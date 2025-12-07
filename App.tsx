@@ -67,6 +67,21 @@ function App() {
   const [showAssistant, setShowAssistant] = useState(false);
   const [snippetPackages, setSnippetPackages] = useState<string[]>([]);
 
+  const createLocalTerminal = () => {
+    const sessionId = crypto.randomUUID();
+    const localHostId = `local-${sessionId}`;
+    const newSession: TerminalSession = {
+      id: sessionId,
+      hostId: localHostId,
+      hostLabel: 'Local Terminal',
+      hostname: 'localhost',
+      username: 'local',
+      status: 'connecting',
+    };
+    setSessions(prev => [...prev, newSession]);
+    setActiveTabId(sessionId);
+  };
+
   // --- Effects ---
   useEffect(() => {
     const root = window.document.documentElement;
@@ -445,6 +460,7 @@ function App() {
           onToggleAssistant={() => setShowAssistant(prev => !prev)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenQuickSwitcher={() => setIsQuickSwitcherOpen(true)}
+          onCreateLocalTerminal={createLocalTerminal}
           onNewHost={() => { setEditingHost(null); setIsFormOpen(true); }}
           onEditHost={handleEditHost}
           onDeleteHost={handleDeleteHost}
@@ -488,6 +504,7 @@ function App() {
           setIsQuickSwitcherOpen(false);
           setQuickSearch('');
         }}
+        onCreateLocalTerminal={createLocalTerminal}
         onClose={() => setIsQuickSwitcherOpen(false)}
       />
 

@@ -12,6 +12,7 @@
     "start": "node electron/launch.cjs"
   },
   "dependencies": {
+    "uuid": "^9.0.1",
     "@google/genai": "1.31.0",
     "@radix-ui/react-collapsible": "1.1.12",
     "@radix-ui/react-context-menu": "2.2.16",

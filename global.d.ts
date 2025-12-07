@@ -17,6 +17,7 @@ interface NebulaSSHOptions {
 
 interface NebulaBridge {
   startSSHSession(options: NebulaSSHOptions): Promise<string>;
+  startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; env?: Record<string, string> }): Promise<string>;
   execCommand(options: {
     hostname: string;
     username: string;

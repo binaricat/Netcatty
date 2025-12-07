@@ -159,6 +159,40 @@ const registerSSHBridge = (win) => {
   };
 
   electronModule.ipcMain.handle("nebula:start", start);
+  electronModule.ipcMain.handle("nebula:local:start", (event, payload) => {
+    const sessionId =
+      payload?.sessionId ||
+      `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const shell =
+      payload?.shell ||
+      process.env.SHELL ||
+      (process.platform === "win32" ? "powershell.exe" : "/bin/bash");
+    const env = {
+      ...process.env,
+      ...(payload?.env || {}),
+      TERM: "xterm-256color",
+    };
+    const proc = pty.spawn(shell, [], {
+      cols: payload?.cols || 80,
+      rows: payload?.rows || 24,
+      env,
+    });
+    const session = {
+      proc,
+      webContentsId: event.sender.id,
+    };
+    sessions.set(sessionId, session);
+    proc.onData((data) => {
+      const contents = electronModule.webContents.fromId(session.webContentsId);
+      contents?.send("nebula:data", { sessionId, data });
+    });
+    proc.onExit((evt) => {
+      sessions.delete(sessionId);
+      const contents = electronModule.webContents.fromId(session.webContentsId);
+      contents?.send("nebula:exit", { sessionId, ...evt });
+    });
+    return { sessionId };
+  });
   electronModule.ipcMain.on("nebula:write", write);
   electronModule.ipcMain.on("nebula:resize", resize);
   electronModule.ipcMain.on("nebula:close", close);

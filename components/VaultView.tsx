@@ -17,6 +17,7 @@ import {
   Settings,
   Star,
   Trash2,
+  TerminalSquare,
 } from 'lucide-react';
 import { Host, SSHKey, Snippet, GroupNode, TerminalSession } from '../types';
 import { normalizeDistroId, DistroAvatar } from './DistroAvatar';
@@ -46,6 +47,7 @@ interface VaultViewProps {
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onNewHost: () => void;
+  onCreateLocalTerminal: () => void;
   onEditHost: (host: Host) => void;
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
@@ -75,6 +77,7 @@ export const VaultView: React.FC<VaultViewProps> = ({
   onOpenSettings,
   onOpenQuickSwitcher,
   onNewHost,
+  onCreateLocalTerminal,
   onEditHost,
   onDeleteHost,
   onConnect,
@@ -275,6 +278,9 @@ export const VaultView: React.FC<VaultViewProps> = ({
                     </Button>
                   </PopoverContent>
                 </Popover>
+                <Button size="sm" variant="secondary" className="h-11 px-3" onClick={onCreateLocalTerminal}>
+                  <TerminalSquare size={14} className="mr-2" /> Terminal
+                </Button>
               </div>
             </div>
           </header>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Monitor } from 'lucide-react';
+import { Monitor, TerminalSquare } from 'lucide-react';
 import { Host } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,6 +11,7 @@ interface QuickSwitcherProps {
   onQueryChange: (value: string) => void;
   onSelect: (host: Host) => void;
   onClose: () => void;
+  onCreateLocalTerminal?: () => void;
 }
 
 export const QuickSwitcher: React.FC<QuickSwitcherProps> = ({
@@ -20,6 +21,7 @@ export const QuickSwitcher: React.FC<QuickSwitcherProps> = ({
   onQueryChange,
   onSelect,
   onClose,
+  onCreateLocalTerminal,
 }) => {
   if (!isOpen) return null;
 
@@ -45,6 +47,15 @@ export const QuickSwitcher: React.FC<QuickSwitcherProps> = ({
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" disabled>Create a workspace</Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" disabled>Restore</Button>
+              {onCreateLocalTerminal && (
+                <Button
+                  size="sm"
+                  className="h-7 px-3 text-[11px]"
+                  onClick={(e) => { e.stopPropagation(); onCreateLocalTerminal(); onClose(); }}
+                >
+                  <TerminalSquare size={12} className="mr-1" /> Terminal
+                </Button>
+              )}
             </div>
           </div>
           <div className="divide-y divide-border/70">

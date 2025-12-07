@@ -35,6 +35,10 @@ const api = {
     const result = await ipcRenderer.invoke("nebula:start", options);
     return result.sessionId;
   },
+  startLocalSession: async (options) => {
+    const result = await ipcRenderer.invoke("nebula:local:start", options || {});
+    return result.sessionId;
+  },
   writeToSession: (sessionId, data) => {
     ipcRenderer.send("nebula:write", { sessionId, data });
   },

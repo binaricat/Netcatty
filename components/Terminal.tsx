@@ -163,7 +163,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }
         });
 
-        await startSSH(term);
+        if (host.protocol === 'local' || host.hostname === 'localhost') {
+          await startLocal(term);
+        } else {
+          await startSSH(term);
+        }
       } catch (err) {
         console.error("Failed to initialize terminal", err);
         setError(err instanceof Error ? err.message : String(err));
@@ -338,6 +342,43 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setTimeout(() => runDistroDetection(key), 600);
   };
 
+  const startLocal = async (term: GhosttyTerminal) => {
+    try {
+      term.clear?.();
+    } catch (err) {
+      console.warn("Failed to clear terminal before connect", err);
+    }
+
+    const startLocalSession = window.nebula?.startLocalSession;
+    if (!startLocalSession) {
+      setError("Local shell bridge unavailable. Please run the desktop build.");
+      term.writeln("\r\n[Local shell bridge unavailable. Please run the desktop build to spawn a local terminal.]");
+      updateStatus('disconnected');
+      return;
+    }
+
+    try {
+      const id = await startLocalSession({ sessionId, cols: term.cols, rows: term.rows });
+      sessionRef.current = id;
+      disposeDataRef.current = window.nebula?.onSessionData(id, (chunk) => {
+        term.write(chunk);
+        if (!hasConnectedRef.current) updateStatus('connected');
+      });
+      disposeExitRef.current = window.nebula?.onSessionExit(id, (evt) => {
+        updateStatus('disconnected');
+        term.writeln(
+          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
+        );
+        onSessionExit?.(sessionId);
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      term.writeln(`\r\n[Failed to start local shell: ${message}]`);
+      updateStatus('disconnected');
+    }
+  };
+
   const handleSnippetClick = (cmd: string) => {
     if (sessionRef.current && window.nebula?.writeToSession) {
       window.nebula.writeToSession(sessionRef.current, `${cmd}\r`);
@@ -364,7 +405,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setError(null);
     setProgressLogs(['Retrying secure channel...']);
     setShowLogs(true);
-    startSSH(termRef.current);
+    if (host.protocol === 'local' || host.hostname === 'localhost') {
+      startLocal(termRef.current);
+    } else {
+      startSSH(termRef.current);
+    }
   };
 
   const renderControls = (variant: 'default' | 'compact', opts?: { showClose?: boolean }) => {

@@ -327,8 +327,17 @@ export const TerminalLayer: React.FC<TerminalLayerProps> = ({
       )}
       <div ref={workspaceInnerRef} className="absolute inset-0 p-3">
         {sessions.map(session => {
-          const host = hosts.find(h => h.id === session.hostId);
-          if (!host) return null;
+          const host = hosts.find(h => h.id === session.hostId) || {
+            id: session.hostId,
+            label: session.hostLabel || 'Local Terminal',
+            hostname: session.hostname || 'localhost',
+            username: session.username || 'local',
+            port: 22,
+            os: 'linux',
+            group: '',
+            tags: [],
+            protocol: 'local' as const,
+          };
           const inActiveWorkspace = !!activeWorkspace && session.workspaceId === activeWorkspace.id;
           const isActiveSolo = activeTabId === session.id && !activeWorkspace && isTerminalLayerVisible;
           const isVisible = (inActiveWorkspace || isActiveSolo) && isTerminalLayerVisible;

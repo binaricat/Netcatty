@@ -9,7 +9,7 @@ export interface Host {
   tags: string[];
   os: 'linux' | 'windows' | 'macos';
   identityFileId?: string; // Reference to SSHKey
-  protocol?: 'ssh' | 'telnet';
+  protocol?: 'ssh' | 'telnet' | 'local';
   password?: string;
   authMethod?: 'password' | 'key' | 'certificate' | 'fido2';
   agentForwarding?: boolean;
