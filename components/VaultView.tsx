@@ -20,7 +20,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { Host, SSHKey, Snippet, GroupNode, TerminalSession } from '../types';
-import { normalizeDistroId, DistroAvatar } from './DistroAvatar';
+import { DistroAvatar } from './DistroAvatar';
 import SnippetsManager from './SnippetsManager';
 import KeyManager from './KeyManager';
 import PortForwarding from './PortForwarding';
@@ -31,6 +31,7 @@ import { cn } from '../lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
+import { sanitizeHost } from '../domain/host';
 
 type VaultSection = 'hosts' | 'keys' | 'snippets' | 'port';
 
@@ -57,12 +58,6 @@ interface VaultViewProps {
   onUpdateSnippetPackages: (pkgs: string[]) => void;
   onUpdateCustomGroups: (groups: string[]) => void;
 }
-
-const sanitizeHost = (host: Host): Host => {
-  const cleanHostname = (host.hostname || '').split(/\s+/)[0];
-  const cleanDistro = normalizeDistroId(host.distro);
-  return { ...host, hostname: cleanHostname, distro: cleanDistro };
-};
 
 export const VaultView: React.FC<VaultViewProps> = ({
   isActive,

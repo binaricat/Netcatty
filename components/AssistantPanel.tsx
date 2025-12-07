@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { generateSSHCommand, explainLog } from '../services/geminiService';
+import { generateSSHCommand, explainLog } from '../infrastructure/services/geminiService';
 import { Sparkles, MessageSquare, Copy, Terminal, Check } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Chat } from "@google/genai";
-import { RemoteFile } from "../types";
+import { RemoteFile } from "../../domain/models";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;

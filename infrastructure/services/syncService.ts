@@ -1,5 +1,4 @@
-
-import { Host, SSHKey, Snippet } from '../types';
+import { Host, SSHKey, Snippet } from '../../domain/models';
 
 interface BackupData {
   hosts: Host[];

@@ -9,8 +9,8 @@ import { ScrollArea } from './ui/scroll-area';
 import { Sun, Moon, Cloud, Download, Upload, Palette, Github, Loader2, Check, TerminalSquare } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SyncConfig } from '../types';
-import { syncToGist, loadFromGist } from '../services/syncService';
-import { TERMINAL_THEMES } from '../lib/terminalThemes';
+import { syncToGist, loadFromGist } from '../infrastructure/services/syncService';
+import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
 
 interface SettingsDialogProps {
   isOpen: boolean;

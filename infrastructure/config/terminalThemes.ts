@@ -1,4 +1,4 @@
-import { TerminalTheme } from '../types';
+import { TerminalTheme } from '../../domain/models';
 
 export const TERMINAL_THEMES: TerminalTheme[] = [
   {

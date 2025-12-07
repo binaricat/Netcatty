@@ -1,6 +1,7 @@
 export const STORAGE_KEY_HOSTS = 'nebula_hosts_v1';
 export const STORAGE_KEY_KEYS = 'nebula_keys_v1';
 export const STORAGE_KEY_GROUPS = 'nebula_groups_v1';
+export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'nebula_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'nebula_snippet_packages_v1';
 export const STORAGE_KEY_THEME = 'nebula_theme_v1';

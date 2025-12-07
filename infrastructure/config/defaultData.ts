@@ -1,4 +1,4 @@
-import { Host, Snippet } from '../types';
+import { Host, Snippet } from '../../domain/models';
 
 export const INITIAL_HOSTS: Host[] = [
   { id: '1', label: 'Production Web', hostname: '10.0.0.12', port: 22, username: 'ubuntu', group: 'AWS/Production', tags: ['prod', 'web'], os: 'linux' },
