@@ -37,6 +37,8 @@ export interface Snippet {
   label: string;
   command: string; // Multi-line script
   tags?: string[];
+  package?: string; // package path
+  targets?: string[]; // host ids
 }
 
 export interface TerminalLine {

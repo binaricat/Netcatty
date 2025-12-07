@@ -29,6 +29,7 @@ const STORAGE_KEY_HOSTS = 'nebula_hosts_v1';
 const STORAGE_KEY_KEYS = 'nebula_keys_v1';
 const STORAGE_KEY_GROUPS = 'nebula_groups_v1';
 const STORAGE_KEY_SNIPPETS = 'nebula_snippets_v1';
+const STORAGE_KEY_SNIPPET_PACKAGES = 'nebula_snippet_packages_v1';
 const STORAGE_KEY_THEME = 'nebula_theme_v1';
 const STORAGE_KEY_COLOR = 'nebula_color_v1';
 const STORAGE_KEY_SYNC = 'nebula_sync_v1';
@@ -260,6 +261,7 @@ function App() {
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [targetParentPath, setTargetParentPath] = useState<string | null>(null);
+  const [snippetPackages, setSnippetPackages] = useState<string[]>([]);
 
   // --- Effects ---
   useEffect(() => {
@@ -281,6 +283,7 @@ function App() {
     const savedKeys = localStorage.getItem(STORAGE_KEY_KEYS);
     const savedGroups = localStorage.getItem(STORAGE_KEY_GROUPS);
     const savedSnippets = localStorage.getItem(STORAGE_KEY_SNIPPETS);
+    const savedSnippetPackages = localStorage.getItem(STORAGE_KEY_SNIPPET_PACKAGES);
     
     if (savedHosts) {
       const sanitized = JSON.parse(savedHosts).map((h: Host) => sanitizeHost(h));
@@ -291,6 +294,7 @@ function App() {
     if (savedKeys) setKeys(JSON.parse(savedKeys));
     if (savedSnippets) setSnippets(JSON.parse(savedSnippets));
     else updateSnippets(INITIAL_SNIPPETS);
+    if (savedSnippetPackages) setSnippetPackages(JSON.parse(savedSnippetPackages));
     
     if (savedGroups) setCustomGroups(JSON.parse(savedGroups));
   }, []);
@@ -302,6 +306,7 @@ function App() {
   };
   const updateKeys = (d: SSHKey[]) => { setKeys(d); localStorage.setItem(STORAGE_KEY_KEYS, JSON.stringify(d)); };
   const updateSnippets = (d: Snippet[]) => { setSnippets(d); localStorage.setItem(STORAGE_KEY_SNIPPETS, JSON.stringify(d)); };
+  const updateSnippetPackages = (d: string[]) => { setSnippetPackages(d); localStorage.setItem(STORAGE_KEY_SNIPPET_PACKAGES, JSON.stringify(d)); };
   const updateCustomGroups = (d: string[]) => { setCustomGroups(d); localStorage.setItem(STORAGE_KEY_GROUPS, JSON.stringify(d)); };
   const updateSyncConfig = (d: SyncConfig | null) => { setSyncConfig(d); localStorage.setItem(STORAGE_KEY_SYNC, JSON.stringify(d)); };
 
@@ -826,7 +831,14 @@ function App() {
                 <KeyManager keys={keys} onSave={k => updateKeys([...keys, k])} onDelete={id => updateKeys(keys.filter(k => k.id !== id))} />
               )}
               {currentSection === 'snippets' && (
-                <SnippetsManager snippets={snippets} onSave={s => updateSnippets(snippets.find(ex => ex.id === s.id) ? snippets.map(ex => ex.id === s.id ? s : ex) : [...snippets, s])} onDelete={id => updateSnippets(snippets.filter(s => s.id !== id))} />
+                <SnippetsManager
+                  snippets={snippets}
+                  packages={snippetPackages}
+                  hosts={hosts}
+                  onPackagesChange={updateSnippetPackages}
+                  onSave={s => updateSnippets(snippets.find(ex => ex.id === s.id) ? snippets.map(ex => ex.id === s.id ? s : ex) : [...snippets, s])}
+                  onDelete={id => updateSnippets(snippets.filter(s => s.id !== id))}
+                />
               )}
               {currentSection === 'port' && <PortForwarding />}
             </div>
