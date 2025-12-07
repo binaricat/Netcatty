@@ -86,3 +86,11 @@ body {
 .app-no-drag {
   -webkit-app-region: no-drag;
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
