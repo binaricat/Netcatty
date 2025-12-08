@@ -417,12 +417,288 @@ const registerSSHBridge = (win) => {
     return true;
   };
 
+  // Delete file or directory via SFTP
+  const deleteSftp = async (_event, payload) => {
+    const client = sftpClients.get(payload.sftpId);
+    if (!client) throw new Error("SFTP session not found");
+    
+    // Check if it's a directory or file
+    const stat = await client.stat(payload.path);
+    if (stat.isDirectory) {
+      await client.rmdir(payload.path, true); // recursive delete
+    } else {
+      await client.delete(payload.path);
+    }
+    return true;
+  };
+
+  // Rename file or directory via SFTP
+  const renameSftp = async (_event, payload) => {
+    const client = sftpClients.get(payload.sftpId);
+    if (!client) throw new Error("SFTP session not found");
+    await client.rename(payload.oldPath, payload.newPath);
+    return true;
+  };
+
+  // Stat file via SFTP
+  const statSftp = async (_event, payload) => {
+    const client = sftpClients.get(payload.sftpId);
+    if (!client) throw new Error("SFTP session not found");
+    const stat = await client.stat(payload.path);
+    return {
+      name: path.basename(payload.path),
+      type: stat.isDirectory ? "directory" : stat.isSymbolicLink ? "symlink" : "file",
+      size: stat.size,
+      lastModified: stat.modifyTime,
+      permissions: stat.mode ? (stat.mode & 0o777).toString(8) : undefined,
+    };
+  };
+
+  // Change permissions via SFTP
+  const chmodSftp = async (_event, payload) => {
+    const client = sftpClients.get(payload.sftpId);
+    if (!client) throw new Error("SFTP session not found");
+    await client.chmod(payload.path, parseInt(payload.mode, 8));
+    return true;
+  };
+
+  // Local filesystem operations
+  const listLocalDir = async (_event, payload) => {
+    const dirPath = payload.path;
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const result = [];
+    
+    for (const entry of entries) {
+      try {
+        const fullPath = path.join(dirPath, entry.name);
+        const stat = await fs.promises.stat(fullPath);
+        result.push({
+          name: entry.name,
+          type: entry.isDirectory() ? "directory" : entry.isSymbolicLink() ? "symlink" : "file",
+          size: `${stat.size} bytes`,
+          lastModified: stat.mtime.toISOString(),
+        });
+      } catch (err) {
+        // Skip files we can't stat (permission denied, etc.)
+        console.warn(`Could not stat ${entry.name}:`, err.message);
+      }
+    }
+    return result;
+  };
+
+  const readLocalFile = async (_event, payload) => {
+    const buffer = await fs.promises.readFile(payload.path);
+    return buffer;
+  };
+
+  const writeLocalFile = async (_event, payload) => {
+    await fs.promises.writeFile(payload.path, Buffer.from(payload.content));
+    return true;
+  };
+
+  const deleteLocalFile = async (_event, payload) => {
+    const stat = await fs.promises.stat(payload.path);
+    if (stat.isDirectory()) {
+      await fs.promises.rm(payload.path, { recursive: true, force: true });
+    } else {
+      await fs.promises.unlink(payload.path);
+    }
+    return true;
+  };
+
+  const renameLocalFile = async (_event, payload) => {
+    await fs.promises.rename(payload.oldPath, payload.newPath);
+    return true;
+  };
+
+  const mkdirLocal = async (_event, payload) => {
+    await fs.promises.mkdir(payload.path, { recursive: true });
+    return true;
+  };
+
+  const statLocal = async (_event, payload) => {
+    const stat = await fs.promises.stat(payload.path);
+    return {
+      name: path.basename(payload.path),
+      type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
+      size: stat.size,
+      lastModified: stat.mtime.getTime(),
+    };
+  };
+
+  const getHomeDir = async () => {
+    return os.homedir();
+  };
+
   electronModule.ipcMain.handle("nebula:sftp:open", openSftp);
   electronModule.ipcMain.handle("nebula:sftp:list", listSftp);
   electronModule.ipcMain.handle("nebula:sftp:read", readSftp);
   electronModule.ipcMain.handle("nebula:sftp:write", writeSftp);
   electronModule.ipcMain.handle("nebula:sftp:close", closeSftp);
   electronModule.ipcMain.handle("nebula:sftp:mkdir", mkdirSftp);
+  electronModule.ipcMain.handle("nebula:sftp:delete", deleteSftp);
+  electronModule.ipcMain.handle("nebula:sftp:rename", renameSftp);
+  electronModule.ipcMain.handle("nebula:sftp:stat", statSftp);
+  electronModule.ipcMain.handle("nebula:sftp:chmod", chmodSftp);
+  
+  // Local filesystem handlers
+  electronModule.ipcMain.handle("nebula:local:list", listLocalDir);
+  electronModule.ipcMain.handle("nebula:local:read", readLocalFile);
+  electronModule.ipcMain.handle("nebula:local:write", writeLocalFile);
+  electronModule.ipcMain.handle("nebula:local:delete", deleteLocalFile);
+  electronModule.ipcMain.handle("nebula:local:rename", renameLocalFile);
+  electronModule.ipcMain.handle("nebula:local:mkdir", mkdirLocal);
+  electronModule.ipcMain.handle("nebula:local:stat", statLocal);
+  electronModule.ipcMain.handle("nebula:local:homedir", getHomeDir);
+  
+  // Streaming transfer with progress and cancellation support
+  const activeTransfers = new Map(); // transferId -> { cancelled: boolean, stream?: ReadableStream }
+  
+  const startTransfer = async (event, payload) => {
+    const { transferId, sourcePath, targetPath, sourceType, targetType, sourceSftpId, targetSftpId, totalBytes } = payload;
+    const sender = event.sender;
+    
+    // Register transfer for cancellation
+    activeTransfers.set(transferId, { cancelled: false });
+    
+    const sendProgress = (transferred, speed) => {
+      if (!activeTransfers.get(transferId)?.cancelled) {
+        sender.send("nebula:transfer:progress", { transferId, transferred, speed, totalBytes });
+      }
+    };
+    
+    const sendComplete = () => {
+      activeTransfers.delete(transferId);
+      sender.send("nebula:transfer:complete", { transferId });
+    };
+    
+    const sendError = (error) => {
+      activeTransfers.delete(transferId);
+      sender.send("nebula:transfer:error", { transferId, error: error.message || String(error) });
+    };
+    
+    try {
+      let readStream;
+      let writeStream;
+      let fileSize = totalBytes || 0;
+      
+      // Create read stream based on source type
+      if (sourceType === 'local') {
+        if (!fileSize) {
+          const stat = await fs.promises.stat(sourcePath);
+          fileSize = stat.size;
+        }
+        readStream = fs.createReadStream(sourcePath);
+      } else if (sourceType === 'sftp') {
+        const client = sftpClients.get(sourceSftpId);
+        if (!client) throw new Error("Source SFTP session not found");
+        if (!fileSize) {
+          const stat = await client.stat(sourcePath);
+          fileSize = stat.size;
+        }
+        // ssh2-sftp-client's get with stream
+        readStream = client.sftp.createReadStream(sourcePath);
+      } else {
+        throw new Error("Invalid source type");
+      }
+      
+      // Create write stream based on target type
+      if (targetType === 'local') {
+        // Ensure directory exists
+        const dir = path.dirname(targetPath);
+        await fs.promises.mkdir(dir, { recursive: true });
+        writeStream = fs.createWriteStream(targetPath);
+      } else if (targetType === 'sftp') {
+        const client = sftpClients.get(targetSftpId);
+        if (!client) throw new Error("Target SFTP session not found");
+        // Ensure directory exists
+        const dir = path.dirname(targetPath).replace(/\\/g, '/');
+        try { await client.mkdir(dir, true); } catch {}
+        writeStream = client.sftp.createWriteStream(targetPath);
+      } else {
+        throw new Error("Invalid target type");
+      }
+      
+      // Store streams for potential cancellation
+      const transfer = activeTransfers.get(transferId);
+      if (transfer) {
+        transfer.readStream = readStream;
+        transfer.writeStream = writeStream;
+      }
+      
+      // Track progress
+      let transferred = 0;
+      let lastTime = Date.now();
+      let lastTransferred = 0;
+      let speed = 0;
+      
+      readStream.on('data', (chunk) => {
+        // Check if cancelled
+        if (activeTransfers.get(transferId)?.cancelled) {
+          readStream.destroy();
+          writeStream.destroy();
+          return;
+        }
+        
+        transferred += chunk.length;
+        
+        // Calculate speed every 200ms
+        const now = Date.now();
+        const elapsed = now - lastTime;
+        if (elapsed >= 200) {
+          speed = Math.round((transferred - lastTransferred) / (elapsed / 1000));
+          lastTime = now;
+          lastTransferred = transferred;
+          sendProgress(transferred, speed);
+        }
+      });
+      
+      readStream.on('error', (err) => {
+        writeStream.destroy();
+        sendError(err);
+      });
+      
+      writeStream.on('error', (err) => {
+        readStream.destroy();
+        sendError(err);
+      });
+      
+      writeStream.on('finish', () => {
+        if (!activeTransfers.get(transferId)?.cancelled) {
+          // Send final progress with 100%
+          sendProgress(fileSize, speed);
+          sendComplete();
+        }
+      });
+      
+      // Pipe read to write
+      readStream.pipe(writeStream);
+      
+      return { transferId, totalBytes: fileSize };
+    } catch (err) {
+      sendError(err);
+      return { transferId, error: err.message };
+    }
+  };
+  
+  const cancelTransfer = async (_event, payload) => {
+    const { transferId } = payload;
+    const transfer = activeTransfers.get(transferId);
+    if (transfer) {
+      transfer.cancelled = true;
+      if (transfer.readStream) {
+        try { transfer.readStream.destroy(); } catch {}
+      }
+      if (transfer.writeStream) {
+        try { transfer.writeStream.destroy(); } catch {}
+      }
+      activeTransfers.delete(transferId);
+    }
+    return { success: true };
+  };
+  
+  electronModule.ipcMain.handle("nebula:transfer:start", startTransfer);
+  electronModule.ipcMain.handle("nebula:transfer:cancel", cancelTransfer);
 };
 
 // Store reference to main window for theme updates

@@ -29,8 +29,13 @@ body {
 }
 
 @keyframes shimmer {
-  0% { background-position: -120px 0; }
-  100% { background-position: 120px 0; }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes progress-shimmer {
+  0% { transform: translateX(-200%); }
+  100% { transform: translateX(200%); }
 }
 
 .glass-panel {

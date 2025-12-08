@@ -166,6 +166,15 @@ const FileRow: React.FC<{
     );
 };
 
+// Helper to format bytes for transfer display
+const formatTransferBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const size = bytes / Math.pow(1024, i);
+    return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
+
 // Transfer item component
 const TransferItem: React.FC<{
     task: TransferTask;
@@ -173,26 +182,40 @@ const TransferItem: React.FC<{
     onRetry: () => void;
     onDismiss: () => void;
 }> = ({ task, onCancel, onRetry, onDismiss }) => {
-    const progress = task.totalBytes > 0 ? (task.transferredBytes / task.totalBytes) * 100 : 0;
-    const speedFormatted = task.speed > 0
-        ? `${(task.speed / 1024).toFixed(1)} KB/s`
-        : '';
+    const progress = task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0;
+    
+    // Format speed with appropriate unit
+    const formatSpeed = (bytesPerSecond: number): string => {
+        if (bytesPerSecond <= 0) return '';
+        if (bytesPerSecond >= 1024 * 1024) {
+            return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+        }
+        return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+    };
+    const speedFormatted = formatSpeed(task.speed);
 
     const remainingBytes = task.totalBytes - task.transferredBytes;
     const remainingTime = task.speed > 0
         ? Math.ceil(remainingBytes / task.speed)
         : 0;
     const remainingFormatted = remainingTime > 60
-        ? `~${Math.ceil(remainingTime / 60)} min remaining`
+        ? `~${Math.ceil(remainingTime / 60)}m left`
         : remainingTime > 0
-            ? `~${remainingTime}s remaining`
+            ? `~${remainingTime}s left`
+            : '';
+    
+    // Format bytes transferred / total
+    const bytesDisplay = task.status === 'transferring' && task.totalBytes > 0
+        ? `${formatTransferBytes(task.transferredBytes)} / ${formatTransferBytes(task.totalBytes)}`
+        : task.status === 'completed' && task.totalBytes > 0
+            ? formatTransferBytes(task.totalBytes)
             : '';
 
     return (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-background/60 border-t border-border/40 backdrop-blur-sm">
             <div className="h-6 w-6 rounded flex items-center justify-center shrink-0">
                 {task.status === 'transferring' && <Loader2 size={14} className="animate-spin text-primary" />}
-                {task.status === 'pending' && <ArrowDown size={14} className="text-muted-foreground" />}
+                {task.status === 'pending' && <ArrowDown size={14} className="text-muted-foreground animate-bounce" />}
                 {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500" />}
                 {task.status === 'failed' && <XCircle size={14} className="text-destructive" />}
                 {task.status === 'cancelled' && <XCircle size={14} className="text-muted-foreground" />}
@@ -200,22 +223,54 @@ const TransferItem: React.FC<{
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm truncate">{task.fileName}</span>
+                    <span className="text-sm truncate font-medium">{task.fileName}</span>
                     {task.status === 'transferring' && speedFormatted && (
-                        <span className="text-xs text-muted-foreground">{speedFormatted}</span>
+                        <span className="text-xs text-primary/80 font-mono">{speedFormatted}</span>
+                    )}
+                    {task.status === 'transferring' && remainingFormatted && (
+                        <span className="text-xs text-muted-foreground">{remainingFormatted}</span>
                     )}
                 </div>
-                {task.status === 'transferring' && (
-                    <div className="flex items-center gap-2 mt-1">
-                        <div className="flex-1 h-1.5 bg-secondary/80 rounded-full overflow-hidden">
+                {(task.status === 'transferring' || task.status === 'pending') && (
+                    <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex-1 h-2 bg-secondary/80 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-300 ease-out relative"
-                                style={{ width: `${progress}%` }}
+                                className={cn(
+                                    "h-full rounded-full relative overflow-hidden",
+                                    task.status === 'pending' 
+                                        ? "bg-muted-foreground/50 animate-pulse"
+                                        : "bg-gradient-to-r from-primary via-primary/90 to-primary"
+                                )}
+                                style={{ 
+                                    width: task.status === 'pending' ? '100%' : `${progress}%`,
+                                    transition: 'width 150ms ease-out'
+                                }}
                             >
-                                <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                                {/* Animated shine effect */}
+                                {task.status === 'transferring' && (
+                                    <div 
+                                        className="absolute inset-0 w-1/2 h-full"
+                                        style={{
+                                            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%)',
+                                            animation: 'progress-shimmer 1.5s ease-in-out infinite',
+                                        }}
+                                    />
+                                )}
                             </div>
                         </div>
-                        <span className="text-[10px] text-muted-foreground shrink-0 w-20 text-right">{Math.round(progress)}%</span>
+                        <span className="text-[11px] text-muted-foreground shrink-0 min-w-[40px] text-right font-mono">
+                            {task.status === 'pending' ? 'waiting...' : `${Math.round(progress)}%`}
+                        </span>
+                    </div>
+                )}
+                {task.status === 'transferring' && bytesDisplay && (
+                    <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                        {bytesDisplay}
+                    </div>
+                )}
+                {task.status === 'completed' && bytesDisplay && (
+                    <div className="text-[10px] text-green-600 mt-0.5">
+                        Completed • {bytesDisplay}
                     </div>
                 )}
                 {task.status === 'failed' && task.error && (
@@ -230,7 +285,7 @@ const TransferItem: React.FC<{
                     </Button>
                 )}
                 {(task.status === 'pending' || task.status === 'transferring') && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={onCancel} title="Cancel">
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={onCancel} title="Cancel">
                         <X size={12} />
                     </Button>
                 )}
@@ -262,7 +317,8 @@ interface SftpPaneViewProps {
     onCreateDirectory: (name: string) => Promise<void>;
     onDeleteFiles: (fileNames: string[]) => Promise<void>;
     onRenameFile: (oldName: string, newName: string) => Promise<void>;
-    onStartTransfer: (files: { name: string; isDirectory: boolean }[]) => void;
+    onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
+    onReceiveFromOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
     onEditPermissions?: (file: SftpFileEntry) => void;
     draggedFiles: { name: string; isDirectory: boolean; side: 'left' | 'right' }[] | null;
     onDragStart: (files: { name: string; isDirectory: boolean }[], side: 'left' | 'right') => void;
@@ -286,7 +342,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     onCreateDirectory,
     onDeleteFiles,
     onRenameFile,
-    onStartTransfer,
+    onCopyToOtherPane,
+    onReceiveFromOtherPane,
     onEditPermissions,
     draggedFiles,
     onDragStart,
@@ -383,7 +440,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         setDragOverEntry(null);
 
         if (!draggedFiles || draggedFiles[0]?.side === side) return;
-        onStartTransfer(draggedFiles.map(f => ({ name: f.name, isDirectory: f.isDirectory })));
+        // Files are being dropped ON this pane FROM the other pane
+        onReceiveFromOtherPane(draggedFiles.map(f => ({ name: f.name, isDirectory: f.isDirectory })));
     };
 
     const handleFileDragStart = (entry: SftpFileEntry, e: React.DragEvent) => {
@@ -424,9 +482,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         if (!draggedFiles || draggedFiles[0]?.side === side) return;
         if (entry.type !== 'directory') return;
 
-        // Navigate to directory first, then transfer
-        // For now, just transfer to current directory
-        onStartTransfer(draggedFiles.map(f => ({ name: f.name, isDirectory: f.isDirectory })));
+        // Files dropped ON a directory in this pane FROM the other pane
+        // For now, just transfer to current directory (TODO: transfer into the target directory)
+        onReceiveFromOtherPane(draggedFiles.map(f => ({ name: f.name, isDirectory: f.isDirectory })));
     };
 
     const openRenameDialog = (name: string) => {
@@ -678,7 +736,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
                                                 const file = displayFiles.find(f => f.name === name);
                                                 return { name, isDirectory: file?.type === 'directory' || false };
                                             });
-                                            onStartTransfer(fileData);
+                                            onCopyToOtherPane(fileData);
                                         }}>
                                             <Copy size={14} className="mr-2" /> Copy to other pane
                                         </ContextMenuItem>
@@ -1146,12 +1204,22 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys }) => {
         setDraggedFiles(null);
     }, []);
 
-    const handleStartTransferLeft = useCallback((files: { name: string; isDirectory: boolean }[]) => {
-        sftp.startTransfer(files, 'left', 'right');
+    // Copy to other pane: source is the current pane, target is the other pane
+    const handleCopyToOtherPaneLeft = useCallback((files: { name: string; isDirectory: boolean }[]) => {
+        sftp.startTransfer(files, 'left', 'right');  // from left to right
     }, [sftp.startTransfer]);
 
-    const handleStartTransferRight = useCallback((files: { name: string; isDirectory: boolean }[]) => {
-        sftp.startTransfer(files, 'right', 'left');
+    const handleCopyToOtherPaneRight = useCallback((files: { name: string; isDirectory: boolean }[]) => {
+        sftp.startTransfer(files, 'right', 'left');  // from right to left
+    }, [sftp.startTransfer]);
+
+    // Receive from other pane (drag-drop): source is other pane, target is this pane
+    const handleReceiveFromOtherPaneLeft = useCallback((files: { name: string; isDirectory: boolean }[]) => {
+        sftp.startTransfer(files, 'right', 'left');  // from right to left
+    }, [sftp.startTransfer]);
+
+    const handleReceiveFromOtherPaneRight = useCallback((files: { name: string; isDirectory: boolean }[]) => {
+        sftp.startTransfer(files, 'left', 'right');  // from left to right
     }, [sftp.startTransfer]);
 
     // Pane-specific callbacks using useCallback
@@ -1221,7 +1289,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys }) => {
                         onCreateDirectory={handleCreateDirectoryLeft}
                         onDeleteFiles={handleDeleteFilesLeft}
                         onRenameFile={handleRenameFileLeft}
-                        onStartTransfer={handleStartTransferLeft}
+                        onCopyToOtherPane={handleCopyToOtherPaneLeft}
+                        onReceiveFromOtherPane={handleReceiveFromOtherPaneLeft}
                         onEditPermissions={handleEditPermissionsLeft}
                         draggedFiles={draggedFiles}
                         onDragStart={handleDragStart}
@@ -1248,7 +1317,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys }) => {
                         onCreateDirectory={handleCreateDirectoryRight}
                         onDeleteFiles={handleDeleteFilesRight}
                         onRenameFile={handleRenameFileRight}
-                        onStartTransfer={handleStartTransferRight}
+                        onCopyToOtherPane={handleCopyToOtherPaneRight}
+                        onReceiveFromOtherPane={handleReceiveFromOtherPaneRight}
                         onEditPermissions={handleEditPermissionsRight}
                         draggedFiles={draggedFiles}
                         onDragStart={handleDragStart}

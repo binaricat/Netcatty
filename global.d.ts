@@ -73,6 +73,23 @@ interface NebulaBridge {
   cancelTransfer?(transferId: string): Promise<void>;
   onTransferProgress?(transferId: string, cb: (progress: SftpTransferProgress) => void): () => void;
   
+  // Streaming transfer with real progress and cancellation
+  startStreamTransfer?(
+    options: {
+      transferId: string;
+      sourcePath: string;
+      targetPath: string;
+      sourceType: 'local' | 'sftp';
+      targetType: 'local' | 'sftp';
+      sourceSftpId?: string;
+      targetSftpId?: string;
+      totalBytes?: number;
+    },
+    onProgress?: (transferred: number, total: number, speed: number) => void,
+    onComplete?: () => void,
+    onError?: (error: string) => void
+  ): Promise<{ transferId: string; totalBytes?: number; error?: string }>;
+  
   // Local filesystem operations
   listLocalDir?(path: string): Promise<RemoteFile[]>;
   readLocalFile?(path: string): Promise<ArrayBuffer>;

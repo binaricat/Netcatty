@@ -176,6 +176,7 @@ export interface TransferTask {
   isDirectory: boolean;
   childTasks?: string[]; // For directory transfers
   parentTaskId?: string;
+  skipConflictCheck?: boolean; // Skip conflict check for replace operations
 }
 
 export interface FileConflict {

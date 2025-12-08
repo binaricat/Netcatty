@@ -107,14 +107,100 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
   // SFTP session refs
   const sftpSessionsRef = useRef<Map<string, string>>(new Map()); // connectionId -> sftpId
   
+  // Progress simulation refs
+  const progressIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  
+  // Simulate progress for a transfer (used when real progress callbacks aren't available)
+  const startProgressSimulation = useCallback((taskId: string, estimatedBytes: number) => {
+    // Clear any existing interval for this task
+    const existing = progressIntervalsRef.current.get(taskId);
+    if (existing) clearInterval(existing);
+    
+    // Estimate transfer speed based on file size (simulate realistic speeds)
+    // Smaller files: faster perceived progress, larger files: slower but steady
+    const baseSpeed = Math.max(50000, Math.min(500000, estimatedBytes / 10)); // 50KB/s to 500KB/s base
+    const variability = 0.3; // 30% speed variation
+    
+    let transferred = 0;
+    const interval = setInterval(() => {
+      // Add some randomness to simulate real network conditions
+      const speedFactor = 1 + (Math.random() - 0.5) * variability;
+      const chunkSize = Math.floor(baseSpeed * speedFactor * 0.1); // Update every 100ms
+      transferred = Math.min(transferred + chunkSize, estimatedBytes);
+      
+      setTransfers(prev => prev.map(t => {
+        if (t.id !== taskId || t.status !== 'transferring') return t;
+        return {
+          ...t,
+          transferredBytes: transferred,
+          totalBytes: estimatedBytes,
+          speed: chunkSize * 10, // Convert to per-second
+        };
+      }));
+      
+      // If we've reached the estimated size, slow down to show we're finishing
+      if (transferred >= estimatedBytes * 0.95) {
+        clearInterval(interval);
+        progressIntervalsRef.current.delete(taskId);
+      }
+    }, 100);
+    
+    progressIntervalsRef.current.set(taskId, interval);
+  }, []);
+  
+  const stopProgressSimulation = useCallback((taskId: string) => {
+    const interval = progressIntervalsRef.current.get(taskId);
+    if (interval) {
+      clearInterval(interval);
+      progressIntervalsRef.current.delete(taskId);
+    }
+  }, []);
+  
+  // Check if an error indicates a stale/lost SFTP session
+  const isSessionError = (err: unknown): boolean => {
+    if (!(err instanceof Error)) return false;
+    const msg = err.message.toLowerCase();
+    return msg.includes('session not found') || 
+           msg.includes('sftp session') || 
+           msg.includes('not found') ||
+           msg.includes('closed') ||
+           msg.includes('connection reset');
+  };
+
+  // Handle session error by clearing the connection state for a side
+  const handleSessionError = useCallback((side: 'left' | 'right', error: Error) => {
+    const pane = side === 'left' ? leftPane : rightPane;
+    const setPane = side === 'left' ? setLeftPane : setRightPane;
+    
+    if (pane.connection) {
+      // Clean up stale session reference
+      sftpSessionsRef.current.delete(pane.connection.id);
+    }
+    
+    setPane({
+      connection: null,
+      files: [],
+      loading: false,
+      error: 'SFTP session lost. Please reconnect.',
+      selectedFiles: new Set(),
+      filter: '',
+    });
+  }, [leftPane, rightPane]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Clear all SFTP sessions
       sftpSessionsRef.current.forEach(async (sftpId) => {
         try {
           await window.nebula?.closeSftp(sftpId);
         } catch {}
       });
+      // Clear all progress simulation intervals
+      progressIntervalsRef.current.forEach((interval) => {
+        clearInterval(interval);
+      });
+      progressIntervalsRef.current.clear();
     };
   }, []);
 
@@ -132,8 +218,20 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
 
   // Connect to a host
   const connect = useCallback(async (side: 'left' | 'right', host: Host | 'local') => {
+    const currentPane = side === 'left' ? leftPane : rightPane;
     const setPane = side === 'left' ? setLeftPane : setRightPane;
     const connectionId = `${side}-${Date.now()}`;
+
+    // First, disconnect any existing connection
+    if (currentPane.connection && !currentPane.connection.isLocal) {
+      const oldSftpId = sftpSessionsRef.current.get(currentPane.connection.id);
+      if (oldSftpId) {
+        try {
+          await window.nebula?.closeSftp(oldSftpId);
+        } catch {}
+        sftpSessionsRef.current.delete(currentPane.connection.id);
+      }
+    }
 
     if (host === 'local') {
       // Local filesystem connection
@@ -244,7 +342,7 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         }));
       }
     }
-  }, [getHostCredentials]);
+  }, [getHostCredentials, leftPane, rightPane]);
 
   // Disconnect
   const disconnect = useCallback(async (side: 'left' | 'right') => {
@@ -415,8 +513,39 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         files = await listLocalFiles(path);
       } else {
         const sftpId = sftpSessionsRef.current.get(pane.connection.id);
-        if (!sftpId) throw new Error('SFTP session not found');
-        files = await listRemoteFiles(sftpId, path);
+        if (!sftpId) {
+          // Session lost - clear connection state
+          setPane({
+            connection: null,
+            files: [],
+            loading: false,
+            error: 'SFTP session lost. Please reconnect.',
+            selectedFiles: new Set(),
+            filter: '',
+          });
+          return;
+        }
+        
+        try {
+          files = await listRemoteFiles(sftpId, path);
+        } catch (err) {
+          // Check if it's a session error
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+          if (errorMsg.includes('session') || errorMsg.includes('not found') || errorMsg.includes('closed')) {
+            // Clean up stale session reference
+            sftpSessionsRef.current.delete(pane.connection.id);
+            setPane({
+              connection: null,
+              files: [],
+              loading: false,
+              error: 'SFTP session expired. Please reconnect.',
+              selectedFiles: new Set(),
+              filter: '',
+            });
+            return;
+          }
+          throw err;
+        }
       }
 
       setPane(prev => ({
@@ -523,14 +652,21 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         await window.nebula?.mkdirLocal?.(fullPath);
       } else {
         const sftpId = sftpSessionsRef.current.get(pane.connection.id);
-        if (!sftpId) throw new Error('SFTP session not found');
+        if (!sftpId) {
+          handleSessionError(side, new Error('SFTP session not found'));
+          return;
+        }
         await window.nebula?.mkdirSftp(sftpId, fullPath);
       }
       await refresh(side);
     } catch (err) {
+      if (isSessionError(err)) {
+        handleSessionError(side, err as Error);
+        return;
+      }
       throw err;
     }
-  }, [leftPane, rightPane, refresh]);
+  }, [leftPane, rightPane, refresh, handleSessionError]);
 
   // Delete files
   const deleteFiles = useCallback(async (side: 'left' | 'right', fileNames: string[]) => {
@@ -545,15 +681,22 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
           await window.nebula?.deleteLocalFile?.(fullPath);
         } else {
           const sftpId = sftpSessionsRef.current.get(pane.connection.id);
-          if (!sftpId) throw new Error('SFTP session not found');
+          if (!sftpId) {
+            handleSessionError(side, new Error('SFTP session not found'));
+            return;
+          }
           await window.nebula?.deleteSftp?.(sftpId, fullPath);
         }
       }
       await refresh(side);
     } catch (err) {
+      if (isSessionError(err)) {
+        handleSessionError(side, err as Error);
+        return;
+      }
       throw err;
     }
-  }, [leftPane, rightPane, refresh]);
+  }, [leftPane, rightPane, refresh, handleSessionError]);
 
   // Rename file
   const renameFile = useCallback(async (side: 'left' | 'right', oldName: string, newName: string) => {
@@ -568,14 +711,21 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         await window.nebula?.renameLocalFile?.(oldPath, newPath);
       } else {
         const sftpId = sftpSessionsRef.current.get(pane.connection.id);
-        if (!sftpId) throw new Error('SFTP session not found');
+        if (!sftpId) {
+          handleSessionError(side, new Error('SFTP session not found'));
+          return;
+        }
         await window.nebula?.renameSftp?.(sftpId, oldPath, newPath);
       }
       await refresh(side);
     } catch (err) {
+      if (isSessionError(err)) {
+        handleSessionError(side, err as Error);
+        return;
+      }
       throw err;
     }
-  }, [leftPane, rightPane, refresh]);
+  }, [leftPane, rightPane, refresh, handleSessionError]);
 
   // Transfer files
   const startTransfer = useCallback(async (
@@ -590,15 +740,38 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
 
     const sourcePath = sourcePane.connection.currentPath;
     const targetPath = targetPane.connection.currentPath;
+    
+    // Get SFTP session ID if remote
+    const sourceSftpId = sourcePane.connection.isLocal ? null : 
+      sftpSessionsRef.current.get(sourcePane.connection.id);
 
-    // Create transfer tasks
-    const newTasks: TransferTask[] = sourceFiles.map(file => {
+    // Create transfer tasks with actual file sizes
+    const newTasks: TransferTask[] = [];
+    
+    for (const file of sourceFiles) {
       const direction: TransferDirection = 
         sourcePane.connection!.isLocal && !targetPane.connection!.isLocal ? 'upload' :
         !sourcePane.connection!.isLocal && targetPane.connection!.isLocal ? 'download' :
         'remote-to-remote';
 
-      return {
+      // Get actual file size from source
+      let fileSize = 0;
+      if (!file.isDirectory) {
+        try {
+          const fullPath = joinPath(sourcePath, file.name);
+          if (sourcePane.connection!.isLocal) {
+            const stat = await window.nebula?.statLocal?.(fullPath);
+            if (stat) fileSize = stat.size;
+          } else if (sourceSftpId) {
+            const stat = await window.nebula?.statSftp?.(sourceSftpId, fullPath);
+            if (stat) fileSize = stat.size;
+          }
+        } catch {
+          // If stat fails, we'll use estimate later
+        }
+      }
+
+      newTasks.push({
         id: crypto.randomUUID(),
         fileName: file.name,
         sourcePath: joinPath(sourcePath, file.name),
@@ -607,13 +780,13 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         targetConnectionId: targetPane.connection!.id,
         direction,
         status: 'pending' as TransferStatus,
-        totalBytes: 0,
+        totalBytes: fileSize,
         transferredBytes: 0,
         speed: 0,
         startTime: Date.now(),
         isDirectory: file.isDirectory,
-      };
-    });
+      });
+    }
 
     setTransfers(prev => [...prev, ...newTasks]);
 
@@ -633,7 +806,45 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
       setTransfers(prev => prev.map(t => t.id === task.id ? { ...t, ...updates } : t));
     };
 
-    updateTask({ status: 'transferring' });
+    // Get actual file size if not already known
+    let actualFileSize = task.totalBytes;
+    if (!task.isDirectory && actualFileSize === 0) {
+      try {
+        const sourceSftpId = sourcePane.connection?.isLocal ? null : 
+          sftpSessionsRef.current.get(sourcePane.connection!.id);
+        
+        if (sourcePane.connection?.isLocal) {
+          const stat = await window.nebula?.statLocal?.(task.sourcePath);
+          if (stat) actualFileSize = stat.size;
+        } else if (sourceSftpId) {
+          const stat = await window.nebula?.statSftp?.(sourceSftpId, task.sourcePath);
+          if (stat) actualFileSize = stat.size;
+        }
+      } catch {
+        // Ignore stat errors, use estimate
+      }
+    }
+
+    // Estimate file size for progress simulation (use a reasonable default if unknown)
+    const estimatedSize = actualFileSize > 0 ? actualFileSize : 
+      task.isDirectory ? 1024 * 1024 : // 1MB estimate for directories
+      256 * 1024; // 256KB default for files
+    
+    // Check if streaming transfer is available (will provide real progress)
+    const hasStreamingTransfer = !!window.nebula?.startStreamTransfer;
+    
+    updateTask({ 
+      status: 'transferring',
+      totalBytes: estimatedSize,
+      transferredBytes: 0,
+      startTime: Date.now(),
+    });
+    
+    // Only use simulated progress for directories or when streaming is not available
+    const useSimulatedProgress = task.isDirectory || !hasStreamingTransfer;
+    if (useSimulatedProgress) {
+      startProgressSimulation(task.id, estimatedSize);
+    }
 
     try {
       const sourceSftpId = sourcePane.connection?.isLocal ? null : 
@@ -642,10 +853,30 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         sftpSessionsRef.current.get(targetPane.connection!.id);
 
       // Check if file already exists at target (conflict detection)
-      if (!task.isDirectory) {
+      // Skip if user already resolved conflict with replace/duplicate
+      if (!task.isDirectory && !task.skipConflictCheck) {
         let targetExists = false;
         let existingStat: { size: number; mtime: number } | null = null;
+        let sourceStat: { size: number; mtime: number } | null = null;
         
+        // Get source file stat for accurate size and mtime
+        try {
+          if (sourcePane.connection?.isLocal) {
+            const stat = await window.nebula?.statLocal?.(task.sourcePath);
+            if (stat) {
+              sourceStat = { size: stat.size, mtime: stat.lastModified || Date.now() };
+            }
+          } else if (sourceSftpId && window.nebula?.statSftp) {
+            const stat = await window.nebula.statSftp(sourceSftpId, task.sourcePath);
+            if (stat) {
+              sourceStat = { size: stat.size, mtime: stat.lastModified || Date.now() };
+            }
+          }
+        } catch {
+          // Use estimated size if stat fails
+        }
+        
+        // Get target file stat to check for conflict
         try {
           if (targetPane.connection?.isLocal) {
             const stat = await window.nebula?.statLocal?.(task.targetPath);
@@ -665,6 +896,9 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         }
 
         if (targetExists && existingStat) {
+          // Stop progress simulation while waiting for user decision
+          stopProgressSimulation(task.id);
+          
           // Add conflict for user to resolve
           const newConflict: FileConflict = {
             transferId: task.id,
@@ -672,12 +906,12 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
             sourcePath: task.sourcePath,
             targetPath: task.targetPath,
             existingSize: existingStat.size,
-            newSize: task.totalBytes,
+            newSize: sourceStat?.size || estimatedSize, // Use actual source size
             existingModified: existingStat.mtime,
-            newModified: Date.now(),
+            newModified: sourceStat?.mtime || Date.now(), // Use actual source mtime
           };
           setConflicts(prev => [...prev, newConflict]);
-          updateTask({ status: 'pending' }); // Wait for user decision
+          updateTask({ status: 'pending', totalBytes: sourceStat?.size || estimatedSize }); // Wait for user decision
           return;
         }
       }
@@ -690,28 +924,90 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
         await transferFile(task, sourceSftpId, targetSftpId, sourcePane.connection!.isLocal, targetPane.connection!.isLocal);
       }
 
-      updateTask({ status: 'completed', endTime: Date.now() });
+      // Stop progress simulation (only if it was started)
+      if (useSimulatedProgress) {
+        stopProgressSimulation(task.id);
+      }
+      
+      // Get the current state of the task to use accurate totalBytes
+      setTransfers(prev => prev.map(t => {
+        if (t.id !== task.id) return t;
+        return {
+          ...t,
+          status: 'completed' as TransferStatus,
+          endTime: Date.now(),
+          transferredBytes: t.totalBytes, // Use actual totalBytes from state
+          speed: 0,
+        };
+      }));
       
       // Refresh target pane
       const targetSide = targetPane === leftPane ? 'left' : 'right';
       await refresh(targetSide as 'left' | 'right');
     } catch (err) {
+      // Stop progress simulation on failure (only if it was started)
+      if (useSimulatedProgress) {
+        stopProgressSimulation(task.id);
+      }
       updateTask({ 
         status: 'failed', 
         error: err instanceof Error ? err.message : 'Transfer failed',
         endTime: Date.now(),
+        speed: 0,
       });
     }
   };
 
-  // Transfer a single file
+  // Transfer a single file using streaming with real progress
   const transferFile = async (
     task: TransferTask,
     sourceSftpId: string | null,
     targetSftpId: string | null,
     sourceIsLocal: boolean,
     targetIsLocal: boolean
-  ) => {
+  ): Promise<void> => {
+    // Try to use streaming transfer if available
+    if (window.nebula?.startStreamTransfer) {
+      return new Promise((resolve, reject) => {
+        const options = {
+          transferId: task.id,
+          sourcePath: task.sourcePath,
+          targetPath: task.targetPath,
+          sourceType: sourceIsLocal ? 'local' as const : 'sftp' as const,
+          targetType: targetIsLocal ? 'local' as const : 'sftp' as const,
+          sourceSftpId: sourceSftpId || undefined,
+          targetSftpId: targetSftpId || undefined,
+          totalBytes: task.totalBytes || undefined,
+        };
+        
+        const onProgress = (transferred: number, total: number, speed: number) => {
+          setTransfers(prev => prev.map(t => {
+            if (t.id !== task.id) return t;
+            // Check if cancelled
+            if (t.status === 'cancelled') return t;
+            return {
+              ...t,
+              transferredBytes: transferred,
+              totalBytes: total || t.totalBytes,
+              speed,
+            };
+          }));
+        };
+        
+        const onComplete = () => {
+          resolve();
+        };
+        
+        const onError = (error: string) => {
+          reject(new Error(error));
+        };
+        
+        window.nebula!.startStreamTransfer!(options, onProgress, onComplete, onError)
+          .catch(reject);
+      });
+    }
+    
+    // Fallback to legacy transfer (read all then write all)
     let content: ArrayBuffer | string;
 
     // Read from source
@@ -797,12 +1093,28 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
   };
 
   // Cancel transfer
+  // This will stop the streaming transfer at the backend level if supported
   const cancelTransfer = useCallback(async (transferId: string) => {
+    // Stop progress simulation (for directory transfers or fallback mode)
+    stopProgressSimulation(transferId);
+    
+    // Mark as cancelled
     setTransfers(prev => prev.map(t => 
       t.id === transferId ? { ...t, status: 'cancelled' as TransferStatus, endTime: Date.now() } : t
     ));
-    await window.nebula?.cancelTransfer?.(transferId);
-  }, []);
+    
+    // Remove from conflicts if present
+    setConflicts(prev => prev.filter(c => c.transferId !== transferId));
+    
+    // Cancel at backend level if streaming transfer is in progress
+    if (window.nebula?.cancelTransfer) {
+      try {
+        await window.nebula.cancelTransfer(transferId);
+      } catch (err) {
+        console.warn('Failed to cancel transfer at backend:', err);
+      }
+    }
+  }, [stopProgressSimulation]);
 
   // Retry failed transfer
   const retryTransfer = useCallback(async (transferId: string) => {
@@ -831,43 +1143,66 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
   }, []);
 
   // Handle file conflict
-  const resolveConflict = useCallback((conflictId: string, action: 'replace' | 'skip' | 'duplicate') => {
+  const resolveConflict = useCallback(async (conflictId: string, action: 'replace' | 'skip' | 'duplicate') => {
     const conflict = conflicts.find(c => c.transferId === conflictId);
     if (!conflict) return;
 
     // Remove from conflicts list
     setConflicts(prev => prev.filter(c => c.transferId !== conflictId));
 
-    // Handle based on action
-    setTransfers(prev => prev.map(t => {
-      if (t.id !== conflictId) return t;
-      
-      switch (action) {
-        case 'skip':
-          // Mark as cancelled
-          return { ...t, status: 'cancelled' as TransferStatus };
-        case 'replace':
-          // Mark as pending to continue transfer (will overwrite)
-          return { ...t, status: 'pending' as TransferStatus };
-        case 'duplicate':
-          // Generate new name and update task
-          const ext = t.fileName.includes('.') ? '.' + t.fileName.split('.').pop() : '';
-          const baseName = t.fileName.includes('.') 
-            ? t.fileName.slice(0, t.fileName.lastIndexOf('.'))
-            : t.fileName;
-          const newName = `${baseName} (copy)${ext}`;
-          const newTargetPath = t.targetPath.replace(t.fileName, newName);
-          return { 
-            ...t, 
-            fileName: newName,
-            targetPath: newTargetPath,
-            status: 'pending' as TransferStatus 
-          };
-        default:
-          return t;
-      }
-    }));
-  }, [conflicts]);
+    // Find the task
+    const task = transfers.find(t => t.id === conflictId);
+    if (!task) return;
+
+    if (action === 'skip') {
+      // Mark as cancelled
+      setTransfers(prev => prev.map(t => 
+        t.id === conflictId ? { ...t, status: 'cancelled' as TransferStatus } : t
+      ));
+      return;
+    }
+
+    // For replace or duplicate, we need to update the task and re-process
+    let updatedTask = { ...task };
+    
+    if (action === 'duplicate') {
+      // Generate new name and update task
+      const ext = task.fileName.includes('.') ? '.' + task.fileName.split('.').pop() : '';
+      const baseName = task.fileName.includes('.') 
+        ? task.fileName.slice(0, task.fileName.lastIndexOf('.'))
+        : task.fileName;
+      const newName = `${baseName} (copy)${ext}`;
+      const newTargetPath = task.targetPath.replace(task.fileName, newName);
+      updatedTask = { 
+        ...task, 
+        fileName: newName,
+        targetPath: newTargetPath,
+        skipConflictCheck: true, // Skip check for new name
+      };
+    } else if (action === 'replace') {
+      // For replace, we just need to skip the conflict check
+      updatedTask = {
+        ...task,
+        skipConflictCheck: true, // User explicitly chose to replace
+      };
+    }
+
+    // Update task status and re-process
+    setTransfers(prev => prev.map(t => 
+      t.id === conflictId ? { ...updatedTask, status: 'pending' as TransferStatus } : t
+    ));
+
+    // Find source and target panes and re-process transfer
+    const sourcePane = updatedTask.sourceConnectionId.startsWith('left') ? leftPane : rightPane;
+    const targetPane = updatedTask.targetConnectionId.startsWith('left') ? leftPane : rightPane;
+
+    if (sourcePane.connection && targetPane.connection) {
+      // Small delay to ensure state is updated
+      setTimeout(async () => {
+        await processTransfer(updatedTask, sourcePane, targetPane);
+      }, 100);
+    }
+  }, [conflicts, transfers, leftPane, rightPane]);
 
   // Get filtered files
   const getFilteredFiles = (pane: SftpPane): SftpFileEntry[] => {
@@ -895,7 +1230,7 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
     
     const sftpId = sftpSessionsRef.current.get(pane.connection.id);
     if (!sftpId || !window.nebula?.chmodSftp) {
-      console.warn('chmod not available');
+      handleSessionError(side, new Error('SFTP session not found'));
       return;
     }
     
@@ -903,9 +1238,13 @@ export const useSftpState = (hosts: Host[], keys: SSHKey[]) => {
       await window.nebula.chmodSftp(sftpId, filePath, mode);
       await refresh(side);
     } catch (err) {
+      if (isSessionError(err)) {
+        handleSessionError(side, err as Error);
+        return;
+      }
       console.error('Failed to change permissions:', err);
     }
-  }, [leftPane, rightPane, refresh]);
+  }, [leftPane, rightPane, refresh, handleSessionError]);
 
   return {
     // Panes
