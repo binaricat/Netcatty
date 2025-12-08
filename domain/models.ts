@@ -130,3 +130,61 @@ export interface Workspace {
   title: string;
   root: WorkspaceNode;
 }
+
+// SFTP Types
+export interface SftpFileEntry {
+  name: string;
+  type: 'file' | 'directory' | 'symlink';
+  size: number;
+  sizeFormatted: string;
+  lastModified: number;
+  lastModifiedFormatted: string;
+  permissions?: string;
+  owner?: string;
+  group?: string;
+}
+
+export interface SftpConnection {
+  id: string;
+  hostId: string;
+  hostLabel: string;
+  isLocal: boolean;
+  status: 'connecting' | 'connected' | 'disconnected' | 'error';
+  error?: string;
+  currentPath: string;
+  homeDir?: string;
+}
+
+export type TransferStatus = 'pending' | 'transferring' | 'completed' | 'failed' | 'cancelled';
+export type TransferDirection = 'upload' | 'download' | 'remote-to-remote' | 'local-copy';
+
+export interface TransferTask {
+  id: string;
+  fileName: string;
+  sourcePath: string;
+  targetPath: string;
+  sourceConnectionId: string;
+  targetConnectionId: string;
+  direction: TransferDirection;
+  status: TransferStatus;
+  totalBytes: number;
+  transferredBytes: number;
+  speed: number; // bytes per second
+  error?: string;
+  startTime: number;
+  endTime?: number;
+  isDirectory: boolean;
+  childTasks?: string[]; // For directory transfers
+  parentTaskId?: string;
+}
+
+export interface FileConflict {
+  transferId: string;
+  fileName: string;
+  sourcePath: string;
+  targetPath: string;
+  existingSize: number;
+  newSize: number;
+  existingModified: number;
+  newModified: number;
+}

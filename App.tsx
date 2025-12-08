@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import SettingsDialog from './components/SettingsDialog';
 import HostDetailsPanel from './components/HostDetailsPanel';
-import { SftpView } from './components/SftpView';
+import { SftpView } from './components/SftpViewNew';
 import { TopTabs } from './components/TopTabs';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { VaultView } from './components/VaultView';
@@ -166,7 +166,7 @@ function App() {
           onUpdateCustomGroups={updateCustomGroups}
         />
 
-        <SftpView hosts={hosts} isActive={isSftpActive && !draggingSessionId} />
+        <SftpView hosts={hosts} keys={keys} isActive={isSftpActive && !draggingSessionId} />
 
         <TerminalLayer
           hosts={hosts}
