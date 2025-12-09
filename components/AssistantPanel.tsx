@@ -19,7 +19,7 @@ const AssistantPanelInner: React.FC = () => {
 
     setLoading(true);
     setResponse('');
-    
+
     try {
       if (mode === 'command') {
         const cmd = await generateSSHCommand(prompt);
@@ -79,7 +79,7 @@ const AssistantPanelInner: React.FC = () => {
               placeholder={mode === 'command' ? "e.g. Find all files larger than 50MB in /var/log" : "e.g. Error: Connection refused on port 22"}
             />
           </div>
-          
+
           <Button
             type="submit"
             disabled={loading}
@@ -99,11 +99,11 @@ const AssistantPanelInner: React.FC = () => {
               </Button>
             </div>
             <Card className="bg-muted/50 border-border">
-                <CardContent className="p-3">
-                  <pre className="text-sm font-mono whitespace-pre-wrap break-words text-foreground">
-                    {response}
-                  </pre>
-                </CardContent>
+              <CardContent className="p-3">
+                <pre className="text-sm font-mono whitespace-pre-wrap break-words text-foreground">
+                  {response}
+                </pre>
+              </CardContent>
             </Card>
           </div>
         )}
