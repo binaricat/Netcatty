@@ -102,6 +102,11 @@ type PortForwardStatusCallback = (status: 'inactive' | 'connecting' | 'active' |
 interface NebulaBridge {
   startSSHSession(options: NebulaSSHOptions): Promise<string>;
   startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; env?: Record<string, string> }): Promise<string>;
+  generateKeyPair?(options: {
+    type: 'RSA' | 'ECDSA' | 'ED25519';
+    bits?: number;
+    comment?: string;
+  }): Promise<{ success: boolean; privateKey?: string; publicKey?: string; error?: string }>;
   execCommand(options: {
     hostname: string;
     username: string;

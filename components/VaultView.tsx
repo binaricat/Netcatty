@@ -522,7 +522,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             onSave={k => onUpdateKeys([...keys, k])}
             onUpdate={k => onUpdateKeys(keys.map(existing => existing.id === k.id ? k : existing))}
             onDelete={id => onUpdateKeys(keys.filter(k => k.id !== id))}
-            onSaveHost={(host) => onUpdateHosts([...hosts, host])}
+            onSaveHost={(host) => {
+              // Update existing host or add new one
+              const existingIndex = hosts.findIndex(h => h.id === host.id);
+              if (existingIndex >= 0) {
+                onUpdateHosts(hosts.map(h => h.id === host.id ? host : h));
+              } else {
+                onUpdateHosts([...hosts, host]);
+              }
+            }}
             onCreateGroup={(groupPath) => onUpdateCustomGroups(Array.from(new Set([...customGroups, groupPath])))}
           />
         )}

@@ -507,34 +507,40 @@ echo $3 >> "$FILE"`);
         setError(null);
 
         try {
-            // Simulate key generation delay
-            await new Promise(resolve => setTimeout(resolve, 500));
-
             const keyType = draftKey.type as KeyType || 'ED25519';
             const keySize = draftKey.keySize;
 
-            const { privateKey, publicKey } = generateMockKeyPair(
-                keyType,
-                draftKey.label,
-                keySize
-            );
+            // Use real key generation via Electron backend
+            if (window.nebula?.generateKeyPair) {
+                const result = await window.nebula.generateKeyPair({
+                    type: keyType,
+                    bits: keySize,
+                    comment: `${draftKey.label.trim()}@netcatty`,
+                });
 
-            const newKey: SSHKey = {
-                id: crypto.randomUUID(),
-                label: draftKey.label.trim(),
-                type: keyType,
-                keySize: keyType !== 'ED25519' ? keySize : undefined,
-                privateKey,
-                publicKey,
-                passphrase: draftKey.passphrase,
-                savePassphrase: draftKey.savePassphrase,
-                source: 'generated',
-                category: 'key',
-                created: Date.now(),
-            };
+                if (!result.success || !result.privateKey || !result.publicKey) {
+                    throw new Error(result.error || 'Failed to generate key pair');
+                }
 
-            onSave(newKey);
-            closePanel();
+                const newKey: SSHKey = {
+                    id: crypto.randomUUID(),
+                    label: draftKey.label.trim(),
+                    type: keyType,
+                    keySize: keyType !== 'ED25519' ? keySize : undefined,
+                    privateKey: result.privateKey,
+                    publicKey: result.publicKey,
+                    passphrase: draftKey.passphrase,
+                    savePassphrase: draftKey.savePassphrase,
+                    source: 'generated',
+                    category: 'key',
+                    created: Date.now(),
+                };
+
+                onSave(newKey);
+                closePanel();
+            } else {
+                throw new Error('Key generation not available - please ensure the app is running in Electron');
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to generate key');
         } finally {
@@ -1787,6 +1793,12 @@ echo $3 >> "$FILE"`);
                                         setError('');
 
                                         try {
+                                            // Check for authentication method - prefer password for key export
+                                            // Since we're exporting a key to a host, we need password auth
+                                            if (!exportHost.password && !exportHost.identityFileId) {
+                                                throw new Error('Host has no saved password or key. Please add password credentials to the host first.');
+                                            }
+
                                             // Get private key for authentication if host uses key auth
                                             const hostPrivateKey = exportHost.identityFileId
                                                 ? keys.find(k => k.id === exportHost.identityFileId)?.privateKey
@@ -1796,10 +1808,13 @@ echo $3 >> "$FILE"`);
                                             const escapedPublicKey = panel.key.publicKey.replace(/'/g, "'\\''");
 
                                             // Build the command by replacing $1, $2, $3
-                                            const command = exportScript
+                                            const scriptWithVars = exportScript
                                                 .replace(/\$1/g, exportLocation)
                                                 .replace(/\$2/g, exportFilename)
                                                 .replace(/\$3/g, `'${escapedPublicKey}'`);
+
+                                            // Execute the script directly - SSH exec handles multiline commands
+                                            const command = scriptWithVars;
 
                                             // Execute via SSH
                                             const result = await window.nebula?.execCommand({
@@ -1812,16 +1827,28 @@ echo $3 >> "$FILE"`);
                                                 timeout: 30000,
                                             });
 
-                                            if (result?.code === 0) {
-                                                toast.success(`Public key exported to ${exportHost.label}`, 'Export Successful');
+                                            // Check result - code 0, null, or undefined with no stderr is success
+                                            const exitCode = result?.code;
+                                            const hasError = result?.stderr?.trim();
+                                            if (exitCode === 0 || (exitCode == null && !hasError)) {
+                                                // Update host to use this key for authentication
+                                                if (onSaveHost) {
+                                                    const updatedHost: Host = {
+                                                        ...exportHost,
+                                                        identityFileId: panel.key.id,
+                                                        authMethod: 'key',
+                                                    };
+                                                    onSaveHost(updatedHost);
+                                                }
+                                                toast.success(`Public key exported and attached to ${exportHost.label}`, 'Export Successful');
                                                 closePanel();
                                             } else {
-                                                const errorMsg = result?.stderr || result?.stdout || 'Unknown error';
+                                                const errorMsg = hasError || result?.stdout?.trim() || `Command exited with code ${exitCode}`;
                                                 toast.error(`Failed to export key: ${errorMsg}`, 'Export Failed');
                                             }
                                         } catch (err) {
-                                            const message = err instanceof Error ? err.message : 'Unknown error';
-                                            toast.error(message, 'Export Failed');
+                                            const message = err instanceof Error ? err.message : String(err);
+                                            toast.error(`Export failed: ${message}`, 'Export Failed');
                                         } finally {
                                             setIsExporting(false);
                                         }

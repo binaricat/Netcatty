@@ -25,7 +25,7 @@ const net = require("node:net");
 const http = require("node:http");
 const pty = require("node-pty");
 const SftpClient = require("ssh2-sftp-client");
-const { Client: SSHClient } = require("ssh2");
+const { Client: SSHClient, utils: sshUtils } = require("ssh2");
 
 // GPU: keep hardware acceleration enabled for smoother rendering
 // (If you hit GPU issues, you can restore these switches.)
@@ -341,11 +341,12 @@ const registerSSHBridge = (win) => {
           },
         };
         
-        // Auth
+        // Auth - support both key and password for fallback
         if (jump.privateKey) {
           connOpts.privateKey = jump.privateKey;
           if (jump.passphrase) connOpts.passphrase = jump.passphrase;
-        } else if (jump.password) {
+        }
+        if (jump.password) {
           connOpts.password = jump.password;
         }
         
@@ -468,13 +469,16 @@ const registerSSHBridge = (win) => {
         },
       };
 
-      // Authentication for final target
+      // Authentication for final target - support both key and password for fallback
+      // ssh2 will try methods in order: publickey first, then password
       if (options.privateKey) {
         connectOpts.privateKey = options.privateKey;
         if (options.passphrase) {
           connectOpts.passphrase = options.passphrase;
         }
-      } else if (options.password) {
+      }
+      // Always include password if available for fallback authentication
+      if (options.password) {
         connectOpts.password = options.password;
       }
 
@@ -779,7 +783,8 @@ const registerSSHBridge = (win) => {
                 clearTimeout(timer);
                 settled = true;
                 conn.end();
-                resolve({ stdout, stderr, code });
+                // code can be undefined in some cases, treat as 0 if no stderr
+                resolve({ stdout, stderr, code: code ?? (stderr ? 1 : 0) });
               });
           });
         })
@@ -793,7 +798,13 @@ const registerSSHBridge = (win) => {
           if (settled) return;
           clearTimeout(timer);
           settled = true;
-          resolve({ stdout, stderr, code: null });
+          // Connection ended before command close - likely an auth failure or connection issue
+          // If we have stderr output, use it; otherwise this is likely an error
+          if (stderr || stdout) {
+            resolve({ stdout, stderr, code: 0 });
+          } else {
+            reject(new Error("SSH connection closed unexpectedly"));
+          }
         });
 
       conn.connect({
@@ -810,6 +821,55 @@ const registerSSHBridge = (win) => {
 
   electronModule.ipcMain.handle("nebula:ssh:exec", execOnce);
 
+  // SSH Key Generation handler
+  electronModule.ipcMain.handle("nebula:key:generate", async (_event, options) => {
+    const { type, bits, comment } = options;
+    
+    try {
+      // Map key type to ssh2 format
+      let keyType;
+      let keyBits = bits;
+      
+      switch (type) {
+        case 'ED25519':
+          keyType = 'ed25519';
+          keyBits = undefined; // ED25519 doesn't use bits
+          break;
+        case 'ECDSA':
+          keyType = 'ecdsa';
+          keyBits = bits || 256; // 256, 384, or 521
+          break;
+        case 'RSA':
+        default:
+          keyType = 'rsa';
+          keyBits = bits || 4096;
+          break;
+      }
+      
+      // Generate key pair synchronously
+      const result = sshUtils.generateKeyPairSync(keyType, {
+        bits: keyBits,
+        comment: comment || 'netcatty-generated-key',
+      });
+      
+      // Convert to OpenSSH format strings
+      const privateKey = result.private;
+      const publicKey = result.public;
+      
+      return {
+        success: true,
+        privateKey,
+        publicKey,
+      };
+    } catch (err) {
+      console.error('Key generation failed:', err);
+      return {
+        success: false,
+        error: err.message || 'Key generation failed',
+      };
+    }
+  });
+
   // SFTP handlers
   const openSftp = async (_event, options) => {
     const client = new SftpClient();
@@ -819,9 +879,11 @@ const registerSSHBridge = (win) => {
       port: options.port || 22,
       username: options.username || "root",
     };
+    // Support both key and password for fallback authentication
     if (options.privateKey) {
       connectOpts.privateKey = options.privateKey;
-    } else if (options.password) {
+    }
+    if (options.password) {
       connectOpts.password = options.password;
     }
     await client.connect(connectOpts);

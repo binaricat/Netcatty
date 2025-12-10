@@ -189,6 +189,9 @@ const api = {
   execCommand: async (options) => {
     return ipcRenderer.invoke("nebula:ssh:exec", options);
   },
+  generateKeyPair: async (options) => {
+    return ipcRenderer.invoke("nebula:key:generate", options);
+  },
   resizeSession: (sessionId, cols, rows) => {
     ipcRenderer.send("nebula:resize", { sessionId, cols, rows });
   },

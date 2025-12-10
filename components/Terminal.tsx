@@ -162,7 +162,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hostname: host.hostname,
         username: host.username || 'root',
         port: host.port || 22,
-        password: host.authMethod !== 'key' ? host.password : undefined,
+        password: host.password, // Always include for fallback
         privateKey: key?.privateKey,
         command: 'cat /etc/os-release 2>/dev/null || uname -a',
         timeout: 8000,
@@ -503,7 +503,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Use pending auth if available, otherwise use host config
     const pendingAuth = pendingAuthRef.current;
     const effectiveUsername = pendingAuth?.username || host.username || 'root';
-    const effectivePassword = pendingAuth?.password || (host.authMethod !== 'key' ? host.password : undefined);
+    // Always include password if available for fallback authentication
+    const effectivePassword = pendingAuth?.password || host.password;
     const effectiveKeyId = pendingAuth?.keyId || host.identityFileId;
 
     const key = effectiveKeyId
@@ -528,7 +529,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hostname: jumpHost.hostname,
         port: jumpHost.port || 22,
         username: jumpHost.username || 'root',
-        password: jumpHost.authMethod !== 'key' ? jumpHost.password : undefined,
+        password: jumpHost.password, // Always include for fallback
         privateKey: jumpKey?.privateKey,
         label: jumpHost.label,
       };
@@ -1288,8 +1289,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           username: host.username,
           hostname: host.hostname,
           port: host.port,
-          password: host.authMethod !== 'key' ? host.password : undefined,
-          privateKey: host.authMethod === 'key'
+          password: host.password, // Always include for fallback
+          privateKey: host.identityFileId
             ? keys.find(k => k.id === host.identityFileId)?.privateKey
             : undefined,
         }}
