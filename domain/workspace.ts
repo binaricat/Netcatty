@@ -1,4 +1,4 @@
-import { Workspace, WorkspaceNode } from './models';
+import { Workspace, WorkspaceNode, WorkspaceViewMode } from './models';
 
 export type SplitDirection = 'horizontal' | 'vertical';
 export type SplitPosition = 'left' | 'right' | 'top' | 'bottom';
@@ -117,4 +117,69 @@ export const updateWorkspaceSplitSizes = (
     return node;
   };
   return patch(root);
+};
+
+/**
+ * Create a workspace from multiple session IDs.
+ * Used for snippet runner - creates a workspace with all sessions in a horizontal split.
+ */
+export const createWorkspaceFromSessionIds = (
+  sessionIds: string[],
+  options: {
+    title: string;
+    viewMode?: WorkspaceViewMode;
+    snippetId?: string;
+  }
+): Workspace => {
+  if (sessionIds.length === 0) {
+    throw new Error('Cannot create workspace with no sessions');
+  }
+
+  if (sessionIds.length === 1) {
+    // Single pane workspace
+    return {
+      id: `ws-${crypto.randomUUID()}`,
+      title: options.title,
+      viewMode: options.viewMode,
+      snippetId: options.snippetId,
+      focusedSessionId: sessionIds[0],
+      root: {
+        id: crypto.randomUUID(),
+        type: 'pane',
+        sessionId: sessionIds[0],
+      },
+    };
+  }
+
+  // Multiple sessions - create a horizontal split
+  const children: WorkspaceNode[] = sessionIds.map(sessionId => ({
+    id: crypto.randomUUID(),
+    type: 'pane' as const,
+    sessionId,
+  }));
+
+  return {
+    id: `ws-${crypto.randomUUID()}`,
+    title: options.title,
+    viewMode: options.viewMode,
+    snippetId: options.snippetId,
+    focusedSessionId: sessionIds[0],
+    root: {
+      id: crypto.randomUUID(),
+      type: 'split',
+      direction: 'vertical', // Side by side
+      children,
+      sizes: children.map(() => 1),
+    },
+  };
+};
+
+/**
+ * Collect all session IDs from a workspace node tree.
+ */
+export const collectSessionIds = (node: WorkspaceNode): string[] => {
+  if (node.type === 'pane') {
+    return [node.sessionId];
+  }
+  return node.children.flatMap(child => collectSessionIds(child));
 };

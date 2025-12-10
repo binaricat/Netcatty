@@ -60,6 +60,7 @@ interface VaultViewProps {
   onUpdateCustomGroups: (groups: string[]) => void;
   onUpdateKnownHosts: (knownHosts: KnownHost[]) => void;
   onConvertKnownHost: (knownHost: KnownHost) => void;
+  onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
 }
 
 const VaultViewInner: React.FC<VaultViewProps> = ({
@@ -84,6 +85,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onUpdateCustomGroups,
   onUpdateKnownHosts,
   onConvertKnownHost,
+  onRunSnippet,
 }) => {
   const [currentSection, setCurrentSection] = useState<VaultSection>('hosts');
   const [search, setSearch] = useState('');
@@ -482,6 +484,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 onPackagesChange={onUpdateSnippetPackages}
                 onSave={s => onUpdateSnippets(snippets.find(ex => ex.id === s.id) ? snippets.map(ex => ex.id === s.id ? s : ex) : [...snippets, s])}
                 onDelete={id => onUpdateSnippets(snippets.filter(s => s.id !== id))}
+                onRunSnippet={onRunSnippet}
               />
             )}
           </div>

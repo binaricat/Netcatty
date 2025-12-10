@@ -92,6 +92,9 @@ function App() {
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,
+    toggleWorkspaceViewMode,
+    setWorkspaceFocusedSession,
+    runSnippet,
     orphanSessions,
     orderedTabs,
     reorderTabs,
@@ -199,6 +202,7 @@ function App() {
             onUpdateCustomGroups={updateCustomGroups}
             onUpdateKnownHosts={updateKnownHosts}
             onConvertKnownHost={convertKnownHostToHost}
+            onRunSnippet={runSnippet}
           />
         </VaultViewContainer>
 
@@ -222,6 +226,8 @@ function App() {
           onAddSessionToWorkspace={addSessionToWorkspace}
           onUpdateSplitSizes={updateSplitSizes}
           onSetDraggingSessionId={setDraggingSessionId}
+          onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
+          onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
         />
       </div>
 

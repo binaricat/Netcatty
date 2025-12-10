@@ -3,6 +3,11 @@ import { cn } from '../lib/utils';
 import Terminal from './Terminal';
 import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode, KnownHost } from '../types';
 import { useActiveTabId } from '../application/state/activeTabStore';
+import { collectSessionIds } from '../domain/workspace';
+import { DistroAvatar } from './DistroAvatar';
+import { Button } from './ui/button';
+import { LayoutGrid, Server, Circle } from 'lucide-react';
+import { ScrollArea } from './ui/scroll-area';
 
 type WorkspaceRect = { x: number; y: number; w: number; h: number };
 
@@ -40,6 +45,8 @@ interface TerminalLayerProps {
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onUpdateSplitSizes: (workspaceId: string, splitId: string, sizes: number[]) => void;
   onSetDraggingSessionId: (id: string | null) => void;
+  onToggleWorkspaceViewMode?: (workspaceId: string) => void;
+  onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
@@ -60,6 +67,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onAddSessionToWorkspace,
   onUpdateSplitSizes,
   onSetDraggingSessionId,
+  onToggleWorkspaceViewMode,
+  onSetWorkspaceFocusedSession,
 }) => {
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
@@ -345,12 +354,100 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const isTerminalLayerVisible = isVisible || !!draggingSessionId;
 
+  // Check if active workspace is in focus mode
+  const isFocusMode = activeWorkspace?.viewMode === 'focus';
+  const focusedSessionId = activeWorkspace?.focusedSessionId;
+  
+  // Get sessions for the active workspace in focus mode
+  const workspaceSessionIds = useMemo(() => {
+    if (!activeWorkspace) return [];
+    return collectSessionIds(activeWorkspace.root);
+  }, [activeWorkspace]);
+
+  const workspaceSessions = useMemo(() => {
+    return sessions.filter(s => workspaceSessionIds.includes(s.id));
+  }, [sessions, workspaceSessionIds]);
+
+  // Render focus mode sidebar
+  const renderFocusModeSidebar = () => {
+    if (!activeWorkspace || !isFocusMode) return null;
+    
+    return (
+      <div className="w-56 flex-shrink-0 bg-secondary/50 border-r border-border/50 flex flex-col">
+        {/* Header with view toggle */}
+        <div className="h-10 flex items-center justify-between px-3 border-b border-border/50">
+          <span className="text-xs font-medium text-muted-foreground">
+            Terminals · {workspaceSessions.length}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => onToggleWorkspaceViewMode?.(activeWorkspace.id)}
+            title="Switch to Split View"
+          >
+            <LayoutGrid size={14} />
+          </Button>
+        </div>
+        
+        {/* Session list */}
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-1">
+            {workspaceSessions.map(session => {
+              const host = sessionHostsMap.get(session.id);
+              const isSelected = session.id === focusedSessionId;
+              const statusColor = session.status === 'connected' 
+                ? 'text-emerald-500' 
+                : session.status === 'connecting' 
+                  ? 'text-amber-500' 
+                  : 'text-red-500';
+              
+              return (
+                <div
+                  key={session.id}
+                  className={cn(
+                    "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors",
+                    isSelected 
+                      ? "bg-primary/15 border border-primary/30" 
+                      : "hover:bg-secondary/80 border border-transparent"
+                  )}
+                  onClick={() => onSetWorkspaceFocusedSession?.(activeWorkspace.id, session.id)}
+                >
+                  <div className="relative">
+                    {host ? (
+                      <DistroAvatar host={host} fallback={session.hostLabel} size="sm" className="h-6 w-6" />
+                    ) : (
+                      <Server size={16} className="text-muted-foreground" />
+                    )}
+                    <Circle 
+                      size={6} 
+                      className={cn("absolute -bottom-0.5 -right-0.5 fill-current", statusColor)} 
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{session.hostLabel}</div>
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      {session.username}@{session.hostname}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </div>
+    );
+  };
+
   return (
     <div
       ref={workspaceOuterRef}
       className="absolute inset-0 bg-background flex"
       style={{ display: isTerminalLayerVisible ? 'flex' : 'none', zIndex: isTerminalLayerVisible ? 10 : 0 }}
     >
+      {/* Focus mode sidebar */}
+      {isFocusMode && renderFocusModeSidebar()}
+      
       {draggingSessionId && (
         <div
           ref={workspaceOverlayRef}
@@ -387,14 +484,21 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           )}
         </div>
       )}
-      <div ref={workspaceInnerRef} className="absolute inset-0 overflow-hidden">
+      <div ref={workspaceInnerRef} className={cn("absolute overflow-hidden", isFocusMode ? "left-56 right-0 top-0 bottom-0" : "inset-0")}>
         {sessions.map(session => {
           // Use pre-computed host to avoid creating new objects on every render
           const host = sessionHostsMap.get(session.id)!;
           const inActiveWorkspace = !!activeWorkspace && session.workspaceId === activeWorkspace.id;
           const isActiveSolo = activeTabId === session.id && !activeWorkspace && isTerminalLayerVisible;
-          const isVisible = (inActiveWorkspace || isActiveSolo) && isTerminalLayerVisible;
-          const rect = inActiveWorkspace ? activeWorkspaceRects[session.id] : null;
+          
+          // In focus mode, only the focused session is visible
+          const isFocusedInWorkspace = isFocusMode && inActiveWorkspace && session.id === focusedSessionId;
+          const isSplitViewVisible = !isFocusMode && inActiveWorkspace;
+          
+          const isVisible = ((isFocusedInWorkspace || isSplitViewVisible || isActiveSolo) && isTerminalLayerVisible);
+          
+          // In focus mode, use full area; in split mode, use computed rects
+          const rect = (isSplitViewVisible && !isFocusMode) ? activeWorkspaceRects[session.id] : null;
 
           const layoutStyle = rect
             ? {
@@ -431,20 +535,24 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 isVisible={isVisible}
                 inWorkspace={inActiveWorkspace}
                 isResizing={!!resizing}
+                isFocusMode={isFocusMode}
                 fontSize={14}
                 terminalTheme={terminalTheme}
                 sessionId={session.id}
+                startupCommand={session.startupCommand}
                 onCloseSession={handleCloseSession}
                 onStatusChange={handleStatusChange}
                 onSessionExit={handleSessionExit}
                 onOsDetected={handleOsDetected}
                 onUpdateHost={handleUpdateHost}
                 onAddKnownHost={handleAddKnownHost}
+                onExpandToFocus={inActiveWorkspace && !isFocusMode && activeWorkspace ? () => onToggleWorkspaceViewMode?.(activeWorkspace.id) : undefined}
               />
             </div>
           );
         })}
-        {activeResizers.map(handle => {
+        {/* Only show resizers in split view mode, not in focus mode */}
+        {!isFocusMode && activeResizers.map(handle => {
           const isVertical = handle.direction === 'vertical';
           // Expand hit area perpendicular to the split line, but stay within bounds
           // Vertical split (left-right): expand horizontally, keep vertical bounds
@@ -510,7 +618,9 @@ const terminalLayerAreEqual = (prev: TerminalLayerProps, next: TerminalLayerProp
     prev.workspaces === next.workspaces &&
     prev.draggingSessionId === next.draggingSessionId &&
     prev.terminalTheme === next.terminalTheme &&
-    prev.onUpdateHost === next.onUpdateHost
+    prev.onUpdateHost === next.onUpdateHost &&
+    prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
+    prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession
   );
 };
 

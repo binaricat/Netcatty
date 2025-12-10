@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Host, Snippet } from '../types';
-import { FileCode, Plus, Trash2, Edit2, Copy, Clock, List as ListIcon, FolderPlus, Grid, Server } from 'lucide-react';
+import { FileCode, Plus, Trash2, Edit2, Copy, Clock, List as ListIcon, FolderPlus, Grid, Server, Play } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Card } from './ui/card';
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent, DialogDescription } from './ui/dialog';
 import { Label } from './ui/label';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, ContextMenuSeparator } from './ui/context-menu';
 import { cn } from '../lib/utils';
 
 interface SnippetsManagerProps {
@@ -17,9 +17,10 @@ interface SnippetsManagerProps {
   onSave: (snippet: Snippet) => void;
   onDelete: (id: string) => void;
   onPackagesChange: (packages: string[]) => void;
+  onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
 }
 
-const SnippetsManager: React.FC<SnippetsManagerProps> = ({ snippets, packages, hosts, onSave, onDelete, onPackagesChange }) => {
+const SnippetsManager: React.FC<SnippetsManagerProps> = ({ snippets, packages, hosts, onSave, onDelete, onPackagesChange, onRunSnippet }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Partial<Snippet>>({
     label: '',
@@ -297,6 +298,20 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({ snippets, packages, h
                       </Card>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
+                      <ContextMenuItem 
+                        onClick={() => {
+                          const targetHostsList = (snippet.targets || [])
+                            .map(id => hosts.find(h => h.id === id))
+                            .filter((h): h is Host => Boolean(h));
+                          if (targetHostsList.length > 0) {
+                            onRunSnippet?.(snippet, targetHostsList);
+                          }
+                        }}
+                        disabled={!snippet.targets?.length}
+                      >
+                        <Play className="mr-2 h-4 w-4" /> Run
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
                       <ContextMenuItem onClick={() => handleEdit(snippet)}>
                         <Edit2 className="mr-2 h-4 w-4" /> Edit
                       </ContextMenuItem>

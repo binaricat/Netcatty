@@ -151,6 +151,7 @@ export interface TerminalSession {
   hostname: string;
   status: 'connecting' | 'connected' | 'disconnected';
   workspaceId?: string;
+  startupCommand?: string; // Command to run after connection (for snippet runner)
 }
 
 export interface RemoteFile {
@@ -174,10 +175,15 @@ export type WorkspaceNode =
       sizes?: number[]; // relative sizes for children
     };
 
+export type WorkspaceViewMode = 'split' | 'focus';
+
 export interface Workspace {
   id: string;
   title: string;
   root: WorkspaceNode;
+  viewMode?: WorkspaceViewMode; // 'split' = tiled view (default), 'focus' = left list + single terminal
+  focusedSessionId?: string; // Which session is focused when in focus mode
+  snippetId?: string; // If this workspace was created from running a snippet
 }
 
 // SFTP Types

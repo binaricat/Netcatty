@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, memo } from 'react';
 import { init as initGhostty, Terminal as GhosttyTerminal, FitAddon } from 'ghostty-web';
 import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme, KnownHost, ProxyConfig, HostChainConfig } from '../types';
-import { Zap, FolderInput, Loader2, AlertCircle, ShieldCheck, Clock, Play, X, Lock, Key, User, Eye, EyeOff, ChevronDown } from 'lucide-react';
+import { Zap, FolderInput, Loader2, AlertCircle, ShieldCheck, Clock, Play, X, Lock, Key, User, Eye, EyeOff, ChevronDown, Maximize2 } from 'lucide-react';
 import { DistroAvatar } from './DistroAvatar';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -21,15 +21,18 @@ interface TerminalProps {
   isVisible: boolean;
   inWorkspace?: boolean;
   isResizing?: boolean;
+  isFocusMode?: boolean; // Whether workspace is in focus mode
   fontSize: number;
   terminalTheme: TerminalTheme;
   sessionId: string;
+  startupCommand?: string; // Command to run after connection (for snippet runner)
   onStatusChange?: (sessionId: string, status: TerminalSession['status']) => void;
   onSessionExit?: (sessionId: string) => void;
   onOsDetected?: (hostId: string, distro: string) => void;
   onCloseSession?: (sessionId: string) => void;
   onUpdateHost?: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void; // Callback to add host to known hosts
+  onExpandToFocus?: () => void; // Callback to switch workspace to focus mode
 }
 
 let ghosttyInitialized = false;
@@ -52,15 +55,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   isVisible,
   inWorkspace,
   isResizing,
+  isFocusMode,
   fontSize,
   terminalTheme,
   sessionId,
+  startupCommand,
   onStatusChange,
   onSessionExit,
   onOsDetected,
   onCloseSession,
   onUpdateHost,
   onAddKnownHost,
+  onExpandToFocus,
 }) => {
   const CONNECTION_TIMEOUT = 12000;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,6 +76,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const disposeExitRef = useRef<(() => void) | null>(null);
   const sessionRef = useRef<string | null>(null);
   const hasConnectedRef = useRef(false);
+  const hasRunStartupCommandRef = useRef(false); // Track if startup command has been executed
 
   const [isScriptsOpen, setIsScriptsOpen] = useState(false);
   const [status, setStatus] = useState<TerminalSession['status']>('connecting');
@@ -585,12 +592,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         onSessionExit?.(sessionId);
       });
 
-      if (host.startupCommand) {
+      // Run startup command from host config or snippet
+      const commandToRun = startupCommand || host.startupCommand;
+      if (commandToRun && !hasRunStartupCommandRef.current) {
+        hasRunStartupCommandRef.current = true;
         setTimeout(() => {
           if (sessionRef.current) {
             window.nebula?.writeToSession(
               sessionRef.current,
-              `${host.startupCommand}\r`
+              `${commandToRun}\r`
             );
           }
         }, 600);
@@ -914,6 +924,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               <span className={cn("inline-block h-2 w-2 rounded-full flex-shrink-0", statusDotTone)} />
             </div>
             <div className="flex items-center gap-0.5 flex-shrink-0">
+              {/* Expand to focus mode button - only show in split view mode */}
+              {!isFocusMode && onExpandToFocus && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-white/70 hover:text-white hover:bg-white/10"
+                  onClick={onExpandToFocus}
+                  title="Focus Mode"
+                >
+                  <Maximize2 size={12} />
+                </Button>
+              )}
               {renderControls('compact', { showClose: true })}
             </div>
           </div>

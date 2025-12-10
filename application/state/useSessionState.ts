@@ -1,11 +1,13 @@
 import { MouseEvent, useMemo, useState, useCallback } from 'react';
-import { Host, TerminalSession, Workspace } from '../../domain/models';
+import { Host, Snippet, TerminalSession, Workspace, WorkspaceNode, WorkspaceViewMode } from '../../domain/models';
 import {
   createWorkspaceFromSessions as createWorkspaceEntity,
   insertPaneIntoWorkspace,
   pruneWorkspaceNode,
   SplitHint,
   updateWorkspaceSplitSizes,
+  createWorkspaceFromSessionIds,
+  collectSessionIds,
 } from '../../domain/workspace';
 import { activeTabStore } from './activeTabStore';
 
@@ -57,21 +59,32 @@ export const useSessionState = () => {
     
     setSessions(prevSessions => {
       const targetSession = prevSessions.find(s => s.id === sessionId);
-      const workspaceId = targetSession?.workspaceId;
+      const wsId = targetSession?.workspaceId;
       
       setWorkspaces(prevWorkspaces => {
         let removedWorkspaceId: string | null = null;
         let nextWorkspaces = prevWorkspaces;
+        let dissolvedWorkspaceId: string | null = null;
+        let lastRemainingSessionId: string | null = null;
         
-        if (workspaceId) {
+        if (wsId) {
           nextWorkspaces = prevWorkspaces
             .map(ws => {
-              if (ws.id !== workspaceId) return ws;
+              if (ws.id !== wsId) return ws;
               const pruned = pruneWorkspaceNode(ws.root, sessionId);
               if (!pruned) {
                 removedWorkspaceId = ws.id;
                 return null;
               }
+              
+              // Check if only 1 session remains - dissolve workspace
+              const remainingSessionIds = collectSessionIds(pruned);
+              if (remainingSessionIds.length === 1) {
+                dissolvedWorkspaceId = ws.id;
+                lastRemainingSessionId = remainingSessionIds[0];
+                return null;
+              }
+              
               return { ...ws, root: pruned };
             })
             .filter((ws): ws is Workspace => Boolean(ws));
@@ -83,25 +96,45 @@ export const useSessionState = () => {
 
         const currentActiveTabId = activeTabStore.getActiveTabId();
         const getFallback = () => {
+          if (lastRemainingSessionId) return lastRemainingSessionId;
           if (fallbackWorkspace) return fallbackWorkspace.id;
           if (fallbackSolo) return fallbackSolo.id;
           return 'vault';
         };
 
-        if (currentActiveTabId === sessionId) {
-          setActiveTabId(fallbackSolo ? fallbackSolo.id : getFallback());
+        if (dissolvedWorkspaceId && currentActiveTabId === dissolvedWorkspaceId) {
+          setActiveTabId(getFallback());
+        } else if (currentActiveTabId === sessionId) {
+          setActiveTabId(getFallback());
         } else if (removedWorkspaceId && currentActiveTabId === removedWorkspaceId) {
           setActiveTabId(getFallback());
-        } else if (workspaceId && currentActiveTabId === workspaceId && !nextWorkspaces.find(w => w.id === workspaceId)) {
+        } else if (wsId && currentActiveTabId === wsId && !nextWorkspaces.find(w => w.id === wsId)) {
           setActiveTabId(getFallback());
         }
         
         return nextWorkspaces;
       });
       
+      // Check if we need to dissolve a workspace (convert remaining session to orphan)
+      if (targetSession?.workspaceId) {
+        const ws = workspaces.find(w => w.id === targetSession.workspaceId);
+        if (ws) {
+          const pruned = pruneWorkspaceNode(ws.root, sessionId);
+          if (pruned) {
+            const remainingSessionIds = collectSessionIds(pruned);
+            if (remainingSessionIds.length === 1) {
+              // Dissolve: remove workspaceId from the remaining session
+              return prevSessions
+                .filter(s => s.id !== sessionId)
+                .map(s => remainingSessionIds.includes(s.id) ? { ...s, workspaceId: undefined } : s);
+            }
+          }
+        }
+      }
+      
       return prevSessions.filter(s => s.id !== sessionId);
     });
-  }, []);
+  }, [workspaces]);
 
   const closeWorkspace = useCallback((workspaceId: string) => {
     setWorkspaces(prevWorkspaces => {
@@ -211,6 +244,67 @@ export const useSessionState = () => {
     }));
   }, []);
 
+  // Toggle workspace view mode between split and focus
+  const toggleWorkspaceViewMode = useCallback((workspaceId: string) => {
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws.id !== workspaceId) return ws;
+      const currentMode = ws.viewMode || 'split';
+      const newMode: WorkspaceViewMode = currentMode === 'split' ? 'focus' : 'split';
+      // If switching to focus mode and no focused session, pick the first one
+      let focusedSessionId = ws.focusedSessionId;
+      if (newMode === 'focus' && !focusedSessionId) {
+        const sessionIds = collectSessionIds(ws.root);
+        focusedSessionId = sessionIds[0];
+      }
+      return { ...ws, viewMode: newMode, focusedSessionId };
+    }));
+  }, []);
+
+  // Set the focused session in a workspace (for focus mode)
+  const setWorkspaceFocusedSession = useCallback((workspaceId: string, sessionId: string) => {
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws.id !== workspaceId) return ws;
+      return { ...ws, focusedSessionId: sessionId };
+    }));
+  }, []);
+
+  // Run a snippet on multiple target hosts - creates a focus mode workspace
+  const runSnippet = useCallback((snippet: Snippet, targetHosts: Host[]) => {
+    if (targetHosts.length === 0) return;
+
+    // Create sessions for each target host
+    const newSessions: TerminalSession[] = targetHosts.map(host => ({
+      id: crypto.randomUUID(),
+      hostId: host.id,
+      hostLabel: host.label,
+      hostname: host.hostname,
+      username: host.username,
+      status: 'connecting' as const,
+      // workspaceId will be set after workspace is created
+    }));
+
+    const sessionIds = newSessions.map(s => s.id);
+    
+    // Create a focus mode workspace
+    const workspace = createWorkspaceFromSessionIds(sessionIds, {
+      title: snippet.label,
+      viewMode: 'focus',
+      snippetId: snippet.id,
+    });
+
+    // Update sessions with workspaceId
+    const sessionsWithWorkspace = newSessions.map(s => ({
+      ...s,
+      workspaceId: workspace.id,
+      // Store the command to run after connection
+      startupCommand: snippet.command,
+    }));
+
+    setSessions(prev => [...prev, ...sessionsWithWorkspace]);
+    setWorkspaces(prev => [...prev, workspace]);
+    setActiveTabId(workspace.id);
+  }, []);
+
   const orphanSessions = useMemo(() => sessions.filter(s => !s.workspaceId), [sessions]);
 
   // Get ordered tabs: combines orphan sessions and workspaces in the custom order
@@ -286,6 +380,9 @@ export const useSessionState = () => {
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,
+    toggleWorkspaceViewMode,
+    setWorkspaceFocusedSession,
+    runSnippet,
     orphanSessions,
     orderedTabs,
     reorderTabs,
