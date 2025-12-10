@@ -1,3 +1,24 @@
+// Proxy configuration for SSH connections
+export type ProxyType = 'http' | 'socks5';
+
+export interface ProxyConfig {
+  type: ProxyType;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+// Host chain configuration for jump host / bastion connections
+export interface HostChainConfig {
+  hostIds: string[]; // Array of host IDs in order (first = closest to client)
+}
+
+// Environment variable for SSH session
+export interface EnvVar {
+  name: string;
+  value: string;
+}
 
 export interface Host {
   id: string;
@@ -14,9 +35,12 @@ export interface Host {
   authMethod?: 'password' | 'key' | 'certificate' | 'fido2';
   agentForwarding?: boolean;
   startupCommand?: string;
-  hostChaining?: string;
-  proxy?: string;
-  envVars?: string;
+  hostChaining?: string; // Deprecated: use hostChain instead
+  proxy?: string; // Deprecated: use proxyConfig instead
+  proxyConfig?: ProxyConfig; // New structured proxy configuration
+  hostChain?: HostChainConfig; // New structured host chain configuration
+  envVars?: string; // Deprecated: use environmentVariables instead
+  environmentVariables?: EnvVar[]; // Structured environment variables
   charset?: string;
   moshEnabled?: boolean;
   theme?: string;

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, memo } from 'react';
 import { init as initGhostty, Terminal as GhosttyTerminal, FitAddon } from 'ghostty-web';
-import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme } from '../types';
+import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme, KnownHost, ProxyConfig, HostChainConfig } from '../types';
 import { Zap, FolderInput, Loader2, AlertCircle, ShieldCheck, Clock, Play, X, Lock, Key, User, Eye, EyeOff, ChevronDown } from 'lucide-react';
 import { DistroAvatar } from './DistroAvatar';
 import { Button } from './ui/button';
@@ -10,11 +10,14 @@ import { cn } from '../lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { ScrollArea } from './ui/scroll-area';
 import SFTPModal from './SFTPModal';
+import KnownHostConfirmDialog, { HostKeyInfo } from './KnownHostConfirmDialog';
 
 interface TerminalProps {
   host: Host;
   keys: SSHKey[];
   snippets: Snippet[];
+  allHosts?: Host[]; // All hosts for chain resolution
+  knownHosts?: KnownHost[]; // Known hosts for verification
   isVisible: boolean;
   inWorkspace?: boolean;
   isResizing?: boolean;
@@ -26,6 +29,7 @@ interface TerminalProps {
   onOsDetected?: (hostId: string, distro: string) => void;
   onCloseSession?: (sessionId: string) => void;
   onUpdateHost?: (host: Host) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void; // Callback to add host to known hosts
 }
 
 let ghosttyInitialized = false;
@@ -43,6 +47,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   host,
   keys,
   snippets,
+  allHosts = [],
+  knownHosts = [],
   isVisible,
   inWorkspace,
   isResizing,
@@ -54,6 +60,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onOsDetected,
   onCloseSession,
   onUpdateHost,
+  onAddKnownHost,
 }) => {
   const CONNECTION_TIMEOUT = 12000;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -74,6 +81,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [showSFTP, setShowSFTP] = useState(false);
   const [progressValue, setProgressValue] = useState(15);
 
+  // Chain connection progress state
+  const [chainProgress, setChainProgress] = useState<{
+    currentHop: number;
+    totalHops: number;
+    currentHostLabel: string;
+  } | null>(null);
+
   // Auth dialog state for hosts without credentials
   const [needsAuth, setNeedsAuth] = useState(false);
   const [authUsername, setAuthUsername] = useState(host.username || 'root');
@@ -89,6 +103,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     password?: string;
     keyId?: string;
   } | null>(null);
+
+  // Known host verification state
+  const [needsHostKeyVerification, setNeedsHostKeyVerification] = useState(false);
+  const [pendingHostKeyInfo, setPendingHostKeyInfo] = useState<HostKeyInfo | null>(null);
+  const pendingConnectionRef = useRef<(() => void) | null>(null);
+
+  // Resolve host chain to actual host objects
+  const resolvedChainHosts = host.hostChain?.hostIds
+    ?.map(id => allHosts.find(h => h.id === id))
+    .filter(Boolean) as Host[] || [];
 
   const updateStatus = (next: TerminalSession['status']) => {
     setStatus(next);
@@ -446,6 +470,58 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       ? keys.find((k) => k.id === effectiveKeyId)
       : undefined;
 
+    // Prepare proxy configuration if set
+    const proxyConfig = host.proxyConfig ? {
+      type: host.proxyConfig.type,
+      host: host.proxyConfig.host,
+      port: host.proxyConfig.port,
+      username: host.proxyConfig.username,
+      password: host.proxyConfig.password,
+    } : undefined;
+
+    // Prepare jump host chain configuration
+    const jumpHosts = resolvedChainHosts.map(jumpHost => {
+      const jumpKey = jumpHost.identityFileId 
+        ? keys.find(k => k.id === jumpHost.identityFileId) 
+        : undefined;
+      return {
+        hostname: jumpHost.hostname,
+        port: jumpHost.port || 22,
+        username: jumpHost.username || 'root',
+        password: jumpHost.authMethod !== 'key' ? jumpHost.password : undefined,
+        privateKey: jumpKey?.privateKey,
+        label: jumpHost.label,
+      };
+    });
+
+    // Initialize chain progress if we have jump hosts
+    const totalHops = jumpHosts.length + 1; // jump hosts + target
+    let unsubscribeChainProgress: (() => void) | undefined;
+    
+    if (jumpHosts.length > 0) {
+      setChainProgress({
+        currentHop: 1,
+        totalHops,
+        currentHostLabel: jumpHosts[0]?.label || jumpHosts[0]?.hostname || host.hostname,
+      });
+      setProgressLogs(prev => [...prev, `Starting chain connection (${totalHops} hops)...`]);
+      
+      // Subscribe to chain progress events from IPC
+      if (window.nebula?.onChainProgress) {
+        unsubscribeChainProgress = window.nebula.onChainProgress((hop, total, label, status) => {
+          setChainProgress({
+            currentHop: hop,
+            totalHops: total,
+            currentHostLabel: label,
+          });
+          setProgressLogs(prev => [...prev, `Chain ${hop} of ${total}: ${label} - ${status}`]);
+          // Update progress value based on chain hop
+          const hopProgress = (hop / total) * 80 + 10;
+          setProgressValue(Math.min(95, hopProgress));
+        });
+      }
+    }
+
     try {
       const id = await window.nebula.startSSHSession({
         sessionId,
@@ -459,7 +535,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         cols: term.cols,
         rows: term.rows,
         charset: host.charset,
+        // Environment variables
+        env: host.environmentVariables?.reduce((acc, { name, value }) => {
+          if (name) acc[name] = value;
+          return acc;
+        }, {} as Record<string, string>),
+        // New: proxy and jump host configuration
+        proxy: proxyConfig,
+        jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
       });
+
+      // Clean up chain progress listener after successful connection
+      if (unsubscribeChainProgress) {
+        unsubscribeChainProgress();
+      }
 
       sessionRef.current = id;
 
@@ -467,6 +556,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         term.write(chunk);
         if (!hasConnectedRef.current) {
           updateStatus('connected');
+          setChainProgress(null); // Clear chain progress on connect
           // Trigger fit after connection to ensure proper terminal size
           setTimeout(() => {
             if (fitAddonRef.current) {
@@ -486,6 +576,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
       disposeExitRef.current = window.nebula.onSessionExit(id, (evt) => {
         updateStatus('disconnected');
+        setChainProgress(null); // Clear chain progress on disconnect
         term.writeln(
           `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
         );
@@ -505,6 +596,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
+      setChainProgress(null); // Clear chain progress on error
+      // Clean up chain progress listener on error
+      if (unsubscribeChainProgress) {
+        unsubscribeChainProgress();
+      }
       term.writeln(`\r\n[Failed to start SSH: ${message}]`);
       updateStatus('disconnected');
     }
@@ -579,12 +675,55 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const handleCancelConnect = () => {
     setIsCancelling(true);
     setNeedsAuth(false);
+    setNeedsHostKeyVerification(false);
+    setPendingHostKeyInfo(null);
     setError('Connection cancelled');
     setProgressLogs((prev) => [...prev, 'Cancelled by user.']);
     cleanupSession();
     updateStatus('disconnected');
+    setChainProgress(null); // Clear chain progress on cancel
     setTimeout(() => setIsCancelling(false), 600);
     onCloseSession?.(sessionId);
+  };
+  
+  // Handle known host verification - Close (cancel)
+  const handleHostKeyClose = () => {
+    setNeedsHostKeyVerification(false);
+    setPendingHostKeyInfo(null);
+    handleCancelConnect();
+  };
+  
+  // Handle known host verification - Continue without adding
+  const handleHostKeyContinue = () => {
+    setNeedsHostKeyVerification(false);
+    // Resume connection without adding to known hosts
+    if (pendingConnectionRef.current) {
+      pendingConnectionRef.current();
+      pendingConnectionRef.current = null;
+    }
+    setPendingHostKeyInfo(null);
+  };
+  
+  // Handle known host verification - Add and continue
+  const handleHostKeyAddAndContinue = () => {
+    if (pendingHostKeyInfo && onAddKnownHost) {
+      const newKnownHost: KnownHost = {
+        id: `kh-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        hostname: pendingHostKeyInfo.hostname,
+        port: pendingHostKeyInfo.port || host.port || 22,
+        keyType: pendingHostKeyInfo.keyType,
+        publicKey: pendingHostKeyInfo.fingerprint,
+        discoveredAt: Date.now(),
+      };
+      onAddKnownHost(newKnownHost);
+    }
+    setNeedsHostKeyVerification(false);
+    // Resume connection
+    if (pendingConnectionRef.current) {
+      pendingConnectionRef.current();
+      pendingConnectionRef.current = null;
+    }
+    setPendingHostKeyInfo(null);
   };
 
   const handleRetry = () => {
@@ -771,7 +910,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           </div>
         )}
 
-        {status !== 'connected' && (
+        {/* Known Host Verification Dialog */}
+        {needsHostKeyVerification && pendingHostKeyInfo && (
+          <div className="absolute inset-0 z-30 bg-background">
+            <KnownHostConfirmDialog
+              host={host}
+              hostKeyInfo={pendingHostKeyInfo}
+              onClose={handleHostKeyClose}
+              onContinue={handleHostKeyContinue}
+              onAddAndContinue={handleHostKeyAddAndContinue}
+            />
+          </div>
+        )}
+
+        {status !== 'connected' && !needsHostKeyVerification && (
           <div className={cn(
             "absolute inset-0 z-20 flex items-center justify-center",
             needsAuth ? "bg-black" : "bg-black/30"
@@ -781,10 +933,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 <div className="flex items-center gap-3">
                   <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10" />
                   <div>
-                    <div className="text-sm font-semibold">{host.label}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono">
-                      SSH {host.hostname}:{host.port || 22}
-                    </div>
+                    {/* Show chain progress if available */}
+                    {chainProgress ? (
+                      <>
+                        <div className="text-sm font-semibold">
+                          <span className="text-muted-foreground">Chain</span>{' '}
+                          <span className="font-bold">{chainProgress.currentHop}</span>{' '}
+                          <span className="text-muted-foreground">of</span>{' '}
+                          <span>{chainProgress.totalHops}:</span>{' '}
+                          <span>{chainProgress.currentHostLabel}</span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground font-mono">
+                          SSH {host.hostname}:{host.port || 22}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold">{host.label}</div>
+                        <div className="text-[11px] text-muted-foreground font-mono">
+                          SSH {host.hostname}:{host.port || 22}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 {!needsAuth && (

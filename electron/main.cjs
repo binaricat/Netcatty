@@ -188,32 +188,277 @@ const registerSSHBridge = (win) => {
   if (registerSSHBridge._registered) return;
   registerSSHBridge._registered = true;
 
-  // Pure ssh2-based SSH session (no external ssh.exe required)
-  const start = (event, options) => {
+  // Helper: Create a socket through a proxy (HTTP CONNECT or SOCKS5)
+  const createProxySocket = (proxy, targetHost, targetPort) => {
     return new Promise((resolve, reject) => {
-      const sessionId =
-        options.sessionId ||
-        `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      if (proxy.type === 'http') {
+        // HTTP CONNECT proxy
+        const socket = net.connect(proxy.port, proxy.host, () => {
+          let authHeader = '';
+          if (proxy.username && proxy.password) {
+            const auth = Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64');
+            authHeader = `Proxy-Authorization: Basic ${auth}\r\n`;
+          }
+          const connectRequest = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${authHeader}\r\n`;
+          socket.write(connectRequest);
+          
+          let response = '';
+          const onData = (data) => {
+            response += data.toString();
+            if (response.includes('\r\n\r\n')) {
+              socket.removeListener('data', onData);
+              if (response.startsWith('HTTP/1.1 200') || response.startsWith('HTTP/1.0 200')) {
+                resolve(socket);
+              } else {
+                socket.destroy();
+                reject(new Error(`HTTP proxy error: ${response.split('\r\n')[0]}`));
+              }
+            }
+          };
+          socket.on('data', onData);
+        });
+        socket.on('error', reject);
+      } else if (proxy.type === 'socks5') {
+        // SOCKS5 proxy
+        const socket = net.connect(proxy.port, proxy.host, () => {
+          // SOCKS5 greeting
+          const authMethods = proxy.username && proxy.password ? [0x00, 0x02] : [0x00];
+          socket.write(Buffer.from([0x05, authMethods.length, ...authMethods]));
+          
+          let step = 'greeting';
+          const onData = (data) => {
+            if (step === 'greeting') {
+              if (data[0] !== 0x05) {
+                socket.destroy();
+                reject(new Error('Invalid SOCKS5 response'));
+                return;
+              }
+              const method = data[1];
+              if (method === 0x02 && proxy.username && proxy.password) {
+                // Username/password auth
+                step = 'auth';
+                const userBuf = Buffer.from(proxy.username);
+                const passBuf = Buffer.from(proxy.password);
+                socket.write(Buffer.concat([
+                  Buffer.from([0x01, userBuf.length]),
+                  userBuf,
+                  Buffer.from([passBuf.length]),
+                  passBuf
+                ]));
+              } else if (method === 0x00) {
+                // No auth, proceed to connect
+                step = 'connect';
+                sendConnectRequest();
+              } else {
+                socket.destroy();
+                reject(new Error('SOCKS5 authentication method not supported'));
+              }
+            } else if (step === 'auth') {
+              if (data[1] !== 0x00) {
+                socket.destroy();
+                reject(new Error('SOCKS5 authentication failed'));
+                return;
+              }
+              step = 'connect';
+              sendConnectRequest();
+            } else if (step === 'connect') {
+              socket.removeListener('data', onData);
+              if (data[1] === 0x00) {
+                resolve(socket);
+              } else {
+                const errors = {
+                  0x01: 'General failure',
+                  0x02: 'Connection not allowed',
+                  0x03: 'Network unreachable',
+                  0x04: 'Host unreachable',
+                  0x05: 'Connection refused',
+                  0x06: 'TTL expired',
+                  0x07: 'Command not supported',
+                  0x08: 'Address type not supported',
+                };
+                socket.destroy();
+                reject(new Error(`SOCKS5 error: ${errors[data[1]] || 'Unknown'}`));
+              }
+            }
+          };
+          
+          const sendConnectRequest = () => {
+            // SOCKS5 connect request
+            const hostBuf = Buffer.from(targetHost);
+            const request = Buffer.concat([
+              Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
+              hostBuf,
+              Buffer.from([(targetPort >> 8) & 0xff, targetPort & 0xff])
+            ]);
+            socket.write(request);
+          };
+          
+          socket.on('data', onData);
+        });
+        socket.on('error', reject);
+      } else {
+        reject(new Error(`Unknown proxy type: ${proxy.type}`));
+      }
+    });
+  };
 
+  // Helper: Connect through a chain of jump hosts
+  const connectThroughChain = async (event, options, jumpHosts, targetHost, targetPort) => {
+    const sender = event.sender;
+    const connections = [];
+    let currentSocket = null;
+    
+    const sendProgress = (hop, total, label, status) => {
+      if (!sender.isDestroyed()) {
+        sender.send("nebula:chain:progress", { hop, total, label, status });
+      }
+    };
+    
+    try {
+      const totalHops = jumpHosts.length;
+      
+      // Connect through each jump host
+      for (let i = 0; i < jumpHosts.length; i++) {
+        const jump = jumpHosts[i];
+        const isFirst = i === 0;
+        const isLast = i === jumpHosts.length - 1;
+        const hopLabel = jump.label || `${jump.hostname}:${jump.port || 22}`;
+        
+        sendProgress(i + 1, totalHops + 1, hopLabel, 'connecting');
+        
+        const conn = new SSHClient();
+        
+        // Build connection options
+        const connOpts = {
+          host: jump.hostname,
+          port: jump.port || 22,
+          username: jump.username || 'root',
+          readyTimeout: 30000,
+          keepaliveInterval: 5000,
+          algorithms: {
+            cipher: ['aes128-gcm@openssh.com', 'aes256-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
+            compress: ['none'],
+          },
+        };
+        
+        // Auth
+        if (jump.privateKey) {
+          connOpts.privateKey = jump.privateKey;
+          if (jump.passphrase) connOpts.passphrase = jump.passphrase;
+        } else if (jump.password) {
+          connOpts.password = jump.password;
+        }
+        
+        // If first hop and proxy is configured, connect through proxy
+        if (isFirst && options.proxy) {
+          currentSocket = await createProxySocket(options.proxy, jump.hostname, jump.port || 22);
+          connOpts.sock = currentSocket;
+          delete connOpts.host;
+          delete connOpts.port;
+        } else if (!isFirst && currentSocket) {
+          // Tunnel through previous hop
+          connOpts.sock = currentSocket;
+          delete connOpts.host;
+          delete connOpts.port;
+        }
+        
+        // Connect this hop
+        await new Promise((resolve, reject) => {
+          conn.on('ready', () => {
+            sendProgress(i + 1, totalHops + 1, hopLabel, 'connected');
+            resolve();
+          });
+          conn.on('error', (err) => {
+            sendProgress(i + 1, totalHops + 1, hopLabel, 'error');
+            reject(err);
+          });
+          conn.connect(connOpts);
+        });
+        
+        connections.push(conn);
+        
+        // Determine next target
+        let nextHost, nextPort;
+        if (isLast) {
+          // Last jump host, forward to final target
+          nextHost = targetHost;
+          nextPort = targetPort;
+        } else {
+          // Forward to next jump host
+          const nextJump = jumpHosts[i + 1];
+          nextHost = nextJump.hostname;
+          nextPort = nextJump.port || 22;
+        }
+        
+        // Create forward stream to next hop
+        sendProgress(i + 1, totalHops + 1, hopLabel, 'forwarding');
+        currentSocket = await new Promise((resolve, reject) => {
+          conn.forwardOut('127.0.0.1', 0, nextHost, nextPort, (err, stream) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve(stream);
+          });
+        });
+      }
+      
+      // Return the final forwarded stream and all connections for cleanup
+      return { 
+        socket: currentSocket, 
+        connections,
+        sendProgress 
+      };
+    } catch (err) {
+      // Cleanup on error
+      for (const conn of connections) {
+        try { conn.end(); } catch {}
+      }
+      throw err;
+    }
+  };
+
+  // Pure ssh2-based SSH session (no external ssh.exe required)
+  const start = async (event, options) => {
+    const sessionId =
+      options.sessionId ||
+      `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const cols = options.cols || 80;
+    const rows = options.rows || 24;
+    const sender = event.sender;
+    
+    const sendProgress = (hop, total, label, status) => {
+      if (!sender.isDestroyed()) {
+        sender.send("nebula:chain:progress", { hop, total, label, status });
+      }
+    };
+
+    try {
       const conn = new SSHClient();
-      const cols = options.cols || 80;
-      const rows = options.rows || 24;
-
+      let chainConnections = [];
+      let connectionSocket = null;
+      
+      // Determine if we have jump hosts
+      const jumpHosts = options.jumpHosts || [];
+      const hasJumpHosts = jumpHosts.length > 0;
+      const hasProxy = !!options.proxy;
+      const totalHops = jumpHosts.length + 1; // +1 for final target
+      
+      // Build base connection options for final target
       const connectOpts = {
         host: options.hostname,
         port: options.port || 22,
         username: options.username || "root",
         readyTimeout: 30000,
-        keepaliveInterval: 5000,      // Reduced from 10000ms to 5000ms for faster detection of connection issues
-        keepaliveCountMax: 3,         // Disconnect after 3 failed keepalives (15 seconds total)
-        // Performance: prefer faster ciphers and disable compression for lower latency
+        keepaliveInterval: 5000,
         algorithms: {
           cipher: ['aes128-gcm@openssh.com', 'aes256-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
-          compress: ['none'],  // Disable compression for lower latency on fast connections
+          compress: ['none'],
         },
       };
 
-      // Authentication: private key takes precedence
+      // Authentication for final target
       if (options.privateKey) {
         connectOpts.privateKey = options.privateKey;
         if (options.passphrase) {
@@ -233,78 +478,140 @@ const registerSSHBridge = (win) => {
         }
       }
 
-      conn.on("ready", () => {
-        conn.shell(
-          {
-            term: "xterm-256color",
-            cols,
-            rows,
-          },
-          {
-            env: { 
-              LANG: options.charset || "en_US.UTF-8",
-              COLORTERM: "truecolor",
-            },
-          },
-          (err, stream) => {
-            if (err) {
-              conn.end();
-              reject(err);
-              return;
-            }
-
-            const session = {
-              conn,
-              stream,
-              webContentsId: event.sender.id,
-            };
-            sessions.set(sessionId, session);
-
-            stream.on("data", (data) => {
-              const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
-              contents?.send("nebula:data", { sessionId, data: data.toString("utf8") });
-            });
-
-            stream.stderr?.on("data", (data) => {
-              const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
-              contents?.send("nebula:data", { sessionId, data: data.toString("utf8") });
-            });
-
-            stream.on("close", () => {
-              const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
-              contents?.send("nebula:exit", { sessionId, exitCode: 0 });
-              sessions.delete(sessionId);
-              conn.end();
-            });
-
-            // Run startup command if specified
-            if (options.startupCommand) {
-              setTimeout(() => {
-                stream.write(`${options.startupCommand}\n`);
-              }, 300);
-            }
-
-            resolve({ sessionId });
-          }
+      // Handle chain/proxy connections
+      if (hasJumpHosts) {
+        // Connect through jump host chain
+        const chainResult = await connectThroughChain(
+          event, 
+          options, 
+          jumpHosts, 
+          options.hostname, 
+          options.port || 22
         );
-      });
+        connectionSocket = chainResult.socket;
+        chainConnections = chainResult.connections;
+        
+        // Use the forwarded socket for final connection
+        connectOpts.sock = connectionSocket;
+        delete connectOpts.host;
+        delete connectOpts.port;
+        
+        // Progress for final target
+        sendProgress(totalHops, totalHops, options.hostname, 'connecting');
+      } else if (hasProxy) {
+        // Direct connection through proxy (no jump hosts)
+        sendProgress(1, 1, options.hostname, 'connecting');
+        connectionSocket = await createProxySocket(
+          options.proxy, 
+          options.hostname, 
+          options.port || 22
+        );
+        connectOpts.sock = connectionSocket;
+        delete connectOpts.host;
+        delete connectOpts.port;
+      }
 
-      conn.on("error", (err) => {
-        console.error("SSH connection error:", err.message);
-        const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
-        contents?.send("nebula:exit", { sessionId, exitCode: 1, error: err.message });
-        sessions.delete(sessionId);
-        reject(err);
-      });
+      return new Promise((resolve, reject) => {
+        conn.on("ready", () => {
+          if (hasJumpHosts || hasProxy) {
+            sendProgress(totalHops, totalHops, options.hostname, 'connected');
+          }
+          
+          conn.shell(
+            {
+              term: "xterm-256color",
+              cols,
+              rows,
+            },
+            {
+              env: { 
+                LANG: options.charset || "en_US.UTF-8",
+                COLORTERM: "truecolor",
+                // Merge user-defined environment variables
+                ...(options.env || {}),
+              },
+            },
+            (err, stream) => {
+              if (err) {
+                conn.end();
+                for (const c of chainConnections) {
+                  try { c.end(); } catch {}
+                }
+                reject(err);
+                return;
+              }
 
-      conn.on("close", () => {
-        const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
-        contents?.send("nebula:exit", { sessionId, exitCode: 0 });
-        sessions.delete(sessionId);
-      });
+              const session = {
+                conn,
+                stream,
+                chainConnections, // Store chain connections for cleanup
+                webContentsId: event.sender.id,
+              };
+              sessions.set(sessionId, session);
 
-      conn.connect(connectOpts);
-    });
+              stream.on("data", (data) => {
+                const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+                contents?.send("nebula:data", { sessionId, data: data.toString("utf8") });
+              });
+
+              stream.stderr?.on("data", (data) => {
+                const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+                contents?.send("nebula:data", { sessionId, data: data.toString("utf8") });
+              });
+
+              stream.on("close", () => {
+                const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+                contents?.send("nebula:exit", { sessionId, exitCode: 0 });
+                sessions.delete(sessionId);
+                conn.end();
+                // Cleanup chain connections
+                for (const c of chainConnections) {
+                  try { c.end(); } catch {}
+                }
+              });
+
+              // Run startup command if specified
+              if (options.startupCommand) {
+                setTimeout(() => {
+                  stream.write(`${options.startupCommand}\n`);
+                }, 300);
+              }
+
+              resolve({ sessionId });
+            }
+          );
+        });
+
+        conn.on("error", (err) => {
+          console.error("SSH connection error:", err.message);
+          const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+          contents?.send("nebula:exit", { sessionId, exitCode: 1, error: err.message });
+          sessions.delete(sessionId);
+          // Cleanup chain connections
+          for (const c of chainConnections) {
+            try { c.end(); } catch {}
+          }
+          reject(err);
+        });
+
+        conn.on("close", () => {
+          const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+          contents?.send("nebula:exit", { sessionId, exitCode: 0 });
+          sessions.delete(sessionId);
+          // Cleanup chain connections
+          for (const c of chainConnections) {
+            try { c.end(); } catch {}
+          }
+        });
+
+        conn.connect(connectOpts);
+      });
+    } catch (err) {
+      console.error("SSH chain connection error:", err.message);
+      const contents = BrowserWindow.fromWebContents(event.sender)?.webContents;
+      contents?.send("nebula:exit", { sessionId, exitCode: 1, error: err.message });
+      throw err;
+    }
   };
 
   const write = (_event, payload) => {
@@ -343,6 +650,12 @@ const registerSSHBridge = (win) => {
         session.conn?.end();
       } else if (session.proc) {
         session.proc.kill();
+      }
+      // Cleanup chain connections if any
+      if (session.chainConnections) {
+        for (const c of session.chainConnections) {
+          try { c.end(); } catch {}
+        }
       }
     } catch (err) {
       console.warn("Close failed", err);

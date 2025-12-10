@@ -5,6 +5,7 @@ const exitListeners = new Map();
 const transferProgressListeners = new Map();
 const transferCompleteListeners = new Map();
 const transferErrorListeners = new Map();
+const chainProgressListeners = new Map();
 
 ipcRenderer.on("nebula:data", (_event, payload) => {
   const set = dataListeners.get(payload.sessionId);
@@ -31,6 +32,19 @@ ipcRenderer.on("nebula:exit", (_event, payload) => {
   }
   dataListeners.delete(payload.sessionId);
   exitListeners.delete(payload.sessionId);
+});
+
+// Chain progress events (for jump host connections)
+ipcRenderer.on("nebula:chain:progress", (_event, payload) => {
+  const { hop, total, label, status } = payload;
+  // Notify all registered chain progress listeners
+  chainProgressListeners.forEach((cb) => {
+    try {
+      cb(hop, total, label, status);
+    } catch (err) {
+      console.error("Chain progress callback failed", err);
+    }
+  });
 });
 
 // Transfer progress events
@@ -299,6 +313,14 @@ const api = {
       if (portForwardStatusListeners.get(tunnelId)?.size === 0) {
         portForwardStatusListeners.delete(tunnelId);
       }
+    };
+  },
+  // Chain progress listener for jump host connections
+  onChainProgress: (cb) => {
+    const id = Date.now().toString() + Math.random().toString(16).slice(2);
+    chainProgressListeners.set(id, cb);
+    return () => {
+      chainProgressListeners.delete(id);
     };
   },
 };

@@ -210,12 +210,14 @@ function App() {
           snippets={snippets}
           sessions={sessions}
           workspaces={workspaces}
+          knownHosts={knownHosts}
           draggingSessionId={draggingSessionId}
           terminalTheme={currentTerminalTheme}
           onCloseSession={closeSession}
           onUpdateSessionStatus={updateSessionStatus}
           onUpdateHostDistro={updateHostDistro}
           onUpdateHost={(host) => updateHosts(hosts.map(h => h.id === host.id ? host : h))}
+          onAddKnownHost={(kh) => updateKnownHosts([...knownHosts, kh])}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
           onUpdateSplitSizes={updateSplitSizes}
@@ -287,12 +289,16 @@ function App() {
           initialData={editingHost}
           availableKeys={keys}
           groups={Array.from(new Set([...customGroups, ...hosts.map(h => h.group || 'General')]))}
+          allHosts={hosts}
           onSave={host => {
             updateHosts(editingHost ? hosts.map(h => h.id === host.id ? host : h) : [...hosts, host]);
             setIsFormOpen(false);
             setEditingHost(null);
           }}
           onCancel={() => { setIsFormOpen(false); setEditingHost(null); }}
+          onCreateGroup={(groupPath) => {
+            updateCustomGroups(Array.from(new Set([...customGroups, groupPath])));
+          }}
         />
       )}
 

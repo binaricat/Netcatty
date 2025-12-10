@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import { cn } from '../lib/utils';
 import Terminal from './Terminal';
-import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
+import { Host, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode, KnownHost } from '../types';
 import { useActiveTabId } from '../application/state/activeTabStore';
 
 type WorkspaceRect = { x: number; y: number; w: number; h: number };
@@ -28,12 +28,14 @@ interface TerminalLayerProps {
   snippets: Snippet[];
   sessions: TerminalSession[];
   workspaces: Workspace[];
+  knownHosts?: KnownHost[];
   draggingSessionId: string | null;
   terminalTheme: TerminalTheme;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onUpdateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
   onUpdateHostDistro: (hostId: string, distro: string) => void;
   onUpdateHost: (host: Host) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onUpdateSplitSizes: (workspaceId: string, splitId: string, sizes: number[]) => void;
@@ -46,12 +48,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   snippets,
   sessions,
   workspaces,
+  knownHosts = [],
   draggingSessionId,
   terminalTheme,
   onCloseSession,
   onUpdateSessionStatus,
   onUpdateHostDistro,
   onUpdateHost,
+  onAddKnownHost,
   onCreateWorkspaceFromSessions,
   onAddSessionToWorkspace,
   onUpdateSplitSizes,
@@ -83,6 +87,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleUpdateHost = useCallback((host: Host) => {
     onUpdateHost(host);
   }, [onUpdateHost]);
+
+  const handleAddKnownHost = useCallback((knownHost: KnownHost) => {
+    onAddKnownHost?.(knownHost);
+  }, [onAddKnownHost]);
 
   const [workspaceArea, setWorkspaceArea] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const workspaceOuterRef = useRef<HTMLDivElement>(null);
@@ -418,6 +426,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 host={host}
                 keys={keys}
                 snippets={snippets}
+                allHosts={hosts}
+                knownHosts={knownHosts}
                 isVisible={isVisible}
                 inWorkspace={inActiveWorkspace}
                 isResizing={!!resizing}
@@ -429,6 +439,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 onSessionExit={handleSessionExit}
                 onOsDetected={handleOsDetected}
                 onUpdateHost={handleUpdateHost}
+                onAddKnownHost={handleAddKnownHost}
               />
             </div>
           );

@@ -1,5 +1,33 @@
 import type { TerminalSession, RemoteFile } from "./types";
 
+// Proxy configuration for SSH connections
+interface NebulaProxyConfig {
+  type: 'http' | 'socks5';
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+// Jump host configuration for SSH tunneling
+interface NebulaJumpHost {
+  hostname: string;
+  port: number;
+  username: string;
+  password?: string;
+  privateKey?: string;
+  label?: string; // Display label for UI
+}
+
+// Host key information for verification
+interface NebulaHostKeyInfo {
+  hostname: string;
+  port: number;
+  keyType: string;
+  fingerprint: string;
+  publicKey?: string;
+}
+
 interface NebulaSSHOptions {
   sessionId?: string;
   hostname: string;
@@ -13,6 +41,14 @@ interface NebulaSSHOptions {
   rows?: number;
   charset?: string;
   extraArgs?: string[];
+  startupCommand?: string;
+  passphrase?: string;
+  // Environment variables to set in the remote shell
+  env?: Record<string, string>;
+  // Proxy configuration
+  proxy?: NebulaProxyConfig;
+  // Jump hosts (bastion chain)
+  jumpHosts?: NebulaJumpHost[];
 }
 
 interface SftpStatResult {
@@ -158,6 +194,10 @@ interface NebulaBridge {
   
   // Known Hosts
   readKnownHosts?(): Promise<string | null>;
+  
+  // Chain progress listener for jump host connections
+  // Callback receives: (currentHop: number, totalHops: number, hostLabel: string, status: string)
+  onChainProgress?(cb: (hop: number, total: number, label: string, status: string) => void): () => void;
 }
 
 declare global {
