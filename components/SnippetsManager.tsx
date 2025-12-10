@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Host, Snippet, ShellHistoryEntry, SSHKey } from '../types';
-import { FileCode, Plus, Trash2, Edit2, Copy, Clock, List as ListIcon, FolderPlus, Grid, Play, ArrowLeft, X, Check, ChevronDown, Loader2, Package } from 'lucide-react';
+import { FileCode, Plus, Trash2, Edit2, Copy, Clock, List as ListIcon, FolderPlus, Grid, Play, ArrowLeft, X, Check, ChevronDown, Loader2, Package, Search, LayoutGrid } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
@@ -13,6 +13,8 @@ import { DistroAvatar } from './DistroAvatar';
 import SelectHostPanel from './SelectHostPanel';
 import { AsidePanel, AsidePanelContent } from './ui/aside-panel';
 import { Combobox, ComboboxOption } from './ui/combobox';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { SortDropdown, SortMode } from './ui/sort-dropdown';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -61,6 +63,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [newPackageName, setNewPackageName] = useState('');
   const [isPackageDialogOpen, setIsPackageDialogOpen] = useState(false);
+
+  // Search, sort, and view mode state
+  const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortMode, setSortMode] = useState<SortMode>('az');
 
   // Shell history lazy loading state
   const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
@@ -153,8 +160,28 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   }, [packages, selectedPackage, snippets]);
 
   const displayedSnippets = useMemo(() => {
-    return snippets.filter((s) => (s.package || '') === (selectedPackage || ''));
-  }, [snippets, selectedPackage]);
+    let result = snippets.filter((s) => (s.package || '') === (selectedPackage || ''));
+    // Apply search filter
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      result = result.filter(sn =>
+        sn.label.toLowerCase().includes(s) ||
+        sn.command.toLowerCase().includes(s)
+      );
+    }
+    // Apply sorting
+    result = [...result].sort((a, b) => {
+      switch (sortMode) {
+        case 'az':
+          return a.label.localeCompare(b.label);
+        case 'za':
+          return b.label.localeCompare(a.label);
+        default:
+          return 0;
+      }
+    });
+    return result;
+  }, [snippets, selectedPackage, search, sortMode]);
 
   const breadcrumb = useMemo(() => {
     if (!selectedPackage) return [];
@@ -453,7 +480,17 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     <div className="px-2.5 py-2.5 lg:px-3 lg:py-3 h-full overflow-hidden flex gap-3 relative">
       <div className="flex-1 flex flex-col min-h-0 space-y-3">
         <div className="flex items-center gap-2">
-          <Button onClick={() => handleEdit()} size="sm" className="h-9">
+          {/* Search box */}
+          <div className="relative w-64">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search snippets..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-10 pl-9 bg-secondary border-border/60 text-sm"
+            />
+          </div>
+          <Button onClick={() => handleEdit()} size="sm" className="h-10">
             <Plus size={14} className="mr-2" /> New Snippet
           </Button>
           <Button
@@ -463,27 +500,59 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             }}
             size="sm"
             variant="secondary"
-            className="h-9 gap-2"
+            className="h-10 gap-2"
           >
             <FolderPlus size={14} className="mr-1" /> New Package
           </Button>
           <Button
             variant={rightPanelMode === 'history' ? 'secondary' : 'ghost'}
             size="sm"
-            className="h-9 gap-2"
+            className="h-10 gap-2"
             onClick={() => setRightPanelMode(rightPanelMode === 'history' ? 'none' : 'history')}
           >
             <Clock size={14} /> Shell History
           </Button>
-          <div className="flex items-center gap-2 ml-auto text-sm text-muted-foreground">
-            <button className="text-primary hover:underline" onClick={() => setSelectedPackage(null)}>All packages</button>
-            {breadcrumb.map((b) => (
-              <span key={b.path} className="flex items-center gap-1">
-                <span className="text-muted-foreground">›</span>
-                <button className="text-primary hover:underline" onClick={() => setSelectedPackage(b.path)}>{b.name}</button>
-              </span>
-            ))}
+          {/* View mode and sort controls */}
+          <div className="flex items-center gap-1 ml-auto">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-10 w-10">
+                  {viewMode === 'grid' ? <LayoutGrid size={16} /> : <ListIcon size={16} />}
+                  <ChevronDown size={10} className="ml-0.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-32 p-1 z-50" align="end">
+                <Button
+                  variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                  className="w-full justify-start gap-2 h-9"
+                  onClick={() => setViewMode('grid')}
+                >
+                  <LayoutGrid size={14} /> Grid
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                  className="w-full justify-start gap-2 h-9"
+                  onClick={() => setViewMode('list')}
+                >
+                  <ListIcon size={14} /> List
+                </Button>
+              </PopoverContent>
+            </Popover>
+            <SortDropdown
+              value={sortMode}
+              onChange={setSortMode}
+              className="h-10 w-10"
+            />
           </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <button className="text-primary hover:underline" onClick={() => setSelectedPackage(null)}>All packages</button>
+          {breadcrumb.map((b) => (
+            <span key={b.path} className="flex items-center gap-1">
+              <span className="text-muted-foreground">›</span>
+              <button className="text-primary hover:underline" onClick={() => setSelectedPackage(b.path)}>{b.name}</button>
+            </span>
+          ))}
         </div>
 
         {!snippets.length && displayedPackages.length === 0 && (
@@ -504,12 +573,21 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-muted-foreground">Packages</h3>
               </div>
-              <div className="grid gap-2 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+              <div className={cn(
+                viewMode === 'grid'
+                  ? "grid gap-2 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+                  : "flex flex-col gap-0"
+              )}>
                 {displayedPackages.map((pkg) => (
                   <ContextMenu key={pkg.path}>
                     <ContextMenuTrigger>
-                      <Card
-                        className="group bg-secondary/70 border border-border/70 hover:border-primary/60 transition-colors h-[72px] px-3 py-2 cursor-pointer"
+                      <div
+                        className={cn(
+                          "cursor-pointer",
+                          viewMode === 'grid'
+                            ? "bg-secondary/70 border border-border/70 hover:border-primary/60 transition-colors h-[72px] px-3 py-2 rounded-lg"
+                            : "group h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
+                        )}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
@@ -526,15 +604,18 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         onClick={() => setSelectedPackage(pkg.path)}
                       >
                         <div className="flex items-center gap-3 h-full">
-                          <div className="h-10 w-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-                            <Grid size={16} />
+                          <div className={cn(
+                            "rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0",
+                            viewMode === 'grid' ? "h-10 w-10" : "h-8 w-8"
+                          )}>
+                            <Grid size={viewMode === 'grid' ? 16 : 14} />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{pkg.name}</div>
                             <div className="text-[11px] text-muted-foreground">{pkg.count} snippet{pkg.count === 1 ? '' : 's'}</div>
                           </div>
                         </div>
-                      </Card>
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem onClick={() => setSelectedPackage(pkg.path)}>Open</ContextMenuItem>
@@ -549,12 +630,21 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           {displayedSnippets.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-sm font-semibold text-muted-foreground">Snippets</h3>
-              <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+              <div className={cn(
+                viewMode === 'grid'
+                  ? "grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+                  : "flex flex-col gap-0"
+              )}>
                 {displayedSnippets.map((snippet) => (
                   <ContextMenu key={snippet.id}>
                     <ContextMenuTrigger>
-                      <Card
-                        className="group relative bg-secondary/70 border border-border/70 hover:border-primary/60 transition-colors h-[72px] px-3 py-2 cursor-pointer"
+                      <div
+                        className={cn(
+                          "group cursor-pointer",
+                          viewMode === 'grid'
+                            ? "bg-secondary/70 border border-border/70 hover:border-primary/60 transition-colors h-[72px] px-3 py-2 rounded-lg"
+                            : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
+                        )}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
@@ -563,17 +653,30 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         onClick={() => handleEdit(snippet)}
                       >
                         <div className="flex items-center gap-3 h-full">
-                          <div className="h-10 w-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-                            <FileCode size={16} />
+                          <div className={cn(
+                            "rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0",
+                            viewMode === 'grid' ? "h-10 w-10" : "h-8 w-8"
+                          )}>
+                            <FileCode size={viewMode === 'grid' ? 16 : 14} />
                           </div>
-                          <div className="min-w-0 flex-1 space-y-1">
+                          <div className="min-w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{snippet.label}</div>
                             <div className="text-[11px] text-muted-foreground font-mono leading-4 truncate">
                               {snippet.command.replace(/\s+/g, ' ') || 'Command'}
                             </div>
                           </div>
+                          {viewMode === 'list' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                              onClick={(e) => { e.stopPropagation(); handleEdit(snippet); }}
+                            >
+                              <Edit2 size={14} />
+                            </Button>
+                          )}
                         </div>
-                      </Card>
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem

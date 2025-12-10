@@ -181,12 +181,12 @@ const HostItem = React.memo<HostItemProps>(({ knownHost, converted, viewMode, on
     return (
         <div
             className={cn(
-                "group flex items-center gap-3 px-4 py-3 rounded-lg border border-border/50 bg-background hover:bg-secondary/50 transition-colors cursor-pointer",
+                "group flex items-center gap-3 px-3 py-2 h-14 rounded-lg hover:bg-secondary/60 transition-colors cursor-pointer",
                 converted && "opacity-60"
             )}
         >
-            <div className="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-                <Server size={18} />
+            <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                <Server size={14} />
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ const HostItem = React.memo<HostItemProps>(({ knownHost, converted, viewMode, on
                         </span>
                     )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <span className={cn("flex items-center gap-1", getKeyTypeColorFn(knownHost.keyType))}>
                         <Key size={10} />
                         {knownHost.keyType}
@@ -227,15 +227,6 @@ const HostItem = React.memo<HostItemProps>(({ knownHost, converted, viewMode, on
                         <ArrowRight size={14} />
                     </Button>
                 )}
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
-                    onClick={(e) => { e.stopPropagation(); onDelete(knownHost.id); }}
-                    title="Remove"
-                >
-                    <Trash2 size={14} />
-                </Button>
             </div>
         </div>
     );
@@ -561,7 +552,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
             <ScrollArea className="flex-1">
                 <div className={cn(
                     "p-4",
-                    viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3" : "space-y-2"
+                    viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3" : "flex flex-col gap-0"
                 )}>
                     {displayedHosts.length === 0 ? (
                         <div className={cn(

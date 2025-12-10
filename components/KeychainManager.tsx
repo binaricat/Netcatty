@@ -1035,17 +1035,17 @@ echo $3 >> "$FILE"`);
                     ) : (
                         <div className={viewMode === 'grid'
                             ? "grid gap-2.5 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                            : "space-y-2"
+                            : "flex flex-col gap-0"
                         }>
                             {filteredKeys.map((key) => (
                                 <ContextMenu key={key.id}>
                                     <ContextMenuTrigger asChild>
-                                        <Card
+                                        <div
                                             className={cn(
-                                                "group relative overflow-hidden bg-secondary/60 border transition-all cursor-pointer",
-                                                "h-[72px] px-3 py-2",
-                                                viewMode === 'list' && "w-full",
-                                                "border-border/60 shadow-sm hover:shadow-[0_0_0_2px_var(--ring)]",
+                                                "group cursor-pointer",
+                                                viewMode === 'grid'
+                                                    ? "bg-secondary/60 border border-border/60 shadow-sm hover:shadow-[0_0_0_2px_var(--ring)] rounded-lg h-[72px] px-3 py-2"
+                                                    : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                                 (panel.type === 'view' && panel.key.id === key.id) && "ring-2 ring-primary",
                                                 (panel.type === 'export' && panel.key.id === key.id) && "ring-2 ring-primary"
                                             )}
@@ -1053,7 +1053,8 @@ echo $3 >> "$FILE"`);
                                         >
                                             <div className="flex items-center gap-3 h-full">
                                                 <div className={cn(
-                                                    "h-9 w-9 rounded-md flex items-center justify-center",
+                                                    "rounded-md flex items-center justify-center",
+                                                    viewMode === 'grid' ? "h-9 w-9" : "h-8 w-8",
                                                     key.source === 'biometric'
                                                         ? "bg-blue-500/15 text-blue-500"
                                                         : key.source === 'fido2'
@@ -1063,26 +1064,28 @@ echo $3 >> "$FILE"`);
                                                     {getKeyIcon(key)}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <CardTitle className="text-sm font-semibold truncate">{key.label}</CardTitle>
-                                                    <CardDescription className="text-[11px] font-mono text-muted-foreground truncate">
+                                                    <div className="text-sm font-semibold truncate">{key.label}</div>
+                                                    <div className="text-[11px] font-mono text-muted-foreground truncate">
                                                         Type {getKeyTypeDisplay(key)}
-                                                    </CardDescription>
+                                                    </div>
                                                 </div>
                                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <Button
-                                                        size="icon"
-                                                        variant="ghost"
-                                                        className="h-8 w-8 text-destructive hover:text-destructive"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDelete(key.id);
-                                                        }}
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </Button>
+                                                    {viewMode === 'list' && (
+                                                        <Button
+                                                            size="icon"
+                                                            variant="ghost"
+                                                            className="h-8 w-8"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                openKeyEdit(key);
+                                                            }}
+                                                        >
+                                                            <Pencil size={14} />
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             </div>
-                                        </Card>
+                                        </div>
                                     </ContextMenuTrigger>
                                     <ContextMenuContent>
                                         <ContextMenuItem
@@ -1124,16 +1127,16 @@ echo $3 >> "$FILE"`);
                         </div>
                         <div className={viewMode === 'grid'
                             ? "grid gap-2.5 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                            : "space-y-2"
+                            : "flex flex-col gap-0"
                         }>
                             {filteredIdentities.map((identity) => (
-                                <Card
+                                <div
                                     key={identity.id}
                                     className={cn(
-                                        "group relative overflow-hidden bg-secondary/60 border transition-all cursor-pointer",
-                                        "h-[72px] px-3 py-2",
-                                        viewMode === 'list' && "w-full",
-                                        "border-border/60 shadow-sm hover:shadow-[0_0_0_2px_var(--ring)]",
+                                        "group cursor-pointer",
+                                        viewMode === 'grid'
+                                            ? "bg-secondary/60 border border-border/60 shadow-sm hover:shadow-[0_0_0_2px_var(--ring)] rounded-lg h-[72px] px-3 py-2"
+                                            : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                         panel.type === 'identity' && panel.identity?.id === identity.id && "ring-2 ring-primary"
                                     )}
                                     onClick={() => {
@@ -1142,33 +1145,39 @@ echo $3 >> "$FILE"`);
                                     }}
                                 >
                                     <div className="flex items-center gap-3 h-full">
-                                        <div className="h-9 w-9 rounded-md bg-green-500/15 text-green-500 flex items-center justify-center">
-                                            <User size={16} />
+                                        <div className={cn(
+                                            "rounded-md bg-green-500/15 text-green-500 flex items-center justify-center",
+                                            viewMode === 'grid' ? "h-9 w-9" : "h-8 w-8"
+                                        )}>
+                                            <User size={viewMode === 'grid' ? 16 : 14} />
                                         </div>
                                         <div className="min-w-0 flex-1">
-                                            <CardTitle className="text-sm font-semibold truncate">{identity.label || 'Add a label...'}</CardTitle>
-                                            <CardDescription className="text-[11px] font-mono text-muted-foreground truncate">
+                                            <div className="text-sm font-semibold truncate">{identity.label || 'Add a label...'}</div>
+                                            <div className="text-[11px] font-mono text-muted-foreground truncate">
                                                 {identity.authMethod === 'password' ? 'Password' :
                                                     identity.authMethod === 'key' ? 'Key' :
                                                         identity.authMethod === 'certificate' ? 'Certificate' :
                                                             'FIDO2'}
-                                            </CardDescription>
+                                            </div>
                                         </div>
                                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Button
-                                                size="icon"
-                                                variant="ghost"
-                                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteIdentity(identity.id);
-                                                }}
-                                            >
-                                                <Trash2 size={14} />
-                                            </Button>
+                                            {viewMode === 'list' && (
+                                                <Button
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPanelStack([{ type: 'identity', identity }]);
+                                                        setDraftIdentity({ ...identity });
+                                                    }}
+                                                >
+                                                    <Pencil size={14} />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
-                                </Card>
+                                </div>
                             ))}
                         </div>
                     </div>

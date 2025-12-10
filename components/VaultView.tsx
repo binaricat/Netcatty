@@ -3,21 +3,21 @@ import { AppLogo } from './AppLogo';
 import {
   Activity,
   BookMarked,
-  ChevronRight,
+  ChevronDown,
   FolderPlus,
   Edit2,
   FileCode,
   Grid,
-  Heart,
   Key,
   LayoutGrid,
+  List,
   Plug,
   Plus,
   Search,
   Settings,
-  Star,
   Trash2,
   TerminalSquare,
+  Upload,
   Zap,
 } from 'lucide-react';
 import { Host, SSHKey, Snippet, GroupNode, TerminalSession, KnownHost, ShellHistoryEntry, HostProtocol } from '../types';
@@ -36,6 +36,8 @@ import { cn } from '../lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
+import { SortDropdown, SortMode } from './ui/sort-dropdown';
+import { TagFilterDropdown } from './ui/tag-filter-dropdown';
 import { sanitizeHost } from '../domain/host';
 import { useIsVaultActive } from '../application/state/activeTabStore';
 
@@ -95,6 +97,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [targetParentPath, setTargetParentPath] = useState<string | null>(null);
+
+  // View mode, sorting, and tag filter state
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortMode, setSortMode] = useState<SortMode>('az');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Host panel state (local to hosts section)
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
@@ -237,8 +244,27 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         h.tags.some(t => t.toLowerCase().includes(s))
       );
     }
+    // Apply tag filter
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter(h => selectedTags.some(t => h.tags?.includes(t)));
+    }
+    // Apply sorting
+    filtered = [...filtered].sort((a, b) => {
+      switch (sortMode) {
+        case 'az':
+          return a.label.localeCompare(b.label);
+        case 'za':
+          return b.label.localeCompare(a.label);
+        case 'newest':
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        case 'oldest':
+          return (a.createdAt || 0) - (b.createdAt || 0);
+        default:
+          return 0;
+      }
+    });
     return filtered;
-  }, [hosts, selectedGroupPath, search]);
+  }, [hosts, selectedGroupPath, search, selectedTags, sortMode]);
 
   // Compute all unique tags across all hosts
   const allTags = useMemo(() => {
@@ -403,7 +429,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 <Input
                   placeholder="Find a host or ssh user@hostname..."
                   className={cn(
-                    "pl-9 h-11 bg-secondary border-border/60 text-sm",
+                    "pl-9 h-10 bg-secondary border-border/60 text-sm",
                     isSearchQuickConnect && "border-primary/50 ring-1 ring-primary/20"
                   )}
                   value={search}
@@ -418,41 +444,92 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
               </div>
               <Button
                 variant={isSearchQuickConnect ? "default" : "secondary"}
-                className="h-11 px-4"
+                className="h-10 px-4"
                 onClick={handleConnectClick}
               >
                 Connect
               </Button>
+              {/* View mode, tag filter, and sort controls */}
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><LayoutGrid size={16} /></Button>
-                <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><Grid size={16} /></Button>
-                <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><Heart size={16} /></Button>
-                <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><Star size={16} /></Button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" className="h-11 px-3" onClick={handleNewHost}>
-                  <Plus size={14} className="mr-2" /> New Host
-                </Button>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button size="sm" variant="ghost" className="h-11 w-10 px-0">
-                      <ChevronRight size={16} />
+                    <Button variant="ghost" size="icon" className="h-10 w-10">
+                      {viewMode === 'grid' ? <LayoutGrid size={16} /> : <List size={16} />}
+                      <ChevronDown size={10} className="ml-0.5" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-44 p-1">
+                  <PopoverContent className="w-32 p-1 z-50" align="end">
                     <Button
-                      variant="ghost"
-                      className="w-full justify-start gap-2"
-                      onClick={() => { setTargetParentPath(selectedGroupPath); setIsNewFolderOpen(true); }}
+                      variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                      className="w-full justify-start gap-2 h-9"
+                      onClick={() => setViewMode('grid')}
                     >
-                      <Grid size={14} /> New Group
+                      <LayoutGrid size={14} /> Grid
+                    </Button>
+                    <Button
+                      variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                      className="w-full justify-start gap-2 h-9"
+                      onClick={() => setViewMode('list')}
+                    >
+                      <List size={14} /> List
                     </Button>
                   </PopoverContent>
                 </Popover>
-                <Button size="sm" variant="secondary" className="h-11 px-3" onClick={onCreateLocalTerminal}>
-                  <TerminalSquare size={14} className="mr-2" /> Terminal
-                </Button>
+                <TagFilterDropdown
+                  allTags={allTags}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                  className="h-10 w-10"
+                />
+                <SortDropdown
+                  value={sortMode}
+                  onChange={setSortMode}
+                  className="h-10 w-10"
+                />
               </div>
+              {/* New Host split button */}
+              <div className="flex items-center">
+                <div className="flex items-center rounded-md bg-primary text-primary-foreground">
+                  <Button
+                    size="sm"
+                    className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
+                    onClick={handleNewHost}
+                  >
+                    <Plus size={14} className="mr-2" /> New Host
+                  </Button>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        size="sm"
+                        className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none"
+                      >
+                        <ChevronDown size={14} />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-44 p-1" align="end">
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start gap-2"
+                        onClick={() => { setTargetParentPath(selectedGroupPath); setIsNewFolderOpen(true); }}
+                      >
+                        <Grid size={14} /> New Group
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start gap-2"
+                        onClick={() => {
+                          // TODO: Import hosts
+                        }}
+                      >
+                        <Upload size={14} /> Import
+                      </Button>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+              <Button size="sm" variant="secondary" className="h-10 px-3" onClick={onCreateLocalTerminal}>
+                <TerminalSquare size={14} className="mr-2" /> Terminal
+              </Button>
             </div>
           </header>
         )}
@@ -485,7 +562,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       </div>
                     </>
                   )}
-                  <div className={cn("grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4", displayedGroups.length === 0 ? "hidden" : "")}
+                  <div className={cn(
+                    displayedGroups.length === 0 ? "hidden" : "",
+                    viewMode === 'grid'
+                      ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                      : "flex flex-col gap-0"
+                  )}
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => {
                       e.preventDefault();
@@ -499,7 +581,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       <ContextMenu key={node.path}>
                         <ContextMenuTrigger asChild>
                           <div
-                            className="soft-card elevate rounded-lg p-4 cursor-pointer"
+                            className={cn(
+                              "cursor-pointer",
+                              viewMode === 'grid'
+                                ? "soft-card elevate rounded-lg p-4"
+                                : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
+                            )}
                             draggable
                             onDragStart={(e) => e.dataTransfer.setData('group-path', node.path)}
                             onDoubleClick={() => setSelectedGroupPath(node.path)}
@@ -514,12 +601,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                               if (groupPath) moveGroup(groupPath, node.path);
                             }}
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center">
-                                <Grid size={18} />
+                            <div className="flex items-center gap-3 h-full">
+                              <div className={cn(
+                                "rounded-lg bg-primary/15 text-primary flex items-center justify-center",
+                                viewMode === 'grid' ? "h-10 w-10" : "h-8 w-8"
+                              )}>
+                                <Grid size={viewMode === 'grid' ? 18 : 14} />
                               </div>
-                              <div>
-                                <div className="text-sm font-semibold">{node.name}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold truncate">{node.name}</div>
                                 <div className="text-[11px] text-muted-foreground">{node.hosts.length} Hosts</div>
                               </div>
                             </div>
@@ -546,7 +636,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       <div className="bg-secondary/80 border border-border/70 rounded-md px-2 py-1 text-[11px]">{sessions.length} live</div>
                     </div>
                   </div>
-                  <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className={cn(
+                    viewMode === 'grid'
+                      ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                      : "flex flex-col gap-0"
+                  )}>
                     {displayedHosts.map((host) => {
                       const safeHost = sanitizeHost(host);
                       const distroBadge = { text: (safeHost.os || 'L')[0].toUpperCase(), label: safeHost.distro || safeHost.os || 'Linux' };
@@ -554,7 +648,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                         <ContextMenu key={host.id}>
                           <ContextMenuTrigger>
                             <div
-                              className="soft-card elevate rounded-xl cursor-pointer h-[72px] px-3 py-2"
+                              className={cn(
+                                "group cursor-pointer",
+                                viewMode === 'grid'
+                                  ? "soft-card elevate rounded-xl h-[72px] px-3 py-2"
+                                  : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
+                              )}
                               draggable
                               onDragStart={(e) => {
                                 e.dataTransfer.effectAllowed = 'move';
@@ -563,12 +662,27 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                               onClick={() => handleHostConnect(safeHost)}
                             >
                               <div className="flex items-center gap-3 h-full">
-                                <DistroAvatar host={safeHost} fallback={distroBadge.text} />
-                                <div className="min-w-0 flex flex-col justify-center gap-0.5">
+                                <DistroAvatar host={safeHost} fallback={distroBadge.text} size={viewMode === 'list' ? 'sm' : 'md'} />
+                                <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                   <div className="text-sm font-semibold truncate leading-5">{safeHost.label}</div>
                                   <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">{safeHost.username}@{safeHost.hostname}</div>
-                                  {safeHost.distro && <div className="text-[10px] text-muted-foreground truncate leading-4">{distroBadge.label}</div>}
+                                  {viewMode === 'grid' && safeHost.distro && <div className="text-[10px] text-muted-foreground truncate leading-4">{distroBadge.label}</div>}
                                 </div>
+                                {viewMode === 'list' && (
+                                  <>
+                                    {safeHost.distro && (
+                                      <div className="text-[11px] text-muted-foreground shrink-0">{distroBadge.label}</div>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                      onClick={(e) => { e.stopPropagation(); handleEditHost(host); }}
+                                    >
+                                      <Edit2 size={14} />
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           </ContextMenuTrigger>
