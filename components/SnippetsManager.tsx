@@ -298,7 +298,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({ snippets, packages, h
                       </Card>
                     </ContextMenuTrigger>
                     <ContextMenuContent>
-                      <ContextMenuItem 
+                      <ContextMenuItem
                         onClick={() => {
                           const targetHostsList = (snippet.targets || [])
                             .map(id => hosts.find(h => h.id === id))

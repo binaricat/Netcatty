@@ -357,7 +357,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Check if active workspace is in focus mode
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
-  
+
   // Get sessions for the active workspace in focus mode
   const workspaceSessionIds = useMemo(() => {
     if (!activeWorkspace) return [];
@@ -371,7 +371,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Render focus mode sidebar
   const renderFocusModeSidebar = () => {
     if (!activeWorkspace || !isFocusMode) return null;
-    
+
     return (
       <div className="w-56 flex-shrink-0 bg-secondary/50 border-r border-border/50 flex flex-col">
         {/* Header with view toggle */}
@@ -389,26 +389,26 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             <LayoutGrid size={14} />
           </Button>
         </div>
-        
+
         {/* Session list */}
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
             {workspaceSessions.map(session => {
               const host = sessionHostsMap.get(session.id);
               const isSelected = session.id === focusedSessionId;
-              const statusColor = session.status === 'connected' 
-                ? 'text-emerald-500' 
-                : session.status === 'connecting' 
-                  ? 'text-amber-500' 
+              const statusColor = session.status === 'connected'
+                ? 'text-emerald-500'
+                : session.status === 'connecting'
+                  ? 'text-amber-500'
                   : 'text-red-500';
-              
+
               return (
                 <div
                   key={session.id}
                   className={cn(
                     "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors",
-                    isSelected 
-                      ? "bg-primary/15 border border-primary/30" 
+                    isSelected
+                      ? "bg-primary/15 border border-primary/30"
                       : "hover:bg-secondary/80 border border-transparent"
                   )}
                   onClick={() => onSetWorkspaceFocusedSession?.(activeWorkspace.id, session.id)}
@@ -419,9 +419,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     ) : (
                       <Server size={16} className="text-muted-foreground" />
                     )}
-                    <Circle 
-                      size={6} 
-                      className={cn("absolute -bottom-0.5 -right-0.5 fill-current", statusColor)} 
+                    <Circle
+                      size={6}
+                      className={cn("absolute -bottom-0.5 -right-0.5 fill-current", statusColor)}
                     />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -447,7 +447,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     >
       {/* Focus mode sidebar */}
       {isFocusMode && renderFocusModeSidebar()}
-      
+
       {draggingSessionId && (
         <div
           ref={workspaceOverlayRef}
@@ -490,13 +490,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           const host = sessionHostsMap.get(session.id)!;
           const inActiveWorkspace = !!activeWorkspace && session.workspaceId === activeWorkspace.id;
           const isActiveSolo = activeTabId === session.id && !activeWorkspace && isTerminalLayerVisible;
-          
+
           // In focus mode, only the focused session is visible
           const isFocusedInWorkspace = isFocusMode && inActiveWorkspace && session.id === focusedSessionId;
           const isSplitViewVisible = !isFocusMode && inActiveWorkspace;
-          
+
           const isVisible = ((isFocusedInWorkspace || isSplitViewVisible || isActiveSolo) && isTerminalLayerVisible);
-          
+
           // In focus mode, use full area; in split mode, use computed rects
           const rect = (isSplitViewVisible && !isFocusMode) ? activeWorkspaceRects[session.id] : null;
 
