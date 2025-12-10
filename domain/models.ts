@@ -20,6 +20,20 @@ export interface EnvVar {
   value: string;
 }
 
+// Protocol type for connections
+export type HostProtocol = 'ssh' | 'telnet' | 'mosh' | 'local';
+
+// Per-protocol configuration
+export interface ProtocolConfig {
+  protocol: HostProtocol;
+  port: number;
+  enabled: boolean;
+  // Mosh-specific
+  moshServerPath?: string;
+  // Protocol-specific theme override
+  theme?: string;
+}
+
 export interface Host {
   id: string;
   label: string;
@@ -30,7 +44,7 @@ export interface Host {
   tags: string[];
   os: 'linux' | 'windows' | 'macos';
   identityFileId?: string; // Reference to SSHKey
-  protocol?: 'ssh' | 'telnet' | 'local';
+  protocol?: 'ssh' | 'telnet' | 'local'; // Default/primary protocol
   password?: string;
   authMethod?: 'password' | 'key' | 'certificate' | 'fido2';
   agentForwarding?: boolean;
@@ -45,6 +59,10 @@ export interface Host {
   moshEnabled?: boolean;
   theme?: string;
   distro?: string; // detected distro id (e.g., ubuntu, debian)
+  // Multi-protocol support
+  protocols?: ProtocolConfig[]; // Multiple protocol configurations
+  telnetPort?: number; // Telnet-specific port (for quick access)
+  telnetEnabled?: boolean; // Is Telnet enabled for this host
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';

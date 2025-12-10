@@ -5,17 +5,19 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/utils";
-import { Network, KeyRound, Lock, Share2, Server, Shield, Zap, TerminalSquare, Tag, ChevronLeft, Navigation, PhoneCall, Plus, FolderPlus, ArrowLeft, Link2, Trash2, GripVertical, Globe, HelpCircle, X, ArrowDown, ArrowRight, Check, Variable, Key, Fingerprint } from "lucide-react";
+import { Network, KeyRound, Lock, Share2, Server, Shield, Zap, TerminalSquare, Tag, ChevronLeft, Navigation, PhoneCall, Plus, FolderPlus, ArrowLeft, Link2, Trash2, GripVertical, Globe, HelpCircle, X, ArrowDown, ArrowRight, Check, Variable, Key, Fingerprint, Palette } from "lucide-react";
 import { ScrollArea } from "./ui/scroll-area";
 import { DistroAvatar } from "./DistroAvatar";
 import { AsidePanel, AsidePanelContent, AsidePanelFooter } from "./ui/aside-panel";
 import { Combobox, MultiCombobox, ComboboxOption } from "./ui/combobox";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import ThemeSelectPanel from "./ThemeSelectPanel";
+import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
 
 type Protocol = "ssh" | "telnet";
 type AuthMethod = "password" | "key" | "certificate" | "fido2";
 type CredentialType = "sshid" | "key" | "certificate" | "fido2" | null;
-type SubPanel = "none" | "create-group" | "proxy" | "chain" | "env-vars";
+type SubPanel = "none" | "create-group" | "proxy" | "chain" | "env-vars" | "theme-select" | "telnet-theme-select";
 
 interface HostDetailsPanelProps {
   initialData?: Host | null;
@@ -603,6 +605,54 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     );
   }
 
+  // Theme selection sub-panel (SSH)
+  if (activeSubPanel === "theme-select") {
+    return (
+      <ThemeSelectPanel
+        open={true}
+        selectedThemeId={form.theme || 'flexoki-dark'}
+        onSelect={(themeId) => {
+          update("theme", themeId);
+          setActiveSubPanel("none");
+        }}
+        onClose={onCancel}
+        onBack={() => setActiveSubPanel("none")}
+        showBackButton={true}
+      />
+    );
+  }
+
+  // Theme selection sub-panel (Telnet)
+  if (activeSubPanel === "telnet-theme-select") {
+    return (
+      <ThemeSelectPanel
+        open={true}
+        selectedThemeId={form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'}
+        onSelect={(themeId) => {
+          // Update telnet protocol theme
+          const telnetConfig = form.protocols?.find(p => p.protocol === 'telnet');
+          if (telnetConfig) {
+            const newProtocols = form.protocols?.map(p => 
+              p.protocol === 'telnet' ? { ...p, theme: themeId } : p
+            );
+            setForm(prev => ({ ...prev, protocols: newProtocols }));
+          } else {
+            // Create new telnet protocol config with theme
+            const newProtocols = [
+              ...(form.protocols || []),
+              { protocol: 'telnet' as const, port: form.telnetPort || 23, enabled: true, theme: themeId }
+            ];
+            setForm(prev => ({ ...prev, protocols: newProtocols }));
+          }
+          setActiveSubPanel("none");
+        }}
+        onClose={onCancel}
+        onBack={() => setActiveSubPanel("none")}
+        showBackButton={true}
+      />
+    );
+  }
+
   // Main panel
   return (
     <AsidePanel
@@ -687,17 +737,128 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           </div>
         </Card>
 
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-2 py-1">
-            <span className="text-xs text-muted-foreground">SSH on</span>
-            <Input
-              type="number"
-              value={form.port}
-              onChange={(e) => update("port", Number(e.target.value))}
-              className="h-8 w-16 text-center"
-            />
-            <span className="text-xs text-muted-foreground">port</span>
+        {/* SSH Protocol Card */}
+        <Card className="p-3 space-y-3 bg-card border-border/80">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-2 py-1">
+              <span className="text-xs text-muted-foreground">SSH on</span>
+              <Input
+                type="number"
+                value={form.port}
+                onChange={(e) => update("port", Number(e.target.value))}
+                className="h-8 w-16 text-center"
+              />
+              <span className="text-xs text-muted-foreground">port</span>
+            </div>
           </div>
+          
+          {/* SSH Theme Selection */}
+          <button
+            type="button"
+            className="w-full flex items-center gap-3 p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
+            onClick={() => setActiveSubPanel("theme-select")}
+          >
+            <div 
+              className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
+              style={{ 
+                backgroundColor: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.background || '#100F0F',
+                color: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.foreground || '#CECDC3'
+              }}
+            >
+              <div className="p-0.5">
+                <div style={{ color: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.green }}>$</div>
+              </div>
+            </div>
+            <span className="text-sm flex-1">
+              {TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.name || 'Flexoki Dark'}
+            </span>
+          </button>
+        </Card>
+
+        {/* Telnet Protocol Card */}
+        <Card className="p-3 space-y-3 bg-card border-border/80">
+          {form.telnetEnabled ? (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-2 py-1">
+                  <span className="text-xs text-muted-foreground">Telnet on</span>
+                  <Input
+                    type="number"
+                    value={form.telnetPort || 23}
+                    onChange={(e) => update("telnetPort", Number(e.target.value))}
+                    className="h-8 w-16 text-center"
+                  />
+                  <span className="text-xs text-muted-foreground">port</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  onClick={() => update("telnetEnabled", false)}
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+
+              {/* Telnet Credentials */}
+              <p className="text-xs font-semibold">Credentials</p>
+              <Input 
+                placeholder="Username" 
+                value={form.username} 
+                onChange={(e) => update("username", e.target.value)} 
+                className="h-10" 
+              />
+              <Input 
+                placeholder="Password" 
+                type="password" 
+                value={form.password || ""} 
+                onChange={(e) => update("password", e.target.value)} 
+                className="h-10" 
+              />
+
+              {/* Telnet Charset */}
+              <Input 
+                placeholder="Charset (e.g. UTF-8)" 
+                value={form.charset || "UTF-8"} 
+                onChange={(e) => update("charset", e.target.value)} 
+                className="h-10" 
+              />
+
+              {/* Telnet Theme Selection */}
+              <button
+                type="button"
+                className="w-full flex items-center gap-3 p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
+                onClick={() => setActiveSubPanel("telnet-theme-select")}
+              >
+                <div 
+                  className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
+                  style={{ 
+                    backgroundColor: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.background || '#100F0F',
+                    color: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.foreground || '#CECDC3'
+                  }}
+                >
+                  <div className="p-0.5">
+                    <div style={{ color: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.green }}>$</div>
+                  </div>
+                </div>
+                <span className="text-sm flex-1">
+                  {TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.name || 'Flexoki Dark'}
+                </span>
+              </button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              className="w-full h-10 justify-start gap-2"
+              onClick={() => {
+                update("telnetEnabled", true);
+                update("telnetPort", 23);
+              }}
+            >
+              <Plus size={14} />
+              Add Telnet
+            </Button>
+          )}
         </Card>
 
         <Card className="p-3 space-y-3 bg-card border-border/80">

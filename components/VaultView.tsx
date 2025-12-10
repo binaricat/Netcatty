@@ -18,14 +18,17 @@ import {
   Star,
   Trash2,
   TerminalSquare,
+  Zap,
 } from 'lucide-react';
-import { Host, SSHKey, Snippet, GroupNode, TerminalSession, KnownHost, ShellHistoryEntry } from '../types';
+import { Host, SSHKey, Snippet, GroupNode, TerminalSession, KnownHost, ShellHistoryEntry, HostProtocol } from '../types';
 import { DistroAvatar } from './DistroAvatar';
 import SnippetsManager from './SnippetsManager';
 import KeychainManager from './KeychainManager';
 import PortForwarding from './PortForwardingNew';
 import KnownHostsManager from './KnownHostsManager';
 import HostDetailsPanel from './HostDetailsPanel';
+import QuickConnectWizard, { parseQuickConnectInput, isQuickConnectInput } from './QuickConnectWizard';
+import ProtocolSelectDialog from './ProtocolSelectDialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
@@ -96,6 +99,87 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Host panel state (local to hosts section)
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
+
+  // Quick connect state
+  const [quickConnectTarget, setQuickConnectTarget] = useState<{ hostname: string; username?: string; port?: number } | null>(null);
+  const [isQuickConnectOpen, setIsQuickConnectOpen] = useState(false);
+
+  // Protocol select state (for hosts with multiple protocols)
+  const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(null);
+
+  // Check if search input is a quick connect address
+  const isSearchQuickConnect = useMemo(() => {
+    return isQuickConnectInput(search);
+  }, [search]);
+
+  // Handle connect button click - detect quick connect or regular search
+  const handleConnectClick = useCallback(() => {
+    if (isSearchQuickConnect) {
+      const target = parseQuickConnectInput(search);
+      if (target) {
+        setQuickConnectTarget(target);
+        setIsQuickConnectOpen(true);
+      }
+    } else {
+      onOpenQuickSwitcher();
+    }
+  }, [isSearchQuickConnect, search, onOpenQuickSwitcher]);
+
+  // Handle search input keydown for quick connect
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && isSearchQuickConnect) {
+      e.preventDefault();
+      handleConnectClick();
+    }
+  }, [isSearchQuickConnect, handleConnectClick]);
+
+  // Check if host has multiple protocols enabled
+  const hasMultipleProtocols = useCallback((host: Host) => {
+    let count = 0;
+    if (host.protocol === 'ssh' || !host.protocol) count++;
+    if (host.moshEnabled) count++;
+    if (host.telnetEnabled || host.protocol === 'telnet') count++;
+    if (host.protocols?.length) {
+      count = host.protocols.filter(p => p.enabled).length;
+    }
+    return count > 1;
+  }, []);
+
+  // Handle host connect with protocol selection
+  const handleHostConnect = useCallback((host: Host) => {
+    if (hasMultipleProtocols(host)) {
+      setProtocolSelectHost(host);
+    } else {
+      onConnect(host);
+    }
+  }, [hasMultipleProtocols, onConnect]);
+
+  // Handle protocol selection
+  const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => {
+    if (protocolSelectHost) {
+      const hostWithProtocol: Host = {
+        ...protocolSelectHost,
+        protocol: protocol === 'mosh' ? 'ssh' : protocol,
+        port,
+        moshEnabled: protocol === 'mosh',
+      };
+      onConnect(hostWithProtocol);
+      setProtocolSelectHost(null);
+    }
+  }, [protocolSelectHost, onConnect]);
+
+  // Handle quick connect
+  const handleQuickConnect = useCallback((host: Host) => {
+    onConnect(host);
+    setIsQuickConnectOpen(false);
+    setQuickConnectTarget(null);
+    setSearch('');
+  }, [onConnect]);
+
+  // Handle quick connect save host
+  const handleQuickConnectSaveHost = useCallback((host: Host) => {
+    onUpdateHosts([...hosts, host]);
+  }, [hosts, onUpdateHosts]);
 
   const handleNewHost = useCallback(() => {
     setEditingHost(null);
@@ -314,9 +398,29 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             <div className="h-14 px-4 py-2 flex items-center gap-3">
               <div className="relative flex-1">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Find a host or ssh user@hostname..." className="pl-9 h-11 bg-secondary border-border/60 text-sm" value={search} onChange={e => setSearch(e.target.value)} />
+                <Input 
+                  placeholder="Find a host or ssh user@hostname..." 
+                  className={cn(
+                    "pl-9 h-11 bg-secondary border-border/60 text-sm",
+                    isSearchQuickConnect && "border-primary/50 ring-1 ring-primary/20"
+                  )} 
+                  value={search} 
+                  onChange={e => setSearch(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {isSearchQuickConnect && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Zap size={14} className="text-primary" />
+                  </div>
+                )}
               </div>
-              <Button variant="secondary" className="h-11 px-4" onClick={onOpenQuickSwitcher}>Connect</Button>
+              <Button 
+                variant={isSearchQuickConnect ? "default" : "secondary"} 
+                className="h-11 px-4" 
+                onClick={handleConnectClick}
+              >
+                Connect
+              </Button>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><LayoutGrid size={16} /></Button>
                 <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:text-foreground"><Grid size={16} /></Button>
@@ -454,7 +558,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                 e.dataTransfer.effectAllowed = 'move';
                                 e.dataTransfer.setData('host-id', host.id);
                               }}
-                              onClick={() => onConnect(safeHost)}
+                              onClick={() => handleHostConnect(safeHost)}
                             >
                               <div className="flex items-center gap-3 h-full">
                                 <DistroAvatar host={safeHost} fallback={distroBadge.text} />
@@ -467,7 +571,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                             </div>
                           </ContextMenuTrigger>
                           <ContextMenuContent>
-                            <ContextMenuItem onClick={() => onConnect(host)}>
+                            <ContextMenuItem onClick={() => handleHostConnect(host)}>
                               <Plug className="mr-2 h-4 w-4" /> Connect
                             </ContextMenuItem>
                             <ContextMenuItem onClick={() => handleEditHost(host)}>
@@ -583,6 +687,31 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           <DialogFooter><Button variant="ghost" onClick={() => setIsNewFolderOpen(false)}>Cancel</Button><Button onClick={submitNewFolder}>Create</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Quick Connect Wizard */}
+      {isQuickConnectOpen && quickConnectTarget && (
+        <QuickConnectWizard
+          open={isQuickConnectOpen}
+          target={quickConnectTarget}
+          keys={keys}
+          knownHosts={knownHosts}
+          onConnect={handleQuickConnect}
+          onSaveHost={handleQuickConnectSaveHost}
+          onClose={() => {
+            setIsQuickConnectOpen(false);
+            setQuickConnectTarget(null);
+          }}
+        />
+      )}
+
+      {/* Protocol Select Dialog */}
+      {protocolSelectHost && (
+        <ProtocolSelectDialog
+          host={protocolSelectHost}
+          onSelect={handleProtocolSelect}
+          onCancel={() => setProtocolSelectHost(null)}
+        />
+      )}
     </div>
   );
 };
