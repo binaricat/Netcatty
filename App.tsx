@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import SettingsDialog from './components/SettingsDialog';
-import { SftpView } from './components/SftpViewNew';
+import { SftpView } from './components/SftpView';
 import { TopTabs } from './components/TopTabs';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import { VaultView } from './components/VaultView';
