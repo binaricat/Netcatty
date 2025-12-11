@@ -31,7 +31,7 @@ import QuickConnectWizard, { parseQuickConnectInput, isQuickConnectInput } from 
 import ProtocolSelectDialog from './ProtocolSelectDialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Dropdown, DropdownTrigger, DropdownContent } from './ui/dropdown';
 import { cn } from '../lib/utils';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -476,14 +476,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
               </Button>
               {/* View mode, tag filter, and sort controls */}
               <div className="flex items-center gap-1">
-                <Popover>
-                  <PopoverTrigger asChild>
+                <Dropdown>
+                  <DropdownTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-10 w-10">
                       {viewMode === 'grid' ? <LayoutGrid size={16} /> : <List size={16} />}
                       <ChevronDown size={10} className="ml-0.5" />
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-32 p-1 z-50" align="end">
+                  </DropdownTrigger>
+                  <DropdownContent className="w-32" align="end">
                     <Button
                       variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                       className="w-full justify-start gap-2 h-9"
@@ -498,8 +498,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                     >
                       <List size={14} /> List
                     </Button>
-                  </PopoverContent>
-                </Popover>
+                  </DropdownContent>
+                </Dropdown>
                 <TagFilterDropdown
                   allTags={allTags}
                   selectedTags={selectedTags}
@@ -516,43 +516,43 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
               </div>
               {/* New Host split button */}
               <div className="flex items-center">
-                <div className="flex items-center rounded-md bg-primary text-primary-foreground">
-                  <Button
-                    size="sm"
-                    className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
-                    onClick={handleNewHost}
-                  >
-                    <Plus size={14} className="mr-2" /> New Host
-                  </Button>
-                  <Popover>
-                    <PopoverTrigger asChild>
+                <Dropdown>
+                  <div className="flex items-center rounded-md bg-primary text-primary-foreground">
+                    <Button
+                      size="sm"
+                      className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
+                      onClick={handleNewHost}
+                    >
+                      <Plus size={14} className="mr-2" /> New Host
+                    </Button>
+                    <DropdownTrigger asChild>
                       <Button
                         size="sm"
                         className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none"
                       >
                         <ChevronDown size={14} />
                       </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-44 p-1" align="end">
-                      <Button
-                        variant="ghost"
-                        className="w-full justify-start gap-2"
-                        onClick={() => { setTargetParentPath(selectedGroupPath); setIsNewFolderOpen(true); }}
-                      >
-                        <FolderTree size={14} /> New Group
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="w-full justify-start gap-2"
-                        onClick={() => {
-                          // TODO: Import hosts
-                        }}
-                      >
-                        <Upload size={14} /> Import
-                      </Button>
-                    </PopoverContent>
-                  </Popover>
-                </div>
+                    </DropdownTrigger>
+                  </div>
+                  <DropdownContent className="w-44" align="end" alignToParent>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-2"
+                      onClick={() => { setTargetParentPath(selectedGroupPath); setIsNewFolderOpen(true); }}
+                    >
+                      <FolderTree size={14} /> New Group
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-2"
+                      onClick={() => {
+                        // TODO: Import hosts
+                      }}
+                    >
+                      <Upload size={14} /> Import
+                    </Button>
+                  </DropdownContent>
+                </Dropdown>
               </div>
               <Button size="sm" variant="secondary" className="h-10 px-3" onClick={onCreateLocalTerminal}>
                 <TerminalSquare size={14} className="mr-2" /> Terminal

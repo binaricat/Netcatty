@@ -5,6 +5,18 @@ if (process.env.ELECTRON_RUN_AS_NODE) {
   delete process.env.ELECTRON_RUN_AS_NODE;
 }
 
+// Handle uncaught exceptions for EPIPE errors (when writing to closed streams)
+process.on('uncaughtException', (err) => {
+  if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') {
+    // Ignore EPIPE errors - these happen when terminal is closed while data is being written
+    console.warn('Ignored stream error:', err.code);
+    return;
+  }
+  // Re-throw other errors
+  console.error('Uncaught exception:', err);
+  throw err;
+});
+
 let electronModule;
 try {
   electronModule = require("node:electron");
@@ -661,13 +673,20 @@ const registerSSHBridge = (win) => {
   const write = (_event, payload) => {
     const session = sessions.get(payload.sessionId);
     if (!session) return;
-    // SSH sessions use stream, local terminal uses proc, telnet-native uses socket
-    if (session.stream) {
-      session.stream.write(payload.data);
-    } else if (session.proc) {
-      session.proc.write(payload.data);
-    } else if (session.socket) {
-      session.socket.write(payload.data);
+    try {
+      // SSH sessions use stream, local terminal uses proc, telnet-native uses socket
+      if (session.stream) {
+        session.stream.write(payload.data);
+      } else if (session.proc) {
+        session.proc.write(payload.data);
+      } else if (session.socket) {
+        session.socket.write(payload.data);
+      }
+    } catch (err) {
+      // Ignore EPIPE errors when process is already closed
+      if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') {
+        console.warn("Write failed", err);
+      }
     }
   };
 
@@ -696,7 +715,10 @@ const registerSSHBridge = (win) => {
         session.socket.write(buf);
       }
     } catch (err) {
-      console.warn("Resize failed", err);
+      // Ignore errors when process is already closed
+      if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') {
+        console.warn("Resize failed", err);
+      }
     }
   };
 

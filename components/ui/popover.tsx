@@ -1,5 +1,5 @@
 import * as React from "react"
-import { useLayoutEffect, useState, useRef } from "react"
+import { useLayoutEffect, useState, useRef, useCallback } from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 
 import { cn } from "../../lib/utils"
@@ -16,31 +16,37 @@ const PopoverContent = React.forwardRef<
 >(({ className, align = "center", sideOffset = 4, ...props }, ref) => {
   // Fix for Electron: ensure position is calculated after content is fully rendered
   const [isPositioned, setIsPositioned] = useState(false)
-  const innerRef = useRef<HTMLDivElement>(null)
+  const [node, setNode] = useState<HTMLDivElement | null>(null)
 
-  // Combine refs
-  const combinedRef = (node: HTMLDivElement) => {
-    innerRef.current = node
+  // Use callback ref to detect when element is mounted
+  const callbackRef = useCallback((element: HTMLDivElement | null) => {
+    setNode(element)
+    // Forward ref
     if (typeof ref === 'function') {
-      ref(node)
+      ref(element)
     } else if (ref) {
-      ref.current = node
+      ref.current = element
     }
-  }
+  }, [ref])
 
   useLayoutEffect(() => {
-    // Reset on each open
+    if (!node) {
+      setIsPositioned(false)
+      return
+    }
+    // Element just mounted, wait for next frame to ensure position is calculated
     setIsPositioned(false)
-    // Wait for next frame to ensure content is rendered
     requestAnimationFrame(() => {
-      setIsPositioned(true)
+      requestAnimationFrame(() => {
+        setIsPositioned(true)
+      })
     })
-  }, [])
+  }, [node])
 
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
-        ref={combinedRef}
+        ref={callbackRef}
         align={align}
         sideOffset={sideOffset}
         // Force position recalculation on every animation frame

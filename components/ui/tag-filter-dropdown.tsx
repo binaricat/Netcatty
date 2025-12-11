@@ -2,7 +2,7 @@ import React from 'react';
 import { Check, ChevronDown, ChevronUp, Tag, Search, Pencil, Trash2, X } from 'lucide-react';
 import { Button } from './button';
 import { Input } from './input';
-import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import { Dropdown, DropdownContent, DropdownTrigger } from './dropdown';
 import { ScrollArea } from './scroll-area';
 import { cn } from '../../lib/utils';
 
@@ -113,8 +113,8 @@ export const TagFilterDropdown: React.FC<TagFilterDropdownProps> = ({
     const canDelete = !!onDeleteTag;
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
+        <Dropdown open={open} onOpenChange={setOpen}>
+            <DropdownTrigger asChild>
                 <Button
                     variant="ghost"
                     size="icon"
@@ -126,8 +126,8 @@ export const TagFilterDropdown: React.FC<TagFilterDropdownProps> = ({
                     <Tag size={14} />
                     {open ? <ChevronUp size={10} className="ml-0.5" /> : <ChevronDown size={10} className="ml-0.5" />}
                 </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-1 z-[60]" align="end">
+            </DropdownTrigger>
+            <DropdownContent className="w-64" align="end">
                 {allTags.length === 0 ? (
                     <div className="px-3 py-4 text-center text-sm text-muted-foreground">
                         No tags available
@@ -245,8 +245,8 @@ export const TagFilterDropdown: React.FC<TagFilterDropdownProps> = ({
                         </ScrollArea>
                     </>
                 )}
-            </PopoverContent>
-        </Popover>
+            </DropdownContent>
+        </Dropdown>
     );
 };
 

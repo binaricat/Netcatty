@@ -1,15 +1,15 @@
 import React from 'react';
 import { Check, ChevronDown, ChevronUp, SortAsc, SortDesc, Calendar, CalendarClock } from 'lucide-react';
 import { Button } from './button';
-import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import { Dropdown, DropdownContent, DropdownTrigger } from './dropdown';
 
 export type SortMode = 'az' | 'za' | 'newest' | 'oldest';
 
-export const SORT_OPTIONS: Record<SortMode, { label: string; icon: React.ReactNode }> = {
-    az: { label: 'A-z', icon: <SortAsc size={14} /> },
-    za: { label: 'Z-a', icon: <SortDesc size={14} /> },
-    newest: { label: 'Newest to oldest', icon: <Calendar size={14} /> },
-    oldest: { label: 'Oldest to newest', icon: <CalendarClock size={14} /> },
+export const SORT_OPTIONS: Record<SortMode, { label: string; icon: React.ReactElement; triggerIcon: React.ReactElement }> = {
+    az: { label: 'A-z', icon: <SortAsc className="w-4 h-4 shrink-0" />, triggerIcon: <SortAsc className="w-4 h-4" /> },
+    za: { label: 'Z-a', icon: <SortDesc className="w-4 h-4 shrink-0" />, triggerIcon: <SortDesc className="w-4 h-4" /> },
+    newest: { label: 'Newest to oldest', icon: <Calendar className="w-4 h-4 shrink-0" />, triggerIcon: <Calendar className="w-4 h-4" /> },
+    oldest: { label: 'Oldest to newest', icon: <CalendarClock className="w-4 h-4 shrink-0" />, triggerIcon: <CalendarClock className="w-4 h-4" /> },
 };
 
 interface SortDropdownProps {
@@ -22,14 +22,14 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({ value, onChange, cla
     const [open, setOpen] = React.useState(false);
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
+        <Dropdown open={open} onOpenChange={setOpen}>
+            <DropdownTrigger asChild>
                 <Button variant="ghost" size="icon" className={className || "h-8 w-8"}>
-                    {SORT_OPTIONS[value].icon}
+                    {SORT_OPTIONS[value].triggerIcon}
                     {open ? <ChevronUp size={10} className="ml-0.5" /> : <ChevronDown size={10} className="ml-0.5" />}
                 </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-44 p-1 z-[60]" align="end">
+            </DropdownTrigger>
+            <DropdownContent className="w-44" align="end">
                 {(Object.keys(SORT_OPTIONS) as SortMode[]).map(mode => (
                     <Button
                         key={mode}
@@ -44,8 +44,8 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({ value, onChange, cla
                         {value === mode && <Check size={12} className="ml-auto" />}
                     </Button>
                 ))}
-            </PopoverContent>
-        </Popover>
+            </DropdownContent>
+        </Dropdown>
     );
 };
 

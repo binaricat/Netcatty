@@ -1,5 +1,6 @@
 import * as React from "react"
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { cn } from "../../lib/utils"
 
 interface DropdownContextValue {
@@ -154,14 +155,17 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
     // Calculate position synchronously after DOM updates
     useLayoutEffect(() => {
         if (open) {
-            // Initial calculation
-            const pos = calculatePosition()
-            if (pos) setPosition(pos)
+            // Reset position first to hide content while calculating
+            setPosition(null)
 
-            // Recalculate after a frame to ensure content is fully rendered
+            // Use double requestAnimationFrame to ensure content is fully rendered
+            // First frame: content is added to DOM
+            // Second frame: layout is calculated, offsetWidth is available
             requestAnimationFrame(() => {
-                const pos = calculatePosition()
-                if (pos) setPosition(pos)
+                requestAnimationFrame(() => {
+                    const pos = calculatePosition()
+                    if (pos) setPosition(pos)
+                })
             })
         } else {
             setPosition(null)
@@ -204,7 +208,7 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
 
     if (!open) return null
 
-    return (
+    return createPortal(
         <div
             ref={contentRef}
             className={cn(
@@ -218,7 +222,8 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
             }}
         >
             {children}
-        </div>
+        </div>,
+        document.body
     )
 }
 

@@ -13,7 +13,7 @@ import { DistroAvatar } from './DistroAvatar';
 import SelectHostPanel from './SelectHostPanel';
 import { AsidePanel, AsidePanelContent } from './ui/aside-panel';
 import { Combobox, ComboboxOption } from './ui/combobox';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Dropdown, DropdownTrigger, DropdownContent } from './ui/dropdown';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
 
 interface SnippetsManagerProps {
@@ -479,7 +479,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   return (
     <div className="h-full flex gap-3 relative">
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <div className="flex items-center gap-2 px-4 pt-4 pb-2">
           {/* Search box */}
           <div className="relative w-64">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -514,14 +514,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           </Button>
           {/* View mode and sort controls */}
           <div className="flex items-center gap-1 ml-auto">
-            <Popover>
-              <PopoverTrigger asChild>
+            <Dropdown>
+              <DropdownTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-10 w-10">
                   {viewMode === 'grid' ? <LayoutGrid size={16} /> : <ListIcon size={16} />}
                   <ChevronDown size={10} className="ml-0.5" />
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-32 p-1 z-50" align="end">
+              </DropdownTrigger>
+              <DropdownContent className="w-32" align="end">
                 <Button
                   variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                   className="w-full justify-start gap-2 h-9"
@@ -536,8 +536,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 >
                   <ListIcon size={14} /> List
                 </Button>
-              </PopoverContent>
-            </Popover>
+              </DropdownContent>
+            </Dropdown>
             <SortDropdown
               value={sortMode}
               onChange={setSortMode}
@@ -545,10 +545,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             />
           </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground px-3">
+        <div className="flex items-center gap-2 text-sm font-semibold px-4">
           <button className="text-primary hover:underline" onClick={() => setSelectedPackage(null)}>All packages</button>
           {breadcrumb.map((b) => (
-            <span key={b.path} className="flex items-center gap-1">
+            <span key={b.path} className="flex items-center gap-2">
               <span className="text-muted-foreground">›</span>
               <button className="text-primary hover:underline" onClick={() => setSelectedPackage(b.path)}>{b.name}</button>
             </span>
@@ -556,7 +556,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         </div>
 
         {!snippets.length && displayedPackages.length === 0 && (
-          <div className="flex-1 flex items-center justify-center px-3">
+          <div className="flex-1 flex items-center justify-center px-4">
             <div className="max-w-md w-full text-center space-y-3 py-12 rounded-2xl bg-secondary/60 border border-border/60 shadow-lg">
               <div className="mx-auto h-12 w-12 rounded-xl bg-muted text-muted-foreground flex items-center justify-center">
                 <FileCode size={22} />
@@ -567,7 +567,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           </div>
         )}
 
-        <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-3">
+        <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
           {displayedPackages.length > 0 && (
             <>
               <div className="flex items-center justify-between">

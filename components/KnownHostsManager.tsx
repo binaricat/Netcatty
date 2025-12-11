@@ -11,22 +11,16 @@ import {
     Shield,
     FolderOpen,
     LayoutGrid,
-    List,
-    ArrowDownAZ,
-    ArrowUpAZ,
-    Calendar,
-    Check,
+    List as ListIcon,
+    ChevronDown,
 } from 'lucide-react';
 import { KnownHost, Host } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { cn } from '../lib/utils';
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from './ui/popover';
+import { Dropdown, DropdownContent, DropdownTrigger } from './ui/dropdown';
+import { SortDropdown, SortMode } from './ui/sort-dropdown';
 
 interface KnownHostsManagerProps {
     knownHosts: KnownHost[];
@@ -40,7 +34,6 @@ interface KnownHostsManagerProps {
 }
 
 type ViewMode = 'grid' | 'list';
-type SortBy = 'name-asc' | 'name-desc' | 'newest' | 'oldest';
 
 // Helper functions outside component for stable references
 const formatDateFn = (timestamp: number) => {
@@ -250,9 +243,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     const deferredSearch = useDeferredValue(search);
     const [isScanning, setIsScanning] = useState(false);
     const [viewMode, setViewMode] = useState<ViewMode>('grid');
-    const [sortBy, setSortBy] = useState<SortBy>('newest');
-    const [viewPopoverOpen, setViewPopoverOpen] = useState(false);
-    const [sortPopoverOpen, setSortPopoverOpen] = useState(false);
+    const [sortMode, setSortMode] = useState<SortMode>('newest');
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const hasScannedRef = React.useRef(false);
     const RENDER_LIMIT = 100; // Limit rendered items for performance
@@ -285,10 +276,10 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
 
         // Sort
         result = [...result].sort((a, b) => {
-            switch (sortBy) {
-                case 'name-asc':
+            switch (sortMode) {
+                case 'az':
                     return a.hostname.localeCompare(b.hostname);
-                case 'name-desc':
+                case 'za':
                     return b.hostname.localeCompare(a.hostname);
                 case 'newest':
                     return b.discoveredAt - a.discoveredAt;
@@ -300,7 +291,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
         });
 
         return result;
-    }, [knownHosts, deferredSearch, sortBy]);
+    }, [knownHosts, deferredSearch, sortMode]);
 
     // Limit rendered items for performance
     const displayedHosts = useMemo(() => {
@@ -383,13 +374,6 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
         onConvertToHost(knownHost);
     }, [onConvertToHost]);
 
-    // View/Sort handlers
-    const setGridView = useCallback(() => { setViewMode('grid'); setViewPopoverOpen(false); }, []);
-    const setListView = useCallback(() => { setViewMode('list'); setViewPopoverOpen(false); }, []);
-    const setSortNameAsc = useCallback(() => { setSortBy('name-asc'); setSortPopoverOpen(false); }, []);
-    const setSortNameDesc = useCallback(() => { setSortBy('name-desc'); setSortPopoverOpen(false); }, []);
-    const setSortNewest = useCallback(() => { setSortBy('newest'); setSortPopoverOpen(false); }, []);
-    const setSortOldest = useCallback(() => { setSortBy('oldest'); setSortPopoverOpen(false); }, []);
     const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
 
     // Memoize the rendered list to prevent re-renders
@@ -426,93 +410,37 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
                 </div>
                 <div className="flex items-center gap-1">
                     {/* View Mode Toggle */}
-                    <Popover open={viewPopoverOpen} onOpenChange={setViewPopoverOpen}>
-                        <PopoverTrigger asChild>
+                    <Dropdown>
+                        <DropdownTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-9 w-9">
-                                {viewMode === 'grid' ? <LayoutGrid size={16} /> : <List size={16} />}
+                                {viewMode === 'grid' ? <LayoutGrid size={16} /> : <ListIcon size={16} />}
+                                <ChevronDown size={10} className="ml-0.5" />
                             </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-36 p-1" align="end">
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors",
-                                    viewMode === 'grid' && "bg-secondary"
-                                )}
-                                onClick={setGridView}
+                        </DropdownTrigger>
+                        <DropdownContent className="w-32" align="end">
+                            <Button
+                                variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                                className="w-full justify-start gap-2 h-9"
+                                onClick={() => setViewMode('grid')}
                             >
-                                <LayoutGrid size={14} />
-                                Grid
-                                {viewMode === 'grid' && <Check size={14} className="ml-auto" />}
-                            </button>
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors",
-                                    viewMode === 'list' && "bg-secondary"
-                                )}
-                                onClick={setListView}
+                                <LayoutGrid size={14} /> Grid
+                            </Button>
+                            <Button
+                                variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                                className="w-full justify-start gap-2 h-9"
+                                onClick={() => setViewMode('list')}
                             >
-                                <List size={14} />
-                                List
-                                {viewMode === 'list' && <Check size={14} className="ml-auto" />}
-                            </button>
-                        </PopoverContent>
-                    </Popover>
+                                <ListIcon size={14} /> List
+                            </Button>
+                        </DropdownContent>
+                    </Dropdown>
 
                     {/* Sort Toggle */}
-                    <Popover open={sortPopoverOpen} onOpenChange={setSortPopoverOpen}>
-                        <PopoverTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-9 w-9">
-                                <Calendar size={16} />
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-48 p-1" align="end">
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors",
-                                    sortBy === 'name-asc' && "bg-secondary"
-                                )}
-                                onClick={setSortNameAsc}
-                            >
-                                <ArrowDownAZ size={14} />
-                                A-z
-                                {sortBy === 'name-asc' && <Check size={14} className="ml-auto" />}
-                            </button>
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors",
-                                    sortBy === 'name-desc' && "bg-secondary"
-                                )}
-                                onClick={setSortNameDesc}
-                            >
-                                <ArrowUpAZ size={14} />
-                                Z-a
-                                {sortBy === 'name-desc' && <Check size={14} className="ml-auto" />}
-                            </button>
-                            <div className="my-1 h-px bg-border" />
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors whitespace-nowrap",
-                                    sortBy === 'newest' && "bg-secondary"
-                                )}
-                                onClick={setSortNewest}
-                            >
-                                <Calendar size={14} className="flex-shrink-0" />
-                                Newest to oldest
-                                {sortBy === 'newest' && <Check size={14} className="ml-auto flex-shrink-0" />}
-                            </button>
-                            <button
-                                className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-secondary transition-colors whitespace-nowrap",
-                                    sortBy === 'oldest' && "bg-secondary"
-                                )}
-                                onClick={setSortOldest}
-                            >
-                                <Calendar size={14} className="flex-shrink-0" />
-                                Oldest to newest
-                                {sortBy === 'oldest' && <Check size={14} className="ml-auto flex-shrink-0" />}
-                            </button>
-                        </PopoverContent>
-                    </Popover>
+                    <SortDropdown
+                        value={sortMode}
+                        onChange={setSortMode}
+                        className="h-9 w-9"
+                    />
                 </div>
                 <div className="w-px h-5 bg-border/50" />
                 <div className="flex items-center gap-2">

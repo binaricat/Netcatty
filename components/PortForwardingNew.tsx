@@ -31,7 +31,8 @@ import { AsidePanel, AsidePanelContent, AsidePanelFooter, AsideActionMenu, Aside
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent } from './ui/card';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Dropdown, DropdownTrigger, DropdownContent } from './ui/dropdown';
+import { SortDropdown } from './ui/sort-dropdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
 import { ScrollArea } from './ui/scroll-area';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, ContextMenuSeparator } from './ui/context-menu';
@@ -78,13 +79,6 @@ const TYPE_ICONS: Record<PortForwardingType, React.ReactNode> = {
     local: <Globe size={16} />,
     remote: <Server size={16} />,
     dynamic: <Shuffle size={16} />,
-};
-
-const SORT_LABELS: Record<SortMode, { label: string; icon: React.ReactNode }> = {
-    az: { label: 'A-z', icon: <SortAsc size={14} /> },
-    za: { label: 'Z-a', icon: <SortDesc size={14} /> },
-    newest: { label: 'Newest to oldest', icon: <Calendar size={14} /> },
-    oldest: { label: 'Oldest to newest', icon: <CalendarClock size={14} /> },
 };
 
 const PortForwarding: React.FC<PortForwardingProps> = ({ hosts, keys, customGroups, onNewHost, onSaveHost, onCreateGroup }) => {
@@ -876,15 +870,15 @@ const PortForwarding: React.FC<PortForwardingProps> = ({ hosts, keys, customGrou
             <div className={cn("flex-1 flex flex-col min-h-0", (showWizard || showEditPanel || showNewForm) ? "mr-[360px]" : "")}>
                 {/* Toolbar */}
                 <div className="h-14 px-4 flex items-center gap-3 bg-secondary/60 border-b border-border/60 relative z-20">
-                    <Popover open={showNewMenu} onOpenChange={setShowNewMenu}>
-                        <PopoverTrigger asChild>
+                    <Dropdown open={showNewMenu} onOpenChange={setShowNewMenu}>
+                        <DropdownTrigger asChild>
                             <Button variant="secondary" className="h-9 px-3 gap-2">
                                 <Zap size={14} />
                                 NEW FORWARDING
                                 <ChevronDown size={14} className={cn("transition-transform", showNewMenu ? "rotate-180" : "")} />
                             </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-52 p-1 z-[9999]" align="start" sideOffset={8}>
+                        </DropdownTrigger>
+                        <DropdownContent className="w-52" align="start" sideOffset={8}>
                             <Button
                                 variant="ghost"
                                 className="w-full justify-start gap-3 h-10"
@@ -909,8 +903,8 @@ const PortForwarding: React.FC<PortForwardingProps> = ({ hosts, keys, customGrou
                                 <Shuffle size={16} className="text-purple-500" />
                                 Dynamic Forwarding
                             </Button>
-                        </PopoverContent>
-                    </Popover>
+                        </DropdownContent>
+                    </Dropdown>
 
                     <div className="ml-auto flex items-center gap-2">
                         <div className="relative">
@@ -924,14 +918,14 @@ const PortForwarding: React.FC<PortForwardingProps> = ({ hosts, keys, customGrou
                         </div>
 
                         {/* View mode toggle */}
-                        <Popover>
-                            <PopoverTrigger asChild>
+                        <Dropdown>
+                            <DropdownTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-9 w-9">
                                     {viewMode === 'grid' ? <LayoutGrid size={16} /> : <ListIcon size={16} />}
                                     <ChevronDown size={10} className="ml-0.5" />
                                 </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-32 p-1 z-50" align="end">
+                            </DropdownTrigger>
+                            <DropdownContent className="w-32" align="end">
                                 <Button
                                     variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
                                     className="w-full justify-start gap-2 h-9"
@@ -948,31 +942,15 @@ const PortForwarding: React.FC<PortForwardingProps> = ({ hosts, keys, customGrou
                                     <ListIcon size={14} /> List
                                     {viewMode === 'list' && <Check size={12} className="ml-auto" />}
                                 </Button>
-                            </PopoverContent>
-                        </Popover>
+                            </DropdownContent>
+                        </Dropdown>
 
                         {/* Sort mode toggle */}
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-9 w-9">
-                                    {SORT_LABELS[sortMode].icon}
-                                    <ChevronDown size={10} className="ml-0.5" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-44 p-1 z-50" align="end">
-                                {(Object.keys(SORT_LABELS) as SortMode[]).map(mode => (
-                                    <Button
-                                        key={mode}
-                                        variant={sortMode === mode ? 'secondary' : 'ghost'}
-                                        className="w-full justify-start gap-2 h-9"
-                                        onClick={() => setSortMode(mode)}
-                                    >
-                                        {SORT_LABELS[mode].icon} {SORT_LABELS[mode].label}
-                                        {sortMode === mode && <Check size={12} className="ml-auto" />}
-                                    </Button>
-                                ))}
-                            </PopoverContent>
-                        </Popover>
+                        <SortDropdown
+                            value={sortMode}
+                            onChange={setSortMode}
+                            className="h-9 w-9"
+                        />
                     </div>
                 </div>
 
