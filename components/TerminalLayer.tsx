@@ -1,9 +1,9 @@
-import { Circle,LayoutGrid,Server } from 'lucide-react';
-import React,{ memo,useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import { Circle, LayoutGrid, Server } from 'lucide-react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
 import { collectSessionIds } from '../domain/workspace';
 import { cn } from '../lib/utils';
-import { Host,KnownHost,SSHKey,Snippet,TerminalSession,TerminalTheme,Workspace,WorkspaceNode } from '../types';
+import { Host, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
 import { DistroAvatar } from './DistroAvatar';
 import Terminal from './Terminal';
 import { Button } from './ui/button';

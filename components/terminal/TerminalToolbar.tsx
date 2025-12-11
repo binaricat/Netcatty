@@ -2,11 +2,11 @@
  * Terminal Toolbar
  * Displays SFTP, Scripts, Theme buttons and close button in terminal status bar
  */
-import { FolderInput,X,Zap,Palette } from 'lucide-react';
+import { FolderInput, X, Zap, Palette } from 'lucide-react';
 import React, { useState } from 'react';
 import { Snippet, Host } from '../../types';
 import { Button } from '../ui/button';
-import { Popover,PopoverContent,PopoverTrigger } from '../ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { ScrollArea } from '../ui/scroll-area';
 import ThemeCustomizeModal from './ThemeCustomizeModal';
 
