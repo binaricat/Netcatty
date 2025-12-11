@@ -1178,7 +1178,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         <div
           ref={containerRef}
           className="absolute inset-x-0 bottom-0"
-          style={{ top: "40px", paddingLeft: "16px" }}
+          style={{ top: "40px", paddingLeft: "6px" }}
         />
         {error && (
           <div className="absolute bottom-3 left-3 text-xs text-destructive bg-background/80 border border-destructive/40 rounded px-3 py-2 shadow-lg">

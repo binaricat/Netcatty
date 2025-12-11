@@ -63,17 +63,17 @@ const WindowControls: React.FC = memo(() => {
   };
 
   return (
-    <div className="flex items-center app-no-drag">
+    <div className="flex items-center app-drag">
       <button
         onClick={handleMinimize}
-        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150"
+        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150 app-no-drag"
         title="Minimize"
       >
         <Minus size={16} />
       </button>
       <button
         onClick={handleMaximize}
-        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150"
+        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150 app-no-drag"
         title={isMaximized ? "Restore" : "Maximize"}
       >
         {isMaximized ? (
@@ -86,7 +86,7 @@ const WindowControls: React.FC = memo(() => {
       </button>
       <button
         onClick={handleClose}
-        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-all duration-150"
+        className="h-10 w-12 flex items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-all duration-150 app-no-drag"
         title="Close"
       >
         <X size={16} />
@@ -422,14 +422,29 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     });
   };
 
+  // Handle double-click on titlebar to maximize/restore window (Windows/Linux)
+  const handleTitleBarDoubleClick = useCallback((e: React.MouseEvent) => {
+    // Only handle double-click on the drag region itself, not on buttons/tabs
+    if ((e.target as HTMLElement).closest('.app-no-drag')) return;
+    if (!isMacClient) {
+      window.netcatty?.windowMaximize?.();
+    }
+  }, [isMacClient]);
+
   return (
-    <div className="w-full bg-secondary/90 border-b border-border/60 backdrop-blur app-drag">
+    <div 
+      className="relative w-full bg-secondary border-b border-border/60 app-drag"
+      style={{ WebkitAppRegion: 'drag', userSelect: 'none' }}
+      onDoubleClick={handleTitleBarDoubleClick}
+    >
+      {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
+      <div className="absolute inset-x-0 top-0 h-3 app-drag pointer-events-auto z-10" style={{ WebkitAppRegion: 'drag' }} aria-hidden />
       <div
-        className="h-10 px-3 flex items-center gap-2"
-        style={{ paddingLeft: isMacClient ? 76 : 12 }}
+        className="h-10 px-3 flex items-center gap-2 app-drag"
+        style={{ paddingLeft: isMacClient ? 76 : 12, WebkitAppRegion: 'drag' }}
       >
         {/* Fixed left tabs: Vaults and SFTP */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 app-drag">
           <div
             onClick={() => onSelectTab('vault')}
             className={cn(
@@ -451,7 +466,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         </div>
 
         {/* Scrollable tabs container with fade masks */}
-        <div className="relative min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1 app-drag" style={{ WebkitAppRegion: 'drag' }}>
           {/* Left fade mask */}
           {canScrollLeft && (
             <div
@@ -463,7 +478,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {/* Scrollable container */}
           <div
             ref={tabsContainerRef}
-            className="flex items-center gap-2 overflow-x-auto scrollbar-none"
+            className="flex items-center gap-2 overflow-x-auto scrollbar-none app-drag"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {renderOrderedTabs()}
@@ -479,6 +494,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 <Plus size={14} />
               </Button>
             )}
+            {/* Draggable spacer - fills remaining space */}
+            <div className="flex-1 min-w-[20px] app-drag" />
           </div>
 
           {/* Right fade mask */}
@@ -504,17 +521,17 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         )}
 
         {/* Fixed right controls */}
-        <div className="flex-shrink-0 flex items-center gap-2 app-no-drag">
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+        <div className="flex-shrink-0 flex items-center gap-2 app-drag" style={{ WebkitAppRegion: 'drag' }}>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground app-no-drag">
             <Bell size={16} />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground app-no-drag">
             <User size={16} />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground app-no-drag"
             onClick={onToggleTheme}
             title="Toggle theme"
           >
@@ -523,6 +540,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         </div>
         {/* Custom window controls for Windows/Linux */}
         {!isMacClient && <WindowControls />}
+        {/* Small drag shim to the right edge */}
+        <div className="w-2 h-10 app-drag flex-shrink-0" />
       </div>
     </div>
   );

@@ -594,9 +594,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       {/* Main Area */}
       <div className="flex-1 flex flex-col min-h-0 relative">
         {currentSection === "hosts" && (
-          <header className="border-b border-border/50 bg-secondary/80 backdrop-blur">
+          <header className="border-b border-border/50 bg-secondary/80 backdrop-blur app-drag">
             <div className="h-14 px-4 py-2 flex items-center gap-3">
-              <div className="relative flex-1">
+              <div className="relative flex-1 app-no-drag">
                 <Search
                   size={14}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -620,16 +620,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
               </div>
               <Button
                 variant={isSearchQuickConnect ? "default" : "secondary"}
-                className="h-10 px-4"
+                className="h-10 px-4 app-no-drag"
                 onClick={handleConnectClick}
               >
                 Connect
               </Button>
               {/* View mode, tag filter, and sort controls */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 app-no-drag">
                 <Dropdown>
                   <DropdownTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-10 w-10">
+                    <Button variant="ghost" size="icon" className="h-10 w-10 app-no-drag">
                       {viewMode === "grid" ? (
                         <LayoutGrid size={16} />
                       ) : (
@@ -670,12 +670,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 />
               </div>
               {/* New Host split button */}
-              <div className="flex items-center">
+              <div className="flex items-center app-no-drag">
                 <Dropdown>
                   <div className="flex items-center rounded-md bg-primary text-primary-foreground">
                     <Button
                       size="sm"
-                      className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
+                      className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none app-no-drag"
                       onClick={handleNewHost}
                     >
                       <Plus size={14} className="mr-2" /> New Host
@@ -683,7 +683,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                     <DropdownTrigger asChild>
                       <Button
                         size="sm"
-                        className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none"
+                        className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none app-no-drag"
                       >
                         <ChevronDown size={14} />
                       </Button>
