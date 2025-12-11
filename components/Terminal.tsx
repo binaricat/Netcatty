@@ -1,15 +1,26 @@
-import { FitAddon,Terminal as GhosttyTerminal,init as initGhostty } from 'ghostty-web';
-import { Maximize2 } from 'lucide-react';
-import React,{ memo,useEffect,useRef,useState } from 'react';
-import { cn } from '../lib/utils';
-import { Host,KnownHost,SSHKey,Snippet,TerminalSession,TerminalTheme } from '../types';
-import KnownHostConfirmDialog,{ HostKeyInfo } from './KnownHostConfirmDialog';
-import SFTPModal from './SFTPModal';
-import { Button } from './ui/button';
+import {
+  FitAddon,
+  Terminal as GhosttyTerminal,
+  init as initGhostty,
+} from "ghostty-web";
+import { Maximize2 } from "lucide-react";
+import React, { memo, useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
+import {
+  Host,
+  KnownHost,
+  SSHKey,
+  Snippet,
+  TerminalSession,
+  TerminalTheme,
+} from "../types";
+import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
+import SFTPModal from "./SFTPModal";
+import { Button } from "./ui/button";
 
 // Import terminal sub-components
-import { TerminalConnectionDialog } from './terminal/TerminalConnectionDialog';
-import { TerminalToolbar } from './terminal/TerminalToolbar';
+import { TerminalConnectionDialog } from "./terminal/TerminalConnectionDialog";
+import { TerminalToolbar } from "./terminal/TerminalToolbar";
 
 interface TerminalProps {
   host: Host;
@@ -25,14 +36,22 @@ interface TerminalProps {
   terminalTheme: TerminalTheme;
   sessionId: string;
   startupCommand?: string; // Command to run after connection (for snippet runner)
-  onStatusChange?: (sessionId: string, status: TerminalSession['status']) => void;
+  onStatusChange?: (
+    sessionId: string,
+    status: TerminalSession["status"],
+  ) => void;
   onSessionExit?: (sessionId: string) => void;
   onOsDetected?: (hostId: string, distro: string) => void;
   onCloseSession?: (sessionId: string) => void;
   onUpdateHost?: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void; // Callback to add host to known hosts
   onExpandToFocus?: () => void; // Callback to switch workspace to focus mode
-  onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void; // Callback when a command is executed
+  onCommandExecuted?: (
+    command: string,
+    hostId: string,
+    hostLabel: string,
+    sessionId: string,
+  ) => void; // Callback when a command is executed
 }
 
 let ghosttyInitialized = false;
@@ -78,10 +97,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const sessionRef = useRef<string | null>(null);
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false); // Track if startup command has been executed
-  const commandBufferRef = useRef<string>(''); // Buffer for tracking typed commands
+  const commandBufferRef = useRef<string>(""); // Buffer for tracking typed commands
 
   const [isScriptsOpen, setIsScriptsOpen] = useState(false);
-  const [status, setStatus] = useState<TerminalSession['status']>('connecting');
+  const [status, setStatus] = useState<TerminalSession["status"]>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [progressLogs, setProgressLogs] = useState<string[]>([]);
@@ -100,9 +119,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Auth dialog state for hosts without credentials
   const [needsAuth, setNeedsAuth] = useState(false);
   const [authRetryMessage, setAuthRetryMessage] = useState<string | null>(null); // Error message for auth retry
-  const [authUsername, setAuthUsername] = useState(host.username || 'root');
-  const [authMethod, setAuthMethod] = useState<'password' | 'key'>('password');
-  const [authPassword, setAuthPassword] = useState('');
+  const [authUsername, setAuthUsername] = useState(host.username || "root");
+  const [authMethod, setAuthMethod] = useState<"password" | "key">("password");
+  const [authPassword, setAuthPassword] = useState("");
   const [authKeyId, setAuthKeyId] = useState<string | null>(null);
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [saveCredentials, setSaveCredentials] = useState(true);
@@ -115,18 +134,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   } | null>(null);
 
   // Known host verification state
-  const [needsHostKeyVerification, setNeedsHostKeyVerification] = useState(false);
-  const [pendingHostKeyInfo, setPendingHostKeyInfo] = useState<HostKeyInfo | null>(null);
+  const [needsHostKeyVerification, setNeedsHostKeyVerification] =
+    useState(false);
+  const [pendingHostKeyInfo, setPendingHostKeyInfo] =
+    useState<HostKeyInfo | null>(null);
   const pendingConnectionRef = useRef<(() => void) | null>(null);
 
   // Resolve host chain to actual host objects
-  const resolvedChainHosts = host.hostChain?.hostIds
-    ?.map(id => allHosts.find(h => h.id === id))
-    .filter(Boolean) as Host[] || [];
+  const resolvedChainHosts =
+    (host.hostChain?.hostIds
+      ?.map((id) => allHosts.find((h) => h.id === id))
+      .filter(Boolean) as Host[]) || [];
 
-  const updateStatus = (next: TerminalSession['status']) => {
+  const updateStatus = (next: TerminalSession["status"]) => {
     setStatus(next);
-    hasConnectedRef.current = next === 'connected';
+    hasConnectedRef.current = next === "connected";
     onStatusChange?.(sessionId, next);
   };
 
@@ -159,16 +181,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     try {
       const res = await window.nebula.execCommand({
         hostname: host.hostname,
-        username: host.username || 'root',
+        username: host.username || "root",
         port: host.port || 22,
         password: host.password, // Always include for fallback
         privateKey: key?.privateKey,
-        command: 'cat /etc/os-release 2>/dev/null || uname -a',
+        command: "cat /etc/os-release 2>/dev/null || uname -a",
         timeout: 8000,
       });
-      const data = `${res.stdout || ''}\n${res.stderr || ''}`;
+      const data = `${res.stdout || ""}\n${res.stderr || ""}`;
       const idMatch = data.match(/ID=([\\w\\-]+)/i);
-      const distro = idMatch ? idMatch[1].replace(/"/g, '') : (data.split(/\\s+/)[0] || '').toLowerCase();
+      const distro = idMatch
+        ? idMatch[1].replace(/"/g, "")
+        : (data.split(/\\s+/)[0] || "").toLowerCase();
       if (distro) onOsDetected?.(host.id, distro);
     } catch (err) {
       console.warn("OS probe failed", err);
@@ -190,11 +214,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         if (disposed || !containerRef.current) return;
 
         const term = new GhosttyTerminal({
-          cursorBlink: false,  // Disable cursor blinking for better performance
+          cursorBlink: false, // Disable cursor blinking for better performance
           fontSize,
-          fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", "Menlo", "DejaVu Sans Mono", monospace',
-          scrollback: 5000,  // Reduced from default 10000 for better performance
-          smoothScrollDuration: 0,  // Disable smooth scrolling to reduce render overhead
+          fontFamily:
+            '"JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", "Menlo", "DejaVu Sans Mono", monospace',
+          scrollback: 5000, // Reduced from default 10000 for better performance
+          smoothScrollDuration: 0, // Disable smooth scrolling to reduce render overhead
           theme: {
             ...terminalTheme.colors,
             selectionBackground: terminalTheme.colors.selection,
@@ -216,28 +241,31 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             window.nebula.writeToSession(id, data);
 
             // Track command input for shell history
-            if (status === 'connected' && onCommandExecuted) {
+            if (status === "connected" && onCommandExecuted) {
               // Handle control characters
-              if (data === '\r' || data === '\n') {
+              if (data === "\r" || data === "\n") {
                 // Enter pressed - command submitted
                 const cmd = commandBufferRef.current.trim();
                 if (cmd) {
                   onCommandExecuted(cmd, host.id, host.label, sessionId);
                 }
-                commandBufferRef.current = '';
-              } else if (data === '\x7f' || data === '\b') {
+                commandBufferRef.current = "";
+              } else if (data === "\x7f" || data === "\b") {
                 // Backspace - remove last character
-                commandBufferRef.current = commandBufferRef.current.slice(0, -1);
-              } else if (data === '\x03') {
+                commandBufferRef.current = commandBufferRef.current.slice(
+                  0,
+                  -1,
+                );
+              } else if (data === "\x03") {
                 // Ctrl+C - clear buffer
-                commandBufferRef.current = '';
-              } else if (data === '\x15') {
+                commandBufferRef.current = "";
+              } else if (data === "\x15") {
                 // Ctrl+U - clear line
-                commandBufferRef.current = '';
+                commandBufferRef.current = "";
               } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
                 // Regular printable character
                 commandBufferRef.current += data;
-              } else if (data.length > 1 && !data.startsWith('\x1b')) {
+              } else if (data.length > 1 && !data.startsWith("\x1b")) {
                 // Pasted text (multiple chars, not escape sequence)
                 commandBufferRef.current += data;
               }
@@ -252,41 +280,41 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }
         });
 
-        if (host.protocol === 'local' || host.hostname === 'localhost') {
-          setStatus('connecting');
-          setProgressLogs(['Initializing local shell...']);
+        if (host.protocol === "local" || host.hostname === "localhost") {
+          setStatus("connecting");
+          setProgressLogs(["Initializing local shell..."]);
           await startLocal(term);
-        } else if (host.protocol === 'telnet') {
-          setStatus('connecting');
-          setProgressLogs(['Initializing Telnet connection...']);
+        } else if (host.protocol === "telnet") {
+          setStatus("connecting");
+          setProgressLogs(["Initializing Telnet connection..."]);
           await startTelnet(term);
         } else if (host.moshEnabled) {
-          setStatus('connecting');
-          setProgressLogs(['Initializing Mosh connection...']);
+          setStatus("connecting");
+          setProgressLogs(["Initializing Mosh connection..."]);
           await startMosh(term);
         } else {
           // SSH connection (default)
           // Check if host needs authentication info
-          const hasPassword = host.authMethod === 'password' && host.password;
-          const hasKey = host.authMethod === 'key' && host.identityFileId;
+          const hasPassword = host.authMethod === "password" && host.password;
+          const hasKey = host.authMethod === "key" && host.identityFileId;
           const hasPendingAuth = pendingAuthRef.current;
 
           if (!hasPassword && !hasKey && !hasPendingAuth && !host.username) {
             // No auth info available - show auth dialog without starting connection
             setNeedsAuth(true);
             // Keep status as disconnected - don't trigger timeout timer
-            setStatus('disconnected');
+            setStatus("disconnected");
             return;
           }
 
-          setStatus('connecting');
-          setProgressLogs(['Initializing secure channel...']);
+          setStatus("connecting");
+          setProgressLogs(["Initializing secure channel..."]);
           await startSSH(term);
         }
       } catch (err) {
         console.error("Failed to initialize terminal", err);
         setError(err instanceof Error ? err.message : String(err));
-        updateStatus('disconnected');
+        updateStatus("disconnected");
       }
     };
 
@@ -301,13 +329,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Connection timeline and timeout visuals
   useEffect(() => {
     // Don't run timeout timer when showing auth dialog (user is entering credentials)
-    if (status !== 'connecting' || needsAuth) return;
+    if (status !== "connecting" || needsAuth) return;
     const scripted = [
-      'Resolving host and keys...',
-      'Negotiating ciphers...',
-      'Exchanging keys...',
-      'Authenticating user...',
-      'Waiting for server greeting...',
+      "Resolving host and keys...",
+      "Negotiating ciphers...",
+      "Exchanging keys...",
+      "Authenticating user...",
+      "Waiting for server greeting...",
     ];
     let idx = 0;
     const stepTimer = setInterval(() => {
@@ -324,9 +352,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }, 1000);
 
     const timeout = setTimeout(() => {
-      setError('Connection timed out. Please try again.');
-      updateStatus('disconnected');
-      setProgressLogs((prev) => [...prev, 'Connection timed out.']);
+      setError("Connection timed out. Please try again.");
+      updateStatus("disconnected");
+      setProgressLogs((prev) => [...prev, "Connection timed out."]);
     }, CONNECTION_TIMEOUT);
 
     setProgressValue(5);
@@ -339,7 +367,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const increment = Math.max(1, remaining * 0.15);
         return Math.min(95, prev + increment);
       });
-    }, 200);  // Reduced from 100ms to 200ms to cut re-renders in half
+    }, 200); // Reduced from 100ms to 200ms to cut re-renders in half
 
     return () => {
       clearInterval(stepTimer);
@@ -384,11 +412,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     let cancelled = false;
     const waitForFonts = async () => {
       try {
-        if (!(document as any).fonts?.ready) return;
-        await (document as any).fonts.ready;
+        // FontFaceSet is available in modern browsers
+        const fontFaceSet = document.fonts as FontFaceSet | undefined;
+        if (!fontFaceSet?.ready) return;
+        await fontFaceSet.ready;
         if (cancelled) return;
 
-        const term = termRef.current as any;
+        const term = termRef.current as {
+          cols: number;
+          rows: number;
+          renderer?: { remeasureFont?: () => void };
+        } | null;
         const fitAddon = fitAddonRef.current;
         try {
           term?.renderer?.remeasureFont?.();
@@ -485,10 +519,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }, 250);
     };
 
-    window.addEventListener('resize', handler);
+    window.addEventListener("resize", handler);
     return () => {
       if (resizeTimeout) clearTimeout(resizeTimeout);
-      window.removeEventListener('resize', handler);
+      window.removeEventListener("resize", handler);
     };
   }, []);
 
@@ -502,15 +536,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!window.nebula?.startSSHSession) {
       setError("Native SSH bridge unavailable. Launch via Electron app.");
       term.writeln(
-        "\r\n[netcatty SSH bridge unavailable. Please run the desktop build to connect.]"
+        "\r\n[netcatty SSH bridge unavailable. Please run the desktop build to connect.]",
       );
-      updateStatus('disconnected');
+      updateStatus("disconnected");
       return;
     }
 
     // Use pending auth if available, otherwise use host config
     const pendingAuth = pendingAuthRef.current;
-    const effectiveUsername = pendingAuth?.username || host.username || 'root';
+    const effectiveUsername = pendingAuth?.username || host.username || "root";
     // Always include password if available for fallback authentication
     const effectivePassword = pendingAuth?.password || host.password;
     const effectiveKeyId = pendingAuth?.keyId || host.identityFileId;
@@ -520,23 +554,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       : undefined;
 
     // Prepare proxy configuration if set
-    const proxyConfig = host.proxyConfig ? {
-      type: host.proxyConfig.type,
-      host: host.proxyConfig.host,
-      port: host.proxyConfig.port,
-      username: host.proxyConfig.username,
-      password: host.proxyConfig.password,
-    } : undefined;
+    const proxyConfig = host.proxyConfig
+      ? {
+          type: host.proxyConfig.type,
+          host: host.proxyConfig.host,
+          port: host.proxyConfig.port,
+          username: host.proxyConfig.username,
+          password: host.proxyConfig.password,
+        }
+      : undefined;
 
     // Prepare jump host chain configuration
-    const jumpHosts = resolvedChainHosts.map(jumpHost => {
+    const jumpHosts = resolvedChainHosts.map((jumpHost) => {
       const jumpKey = jumpHost.identityFileId
-        ? keys.find(k => k.id === jumpHost.identityFileId)
+        ? keys.find((k) => k.id === jumpHost.identityFileId)
         : undefined;
       return {
         hostname: jumpHost.hostname,
         port: jumpHost.port || 22,
-        username: jumpHost.username || 'root',
+        username: jumpHost.username || "root",
         password: jumpHost.password, // Always include for fallback
         privateKey: jumpKey?.privateKey,
         label: jumpHost.label,
@@ -551,23 +587,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       setChainProgress({
         currentHop: 1,
         totalHops,
-        currentHostLabel: jumpHosts[0]?.label || jumpHosts[0]?.hostname || host.hostname,
+        currentHostLabel:
+          jumpHosts[0]?.label || jumpHosts[0]?.hostname || host.hostname,
       });
-      setProgressLogs(prev => [...prev, `Starting chain connection (${totalHops} hops)...`]);
+      setProgressLogs((prev) => [
+        ...prev,
+        `Starting chain connection (${totalHops} hops)...`,
+      ]);
 
       // Subscribe to chain progress events from IPC
       if (window.nebula?.onChainProgress) {
-        unsubscribeChainProgress = window.nebula.onChainProgress((hop, total, label, status) => {
-          setChainProgress({
-            currentHop: hop,
-            totalHops: total,
-            currentHostLabel: label,
-          });
-          setProgressLogs(prev => [...prev, `Chain ${hop} of ${total}: ${label} - ${status}`]);
-          // Update progress value based on chain hop
-          const hopProgress = (hop / total) * 80 + 10;
-          setProgressValue(Math.min(95, hopProgress));
-        });
+        unsubscribeChainProgress = window.nebula.onChainProgress(
+          (hop, total, label, status) => {
+            setChainProgress({
+              currentHop: hop,
+              totalHops: total,
+              currentHostLabel: label,
+            });
+            setProgressLogs((prev) => [
+              ...prev,
+              `Chain ${hop} of ${total}: ${label} - ${status}`,
+            ]);
+            // Update progress value based on chain hop
+            const hopProgress = (hop / total) * 80 + 10;
+            setProgressValue(Math.min(95, hopProgress));
+          },
+        );
       }
     }
 
@@ -585,10 +630,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         rows: term.rows,
         charset: host.charset,
         // Environment variables
-        env: host.environmentVariables?.reduce((acc, { name, value }) => {
-          if (name) acc[name] = value;
-          return acc;
-        }, {} as Record<string, string>),
+        env: host.environmentVariables?.reduce(
+          (acc, { name, value }) => {
+            if (name) acc[name] = value;
+            return acc;
+          },
+          {} as Record<string, string>,
+        ),
         // New: proxy and jump host configuration
         proxy: proxyConfig,
         jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
@@ -604,7 +652,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       disposeDataRef.current = window.nebula.onSessionData(id, (chunk) => {
         term.write(chunk);
         if (!hasConnectedRef.current) {
-          updateStatus('connected');
+          updateStatus("connected");
           setChainProgress(null); // Clear chain progress on connect
           // Trigger fit after connection to ensure proper terminal size
           setTimeout(() => {
@@ -613,7 +661,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 fitAddonRef.current.fit();
                 // Send updated size to remote
                 if (sessionRef.current && window.nebula?.resizeSession) {
-                  window.nebula.resizeSession(sessionRef.current, term.cols, term.rows);
+                  window.nebula.resizeSession(
+                    sessionRef.current,
+                    term.cols,
+                    term.rows,
+                  );
                 }
               } catch (err) {
                 console.warn("Post-connect fit failed", err);
@@ -624,10 +676,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       });
 
       disposeExitRef.current = window.nebula.onSessionExit(id, (evt) => {
-        updateStatus('disconnected');
+        updateStatus("disconnected");
         setChainProgress(null); // Clear chain progress on disconnect
         term.writeln(
-          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
+          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
         onSessionExit?.(sessionId);
       });
@@ -640,7 +692,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           if (sessionRef.current) {
             window.nebula?.writeToSession(
               sessionRef.current,
-              `${commandToRun}\r`
+              `${commandToRun}\r`,
             );
             // Track startup command execution in shell history
             if (onCommandExecuted) {
@@ -653,24 +705,30 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const message = err instanceof Error ? err.message : String(err);
 
       // Check if this is an authentication failure
-      const isAuthError = message.toLowerCase().includes('authentication') ||
-        message.toLowerCase().includes('auth') ||
-        message.toLowerCase().includes('password') ||
-        message.toLowerCase().includes('permission denied');
+      const isAuthError =
+        message.toLowerCase().includes("authentication") ||
+        message.toLowerCase().includes("auth") ||
+        message.toLowerCase().includes("password") ||
+        message.toLowerCase().includes("permission denied");
 
       if (isAuthError) {
         // Show auth dialog for password retry
         setError(null); // Clear error so we show auth dialog instead
         setNeedsAuth(true);
-        setAuthRetryMessage('Authentication failed. Please check your credentials and try again.');
-        setAuthPassword(''); // Clear password for re-entry
-        setProgressLogs(prev => [...prev, 'Authentication failed. Please try again.']);
+        setAuthRetryMessage(
+          "Authentication failed. Please check your credentials and try again.",
+        );
+        setAuthPassword(""); // Clear password for re-entry
+        setProgressLogs((prev) => [
+          ...prev,
+          "Authentication failed. Please try again.",
+        ]);
         // Stay in connecting state to show auth dialog
-        setStatus('connecting');
+        setStatus("connecting");
       } else {
         setError(message);
         term.writeln(`\r\n[Failed to start SSH: ${message}]`);
-        updateStatus('disconnected');
+        updateStatus("disconnected");
       }
 
       setChainProgress(null); // Clear chain progress on error
@@ -694,8 +752,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const startTelnetSession = window.nebula?.startTelnetSession;
     if (!startTelnetSession) {
       setError("Telnet bridge unavailable. Please run the desktop build.");
-      term.writeln("\r\n[Telnet bridge unavailable. Please run the desktop build.]");
-      updateStatus('disconnected');
+      term.writeln(
+        "\r\n[Telnet bridge unavailable. Please run the desktop build.]",
+      );
+      updateStatus("disconnected");
       return;
     }
 
@@ -707,10 +767,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         cols: term.cols,
         rows: term.rows,
         charset: host.charset,
-        env: host.environmentVariables?.reduce((acc, { name, value }) => {
-          if (name) acc[name] = value;
-          return acc;
-        }, {} as Record<string, string>),
+        env: host.environmentVariables?.reduce(
+          (acc, { name, value }) => {
+            if (name) acc[name] = value;
+            return acc;
+          },
+          {} as Record<string, string>,
+        ),
       });
 
       sessionRef.current = id;
@@ -718,13 +781,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       disposeDataRef.current = window.nebula?.onSessionData(id, (chunk) => {
         term.write(chunk);
         if (!hasConnectedRef.current) {
-          updateStatus('connected');
+          updateStatus("connected");
           setTimeout(() => {
             if (fitAddonRef.current) {
               try {
                 fitAddonRef.current.fit();
                 if (sessionRef.current && window.nebula?.resizeSession) {
-                  window.nebula.resizeSession(sessionRef.current, term.cols, term.rows);
+                  window.nebula.resizeSession(
+                    sessionRef.current,
+                    term.cols,
+                    term.rows,
+                  );
                 }
               } catch (err) {
                 console.warn("Post-connect fit failed", err);
@@ -735,9 +802,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       });
 
       disposeExitRef.current = window.nebula?.onSessionExit(id, (evt) => {
-        updateStatus('disconnected');
+        updateStatus("disconnected");
         term.writeln(
-          `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
+          `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
         onSessionExit?.(sessionId);
       });
@@ -745,7 +812,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       term.writeln(`\r\n[Failed to start Telnet: ${message}]`);
-      updateStatus('disconnected');
+      updateStatus("disconnected");
     }
   };
 
@@ -759,8 +826,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const startMoshSession = window.nebula?.startMoshSession;
     if (!startMoshSession) {
       setError("Mosh bridge unavailable. Please run the desktop build.");
-      term.writeln("\r\n[Mosh bridge unavailable. Please run the desktop build.]");
-      updateStatus('disconnected');
+      term.writeln(
+        "\r\n[Mosh bridge unavailable. Please run the desktop build.]",
+      );
+      updateStatus("disconnected");
       return;
     }
 
@@ -768,17 +837,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const id = await startMoshSession({
         sessionId,
         hostname: host.hostname,
-        username: host.username || 'root',
+        username: host.username || "root",
         port: host.port || 22,
         moshServerPath: host.moshServerPath,
         agentForwarding: host.agentForwarding,
         cols: term.cols,
         rows: term.rows,
         charset: host.charset,
-        env: host.environmentVariables?.reduce((acc, { name, value }) => {
-          if (name) acc[name] = value;
-          return acc;
-        }, {} as Record<string, string>),
+        env: host.environmentVariables?.reduce(
+          (acc, { name, value }) => {
+            if (name) acc[name] = value;
+            return acc;
+          },
+          {} as Record<string, string>,
+        ),
       });
 
       sessionRef.current = id;
@@ -786,13 +858,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       disposeDataRef.current = window.nebula?.onSessionData(id, (chunk) => {
         term.write(chunk);
         if (!hasConnectedRef.current) {
-          updateStatus('connected');
+          updateStatus("connected");
           setTimeout(() => {
             if (fitAddonRef.current) {
               try {
                 fitAddonRef.current.fit();
                 if (sessionRef.current && window.nebula?.resizeSession) {
-                  window.nebula.resizeSession(sessionRef.current, term.cols, term.rows);
+                  window.nebula.resizeSession(
+                    sessionRef.current,
+                    term.cols,
+                    term.rows,
+                  );
                 }
               } catch (err) {
                 console.warn("Post-connect fit failed", err);
@@ -803,9 +879,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       });
 
       disposeExitRef.current = window.nebula?.onSessionExit(id, (evt) => {
-        updateStatus('disconnected');
+        updateStatus("disconnected");
         term.writeln(
-          `\r\n[Mosh session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
+          `\r\n[Mosh session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
         onSessionExit?.(sessionId);
       });
@@ -816,7 +892,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         hasRunStartupCommandRef.current = true;
         setTimeout(() => {
           if (sessionRef.current) {
-            window.nebula?.writeToSession(sessionRef.current, `${commandToRun}\r`);
+            window.nebula?.writeToSession(
+              sessionRef.current,
+              `${commandToRun}\r`,
+            );
             if (onCommandExecuted) {
               onCommandExecuted(commandToRun, host.id, host.label, sessionId);
             }
@@ -827,7 +906,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       term.writeln(`\r\n[Failed to start Mosh: ${message}]`);
-      updateStatus('disconnected');
+      updateStatus("disconnected");
     }
   };
 
@@ -841,18 +920,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const startLocalSession = window.nebula?.startLocalSession;
     if (!startLocalSession) {
       setError("Local shell bridge unavailable. Please run the desktop build.");
-      term.writeln("\r\n[Local shell bridge unavailable. Please run the desktop build to spawn a local terminal.]");
-      updateStatus('disconnected');
+      term.writeln(
+        "\r\n[Local shell bridge unavailable. Please run the desktop build to spawn a local terminal.]",
+      );
+      updateStatus("disconnected");
       return;
     }
 
     try {
-      const id = await startLocalSession({ sessionId, cols: term.cols, rows: term.rows });
+      const id = await startLocalSession({
+        sessionId,
+        cols: term.cols,
+        rows: term.rows,
+      });
       sessionRef.current = id;
       disposeDataRef.current = window.nebula?.onSessionData(id, (chunk) => {
         term.write(chunk);
         if (!hasConnectedRef.current) {
-          updateStatus('connected');
+          updateStatus("connected");
           // Trigger fit after connection to ensure proper terminal size
           setTimeout(() => {
             if (fitAddonRef.current) {
@@ -860,7 +945,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 fitAddonRef.current.fit();
                 // Send updated size to remote
                 if (sessionRef.current && window.nebula?.resizeSession) {
-                  window.nebula.resizeSession(sessionRef.current, term.cols, term.rows);
+                  window.nebula.resizeSession(
+                    sessionRef.current,
+                    term.cols,
+                    term.rows,
+                  );
                 }
               } catch (err) {
                 console.warn("Post-connect fit failed", err);
@@ -870,9 +959,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       });
       disposeExitRef.current = window.nebula?.onSessionExit(id, (evt) => {
-        updateStatus('disconnected');
+        updateStatus("disconnected");
         term.writeln(
-          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`
+          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
         onSessionExit?.(sessionId);
       });
@@ -880,7 +969,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       term.writeln(`\r\n[Failed to start local shell: ${message}]`);
-      updateStatus('disconnected');
+      updateStatus("disconnected");
     }
   };
 
@@ -900,10 +989,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setAuthRetryMessage(null); // Clear auth retry message
     setNeedsHostKeyVerification(false);
     setPendingHostKeyInfo(null);
-    setError('Connection cancelled');
-    setProgressLogs((prev) => [...prev, 'Cancelled by user.']);
+    setError("Connection cancelled");
+    setProgressLogs((prev) => [...prev, "Cancelled by user."]);
     cleanupSession();
-    updateStatus('disconnected');
+    updateStatus("disconnected");
     setChainProgress(null); // Clear chain progress on cancel
     setTimeout(() => setIsCancelling(false), 600);
     onCloseSession?.(sessionId);
@@ -955,11 +1044,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setNeedsAuth(false);
     setAuthRetryMessage(null); // Clear auth retry message
     pendingAuthRef.current = null;
-    setStatus('connecting');
+    setStatus("connecting");
     setError(null);
-    setProgressLogs(['Retrying secure channel...']);
+    setProgressLogs(["Retrying secure channel..."]);
     setShowLogs(true);
-    if (host.protocol === 'local' || host.hostname === 'localhost') {
+    if (host.protocol === "local" || host.hostname === "localhost") {
       startLocal(termRef.current);
     } else {
       startSSH(termRef.current);
@@ -968,8 +1057,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const isAuthValid = () => {
     if (!authUsername.trim()) return false;
-    if (authMethod === 'password') return authPassword.trim().length > 0;
-    if (authMethod === 'key') return !!authKeyId;
+    if (authMethod === "password") return authPassword.trim().length > 0;
+    if (authMethod === "key") return !!authKeyId;
     return false;
   };
 
@@ -979,8 +1068,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Set pending auth credentials
     pendingAuthRef.current = {
       username: authUsername,
-      password: authMethod === 'password' ? authPassword : undefined,
-      keyId: authMethod === 'key' ? authKeyId ?? undefined : undefined,
+      password: authMethod === "password" ? authPassword : undefined,
+      keyId: authMethod === "key" ? (authKeyId ?? undefined) : undefined,
     };
 
     // Save credentials to host if requested
@@ -989,8 +1078,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         ...host,
         username: authUsername,
         authMethod: authMethod,
-        password: authMethod === 'password' ? authPassword : undefined,
-        identityFileId: authMethod === 'key' ? authKeyId ?? undefined : undefined,
+        password: authMethod === "password" ? authPassword : undefined,
+        identityFileId:
+          authMethod === "key" ? (authKeyId ?? undefined) : undefined,
       };
       onUpdateHost(updatedHost);
     }
@@ -998,8 +1088,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Hide auth dialog and start connection
     setNeedsAuth(false);
     setAuthRetryMessage(null); // Clear any previous auth error message
-    setStatus('connecting');
-    setProgressLogs(['Authenticating with provided credentials...']);
+    setStatus("connecting");
+    setProgressLogs(["Authenticating with provided credentials..."]);
 
     if (termRef.current) {
       // Clear terminal before connecting
@@ -1025,12 +1115,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     />
   );
 
-  const statusDotTone = status === 'connected'
-    ? "bg-emerald-400"
-    : status === 'connecting'
-      ? "bg-amber-400"
-      : "bg-rose-500";
-  const isConnecting = status === 'connecting';
+  const statusDotTone =
+    status === "connected"
+      ? "bg-emerald-400"
+      : status === "connecting"
+        ? "bg-amber-400"
+        : "bg-rose-500";
+  const isConnecting = status === "connecting";
   const hasError = Boolean(error);
 
   return (
@@ -1039,8 +1130,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       <div className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
         <div className="flex items-center gap-1 px-2 py-1 bg-black/55 text-white backdrop-blur-md pointer-events-auto min-w-0">
           <div className="flex-1 min-w-0 flex items-center gap-1 text-[11px] font-semibold">
-            <span className={cn("truncate", inWorkspace ? "max-w-[80px]" : "max-w-[200px]")}>{host.label}</span>
-            <span className={cn("inline-block h-2 w-2 rounded-full flex-shrink-0", statusDotTone)} />
+            <span
+              className={cn(
+                "truncate",
+                inWorkspace ? "max-w-[80px]" : "max-w-[200px]",
+              )}
+            >
+              {host.label}
+            </span>
+            <span
+              className={cn(
+                "inline-block h-2 w-2 rounded-full flex-shrink-0",
+                statusDotTone,
+              )}
+            />
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {/* Expand to focus mode button - only show in workspace split view mode */}
@@ -1064,7 +1167,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         className="h-full flex-1 min-w-0 transition-all duration-300 relative overflow-hidden pt-8"
         style={{ backgroundColor: terminalTheme.colors.background }}
       >
-        <div ref={containerRef} className="absolute inset-x-0 bottom-0" style={{ top: '40px', paddingLeft: '16px' }} />
+        <div
+          ref={containerRef}
+          className="absolute inset-x-0 bottom-0"
+          style={{ top: "40px", paddingLeft: "16px" }}
+        />
         {error && (
           <div className="absolute bottom-3 left-3 text-xs text-destructive bg-background/80 border border-destructive/40 rounded px-3 py-2 shadow-lg">
             {error}
@@ -1084,7 +1191,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           </div>
         )}
 
-        {status !== 'connected' && !needsHostKeyVerification && (
+        {status !== "connected" && !needsHostKeyVerification && (
           <TerminalConnectionDialog
             host={host}
             status={status}
@@ -1124,7 +1231,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             }}
           />
         )}
-
       </div>
 
       {/* SFTP Modal - rendered outside terminal container to avoid affecting terminal width */}
@@ -1136,10 +1242,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           port: host.port,
           password: host.password, // Always include for fallback
           privateKey: host.identityFileId
-            ? keys.find(k => k.id === host.identityFileId)?.privateKey
+            ? keys.find((k) => k.id === host.identityFileId)?.privateKey
             : undefined,
         }}
-        open={showSFTP && status === 'connected'}
+        open={showSFTP && status === "connected"}
         onClose={() => setShowSFTP(false)}
       />
     </div>
@@ -1148,6 +1254,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
 // Memoized Terminal - only re-renders when props change
 const Terminal = memo(TerminalComponent);
-Terminal.displayName = 'Terminal';
+Terminal.displayName = "Terminal";
 
 export default Terminal;

@@ -1,13 +1,30 @@
-import { Key,LayoutGrid,List as ListIcon,Pencil,Plus,Search,Shield,Trash2 } from 'lucide-react';
-import React,{ useMemo,useState } from 'react';
-import { cn } from '../lib/utils';
-import { SSHKey } from '../types';
-import { Button } from './ui/button';
-import { Card,CardDescription,CardTitle } from './ui/card';
-import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from './ui/dialog';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
+import {
+  Key,
+  LayoutGrid,
+  List as ListIcon,
+  Pencil,
+  Plus,
+  Search,
+  Shield,
+  Trash2,
+} from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { KeyType } from "../domain/models";
+import { cn } from "../lib/utils";
+import { SSHKey } from "../types";
+import { Button } from "./ui/button";
+import { Card, CardDescription, CardTitle } from "./ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
 
 interface KeyManagerProps {
   keys: SSHKey[];
@@ -17,22 +34,23 @@ interface KeyManagerProps {
 
 const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [panelMode, setPanelMode] = useState<'new' | 'edit'>('new');
+  const [panelMode, setPanelMode] = useState<"new" | "edit">("new");
   const [draftKey, setDraftKey] = useState<Partial<SSHKey>>({
-    id: '',
-    label: '',
-    type: 'RSA',
-    privateKey: '',
-    publicKey: '',
+    id: "",
+    label: "",
+    type: "RSA",
+    privateKey: "",
+    publicKey: "",
     created: Date.now(),
   });
   const [generateMode, setGenerateMode] = useState(false);
-  const [search, setSearch] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const handleGenerate = () => {
     // Simulate Key Generation
-    const mockKey = `-----BEGIN ${draftKey.type} PRIVATE KEY-----\n` +
+    const mockKey =
+      `-----BEGIN ${draftKey.type} PRIVATE KEY-----\n` +
       `MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC${Math.random().toString(36).substring(7)}\n` +
       `... (simulated generated content) ...\n` +
       `-----END ${draftKey.type} PRIVATE KEY-----`;
@@ -47,10 +65,12 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
     const payload: SSHKey = {
       id: draftKey.id || crypto.randomUUID(),
       label: draftKey.label,
-      type: (draftKey.type as any) || 'RSA',
+      type: (draftKey.type as KeyType) || "RSA",
       privateKey: draftKey.privateKey,
       publicKey: draftKey.publicKey?.trim() || undefined,
       created: draftKey.created || Date.now(),
+      source: draftKey.source || (generateMode ? "generated" : "imported"),
+      category: draftKey.category || "key",
     };
     onSave(payload);
     setIsDialogOpen(false);
@@ -58,21 +78,23 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
   };
 
   const openPanelForKey = (key: SSHKey) => {
-    setPanelMode('edit');
+    setPanelMode("edit");
     setDraftKey({ ...key });
     setIsDialogOpen(true);
     setGenerateMode(false);
   };
 
   const openPanelNew = (isGenerate = false) => {
-    setPanelMode('new');
+    setPanelMode("new");
     setGenerateMode(isGenerate);
     setDraftKey({
-      id: '',
-      label: '',
-      type: 'RSA',
-      privateKey: isGenerate ? 'Click generate to create a new key pair...' : '',
-      publicKey: '',
+      id: "",
+      label: "",
+      type: "RSA",
+      privateKey: isGenerate
+        ? "Click generate to create a new key pair..."
+        : "",
+      publicKey: "",
       created: Date.now(),
     });
     setIsDialogOpen(true);
@@ -82,26 +104,35 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
     onDelete(id);
     if (draftKey.id === id) {
       setIsDialogOpen(false);
-      setDraftKey({ id: '', label: '', type: 'RSA', privateKey: '', publicKey: '', created: Date.now() });
+      setDraftKey({
+        id: "",
+        label: "",
+        type: "RSA",
+        privateKey: "",
+        publicKey: "",
+        created: Date.now(),
+      });
     }
   };
 
   const filteredKeys = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return keys.filter(k => {
+    return keys.filter((k) => {
       if (!term) return true;
       return (
         k.label.toLowerCase().includes(term) ||
-        (k.type || '').toString().toLowerCase().includes(term)
+        (k.type || "").toString().toLowerCase().includes(term)
       );
     });
   }, [keys, search]);
 
   const derivedPublicKey = useMemo(() => {
     if (draftKey.publicKey) return draftKey.publicKey;
-    if (!draftKey.label) return 'Generated By netcatty';
-    return `ssh-${(draftKey.type || 'ed25519').toLowerCase()} AAAAC3NzaC1lZDI1NTE5AAAA${(draftKey.label || 'nebula')
-      .replace(/\s+/g, '')
+    if (!draftKey.label) return "Generated By netcatty";
+    return `ssh-${(draftKey.type || "ed25519").toLowerCase()} AAAAC3NzaC1lZDI1NTE5AAAA${(
+      draftKey.label || "nebula"
+    )
+      .replace(/\s+/g, "")
       .slice(0, 8)} Generated By netcatty`;
   }, [draftKey.label, draftKey.type, draftKey.publicKey]);
 
@@ -121,34 +152,41 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
         </Button>
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search keys..."
               className="h-9 pl-8 w-44 md:w-56"
             />
           </div>
           <Button
             size="icon"
-            variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+            variant={viewMode === "grid" ? "secondary" : "ghost"}
             className="h-9 w-9"
-            onClick={() => setViewMode('grid')}
+            onClick={() => setViewMode("grid")}
           >
             <LayoutGrid size={16} />
           </Button>
           <Button
             size="icon"
-            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+            variant={viewMode === "list" ? "secondary" : "ghost"}
             className="h-9 w-9"
-            onClick={() => setViewMode('list')}
+            onClick={() => setViewMode("list")}
           >
             <ListIcon size={16} />
           </Button>
           <Button size="sm" onClick={() => openPanelNew(false)}>
             <Plus size={14} className="mr-2" /> Import
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => openPanelNew(true)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => openPanelNew(true)}
+          >
             Generate
           </Button>
         </div>
@@ -156,7 +194,9 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
 
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-base font-semibold text-muted-foreground">Keys</h2>
+          <h2 className="text-base font-semibold text-muted-foreground">
+            Keys
+          </h2>
         </div>
 
         <div className="space-y-3">
@@ -165,20 +205,30 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
               <div className="h-16 w-16 rounded-2xl bg-secondary/80 flex items-center justify-center mb-4">
                 <Shield size={32} className="opacity-60" />
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">Set up your keys</h3>
+              <h3 className="text-lg font-semibold text-foreground mb-2">
+                Set up your keys
+              </h3>
               <p className="text-sm text-center max-w-sm">
                 Import or generate SSH keys for secure authentication.
               </p>
             </div>
           )}
 
-          <div className={viewMode === 'grid' ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "flex flex-col gap-0"}>
+          <div
+            className={
+              viewMode === "grid"
+                ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                : "flex flex-col gap-0"
+            }
+          >
             {filteredKeys.map((key) => (
               <Card
                 key={key.id}
                 className={cn(
                   "group cursor-pointer soft-card elevate rounded-xl",
-                  viewMode === 'grid' ? "h-[68px] px-3 py-2" : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
+                  viewMode === "grid"
+                    ? "h-[68px] px-3 py-2"
+                    : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                 )}
                 onClick={() => openPanelForKey(key)}
               >
@@ -187,11 +237,15 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
                     <Key size={16} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <CardTitle className="text-sm font-semibold truncate">{key.label}</CardTitle>
+                    <CardTitle className="text-sm font-semibold truncate">
+                      {key.label}
+                    </CardTitle>
                     <CardDescription className="text-[11px] font-mono text-muted-foreground truncate">
                       Type {key.type}
                     </CardDescription>
-                    <div className="text-[10px] text-muted-foreground/80 font-mono truncate">SHA256:{key.id.substring(0, 16)}...</div>
+                    <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
+                      SHA256:{key.id.substring(0, 16)}...
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button
@@ -227,9 +281,13 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{panelMode === 'new' ? 'New Key' : 'Edit Key'}</DialogTitle>
+            <DialogTitle>
+              {panelMode === "new" ? "New Key" : "Edit Key"}
+            </DialogTitle>
             <DialogDescription className="sr-only">
-              {panelMode === 'new' ? 'Create a new SSH key entry' : 'Edit the selected SSH key entry'}
+              {panelMode === "new"
+                ? "Create a new SSH key entry"
+                : "Edit the selected SSH key entry"}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -237,7 +295,9 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
               <Label>Label</Label>
               <Input
                 value={draftKey.label}
-                onChange={e => setDraftKey({ ...draftKey, label: e.target.value })}
+                onChange={(e) =>
+                  setDraftKey({ ...draftKey, label: e.target.value })
+                }
                 placeholder="Key label"
                 required
               />
@@ -247,13 +307,20 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
               <Label>Private key *</Label>
               <Textarea
                 value={draftKey.privateKey}
-                onChange={e => setDraftKey({ ...draftKey, privateKey: e.target.value })}
+                onChange={(e) =>
+                  setDraftKey({ ...draftKey, privateKey: e.target.value })
+                }
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                 className="min-h-[160px] font-mono text-xs"
                 required
               />
               {generateMode && (
-                <Button type="button" size="sm" variant="secondary" onClick={handleGenerate}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleGenerate}
+                >
                   Generate
                 </Button>
               )}
@@ -263,7 +330,9 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
               <Label>Public key</Label>
               <Textarea
                 value={derivedPublicKey}
-                onChange={e => setDraftKey({ ...draftKey, publicKey: e.target.value })}
+                onChange={(e) =>
+                  setDraftKey({ ...draftKey, publicKey: e.target.value })
+                }
                 placeholder="ssh-ed25519 AAAAC3... user@host"
                 className="min-h-[90px] font-mono text-xs"
               />
@@ -271,7 +340,10 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
 
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
-                Certificate <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Optional</span>
+                Certificate{" "}
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  Optional
+                </span>
               </Label>
               <Textarea
                 placeholder="Paste certificate..."
@@ -280,7 +352,9 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
             </div>
 
             <div className="border border-dashed border-border/80 rounded-xl p-4 text-center space-y-2 bg-background/60">
-              <div className="text-sm text-muted-foreground">Drag and drop a private key file to import</div>
+              <div className="text-sm text-muted-foreground">
+                Drag and drop a private key file to import
+              </div>
               <Button
                 type="button"
                 variant="secondary"
@@ -288,10 +362,10 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
                   // mock file import
                   setDraftKey({
                     ...draftKey,
-                    label: draftKey.label || 'Imported Key',
+                    label: draftKey.label || "Imported Key",
                     privateKey:
                       draftKey.privateKey ||
-                      '-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAC3NzaC1lZDI1NTE5AAAA\n-----END OPENSSH PRIVATE KEY-----',
+                      "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAC3NzaC1lZDI1NTE5AAAA\n-----END OPENSSH PRIVATE KEY-----",
                   });
                 }}
               >
@@ -300,7 +374,7 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
             </div>
 
             <DialogFooter>
-              {panelMode === 'edit' && draftKey.id && (
+              {panelMode === "edit" && draftKey.id && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -310,8 +384,16 @@ const KeyManager: React.FC<KeyManagerProps> = ({ keys, onSave, onDelete }) => {
                   Delete
                 </Button>
               )}
-              <Button type="button" variant="ghost" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-              <Button type="submit">{panelMode === 'new' ? 'Save Key' : 'Update Key'}</Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setIsDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">
+                {panelMode === "new" ? "Save Key" : "Update Key"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

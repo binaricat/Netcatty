@@ -1,10 +1,23 @@
-import { Folder,LayoutGrid,Search,Shield,Terminal,TerminalSquare } from 'lucide-react';
-import React,{ memo,useEffect,useRef,useState } from 'react';
-import { Host,TerminalSession,Workspace } from '../types';
-import { DistroAvatar } from './DistroAvatar';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { ScrollArea } from './ui/scroll-area';
+import {
+  Folder,
+  LayoutGrid,
+  Search,
+  Shield,
+  Terminal,
+  TerminalSquare,
+} from "lucide-react";
+import React, { memo, useEffect, useRef, useState } from "react";
+import { Host, TerminalSession, Workspace } from "../types";
+
+type QuickSwitcherItem = {
+  type: "host" | "tab" | "workspace" | "action";
+  id: string;
+  data?: Host | TerminalSession | Workspace;
+};
+import { DistroAvatar } from "./DistroAvatar";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { ScrollArea } from "./ui/scroll-area";
 
 interface QuickSwitcherProps {
   isOpen: boolean;
@@ -55,13 +68,16 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     if (!isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         onClose();
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -69,25 +85,33 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
   const showCategorized = isFocused || query.trim().length > 0;
 
   // Get orphan sessions (sessions without workspace)
-  const orphanSessions = sessions.filter(s => !s.workspaceId);
+  const orphanSessions = sessions.filter((s) => !s.workspaceId);
 
   // Build categorized items for navigation
   const buildFlatItems = () => {
-    const items: Array<{ type: 'host' | 'tab' | 'workspace' | 'action'; id: string; data?: any }> = [];
+    const items: QuickSwitcherItem[] = [];
 
     if (showCategorized) {
       // Hosts
-      results.forEach(host => items.push({ type: 'host', id: host.id, data: host }));
+      results.forEach((host) =>
+        items.push({ type: "host", id: host.id, data: host }),
+      );
       // Tabs (built-in + sessions + workspaces)
-      items.push({ type: 'tab', id: 'vault' });
-      items.push({ type: 'tab', id: 'sftp' });
-      orphanSessions.forEach(s => items.push({ type: 'tab', id: s.id, data: s }));
-      workspaces.forEach(w => items.push({ type: 'workspace', id: w.id, data: w }));
+      items.push({ type: "tab", id: "vault" });
+      items.push({ type: "tab", id: "sftp" });
+      orphanSessions.forEach((s) =>
+        items.push({ type: "tab", id: s.id, data: s }),
+      );
+      workspaces.forEach((w) =>
+        items.push({ type: "workspace", id: w.id, data: w }),
+      );
       // Quick connect actions
-      items.push({ type: 'action', id: 'local-terminal' });
+      items.push({ type: "action", id: "local-terminal" });
     } else {
       // Recent connections only
-      results.forEach(host => items.push({ type: 'host', id: host.id, data: host }));
+      results.forEach((host) =>
+        items.push({ type: "host", id: host.id, data: host }),
+      );
     }
 
     return items;
@@ -96,31 +120,31 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
   const flatItems = buildFlatItems();
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex(prev => Math.min(prev + 1, flatItems.length - 1));
-    } else if (e.key === 'ArrowUp') {
+      setSelectedIndex((prev) => Math.min(prev + 1, flatItems.length - 1));
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && flatItems.length > 0) {
+      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" && flatItems.length > 0) {
       e.preventDefault();
       const item = flatItems[selectedIndex];
       handleItemSelect(item);
     }
   };
 
-  const handleItemSelect = (item: { type: string; id: string; data?: any }) => {
+  const handleItemSelect = (item: QuickSwitcherItem) => {
     switch (item.type) {
-      case 'host':
-        onSelect(item.data);
+      case "host":
+        onSelect(item.data as Host);
         break;
-      case 'tab':
-      case 'workspace':
+      case "tab":
+      case "workspace":
         onSelectTab(item.id);
         onClose();
         break;
-      case 'action':
-        if (item.id === 'local-terminal' && onCreateLocalTerminal) {
+      case "action":
+        if (item.id === "local-terminal" && onCreateLocalTerminal) {
           onCreateLocalTerminal();
           onClose();
         }
@@ -130,38 +154,48 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
 
   // Helper to get item index in flat list
   const getItemIndex = (type: string, id: string) => {
-    return flatItems.findIndex(item => item.type === type && item.id === id);
+    return flatItems.findIndex((item) => item.type === type && item.id === id);
   };
 
   const renderHostItem = (host: Host) => {
-    const idx = getItemIndex('host', host.id);
+    const idx = getItemIndex("host", host.id);
     const isSelected = idx === selectedIndex;
 
     return (
       <div
         key={host.id}
-        className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-muted/50'
-          }`}
-        onClick={() => { onSelect(host); }}
+        className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
+          isSelected ? "bg-primary/15" : "hover:bg-muted/50"
+        }`}
+        onClick={() => {
+          onSelect(host);
+        }}
         onMouseEnter={() => setSelectedIndex(idx)}
       >
         <div className="flex items-center gap-3 min-w-0">
-          <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} size="sm" />
+          <DistroAvatar
+            host={host}
+            fallback={host.label.slice(0, 2).toUpperCase()}
+            size="sm"
+          />
           <span className="text-sm font-medium truncate">{host.label}</span>
         </div>
         <div className="text-[11px] text-muted-foreground">
-          {host.group ? `Personal / ${host.group}` : 'Personal'}
+          {host.group ? `Personal / ${host.group}` : "Personal"}
         </div>
       </div>
     );
   };
 
   return (
-    <div className="fixed inset-x-0 top-12 z-50 flex justify-center pt-2" style={{ pointerEvents: 'none' }}>
+    <div
+      className="fixed inset-x-0 top-12 z-50 flex justify-center pt-2"
+      style={{ pointerEvents: "none" }}
+    >
       <div
         ref={containerRef}
         className="w-full max-w-2xl mx-4 bg-background border border-border rounded-xl shadow-2xl overflow-hidden max-h-[520px] flex flex-col"
-        style={{ pointerEvents: 'auto' }}
+        style={{ pointerEvents: "auto" }}
       >
         {/* Search Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
@@ -169,7 +203,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
           <Input
             ref={inputRef}
             value={query}
-            onChange={e => {
+            onChange={(e) => {
               onQueryChange(e.target.value);
               setSelectedIndex(0);
             }}
@@ -178,7 +212,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
             placeholder="Search hosts or tabs"
             className="flex-1 h-8 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-0 text-sm"
           />
-          <kbd className="text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Ctrl+K</kbd>
+          <kbd className="text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            Ctrl+K
+          </kbd>
         </div>
 
         <ScrollArea className="flex-1 h-full">
@@ -186,7 +222,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
             /* Default view: Recent connections with header */
             <div>
               <div className="px-4 py-2 flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">Recent connections</span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  Recent connections
+                </span>
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
@@ -196,7 +234,12 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                   >
                     Create a workspace
                   </Button>
-                  <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" disabled>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    disabled
+                  >
                     Restore
                   </Button>
                 </div>
@@ -217,14 +260,18 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
               {/* Jump To hint */}
               <div className="px-4 py-2 flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Jump To</span>
-                <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">Ctrl+Shift+J</kbd>
+                <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">
+                  Ctrl+Shift+J
+                </kbd>
               </div>
 
               {/* Hosts section */}
               {results.length > 0 && (
                 <div>
                   <div className="px-4 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Hosts</span>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Hosts
+                    </span>
                   </div>
                   {results.map(renderHostItem)}
                 </div>
@@ -233,22 +280,33 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
               {/* Tabs section */}
               <div>
                 <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Tabs</span>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Tabs
+                  </span>
                 </div>
 
                 {/* Built-in tabs */}
-                {['vault', 'sftp'].map(tabId => {
-                  const idx = getItemIndex('tab', tabId);
+                {["vault", "sftp"].map((tabId) => {
+                  const idx = getItemIndex("tab", tabId);
                   const isSelected = idx === selectedIndex;
-                  const icon = tabId === 'vault' ? <Shield size={16} /> : <Folder size={16} />;
-                  const label = tabId === 'vault' ? 'Vaults' : 'SFTP';
+                  const icon =
+                    tabId === "vault" ? (
+                      <Shield size={16} />
+                    ) : (
+                      <Folder size={16} />
+                    );
+                  const label = tabId === "vault" ? "Vaults" : "SFTP";
 
                   return (
                     <div
                       key={tabId}
-                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-muted/50'
-                        }`}
-                      onClick={() => { onSelectTab(tabId); onClose(); }}
+                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                        isSelected ? "bg-primary/15" : "hover:bg-muted/50"
+                      }`}
+                      onClick={() => {
+                        onSelectTab(tabId);
+                        onClose();
+                      }}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >
                       <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
@@ -260,43 +318,55 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                 })}
 
                 {/* Workspaces */}
-                {workspaces.map(workspace => {
-                  const idx = getItemIndex('workspace', workspace.id);
+                {workspaces.map((workspace) => {
+                  const idx = getItemIndex("workspace", workspace.id);
                   const isSelected = idx === selectedIndex;
 
                   return (
                     <div
                       key={workspace.id}
-                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-muted/50'
-                        }`}
-                      onClick={() => { onSelectTab(workspace.id); onClose(); }}
+                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                        isSelected ? "bg-primary/15" : "hover:bg-muted/50"
+                      }`}
+                      onClick={() => {
+                        onSelectTab(workspace.id);
+                        onClose();
+                      }}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >
                       <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
                         <LayoutGrid size={16} />
                       </div>
-                      <span className="text-sm font-medium">{workspace.title}</span>
+                      <span className="text-sm font-medium">
+                        {workspace.title}
+                      </span>
                     </div>
                   );
                 })}
 
                 {/* Orphan sessions */}
-                {orphanSessions.map(session => {
-                  const idx = getItemIndex('tab', session.id);
+                {orphanSessions.map((session) => {
+                  const idx = getItemIndex("tab", session.id);
                   const isSelected = idx === selectedIndex;
 
                   return (
                     <div
                       key={session.id}
-                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-muted/50'
-                        }`}
-                      onClick={() => { onSelectTab(session.id); onClose(); }}
+                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                        isSelected ? "bg-primary/15" : "hover:bg-muted/50"
+                      }`}
+                      onClick={() => {
+                        onSelectTab(session.id);
+                        onClose();
+                      }}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >
                       <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
                         <TerminalSquare size={16} />
                       </div>
-                      <span className="text-sm font-medium">{session.hostLabel}</span>
+                      <span className="text-sm font-medium">
+                        {session.hostLabel}
+                      </span>
                     </div>
                   );
                 })}
@@ -305,16 +375,26 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
               {/* Quick connect section */}
               <div>
                 <div className="px-4 py-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Quick connect</span>
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Quick connect
+                  </span>
                 </div>
 
                 {/* Local Terminal */}
                 {onCreateLocalTerminal && (
                   <div
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${getItemIndex('action', 'local-terminal') === selectedIndex ? 'bg-primary/15' : 'hover:bg-muted/50'
-                      }`}
-                    onClick={() => { onCreateLocalTerminal(); onClose(); }}
-                    onMouseEnter={() => setSelectedIndex(getItemIndex('action', 'local-terminal'))}
+                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                      getItemIndex("action", "local-terminal") === selectedIndex
+                        ? "bg-primary/15"
+                        : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => {
+                      onCreateLocalTerminal();
+                      onClose();
+                    }}
+                    onMouseEnter={() =>
+                      setSelectedIndex(getItemIndex("action", "local-terminal"))
+                    }
                   >
                     <div className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground">
                       <Terminal size={16} />
@@ -334,4 +414,4 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
 };
 
 export const QuickSwitcher = memo(QuickSwitcherInner);
-QuickSwitcher.displayName = 'QuickSwitcher';
+QuickSwitcher.displayName = "QuickSwitcher";

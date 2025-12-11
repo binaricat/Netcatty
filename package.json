@@ -5,7 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"npm:dev:electron\"",
+    "dev": "npm run lint && concurrently -k \"vite\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
     "build": "vite build",
     "preview": "vite preview",

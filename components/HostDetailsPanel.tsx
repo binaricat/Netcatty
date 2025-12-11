@@ -1,25 +1,52 @@
-import { Check,Fingerprint,FolderPlus,Globe,Key,Link2,Plus,Shield,Tag,TerminalSquare,Variable,X } from "lucide-react";
-import React,{ useEffect,useMemo,useState } from "react";
+import {
+  Check,
+  Fingerprint,
+  FolderPlus,
+  Globe,
+  Key,
+  Link2,
+  Plus,
+  Shield,
+  Tag,
+  TerminalSquare,
+  Variable,
+  X,
+} from "lucide-react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
 import { cn } from "../lib/utils";
-import { EnvVar,Host,ProxyConfig,SSHKey } from "../types";
+import { EnvVar, Host, ProxyConfig, SSHKey } from "../types";
 import { DistroAvatar } from "./DistroAvatar";
 import ThemeSelectPanel from "./ThemeSelectPanel";
-import { AsidePanel,AsidePanelContent,AsidePanelFooter } from "./ui/aside-panel";
+import {
+  AsidePanel,
+  AsidePanelContent,
+  AsidePanelFooter,
+} from "./ui/aside-panel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
-import { Combobox,ComboboxOption,MultiCombobox } from "./ui/combobox";
+import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
-import { Popover,PopoverContent,PopoverTrigger } from "./ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 // Import host-details sub-panels
-import { ChainPanel,CreateGroupPanel,EnvVarsPanel,ProxyPanel } from "./host-details";
+import {
+  ChainPanel,
+  CreateGroupPanel,
+  EnvVarsPanel,
+  ProxyPanel,
+} from "./host-details";
 
-type Protocol = "ssh" | "telnet";
-type AuthMethod = "password" | "key" | "certificate" | "fido2";
 type CredentialType = "sshid" | "key" | "certificate" | "fido2" | null;
-type SubPanel = "none" | "create-group" | "proxy" | "chain" | "env-vars" | "theme-select" | "telnet-theme-select";
+type SubPanel =
+  | "none"
+  | "create-group"
+  | "proxy"
+  | "chain"
+  | "env-vars"
+  | "theme-select"
+  | "telnet-theme-select";
 
 interface HostDetailsPanelProps {
   initialData?: Host | null;
@@ -42,30 +69,35 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   onSave,
   onCancel,
   onCreateGroup,
-  onCreateTag
+  onCreateTag,
 }) => {
-  const [form, setForm] = useState<Host>(() => initialData || ({
-    id: crypto.randomUUID(),
-    label: "",
-    hostname: "",
-    port: 22,
-    username: "root",
-    protocol: "ssh",
-    tags: [],
-    os: "linux",
-    agentForwarding: false,
-    authMethod: "password",
-    charset: "UTF-8",
-    theme: "Flexoki Dark",
-    createdAt: Date.now()
-  } as Host));
+  const [form, setForm] = useState<Host>(
+    () =>
+      initialData ||
+      ({
+        id: crypto.randomUUID(),
+        label: "",
+        hostname: "",
+        port: 22,
+        username: "root",
+        protocol: "ssh",
+        tags: [],
+        os: "linux",
+        agentForwarding: false,
+        authMethod: "password",
+        charset: "UTF-8",
+        theme: "Flexoki Dark",
+        createdAt: Date.now(),
+      } as Host),
+  );
 
   // Sub-panel state
   const [activeSubPanel, setActiveSubPanel] = useState<SubPanel>("none");
 
   // Credential selection state
   const [credentialPopoverOpen, setCredentialPopoverOpen] = useState(false);
-  const [selectedCredentialType, setSelectedCredentialType] = useState<CredentialType>(null);
+  const [selectedCredentialType, setSelectedCredentialType] =
+    useState<CredentialType>(null);
 
   // New group creation state
   const [newGroupName, setNewGroupName] = useState("");
@@ -73,35 +105,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 
   // Group input state for inline creation suggestion
   const [groupInputValue, setGroupInputValue] = useState(form.group || "");
-  const [showCreateGroupSuggestion, setShowCreateGroupSuggestion] = useState(false);
-
-  // Tag input state
-  const [tagInputValue, setTagInputValue] = useState("");
-  const [showTagInput, setShowTagInput] = useState(false);
-
-  const handleAddTag = () => {
-    const tag = tagInputValue.trim();
-    if (tag && !form.tags?.includes(tag)) {
-      update("tags", [...(form.tags || []), tag]);
-      setTagInputValue("");
-    }
-  };
-
-  const handleRemoveTag = (tagToRemove: string) => {
-    update("tags", (form.tags || []).filter(t => t !== tagToRemove));
-  };
-
-  const handleTagKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleAddTag();
-    } else if (e.key === 'Escape') {
-      setShowTagInput(false);
-      setTagInputValue("");
-    }
-  };
-
-  const tagsInput = useMemo(() => form.tags?.join(", "), [form.tags]);
 
   // Check if the entered group is new (doesn't exist)
   const isNewGroup = useMemo(() => {
@@ -113,9 +116,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     if (initialData) {
       // Ensure telnetEnabled is set when protocol is telnet
       const updatedData = { ...initialData };
-      if (initialData.protocol === 'telnet' && !initialData.telnetEnabled) {
+      if (initialData.protocol === "telnet" && !initialData.telnetEnabled) {
         updatedData.telnetEnabled = true;
-        updatedData.telnetPort = initialData.telnetPort || initialData.port || 23;
+        updatedData.telnetPort =
+          initialData.telnetPort || initialData.port || 23;
       }
       setForm(updatedData);
       setGroupInputValue(initialData.group || "");
@@ -126,32 +130,35 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const updateProxyConfig = (field: keyof ProxyConfig, value: string | number) => {
-    setForm((prev) => ({
-      ...prev,
-      proxyConfig: {
-        type: prev.proxyConfig?.type || 'http',
-        host: prev.proxyConfig?.host || '',
-        port: prev.proxyConfig?.port || 8080,
-        ...prev.proxyConfig,
-        [field]: value
-      }
-    }));
-  };
+  const updateProxyConfig = useCallback(
+    (field: keyof ProxyConfig, value: string | number) => {
+      setForm((prev) => ({
+        ...prev,
+        proxyConfig: {
+          type: prev.proxyConfig?.type || "http",
+          host: prev.proxyConfig?.host || "",
+          port: prev.proxyConfig?.port || 8080,
+          ...prev.proxyConfig,
+          [field]: value,
+        },
+      }));
+    },
+    [],
+  );
 
-  const clearProxyConfig = () => {
+  const clearProxyConfig = useCallback(() => {
     setForm((prev) => {
-      const { proxyConfig, ...rest } = prev;
+      const { proxyConfig: _proxyConfig, ...rest } = prev;
       return rest as Host;
     });
-  };
+  }, []);
 
   const addHostToChain = (hostId: string) => {
     setForm((prev) => ({
       ...prev,
       hostChain: {
-        hostIds: [...(prev.hostChain?.hostIds || []), hostId]
-      }
+        hostIds: [...(prev.hostChain?.hostIds || []), hostId],
+      },
     }));
   };
 
@@ -159,17 +166,17 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     setForm((prev) => ({
       ...prev,
       hostChain: {
-        hostIds: (prev.hostChain?.hostIds || []).filter((_, i) => i !== index)
-      }
+        hostIds: (prev.hostChain?.hostIds || []).filter((_, i) => i !== index),
+      },
     }));
   };
 
-  const clearHostChain = () => {
+  const clearHostChain = useCallback(() => {
     setForm((prev) => {
-      const { hostChain, ...rest } = prev;
+      const { hostChain: _hostChain, ...rest } = prev;
       return rest as Host;
     });
-  };
+  }, []);
 
   // Environment variables state
   const [newEnvName, setNewEnvName] = useState("");
@@ -180,7 +187,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     const newVar: EnvVar = { name: newEnvName.trim(), value: newEnvValue };
     setForm((prev) => ({
       ...prev,
-      environmentVariables: [...(prev.environmentVariables || []), newVar]
+      environmentVariables: [...(prev.environmentVariables || []), newVar],
     }));
     setNewEnvName("");
     setNewEnvValue("");
@@ -189,7 +196,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   const removeEnvVar = (index: number) => {
     setForm((prev) => ({
       ...prev,
-      environmentVariables: (prev.environmentVariables || []).filter((_, i) => i !== index)
+      environmentVariables: (prev.environmentVariables || []).filter(
+        (_, i) => i !== index,
+      ),
     }));
   };
 
@@ -206,7 +215,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 
   const handleCreateGroup = () => {
     if (!newGroupName.trim()) return;
-    const fullPath = newGroupParent ? `${newGroupParent}/${newGroupName.trim()}` : newGroupName.trim();
+    const fullPath = newGroupParent
+      ? `${newGroupParent}/${newGroupName.trim()}`
+      : newGroupName.trim();
     onCreateGroup?.(fullPath);
     setGroupInputValue(fullPath);
     update("group", fullPath);
@@ -215,63 +226,41 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     setActiveSubPanel("none");
   };
 
-  const handleGroupInputChange = (value: string) => {
-    setGroupInputValue(value);
-    update("group", value);
-    setShowCreateGroupSuggestion(true);
-  };
-
-  const handleCreateGroupFromInput = () => {
-    if (!isNewGroup) return;
-    // Open the create group sub-panel with the current input pre-filled
-    setNewGroupName(groupInputValue.trim());
-    setActiveSubPanel("create-group");
-    setShowCreateGroupSuggestion(false);
-  };
-
-  const setTelnetDefaults = () => {
-    setForm((prev) => ({
-      ...prev,
-      protocol: "telnet",
-      port: prev.port || 23,
-      authMethod: "password",
-      identityFileId: "",
-    }));
-  };
-
   // Get available hosts for chain (exclude current host)
   const availableHostsForChain = useMemo(() => {
     const chainedIds = new Set(form.hostChain?.hostIds || []);
-    return allHosts.filter(h => h.id !== form.id && !chainedIds.has(h.id));
+    return allHosts.filter((h) => h.id !== form.id && !chainedIds.has(h.id));
   }, [allHosts, form.id, form.hostChain?.hostIds]);
 
   // Get hosts in chain
   const chainedHosts = useMemo(() => {
     const ids = form.hostChain?.hostIds || [];
-    return ids.map(id => allHosts.find(h => h.id === id)).filter(Boolean) as Host[];
+    return ids
+      .map((id) => allHosts.find((h) => h.id === id))
+      .filter(Boolean) as Host[];
   }, [allHosts, form.hostChain?.hostIds]);
 
   // Compute group options for Combobox
   const groupOptions: ComboboxOption[] = useMemo(() => {
-    return groups.map(g => ({
+    return groups.map((g) => ({
       value: g,
-      label: g.includes('/') ? g.split('/').pop()! : g,
-      sublabel: g.includes('/') ? g : undefined,
+      label: g.includes("/") ? g.split("/").pop()! : g,
+      sublabel: g.includes("/") ? g : undefined,
     }));
   }, [groups]);
 
   // Compute tag options for MultiCombobox
   const tagOptions: ComboboxOption[] = useMemo(() => {
     const allTagSet = new Set([...allTags, ...(form.tags || [])]);
-    return Array.from(allTagSet).map(t => ({ value: t, label: t }));
+    return Array.from(allTagSet).map((t) => ({ value: t, label: t }));
   }, [allTags, form.tags]);
 
   // Available keys by category
   const keysByCategory = useMemo(() => {
     return {
-      key: availableKeys.filter(k => k.category === 'key'),
-      certificate: availableKeys.filter(k => k.category === 'certificate'),
-      identity: availableKeys.filter(k => k.category === 'identity'),
+      key: availableKeys.filter((k) => k.category === "key"),
+      certificate: availableKeys.filter((k) => k.category === "certificate"),
+      identity: availableKeys.filter((k) => k.category === "identity"),
     };
   }, [availableKeys]);
 
@@ -336,7 +325,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onUpdateEnvVar={(index, field, value) => {
           const newVars = [...(form.environmentVariables || [])];
           newVars[index] = { ...newVars[index], [field]: value };
-          setForm(prev => ({ ...prev, environmentVariables: newVars }));
+          setForm((prev) => ({ ...prev, environmentVariables: newVars }));
         }}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
@@ -349,7 +338,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     return (
       <ThemeSelectPanel
         open={true}
-        selectedThemeId={form.theme || 'flexoki-dark'}
+        selectedThemeId={form.theme || "flexoki-dark"}
         onSelect={(themeId) => {
           update("theme", themeId);
           setActiveSubPanel("none");
@@ -366,22 +355,33 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     return (
       <ThemeSelectPanel
         open={true}
-        selectedThemeId={form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'}
+        selectedThemeId={
+          form.protocols?.find((p) => p.protocol === "telnet")?.theme ||
+          form.theme ||
+          "flexoki-dark"
+        }
         onSelect={(themeId) => {
           // Update telnet protocol theme
-          const telnetConfig = form.protocols?.find(p => p.protocol === 'telnet');
+          const telnetConfig = form.protocols?.find(
+            (p) => p.protocol === "telnet",
+          );
           if (telnetConfig) {
-            const newProtocols = form.protocols?.map(p =>
-              p.protocol === 'telnet' ? { ...p, theme: themeId } : p
+            const newProtocols = form.protocols?.map((p) =>
+              p.protocol === "telnet" ? { ...p, theme: themeId } : p,
             );
-            setForm(prev => ({ ...prev, protocols: newProtocols }));
+            setForm((prev) => ({ ...prev, protocols: newProtocols }));
           } else {
             // Create new telnet protocol config with theme
             const newProtocols = [
               ...(form.protocols || []),
-              { protocol: 'telnet' as const, port: form.telnetPort || 23, enabled: true, theme: themeId }
+              {
+                protocol: "telnet" as const,
+                port: form.telnetPort || 23,
+                enabled: true,
+                theme: themeId,
+              },
             ];
-            setForm(prev => ({ ...prev, protocols: newProtocols }));
+            setForm((prev) => ({ ...prev, protocols: newProtocols }));
           }
           setActiveSubPanel("none");
         }}
@@ -417,7 +417,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           <div className="flex items-center gap-2">
             <DistroAvatar
               host={form as Host}
-              fallback={form.label?.slice(0, 2).toUpperCase() || form.hostname?.slice(0, 2).toUpperCase() || "H"}
+              fallback={
+                form.label?.slice(0, 2).toUpperCase() ||
+                form.hostname?.slice(0, 2).toUpperCase() ||
+                "H"
+              }
               className="h-10 w-10"
             />
             <Input
@@ -500,16 +504,32 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             <div
               className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
               style={{
-                backgroundColor: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.background || '#100F0F',
-                color: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.foreground || '#CECDC3'
+                backgroundColor:
+                  TERMINAL_THEMES.find(
+                    (t) => t.id === (form.theme || "flexoki-dark"),
+                  )?.colors.background || "#100F0F",
+                color:
+                  TERMINAL_THEMES.find(
+                    (t) => t.id === (form.theme || "flexoki-dark"),
+                  )?.colors.foreground || "#CECDC3",
               }}
             >
               <div className="p-0.5">
-                <div style={{ color: TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.colors.green }}>$</div>
+                <div
+                  style={{
+                    color: TERMINAL_THEMES.find(
+                      (t) => t.id === (form.theme || "flexoki-dark"),
+                    )?.colors.green,
+                  }}
+                >
+                  $
+                </div>
               </div>
             </div>
             <span className="text-sm flex-1">
-              {TERMINAL_THEMES.find(t => t.id === (form.theme || 'flexoki-dark'))?.name || 'Flexoki Dark'}
+              {TERMINAL_THEMES.find(
+                (t) => t.id === (form.theme || "flexoki-dark"),
+              )?.name || "Flexoki Dark"}
             </span>
           </button>
 
@@ -524,15 +544,27 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         <Card className="p-3 space-y-3 bg-card border-border/80">
           <p className="text-xs font-semibold">Credentials</p>
           <div className="grid gap-2">
-            <Input placeholder="Username" value={form.username} onChange={(e) => update("username", e.target.value)} className="h-10" />
-            <Input placeholder="Password" type="password" value={form.password || ""} onChange={(e) => update("password", e.target.value)} className="h-10" />
+            <Input
+              placeholder="Username"
+              value={form.username}
+              onChange={(e) => update("username", e.target.value)}
+              className="h-10"
+            />
+            <Input
+              placeholder="Password"
+              type="password"
+              value={form.password || ""}
+              onChange={(e) => update("password", e.target.value)}
+              className="h-10"
+            />
 
             {/* Selected credential display */}
             {form.identityFileId && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                 <Key size={14} className="text-primary" />
                 <span className="text-sm flex-1 truncate">
-                  {availableKeys.find(k => k.id === form.identityFileId)?.label || "Key"}
+                  {availableKeys.find((k) => k.id === form.identityFileId)
+                    ?.label || "Key"}
                 </span>
                 <Button
                   variant="ghost"
@@ -568,74 +600,82 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             )}
 
             {/* Credential type selection with inline popover - hidden when credential is selected */}
-            {!form.identityFileId && form.authMethod !== "fido2" && !selectedCredentialType && (
-              <Popover open={credentialPopoverOpen} onOpenChange={setCredentialPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-                  >
-                    <Plus size={12} />
-                    <span>Key, Certificate, FIDO2</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="w-[200px] p-1"
-                  align="start"
-                  sideOffset={4}
+            {!form.identityFileId &&
+              form.authMethod !== "fido2" &&
+              !selectedCredentialType && (
+                <Popover
+                  open={credentialPopoverOpen}
+                  onOpenChange={setCredentialPopoverOpen}
                 >
-                  <div className="space-y-0.5">
+                  <PopoverTrigger asChild>
                     <button
                       type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                      onClick={() => {
-                        setSelectedCredentialType("key");
-                        setCredentialPopoverOpen(false);
-                      }}
+                      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
                     >
-                      <Key size={16} className="text-muted-foreground" />
-                      <span className="text-sm font-medium">Key</span>
+                      <Plus size={12} />
+                      <span>Key, Certificate, FIDO2</span>
                     </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-[200px] p-1"
+                    align="start"
+                    sideOffset={4}
+                  >
+                    <div className="space-y-0.5">
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          setSelectedCredentialType("key");
+                          setCredentialPopoverOpen(false);
+                        }}
+                      >
+                        <Key size={16} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">Key</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                      onClick={() => {
-                        setSelectedCredentialType("certificate");
-                        setCredentialPopoverOpen(false);
-                      }}
-                    >
-                      <Shield size={16} className="text-muted-foreground" />
-                      <span className="text-sm font-medium">Certificate</span>
-                    </button>
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          setSelectedCredentialType("certificate");
+                          setCredentialPopoverOpen(false);
+                        }}
+                      >
+                        <Shield size={16} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">Certificate</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-                      onClick={() => {
-                        update("authMethod", "fido2");
-                        update("identityFileId", undefined);
-                        setCredentialPopoverOpen(false);
-                        setSelectedCredentialType(null);
-                      }}
-                    >
-                      <Fingerprint size={16} className="text-muted-foreground" />
-                      <span className="text-sm font-medium">FIDO2</span>
-                    </button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            )}
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          update("authMethod", "fido2");
+                          update("identityFileId", undefined);
+                          setCredentialPopoverOpen(false);
+                          setSelectedCredentialType(null);
+                        }}
+                      >
+                        <Fingerprint
+                          size={16}
+                          className="text-muted-foreground"
+                        />
+                        <span className="text-sm font-medium">FIDO2</span>
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
 
             {/* Key selection combobox - appears after selecting "Key" type */}
             {selectedCredentialType === "key" && !form.identityFileId && (
               <div className="flex items-center gap-1">
                 <Combobox
-                  options={keysByCategory.key.map(k => ({
+                  options={keysByCategory.key.map((k) => ({
                     value: k.id,
                     label: k.label,
-                    sublabel: `${k.type}${k.keySize ? ` ${k.keySize}` : ''}`,
-                    icon: <Key size={14} className="text-muted-foreground" />
+                    sublabel: `${k.type}${k.keySize ? ` ${k.keySize}` : ""}`,
+                    icon: <Key size={14} className="text-muted-foreground" />,
                   }))}
                   value={form.identityFileId}
                   onValueChange={(val) => {
@@ -660,35 +700,40 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             )}
 
             {/* Certificate selection combobox - appears after selecting "Certificate" type */}
-            {selectedCredentialType === "certificate" && !form.identityFileId && (
-              <div className="flex items-center gap-1">
-                <Combobox
-                  options={keysByCategory.certificate.map(k => ({
-                    value: k.id,
-                    label: k.label,
-                    icon: <Shield size={14} className="text-muted-foreground" />
-                  }))}
-                  value={form.identityFileId}
-                  onValueChange={(val) => {
-                    update("identityFileId", val);
-                    update("authMethod", "certificate");
-                    setSelectedCredentialType(null);
-                  }}
-                  placeholder="Search certificates..."
-                  emptyText="No certificates available"
-                  icon={<Shield size={14} className="text-muted-foreground" />}
-                  className="flex-1"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={() => setSelectedCredentialType(null)}
-                >
-                  <X size={14} />
-                </Button>
-              </div>
-            )}
+            {selectedCredentialType === "certificate" &&
+              !form.identityFileId && (
+                <div className="flex items-center gap-1">
+                  <Combobox
+                    options={keysByCategory.certificate.map((k) => ({
+                      value: k.id,
+                      label: k.label,
+                      icon: (
+                        <Shield size={14} className="text-muted-foreground" />
+                      ),
+                    }))}
+                    value={form.identityFileId}
+                    onValueChange={(val) => {
+                      update("identityFileId", val);
+                      update("authMethod", "certificate");
+                      setSelectedCredentialType(null);
+                    }}
+                    placeholder="Search certificates..."
+                    emptyText="No certificates available"
+                    icon={
+                      <Shield size={14} className="text-muted-foreground" />
+                    }
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setSelectedCredentialType(null)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+              )}
           </div>
         </Card>
 
@@ -710,10 +755,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               </div>
               {chainedHosts.length > 0 ? (
                 <Badge variant="secondary" className="text-xs">
-                  {chainedHosts.length} hop{chainedHosts.length > 1 ? 's' : ''}
+                  {chainedHosts.length} hop{chainedHosts.length > 1 ? "s" : ""}
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-xs text-muted-foreground">Direct</Badge>
+                <Badge
+                  variant="outline"
+                  className="text-xs text-muted-foreground"
+                >
+                  Direct
+                </Badge>
               )}
             </div>
             {chainedHosts.length > 0 && (
@@ -721,15 +771,24 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 className="w-full flex items-center gap-1 p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
                 onClick={() => setActiveSubPanel("chain")}
               >
-                <Link2 size={14} className="text-muted-foreground flex-shrink-0" />
+                <Link2
+                  size={14}
+                  className="text-muted-foreground flex-shrink-0"
+                />
                 <span className="text-sm truncate">
-                  {chainedHosts.slice(0, 3).map(h => h.hostname || h.label).join(' -> ')}
-                  {chainedHosts.length > 3 && '...'}
+                  {chainedHosts
+                    .slice(0, 3)
+                    .map((h) => h.hostname || h.label)
+                    .join(" -> ")}
+                  {chainedHosts.length > 3 && "..."}
                 </span>
                 <X
                   size={14}
                   className="text-muted-foreground hover:text-destructive flex-shrink-0 ml-auto"
-                  onClick={(e) => { e.stopPropagation(); clearHostChain(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearHostChain();
+                  }}
                 />
               </button>
             )}
@@ -755,10 +814,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             </div>
             {form.proxyConfig?.host ? (
               <Badge variant="secondary" className="text-xs">
-                {form.proxyConfig.type?.toUpperCase()} {form.proxyConfig.host}:{form.proxyConfig.port}
+                {form.proxyConfig.type?.toUpperCase()} {form.proxyConfig.host}:
+                {form.proxyConfig.port}
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-xs text-muted-foreground">None</Badge>
+              <Badge
+                variant="outline"
+                className="text-xs text-muted-foreground"
+              >
+                None
+              </Badge>
             )}
           </div>
           <Button
@@ -785,13 +850,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               onClick={() => setActiveSubPanel("env-vars")}
             >
               <span className="text-sm truncate">
-                {form.environmentVariables?.slice(0, 2).map(v => `${v.name}=${v.value}`).join(', ')}
-                {(form.environmentVariables?.length || 0) > 2 && '...'}
+                {form.environmentVariables
+                  ?.slice(0, 2)
+                  .map((v) => `${v.name}=${v.value}`)
+                  .join(", ")}
+                {(form.environmentVariables?.length || 0) > 2 && "..."}
               </span>
               <X
                 size={14}
                 className="text-muted-foreground hover:text-destructive flex-shrink-0 ml-auto"
-                onClick={(e) => { e.stopPropagation(); setForm(prev => ({ ...prev, environmentVariables: [] })); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setForm((prev) => ({ ...prev, environmentVariables: [] }));
+                }}
               />
             </button>
           ) : (
@@ -818,7 +889,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             onChange={(e) => update("startupCommand", e.target.value)}
             className="h-9"
           />
-          <p className="text-xs text-muted-foreground">This command will be executed automatically after SSH connection is established.</p>
+          <p className="text-xs text-muted-foreground">
+            This command will be executed automatically after SSH connection is
+            established.
+          </p>
         </Card>
 
         {/* Telnet Protocol Section - Separator and Configuration */}
@@ -829,7 +903,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         </div>
 
         {/* Telnet Protocol Card */}
-        {(form.telnetEnabled || form.protocol === 'telnet') ? (
+        {form.telnetEnabled || form.protocol === "telnet" ? (
           <Card className="p-3 space-y-3 bg-card border-border/80">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-2 py-1">
@@ -857,14 +931,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             <Input
               placeholder="Telnet Username"
               value={form.telnetUsername || form.username || ""}
-              onChange={(e) => update("telnetUsername" as keyof Host, e.target.value)}
+              onChange={(e) =>
+                update("telnetUsername" as keyof Host, e.target.value)
+              }
               className="h-10"
             />
             <Input
               placeholder="Telnet Password"
               type="password"
               value={form.telnetPassword || form.password || ""}
-              onChange={(e) => update("telnetPassword" as keyof Host, e.target.value)}
+              onChange={(e) =>
+                update("telnetPassword" as keyof Host, e.target.value)
+              }
               className="h-10"
             />
 
@@ -885,16 +963,52 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               <div
                 className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
                 style={{
-                  backgroundColor: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.background || '#100F0F',
-                  color: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.foreground || '#CECDC3'
+                  backgroundColor:
+                    TERMINAL_THEMES.find(
+                      (t) =>
+                        t.id ===
+                        (form.protocols?.find((p) => p.protocol === "telnet")
+                          ?.theme ||
+                          form.theme ||
+                          "flexoki-dark"),
+                    )?.colors.background || "#100F0F",
+                  color:
+                    TERMINAL_THEMES.find(
+                      (t) =>
+                        t.id ===
+                        (form.protocols?.find((p) => p.protocol === "telnet")
+                          ?.theme ||
+                          form.theme ||
+                          "flexoki-dark"),
+                    )?.colors.foreground || "#CECDC3",
                 }}
               >
                 <div className="p-0.5">
-                  <div style={{ color: TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.colors.green }}>$</div>
+                  <div
+                    style={{
+                      color: TERMINAL_THEMES.find(
+                        (t) =>
+                          t.id ===
+                          (form.protocols?.find((p) => p.protocol === "telnet")
+                            ?.theme ||
+                            form.theme ||
+                            "flexoki-dark"),
+                      )?.colors.green,
+                    }}
+                  >
+                    $
+                  </div>
                 </div>
               </div>
               <span className="text-sm flex-1">
-                {TERMINAL_THEMES.find(t => t.id === (form.protocols?.find(p => p.protocol === 'telnet')?.theme || form.theme || 'flexoki-dark'))?.name || 'Flexoki Dark'}
+                {TERMINAL_THEMES.find(
+                  (t) =>
+                    t.id ===
+                    (form.protocols?.find((p) => p.protocol === "telnet")
+                      ?.theme ||
+                      form.theme ||
+                      "flexoki-dark"),
+                )?.name || "Flexoki Dark"}
               </span>
             </button>
           </Card>
@@ -913,7 +1027,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         )}
       </AsidePanelContent>
       <AsidePanelFooter>
-        <Button className="w-full h-10" onClick={handleSubmit} disabled={!form.hostname || !form.label}>
+        <Button
+          className="w-full h-10"
+          onClick={handleSubmit}
+          disabled={!form.hostname || !form.label}
+        >
           Save
         </Button>
       </AsidePanelFooter>
@@ -930,7 +1048,12 @@ interface ToggleRowProps {
 const ToggleRow: React.FC<ToggleRowProps> = ({ label, enabled, onToggle }) => (
   <div className="flex items-center justify-between h-10 px-3 rounded-md border border-border/70 bg-secondary/70">
     <span className="text-sm">{label}</span>
-    <Button variant={enabled ? "secondary" : "ghost"} size="sm" className={cn("h-8 min-w-[72px]", enabled && "bg-primary/20")} onClick={onToggle}>
+    <Button
+      variant={enabled ? "secondary" : "ghost"}
+      size="sm"
+      className={cn("h-8 min-w-[72px]", enabled && "bg-primary/20")}
+      onClick={onToggle}
+    >
       {enabled ? "Enabled" : "Disabled"}
     </Button>
   </div>

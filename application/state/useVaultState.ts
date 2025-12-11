@@ -1,17 +1,28 @@
-import { useCallback,useEffect,useState } from 'react';
-import { normalizeDistroId,sanitizeHost } from '../../domain/host';
-import { Host,KeyCategory,KeySource,KnownHost,ShellHistoryEntry,Snippet,SSHKey } from '../../domain/models';
-import { INITIAL_HOSTS,INITIAL_SNIPPETS } from '../../infrastructure/config/defaultData';
+import { useCallback, useEffect, useState } from "react";
+import { normalizeDistroId, sanitizeHost } from "../../domain/host";
 import {
-STORAGE_KEY_GROUPS,
-STORAGE_KEY_HOSTS,
-STORAGE_KEY_KEYS,
-STORAGE_KEY_KNOWN_HOSTS,
-STORAGE_KEY_SHELL_HISTORY,
-STORAGE_KEY_SNIPPET_PACKAGES,
-STORAGE_KEY_SNIPPETS,
-} from '../../infrastructure/config/storageKeys';
-import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
+  Host,
+  KeyCategory,
+  KeySource,
+  KnownHost,
+  ShellHistoryEntry,
+  Snippet,
+  SSHKey,
+} from "../../domain/models";
+import {
+  INITIAL_HOSTS,
+  INITIAL_SNIPPETS,
+} from "../../infrastructure/config/defaultData";
+import {
+  STORAGE_KEY_GROUPS,
+  STORAGE_KEY_HOSTS,
+  STORAGE_KEY_KEYS,
+  STORAGE_KEY_KNOWN_HOSTS,
+  STORAGE_KEY_SHELL_HISTORY,
+  STORAGE_KEY_SNIPPET_PACKAGES,
+  STORAGE_KEY_SNIPPETS,
+} from "../../infrastructure/config/storageKeys";
+import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 
 type ExportableVaultData = {
   hosts: Host[];
@@ -22,18 +33,23 @@ type ExportableVaultData = {
 };
 
 // Migration helper for old SSHKey format to new format
-const migrateKey = (key: Partial<SSHKey> & { id: string; label: string }): SSHKey => {
+const migrateKey = (
+  key: Partial<SSHKey> & { id: string; label: string },
+): SSHKey => {
   return {
     id: key.id,
     label: key.label,
-    type: key.type || 'ED25519',
-    privateKey: key.privateKey || '',
+    type: key.type || "ED25519",
+    privateKey: key.privateKey || "",
     publicKey: key.publicKey,
     certificate: key.certificate,
     passphrase: key.passphrase,
     savePassphrase: key.savePassphrase,
-    source: key.source || (key.privateKey ? 'imported' : 'generated') as KeySource,
-    category: key.category || (key.certificate ? 'certificate' : 'key') as KeyCategory,
+    source:
+      key.source || ((key.privateKey ? "imported" : "generated") as KeySource),
+    category:
+      key.category ||
+      ((key.certificate ? "certificate" : "key") as KeyCategory),
     credentialId: key.credentialId,
     rpId: key.rpId,
     created: key.created || Date.now(),
@@ -80,19 +96,22 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, data);
   }, []);
 
-  const addShellHistoryEntry = useCallback((entry: Omit<ShellHistoryEntry, 'id' | 'timestamp'>) => {
-    const newEntry: ShellHistoryEntry = {
-      ...entry,
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-    };
-    setShellHistory(prev => {
-      // Keep only the last 1000 entries
-      const updated = [newEntry, ...prev].slice(0, 1000);
-      localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
-      return updated;
-    });
-  }, []);
+  const addShellHistoryEntry = useCallback(
+    (entry: Omit<ShellHistoryEntry, "id" | "timestamp">) => {
+      const newEntry: ShellHistoryEntry = {
+        ...entry,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+      };
+      setShellHistory((prev) => {
+        // Keep only the last 1000 entries
+        const updated = [newEntry, ...prev].slice(0, 1000);
+        localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
+        return updated;
+      });
+    },
+    [],
+  );
 
   const clearShellHistory = useCallback(() => {
     setShellHistory([]);
@@ -106,40 +125,42 @@ export const useVaultState = () => {
       label: knownHost.hostname,
       hostname: knownHost.hostname,
       port: knownHost.port,
-      username: '', // Will be set when connecting
-      os: 'linux',
-      group: '',
+      username: "", // Will be set when connecting
+      os: "linux",
+      group: "",
       tags: [],
-      protocol: 'ssh',
+      protocol: "ssh",
     };
-    
+
     // Update the known host to mark it as converted using functional update
-    setKnownHosts(prevKnownHosts => {
-      const updated = prevKnownHosts.map(kh => 
-        kh.id === knownHost.id 
-          ? { ...kh, convertedToHostId: newHost.id }
-          : kh
+    setKnownHosts((prevKnownHosts) => {
+      const updated = prevKnownHosts.map((kh) =>
+        kh.id === knownHost.id ? { ...kh, convertedToHostId: newHost.id } : kh,
       );
       localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, updated);
       return updated;
     });
-    
+
     // Add to hosts using functional update
-    setHosts(prevHosts => {
+    setHosts((prevHosts) => {
       const updated = [...prevHosts, sanitizeHost(newHost)];
       localStorageAdapter.write(STORAGE_KEY_HOSTS, updated);
       return updated;
     });
-    
+
     return newHost;
   }, []);
 
   useEffect(() => {
     const savedHosts = localStorageAdapter.read<Host[]>(STORAGE_KEY_HOSTS);
-    const savedKeys = localStorageAdapter.read<Partial<SSHKey>[]>(STORAGE_KEY_KEYS);
+    const savedKeys =
+      localStorageAdapter.read<Partial<SSHKey>[]>(STORAGE_KEY_KEYS);
     const savedGroups = localStorageAdapter.read<string[]>(STORAGE_KEY_GROUPS);
-    const savedSnippets = localStorageAdapter.read<Snippet[]>(STORAGE_KEY_SNIPPETS);
-    const savedSnippetPackages = localStorageAdapter.read<string[]>(STORAGE_KEY_SNIPPET_PACKAGES);
+    const savedSnippets =
+      localStorageAdapter.read<Snippet[]>(STORAGE_KEY_SNIPPETS);
+    const savedSnippetPackages = localStorageAdapter.read<string[]>(
+      STORAGE_KEY_SNIPPET_PACKAGES,
+    );
 
     if (savedHosts?.length) {
       const sanitized = savedHosts.map(sanitizeHost);
@@ -151,56 +172,79 @@ export const useVaultState = () => {
 
     // Migrate old keys to new format with source/category fields
     if (savedKeys?.length) {
-      const migratedKeys = savedKeys.map(k => migrateKey(k as any));
+      const migratedKeys = savedKeys.map((k) =>
+        migrateKey(k as Partial<SSHKey>),
+      );
       setKeys(migratedKeys);
       // Persist migrated keys
       localStorageAdapter.write(STORAGE_KEY_KEYS, migratedKeys);
     }
-    
+
     if (savedSnippets) setSnippets(savedSnippets);
     else updateSnippets(INITIAL_SNIPPETS);
 
     if (savedGroups) setCustomGroups(savedGroups);
     if (savedSnippetPackages) setSnippetPackages(savedSnippetPackages);
-    
+
     // Load known hosts
-    const savedKnownHosts = localStorageAdapter.read<KnownHost[]>(STORAGE_KEY_KNOWN_HOSTS);
+    const savedKnownHosts = localStorageAdapter.read<KnownHost[]>(
+      STORAGE_KEY_KNOWN_HOSTS,
+    );
     if (savedKnownHosts) setKnownHosts(savedKnownHosts);
-    
+
     // Load shell history
-    const savedShellHistory = localStorageAdapter.read<ShellHistoryEntry[]>(STORAGE_KEY_SHELL_HISTORY);
+    const savedShellHistory = localStorageAdapter.read<ShellHistoryEntry[]>(
+      STORAGE_KEY_SHELL_HISTORY,
+    );
     if (savedShellHistory) setShellHistory(savedShellHistory);
   }, [updateHosts, updateSnippets]);
 
   const updateHostDistro = useCallback((hostId: string, distro: string) => {
     const normalized = normalizeDistroId(distro);
-    setHosts(prev => {
-      const next = prev.map(h => h.id === hostId ? { ...h, distro: normalized } : h);
+    setHosts((prev) => {
+      const next = prev.map((h) =>
+        h.id === hostId ? { ...h, distro: normalized } : h,
+      );
       localStorageAdapter.write(STORAGE_KEY_HOSTS, next);
       return next;
     });
   }, []);
 
-  const exportData = useCallback((): ExportableVaultData => ({
-    hosts,
-    keys,
-    snippets,
-    customGroups,
-    knownHosts,
-  }), [hosts, keys, snippets, customGroups, knownHosts]);
+  const exportData = useCallback(
+    (): ExportableVaultData => ({
+      hosts,
+      keys,
+      snippets,
+      customGroups,
+      knownHosts,
+    }),
+    [hosts, keys, snippets, customGroups, knownHosts],
+  );
 
-  const importData = useCallback((payload: Partial<ExportableVaultData>) => {
-    if (payload.hosts) updateHosts(payload.hosts);
-    if (payload.keys) updateKeys(payload.keys);
-    if (payload.snippets) updateSnippets(payload.snippets);
-    if (payload.customGroups) updateCustomGroups(payload.customGroups);
-    if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
-  }, [updateHosts, updateKeys, updateSnippets, updateCustomGroups, updateKnownHosts]);
+  const importData = useCallback(
+    (payload: Partial<ExportableVaultData>) => {
+      if (payload.hosts) updateHosts(payload.hosts);
+      if (payload.keys) updateKeys(payload.keys);
+      if (payload.snippets) updateSnippets(payload.snippets);
+      if (payload.customGroups) updateCustomGroups(payload.customGroups);
+      if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
+    },
+    [
+      updateHosts,
+      updateKeys,
+      updateSnippets,
+      updateCustomGroups,
+      updateKnownHosts,
+    ],
+  );
 
-  const importDataFromString = useCallback((jsonString: string) => {
-    const data = JSON.parse(jsonString);
-    importData(data);
-  }, [importData]);
+  const importDataFromString = useCallback(
+    (jsonString: string) => {
+      const data = JSON.parse(jsonString);
+      importData(data);
+    },
+    [importData],
+  );
 
   return {
     hosts,

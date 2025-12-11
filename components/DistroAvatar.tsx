@@ -1,8 +1,8 @@
-import { Server } from 'lucide-react';
-import React,{ memo } from 'react';
-import { normalizeDistroId } from '../domain/host';
-import { cn } from '../lib/utils';
-import { Host } from '../types';
+import { Server } from "lucide-react";
+import React, { memo } from "react";
+import { normalizeDistroId } from "../domain/host";
+import { cn } from "../lib/utils";
+import { Host } from "../types";
 
 export const DISTRO_LOGOS: Record<string, string> = {
   ubuntu: "/distro/ubuntu.svg",
@@ -35,10 +35,21 @@ export const DISTRO_COLORS: Record<string, string> = {
   default: "bg-slate-600",
 };
 
-type DistroAvatarProps = { host: Host; fallback: string; className?: string; size?: 'sm' | 'md' | 'lg' };
+type DistroAvatarProps = {
+  host: Host;
+  fallback: string;
+  className?: string;
+  size?: "sm" | "md" | "lg";
+};
 
-const DistroAvatarInner: React.FC<DistroAvatarProps> = ({ host, fallback, className, size = 'md' }) => {
-  const distro = normalizeDistroId(host.distro) || (host.distro || '').toLowerCase();
+const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
+  host,
+  fallback: _fallback,
+  className,
+  size = "md",
+}) => {
+  const distro =
+    normalizeDistroId(host.distro) || (host.distro || "").toLowerCase();
   const logo = DISTRO_LOGOS[distro];
   const [errored, setErrored] = React.useState(false);
   const bg = DISTRO_COLORS[distro] || DISTRO_COLORS.default;
@@ -60,7 +71,14 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({ host, fallback, classN
 
   if (logo && !errored) {
     return (
-      <div className={cn(containerClass, "flex items-center justify-center border border-border/40 overflow-hidden", bg, className)}>
+      <div
+        className={cn(
+          containerClass,
+          "flex items-center justify-center border border-border/40 overflow-hidden",
+          bg,
+          className,
+        )}
+      >
         <img
           src={logo}
           alt={host.distro || host.os}
@@ -72,11 +90,17 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({ host, fallback, classN
   }
 
   return (
-    <div className={cn(containerClass, "flex items-center justify-center bg-primary/15 text-primary", className)}>
+    <div
+      className={cn(
+        containerClass,
+        "flex items-center justify-center bg-primary/15 text-primary",
+        className,
+      )}
+    >
       <Server className={iconSize} />
     </div>
   );
 };
 
 export const DistroAvatar = memo(DistroAvatarInner);
-DistroAvatar.displayName = 'DistroAvatar';
+DistroAvatar.displayName = "DistroAvatar";
