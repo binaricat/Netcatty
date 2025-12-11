@@ -48,6 +48,8 @@ interface TerminalProps {
   // Hotkey configuration
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
   keyBindings?: KeyBinding[];
+  // Hotkey action callbacks
+  onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onStatusChange?: (
     sessionId: string,
     status: TerminalSession["status"],
@@ -84,6 +86,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   startupCommand,
   hotkeyScheme = 'disabled',
   keyBindings = [],
+  onHotkeyAction,
   onStatusChange,
   onSessionExit,
   onOsDetected,
@@ -104,6 +107,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false); // Track if startup command has been executed
   const commandBufferRef = useRef<string>(""); // Buffer for tracking typed commands
+  
+  // Refs to store latest hotkey config for use in keyboard handler
+  const hotkeySchemeRef = useRef(hotkeyScheme);
+  const keyBindingsRef = useRef(keyBindings);
+  const onHotkeyActionRef = useRef(onHotkeyAction);
+  hotkeySchemeRef.current = hotkeyScheme;
+  keyBindingsRef.current = keyBindings;
+  onHotkeyActionRef.current = onHotkeyAction;
 
   const [isScriptsOpen, setIsScriptsOpen] = useState(false);
   const [status, setStatus] = useState<TerminalSession["status"]>("connecting");
@@ -381,65 +392,78 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
           // Attach custom key event handler to intercept app-level shortcuts
           // This allows keyboard shortcuts to work even when terminal is focused
-          if (hotkeyScheme !== 'disabled' && keyBindings.length > 0) {
-            const isMac = hotkeyScheme === 'mac';
-            const appLevelActions = getAppLevelActions();
-            const terminalActions = getTerminalPassthroughActions();
+          // Always attach the handler - it will check the ref values dynamically
+          const appLevelActions = getAppLevelActions();
+          const terminalActions = getTerminalPassthroughActions();
 
-            term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-              // Check if this matches any of our shortcuts
-              const matched = checkAppShortcut(e, keyBindings, isMac);
-              if (!matched) return true; // Let xterm handle it
+          term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+            // Read current values from refs
+            const currentScheme = hotkeySchemeRef.current;
+            const currentBindings = keyBindingsRef.current;
+            const hotkeyCallback = onHotkeyActionRef.current;
+            
+            // Skip if hotkeys are disabled
+            if (currentScheme === 'disabled' || currentBindings.length === 0) {
+              return true; // Let xterm handle it
+            }
+            
+            const isMac = currentScheme === 'mac';
+            
+            // Check if this matches any of our shortcuts
+            const matched = checkAppShortcut(e, currentBindings, isMac);
+            if (!matched) return true; // Let xterm handle it
 
-              const { action } = matched;
+            const { action } = matched;
 
-              // App-level actions: return false to prevent xterm from handling
-              // The event will bubble up to our global handler
-              if (appLevelActions.has(action)) {
-                return false;
+            // App-level actions: call the callback directly and prevent xterm from handling
+            if (appLevelActions.has(action)) {
+              e.preventDefault();
+              if (hotkeyCallback) {
+                hotkeyCallback(action, e);
               }
+              return false;
+            }
 
-              // Terminal-level actions: handle here
-              if (terminalActions.has(action)) {
-                e.preventDefault();
-                switch (action) {
-                  case 'copy': {
-                    const selection = term.getSelection();
-                    if (selection) {
-                      navigator.clipboard.writeText(selection);
-                    }
-                    break;
+            // Terminal-level actions: handle here
+            if (terminalActions.has(action)) {
+              e.preventDefault();
+              switch (action) {
+                case 'copy': {
+                  const selection = term.getSelection();
+                  if (selection) {
+                    navigator.clipboard.writeText(selection);
                   }
-                  case 'paste': {
-                    navigator.clipboard.readText().then((text) => {
-                      const id = sessionRef.current;
-                      if (id && window.netcatty?.writeToSession) {
-                        window.netcatty.writeToSession(id, text);
-                      }
-                    });
-                    break;
-                  }
-                  case 'selectAll': {
-                    term.selectAll();
-                    break;
-                  }
-                  case 'clearBuffer': {
-                    term.clear();
-                    break;
-                  }
-                  case 'searchTerminal': {
-                    // TODO: Open search UI - for now just log
-                    console.log('[Terminal] Search requested');
-                    // Could trigger a search UI component here
-                    break;
-                  }
+                  break;
                 }
-                return false;
+                case 'paste': {
+                  navigator.clipboard.readText().then((text) => {
+                    const id = sessionRef.current;
+                    if (id && window.netcatty?.writeToSession) {
+                      window.netcatty.writeToSession(id, text);
+                    }
+                  });
+                  break;
+                }
+                case 'selectAll': {
+                  term.selectAll();
+                  break;
+                }
+                case 'clearBuffer': {
+                  term.clear();
+                  break;
+                }
+                case 'searchTerminal': {
+                  // TODO: Open search UI - for now just log
+                  console.log('[Terminal] Search requested');
+                  // Could trigger a search UI component here
+                  break;
+                }
               }
+              return false;
+            }
 
-              return true; // Let xterm handle other keys
-            });
-          }
+            return true; // Let xterm handle other keys
+          });
 
           fitAddon.fit();
           term.focus();

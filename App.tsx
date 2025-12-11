@@ -118,6 +118,122 @@ function App() {
   // isMacClient is used for window controls styling
   const isMacClient = typeof navigator !== 'undefined' && /Mac|Macintosh/.test(navigator.userAgent);
 
+  // Shared hotkey action handler - used by both global handler and terminal callback
+  const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
+    switch (action) {
+      case 'switchToTab': {
+        // Get the number key pressed (1-9)
+        const num = parseInt(e.key, 10);
+        if (num >= 1 && num <= 9) {
+          // Build complete tab list: vault + sessions/workspaces
+          const allTabs = ['vault', ...orderedTabs];
+          if (num <= allTabs.length) {
+            setActiveTabId(allTabs[num - 1]);
+          }
+        }
+        break;
+      }
+      case 'nextTab': {
+        // Build complete tab list: vault + sessions/workspaces
+        const allTabs = ['vault', ...orderedTabs];
+        const currentId = activeTabStore.getActiveTabId();
+        const currentIdx = allTabs.indexOf(currentId);
+        if (currentIdx !== -1 && allTabs.length > 0) {
+          const nextIdx = (currentIdx + 1) % allTabs.length;
+          setActiveTabId(allTabs[nextIdx]);
+        } else if (allTabs.length > 0) {
+          setActiveTabId(allTabs[0]);
+        }
+        break;
+      }
+      case 'prevTab': {
+        // Build complete tab list: vault + sessions/workspaces
+        const allTabs = ['vault', ...orderedTabs];
+        const currentId = activeTabStore.getActiveTabId();
+        const currentIdx = allTabs.indexOf(currentId);
+        if (currentIdx !== -1 && allTabs.length > 0) {
+          const prevIdx = (currentIdx - 1 + allTabs.length) % allTabs.length;
+          setActiveTabId(allTabs[prevIdx]);
+        } else if (allTabs.length > 0) {
+          setActiveTabId(allTabs[allTabs.length - 1]);
+        }
+        break;
+      }
+      case 'closeTab': {
+        const currentId = activeTabStore.getActiveTabId();
+        if (currentId !== 'vault' && currentId !== 'sftp') {
+          // Find if it's a session or workspace
+          const session = sessions.find(s => s.id === currentId);
+          if (session) {
+            closeSession(currentId);
+          } else {
+            const workspace = workspaces.find(w => w.id === currentId);
+            if (workspace) {
+              closeWorkspace(currentId);
+            }
+          }
+        }
+        break;
+      }
+      case 'newTab':
+      case 'openLocal':
+        createLocalTerminal();
+        break;
+      case 'openHosts':
+        setActiveTabId('vault');
+        break;
+      case 'openSftp':
+        setActiveTabId('sftp');
+        break;
+      case 'quickSwitch':
+      case 'commandPalette':
+        setIsQuickSwitcherOpen(true);
+        break;
+      case 'portForwarding':
+        // Navigate to vault and could open port forwarding section
+        setActiveTabId('vault');
+        break;
+      case 'snippets':
+        // Navigate to vault 
+        setActiveTabId('vault');
+        break;
+      case 'broadcast':
+        // TODO: Implement broadcast mode toggle
+        console.log('[Hotkey] Broadcast mode toggle requested');
+        break;
+      case 'sidePanel':
+        // TODO: Implement side panel toggle
+        console.log('[Hotkey] Side panel toggle requested');
+        break;
+      case 'splitHorizontal':
+        // TODO: Implement horizontal split
+        console.log('[Hotkey] Split horizontal requested');
+        break;
+      case 'splitVertical':
+        // TODO: Implement vertical split
+        console.log('[Hotkey] Split vertical requested');
+        break;
+      case 'moveFocus': {
+        // Move focus between split panes
+        const direction = e.key === 'ArrowUp' ? 'up'
+          : e.key === 'ArrowDown' ? 'down'
+            : e.key === 'ArrowLeft' ? 'left'
+              : e.key === 'ArrowRight' ? 'right'
+                : null;
+        if (direction) {
+          console.log(`[Hotkey] Move focus ${direction}`);
+          // TODO: Implement focus movement in workspace
+        }
+        break;
+      }
+    }
+  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminal]);
+
+  // Callback for terminal to invoke app-level hotkey actions
+  const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
+    executeHotkeyAction(action, e);
+  }, [executeHotkeyAction]);
+
   // Global hotkey handler
   useEffect(() => {
     if (hotkeyScheme === 'disabled') return;
@@ -129,7 +245,7 @@ function App() {
       // Note: xterm terminal handles its own key interception via attachCustomKeyEventHandler
       const target = e.target as HTMLElement;
       const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-      
+
       if (isFormElement && e.key !== 'Escape') {
         return;
       }
@@ -147,115 +263,7 @@ function App() {
 
           e.preventDefault();
           e.stopPropagation();
-
-          // Execute the action
-          switch (binding.action) {
-            case 'switchToTab': {
-              // Get the number key pressed (1-9)
-              const num = parseInt(e.key, 10);
-              if (num >= 1 && num <= 9) {
-                // Build complete tab list: vault + sessions/workspaces
-                const allTabs = ['vault', ...orderedTabs];
-                if (num <= allTabs.length) {
-                  setActiveTabId(allTabs[num - 1]);
-                }
-              }
-              break;
-            }
-            case 'nextTab': {
-              // Build complete tab list: vault + sessions/workspaces
-              const allTabs = ['vault', ...orderedTabs];
-              const currentId = activeTabStore.getActiveTabId();
-              const currentIdx = allTabs.indexOf(currentId);
-              if (currentIdx !== -1 && allTabs.length > 0) {
-                const nextIdx = (currentIdx + 1) % allTabs.length;
-                setActiveTabId(allTabs[nextIdx]);
-              } else if (allTabs.length > 0) {
-                setActiveTabId(allTabs[0]);
-              }
-              break;
-            }
-            case 'prevTab': {
-              // Build complete tab list: vault + sessions/workspaces
-              const allTabs = ['vault', ...orderedTabs];
-              const currentId = activeTabStore.getActiveTabId();
-              const currentIdx = allTabs.indexOf(currentId);
-              if (currentIdx !== -1 && allTabs.length > 0) {
-                const prevIdx = (currentIdx - 1 + allTabs.length) % allTabs.length;
-                setActiveTabId(allTabs[prevIdx]);
-              } else if (allTabs.length > 0) {
-                setActiveTabId(allTabs[allTabs.length - 1]);
-              }
-              break;
-            }
-            case 'closeTab': {
-              const currentId = activeTabStore.getActiveTabId();
-              if (currentId !== 'vault' && currentId !== 'sftp') {
-                // Find if it's a session or workspace
-                const session = sessions.find(s => s.id === currentId);
-                if (session) {
-                  closeSession(currentId);
-                } else {
-                  const workspace = workspaces.find(w => w.id === currentId);
-                  if (workspace) {
-                    closeWorkspace(currentId);
-                  }
-                }
-              }
-              break;
-            }
-            case 'newTab':
-            case 'openLocal':
-              createLocalTerminal();
-              break;
-            case 'openHosts':
-              setActiveTabId('vault');
-              break;
-            case 'openSftp':
-              setActiveTabId('sftp');
-              break;
-            case 'quickSwitch':
-            case 'commandPalette':
-              setIsQuickSwitcherOpen(true);
-              break;
-            case 'portForwarding':
-              // Navigate to vault and could open port forwarding section
-              setActiveTabId('vault');
-              break;
-            case 'snippets':
-              // Navigate to vault 
-              setActiveTabId('vault');
-              break;
-            case 'broadcast':
-              // TODO: Implement broadcast mode toggle
-              console.log('[Hotkey] Broadcast mode toggle requested');
-              break;
-            case 'sidePanel':
-              // TODO: Implement side panel toggle
-              console.log('[Hotkey] Side panel toggle requested');
-              break;
-            case 'splitHorizontal':
-              // TODO: Implement horizontal split
-              console.log('[Hotkey] Split horizontal requested');
-              break;
-            case 'splitVertical':
-              // TODO: Implement vertical split
-              console.log('[Hotkey] Split vertical requested');
-              break;
-            case 'moveFocus': {
-              // Move focus between split panes
-              const direction = e.key === 'ArrowUp' ? 'up' 
-                : e.key === 'ArrowDown' ? 'down'
-                : e.key === 'ArrowLeft' ? 'left'
-                : e.key === 'ArrowRight' ? 'right'
-                : null;
-              if (direction) {
-                console.log(`[Hotkey] Move focus ${direction}`);
-                // TODO: Implement focus movement in workspace
-              }
-              break;
-            }
-          }
+          executeHotkeyAction(binding.action, e);
           return;
         }
       }
@@ -263,7 +271,7 @@ function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown, true);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-  }, [hotkeyScheme, keyBindings, orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminal]);
+  }, [hotkeyScheme, keyBindings, executeHotkeyAction]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -412,6 +420,7 @@ function App() {
           fontSize={terminalFontSize}
           hotkeyScheme={hotkeyScheme}
           keyBindings={keyBindings}
+          onHotkeyAction={handleHotkeyAction}
           onCloseSession={closeSession}
           onUpdateSessionStatus={updateSessionStatus}
           onUpdateHostDistro={updateHostDistro}

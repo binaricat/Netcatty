@@ -40,6 +40,7 @@ interface TerminalLayerProps {
   fontSize?: number;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
   keyBindings?: KeyBinding[];
+  onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onUpdateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
   onUpdateHostDistro: (hostId: string, distro: string) => void;
@@ -66,6 +67,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   fontSize = 14,
   hotkeyScheme = 'disabled',
   keyBindings = [],
+  onHotkeyAction,
   onCloseSession,
   onUpdateSessionStatus,
   onUpdateHostDistro,
@@ -564,6 +566,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 startupCommand={session.startupCommand}
                 hotkeyScheme={hotkeyScheme}
                 keyBindings={keyBindings}
+                onHotkeyAction={onHotkeyAction}
                 onCloseSession={handleCloseSession}
                 onStatusChange={handleStatusChange}
                 onSessionExit={handleSessionExit}
