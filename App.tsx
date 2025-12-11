@@ -107,6 +107,7 @@ function App() {
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,
+    splitSession,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
     runSnippet,
@@ -205,14 +206,36 @@ function App() {
         // TODO: Implement side panel toggle
         console.log('[Hotkey] Side panel toggle requested');
         break;
-      case 'splitHorizontal':
-        // TODO: Implement horizontal split
-        console.log('[Hotkey] Split horizontal requested');
+      case 'splitHorizontal': {
+        // Split current terminal horizontally (top/bottom)
+        const currentId = activeTabStore.getActiveTabId();
+        // Check if it's a standalone session or we're in a workspace
+        const activeSession = sessions.find(s => s.id === currentId);
+        const activeWs = workspaces.find(w => w.id === currentId);
+        if (activeSession && !activeSession.workspaceId) {
+          // Standalone session - split it
+          splitSession(activeSession.id, 'horizontal');
+        } else if (activeWs) {
+          // In a workspace - need to determine focused session
+          // For now, we'll need the terminal to handle this via context menu
+          console.log('[Hotkey] Split horizontal in workspace - use context menu on specific terminal');
+        }
         break;
-      case 'splitVertical':
-        // TODO: Implement vertical split
-        console.log('[Hotkey] Split vertical requested');
+      }
+      case 'splitVertical': {
+        // Split current terminal vertically (left/right)
+        const currentId = activeTabStore.getActiveTabId();
+        const activeSession = sessions.find(s => s.id === currentId);
+        const activeWs = workspaces.find(w => w.id === currentId);
+        if (activeSession && !activeSession.workspaceId) {
+          // Standalone session - split it
+          splitSession(activeSession.id, 'vertical');
+        } else if (activeWs) {
+          // In a workspace - need to determine focused session
+          console.log('[Hotkey] Split vertical in workspace - use context menu on specific terminal');
+        }
         break;
+      }
       case 'moveFocus': {
         // Move focus between split panes
         const direction = e.key === 'ArrowUp' ? 'up'
@@ -227,7 +250,7 @@ function App() {
         break;
       }
     }
-  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminal]);
+  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminal, splitSession]);
 
   // Callback for terminal to invoke app-level hotkey actions
   const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -435,6 +458,7 @@ function App() {
           onSetDraggingSessionId={setDraggingSessionId}
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
+          onSplitSession={splitSession}
         />
       </div>
 

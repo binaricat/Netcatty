@@ -2,6 +2,7 @@ import { Circle, LayoutGrid, Server } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
 import { collectSessionIds } from '../domain/workspace';
+import { SplitDirection } from '../domain/workspace';
 import { KeyBinding } from '../domain/models';
 import { cn } from '../lib/utils';
 import { Host, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
@@ -53,6 +54,7 @@ interface TerminalLayerProps {
   onSetDraggingSessionId: (id: string | null) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
@@ -80,6 +82,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onSetDraggingSessionId,
   onToggleWorkspaceViewMode,
   onSetWorkspaceFocusedSession,
+  onSplitSession,
 }) => {
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
@@ -575,6 +578,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 onAddKnownHost={handleAddKnownHost}
                 onCommandExecuted={handleCommandExecuted}
                 onExpandToFocus={inActiveWorkspace && !isFocusMode && activeWorkspace ? () => onToggleWorkspaceViewMode?.(activeWorkspace.id) : undefined}
+                onSplitHorizontal={onSplitSession ? () => onSplitSession(session.id, 'horizontal') : undefined}
+                onSplitVertical={onSplitSession ? () => onSplitSession(session.id, 'vertical') : undefined}
               />
             </div>
           );
@@ -649,7 +654,8 @@ const terminalLayerAreEqual = (prev: TerminalLayerProps, next: TerminalLayerProp
     prev.fontSize === next.fontSize &&
     prev.onUpdateHost === next.onUpdateHost &&
     prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
-    prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession
+    prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
+    prev.onSplitSession === next.onSplitSession
   );
 };
 

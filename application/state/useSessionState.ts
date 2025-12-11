@@ -6,6 +6,7 @@ createWorkspaceFromSessions as createWorkspaceEntity,
 createWorkspaceFromSessionIds,
 insertPaneIntoWorkspace,
 pruneWorkspaceNode,
+SplitDirection,
 SplitHint,
 updateWorkspaceSplitSizes,
 } from '../../domain/workspace';
@@ -254,6 +255,81 @@ export const useSessionState = () => {
     }));
   }, []);
 
+  // Split a session to create a workspace with the same host connection
+  // direction: 'horizontal' = split top/bottom, 'vertical' = split left/right
+  const splitSession = useCallback((
+    sessionId: string,
+    direction: SplitDirection
+  ) => {
+    setSessions(prevSessions => {
+      const session = prevSessions.find(s => s.id === sessionId);
+      if (!session) return prevSessions;
+      
+      // If session is already in a workspace, split within that workspace
+      if (session.workspaceId) {
+        // Create a new session with the same host
+        const newSession: TerminalSession = {
+          id: crypto.randomUUID(),
+          hostId: session.hostId,
+          hostLabel: session.hostLabel,
+          hostname: session.hostname,
+          username: session.username,
+          status: 'connecting',
+          workspaceId: session.workspaceId,
+          protocol: session.protocol,
+          port: session.port,
+          moshEnabled: session.moshEnabled,
+        };
+        
+        // Add pane to existing workspace
+        const hint: SplitHint = {
+          direction,
+          position: direction === 'horizontal' ? 'bottom' : 'right',
+          targetSessionId: sessionId,
+        };
+        
+        setWorkspaces(prevWorkspaces => {
+          return prevWorkspaces.map(ws => {
+            if (ws.id !== session.workspaceId) return ws;
+            return { ...ws, root: insertPaneIntoWorkspace(ws.root, newSession.id, hint) };
+          });
+        });
+        
+        return [...prevSessions, newSession];
+      }
+      
+      // Session is standalone - create a new workspace
+      const newSession: TerminalSession = {
+        id: crypto.randomUUID(),
+        hostId: session.hostId,
+        hostLabel: session.hostLabel,
+        hostname: session.hostname,
+        username: session.username,
+        status: 'connecting',
+        protocol: session.protocol,
+        port: session.port,
+        moshEnabled: session.moshEnabled,
+      };
+      
+      const hint: SplitHint = {
+        direction,
+        position: direction === 'horizontal' ? 'bottom' : 'right',
+      };
+      
+      const newWorkspace = createWorkspaceEntity(sessionId, newSession.id, hint);
+      setWorkspaces(prev => [...prev, newWorkspace]);
+      setActiveTabId(newWorkspace.id);
+      
+      return prevSessions.map(s => {
+        if (s.id === sessionId) {
+          return { ...s, workspaceId: newWorkspace.id };
+        }
+        return s;
+      }).concat({ ...newSession, workspaceId: newWorkspace.id });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setActiveTabId is a stable store method reference
+  }, []);
+
   // Toggle workspace view mode between split and focus
   const toggleWorkspaceViewMode = useCallback((workspaceId: string) => {
     setWorkspaces(prev => prev.map(ws => {
@@ -391,6 +467,7 @@ export const useSessionState = () => {
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,
+    splitSession,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
     runSnippet,

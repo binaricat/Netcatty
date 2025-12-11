@@ -25,6 +25,7 @@ import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
 // Import terminal sub-components
 import { TerminalConnectionDialog } from "./terminal/TerminalConnectionDialog";
 import { TerminalToolbar } from "./terminal/TerminalToolbar";
+import { TerminalContextMenu } from "./terminal/TerminalContextMenu";
 import {
   XTERM_PERFORMANCE_CONFIG,
   type XTermPlatform,
@@ -66,6 +67,9 @@ interface TerminalProps {
     hostLabel: string,
     sessionId: string,
   ) => void; // Callback when a command is executed
+  // Split actions
+  onSplitHorizontal?: () => void;
+  onSplitVertical?: () => void;
 }
 
 // xterm.js doesn't need async initialization like ghostty-web
@@ -95,6 +99,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onAddKnownHost,
   onExpandToFocus,
   onCommandExecuted,
+  onSplitHorizontal,
+  onSplitVertical,
 }) => {
   const CONNECTION_TIMEOUT = 12000;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,6 +131,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [isCancelling, setIsCancelling] = useState(false);
   const [showSFTP, setShowSFTP] = useState(false);
   const [progressValue, setProgressValue] = useState(15);
+  const [hasSelection, setHasSelection] = useState(false);
 
   // Chain connection progress state
   const [chainProgress, setChainProgress] = useState<{
@@ -795,6 +802,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return () => clearTimeout(timer);
   }, [inWorkspace, isVisible]);
 
+  // Track terminal selection for context menu
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    
+    const onSelectionChange = () => {
+      const selection = term.getSelection();
+      setHasSelection(!!selection && selection.length > 0);
+    };
+    
+    term.onSelectionChange(onSelectionChange);
+    // No need to return cleanup as xterm handles it when disposed
+  }, []);
+
   useEffect(() => {
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -1392,6 +1413,42 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   };
 
+  // Context menu handlers
+  const handleContextCopy = () => {
+    const term = termRef.current;
+    if (!term) return;
+    const selection = term.getSelection();
+    if (selection) {
+      navigator.clipboard.writeText(selection);
+    }
+  };
+
+  const handleContextPaste = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && sessionRef.current && window.netcatty?.writeToSession) {
+        window.netcatty.writeToSession(sessionRef.current, text);
+      }
+    } catch (err) {
+      console.warn("Failed to paste from clipboard", err);
+    }
+  };
+
+  const handleContextSelectAll = () => {
+    const term = termRef.current;
+    if (!term) return;
+    term.selectAll();
+    setHasSelection(true);
+  };
+
+  const handleContextClear = () => {
+    const term = termRef.current;
+    if (!term) return;
+    term.clear();
+  };
+
   const renderControls = (opts?: { showClose?: boolean }) => (
     <TerminalToolbar
       status={status}
@@ -1418,58 +1475,69 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const _hasError = Boolean(error);
 
   return (
-    <div className="relative h-full w-full flex overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]">
-      {/* Unified statusbar for both single host and workspace modes */}
-      <div className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
-        <div className="flex items-center gap-1 px-2 py-1 bg-black/55 text-white backdrop-blur-md pointer-events-auto min-w-0">
-          <div className="flex-1 min-w-0 flex items-center gap-1 text-[11px] font-semibold">
-            <span
-              className={cn(
-                "truncate",
-                inWorkspace ? "max-w-[80px]" : "max-w-[200px]",
-              )}
-            >
-              {host.label}
-            </span>
-            <span
-              className={cn(
-                "inline-block h-2 w-2 rounded-full flex-shrink-0",
-                statusDotTone,
-              )}
-            />
-          </div>
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            {/* Expand to focus mode button - only show in workspace split view mode */}
-            {inWorkspace && !isFocusMode && onExpandToFocus && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 text-white/70 hover:text-white hover:bg-white/10"
-                onClick={onExpandToFocus}
-                title="Focus Mode"
+    <TerminalContextMenu
+      hasSelection={hasSelection}
+      hotkeyScheme={hotkeyScheme}
+      onCopy={handleContextCopy}
+      onPaste={handleContextPaste}
+      onSelectAll={handleContextSelectAll}
+      onClear={handleContextClear}
+      onSplitHorizontal={onSplitHorizontal}
+      onSplitVertical={onSplitVertical}
+      onClose={inWorkspace ? () => onCloseSession?.(sessionId) : undefined}
+    >
+      <div className="relative h-full w-full flex overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]">
+        {/* Unified statusbar for both single host and workspace modes */}
+        <div className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
+          <div className="flex items-center gap-1 px-2 py-1 bg-black/55 text-white backdrop-blur-md pointer-events-auto min-w-0">
+            <div className="flex-1 min-w-0 flex items-center gap-1 text-[11px] font-semibold">
+              <span
+                className={cn(
+                  "truncate",
+                  inWorkspace ? "max-w-[80px]" : "max-w-[200px]",
+                )}
               >
-                <Maximize2 size={12} />
-              </Button>
-            )}
-            {renderControls({ showClose: inWorkspace })}
+                {host.label}
+              </span>
+              <span
+                className={cn(
+                  "inline-block h-2 w-2 rounded-full flex-shrink-0",
+                  statusDotTone,
+                )}
+              />
+            </div>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {/* Expand to focus mode button - only show in workspace split view mode */}
+              {inWorkspace && !isFocusMode && onExpandToFocus && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-white/70 hover:text-white hover:bg-white/10"
+                  onClick={onExpandToFocus}
+                  title="Focus Mode"
+                >
+                  <Maximize2 size={12} />
+                </Button>
+              )}
+              {renderControls({ showClose: inWorkspace })}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div
-        className="h-full flex-1 min-w-0 transition-all duration-300 relative overflow-hidden pt-8"
-        style={{ backgroundColor: effectiveTheme.colors.background }}
-      >
         <div
-          ref={containerRef}
-          className="absolute inset-x-0 bottom-0"
-          style={{ top: "40px", paddingLeft: 6, backgroundColor: effectiveTheme.colors.background }}
-        />
-        {error && (
-          <div className="absolute bottom-3 left-3 text-xs text-destructive bg-background/80 border border-destructive/40 rounded px-3 py-2 shadow-lg">
-            {error}
-          </div>
-        )}
+          className="h-full flex-1 min-w-0 transition-all duration-300 relative overflow-hidden pt-8"
+          style={{ backgroundColor: effectiveTheme.colors.background }}
+        >
+          <div
+            ref={containerRef}
+            className="absolute inset-x-0 bottom-0"
+            style={{ top: "40px", paddingLeft: 6, backgroundColor: effectiveTheme.colors.background }}
+          />
+          {error && (
+            <div className="absolute bottom-3 left-3 text-xs text-destructive bg-background/80 border border-destructive/40 rounded px-3 py-2 shadow-lg">
+              {error}
+            </div>
+          )}
 
         {/* Known Host Verification Dialog */}
         {needsHostKeyVerification && pendingHostKeyInfo && (
@@ -1524,24 +1592,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             }}
           />
         )}
-      </div>
+        </div>
 
-      {/* SFTP Modal - rendered outside terminal container to avoid affecting terminal width */}
-      <SFTPModal
-        host={host}
-        credentials={{
-          username: host.username,
-          hostname: host.hostname,
-          port: host.port,
-          password: host.password, // Always include for fallback
-          privateKey: host.identityFileId
-            ? keys.find((k) => k.id === host.identityFileId)?.privateKey
-            : undefined,
-        }}
-        open={showSFTP && status === "connected"}
-        onClose={() => setShowSFTP(false)}
-      />
-    </div>
+        {/* SFTP Modal - rendered outside terminal container to avoid affecting terminal width */}
+        <SFTPModal
+          host={host}
+          credentials={{
+            username: host.username,
+            hostname: host.hostname,
+            port: host.port,
+            password: host.password, // Always include for fallback
+            privateKey: host.identityFileId
+              ? keys.find((k) => k.id === host.identityFileId)?.privateKey
+              : undefined,
+          }}
+          open={showSFTP && status === "connected"}
+          onClose={() => setShowSFTP(false)}
+        />
+      </div>
+    </TerminalContextMenu>
   );
 };
 
