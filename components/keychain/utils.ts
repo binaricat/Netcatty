@@ -271,7 +271,8 @@ export const createFido2Credential = async (label: string): Promise<{
                     displayName: label,
                 },
                 pubKeyCredParams: [
-                    { alg: -7, type: 'public-key' },   // ES256 (ECDSA P-256)
+                    { alg: -7, type: 'public-key' },     // ES256 (ECDSA P-256)
+                    { alg: -257, type: 'public-key' },   // RS256 (RSA)
                 ],
                 authenticatorSelection: {
                     // cross-platform for hardware security keys like YubiKey
@@ -334,16 +335,58 @@ export const createBiometricCredential = async (label: string): Promise<{
 
         const rpId = getRpIdFromLocation();
 
+        // Best-effort focus/gesture diagnostics. WebAuthn UI can hang if the window isn't focused
+        // or if the transient user activation is lost.
+        const hasFocusNow = document.hasFocus?.() ?? undefined;
+        const userActivationActive =
+            typeof navigator.userActivation?.isActive === 'boolean'
+                ? navigator.userActivation.isActive
+                : undefined;
+        const userActivationHasBeenActive =
+            typeof navigator.userActivation?.hasBeenActive === 'boolean'
+                ? navigator.userActivation.hasBeenActive
+                : undefined;
+        if (hasFocusNow === false) {
+            try {
+                window.focus();
+            } catch {
+                void 0;
+            }
+        }
+
         logger.info('Starting biometric credential creation', {
             rpId,
             origin: window.location.origin,
             isSecureContext: window.isSecureContext,
+            hasFocus: hasFocusNow,
+            userActivationActive,
+            userActivationHasBeenActive,
             label,
         });
 
         const userId = new TextEncoder().encode(crypto.randomUUID());
 
         let credential: PublicKeyCredential | null = null;
+        const pendingWarn = window.setTimeout(() => {
+            logger.warn('WebAuthn navigator.credentials.create() still pending', {
+                rpId,
+                origin: window.location.origin,
+                isSecureContext: window.isSecureContext,
+                hasFocus: document.hasFocus?.() ?? undefined,
+                userActivationActive:
+                    typeof navigator.userActivation?.isActive === 'boolean'
+                        ? navigator.userActivation.isActive
+                        : undefined,
+                userActivationHasBeenActive:
+                    typeof navigator.userActivation?.hasBeenActive === 'boolean'
+                        ? navigator.userActivation.hasBeenActive
+                        : undefined,
+            });
+        }, 1500);
+        const abortController = new AbortController();
+        const abortTimer = window.setTimeout(() => {
+            abortController.abort();
+        }, 20000);
         try {
             credential = await navigator.credentials.create({
                 publicKey: {
@@ -358,7 +401,8 @@ export const createBiometricCredential = async (label: string): Promise<{
                         displayName: label,
                     },
                     pubKeyCredParams: [
-                        { alg: -7, type: 'public-key' },  // ES256 (ECDSA P-256)
+                        { alg: -7, type: 'public-key' },    // ES256 (ECDSA P-256)
+                        { alg: -257, type: 'public-key' },  // RS256 (RSA)
                     ],
                     authenticatorSelection: {
                         authenticatorAttachment: 'platform',
@@ -369,6 +413,7 @@ export const createBiometricCredential = async (label: string): Promise<{
                     timeout: 180000, // 3 minutes
                     attestation: 'none',
                 },
+                signal: abortController.signal,
             }) as PublicKeyCredential;
         } catch (error) {
             const platformAvailable = await platformAvailablePromise;
@@ -411,8 +456,16 @@ export const createBiometricCredential = async (label: string): Promise<{
                     'WebAuthn blocked by security policy. Ensure the app runs in a secure context and the RP ID is valid for this origin.',
                 );
             }
+            if (errName === 'AbortError') {
+                throw new Error(
+                    `${deviceName} prompt did not appear. This is usually a macOS/Electron runtime limitation (e.g. unsigned/unpackaged app). Try running a packaged build (electron-builder) and ensure ${deviceName} is enabled in System Settings.`,
+                );
+            }
 
             throw error;
+        } finally {
+            window.clearTimeout(pendingWarn);
+            window.clearTimeout(abortTimer);
         }
 
         if (!credential) {

@@ -69,7 +69,12 @@ const terminalBridge = require("./bridges/terminalBridge.cjs");
 const windowManager = require("./bridges/windowManager.cjs");
 
 // GPU settings
-app.commandLine.appendSwitch("no-sandbox");
+// NOTE: Do not disable Chromium sandbox by default.
+// On macOS, platform authenticators (Touch ID / WebAuthn) can become unavailable when sandboxing is disabled.
+// If you need to debug with sandbox disabled, set NETCATTY_NO_SANDBOX=1.
+if (process.env.NETCATTY_NO_SANDBOX === "1") {
+  app.commandLine.appendSwitch("no-sandbox");
+}
 // Force hardware acceleration even on blocklisted GPUs (macs sometimes fall back to software)
 app.commandLine.appendSwitch("ignore-gpu-blocklist");
 app.commandLine.appendSwitch("ignore-gpu-blacklist"); // Some Chromium builds use this alias; keep both for safety
@@ -353,6 +358,11 @@ app.on("will-quit", () => {
     terminalBridge.cleanupAllSessions();
   } catch (err) {
     console.warn("Error during terminal cleanup:", err);
+  }
+  try {
+    windowManager.shutdownProductionStaticServer?.();
+  } catch (err) {
+    console.warn("Error during static server shutdown:", err);
   }
 });
 

@@ -4,6 +4,8 @@
  */
 
 const path = require("node:path");
+const fs = require("node:fs");
+const http = require("node:http");
 
 // Theme colors configuration
 const THEME_COLORS = {
@@ -24,6 +26,8 @@ let mainWindow = null;
 let settingsWindow = null;
 let currentTheme = "light";
 let handlersRegistered = false; // Prevent duplicate IPC handler registration
+let staticServer = null;
+let staticServerBaseUrl = null;
 
 /**
  * Normalize dev server URL for WebAuthn compatibility
@@ -49,6 +53,118 @@ function normalizeDevServerUrl(urlString) {
     return urlString;
   } catch {
     return urlString;
+  }
+}
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = {
+    ".html": "text/html",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".eot": "application/vnd.ms-fontobject",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".wasm": "application/wasm",
+  };
+  return mimeTypes[ext] || "application/octet-stream";
+}
+
+function getCacheControlHeader(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  // HTML should not be cached aggressively; assets can be long-cached (Vite uses hashed filenames).
+  if (ext === ".html") return "no-store";
+  return "public, max-age=31536000, immutable";
+}
+
+async function ensureProductionStaticServer(electronDir) {
+  if (staticServerBaseUrl) return staticServerBaseUrl;
+
+  const distPath = path.join(electronDir, "../dist");
+  if (!fs.existsSync(distPath)) {
+    throw new Error(`Missing dist directory at ${distPath}`);
+  }
+
+  staticServer = http.createServer((req, res) => {
+    try {
+      const reqUrl = new URL(req.url || "/", "http://localhost");
+      let pathname = decodeURIComponent(reqUrl.pathname);
+      if (!pathname || pathname === "/") pathname = "/index.html";
+
+      const hasExtension = path.extname(pathname) !== "";
+      let fullPath = path.join(distPath, pathname);
+
+      // Security: ensure path is within dist directory
+      const normalizedDistPath = path.resolve(distPath) + path.sep;
+      const normalizedFullPath = path.resolve(fullPath);
+      if (!normalizedFullPath.startsWith(normalizedDistPath)) {
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("Forbidden");
+        return;
+      }
+
+      // SPA fallback: serve index.html for unknown routes without extension
+      if (!fs.existsSync(normalizedFullPath) && !hasExtension) {
+        fullPath = path.join(distPath, "index.html");
+      } else {
+        fullPath = normalizedFullPath;
+      }
+
+      if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+        return;
+      }
+
+      const stat = fs.statSync(fullPath);
+      res.writeHead(200, {
+        "Content-Type": getMimeType(fullPath),
+        "Content-Length": stat.size.toString(),
+        "Cache-Control": getCacheControlHeader(fullPath),
+      });
+
+      fs.createReadStream(fullPath).pipe(res);
+    } catch (_err) {
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("Internal Server Error");
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    staticServer.once("error", reject);
+    staticServer.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = staticServer.address();
+  const port = address && typeof address === "object" ? address.port : null;
+  if (!port) throw new Error("Failed to bind production static server");
+
+  // Use localhost so WebAuthn RP ID can be "localhost"
+  staticServerBaseUrl = `http://localhost:${port}`;
+  return staticServerBaseUrl;
+}
+
+function shutdownProductionStaticServer() {
+  const server = staticServer;
+  staticServer = null;
+  staticServerBaseUrl = null;
+  if (server) {
+    try {
+      server.close();
+    } catch {}
   }
 }
 
@@ -92,10 +208,11 @@ async function createWindow(electronModule, options) {
     }
   }
 
-  // Production mode - use custom app:// protocol for secure context
-  // This enables WebAuthn while maintaining file:// equivalent performance
-  console.log('[Main] Loading production build via app:// protocol');
-  await win.loadURL('app://localhost/index.html');
+  // Production mode - serve from localhost HTTP for WebAuthn compatibility.
+  // Chromium blocks WebAuthn on custom schemes even when marked as secure.
+  const baseUrl = await ensureProductionStaticServer(electronDir);
+  console.log("[Main] Loading production build via", baseUrl);
+  await win.loadURL(`${baseUrl}/index.html`);
   
   onRegisterBridge?.(win);
   return win;
@@ -160,8 +277,9 @@ async function openSettingsWindow(electronModule, options) {
     }
   }
 
-  // Production mode - use custom app:// protocol
-  await win.loadURL('app://localhost/index.html#/settings');
+  // Production mode - serve from localhost HTTP for WebAuthn compatibility.
+  const baseUrl = await ensureProductionStaticServer(electronDir);
+  await win.loadURL(`${baseUrl}/index.html#/settings`);
   
   return win;
 }
@@ -319,6 +437,7 @@ module.exports = {
   openSettingsWindow,
   closeSettingsWindow,
   buildAppMenu,
+  shutdownProductionStaticServer,
   getMainWindow,
   getSettingsWindow,
   THEME_COLORS,
