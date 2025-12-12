@@ -1711,13 +1711,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       setSearchMatchCount(null);
       return false;
     }
-    
+
     // Store the search term for findNext/findPrevious
     searchTermRef.current = term;
-    
+
     // Clear previous decorations
     searchAddon.clearDecorations();
-    
+
     // Perform search (findNext from current position or start)
     const found = searchAddon.findNext(term, {
       regex: false,
@@ -1732,7 +1732,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         activeMatchColorOverviewRuler: '#FF8800',
       },
     });
-    
+
     // Update match count after search
     // Note: xterm search addon doesn't expose match count directly
     // We'll track it by counting via findAll (if available) or estimate
@@ -1743,7 +1743,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     } else {
       setSearchMatchCount({ current: 0, total: 0 });
     }
-    
+
     return found;
   }, []);
 

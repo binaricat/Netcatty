@@ -69,7 +69,7 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div 
+        <div
             className="flex items-center gap-1.5 px-2 pt-1 pb-2 bg-black/50 backdrop-blur-sm"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
