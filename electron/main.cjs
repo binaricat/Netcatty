@@ -61,6 +61,9 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
+// Apply ssh2 protocol patch needed for OpenSSH sk-* signature layouts.
+require("./bridges/ssh2SkPatch.cjs");
+
 // Import bridge modules
 const sshBridge = require("./bridges/sshBridge.cjs");
 const sftpBridge = require("./bridges/sftpBridge.cjs");

@@ -7,7 +7,6 @@
  *   OpenSSH's webauthn-sk-ecdsa-sha2-nistp256@openssh.com signature format.
  */
 
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { BaseAgent } = require("ssh2/lib/agent.js");
@@ -25,6 +24,12 @@ const log = (msg, data) => {
 
 const DUMMY_ED25519_PUB =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB netcatty-agent-dummy";
+
+// OpenSSH PROTOCOL.u2f defines a distinct signature algorithm for WebAuthn-backed ECDSA SK signatures.
+// Public keys remain `sk-ecdsa-sha2-nistp256@openssh.com`, but signatures use:
+//   `webauthn-sk-ecdsa-sha2-nistp256@openssh.com`
+const SK_ECDSA_ALGO = "sk-ecdsa-sha2-nistp256@openssh.com";
+const WEBAUTHN_SK_ECDSA_ALGO = "webauthn-sk-ecdsa-sha2-nistp256@openssh.com";
 
 function base64UrlToBuffer(b64url) {
   const b64 = String(b64url).replace(/-/g, "+").replace(/_/g, "/");
@@ -219,10 +224,14 @@ class NetcattyAgent extends BaseAgent {
       const { publicKey, label } = opts.meta || {};
       if (!publicKey) throw new Error("Missing publicKey");
       const { type: pubKeyType, blob: pubKeyBlob } = parseOpenSshKeyLine(publicKey);
-      // Keep the original key type for identity (publickey check).
-      // The server matches sk-ecdsa-sha2-nistp256@openssh.com in authorized_keys.
+      if (pubKeyType !== SK_ECDSA_ALGO) {
+        throw new Error(`Unsupported WebAuthn publicKey type: ${pubKeyType}`);
+      }
+      // We must advertise the WebAuthn signature algorithm so sshd can verify using
+      // authenticatorData + SHA256(clientDataJSON) (OpenSSH PROTOCOL.u2f "webauthn signatures").
+      // The *public key blob* remains sk-ecdsa..., so authorized_keys still matches.
       this._key = buildWebAuthnIdentityKey({
-        algoType: pubKeyType,
+        algoType: WEBAUTHN_SK_ECDSA_ALGO,
         pubKeyBlob,
         comment: label || "",
       });
@@ -268,7 +277,7 @@ class NetcattyAgent extends BaseAgent {
       }
 
       if (this._mode === "webauthn") {
-        log("WebAuthn sign started", { keySource: this._meta?.keySource });
+        log("WebAuthn sign started", { keySource: this._meta?.keySource, algo: this._key?.type });
         const { credentialId, rpId, userVerification } = this._meta || {};
         if (!credentialId) throw new Error("Missing credentialId for WebAuthn auth");
         if (!rpId) throw new Error("Missing rpId for WebAuthn auth");
@@ -277,24 +286,29 @@ class NetcattyAgent extends BaseAgent {
         }
 
         log("Calling requestWebAuthnAssertion", { rpId, hasCredentialId: !!credentialId });
-        const challenge = crypto.createHash("sha256").update(data).digest();
         const assertion = await requestWebAuthnAssertion(this._webContents, {
           credentialId,
           rpId,
-          challenge: bufferToBase64Url(challenge),
+          // OpenSSH's WebAuthn SK verification expects the WebAuthn challenge to be the
+          // base64url-encoded SSH signature data (session_id || userauth request).
+          // See OpenSSH `ssh-ecdsa-sk.c` (webauthn_check_prepare_hash).
+          challenge: bufferToBase64Url(data),
           userVerification: userVerification || "preferred",
           keySource: this._meta?.keySource,
         });
         log("WebAuthn assertion received", { hasAssertion: !!assertion });
 
+        const origin = typeof assertion?.origin === "string" ? assertion.origin : "";
         const authenticatorData = base64UrlToBuffer(assertion?.authenticatorData || "");
+        const clientDataJSON = base64UrlToBuffer(assertion?.clientDataJSON || "");
         const signatureDer = base64UrlToBuffer(assertion?.signature || "");
 
-        // Use FIDO2 signature format (compatible with OpenSSH 8.2+)
-        // The WebAuthn API returns the same cryptographic signature as FIDO2,
-        // we just need to format it correctly without the WebAuthn-specific fields.
-        return buildFido2SkEcdsaSignatureBlob({
+        // WebAuthn signatures must include origin + clientDataJSON for sshd to verify
+        // against the challenge (OpenSSH PROTOCOL.u2f "webauthn signatures").
+        return buildWebAuthnSkEcdsaSignatureBlob({
+          origin,
           authenticatorData,
+          clientDataJSON,
           signatureDer,
         });
       }

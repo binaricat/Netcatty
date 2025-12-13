@@ -6,14 +6,8 @@
  */
 
 const { getAssertionInBrowser } = require("./webauthnBrowserBridge.cjs");
-const fs = require("node:fs");
-const path = require("node:path");
 
-// Simple file logger for debugging WebAuthn issues
-const logFile = path.join(require("os").tmpdir(), "netcatty-webauthn.log");
 const log = (msg, data) => {
-  const line = `[${new Date().toISOString()}] ${msg} ${data ? JSON.stringify(data) : ""}\n`;
-  try { fs.appendFileSync(logFile, line); } catch {}
   console.log("[WebAuthn]", msg, data || "");
 };
 
