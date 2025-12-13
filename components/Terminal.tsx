@@ -278,10 +278,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         ? idMatch[1].replace(/"/g, "")
         : (data.split(/\\s+/)[0] || "").toLowerCase();
       if (distro) onOsDetected?.(host.id, distro);
-	    } catch (err) {
-	      logger.warn("OS probe failed", err);
-	    }
-	  };
+    } catch (err) {
+      logger.warn("OS probe failed", err);
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -596,16 +596,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             const handleMiddleClick = async (e: MouseEvent) => {
               if (e.button === 1) { // Middle mouse button
                 e.preventDefault();
-	                  try {
-	                    const text = await navigator.clipboard.readText();
-	                  if (text && sessionRef.current) {
-	                    terminalBackend.writeToSession(sessionRef.current, text);
-	                  }
-		                } catch (err) {
-		                  logger.warn('[Terminal] Failed to paste from clipboard:', err);
-		                }
-	              }
-	            };
+                try {
+                  const text = await navigator.clipboard.readText();
+                  if (text && sessionRef.current) {
+                    terminalBackend.writeToSession(sessionRef.current, text);
+                  }
+                } catch (err) {
+                  logger.warn('[Terminal] Failed to paste from clipboard:', err);
+                }
+              }
+            };
             containerRef.current.addEventListener('auxclick', handleMiddleClick);
             // Store cleanup function
             const container = containerRef.current;
@@ -620,15 +620,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
           fitAddon.fit();
           term.focus();
-	        } catch (openErr) {
-	          logger.error("[XTerm] Failed to open terminal:", openErr);
-	          throw openErr;
-	        }
+        } catch (openErr) {
+          logger.error("[XTerm] Failed to open terminal:", openErr);
+          throw openErr;
+        }
 
-	        term.onData((data) => {
-	          const id = sessionRef.current;
-	          if (id) {
-	            terminalBackend.writeToSession(id, data);
+        term.onData((data) => {
+          const id = sessionRef.current;
+          if (id) {
+            terminalBackend.writeToSession(id, data);
 
             // Track command input for shell history
             if (status === "connected" && onCommandExecuted) {
@@ -666,19 +666,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // Add debouncing for resize events to prevent excessive calls on macOS
         let resizeTimeout: NodeJS.Timeout | null = null;
         const resizeDebounceMs = XTERM_PERFORMANCE_CONFIG.resize.debounceMs;
-	        term.onResize(({ cols, rows }) => {
-	          const id = sessionRef.current;
-	          if (id) {
-	            // Debounce resize to prevent rapid successive calls
-	            if (resizeTimeout) {
-	              clearTimeout(resizeTimeout);
-	            }
-	            resizeTimeout = setTimeout(() => {
-	              terminalBackend.resizeSession(id, cols, rows);
-	              resizeTimeout = null;
-	            }, resizeDebounceMs); // Debounce for smooth resizing on macOS
-	          }
-	        });
+        term.onResize(({ cols, rows }) => {
+          const id = sessionRef.current;
+          if (id) {
+            // Debounce resize to prevent rapid successive calls
+            if (resizeTimeout) {
+              clearTimeout(resizeTimeout);
+            }
+            resizeTimeout = setTimeout(() => {
+              terminalBackend.resizeSession(id, cols, rows);
+              resizeTimeout = null;
+            }, resizeDebounceMs); // Debounce for smooth resizing on macOS
+          }
+        });
 
         if (host.protocol === "local" || host.hostname === "localhost") {
           setStatus("connecting");
@@ -895,30 +895,30 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           logger.warn("Font remeasure failed", err);
         }
 
-	        try {
-	          fitAddon?.fit();
-		        } catch (err) {
-		          logger.warn("Fit after fonts ready failed", err);
-		        }
+        try {
+          fitAddon?.fit();
+        } catch (err) {
+          logger.warn("Fit after fonts ready failed", err);
+        }
 
-	        const id = sessionRef.current;
-	        if (id && term) {
-	          try {
-	            resizeSession(id, term.cols, term.rows);
-		          } catch (err) {
-		            logger.warn("Resize session after fonts ready failed", err);
-		          }
-		        }
-		      } catch (err) {
-		        logger.warn("Waiting for fonts failed", err);
-		      }
-	    };
+        const id = sessionRef.current;
+        if (id && term) {
+          try {
+            resizeSession(id, term.cols, term.rows);
+          } catch (err) {
+            logger.warn("Resize session after fonts ready failed", err);
+          }
+        }
+      } catch (err) {
+        logger.warn("Waiting for fonts failed", err);
+      }
+    };
 
     waitForFonts();
-	    return () => {
-	      cancelled = true;
-	    };
-	  }, [host.id, sessionId, resizeSession]);
+    return () => {
+      cancelled = true;
+    };
+  }, [host.id, sessionId, resizeSession]);
 
   // Debounced fit for resize operations - only fit when not actively resizing
   useEffect(() => {
@@ -1643,16 +1643,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   };
 
-	  const handleContextPaste = async () => {
-	    const term = termRef.current;
-	    if (!term) return;
-	    try {
-	      const text = await navigator.clipboard.readText();
-	      if (text && sessionRef.current) terminalBackend.writeToSession(sessionRef.current, text);
-	    } catch (err) {
-	      logger.warn("Failed to paste from clipboard", err);
-	    }
-	  };
+  const handleContextPaste = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && sessionRef.current) terminalBackend.writeToSession(sessionRef.current, text);
+    } catch (err) {
+      logger.warn("Failed to paste from clipboard", err);
+    }
+  };
 
   const handleContextSelectAll = () => {
     const term = termRef.current;
@@ -1878,7 +1878,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             className="absolute inset-x-0 bottom-0"
             style={{ top: isSearchOpen ? "64px" : "40px", paddingLeft: 6, backgroundColor: effectiveTheme.colors.background }}
           />
-          
+
 
           {/* Known Host Verification Dialog */}
           {needsHostKeyVerification && pendingHostKeyInfo && (
