@@ -262,6 +262,7 @@ interface NetcattyBridge {
   mkdirLocal?(path: string): Promise<void>;
   statLocal?(path: string): Promise<SftpStatResult>;
   getHomeDir?(): Promise<string>;
+  getSystemInfo?(): Promise<{ username: string; hostname: string }>;
   
   setTheme?(theme: 'light' | 'dark'): Promise<boolean>;
   // Window controls for custom title bar (Windows/Linux)

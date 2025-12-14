@@ -66,6 +66,7 @@ interface TerminalProps {
     status: TerminalSession["status"],
   ) => void;
   onSessionExit?: (sessionId: string) => void;
+  onTerminalDataCapture?: (sessionId: string, data: string) => void; // Capture terminal data when session exits
   onOsDetected?: (hostId: string, distro: string) => void;
   onCloseSession?: (sessionId: string) => void;
   onUpdateHost?: (host: Host) => void;
@@ -109,6 +110,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onHotkeyAction,
   onStatusChange,
   onSessionExit,
+  onTerminalDataCapture,
   onOsDetected,
   onCloseSession,
   onUpdateHost,
@@ -746,6 +748,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     return () => {
       disposed = true;
+      // Capture terminal data before teardown if callback is provided
+      if (onTerminalDataCapture && serializeAddonRef.current) {
+        try {
+          const terminalData = serializeAddonRef.current.serialize();
+          logger.info("[Terminal] Capturing data on unmount", { sessionId, dataLength: terminalData.length });
+          onTerminalDataCapture(sessionId, terminalData);
+        } catch (err) {
+          logger.warn("Failed to serialize terminal data on unmount:", err);
+        }
+      }
       teardown();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Effect only runs on host.id/sessionId change, internal functions are stable
@@ -1250,6 +1262,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         term.writeln(
           `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
+        // Capture terminal data before session exit
+        if (onTerminalDataCapture && serializeAddonRef.current) {
+          try {
+            const terminalData = serializeAddonRef.current.serialize();
+            onTerminalDataCapture(sessionId, terminalData);
+          } catch (err) {
+            logger.warn("Failed to serialize terminal data:", err);
+          }
+        }
         onSessionExit?.(sessionId);
       });
 
@@ -1374,6 +1395,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         term.writeln(
           `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
+        // Capture terminal data before session exit
+        if (onTerminalDataCapture && serializeAddonRef.current) {
+          try {
+            const terminalData = serializeAddonRef.current.serialize();
+            onTerminalDataCapture(sessionId, terminalData);
+          } catch (err) {
+            logger.warn("Failed to serialize terminal data:", err);
+          }
+        }
         onSessionExit?.(sessionId);
       });
     } catch (err) {
@@ -1453,6 +1483,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         term.writeln(
           `\r\n[Mosh session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
+        // Capture terminal data before session exit
+        if (onTerminalDataCapture && serializeAddonRef.current) {
+          try {
+            const terminalData = serializeAddonRef.current.serialize();
+            onTerminalDataCapture(sessionId, terminalData);
+          } catch (err) {
+            logger.warn("Failed to serialize terminal data:", err);
+          }
+        }
         onSessionExit?.(sessionId);
       });
 
@@ -1529,6 +1568,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         term.writeln(
           `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
         );
+        // Capture terminal data before session exit
+        logger.info("[Terminal] Session exit, capturing data", { sessionId, hasCallback: !!onTerminalDataCapture, hasSerializeAddon: !!serializeAddonRef.current });
+        if (onTerminalDataCapture && serializeAddonRef.current) {
+          try {
+            const terminalData = serializeAddonRef.current.serialize();
+            logger.info("[Terminal] Serialized terminal data", { sessionId, dataLength: terminalData.length });
+            onTerminalDataCapture(sessionId, terminalData);
+          } catch (err) {
+            logger.warn("Failed to serialize terminal data:", err);
+          }
+        }
         onSessionExit?.(sessionId);
       });
     } catch (err) {

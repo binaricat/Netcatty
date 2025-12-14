@@ -379,6 +379,9 @@ const api = {
   getHomeDir: async () => {
     return ipcRenderer.invoke("netcatty:local:homedir");
   },
+  getSystemInfo: async () => {
+    return ipcRenderer.invoke("netcatty:system:info");
+  },
   // Read system known_hosts file
   readKnownHosts: async () => {
     return ipcRenderer.invoke("netcatty:known-hosts:read");

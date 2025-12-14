@@ -1,6 +1,7 @@
-import { Bell, Copy, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Shield, Square, Sun, TerminalSquare, User, X } from 'lucide-react';
+import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Shield, Square, Sun, TerminalSquare, User, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
+import { LogView } from '../application/state/useSessionState';
 import { useWindowControls } from '../application/state/useWindowControls';
 import { cn } from '../lib/utils';
 import { TerminalSession, Workspace } from '../types';
@@ -16,12 +17,14 @@ interface TopTabsProps {
   sessions: TerminalSession[];
   orphanSessions: TerminalSession[];
   workspaces: Workspace[];
+  logViews: LogView[];
   orderedTabs: string[];
   draggingSessionId: string | null;
   isMacClient: boolean;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onRenameWorkspace: (workspaceId: string) => void;
   onCloseWorkspace: (workspaceId: string) => void;
+  onCloseLogView: (logViewId: string) => void;
   onOpenQuickSwitcher: () => void;
   onToggleTheme: () => void;
   onStartSessionDrag: (sessionId: string) => void;
@@ -107,12 +110,14 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   sessions,
   orphanSessions,
   workspaces,
+  logViews,
   orderedTabs,
   draggingSessionId,
   isMacClient,
   onCloseSession,
   onRenameWorkspace,
   onCloseWorkspace,
+  onCloseLogView,
   onOpenQuickSwitcher,
   onToggleTheme,
   onStartSessionDrag,
@@ -198,6 +203,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     for (const w of workspaces) map.set(w.id, w);
     return map;
   }, [workspaces]);
+
+  const logViewMap = useMemo(() => {
+    const map = new Map<string, LogView>();
+    for (const lv of logViews) map.set(lv.id, lv);
+    return map;
+  }, [logViews]);
 
   // Pre-compute session counts per workspace for O(1) access
   const workspacePaneCounts = useMemo(() => {
@@ -301,15 +312,19 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return orderedTabs.map((tabId) => {
       const session = orphanSessionMap.get(tabId);
       const workspace = workspaceMap.get(tabId);
+      const logView = logViewMap.get(tabId);
       if (session) {
         return { type: 'session' as const, id: tabId, session };
       }
       if (workspace) {
         return { type: 'workspace' as const, id: tabId, workspace, paneCount: workspacePaneCounts.get(tabId) || 0 };
       }
+      if (logView) {
+        return { type: 'logView' as const, id: tabId, logView };
+      }
       return null;
     }).filter(Boolean);
-  }, [orderedTabs, orphanSessionMap, workspaceMap, workspacePaneCounts]);
+  }, [orderedTabs, orphanSessionMap, workspaceMap, logViewMap, workspacePaneCounts]);
 
   // Render the tabs
   const renderOrderedTabs = () => {
@@ -427,6 +442,43 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
+        );
+      }
+
+      if (item.type === 'logView') {
+        const logView = item.logView;
+        const isActive = activeTabId === logView.id;
+        const isLocal = logView.log.protocol === 'local' || logView.log.hostname === 'localhost';
+
+        return (
+          <div
+            key={logView.id}
+            data-tab-id={logView.id}
+            onClick={() => onSelectTab(logView.id)}
+            className={cn(
+              "relative h-8 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-md border text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+              "transition-all duration-200 ease-out",
+              isActive ? "bg-accent/20 text-foreground" : "border-border/60 text-muted-foreground hover:border-accent/40 hover:text-foreground"
+            )}
+            style={isActive ? { borderColor: 'hsl(var(--accent))' } : {}}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <FileText size={14} className={cn("shrink-0", isActive ? "text-accent" : "text-muted-foreground")} />
+              <span className="truncate">
+                Log: {isLocal ? 'Local' : logView.log.hostname}
+              </span>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCloseLogView(logView.id);
+              }}
+              className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+              aria-label="Close log view"
+            >
+              <X size={12} />
+            </button>
+          </div>
         );
       }
 

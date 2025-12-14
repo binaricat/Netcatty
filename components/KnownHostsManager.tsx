@@ -26,6 +26,12 @@ import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
 import { Host, KnownHost } from "../types";
 import { Button } from "./ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "./ui/context-menu";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
@@ -128,123 +134,118 @@ const HostItem = React.memo<HostItemProps>(
     // console.log('[HostItem] render:', knownHost.hostname);
     if (viewMode === "grid") {
       return (
-        <div
-          className={cn(
-            "group cursor-pointer soft-card elevate rounded-xl h-[68px] px-3 py-2",
-            converted && "opacity-60",
-          )}
-        >
-          {/* Quick action buttons on hover */}
-          <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            {!converted && (
-              <button
-                className="p-1 rounded hover:bg-primary/20 text-primary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onConvertToHost(knownHost);
-                }}
-                title="Convert to host"
-              >
-                <ArrowRight size={12} />
-              </button>
-            )}
-            <button
-              className="p-1 rounded hover:bg-destructive/20 text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(knownHost.id);
-              }}
-              title="Remove"
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className={cn(
+                "group cursor-pointer soft-card elevate rounded-xl h-[68px] px-3 py-2",
+                converted && "opacity-60",
+              )}
             >
-              <Trash2 size={12} />
-            </button>
-          </div>
-          <div className="flex items-center gap-3 h-full">
-            <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-              <Server size={18} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold truncate">
-                  {knownHost.hostname}
-                </span>
-                {knownHost.port !== 22 && (
-                  <span className="text-xs text-muted-foreground">
-                    :{knownHost.port}
-                  </span>
+              {/* Quick action buttons on hover */}
+              <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {!converted && (
+                  <button
+                    className="p-1 rounded hover:bg-primary/20 text-primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConvertToHost(knownHost);
+                    }}
+                    title="Convert to host"
+                  >
+                    <ArrowRight size={12} />
+                  </button>
                 )}
+                <button
+                  className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(knownHost.id);
+                  }}
+                  title="Remove"
+                >
+                  <Trash2 size={12} />
+                </button>
               </div>
-              <div className="text-[11px] text-muted-foreground truncate">
-                <span className={cn(getKeyTypeColorFn(knownHost.keyType))}>
-                  {knownHost.keyType}
-                </span>
+              <div className="flex items-center gap-3 h-full">
+                <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                  <Server size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-semibold truncate block">
+                    {knownHost.hostname}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            {!converted && (
+              <ContextMenuItem onClick={() => onConvertToHost(knownHost)}>
+                <ArrowRight className="mr-2 h-4 w-4" /> Convert to Host
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem
+              className="text-destructive"
+              onClick={() => onDelete(knownHost.id)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Remove
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       );
     }
 
     // List view
     return (
-      <div
-        className={cn(
-          "group flex items-center gap-3 px-3 py-2 h-14 rounded-lg hover:bg-secondary/60 transition-colors cursor-pointer",
-          converted && "opacity-60",
-        )}
-      >
-        <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-          <Server size={18} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold truncate">
-              {knownHost.hostname}
-            </span>
-            {knownHost.port !== 22 && (
-              <span className="text-xs text-muted-foreground">
-                :{knownHost.port}
-              </span>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              "group flex items-center gap-3 px-3 py-2 h-14 rounded-lg hover:bg-secondary/60 transition-colors cursor-pointer",
+              converted && "opacity-60",
             )}
-            {converted && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-500">
-                Managed
+          >
+            <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+              <Server size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-semibold truncate block">
+                {knownHost.hostname}
               </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span
-              className={cn(
-                "flex items-center gap-1",
-                getKeyTypeColorFn(knownHost.keyType),
+            </div>
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {!converted && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onConvertToHost(knownHost);
+                  }}
+                  title="Convert to managed host"
+                >
+                  <ArrowRight size={14} />
+                </Button>
               )}
-            >
-              <Key size={10} />
-              {knownHost.keyType}
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock size={10} />
-              {formatDateFn(knownHost.discoveredAt)}
-            </span>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        </ContextMenuTrigger>
+        <ContextMenuContent>
           {!converted && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={(e) => {
-                e.stopPropagation();
-                onConvertToHost(knownHost);
-              }}
-              title="Convert to managed host"
-            >
-              <ArrowRight size={14} />
-            </Button>
+            <ContextMenuItem onClick={() => onConvertToHost(knownHost)}>
+              <ArrowRight className="mr-2 h-4 w-4" /> Convert to Host
+            </ContextMenuItem>
           )}
-        </div>
-      </div>
+          <ContextMenuItem
+            className="text-destructive"
+            onClick={() => onDelete(knownHost.id)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Remove
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   },
 );
@@ -309,9 +310,18 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     }
   }, [handleScanSystem]);
 
-  // Sort and filter hosts
+  // Sort and filter hosts with deduplication by hostname
   const filteredHosts = useMemo(() => {
-    let result = knownHosts;
+    // First, deduplicate by hostname (keep the most recent one)
+    const hostnameMap = new Map<string, KnownHost>();
+    for (const h of knownHosts) {
+      const key = h.hostname;
+      const existing = hostnameMap.get(key);
+      if (!existing || h.discoveredAt > existing.discoveredAt) {
+        hostnameMap.set(key, h);
+      }
+    }
+    let result = Array.from(hostnameMap.values());
 
     // Filter by search
     if (deferredSearch.trim()) {

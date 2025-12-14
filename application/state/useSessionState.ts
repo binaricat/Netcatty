@@ -1,5 +1,5 @@
 import { MouseEvent,useCallback,useMemo,useState } from 'react';
-import { Host,Snippet,TerminalSession,Workspace,WorkspaceViewMode } from '../../domain/models';
+import { ConnectionLog,Host,Snippet,TerminalSession,Workspace,WorkspaceViewMode } from '../../domain/models';
 import {
 collectSessionIds,
 createWorkspaceFromSessions as createWorkspaceEntity,
@@ -14,6 +14,13 @@ updateWorkspaceSplitSizes,
 } from '../../domain/workspace';
 import { activeTabStore } from './activeTabStore';
 
+// LogView represents an open log replay tab
+export interface LogView {
+  id: string; // Tab ID (log-${connectionLogId})
+  connectionLogId: string;
+  log: ConnectionLog;
+}
+
 export const useSessionState = () => {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -26,6 +33,8 @@ export const useSessionState = () => {
   const [tabOrder, setTabOrder] = useState<string[]>([]);
   // Broadcast mode: stores workspace IDs that have broadcast enabled
   const [broadcastWorkspaceIds, setBroadcastWorkspaceIds] = useState<Set<string>>(new Set());
+  // Log views: stores open log replay tabs
+  const [logViews, setLogViews] = useState<LogView[]>([]);
 
   const createLocalTerminal = useCallback(() => {
     const sessionId = crypto.randomUUID();
@@ -421,6 +430,41 @@ export const useSessionState = () => {
 
   const orphanSessions = useMemo(() => sessions.filter(s => !s.workspaceId), [sessions]);
 
+  // Open a log view tab
+  const openLogView = useCallback((log: ConnectionLog) => {
+    const tabId = `log-${log.id}`;
+    // Check if already open
+    setLogViews(prev => {
+      if (prev.some(lv => lv.connectionLogId === log.id)) {
+        // Already open, just switch to it
+        setActiveTabId(tabId);
+        return prev;
+      }
+      // Open new log view
+      const newLogView: LogView = {
+        id: tabId,
+        connectionLogId: log.id,
+        log,
+      };
+      setActiveTabId(tabId);
+      return [...prev, newLogView];
+    });
+  }, [setActiveTabId]);
+
+  // Close a log view tab
+  const closeLogView = useCallback((logViewId: string) => {
+    setLogViews(prev => {
+      const updated = prev.filter(lv => lv.id !== logViewId);
+      // If this was the active tab, switch to vault
+      const currentActiveTabId = activeTabStore.getActiveTabId();
+      if (currentActiveTabId === logViewId) {
+        const fallback = updated.length > 0 ? updated[updated.length - 1].id : 'vault';
+        setActiveTabId(fallback);
+      }
+      return updated;
+    });
+  }, [setActiveTabId]);
+
   // Toggle broadcast mode for a workspace
   const toggleBroadcast = useCallback((workspaceId: string) => {
     setBroadcastWorkspaceIds(prev => {
@@ -439,26 +483,28 @@ export const useSessionState = () => {
     return broadcastWorkspaceIds.has(workspaceId);
   }, [broadcastWorkspaceIds]);
 
-  // Get ordered tabs: combines orphan sessions and workspaces in the custom order
+  // Get ordered tabs: combines orphan sessions, workspaces, and log views in the custom order
   const orderedTabs = useMemo(() => {
     const allTabIds = [
       ...orphanSessions.map(s => s.id),
       ...workspaces.map(w => w.id),
+      ...logViews.map(lv => lv.id),
     ];
     // Filter tabOrder to only include existing tabs, then add any new tabs at the end
     const orderedIds = tabOrder.filter(id => allTabIds.includes(id));
     const newIds = allTabIds.filter(id => !orderedIds.includes(id));
     return [...orderedIds, ...newIds];
-  }, [orphanSessions, workspaces, tabOrder]);
+  }, [orphanSessions, workspaces, logViews, tabOrder]);
 
   const reorderTabs = useCallback((draggedId: string, targetId: string, position: 'before' | 'after' = 'before') => {
     if (draggedId === targetId) return;
     
     setTabOrder(prevTabOrder => {
-      // Get all current tab IDs (orphan sessions + workspaces)
+      // Get all current tab IDs (orphan sessions + workspaces + log views)
       const allTabIds = [
         ...orphanSessions.map(s => s.id),
         ...workspaces.map(w => w.id),
+        ...logViews.map(lv => lv.id),
       ];
       
       // Build current effective order: existing order + new tabs at end
@@ -489,7 +535,7 @@ export const useSessionState = () => {
       
       return currentOrder;
     });
-  }, [orphanSessions, workspaces]);
+  }, [orphanSessions, workspaces, logViews]);
 
   return {
     sessions,
@@ -523,5 +569,9 @@ export const useSessionState = () => {
     isBroadcastEnabled,
     orderedTabs,
     reorderTabs,
+    // Log views
+    logViews,
+    openLogView,
+    closeLogView,
   };
 };

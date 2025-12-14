@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { normalizeDistroId, sanitizeHost } from "../../domain/host";
 import {
+  ConnectionLog,
   Host,
   KeyCategory,
   KnownHost,
@@ -13,6 +14,7 @@ import {
   INITIAL_SNIPPETS,
 } from "../../infrastructure/config/defaultData";
 import {
+  STORAGE_KEY_CONNECTION_LOGS,
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_HOSTS,
   STORAGE_KEY_KEYS,
@@ -78,6 +80,7 @@ export const useVaultState = () => {
   const [snippetPackages, setSnippetPackages] = useState<string[]>([]);
   const [knownHosts, setKnownHosts] = useState<KnownHost[]>([]);
   const [shellHistory, setShellHistory] = useState<ShellHistoryEntry[]>([]);
+  const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
 
   const updateHosts = useCallback((data: Host[]) => {
     const cleaned = data.map(sanitizeHost);
@@ -130,6 +133,68 @@ export const useVaultState = () => {
   const clearShellHistory = useCallback(() => {
     setShellHistory([]);
     localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, []);
+  }, []);
+
+  // Connection logs management
+  const addConnectionLog = useCallback(
+    (log: Omit<ConnectionLog, "id">) => {
+      const newLog: ConnectionLog = {
+        ...log,
+        id: crypto.randomUUID(),
+      };
+      setConnectionLogs((prev) => {
+        // Keep only the last 500 non-saved entries plus all saved entries
+        const savedLogs = prev.filter((l) => l.saved);
+        const unsavedLogs = prev.filter((l) => !l.saved);
+        const updated = [newLog, ...unsavedLogs].slice(0, 500);
+        const final = [...updated, ...savedLogs].sort(
+          (a, b) => b.startTime - a.startTime
+        );
+        localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, final);
+        return final;
+      });
+      return newLog.id;
+    },
+    []
+  );
+
+  const updateConnectionLog = useCallback(
+    (id: string, updates: Partial<ConnectionLog>) => {
+      setConnectionLogs((prev) => {
+        const updated = prev.map((log) =>
+          log.id === id ? { ...log, ...updates } : log
+        );
+        localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, updated);
+        return updated;
+      });
+    },
+    []
+  );
+
+  const toggleConnectionLogSaved = useCallback((id: string) => {
+    setConnectionLogs((prev) => {
+      const updated = prev.map((log) =>
+        log.id === id ? { ...log, saved: !log.saved } : log
+      );
+      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, updated);
+      return updated;
+    });
+  }, []);
+
+  const deleteConnectionLog = useCallback((id: string) => {
+    setConnectionLogs((prev) => {
+      const updated = prev.filter((log) => log.id !== id);
+      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, updated);
+      return updated;
+    });
+  }, []);
+
+  const clearUnsavedConnectionLogs = useCallback(() => {
+    setConnectionLogs((prev) => {
+      const saved = prev.filter((log) => log.saved);
+      localStorageAdapter.write(STORAGE_KEY_CONNECTION_LOGS, saved);
+      return saved;
+    });
   }, []);
 
   // Convert a known host to a managed host
@@ -211,6 +276,12 @@ export const useVaultState = () => {
       STORAGE_KEY_SHELL_HISTORY,
     );
     if (savedShellHistory) setShellHistory(savedShellHistory);
+
+    // Load connection logs
+    const savedConnectionLogs = localStorageAdapter.read<ConnectionLog[]>(
+      STORAGE_KEY_CONNECTION_LOGS,
+    );
+    if (savedConnectionLogs) setConnectionLogs(savedConnectionLogs);
   }, [updateHosts, updateSnippets]);
 
   const updateHostDistro = useCallback((hostId: string, distro: string) => {
@@ -268,6 +339,7 @@ export const useVaultState = () => {
     snippetPackages,
     knownHosts,
     shellHistory,
+    connectionLogs,
     updateHosts,
     updateKeys,
     updateSnippets,
@@ -276,6 +348,11 @@ export const useVaultState = () => {
     updateKnownHosts,
     addShellHistoryEntry,
     clearShellHistory,
+    addConnectionLog,
+    updateConnectionLog,
+    toggleConnectionLogSaved,
+    deleteConnectionLog,
+    clearUnsavedConnectionLogs,
     updateHostDistro,
     convertKnownHostToHost,
     exportData,

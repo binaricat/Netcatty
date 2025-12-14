@@ -50,6 +50,7 @@ interface TerminalLayerProps {
   onUpdateHost: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onUpdateSplitSizes: (workspaceId: string, splitId: string, sizes: number[]) => void;
@@ -82,6 +83,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onUpdateHost,
   onAddKnownHost,
   onCommandExecuted,
+  onTerminalDataCapture,
   onCreateWorkspaceFromSessions,
   onAddSessionToWorkspace,
   onUpdateSplitSizes,
@@ -126,6 +128,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);
   }, [onCommandExecuted]);
+
+  const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => {
+    onTerminalDataCapture?.(sessionId, data);
+  }, [onTerminalDataCapture]);
 
   // Terminal backend for broadcast writes
   const terminalBackend = useTerminalBackend();
@@ -662,6 +668,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                 onCloseSession={handleCloseSession}
                 onStatusChange={handleStatusChange}
                 onSessionExit={handleSessionExit}
+                onTerminalDataCapture={handleTerminalDataCapture}
                 onOsDetected={handleOsDetected}
                 onUpdateHost={handleUpdateHost}
                 onAddKnownHost={handleAddKnownHost}

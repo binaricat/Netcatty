@@ -22,6 +22,7 @@ import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { sanitizeHost } from "../domain/host";
 import { cn } from "../lib/utils";
 import {
+  ConnectionLog,
   GroupNode,
   Host,
   HostProtocol,
@@ -32,6 +33,7 @@ import {
   TerminalSession,
 } from "../types";
 import { AppLogo } from "./AppLogo";
+import ConnectionLogsManager from "./ConnectionLogsManager";
 import { DistroAvatar } from "./DistroAvatar";
 import HostDetailsPanel from "./HostDetailsPanel";
 import KeychainManager from "./KeychainManager";
@@ -64,7 +66,7 @@ import { Label } from "./ui/label";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
 import { TagFilterDropdown } from "./ui/tag-filter-dropdown";
 
-export type VaultSection = "hosts" | "keys" | "snippets" | "port" | "knownhosts";
+export type VaultSection = "hosts" | "keys" | "snippets" | "port" | "knownhosts" | "logs";
 
 // Props without isActive - it's now subscribed internally
 interface VaultViewProps {
@@ -75,6 +77,7 @@ interface VaultViewProps {
   customGroups: string[];
   knownHosts: KnownHost[];
   shellHistory: ShellHistoryEntry[];
+  connectionLogs: ConnectionLog[];
   sessions: TerminalSession[];
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
@@ -88,6 +91,10 @@ interface VaultViewProps {
   onUpdateCustomGroups: (groups: string[]) => void;
   onUpdateKnownHosts: (knownHosts: KnownHost[]) => void;
   onConvertKnownHost: (knownHost: KnownHost) => void;
+  onToggleConnectionLogSaved: (id: string) => void;
+  onDeleteConnectionLog: (id: string) => void;
+  onClearUnsavedConnectionLogs: () => void;
+  onOpenLogView: (log: ConnectionLog) => void;
   onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
   // Optional: navigate to a specific section on mount or when changed
   navigateToSection?: VaultSection | null;
@@ -102,6 +109,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   customGroups,
   knownHosts,
   shellHistory,
+  connectionLogs,
   sessions,
   onOpenSettings,
   onOpenQuickSwitcher,
@@ -115,6 +123,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onUpdateCustomGroups,
   onUpdateKnownHosts,
   onConvertKnownHost,
+  onToggleConnectionLogSaved,
+  onDeleteConnectionLog,
+  onClearUnsavedConnectionLogs,
+  onOpenLogView,
   onRunSnippet,
   navigateToSection,
   onNavigateToSectionHandled,
@@ -588,7 +600,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           >
             <BookMarked size={16} /> Known Hosts
           </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3 h-10">
+          <Button
+            variant={currentSection === "logs" ? "secondary" : "ghost"}
+            className={cn(
+              "w-full justify-start gap-3 h-10",
+              currentSection === "logs" &&
+              "bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40",
+            )}
+            onClick={() => setCurrentSection("logs")}
+          >
             <Activity size={16} /> Logs
           </Button>
         </div>
@@ -740,7 +760,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         {currentSection !== "port" &&
           currentSection !== "keys" &&
           currentSection !== "knownhosts" &&
-          currentSection !== "snippets" && (
+          currentSection !== "snippets" &&
+          currentSection !== "logs" && (
             <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
               {currentSection === "hosts" && (
                 <>
@@ -1075,6 +1096,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         >
           {knownHostsManagerElement}
         </div>
+        {/* Connection Logs */}
+        {currentSection === "logs" && (
+          <ConnectionLogsManager
+            logs={connectionLogs}
+            hosts={hosts}
+            onToggleSaved={onToggleConnectionLogSaved}
+            onDelete={onDeleteConnectionLog}
+            onClearUnsaved={onClearUnsavedConnectionLogs}
+            onOpenLogView={onOpenLogView}
+          />
+        )}
       </div>
 
       {/* Host Details Panel - positioned at VaultView root level for correct top alignment */}
@@ -1186,6 +1218,7 @@ const vaultViewAreEqual = (
     prev.customGroups === next.customGroups &&
     prev.knownHosts === next.knownHosts &&
     prev.shellHistory === next.shellHistory &&
+    prev.connectionLogs === next.connectionLogs &&
     prev.sessions === next.sessions;
 
   return isEqual;

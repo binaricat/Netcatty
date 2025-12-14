@@ -120,6 +120,16 @@ async function getHomeDir() {
 }
 
 /**
+ * Get system info (username and hostname)
+ */
+async function getSystemInfo() {
+  return {
+    username: os.userInfo().username,
+    hostname: os.hostname(),
+  };
+}
+
+/**
  * Read system known_hosts file
  */
 async function readKnownHosts() {
@@ -167,6 +177,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:mkdir", mkdirLocal);
   ipcMain.handle("netcatty:local:stat", statLocal);
   ipcMain.handle("netcatty:local:homedir", getHomeDir);
+  ipcMain.handle("netcatty:system:info", getSystemInfo);
   ipcMain.handle("netcatty:known-hosts:read", readKnownHosts);
 }
 
@@ -180,5 +191,6 @@ module.exports = {
   mkdirLocal,
   statLocal,
   getHomeDir,
+  getSystemInfo,
   readKnownHosts,
 };

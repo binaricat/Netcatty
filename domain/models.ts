@@ -571,6 +571,7 @@ export interface ShellHistoryEntry {
 // Connection Log - records connection history
 export interface ConnectionLog {
   id: string;
+  sessionId?: string; // Terminal session ID for matching during capture
   hostId: string; // Host ID (can be empty for local terminal)
   hostLabel: string; // Display label (e.g., 'Local Terminal' or host label)
   hostname: string; // Target hostname or 'localhost'
@@ -581,4 +582,5 @@ export interface ConnectionLog {
   localUsername: string; // System username of the local user
   localHostname: string; // Local machine hostname
   saved: boolean; // Whether this log is bookmarked/saved
+  terminalData?: string; // Captured terminal output data for replay
 }

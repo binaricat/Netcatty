@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { activeTabStore, useIsVaultActive } from './application/state/activeTabStore';
+import { activeTabStore, useActiveTabId, useIsVaultActive } from './application/state/activeTabStore';
 import { useSessionState } from './application/state/useSessionState';
 import { useSettingsState } from './application/state/useSettingsState';
 import { useVaultState } from './application/state/useVaultState';
 import { useWindowControls } from './application/state/useWindowControls';
 import { matchesKeyBinding } from './domain/models';
+import { netcattyBridge } from './infrastructure/services/netcattyBridge';
+import LogView from './components/LogView';
 import ProtocolSelectDialog from './components/ProtocolSelectDialog';
 import { QuickSwitcher } from './components/QuickSwitcher';
 import SettingsDialog from './components/SettingsDialog';
@@ -18,7 +20,8 @@ import { Label } from './components/ui/label';
 import { ToastProvider } from './components/ui/toast';
 import { VaultView, VaultSection } from './components/VaultView';
 import { cn } from './lib/utils';
-import { Host, HostProtocol } from './types';
+import { Host, HostProtocol, TerminalTheme } from './types';
+import { LogView as LogViewType } from './application/state/useSessionState';
 
 // Visibility container for VaultView - isolates isActive subscription
 const VaultViewContainer: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -30,6 +33,36 @@ const VaultViewContainer: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <div className={cn("absolute inset-0", isActive ? "z-20" : "")} style={containerStyle}>
       {children}
+    </div>
+  );
+};
+
+// LogView wrapper - manages visibility based on active tab
+interface LogViewWrapperProps {
+  logView: LogViewType;
+  terminalTheme: TerminalTheme;
+  fontSize: number;
+  onClose: () => void;
+}
+
+const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, terminalTheme, fontSize, onClose }) => {
+  const activeTabId = useActiveTabId();
+  const isVisible = activeTabId === logView.id;
+  
+  // Use same pattern as VaultViewContainer for visibility
+  const containerStyle: React.CSSProperties = isVisible
+    ? {}
+    : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
+  
+  return (
+    <div className={cn("absolute inset-0", isVisible ? "z-20" : "")} style={containerStyle}>
+      <LogView
+        log={logView.log}
+        terminalTheme={terminalTheme}
+        fontSize={fontSize}
+        isVisible={isVisible}
+        onClose={onClose}
+      />
     </div>
   );
 };
@@ -82,6 +115,7 @@ function App() {
     snippetPackages,
     knownHosts,
     shellHistory,
+    connectionLogs,
     updateHosts,
     updateKeys,
     updateSnippets,
@@ -89,6 +123,11 @@ function App() {
     updateCustomGroups,
     updateKnownHosts,
     addShellHistoryEntry,
+    addConnectionLog,
+    updateConnectionLog,
+    toggleConnectionLogSaved,
+    deleteConnectionLog,
+    clearUnsavedConnectionLogs,
     updateHostDistro,
     convertKnownHostToHost,
     exportData,
@@ -125,6 +164,9 @@ function App() {
     reorderTabs,
     toggleBroadcast,
     isBroadcastEnabled,
+    logViews,
+    openLogView,
+    closeLogView,
   } = useSessionState();
 
   // isMacClient is used for window controls styling
@@ -133,6 +175,10 @@ function App() {
   // Debounce ref for moveFocus to prevent double-triggering when focus switches
   const lastMoveFocusTimeRef = useRef<number>(0);
   const MOVE_FOCUS_DEBOUNCE_MS = 200;
+
+  // Use ref to store addConnectionLog to avoid circular dependencies with executeHotkeyAction
+  const addConnectionLogRef = useRef(addConnectionLog);
+  addConnectionLogRef.current = addConnectionLog;
 
   // Shared hotkey action handler - used by both global handler and terminal callback
   const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -193,6 +239,18 @@ function App() {
       }
       case 'newTab':
       case 'openLocal':
+        // Add connection log for local terminal
+        addConnectionLogRef.current({
+          hostId: '',
+          hostLabel: 'Local Terminal',
+          hostname: 'localhost',
+          username: systemInfoRef.current.username,
+          protocol: 'local',
+          startTime: Date.now(),
+          localUsername: systemInfoRef.current.username,
+          localHostname: systemInfoRef.current.hostname,
+          saved: false,
+        });
         createLocalTerminal();
         break;
       case 'openHosts':
@@ -364,6 +422,100 @@ function App() {
     updateHosts(hosts.filter(h => h.id !== hostId));
   }, [hosts, updateHosts]);
 
+  // System info for connection logs
+  const systemInfoRef = useRef<{ username: string; hostname: string }>({
+    username: 'user',
+    hostname: 'localhost',
+  });
+
+  // Fetch system info on mount
+  useEffect(() => {
+    void (async () => {
+      try {
+        const bridge = netcattyBridge.get();
+        const info = await bridge?.getSystemInfo?.();
+        if (info) {
+          systemInfoRef.current = info;
+        }
+      } catch {
+        // Fallback to defaults
+      }
+    })();
+  }, []);
+
+  // Wrapper to create local terminal with logging
+  const handleCreateLocalTerminal = useCallback(() => {
+    const { username, hostname } = systemInfoRef.current;
+    addConnectionLog({
+      hostId: '',
+      hostLabel: 'Local Terminal',
+      hostname: 'localhost',
+      username: username,
+      protocol: 'local',
+      startTime: Date.now(),
+      localUsername: username,
+      localHostname: hostname,
+      saved: false,
+    });
+    createLocalTerminal();
+  }, [addConnectionLog, createLocalTerminal]);
+
+  // Wrapper to connect to host with logging
+  const handleConnectToHost = useCallback((host: Host) => {
+    const { username, hostname: localHost } = systemInfoRef.current;
+    const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
+    addConnectionLog({
+      hostId: host.id,
+      hostLabel: host.label,
+      hostname: host.hostname,
+      username: host.username || 'root',
+      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
+      startTime: Date.now(),
+      localUsername: username,
+      localHostname: localHost,
+      saved: false,
+    });
+    connectToHost(host);
+  }, [addConnectionLog, connectToHost]);
+
+  // Handle terminal data capture when session exits
+  const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => {
+    console.log('[handleTerminalDataCapture] Called', { sessionId, dataLength: data.length });
+    // Find the connection log for this session
+    const session = sessions.find(s => s.id === sessionId);
+    console.log('[handleTerminalDataCapture] Session', session);
+    if (!session) {
+      console.log('[handleTerminalDataCapture] No session found');
+      return;
+    }
+    
+    console.log('[handleTerminalDataCapture] Looking for logs with hostname:', session.hostname);
+    console.log('[handleTerminalDataCapture] All logs:', connectionLogs.map(l => ({ id: l.id, hostname: l.hostname, endTime: l.endTime, hasTerminalData: !!l.terminalData })));
+    
+    // Find the most recent log matching this session's hostname and doesn't have terminalData yet
+    // For local terminal, hostname is 'localhost'
+    // Sort by startTime descending to find the most recent matching log
+    const matchingLog = connectionLogs
+      .filter(log => 
+        log.hostname === session.hostname && 
+        !log.endTime && 
+        !log.terminalData
+      )
+      .sort((a, b) => b.startTime - a.startTime)[0];
+    
+    console.log('[handleTerminalDataCapture] Matching log', matchingLog);
+    
+    if (matchingLog) {
+      updateConnectionLog(matchingLog.id, {
+        endTime: Date.now(),
+        terminalData: data,
+      });
+      console.log('[handleTerminalDataCapture] Updated log with terminalData');
+    } else {
+      console.log('[handleTerminalDataCapture] No matching log found!');
+    }
+  }, [sessions, connectionLogs, updateConnectionLog]);
+
   // Check if host has multiple protocols enabled
   const hasMultipleProtocols = useCallback((host: Host) => {
     let count = 0;
@@ -385,11 +537,11 @@ function App() {
       setIsQuickSwitcherOpen(false);
       setQuickSearch('');
     } else {
-      connectToHost(host);
+      handleConnectToHost(host);
       setIsQuickSwitcherOpen(false);
       setQuickSearch('');
     }
-  }, [hasMultipleProtocols, connectToHost]);
+  }, [hasMultipleProtocols, handleConnectToHost]);
 
   // Handle protocol selection from dialog
   const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => {
@@ -400,10 +552,10 @@ function App() {
         port,
         moshEnabled: protocol === 'mosh',
       };
-      connectToHost(hostWithProtocol);
+      handleConnectToHost(hostWithProtocol);
       setProtocolSelectHost(null);
     }
-  }, [protocolSelectHost, connectToHost]);
+  }, [protocolSelectHost, handleConnectToHost]);
 
   const handleToggleTheme = useCallback(() => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
@@ -434,12 +586,14 @@ function App() {
         sessions={sessions}
         orphanSessions={orphanSessions}
         workspaces={workspaces}
+        logViews={logViews}
         orderedTabs={orderedTabs}
         draggingSessionId={draggingSessionId}
         isMacClient={isMacClient}
         onCloseSession={closeSession}
         onRenameWorkspace={startWorkspaceRename}
         onCloseWorkspace={closeWorkspace}
+        onCloseLogView={closeLogView}
         onOpenQuickSwitcher={handleOpenQuickSwitcher}
         onToggleTheme={handleToggleTheme}
         onStartSessionDrag={setDraggingSessionId}
@@ -457,12 +611,13 @@ function App() {
             customGroups={customGroups}
             knownHosts={knownHosts}
             shellHistory={shellHistory}
+            connectionLogs={connectionLogs}
             sessions={sessions}
             onOpenSettings={handleOpenSettings}
             onOpenQuickSwitcher={handleOpenQuickSwitcher}
-            onCreateLocalTerminal={createLocalTerminal}
+            onCreateLocalTerminal={handleCreateLocalTerminal}
             onDeleteHost={handleDeleteHost}
-            onConnect={connectToHost}
+            onConnect={handleConnectToHost}
             onUpdateHosts={updateHosts}
             onUpdateKeys={updateKeys}
             onUpdateSnippets={updateSnippets}
@@ -470,7 +625,11 @@ function App() {
             onUpdateCustomGroups={updateCustomGroups}
             onUpdateKnownHosts={updateKnownHosts}
             onConvertKnownHost={convertKnownHostToHost}
+            onToggleConnectionLogSaved={toggleConnectionLogSaved}
+            onDeleteConnectionLog={deleteConnectionLog}
+            onClearUnsavedConnectionLogs={clearUnsavedConnectionLogs}
             onRunSnippet={runSnippet}
+            onOpenLogView={openLogView}
             navigateToSection={navigateToSection}
             onNavigateToSectionHandled={() => setNavigateToSection(null)}
           />
@@ -500,6 +659,7 @@ function App() {
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
             addShellHistoryEntry({ command, hostId, hostLabel, sessionId });
           }}
+          onTerminalDataCapture={handleTerminalDataCapture}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
           onUpdateSplitSizes={updateSplitSizes}
@@ -510,6 +670,17 @@ function App() {
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
         />
+
+        {/* Log Views - readonly terminal replays */}
+        {logViews.map(logView => (
+          <LogViewWrapper
+            key={logView.id}
+            logView={logView}
+            terminalTheme={currentTerminalTheme}
+            fontSize={terminalFontSize}
+            onClose={() => closeLogView(logView.id)}
+          />
+        ))}
       </div>
 
       <QuickSwitcher
@@ -526,7 +697,7 @@ function App() {
           setQuickSearch('');
         }}
         onCreateLocalTerminal={() => {
-          createLocalTerminal();
+          handleCreateLocalTerminal();
           setIsQuickSwitcherOpen(false);
           setQuickSearch('');
         }}
