@@ -10,10 +10,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node electron/launch.cjs",
-    "pack": "npm run build && electron-builder --config electron-builder.json",
-    "pack:mac": "npm run build && electron-builder --config electron-builder.json --mac",
-    "postinstall": "npx @electron/rebuild",
-    "rebuild": "npx @electron/rebuild",
+    "pack": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.json",
+    "pack:mac": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.json --mac",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild": "electron-builder install-app-deps",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
@@ -44,7 +44,6 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.2",
     "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.17",
     "@tailwindcss/vite": "^4.1.17",

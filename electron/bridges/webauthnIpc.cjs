@@ -11,6 +11,29 @@ const log = (msg, data) => {
   console.log("[WebAuthn]", msg, data || "");
 };
 
+function resolveElectronModule() {
+  try {
+    return require("node:electron");
+  } catch {
+    return require("electron");
+  }
+}
+
+function getBiometricWebAuthnFlow() {
+  const raw = process.env.NETCATTY_WEBAUTHN_BIOMETRIC_FLOW;
+  if (raw === "embedded" || raw === "browser" || raw === "auto") return raw;
+  return "auto";
+}
+
+function isPackagedApp() {
+  try {
+    const electronModule = resolveElectronModule();
+    return !!electronModule?.app?.isPackaged;
+  } catch {
+    return false;
+  }
+}
+
 let handlersRegistered = false;
 
 // requestId -> { resolve, reject, timeout }
@@ -40,7 +63,7 @@ function registerHandlers(ipcMain) {
 
 function requestWebAuthnAssertion(webContents, params) {
   // macOS: Electron's embedded WebAuthn prompt can hang (no Touch ID UI). For biometric keys,
-  // use the system browser helper flow instead.
+  // use the system browser helper flow when embedded support is unlikely (e.g. dev/unpackaged).
   log("requestWebAuthnAssertion called", {
     platform: process.platform,
     keySource: params?.keySource,
@@ -48,8 +71,20 @@ function requestWebAuthnAssertion(webContents, params) {
     hasCredentialId: !!params?.credentialId,
   });
   
-  if (process.platform === "darwin" && params?.keySource === "biometric") {
-    log("Using browser helper for biometric key on macOS");
+  const biometricFlow = getBiometricWebAuthnFlow();
+  const shouldUseBrowserHelperForBiometricOnMac =
+    process.platform === "darwin"
+    && params?.keySource === "biometric"
+    && (
+      biometricFlow === "browser"
+      || (biometricFlow === "auto" && !isPackagedApp())
+    );
+
+  if (shouldUseBrowserHelperForBiometricOnMac) {
+    log("Using browser helper for biometric key on macOS", {
+      biometricFlow,
+      isPackaged: isPackagedApp(),
+    });
     const timeoutMs = Math.max(1000, params?.timeoutMs || 180000);
     return getAssertionInBrowser({
       rpId: params?.rpId,
@@ -73,7 +108,10 @@ function requestWebAuthnAssertion(webContents, params) {
     });
   }
   
-  log("Using embedded WebAuthn (not biometric on macOS)");
+  log("Using embedded WebAuthn", {
+    biometricFlow,
+    isPackaged: process.platform === "darwin" ? isPackagedApp() : undefined,
+  });
 
   const requestId = `webauthn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 

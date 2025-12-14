@@ -412,9 +412,15 @@ export const createBiometricCredential = async (
             };
         };
 
-        // macOS: Electron's embedded WebAuthn prompt for platform authenticators can hang with no UI.
-        // Prefer the browser helper flow by default when available.
-        if (isMacOS_ && typeof createCredentialInBrowser === 'function') {
+        // macOS: Electron's embedded WebAuthn prompt for platform authenticators can be unreliable,
+        // especially in dev/unpackaged builds. Prefer browser helper when we're likely running via a dev URL.
+        // In packaged builds (typically file://), try embedded first for a smoother UX.
+        const shouldPreferBrowserHelperOnMac =
+            isMacOS_
+            && typeof createCredentialInBrowser === 'function'
+            && window.location.protocol !== 'file:';
+
+        if (shouldPreferBrowserHelperOnMac) {
             onBrowserFallback?.();
             const fallbackResult = await tryBrowserFallback();
             if (fallbackResult) return fallbackResult;

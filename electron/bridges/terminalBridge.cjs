@@ -26,9 +26,9 @@ function init(deps) {
 function findExecutable(name) {
   if (process.platform !== "win32") return name;
   
-  const { execSync } = require("child_process");
+  const { execFileSync } = require("child_process");
   try {
-    const result = execSync(`where.exe ${name}`, { encoding: "utf8" });
+    const result = execFileSync("where.exe", [name], { encoding: "utf8" });
     const firstLine = result.split(/\r?\n/)[0].trim();
     if (firstLine && fs.existsSync(firstLine)) {
       return firstLine;

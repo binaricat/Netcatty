@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.netcatty.app",
   "productName": "Netcatty",
+  "icon": "public/icon.png",
   "directories": {
     "output": "release"
   },
