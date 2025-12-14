@@ -476,9 +476,9 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                         </Button>
                     </>
                 ) : (
-                    <Button 
-                        size="sm" 
-                        onClick={() => { console.log('[ProviderCard] Connect clicked'); onConnect(); }} 
+                    <Button
+                        size="sm"
+                        onClick={() => { console.log('[ProviderCard] Connect clicked'); onConnect(); }}
                         className="gap-1"
                         disabled={disabled}
                     >
@@ -932,7 +932,7 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
             {sync.hasAnyConnectedProvider && (
                 <div className="space-y-3">
                     <h3 className="text-sm font-medium text-muted-foreground">Sync Status</h3>
-                    
+
                     {/* Version Info Cards */}
                     <div className="grid grid-cols-2 gap-3">
                         <div className="p-3 rounded-lg border bg-card">
