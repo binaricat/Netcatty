@@ -1,4 +1,4 @@
-import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Shield, Square, Sun, TerminalSquare, User, X } from 'lucide-react';
+import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Shield, Square, Sun, TerminalSquare, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
 import { LogView } from '../application/state/useSessionState';
@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import { TerminalSession, Workspace } from '../types';
 import { Button } from './ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
+import { SyncStatusButton } from './SyncStatusButton';
 
 // Helper styles for Electron drag regions (use type assertion to include non-standard WebkitAppRegion)
 const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
@@ -27,6 +28,7 @@ interface TopTabsProps {
   onCloseLogView: (logViewId: string) => void;
   onOpenQuickSwitcher: () => void;
   onToggleTheme: () => void;
+  onOpenSettings: () => void;
   onStartSessionDrag: (sessionId: string) => void;
   onEndSessionDrag: () => void;
   onReorderTabs: (draggedId: string, targetId: string, position: 'before' | 'after') => void;
@@ -120,6 +122,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onCloseLogView,
   onOpenQuickSwitcher,
   onToggleTheme,
+  onOpenSettings,
   onStartSessionDrag,
   onEndSessionDrag,
   onReorderTabs,
@@ -602,9 +605,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground app-no-drag">
             <Bell size={16} />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground app-no-drag">
-            <User size={16} />
-          </Button>
+          <SyncStatusButton onOpenSettings={onOpenSettings} />
           <Button
             variant="ghost"
             size="icon"
@@ -633,7 +634,8 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.workspaces === next.workspaces &&
     prev.orderedTabs === next.orderedTabs &&
     prev.draggingSessionId === next.draggingSessionId &&
-    prev.isMacClient === next.isMacClient
+    prev.isMacClient === next.isMacClient &&
+    prev.onOpenSettings === next.onOpenSettings
   );
 };
 

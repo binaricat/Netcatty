@@ -458,6 +458,10 @@ const api = {
       chainProgressListeners.delete(id);
     };
   },
+
+  // OAuth callback server
+  startOAuthCallback: (expectedState) => ipcRenderer.invoke("oauth:startCallback", expectedState),
+  cancelOAuthCallback: () => ipcRenderer.invoke("oauth:cancelCallback"),
 };
 
 // Merge with existing netcatty (if any) to avoid stale objects on hot reload

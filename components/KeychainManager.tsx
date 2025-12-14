@@ -81,7 +81,7 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   onCreateGroup,
 }) => {
   const { generateKeyPair, execCommand } = useKeychainBackend();
-  const { hasBrowserWebAuthn, createCredentialInBrowser } = useWebAuthnBackend();
+  const { hasBrowserWebAuthn: _hasBrowserWebAuthn, createCredentialInBrowser } = useWebAuthnBackend();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("key");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");

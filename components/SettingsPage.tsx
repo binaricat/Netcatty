@@ -7,7 +7,6 @@ import {
     Cloud,
     Download,
     Keyboard,
-    Loader2,
     Minus,
     Moon,
     Palette,
@@ -19,7 +18,8 @@ import {
     X,
 } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
-import { useSyncState } from "../application/state/useSyncState";
+import { CloudSyncSettings } from "./CloudSyncSettings";
+import type { SyncPayload } from "../domain/sync";
 import {
     CursorShape,
     RightClickBehavior,
@@ -237,8 +237,6 @@ export default function SettingsPage() {
         setTheme,
         primaryColor,
         setPrimaryColor,
-        syncConfig,
-        updateSyncConfig,
         terminalThemeId,
         setTerminalThemeId,
         terminalFontFamilyId,
@@ -267,9 +265,6 @@ export default function SettingsPage() {
     const { closeSettingsWindow } = useWindowControls();
 
     // Local state
-    const { isSyncing, upload, download } = useSyncState();
-    const [gistToken, setGistToken] = useState(syncConfig?.githubToken || "");
-    const [gistId, setGistId] = useState(syncConfig?.gistId || "");
     const [importText, setImportText] = useState("");
     const [recordingBindingId, setRecordingBindingId] = useState<string | null>(null);
     const [recordingScheme, setRecordingScheme] = useState<'mac' | 'pc' | null>(null);
@@ -368,40 +363,25 @@ export default function SettingsPage() {
         };
     }, [recordingBindingId, recordingScheme, updateKeyBinding, cancelRecording, getSpecialSuffix]);
 
-    // Sync handlers
-    const handleSaveGist = async () => {
-        if (!gistToken) return toast.error("Please enter a GitHub token");
-        updateSyncConfig({ githubToken: gistToken, gistId: gistId || undefined });
-        try {
-            const newId = await upload(gistToken, gistId || undefined, {
-                hosts,
-                keys,
-                snippets,
-                customGroups: [],
-            });
-            if (newId && newId !== gistId) {
-                setGistId(newId);
-                updateSyncConfig({ githubToken: gistToken, gistId: newId });
-                toast.success("Synced! Gist ID saved.");
-            } else {
-                toast.success("Synced successfully.");
-            }
-        } catch (e) {
-            toast.error(String(e), "Sync failed");
-        }
-    };
+    // Cloud sync payload handlers
+    const buildSyncPayload = useCallback((): SyncPayload => {
+        return {
+            hosts,
+            keys,
+            snippets,
+            customGroups: [],
+            syncedAt: Date.now(),
+        };
+    }, [hosts, keys, snippets]);
 
-    const handleLoadGist = async () => {
-        if (!gistToken || !gistId) return toast.error("Token and Gist ID required");
-        try {
-            const data = await download(gistToken, gistId);
-            if (!data) throw new Error("No data found in Gist");
-            importDataFromString(JSON.stringify(data));
-            toast.success("Loaded successfully!");
-        } catch (e) {
-            toast.error(String(e), "Download failed");
-        }
-    };
+    const applySyncPayload = useCallback((payload: SyncPayload) => {
+        importDataFromString(JSON.stringify({
+            hosts: payload.hosts,
+            keys: payload.keys,
+            snippets: payload.snippets,
+            customGroups: payload.customGroups,
+        }));
+    }, [importDataFromString]);
 
     return (
         <div className="h-screen flex flex-col bg-background text-foreground">
@@ -1098,56 +1078,10 @@ export default function SettingsPage() {
 
                     {/* Sync & Cloud Tab */}
                     <SettingsTabContent value="sync">
-                        <SectionHeader title="GitHub Gist Sync" />
-                        <div className="space-y-4">
-                            <p className="text-sm text-muted-foreground">
-                                Sync your hosts, keys, and snippets to a private GitHub Gist.
-                            </p>
-                            <div className="space-y-3">
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs">GitHub Personal Access Token</Label>
-                                    <Input
-                                        type="password"
-                                        value={gistToken}
-                                        onChange={(e) => setGistToken(e.target.value)}
-                                        placeholder="ghp_xxxxxxxxxxxx"
-                                        className="font-mono text-sm"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs">Gist ID (optional for new)</Label>
-                                    <Input
-                                        value={gistId}
-                                        onChange={(e) => setGistId(e.target.value)}
-                                        placeholder="Leave empty to create new"
-                                        className="font-mono text-sm"
-                                    />
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button
-                                        onClick={handleSaveGist}
-                                        disabled={isSyncing}
-                                        className="gap-2"
-                                    >
-                                        {isSyncing ? (
-                                            <Loader2 size={14} className="animate-spin" />
-                                        ) : (
-                                            <Upload size={14} />
-                                        )}
-                                        Upload
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        onClick={handleLoadGist}
-                                        disabled={isSyncing || !gistId}
-                                        className="gap-2"
-                                    >
-                                        <Download size={14} />
-                                        Download
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
+                        <CloudSyncSettings
+                            onBuildPayload={buildSyncPayload}
+                            onApplyPayload={applySyncPayload}
+                        />
                     </SettingsTabContent>
 
                     {/* Data Tab */}

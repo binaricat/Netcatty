@@ -598,6 +598,7 @@ function App() {
         onCloseLogView={closeLogView}
         onOpenQuickSwitcher={handleOpenQuickSwitcher}
         onToggleTheme={handleToggleTheme}
+        onOpenSettings={handleOpenSettings}
         onStartSessionDrag={setDraggingSessionId}
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderTabs}
