@@ -412,20 +412,17 @@ export const createBiometricCredential = async (
             };
         };
 
-        // macOS: Electron's embedded WebAuthn prompt for platform authenticators can be unreliable,
-        // especially in dev/unpackaged builds. Prefer browser helper when we're likely running via a dev URL.
-        // In packaged builds (typically file://), try embedded first for a smoother UX.
-        const shouldPreferBrowserHelperOnMac =
-            isMacOS_
-            && typeof createCredentialInBrowser === 'function'
-            && window.location.protocol !== 'file:';
+        // Electron dev: Chromium's embedded WebAuthn prompt for platform authenticators can be unreliable
+        // (or appear behind windows). Prefer the browser helper when available to avoid long hangs/timeouts.
+        const shouldPreferBrowserHelperInDev =
+            typeof createCredentialInBrowser === 'function' && import.meta.env.DEV;
 
-        if (shouldPreferBrowserHelperOnMac) {
+        if (shouldPreferBrowserHelperInDev) {
             onBrowserFallback?.();
             const fallbackResult = await tryBrowserFallback();
             if (fallbackResult) return fallbackResult;
             throw new Error(
-                'WebAuthn browser helper is unavailable. Try a packaged build (electron-builder) and ensure Touch ID is enabled in System Settings.',
+                'WebAuthn browser helper is unavailable. Try a packaged build (electron-builder) and ensure your platform authenticator is enabled in system settings.',
             );
         }
 

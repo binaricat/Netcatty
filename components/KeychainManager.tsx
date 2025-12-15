@@ -376,17 +376,17 @@ echo $3 >> "$FILE"`);
 
     try {
       // Use WebAuthn (macOS may use a browser fallback to reliably show Touch ID prompt)
-      const result = await createBiometricCredential(
-        draftKey.label.trim(),
-        createCredentialInBrowser,
-        // Callback when browser fallback is triggered
-        () => {
-          toast.info(
-            "A browser window will open to complete Touch ID. Finish the prompt there, then return to Netcatty.",
-            "Touch ID",
-          );
-        },
-      );
+       const result = await createBiometricCredential(
+         draftKey.label.trim(),
+         createCredentialInBrowser,
+         // Callback when browser fallback is triggered
+         () => {
+           toast.info(
+            `A browser window will open to complete ${isMac ? "Touch ID" : "Windows Hello"}. Finish the prompt there, then return to Netcatty.`,
+            isMac ? "Touch ID" : "Windows Hello",
+            );
+          },
+        );
 
       if (!result) {
         throw new Error("Credential creation was cancelled");
