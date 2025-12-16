@@ -50,7 +50,7 @@ export const GenerateBiometricPanel: React.FC<GenerateBiometricPanelProps> = ({
             </div>
 
             <p className="text-sm text-muted-foreground text-center">
-                Standard ED25519 SSH key protected by your {isMac ? 'Mac\'s Keychain' : 'Windows Credential Manager'}. 
+                Standard ED25519 SSH key protected by your {isMac ? 'Mac\'s Keychain' : 'Windows Credential Manager'}.
                 {isMac ? ' Touch ID' : ' Windows Hello'} is required to unlock the key.
             </p>
 

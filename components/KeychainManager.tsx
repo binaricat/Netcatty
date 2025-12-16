@@ -377,7 +377,7 @@ echo $3 >> "$FILE"`);
     try {
       // Generate a unique ID for this key (used as the keytar account name)
       const keyId = crypto.randomUUID();
-      
+
       // Generate biometric key via the new backend
       // This creates an ED25519 key with a random passphrase stored in OS Secure Storage
       const result = await generateBiometricKey(keyId, draftKey.label.trim());
@@ -404,7 +404,7 @@ echo $3 >> "$FILE"`);
 
       onSave(newKey);
       closePanel();
-      
+
       toast.success(
         `Biometric key created successfully. ${isMac ? "Touch ID" : "Windows Hello"} will be required to use this key.`,
         "Biometric Key",
@@ -526,7 +526,7 @@ echo $3 >> "$FILE"`);
     async (id: string) => {
       // Find the key to check if it's a biometric key
       const keyToDelete = keys.find((k) => k.id === id);
-      
+
       // If it's a biometric key, also delete the passphrase from secure storage
       if (keyToDelete?.source === "biometric") {
         try {
@@ -537,7 +537,7 @@ echo $3 >> "$FILE"`);
           // Continue with key deletion even if passphrase deletion fails
         }
       }
-      
+
       onDelete(id);
       if (panel.type === "view" && panel.key.id === id) {
         closePanel();
