@@ -1,6 +1,5 @@
 import {
   Check,
-  Fingerprint,
   FolderPlus,
   Globe,
   Key,
@@ -39,7 +38,7 @@ import {
   ProxyPanel,
 } from "./host-details";
 
-type CredentialType = "sshid" | "key" | "certificate" | "fido2" | null;
+type CredentialType = "sshid" | "key" | "certificate" | null;
 type SubPanel =
   | "none"
   | "create-group"
@@ -610,8 +609,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                 {form.authMethod === "certificate" ? (
                   <Shield size={14} className="text-primary" />
-                ) : form.authMethod === "fido2" ? (
-                  <Fingerprint size={14} className="text-primary" />
                 ) : (
                   <Key size={14} className="text-primary" />
                 )}
@@ -647,7 +644,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                       className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
                     >
                       <Plus size={12} />
-                      <span>Key, Certificate, FIDO2</span>
+                      <span>Key, Certificate</span>
                     </button>
                   </PopoverTrigger>
                   <PopoverContent
@@ -678,23 +675,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                       >
                         <Shield size={16} className="text-muted-foreground" />
                         <span className="text-sm font-medium">Certificate</span>
-                      </button>
-
-	                      <button
-	                        type="button"
-	                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
-	                        onClick={() => {
-	                          update("authMethod", "fido2");
-	                          update("identityFileId", undefined);
-	                          setCredentialPopoverOpen(false);
-	                          setSelectedCredentialType("fido2");
-	                        }}
-	                      >
-                        <Fingerprint
-                          size={16}
-                          className="text-muted-foreground"
-                        />
-                        <span className="text-sm font-medium">FIDO2</span>
                       </button>
                     </div>
                   </PopoverContent>
@@ -768,46 +748,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 	                  </Button>
 	                </div>
 	              )}
-
-	            {/* FIDO2 selection combobox - appears after selecting "FIDO2" type */}
-	            {selectedCredentialType === "fido2" && !form.identityFileId && (
-	              <div className="flex items-center gap-1">
-	                <Combobox
-	                  options={keysByCategory.key
-	                    .filter((k) => k.source === "fido2")
-	                    .map((k) => ({
-	                      value: k.id,
-	                      label: k.label,
-	                      icon: (
-	                        <Fingerprint
-	                          size={14}
-	                          className="text-muted-foreground"
-	                        />
-	                      ),
-	                    }))}
-	                  value={form.identityFileId}
-	                  onValueChange={(val) => {
-	                    update("identityFileId", val);
-	                    update("authMethod", "fido2");
-	                    setSelectedCredentialType(null);
-	                  }}
-	                  placeholder="Search FIDO2 keys..."
-	                  emptyText="No FIDO2 keys available"
-	                  icon={
-	                    <Fingerprint size={14} className="text-muted-foreground" />
-	                  }
-	                  className="flex-1"
-	                />
-	                <Button
-	                  variant="ghost"
-	                  size="icon"
-	                  className="h-8 w-8 shrink-0"
-	                  onClick={() => setSelectedCredentialType(null)}
-	                >
-	                  <X size={14} />
-	                </Button>
-	              </div>
-	            )}
 	          </div>
 	        </Card>
 

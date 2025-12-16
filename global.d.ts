@@ -1,46 +1,6 @@
 import type { RemoteFile } from "./types";
 
 declare global {
-// FIDO2 Device Information
-interface Fido2DeviceInfo {
-  id: string;
-  label: string;
-  manufacturer: string;
-  path: string;
-  transport: 'usb' | 'internal';
-  vendorId?: number;
-  productId?: number;
-}
-
-// FIDO2 Support Check Result
-interface Fido2SupportResult {
-  supported: boolean;
-  sshKeygenPath: string | null;
-  version?: string;
-  error?: string;
-}
-
-// FIDO2 Key Generation Options
-interface Fido2GenerateOptions {
-  requestId?: string;
-  label: string;
-  devicePath: string;
-  requireUserPresence?: boolean;
-  requirePinCode?: boolean;
-  resident?: boolean;
-  passphrase?: string;
-}
-
-// FIDO2 Key Generation Result
-interface Fido2GenerateResult {
-  success: boolean;
-  publicKey?: string;
-  privateKey?: string;
-  keyType?: string;
-  error?: string;
-  exitCode?: number;
-}
-
 // Biometric Key Support Check Result (Termius-style)
 interface BiometricSupportResult {
   supported: boolean;
@@ -79,13 +39,9 @@ interface NetcattyJumpHost {
   privateKey?: string;
   certificate?: string;
   passphrase?: string;
-  // WebAuthn-backed keys (optional)
   publicKey?: string;
-  credentialId?: string;
-  rpId?: string;
-  userVerification?: 'required' | 'preferred' | 'discouraged';
   keyId?: string;
-  keySource?: 'generated' | 'imported' | 'biometric' | 'fido2';
+  keySource?: 'generated' | 'imported' | 'biometric';
   label?: string; // Display label for UI
 }
 
@@ -106,15 +62,11 @@ interface NetcattySSHOptions {
   port?: number;
   password?: string;
   privateKey?: string;
-  // Optional OpenSSH user certificate (ssh-*-cert-v01@openssh.com ...)
+  // Optional OpenSSH user certificate
   certificate?: string;
-  // WebAuthn-backed keys (Windows Hello / Touch ID / FIDO2)
-  publicKey?: string; // OpenSSH public key line (e.g., sk-ecdsa-sha2-nistp256@openssh.com ...)
-  credentialId?: string; // base64url
-  rpId?: string;
-  userVerification?: 'required' | 'preferred' | 'discouraged';
+  publicKey?: string; // OpenSSH public key line
   keyId?: string;
-  keySource?: 'generated' | 'imported' | 'biometric' | 'fido2';
+  keySource?: 'generated' | 'imported' | 'biometric';
   agentForwarding?: boolean;
   cols?: number;
   rows?: number;
@@ -128,42 +80,6 @@ interface NetcattySSHOptions {
   proxy?: NetcattyProxyConfig;
   // Jump hosts (bastion chain)
   jumpHosts?: NetcattyJumpHost[];
-}
-
-interface WebAuthnBrowserCreateOptions {
-  rpId: string;
-  name: string;
-  displayName: string;
-  authenticatorAttachment?: 'platform' | 'cross-platform';
-  userVerification?: 'required' | 'preferred' | 'discouraged';
-  timeoutMs?: number;
-}
-
-interface WebAuthnBrowserCreateResult {
-  rpId: string;
-  origin: string;
-  credentialId: string; // base64url
-  attestationObject: string; // base64url
-  clientDataJSON: string; // base64url
-  publicKeySpki: string; // base64url (may be empty)
-}
-
-interface WebAuthnBrowserGetOptions {
-  rpId: string;
-  credentialId: string; // base64url
-  challenge: string; // base64url
-  userVerification?: 'required' | 'preferred' | 'discouraged';
-  timeoutMs?: number;
-}
-
-interface WebAuthnBrowserGetResult {
-  rpId: string;
-  origin: string;
-  credentialId: string; // base64url
-  authenticatorData: string; // base64url
-  clientDataJSON: string; // base64url
-  signature: string; // base64url
-  userHandle: string | null; // base64url
 }
 
 interface SftpStatResult {
@@ -353,10 +269,6 @@ interface NetcattyBridge {
   // Open URL in default browser
   openExternal?(url: string): Promise<void>;
 
-  // WebAuthn browser fallback helpers
-  webauthnCreateCredentialInBrowser?(options: WebAuthnBrowserCreateOptions): Promise<WebAuthnBrowserCreateResult>;
-  webauthnGetAssertionInBrowser?(options: WebAuthnBrowserGetOptions): Promise<WebAuthnBrowserGetResult>;
-  
   // Chain progress listener for jump host connections
   // Callback receives: (currentHop: number, totalHops: number, hostLabel: string, status: string)
   onChainProgress?(cb: (hop: number, total: number, label: string, status: string) => void): () => void;
@@ -419,17 +331,6 @@ interface NetcattyBridge {
   googleDriveUpdateSyncFile?(options: { accessToken: string; fileId: string; syncedFile: unknown }): Promise<{ ok: true }>;
   googleDriveDownloadSyncFile?(options: { accessToken: string; fileId: string }): Promise<{ syncedFile: unknown | null }>;
   googleDriveDeleteSyncFile?(options: { accessToken: string; fileId: string }): Promise<{ ok: true }>;
-
-  // FIDO2 SSH Key Generation
-  fido2ListDevices?(): Promise<Fido2DeviceInfo[]>;
-  fido2CheckSupport?(): Promise<Fido2SupportResult>;
-  fido2Generate?(options: Fido2GenerateOptions): Promise<Fido2GenerateResult>;
-  fido2SubmitPin?(requestId: string, pin: string): Promise<{ success: boolean; error?: string }>;
-  fido2CancelPin?(requestId: string): Promise<{ success: boolean }>;
-  fido2Cancel?(requestId: string): Promise<{ success: boolean }>;
-  fido2GetSshKeygenPath?(): Promise<string | null>;
-  onFido2PinRequest?(cb: (requestId: string) => void): () => void;
-  onFido2TouchPrompt?(cb: (requestId: string) => void): () => void;
 
   // Biometric Key API (Termius-style: ED25519 + OS Secure Storage)
   biometricCheckSupport?(): Promise<BiometricSupportResult>;

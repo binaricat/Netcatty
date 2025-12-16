@@ -8,98 +8,6 @@ const transferErrorListeners = new Map();
 const chainProgressListeners = new Map();
 const authFailedListeners = new Map();
 
-// FIDO2 key generation listeners
-const fido2PinRequestListeners = new Map();
-const fido2TouchPromptListeners = new Map();
-
-// WebAuthn requests from main process
-const base64UrlToUint8 = (b64url) => {
-  if (typeof b64url !== "string") throw new Error("Invalid base64url value");
-  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-  const bin = atob(padded);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-};
-
-const uint8ToBase64Url = (bytes) => {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-};
-
-ipcRenderer.on("netcatty:webauthn:request", async (_event, payload) => {
-  const requestId = payload?.requestId;
-  try {
-    if (!requestId || typeof requestId !== "string") throw new Error("Missing requestId");
-    if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this environment");
-    if (!window.isSecureContext) throw new Error("WebAuthn requires a secure context (HTTPS/localhost)");
-
-    const credentialId = payload?.credentialId;
-    const challenge = payload?.challenge;
-    const rpId = payload?.rpId;
-    const userVerification = payload?.userVerification || "preferred";
-    const timeout = payload?.timeoutMs || 180000;
-
-    if (typeof credentialId !== "string" || !credentialId) throw new Error("Missing credentialId");
-    if (typeof challenge !== "string" || !challenge) throw new Error("Missing challenge");
-    if (typeof rpId !== "string" || !rpId) throw new Error("Missing rpId");
-
-    const idBytes = base64UrlToUint8(credentialId);
-    const challengeBytes = base64UrlToUint8(challenge);
-
-    const credential = await navigator.credentials.get({
-      publicKey: {
-        rpId,
-        challenge: challengeBytes,
-        allowCredentials: [
-          {
-            type: "public-key",
-            id: idBytes,
-          },
-        ],
-        userVerification,
-        timeout,
-      },
-    });
-
-    if (!credential) throw new Error("Credential assertion was cancelled");
-
-    const assertion = credential;
-    const response = assertion.response;
-
-    const origin = window.location.origin || "";
-    const authenticatorData = uint8ToBase64Url(new Uint8Array(response.authenticatorData));
-    const clientDataJSON = uint8ToBase64Url(new Uint8Array(response.clientDataJSON));
-    const signature = uint8ToBase64Url(new Uint8Array(response.signature));
-    const userHandle = response.userHandle
-      ? uint8ToBase64Url(new Uint8Array(response.userHandle))
-      : null;
-
-    ipcRenderer.send("netcatty:webauthn:response", {
-      requestId,
-      ok: true,
-      result: {
-        origin,
-        authenticatorData,
-        clientDataJSON,
-        signature,
-        userHandle,
-      },
-    });
-  } catch (err) {
-    ipcRenderer.send("netcatty:webauthn:response", {
-      requestId,
-      ok: false,
-      error: err?.message || String(err),
-    });
-  }
-});
-
 ipcRenderer.on("netcatty:data", (_event, payload) => {
   const set = dataListeners.get(payload.sessionId);
   if (!set) return;
@@ -140,29 +48,7 @@ ipcRenderer.on("netcatty:chain:progress", (_event, payload) => {
   });
 });
 
-// FIDO2 PIN request events
-ipcRenderer.on("netcatty:fido2:pinRequest", (_event, payload) => {
-  const { requestId } = payload;
-  fido2PinRequestListeners.forEach((cb) => {
-    try {
-      cb(requestId);
-    } catch (err) {
-      console.error("FIDO2 PIN request callback failed", err);
-    }
-  });
-});
 
-// FIDO2 touch prompt events
-ipcRenderer.on("netcatty:fido2:touchPrompt", (_event, payload) => {
-  const { requestId } = payload;
-  fido2TouchPromptListeners.forEach((cb) => {
-    try {
-      cb(requestId);
-    } catch (err) {
-      console.error("FIDO2 touch prompt callback failed", err);
-    }
-  });
-});
 
 // Authentication failed events
 ipcRenderer.on("netcatty:auth:failed", (_event, payload) => {
@@ -454,12 +340,6 @@ const api = {
   
   // Open URL in default browser
   openExternal: (url) => ipcRenderer.invoke("netcatty:openExternal", url),
-
-  // WebAuthn browser fallback (primarily for macOS Touch ID prompt issues)
-  webauthnCreateCredentialInBrowser: (options) =>
-    ipcRenderer.invoke("netcatty:webauthn:browser:create", options),
-  webauthnGetAssertionInBrowser: (options) =>
-    ipcRenderer.invoke("netcatty:webauthn:browser:get", options),
   
   // Port Forwarding API
   startPortForward: async (options) => {
@@ -522,32 +402,6 @@ const api = {
     ipcRenderer.invoke("netcatty:google:drive:downloadSyncFile", options),
   googleDriveDeleteSyncFile: (options) =>
     ipcRenderer.invoke("netcatty:google:drive:deleteSyncFile", options),
-
-  // FIDO2 SSH Key Generation API
-  fido2ListDevices: () =>
-    ipcRenderer.invoke("netcatty:fido2:listDevices"),
-  fido2CheckSupport: () =>
-    ipcRenderer.invoke("netcatty:fido2:checkSupport"),
-  fido2Generate: (options) =>
-    ipcRenderer.invoke("netcatty:fido2:generate", options),
-  fido2SubmitPin: (requestId, pin) =>
-    ipcRenderer.invoke("netcatty:fido2:submitPin", { requestId, pin }),
-  fido2CancelPin: (requestId) =>
-    ipcRenderer.invoke("netcatty:fido2:cancelPin", { requestId }),
-  fido2Cancel: (requestId) =>
-    ipcRenderer.invoke("netcatty:fido2:cancel", { requestId }),
-  fido2GetSshKeygenPath: () =>
-    ipcRenderer.invoke("netcatty:fido2:getSshKeygenPath"),
-  onFido2PinRequest: (cb) => {
-    const id = Date.now().toString() + Math.random().toString(16).slice(2);
-    fido2PinRequestListeners.set(id, cb);
-    return () => fido2PinRequestListeners.delete(id);
-  },
-  onFido2TouchPrompt: (cb) => {
-    const id = Date.now().toString() + Math.random().toString(16).slice(2);
-    fido2TouchPromptListeners.set(id, cb);
-    return () => fido2TouchPromptListeners.delete(id);
-  },
 
   // Biometric Key API (Termius-style: ED25519 + OS Secure Storage)
   biometricCheckSupport: () =>

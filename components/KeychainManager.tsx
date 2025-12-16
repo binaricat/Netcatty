@@ -20,7 +20,6 @@ import { cn } from "../lib/utils";
 import { Host, Identity, KeyType, SSHKey } from "../types";
 import { useBiometricBackend } from "../application/state/useBiometricBackend";
 import { useKeychainBackend } from "../application/state/useKeychainBackend";
-import { useWebAuthnBackend } from "../application/state/useWebAuthnBackend";
 import SelectHostPanel from "./SelectHostPanel";
 import { AsidePanel, AsidePanelContent } from "./ui/aside-panel";
 import { Button } from "./ui/button";
@@ -39,7 +38,6 @@ import { toast } from "./ui/toast";
 import {
   type FilterTab,
   GenerateBiometricPanel,
-  GenerateFido2Panel,
   GenerateStandardPanel,
   IdentityCard,
   IdentityPanel,
@@ -80,7 +78,6 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   onCreateGroup,
 }) => {
   const { generateKeyPair, execCommand } = useKeychainBackend();
-  const { hasBrowserWebAuthn: _hasBrowserWebAuthn, createCredentialInBrowser: _createCredentialInBrowser } = useWebAuthnBackend();
   const { generateKey: generateBiometricKey, deletePassphrase: deleteBiometricPassphrase } = useBiometricBackend();
   const [activeFilter, setActiveFilter] = useState<FilterTab>("key");
   const [search, setSearch] = useState("");
@@ -155,9 +152,6 @@ echo $3 >> "$FILE"`);
         break;
       case "biometric":
         result = result.filter((k) => k.source === "biometric");
-        break;
-      case "fido2":
-        result = result.filter((k) => k.source === "fido2");
         break;
     }
 
@@ -266,9 +260,9 @@ echo $3 >> "$FILE"`);
 
   // Open generate panel
   const openGenerate = useCallback(
-    (keyType: "standard" | "biometric" | "fido2") => {
+    (keyType: "standard" | "biometric") => {
       const defaultType =
-        keyType === "biometric" || keyType === "fido2" ? "ECDSA" : "ED25519";
+        keyType === "biometric" ? "ECDSA" : "ED25519";
       // Set default keySize based on type: ED25519 doesn't need size, RSA defaults to 4096, ECDSA to 256
       const getDefaultKeySize = (type: string) => {
         if (type === "ED25519") return undefined;
@@ -278,7 +272,6 @@ echo $3 >> "$FILE"`);
 
       const getSource = () => {
         if (keyType === "biometric") return "biometric";
-        if (keyType === "fido2") return "fido2";
         return "generated";
       };
 
@@ -396,7 +389,6 @@ echo $3 >> "$FILE"`);
         type: "ED25519",
         privateKey: result.privateKey, // Encrypted with passphrase stored in OS Secure Storage
         publicKey: result.publicKey,
-        // No credentialId/rpId - this is not a WebAuthn key
         source: "biometric",
         category: "key",
         created: Date.now(),
@@ -427,44 +419,6 @@ echo $3 >> "$FILE"`);
     closePanel,
     showError,
   ]);
-
-  // Handle FIDO2 hardware key registration
-  const handleGenerateFido2 = useCallback(async (result: { success: boolean; publicKey?: string; privateKey?: string; error?: string }) => {
-    if (!result.success) {
-      if (result.error) {
-        showError(result.error, "FIDO2 Setup");
-      }
-      return;
-    }
-
-    if (!draftKey.label?.trim()) {
-      showError("Please enter a label for the security key", "Validation");
-      return;
-    }
-
-    try {
-      const newKey: SSHKey = {
-        id: crypto.randomUUID(),
-        label: draftKey.label.trim(),
-        type: "ECDSA",
-        privateKey: result.privateKey || "", // ed25519-sk private key handle
-        publicKey: result.publicKey || "",
-        source: "fido2",
-        category: "key",
-        passphrase: draftKey.passphrase,
-        savePassphrase: draftKey.savePassphrase,
-        created: Date.now(),
-      };
-
-      onSave(newKey);
-      closePanel();
-    } catch (err) {
-      showError(
-        err instanceof Error ? err.message : "Failed to register security key",
-        "FIDO2 Setup",
-      );
-    }
-  }, [draftKey, onSave, closePanel, showError]);
 
   // Handle key import
   const handleImport = useCallback(() => {
@@ -565,7 +519,6 @@ echo $3 >> "$FILE"`);
   // Get icon for key source
   const getKeyIcon = (key: SSHKey) => {
     if (key.source === "biometric") return <Fingerprint size={16} />;
-    if (key.source === "fido2") return <Shield size={16} />;
     if (key.certificate) return <BadgeCheck size={16} />;
     return <Key size={16} />;
   };
@@ -573,7 +526,6 @@ echo $3 >> "$FILE"`);
   // Get key type display
   const getKeyTypeDisplay = (key: SSHKey) => {
     if (key.source === "biometric") return isMac ? "Touch ID" : "Windows Hello";
-    if (key.source === "fido2") return "FIDO2";
     return key.type;
   };
 
@@ -800,19 +752,6 @@ echo $3 >> "$FILE"`);
               <Fingerprint size={14} />
               {biometricLabel}
             </Button>
-
-            <Button
-              size="sm"
-              variant={activeFilter === "fido2" ? "secondary" : "ghost"}
-              className={cn(
-                "h-8 px-3 gap-2",
-                activeFilter === "fido2" && "bg-primary/15 text-primary",
-              )}
-              onClick={() => setActiveFilter("fido2")}
-            >
-              <Shield size={14} />
-              FIDO2
-            </Button>
           </div>
 
           {/* Search and View Mode - hide search when panel is open */}
@@ -885,27 +824,17 @@ echo $3 >> "$FILE"`);
               <h3 className="text-lg font-semibold text-foreground mb-2">
                 {activeFilter === "biometric"
                   ? `Set up ${isMac ? "Touch ID" : "Windows Hello"}`
-                  : activeFilter === "fido2"
-                    ? "Add a security key"
-                    : "Set up your keys"}
+                  : "Set up your keys"}
               </h3>
               <p className="text-sm text-center max-w-sm mb-4">
                 {activeFilter === "biometric"
                   ? `Create biometric SSH keys secured by ${isMac ? "Touch ID" : "Windows Hello"} for passwordless authentication.`
-                  : activeFilter === "fido2"
-                    ? "Connect a hardware security key (YubiKey, etc.) for enhanced security."
-                    : "Import or generate SSH keys for secure authentication."}
+                  : "Import or generate SSH keys for secure authentication."}
               </p>
               {activeFilter === "biometric" && (
                 <Button onClick={() => openGenerate("biometric")}>
                   <Fingerprint size={14} className="mr-2" />
                   Create Biometric Key
-                </Button>
-              )}
-              {activeFilter === "fido2" && (
-                <Button onClick={() => openGenerate("fido2")}>
-                  <Shield size={14} className="mr-2" />
-                  Register Security Key
                 </Button>
               )}
               {(activeFilter === "key" || activeFilter === "certificate") && (
@@ -998,25 +927,21 @@ echo $3 >> "$FILE"`);
               ? "Generate Biometric Key"
               : panel.type === "generate" && panel.keyType === "standard"
                 ? "Generate Key"
-                : panel.type === "generate" && panel.keyType === "fido2"
-                  ? "Register Security Key"
-                  : panel.type === "import"
-                    ? "New Key"
-                    : panel.type === "view"
-                      ? panel.key.source === "biometric"
-                        ? "Biometric Key"
-                        : panel.key.source === "fido2"
-                          ? "Security Key"
-                          : "Key Details"
-                      : panel.type === "edit"
-                        ? "Edit Key"
-                        : panel.type === "identity"
-                          ? panel.identity
-                            ? "Edit Identity"
-                            : "New Identity"
-                          : panel.type === "export"
-                            ? "Key Export"
-                            : ""
+                : panel.type === "import"
+                  ? "New Key"
+                  : panel.type === "view"
+                    ? panel.key.source === "biometric"
+                      ? "Biometric Key"
+                      : "Key Details"
+                    : panel.type === "edit"
+                      ? "Edit Key"
+                      : panel.type === "identity"
+                        ? panel.identity
+                          ? "Edit Identity"
+                          : "New Identity"
+                        : panel.type === "export"
+                          ? "Key Export"
+                          : ""
           }
           showBackButton={panelStack.length > 1}
           onBack={popPanel}
@@ -1036,16 +961,6 @@ echo $3 >> "$FILE"`);
                 setDraftKey={setDraftKey}
                 isGenerating={isGenerating}
                 onGenerate={handleGenerateBiometric}
-              />
-            )}
-
-            {/* Register FIDO2 Hardware Key */}
-            {panel.type === "generate" && panel.keyType === "fido2" && (
-              <GenerateFido2Panel
-                draftKey={draftKey}
-                setDraftKey={setDraftKey}
-                isGenerating={isGenerating}
-                onGenerate={handleGenerateFido2}
               />
             )}
 
@@ -1101,9 +1016,7 @@ echo $3 >> "$FILE"`);
                       "h-10 w-10 rounded-md flex items-center justify-center",
                       panel.key.source === "biometric"
                         ? "bg-blue-500/15 text-blue-500"
-                        : panel.key.source === "fido2"
-                          ? "bg-amber-500/15 text-amber-500"
-                          : "bg-primary/15 text-primary",
+                        : "bg-primary/15 text-primary",
                     )}
                   >
                     {getKeyIcon(panel.key)}

@@ -46,7 +46,7 @@ export interface Host {
   identityFileId?: string; // Reference to SSHKey
   protocol?: 'ssh' | 'telnet' | 'local'; // Default/primary protocol
   password?: string;
-  authMethod?: 'password' | 'key' | 'certificate' | 'fido2';
+  authMethod?: 'password' | 'key' | 'certificate';
   agentForwarding?: boolean;
   createdAt?: number; // Timestamp when host was created
   startupCommand?: string;
@@ -72,9 +72,9 @@ export interface Host {
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';
-export type KeySource = 'generated' | 'imported' | 'biometric' | 'fido2';
+export type KeySource = 'generated' | 'imported' | 'biometric';
 export type KeyCategory = 'key' | 'certificate' | 'identity';
-export type IdentityAuthMethod = 'password' | 'key' | 'certificate' | 'fido2';
+export type IdentityAuthMethod = 'password' | 'key' | 'certificate';
 
 export interface SSHKey {
   id: string;
@@ -88,9 +88,8 @@ export interface SSHKey {
   savePassphrase?: boolean;
   source: KeySource;
   category: KeyCategory;
-  // For biometric/FIDO2 keys
-  credentialId?: string; // WebAuthn credential ID (base64)
-  rpId?: string; // Relying Party ID
+  // For biometric keys (passphrase stored in OS Secure Storage)
+  keyId?: string; // Key identifier for OS Secure Storage lookup
   created: number;
 }
 

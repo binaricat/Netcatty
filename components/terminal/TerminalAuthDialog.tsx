@@ -171,13 +171,13 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                         "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
                                                         selectedKey.certificate?.trim()
                                                             ? "bg-emerald-500/20 text-emerald-500"
-                                                            : selectedKey.source === 'biometric' || selectedKey.source === 'fido2'
+                                                            : selectedKey.source === 'biometric'
                                                                 ? "bg-amber-500/20 text-amber-500"
                                                                 : "bg-primary/20 text-primary"
                                                     )}>
                                                         {selectedKey.certificate?.trim()
                                                             ? <BadgeCheck size={14} />
-                                                            : selectedKey.source === 'biometric' || selectedKey.source === 'fido2'
+                                                            : selectedKey.source === 'biometric'
                                                                 ? <Fingerprint size={14} />
                                                                 : <Key size={14} />}
                                                     </div>
@@ -185,7 +185,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                         <div className="text-sm font-medium truncate">{selectedKey.label}</div>
                                                         <div className="text-xs text-muted-foreground">
                                                             {selectedKey.certificate?.trim() ? 'Certificate' : selectedKey.type}
-                                                            {(selectedKey.source === 'biometric' || selectedKey.source === 'fido2') && ' · Passkey'}
+                                                            {selectedKey.source === 'biometric' && ' · Passkey'}
                                                         </div>
                                                     </div>
                                                 </>
@@ -217,13 +217,13 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                         "h-7 w-7 rounded-md flex items-center justify-center shrink-0",
                                                         key.certificate?.trim()
                                                             ? "bg-emerald-500/20 text-emerald-500"
-                                                            : key.source === 'biometric' || key.source === 'fido2'
+                                                            : key.source === 'biometric'
                                                                 ? "bg-amber-500/20 text-amber-500"
                                                                 : "bg-primary/20 text-primary"
                                                     )}>
                                                         {key.certificate?.trim()
                                                             ? <BadgeCheck size={12} />
-                                                            : key.source === 'biometric' || key.source === 'fido2'
+                                                            : key.source === 'biometric'
                                                                 ? <Fingerprint size={12} />
                                                                 : <Key size={12} />}
                                                     </div>
@@ -231,7 +231,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                         <div className="text-sm font-medium truncate">{key.label}</div>
                                                         <div className="text-xs text-muted-foreground">
                                                             {key.certificate?.trim() ? 'Certificate' : key.type}
-                                                            {(key.source === 'biometric' || key.source === 'fido2') && ' · Passkey'}
+                                                            {key.source === 'biometric' && ' · Passkey'}
                                                         </div>
                                                     </div>
                                                 </button>

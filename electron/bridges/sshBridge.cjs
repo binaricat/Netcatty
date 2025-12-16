@@ -7,7 +7,6 @@ const net = require("node:net");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client: SSHClient, utils: sshUtils } = require("ssh2");
-const { registerHandlers: registerWebAuthnHandlers } = require("./webauthnIpc.cjs");
 const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const biometricBridge = require("./biometricBridge.cjs");
 
@@ -203,21 +202,15 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         },
       };
       
-      // Auth - support agent (webauthn/certificate), key, and password fallback
+      // Auth - support agent (certificate), key, and password fallback
       const hasCertificate =
         typeof jump.certificate === "string" && jump.certificate.trim().length > 0;
-      const hasWebAuthn =
-        typeof jump.credentialId === "string"
-        && typeof jump.rpId === "string"
-        && typeof jump.publicKey === "string"
-        && jump.publicKey.trim().length > 0;
 
       // Check if this jump host uses a Termius-style biometric key
       const isJumpBiometricKey =
         jump.keySource === "biometric"
         && jump.keyId
-        && jump.privateKey
-        && !hasWebAuthn;
+        && jump.privateKey;
 
       // For biometric keys, retrieve passphrase from OS Secure Storage
       let jumpEffectivePassphrase = jump.passphrase;
@@ -240,23 +233,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       }
 
       let authAgent = null;
-      if (hasWebAuthn) {
-        // Give users time to complete Touch ID / Passkey prompts
-        connOpts.readyTimeout = 240000;
-        authAgent = new NetcattyAgent({
-          mode: "webauthn",
-          webContents: event.sender,
-          meta: {
-            label: jump.keyId || jump.username || "",
-            publicKey: jump.publicKey,
-            credentialId: jump.credentialId,
-            rpId: jump.rpId,
-            userVerification: jump.userVerification,
-            keySource: jump.keySource,
-          },
-        });
-        connOpts.agent = authAgent;
-      } else if (hasCertificate) {
+      if (hasCertificate) {
         authAgent = new NetcattyAgent({
           mode: "certificate",
           webContents: event.sender,
@@ -414,19 +391,12 @@ async function startSSHSession(event, options) {
 
     // Authentication for final target
     const hasCertificate = typeof options.certificate === "string" && options.certificate.trim().length > 0;
-    const hasWebAuthn =
-      typeof options.credentialId === "string"
-      && typeof options.rpId === "string"
-      && typeof options.publicKey === "string"
-      && options.publicKey.trim().length > 0;
 
     // Check if this is a Termius-style biometric key (ED25519 + OS Secure Storage)
-    // These keys have keySource === "biometric" but NO credentialId/rpId (not WebAuthn)
     const isBiometricKey =
       options.keySource === "biometric"
       && options.keyId
-      && options.privateKey
-      && !hasWebAuthn;
+      && options.privateKey;
 
     // For biometric keys, retrieve passphrase from OS Secure Storage
     // This will trigger Windows Hello / Touch ID prompt
@@ -456,43 +426,21 @@ async function startSSHSession(event, options) {
 
     console.log("[SSH] Auth configuration:", {
       hasCertificate,
-      hasWebAuthn,
       isBiometricKey,
       keySource: options.keySource,
-      hasCredentialId: !!options.credentialId,
-      hasRpId: !!options.rpId,
       hasPublicKey: !!options.publicKey,
       hasEffectivePassphrase: !!effectivePassphrase,
     });
     
     log("Auth configuration", {
       hasCertificate,
-      hasWebAuthn,
       isBiometricKey,
       keySource: options.keySource,
-      hasCredentialId: !!options.credentialId,
-      hasRpId: !!options.rpId,
       hasPublicKey: !!options.publicKey,
     });
 
     let authAgent = null;
-    if (hasWebAuthn) {
-      // Give users time to complete Touch ID / Passkey prompts (browser helper can take time).
-      connectOpts.readyTimeout = 240000;
-      authAgent = new NetcattyAgent({
-        mode: "webauthn",
-        webContents: event.sender,
-        meta: {
-          label: options.keyId || options.username || "",
-          publicKey: options.publicKey,
-          credentialId: options.credentialId,
-          rpId: options.rpId,
-          userVerification: options.userVerification,
-          keySource: options.keySource,
-        },
-      });
-      connectOpts.agent = authAgent;
-    } else if (hasCertificate) {
+    if (hasCertificate) {
       authAgent = new NetcattyAgent({
         mode: "certificate",
         webContents: event.sender,
@@ -785,11 +733,6 @@ async function execCommand(event, payload) {
       });
 
     const hasCertificate = typeof payload.certificate === "string" && payload.certificate.trim().length > 0;
-    const hasWebAuthn =
-      typeof payload.credentialId === "string"
-      && typeof payload.rpId === "string"
-      && typeof payload.publicKey === "string"
-      && payload.publicKey.trim().length > 0;
 
     const connectOpts = {
       host: payload.hostname,
@@ -800,21 +743,7 @@ async function execCommand(event, payload) {
     };
 
     let authAgent = null;
-    if (hasWebAuthn) {
-      authAgent = new NetcattyAgent({
-        mode: "webauthn",
-        webContents: event.sender,
-        meta: {
-          label: payload.keyId || payload.username || "",
-          publicKey: payload.publicKey,
-          credentialId: payload.credentialId,
-          rpId: payload.rpId,
-          userVerification: payload.userVerification,
-          keySource: payload.keySource,
-        },
-      });
-      connectOpts.agent = authAgent;
-    } else if (hasCertificate) {
+    if (hasCertificate) {
       authAgent = new NetcattyAgent({
         mode: "certificate",
         webContents: event.sender,
@@ -895,7 +824,6 @@ async function generateKeyPair(event, options) {
  * Register IPC handlers for SSH operations
  */
 function registerHandlers(ipcMain) {
-  registerWebAuthnHandlers(ipcMain);
   ipcMain.handle("netcatty:start", startSSHSession);
   ipcMain.handle("netcatty:ssh:exec", execCommand);
   ipcMain.handle("netcatty:key:generate", generateKeyPair);

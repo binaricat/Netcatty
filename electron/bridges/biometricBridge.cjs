@@ -9,7 +9,7 @@
  * 
  * Platform behavior:
  * - macOS: Keychain automatically prompts for Touch ID / password
- * - Windows: We explicitly call Windows Hello before reading from Credential Manager
+ * - Windows: We use electron-windows-security to call Windows Hello
  */
 
 const { spawn, execSync } = require("node:child_process");
@@ -35,35 +35,20 @@ function getKeytar() {
   return keytar || null;
 }
 
-// Lazy-load windows-hello for Windows platform verification
-let windowsHello = null;
-let electronModule = null;
-let mainWindow = null;
-
-/**
- * Initialize the biometric bridge with Electron module reference
- */
-function init(deps) {
-  electronModule = deps?.electronModule;
-  mainWindow = deps?.mainWindow;
-}
-
-function getWindowsHello() {
+// Lazy-load electron-windows-security for Windows Hello verification
+let windowsSecurity = null;
+function getWindowsSecurity() {
   if (process.platform !== "win32") return null;
-  if (windowsHello === null) {
+  if (windowsSecurity === null) {
     try {
-      // Try to load node-windows-hello (most common)
-      windowsHello = require("node-windows-hello");
-    } catch {
-      try {
-        windowsHello = require("windows-hello");
-      } catch (err) {
-        console.warn("[Biometric] windows-hello not available:", err.message);
-        windowsHello = false;
-      }
+      windowsSecurity = require("electron-windows-security");
+      console.log("[Biometric] electron-windows-security loaded successfully");
+    } catch (err) {
+      console.warn("[Biometric] electron-windows-security not available:", err.message);
+      windowsSecurity = false;
     }
   }
-  return windowsHello || null;
+  return windowsSecurity || null;
 }
 
 /**
@@ -174,24 +159,23 @@ async function checkBiometricSupport() {
 
   // Check Windows Hello availability on Windows
   if (platform === "win32") {
-    const wh = getWindowsHello();
-    if (wh) {
+    const winSec = getWindowsSecurity();
+    if (winSec && winSec.UserConsentVerifier) {
       try {
-        // Check if Windows Hello is available
-        if (typeof wh.isAvailable === "function") {
-          result.hasWindowsHello = await wh.isAvailable();
-        } else if (typeof wh.checkAvailability === "function") {
-          result.hasWindowsHello = await wh.checkAvailability();
-        } else {
-          // Assume available if module loaded
-          result.hasWindowsHello = true;
-        }
+        const availability = await new Promise((resolve, reject) => {
+          winSec.UserConsentVerifier.checkAvailabilityAsync((err, avail) => {
+            if (err) reject(err);
+            else resolve(avail);
+          });
+        });
+        // UserConsentVerifierAvailability.available = 0
+        result.hasWindowsHello = availability === 0 || availability === winSec.UserConsentVerifierAvailability.available;
+        console.log("[Biometric] Windows Hello availability:", availability, result.hasWindowsHello);
       } catch (err) {
         console.warn("[Biometric] Windows Hello check failed:", err.message);
         result.hasWindowsHello = false;
       }
     }
-    // Windows Hello is preferred but not required - DPAPI still works
   }
 
   result.supported = true;
@@ -318,206 +302,48 @@ async function generateBiometricKey(options) {
 }
 
 /**
- * Verify user with Windows Hello / Windows Security before allowing access
- * This is the "guard" that ensures biometric verification on Windows
- * 
- * On Windows, we use a standalone PowerShell script file + Start-Process
- * to ensure the Windows Hello UI can be shown with proper window focus.
+ * Verify user with Windows Hello before allowing access
+ * Uses electron-windows-security native module for reliable UI display
  * 
  * @param {string} reason - The reason for the verification prompt
- * @param {object} deps - Dependencies (electronModule)
  * @returns {Promise<boolean>} True if verified, false otherwise
  */
-async function verifyWindowsHello(reason = "Unlock your SSH Key", deps = {}) {
+async function verifyWindowsHello(reason = "Unlock your SSH Key") {
   if (process.platform !== "win32") {
     // Not on Windows, no verification needed here
     // (macOS Keychain handles this automatically)
     return true;
   }
 
-  // First try native node module if available
-  const wh = getWindowsHello();
-  if (wh) {
-    try {
-      // Different libraries have different APIs
-      if (typeof wh.verifyUser === "function") {
-        const result = await wh.verifyUser(reason);
-        return result === true || result?.verified === true;
-      } else if (typeof wh.verify === "function") {
-        const result = await wh.verify(reason);
-        return result === true || result?.success === true;
-      } else if (typeof wh.requestVerification === "function") {
-        const result = await wh.requestVerification(reason);
-        return result === true;
-      }
-    } catch (err) {
-      console.warn("[Biometric] Native Windows Hello failed, trying alternative:", err.message);
-    }
+  const winSec = getWindowsSecurity();
+  if (!winSec || !winSec.UserConsentVerifier) {
+    console.warn("[Biometric] electron-windows-security not available, skipping verification");
+    // SECURITY: If native module not available, we should fail closed
+    return false;
   }
 
-  // Fallback approach: Create a temporary PowerShell script file and run it
-  // Use Start-Process to run in a new window that can steal focus
-  const tempDir = os.tmpdir();
-  const scriptPath = path.join(tempDir, `netcatty-winhello-${Date.now()}.ps1`);
-  const resultPath = path.join(tempDir, `netcatty-winhello-result-${Date.now()}.txt`);
-  
-  // PowerShell script that requests Windows Hello verification
-  const escapedReason = reason.replace(/"/g, '`"').replace(/'/g, "''");
-  const psScript = `
-# Windows Hello Verification Script
-# This script uses WinRT API to request user verification
-
-# Simulate key press to allow foreground window change
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinApi {
-    [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+  try {
+    console.log("[Biometric] Requesting Windows Hello verification via native module...");
     
-    [DllImport("user32.dll")]
-    public static extern bool AllowSetForegroundWindow(int dwProcessId);
-    
-    public const byte VK_MENU = 0x12;
-    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
-    public const uint KEYEVENTF_KEYUP = 0x0002;
-    
-    public static void SimulateAltKey() {
-        keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
-        keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, UIntPtr.Zero);
-    }
-}
-"@
-
-# Allow all processes to set foreground window
-[WinApi]::AllowSetForegroundWindow(-1)
-# Simulate Alt key to unlock foreground window restriction
-[WinApi]::SimulateAltKey()
-
-try {
-    # Load the WinRT type
-    [void][Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
-    
-    # Check if Windows Hello is available
-    $availabilityTask = [Windows.Security.Credentials.UI.UserConsentVerifier]::CheckAvailabilityAsync()
-    Add-Type -AssemblyName System.Runtime.WindowsRuntime
-    
-    $asTaskMethods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { 
-        $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' 
-    }
-    $asTaskGenericAvail = $asTaskMethods[0]
-    $asTaskAvail = $asTaskGenericAvail.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerifierAvailability])
-    $netTaskAvail = $asTaskAvail.Invoke($null, @($availabilityTask))
-    [void]$netTaskAvail.Wait(10000)
-    
-    $availability = $netTaskAvail.Result
-    if ($availability -ne [Windows.Security.Credentials.UI.UserConsentVerifierAvailability]::Available) {
-        "NOT_AVAILABLE:$availability" | Out-File -FilePath "${resultPath.replace(/\\/g, "\\\\")}" -Encoding UTF8
-        exit 1
-    }
-    
-    # Request verification - this should show the Windows Hello dialog
-    $verifyTask = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync("${escapedReason}")
-    
-    $asTaskGenericVerify = $asTaskMethods[0]
-    $asTaskVerify = $asTaskGenericVerify.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerificationResult])
-    $netTaskVerify = $asTaskVerify.Invoke($null, @($verifyTask))
-    
-    # Wait up to 120 seconds for user response
-    [void]$netTaskVerify.Wait(120000)
-    
-    $result = $netTaskVerify.Result
-    if ($result -eq [Windows.Security.Credentials.UI.UserConsentVerificationResult]::Verified) {
-        "VERIFIED" | Out-File -FilePath "${resultPath.replace(/\\/g, "\\\\")}" -Encoding UTF8
-        exit 0
-    } else {
-        "FAILED:$result" | Out-File -FilePath "${resultPath.replace(/\\/g, "\\\\")}" -Encoding UTF8
-        exit 1
-    }
-} catch {
-    "ERROR:$_" | Out-File -FilePath "${resultPath.replace(/\\/g, "\\\\")}" -Encoding UTF8
-    exit 1
-}
-`;
-
-  return new Promise((resolve) => {
-    try {
-      // Write the script file
-      fs.writeFileSync(scriptPath, psScript, "utf8");
-      console.log("[Biometric] Created Windows Hello script at:", scriptPath);
-      
-      const { spawn: spawnProcess } = require("node:child_process");
-      
-      // Run PowerShell with the script file
-      // Use -WindowStyle Normal to ensure the process can show UI
-      const ps = spawnProcess("powershell.exe", [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-WindowStyle", "Normal",
-        "-File", scriptPath
-      ], {
-        windowsHide: false,
-        detached: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      let stderr = "";
-      ps.stderr.on("data", (data) => {
-        stderr += data.toString();
-      });
-
-      const cleanup = () => {
-        try {
-          if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath);
-          if (fs.existsSync(resultPath)) fs.unlinkSync(resultPath);
-        } catch (e) {
-          console.warn("[Biometric] Cleanup failed:", e.message);
-        }
-      };
-
-      ps.on("close", (code) => {
-        // Read result from file
-        let output = "";
-        try {
-          if (fs.existsSync(resultPath)) {
-            output = fs.readFileSync(resultPath, "utf8").trim();
-          }
-        } catch (e) {
-          console.warn("[Biometric] Failed to read result file:", e.message);
-        }
-        
-        console.log("[Biometric] Windows Hello result:", { code, output, stderr: stderr.trim() });
-        cleanup();
-        
-        if (output.startsWith("VERIFIED")) {
-          resolve(true);
+    const result = await new Promise((resolve, reject) => {
+      winSec.UserConsentVerifier.requestVerificationAsync(reason, (err, verificationResult) => {
+        if (err) {
+          reject(err);
         } else {
-          console.warn("[Biometric] Windows Hello verification failed:", output || stderr || "Unknown error");
-          resolve(false);
+          resolve(verificationResult);
         }
       });
+    });
 
-      ps.on("error", (err) => {
-        console.error("[Biometric] Failed to spawn PowerShell:", err);
-        cleanup();
-        resolve(false);
-      });
-
-      // Timeout after 2 minutes
-      setTimeout(() => {
-        try {
-          ps.kill();
-        } catch {}
-        cleanup();
-        console.warn("[Biometric] Windows Hello verification timed out");
-        resolve(false);
-      }, 120000);
-      
-    } catch (err) {
-      console.error("[Biometric] Failed to start Windows Hello verification:", err);
-      resolve(false);
-    }
-  });
+    // UserConsentVerificationResult.verified = 0
+    const verified = result === 0 || result === winSec.UserConsentVerificationResult.verified;
+    console.log("[Biometric] Windows Hello result:", result, "verified:", verified);
+    
+    return verified;
+  } catch (err) {
+    console.error("[Biometric] Windows Hello verification failed:", err);
+    return false;
+  }
 }
 
 /**

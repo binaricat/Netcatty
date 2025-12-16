@@ -231,13 +231,10 @@ interface SFTPModalProps {
     privateKey?: string;
     certificate?: string;
     passphrase?: string;
-    // WebAuthn-backed keys (optional)
+    // Biometric keys (passphrase stored in OS Secure Storage)
     publicKey?: string;
-    credentialId?: string;
-    rpId?: string;
-    userVerification?: 'required' | 'preferred' | 'discouraged';
     keyId?: string;
-    keySource?: 'generated' | 'imported' | 'biometric' | 'fido2';
+    keySource?: 'generated' | 'imported' | 'biometric';
   };
   open: boolean;
   onClose: () => void;

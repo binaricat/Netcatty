@@ -7,7 +7,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const SftpClient = require("ssh2-sftp-client");
-const { registerHandlers: registerWebAuthnHandlers } = require("./webauthnIpc.cjs");
 const { NetcattyAgent } = require("./netcattyAgent.cjs");
 
 // SFTP clients storage - shared reference passed from main
@@ -35,28 +34,10 @@ async function openSftp(event, options) {
   };
   
   const hasCertificate = typeof options.certificate === "string" && options.certificate.trim().length > 0;
-  const hasWebAuthn =
-    typeof options.credentialId === "string"
-    && typeof options.rpId === "string"
-    && typeof options.publicKey === "string"
-    && options.publicKey.trim().length > 0;
+  const hasBiometric = options.keySource === "biometric" && typeof options.keyId === "string";
 
   let authAgent = null;
-  if (hasWebAuthn) {
-    authAgent = new NetcattyAgent({
-      mode: "webauthn",
-      webContents: event.sender,
-      meta: {
-        label: options.keyId || options.username || "",
-        publicKey: options.publicKey,
-        credentialId: options.credentialId,
-        rpId: options.rpId,
-        userVerification: options.userVerification,
-        keySource: options.keySource,
-      },
-    });
-    connectOpts.agent = authAgent;
-  } else if (hasCertificate) {
+  if (hasCertificate) {
     authAgent = new NetcattyAgent({
       mode: "certificate",
       webContents: event.sender,
@@ -270,7 +251,6 @@ async function chmodSftp(event, payload) {
  * Register IPC handlers for SFTP operations
  */
 function registerHandlers(ipcMain) {
-  registerWebAuthnHandlers(ipcMain);
   ipcMain.handle("netcatty:sftp:open", openSftp);
   ipcMain.handle("netcatty:sftp:list", listSftp);
   ipcMain.handle("netcatty:sftp:read", readSftp);

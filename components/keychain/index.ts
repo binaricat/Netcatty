@@ -6,7 +6,7 @@
 
 // Utilities and types
 export {
-copyToClipboard,createBiometricCredential,createFido2Credential,detectKeyType,generateMockKeyPair,getKeyIcon,
+copyToClipboard,detectKeyType,generateMockKeyPair,getKeyIcon,
 getKeyTypeDisplay,isMacOS,type FilterTab,type PanelMode
 } from './utils';
 
@@ -18,7 +18,6 @@ export { KeyCard } from './KeyCard';
 export { EditKeyPanel } from './EditKeyPanel';
 export { ExportKeyPanel } from './ExportKeyPanel';
 export { GenerateBiometricPanel } from './GenerateBiometricPanel';
-export { GenerateFido2Panel } from './GenerateFido2Panel';
 export { GenerateStandardPanel } from './GenerateStandardPanel';
 export { IdentityPanel } from './IdentityPanel';
 export { ImportKeyPanel } from './ImportKeyPanel';
