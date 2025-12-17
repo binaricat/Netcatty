@@ -35,6 +35,7 @@ import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
+import { toast } from "./ui/toast";
 
 interface KnownHostsManagerProps {
   knownHosts: KnownHost[];
@@ -48,30 +49,6 @@ interface KnownHostsManagerProps {
 }
 
 type ViewMode = "grid" | "list";
-
-// Helper functions outside component for stable references
-const _formatDateFn = (timestamp: number) => {
-  return new Date(timestamp).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-};
-
-const _getKeyTypeColorFn = (keyType: string) => {
-  switch (keyType.toLowerCase()) {
-    case "ssh-ed25519":
-      return "text-emerald-500";
-    case "ssh-rsa":
-      return "text-amber-500";
-    case "ecdsa-sha2-nistp256":
-    case "ecdsa-sha2-nistp384":
-    case "ecdsa-sha2-nistp521":
-      return "text-blue-500";
-    default:
-      return "text-muted-foreground";
-  }
-};
 
 // Parse known_hosts file content - pure function, moved outside component
 const parseKnownHostsFile = (content: string): KnownHost[] => {
@@ -262,6 +239,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   onImportFromFile,
   onRefresh,
 }) => {
+  const { t } = useI18n();
   const { readKnownHosts } = useKnownHostsBackend();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -277,26 +255,54 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     setIsScanning(true);
     try {
       const content = await readKnownHosts();
-      if (content) {
-        const parsed = parseKnownHostsFile(content);
-        const existingHostnames = new Set(
-          knownHosts.map((h) => `${h.hostname}:${h.port}`),
+      if (content === undefined) {
+        toast.error(
+          t("knownHosts.toast.scanUnavailable"),
+          t("vault.nav.knownHosts"),
         );
-        const newHosts = parsed.filter(
-          (h) => !existingHostnames.has(`${h.hostname}:${h.port}`),
-        );
+        return;
+      }
+      if (!content) {
+        toast.info(t("knownHosts.toast.scanNoFile"), t("vault.nav.knownHosts"));
+        return;
+      }
 
-        // Directly import new hosts without dialog
-        if (newHosts.length > 0) {
-          onImportFromFile(newHosts);
-        }
+      const parsed = parseKnownHostsFile(content);
+      if (parsed.length === 0) {
+        toast.info(
+          t("knownHosts.toast.scanNoEntries"),
+          t("vault.nav.knownHosts"),
+        );
+        return;
+      }
+
+      const existingHostnames = new Set(
+        knownHosts.map((h) => `${h.hostname}:${h.port}`),
+      );
+      const newHosts = parsed.filter(
+        (h) => !existingHostnames.has(`${h.hostname}:${h.port}`),
+      );
+
+      if (newHosts.length > 0) {
+        onImportFromFile(newHosts);
+        toast.success(
+          t("knownHosts.toast.scanImported", { count: newHosts.length }),
+          t("vault.nav.knownHosts"),
+        );
+      } else {
+        toast.info(t("knownHosts.toast.scanNoNew"), t("vault.nav.knownHosts"));
       }
     } catch (err) {
       logger.error("Failed to scan system known_hosts:", err);
+      toast.error(
+        err instanceof Error ? err.message : t("knownHosts.toast.scanFailed"),
+        t("vault.nav.knownHosts"),
+      );
+    } finally {
+      onRefresh();
+      setIsScanning(false);
     }
-    onRefresh();
-    setIsScanning(false);
-  }, [knownHosts, onRefresh, onImportFromFile, readKnownHosts]);
+  }, [knownHosts, onRefresh, onImportFromFile, readKnownHosts, t]);
 
   // Auto-scan on first mount
   useEffect(() => {
@@ -455,7 +461,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              placeholder="Search known hosts..."
+              placeholder={t("knownHosts.search.placeholder")}
               className="pl-9 h-9 bg-background border-border/60 text-sm"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -481,14 +487,14 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
                 className="w-full justify-start gap-2 h-9"
                 onClick={() => setViewMode("grid")}
               >
-                <LayoutGrid size={14} /> Grid
+                <LayoutGrid size={14} /> {t("vault.view.grid")}
               </Button>
               <Button
                 variant={viewMode === "list" ? "secondary" : "ghost"}
                 className="w-full justify-start gap-2 h-9"
                 onClick={() => setViewMode("list")}
               >
-                <ListIcon size={14} /> List
+                <ListIcon size={14} /> {t("vault.view.list")}
               </Button>
             </DropdownContent>
           </Dropdown>
@@ -513,7 +519,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
               size={14}
               className={cn("mr-2", isScanning && "animate-spin")}
             />
-            Scan System
+            {t("knownHosts.action.scanSystem")}
           </Button>
           <input
             ref={fileInputRef}
@@ -529,7 +535,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
             onClick={openFilePicker}
           >
             <Import size={14} className="mr-2" />
-            Import File
+            {t("knownHosts.action.importFile")}
           </Button>
         </div>
       </div>
@@ -555,11 +561,10 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
                 <Shield size={32} className="opacity-60" />
               </div>
               <h3 className="text-lg font-semibold text-foreground mb-2">
-                No Known Hosts
+                {t("knownHosts.empty.title")}
               </h3>
               <p className="text-sm text-center max-w-sm mb-4">
-                Known hosts are SSH servers you've connected to before. Import
-                from your system's known_hosts file to get started.
+                {t("knownHosts.empty.desc")}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -571,11 +576,11 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
                     size={14}
                     className={cn("mr-2", isScanning && "animate-spin")}
                   />
-                  Scan System
+                  {t("knownHosts.action.scanSystem")}
                 </Button>
                 <Button variant="outline" onClick={openFilePicker}>
                   <FolderOpen size={14} className="mr-2" />
-                  Browse File
+                  {t("knownHosts.action.browseFile")}
                 </Button>
               </div>
             </div>
@@ -589,8 +594,10 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
                     viewMode === "grid" && "col-span-full",
                   )}
                 >
-                  Showing {RENDER_LIMIT} of {filteredHosts.length} hosts. Use
-                  search to find specific hosts.
+                  {t("knownHosts.results.showingLimited", {
+                    shown: displayedHosts.length,
+                    total: filteredHosts.length,
+                  })}
                 </div>
               )}
             </>

@@ -32,6 +32,10 @@ const en: Messages = {
   'common.right': 'Right',
   'common.selectAHost': 'Select a host',
   'common.selectAHostPlaceholder': 'Select a host...',
+  'sort.az': 'A-z',
+  'sort.za': 'Z-a',
+  'sort.newest': 'Newest to oldest',
+  'sort.oldest': 'Oldest to newest',
   'field.label': 'Label',
   'field.type': 'Type',
   'auth.keyType': 'Type {type}',
@@ -238,6 +242,23 @@ const en: Messages = {
   'vault.hosts.newGroup': 'New Group',
   'vault.hosts.import': 'Import',
   'vault.hosts.allHosts': 'All hosts',
+
+  // Known Hosts
+  'knownHosts.search.placeholder': 'Search known hosts...',
+  'knownHosts.action.scanSystem': 'Scan System',
+  'knownHosts.action.importFile': 'Import File',
+  'knownHosts.action.browseFile': 'Browse File',
+  'knownHosts.empty.title': 'No Known Hosts',
+  'knownHosts.empty.desc':
+    "Known hosts are SSH servers you've connected to before. Import from your system's known_hosts file to get started.",
+  'knownHosts.results.showingLimited':
+    'Showing {shown} of {total} hosts. Use search to find specific hosts.',
+  'knownHosts.toast.scanUnavailable': 'System scan is unavailable on this platform.',
+  'knownHosts.toast.scanNoFile': 'No system known_hosts file found.',
+  'knownHosts.toast.scanNoEntries': 'No usable entries found in known_hosts.',
+  'knownHosts.toast.scanImported': 'Imported {count} new hosts.',
+  'knownHosts.toast.scanNoNew': 'No new hosts found.',
+  'knownHosts.toast.scanFailed': 'Failed to scan system known_hosts.',
 
   // Port Forwarding
   'pf.empty.title': 'Set up port forwarding',

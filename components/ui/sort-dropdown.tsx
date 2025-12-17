@@ -1,15 +1,16 @@
 import { Calendar,CalendarClock,Check,ChevronDown,ChevronUp,SortAsc,SortDesc } from 'lucide-react';
 import React from 'react';
+import { useI18n } from "../../application/i18n/I18nProvider";
 import { Button } from './button';
 import { Dropdown,DropdownContent,DropdownTrigger } from './dropdown';
 
 export type SortMode = 'az' | 'za' | 'newest' | 'oldest';
 
-export const SORT_OPTIONS: Record<SortMode, { label: string; icon: React.ReactElement; triggerIcon: React.ReactElement }> = {
-    az: { label: 'A-z', icon: <SortAsc className="w-4 h-4 shrink-0" />, triggerIcon: <SortAsc className="w-4 h-4" /> },
-    za: { label: 'Z-a', icon: <SortDesc className="w-4 h-4 shrink-0" />, triggerIcon: <SortDesc className="w-4 h-4" /> },
-    newest: { label: 'Newest to oldest', icon: <Calendar className="w-4 h-4 shrink-0" />, triggerIcon: <Calendar className="w-4 h-4" /> },
-    oldest: { label: 'Oldest to newest', icon: <CalendarClock className="w-4 h-4 shrink-0" />, triggerIcon: <CalendarClock className="w-4 h-4" /> },
+const SORT_OPTIONS: Record<SortMode, { labelKey: string; icon: React.ReactElement; triggerIcon: React.ReactElement }> = {
+    az: { labelKey: 'sort.az', icon: <SortAsc className="w-4 h-4 shrink-0" />, triggerIcon: <SortAsc className="w-4 h-4" /> },
+    za: { labelKey: 'sort.za', icon: <SortDesc className="w-4 h-4 shrink-0" />, triggerIcon: <SortDesc className="w-4 h-4" /> },
+    newest: { labelKey: 'sort.newest', icon: <Calendar className="w-4 h-4 shrink-0" />, triggerIcon: <Calendar className="w-4 h-4" /> },
+    oldest: { labelKey: 'sort.oldest', icon: <CalendarClock className="w-4 h-4 shrink-0" />, triggerIcon: <CalendarClock className="w-4 h-4" /> },
 };
 
 interface SortDropdownProps {
@@ -20,6 +21,7 @@ interface SortDropdownProps {
 
 export const SortDropdown: React.FC<SortDropdownProps> = ({ value, onChange, className }) => {
     const [open, setOpen] = React.useState(false);
+    const { t } = useI18n();
 
     return (
         <Dropdown open={open} onOpenChange={setOpen}>
@@ -40,7 +42,7 @@ export const SortDropdown: React.FC<SortDropdownProps> = ({ value, onChange, cla
                             setOpen(false);
                         }}
                     >
-                        {SORT_OPTIONS[mode].icon} {SORT_OPTIONS[mode].label}
+                        {SORT_OPTIONS[mode].icon} {t(SORT_OPTIONS[mode].labelKey)}
                         {value === mode && <Check size={12} className="ml-auto" />}
                     </Button>
                 ))}
