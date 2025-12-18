@@ -246,6 +246,22 @@ const en: Messages = {
   'vault.hosts.import': 'Import',
   'vault.hosts.allHosts': 'All hosts',
 
+  // Vault import
+  'vault.import.title': 'Add data to your vault',
+  'vault.import.desc':
+    'Transfer your connections from popular clients. Select a file format to start the migration.',
+  'vault.import.chooseFormat': 'Select a file format',
+  'vault.import.csv.tip': 'Bulk import: use the CSV template.',
+  'vault.import.csv.downloadTemplate': 'Download CSV template',
+  'vault.import.toast.start': 'Importing from {format}...',
+  'vault.import.toast.completedTitle': 'Import completed',
+  'vault.import.toast.failedTitle': 'Import failed',
+  'vault.import.toast.noEntries': 'No importable entries found in {format}.',
+  'vault.import.toast.noNewHosts': 'No new hosts imported from {format}.',
+  'vault.import.toast.summary':
+    'Imported {count} hosts (skipped {skipped}, duplicates {duplicates}).',
+  'vault.import.toast.firstIssue': 'First issue: {issue}',
+
   // Known Hosts
   'knownHosts.search.placeholder': 'Search known hosts...',
   'knownHosts.action.scanSystem': 'Scan System',

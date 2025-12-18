@@ -148,6 +148,20 @@ const zhCN: Messages = {
   'vault.hosts.import': '导入',
   'vault.hosts.allHosts': '全部主机',
 
+  // Vault import
+  'vault.import.title': '添加数据到你的 Vault',
+  'vault.import.desc': '从常见工具迁移连接信息。选择一种格式开始导入。',
+  'vault.import.chooseFormat': '选择文件格式',
+  'vault.import.csv.tip': '批量导入：可使用 CSV 模板填写后导入。',
+  'vault.import.csv.downloadTemplate': '下载 CSV 模板',
+  'vault.import.toast.start': '正在从 {format} 导入...',
+  'vault.import.toast.completedTitle': '导入完成',
+  'vault.import.toast.failedTitle': '导入失败',
+  'vault.import.toast.noEntries': '{format} 文件中没有可导入的条目。',
+  'vault.import.toast.noNewHosts': '从 {format} 没有导入到新的主机。',
+  'vault.import.toast.summary': '已导入 {count} 个主机（跳过 {skipped}，重复 {duplicates}）。',
+  'vault.import.toast.firstIssue': '首个问题：{issue}',
+
   // Known Hosts
   'knownHosts.search.placeholder': '搜索已知主机...',
   'knownHosts.action.scanSystem': '扫描系统',

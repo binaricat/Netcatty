@@ -21,6 +21,8 @@ import {
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { sanitizeHost } from "../domain/host";
+import { importVaultHostsFromText } from "../domain/vaultImport";
+import type { VaultImportFormat } from "../domain/vaultImport";
 import { cn } from "../lib/utils";
 import {
   ConnectionLog,
@@ -45,6 +47,7 @@ import ProtocolSelectDialog from "./ProtocolSelectDialog";
 import QuickConnectWizard from "./QuickConnectWizard";
 import { isQuickConnectInput, parseQuickConnectInput } from "../domain/quickConnect";
 import SnippetsManager from "./SnippetsManager";
+import { ImportVaultDialog } from "./vault/ImportVaultDialog";
 import { Button } from "./ui/button";
 import {
   ContextMenu,
@@ -65,6 +68,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
 import { TagFilterDropdown } from "./ui/tag-filter-dropdown";
+import { toast } from "./ui/toast";
 
 export type VaultSection = "hosts" | "keys" | "snippets" | "port" | "knownhosts" | "logs";
 
@@ -148,6 +152,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [renameTargetPath, setRenameTargetPath] = useState<string | null>(null);
   const [renameGroupName, setRenameGroupName] = useState("");
   const [renameGroupError, setRenameGroupError] = useState<string | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   // Handle external navigation requests
   useEffect(() => {
@@ -279,6 +284,126 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setEditingHost(host);
     setIsHostPanelOpen(true);
   }, []);
+
+  const readTextFile = useCallback(async (file: File): Promise<string> => {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+
+    let encoding: string = "utf-8";
+    let offset = 0;
+
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+      encoding = "utf-16le";
+      offset = 2;
+    } else if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+      encoding = "utf-16be";
+      offset = 2;
+    } else if (
+      bytes.length >= 3 &&
+      bytes[0] === 0xef &&
+      bytes[1] === 0xbb &&
+      bytes[2] === 0xbf
+    ) {
+      encoding = "utf-8";
+      offset = 3;
+    }
+
+    const decoder = new TextDecoder(encoding);
+    return decoder.decode(bytes.slice(offset));
+  }, []);
+
+  const handleImportFileSelected = useCallback(
+    async (format: VaultImportFormat, file: File) => {
+      setIsImportOpen(false);
+
+      try {
+        const formatLabel =
+          format === "putty"
+            ? "PuTTY"
+            : format === "mobaxterm"
+              ? "MobaXterm"
+              : format === "csv"
+                ? "CSV"
+                : format === "securecrt"
+                  ? "SecureCRT"
+                  : "ssh_config";
+
+        toast.info(t("vault.import.toast.start", { format: formatLabel }));
+
+        const text = await readTextFile(file);
+        const result = importVaultHostsFromText(format, text, {
+          fileName: file.name,
+        });
+
+        const makeKey = (h: Host) =>
+          `${(h.protocol ?? "ssh").toLowerCase()}|${h.hostname.toLowerCase()}|${h.port}|${(h.username ?? "").toLowerCase()}`;
+
+        const existingKeys = new Set(hosts.map(makeKey));
+        const newHosts = result.hosts.filter((h) => !existingKeys.has(makeKey(h)));
+
+        if (newHosts.length > 0) {
+          onUpdateHosts([...hosts, ...newHosts].map(sanitizeHost));
+
+          const nextGroups = Array.from(
+            new Set([
+              ...customGroups,
+              ...result.groups,
+              ...newHosts.map((h) => h.group).filter(Boolean),
+            ]),
+          ) as string[];
+          onUpdateCustomGroups(nextGroups);
+        }
+
+        const skipped = result.stats.skipped;
+        const duplicates = result.stats.duplicates;
+        const hasWarnings = skipped > 0 || duplicates > 0 || result.issues.length > 0;
+
+        if (result.stats.parsed === 0 && newHosts.length === 0) {
+          toast.error(
+            t("vault.import.toast.noEntries", { format: formatLabel }),
+            t("vault.import.toast.failedTitle"),
+          );
+          return;
+        }
+
+        if (newHosts.length === 0) {
+          toast.warning(
+            t("vault.import.toast.noNewHosts", { format: formatLabel }),
+            t("vault.import.toast.completedTitle"),
+          );
+          return;
+        }
+
+        const details = t("vault.import.toast.summary", {
+          count: newHosts.length,
+          skipped,
+          duplicates,
+        });
+
+        if (hasWarnings) {
+          const firstIssue = result.issues[0]?.message;
+          toast.warning(
+            firstIssue ? `${details} ${t("vault.import.toast.firstIssue", { issue: firstIssue })}` : details,
+            t("vault.import.toast.completedTitle"),
+          );
+        } else {
+          toast.success(details, t("vault.import.toast.completedTitle"));
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t("common.unknownError");
+        toast.error(message, t("vault.import.toast.failedTitle"));
+      }
+    },
+    [
+      customGroups,
+      hosts,
+      onUpdateCustomGroups,
+      onUpdateHosts,
+      readTextFile,
+      t,
+    ],
+  );
 
   const buildGroupTree = useMemo<Record<string, GroupNode>>(() => {
     const root: Record<string, GroupNode> = {};
@@ -798,7 +923,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       variant="ghost"
                       className="w-full justify-start gap-2"
                       onClick={() => {
-                        // TODO: Import hosts
+                        setIsImportOpen(true);
                       }}
                     >
                       <Upload size={14} /> {t("vault.hosts.import")}
@@ -1314,6 +1439,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ImportVaultDialog
+        open={isImportOpen}
+        onOpenChange={setIsImportOpen}
+        onFileSelected={handleImportFileSelected}
+      />
 
       {/* Quick Connect Wizard */}
       {isQuickConnectOpen && quickConnectTarget && (
