@@ -7,6 +7,7 @@ import { useVaultState } from './application/state/useVaultState';
 import { useWindowControls } from './application/state/useWindowControls';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
+import { getAppLevelActions } from './application/state/useGlobalHotkeys';
 import { resolveHostAuth } from './domain/sshAuth';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
 import { TopTabs } from './components/TopTabs';
@@ -438,13 +439,30 @@ function App({ settings }: { settings: SettingsState }) {
       // Note: xterm terminal handles its own key interception via attachCustomKeyEventHandler
       const target = e.target as HTMLElement;
       const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      const isXtermInput =
+        target instanceof HTMLElement &&
+        !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
 
-      if (isFormElement && e.key !== 'Escape') {
+      if (isFormElement && !isXtermInput && e.key !== 'Escape') {
         return;
       }
 
       const isTerminalElement =
-        target instanceof HTMLElement && !!target.closest?.(".xterm");
+        target instanceof HTMLElement &&
+        !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
+      const isTerminalInPath = Boolean(
+        e.composedPath?.().some(
+          (node) =>
+            node instanceof HTMLElement &&
+            (node.classList.contains("xterm") ||
+              node.classList.contains("xterm-helper-textarea") ||
+              node.classList.contains("xterm-screen") ||
+              node.classList.contains("xterm-viewport") ||
+              node.hasAttribute("data-session-id")),
+        ),
+      );
+
+      const appLevelActions = getAppLevelActions();
 
       // Check each key binding
       for (const binding of keyBindings) {
@@ -463,6 +481,19 @@ function App({ settings }: { settings: SettingsState }) {
 
           e.preventDefault();
           e.stopPropagation();
+          if (IS_DEV) {
+            console.log('[Hotkeys] Global handle', {
+              action: binding.action,
+              key: e.key,
+              meta: e.metaKey,
+              ctrl: e.ctrlKey,
+              alt: e.altKey,
+              shift: e.shiftKey,
+              targetTag: target?.tagName,
+              isTerminalElement,
+              isTerminalInPath,
+            });
+          }
           executeHotkeyAction(binding.action, e);
           return;
         }

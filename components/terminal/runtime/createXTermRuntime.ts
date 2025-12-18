@@ -296,6 +296,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const terminalActions = getTerminalPassthroughActions();
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+    if (e.type !== "keydown") {
+      return true;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === "f" && e.type === "keydown") {
       e.preventDefault();
       ctx.setIsSearchOpen(true);
@@ -317,13 +320,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const { action } = matched;
 
     if (appLevelActions.has(action)) {
-      e.preventDefault();
-      hotkeyCallback?.(action, e);
-      return false;
+      return true; // Let app-level handler process it
     }
 
     if (terminalActions.has(action)) {
       e.preventDefault();
+      e.stopPropagation();
+      if (import.meta.env.DEV) {
+        console.log('[Hotkeys] Xterm terminal-level', {
+          action,
+          key: e.key,
+          meta: e.metaKey,
+          ctrl: e.ctrlKey,
+          alt: e.altKey,
+          shift: e.shiftKey,
+        });
+      }
       switch (action) {
         case "copy": {
           const selection = term.getSelection();
