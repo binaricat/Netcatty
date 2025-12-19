@@ -1,7 +1,6 @@
 import { useCallback,useEffect,useLayoutEffect,useMemo,useState } from 'react';
 import { SyncConfig, TerminalSettings, DEFAULT_TERMINAL_SETTINGS, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage } from '../../domain/models';
 import {
-STORAGE_KEY_COLOR,
 STORAGE_KEY_SYNC,
 STORAGE_KEY_TERM_THEME,
 STORAGE_KEY_THEME,
@@ -13,15 +12,19 @@ STORAGE_KEY_CUSTOM_KEY_BINDINGS,
 STORAGE_KEY_HOTKEY_RECORDING,
 STORAGE_KEY_CUSTOM_CSS,
 STORAGE_KEY_UI_LANGUAGE,
+STORAGE_KEY_UI_THEME_LIGHT,
+STORAGE_KEY_UI_THEME_DARK,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
 import { TERMINAL_FONTS, DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
+import { DARK_UI_THEMES, LIGHT_UI_THEMES, UiThemeTokens, getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
-const DEFAULT_COLOR = '221.2 83.2% 53.3%';
 const DEFAULT_THEME: 'light' | 'dark' = 'light';
+const DEFAULT_LIGHT_UI_THEME = 'snow';
+const DEFAULT_DARK_UI_THEME = 'midnight';
 const DEFAULT_TERMINAL_THEME = 'netcatty-dark';
 const DEFAULT_FONT_FAMILY = 'menlo';
 // Auto-detect default hotkey scheme based on platform
@@ -46,26 +49,38 @@ const readStoredString = (key: string): string | null => {
 
 const isValidTheme = (value: unknown): value is 'light' | 'dark' => value === 'light' || value === 'dark';
 
-const isValidHslToken = (value: string): boolean => {
-  // Expect: "<h> <s>% <l>%", e.g. "221.2 83.2% 53.3%"
-  return /^\s*\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%\s*$/.test(value);
+const isValidUiThemeId = (theme: 'light' | 'dark', value: string): boolean => {
+  const list = theme === 'dark' ? DARK_UI_THEMES : LIGHT_UI_THEMES;
+  return list.some((preset) => preset.id === value);
 };
 
-const applyThemeTokens = (theme: 'light' | 'dark', primaryColor: string) => {
+const applyThemeTokens = (theme: 'light' | 'dark', tokens: UiThemeTokens) => {
   const root = window.document.documentElement;
   root.classList.remove('light', 'dark');
   root.classList.add(theme);
-  root.style.setProperty('--primary', primaryColor);
-  root.style.setProperty('--accent', primaryColor);
-  root.style.setProperty('--ring', primaryColor);
-  const lightness = parseFloat(primaryColor.split(/\s+/)[2]?.replace('%', '') || '');
-  const accentForeground = theme === 'dark'
-    ? '220 40% 96%'
-    : (!Number.isNaN(lightness) && lightness < 55 ? '0 0% 98%' : '222 47% 12%');
-  root.style.setProperty('--accent-foreground', accentForeground);
+  root.style.setProperty('--background', tokens.background);
+  root.style.setProperty('--foreground', tokens.foreground);
+  root.style.setProperty('--card', tokens.card);
+  root.style.setProperty('--card-foreground', tokens.cardForeground);
+  root.style.setProperty('--popover', tokens.popover);
+  root.style.setProperty('--popover-foreground', tokens.popoverForeground);
+  root.style.setProperty('--primary', tokens.primary);
+  root.style.setProperty('--primary-foreground', tokens.primaryForeground);
+  root.style.setProperty('--secondary', tokens.secondary);
+  root.style.setProperty('--secondary-foreground', tokens.secondaryForeground);
+  root.style.setProperty('--muted', tokens.muted);
+  root.style.setProperty('--muted-foreground', tokens.mutedForeground);
+  root.style.setProperty('--accent', tokens.accent);
+  root.style.setProperty('--accent-foreground', tokens.accentForeground);
+  root.style.setProperty('--destructive', tokens.destructive);
+  root.style.setProperty('--destructive-foreground', tokens.destructiveForeground);
+  root.style.setProperty('--border', tokens.border);
+  root.style.setProperty('--input', tokens.input);
+  root.style.setProperty('--ring', tokens.ring);
   
   // Sync with native window title bar (Electron)
   netcattyBridge.get()?.setTheme?.(theme);
+  netcattyBridge.get()?.setBackgroundColor?.(tokens.background);
 };
 
 export const useSettingsState = () => {
@@ -73,9 +88,13 @@ export const useSettingsState = () => {
     const stored = readStoredString(STORAGE_KEY_THEME);
     return stored && isValidTheme(stored) ? stored : DEFAULT_THEME;
   });
-  const [primaryColor, setPrimaryColor] = useState<string>(() => {
-    const stored = readStoredString(STORAGE_KEY_COLOR);
-    return stored && isValidHslToken(stored) ? stored.trim() : DEFAULT_COLOR;
+  const [lightUiThemeId, setLightUiThemeId] = useState<string>(() => {
+    const stored = readStoredString(STORAGE_KEY_UI_THEME_LIGHT);
+    return stored && isValidUiThemeId('light', stored) ? stored : DEFAULT_LIGHT_UI_THEME;
+  });
+  const [darkUiThemeId, setDarkUiThemeId] = useState<string>(() => {
+    const stored = readStoredString(STORAGE_KEY_UI_THEME_DARK);
+    return stored && isValidUiThemeId('dark', stored) ? stored : DEFAULT_DARK_UI_THEME;
   });
   const [syncConfig, setSyncConfig] = useState<SyncConfig | null>(() => localStorageAdapter.read<SyncConfig>(STORAGE_KEY_SYNC));
   const [terminalThemeId, setTerminalThemeId] = useState<string>(() => localStorageAdapter.readString(STORAGE_KEY_TERM_THEME) || DEFAULT_TERMINAL_THEME);
@@ -115,13 +134,16 @@ export const useSettingsState = () => {
   }, []);
 
   useLayoutEffect(() => {
-    applyThemeTokens(theme, primaryColor);
+    const tokens = getUiThemeById(theme, theme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
+    applyThemeTokens(theme, tokens);
     localStorageAdapter.writeString(STORAGE_KEY_THEME, theme);
-    localStorageAdapter.writeString(STORAGE_KEY_COLOR, primaryColor);
+    localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId);
+    localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId);
     // Notify other windows
     notifySettingsChanged(STORAGE_KEY_THEME, theme);
-    notifySettingsChanged(STORAGE_KEY_COLOR, primaryColor);
-  }, [theme, primaryColor, notifySettingsChanged]);
+    notifySettingsChanged(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId);
+    notifySettingsChanged(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId);
+  }, [theme, lightUiThemeId, darkUiThemeId, notifySettingsChanged]);
 
   useLayoutEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, uiLanguage);
@@ -136,18 +158,28 @@ export const useSettingsState = () => {
 	    if (!bridge?.onSettingsChanged) return;
 	    const unsubscribe = bridge.onSettingsChanged((payload) => {
 	      const { key, value } = payload;
-	      if (key === STORAGE_KEY_THEME && (value === 'light' || value === 'dark')) {
-	        setTheme(value);
-	        applyThemeTokens(value, primaryColor);
-	      }
-	      if (key === STORAGE_KEY_COLOR && typeof value === 'string' && isValidHslToken(value)) {
-	        const next = value.trim();
-	        setPrimaryColor(next);
-	        applyThemeTokens(theme, next);
-	      }
-	      if (key === STORAGE_KEY_UI_LANGUAGE && typeof value === 'string') {
-	        const next = resolveSupportedLocale(value);
-	        setUiLanguage((prev) => (prev === next ? prev : next));
+      if (key === STORAGE_KEY_THEME && (value === 'light' || value === 'dark')) {
+        setTheme(value);
+        const tokens = getUiThemeById(value, value === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
+        applyThemeTokens(value, tokens);
+      }
+      if (key === STORAGE_KEY_UI_THEME_LIGHT && typeof value === 'string' && isValidUiThemeId('light', value)) {
+        setLightUiThemeId(value);
+        if (theme === 'light') {
+          const tokens = getUiThemeById('light', value).tokens;
+          applyThemeTokens('light', tokens);
+        }
+      }
+      if (key === STORAGE_KEY_UI_THEME_DARK && typeof value === 'string' && isValidUiThemeId('dark', value)) {
+        setDarkUiThemeId(value);
+        if (theme === 'dark') {
+          const tokens = getUiThemeById('dark', value).tokens;
+          applyThemeTokens('dark', tokens);
+        }
+      }
+      if (key === STORAGE_KEY_UI_LANGUAGE && typeof value === 'string') {
+        const next = resolveSupportedLocale(value);
+        setUiLanguage((prev) => (prev === next ? prev : next));
 	        document.documentElement.lang = next;
 	      }
       if (key === STORAGE_KEY_TERM_THEME && typeof value === 'string') {
@@ -184,7 +216,7 @@ export const useSettingsState = () => {
         // ignore
       }
     };
-  }, [theme, primaryColor]);
+  }, [theme, lightUiThemeId, darkUiThemeId]);
 
   useEffect(() => {
     const bridge = netcattyBridge.get();
@@ -211,9 +243,14 @@ export const useSettingsState = () => {
           setTheme(e.newValue);
         }
       }
-      if (e.key === STORAGE_KEY_COLOR && e.newValue) {
-        if (isValidHslToken(e.newValue) && e.newValue !== primaryColor) {
-          setPrimaryColor(e.newValue.trim());
+      if (e.key === STORAGE_KEY_UI_THEME_LIGHT && e.newValue) {
+        if (isValidUiThemeId('light', e.newValue) && e.newValue !== lightUiThemeId) {
+          setLightUiThemeId(e.newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_UI_THEME_DARK && e.newValue) {
+        if (isValidUiThemeId('dark', e.newValue) && e.newValue !== darkUiThemeId) {
+          setDarkUiThemeId(e.newValue);
         }
       }
       if (e.key === STORAGE_KEY_CUSTOM_CSS && e.newValue !== null) {
@@ -273,7 +310,7 @@ export const useSettingsState = () => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [theme, primaryColor, customCSS, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize]);
+  }, [theme, lightUiThemeId, darkUiThemeId, customCSS, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize]);
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
@@ -395,8 +432,10 @@ export const useSettingsState = () => {
   return {
     theme,
     setTheme,
-    primaryColor,
-    setPrimaryColor,
+    lightUiThemeId,
+    setLightUiThemeId,
+    darkUiThemeId,
+    setDarkUiThemeId,
     syncConfig,
     updateSyncConfig,
     uiLanguage,

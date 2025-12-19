@@ -325,6 +325,9 @@ const api = {
   setTheme: async (theme) => {
     return ipcRenderer.invoke("netcatty:setTheme", theme);
   },
+  setBackgroundColor: async (color) => {
+    return ipcRenderer.invoke("netcatty:setBackgroundColor", color);
+  },
   setLanguage: async (language) => {
     return ipcRenderer.invoke("netcatty:setLanguage", language);
   },

@@ -64,8 +64,10 @@ const zhCN: Messages = {
   'settings.appearance.uiTheme': '界面主题',
   'settings.appearance.darkMode': '深色模式',
   'settings.appearance.darkMode.desc': '在浅色与深色主题之间切换',
-  'settings.appearance.accentColor': '强调色',
-  'settings.appearance.customColor': '自定义颜色',
+  'settings.appearance.themeColor': '主题色',
+  'settings.appearance.themeColor.desc': '为浅色与深色主题选择预设配色',
+  'settings.appearance.themeColor.light': '浅色主题',
+  'settings.appearance.themeColor.dark': '深色主题',
   'settings.appearance.customCss': '自定义 CSS',
   'settings.appearance.customCss.desc': '使用自定义 CSS 个性化界面，修改会立即生效。',
   'settings.appearance.customCss.placeholder':

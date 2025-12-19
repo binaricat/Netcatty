@@ -153,19 +153,12 @@
     (function () {
       try {
         var theme = localStorage.getItem('netcatty_theme_v1');
-        var color = localStorage.getItem('netcatty_color_v1');
         var lang = localStorage.getItem('netcatty_ui_language_v1');
         var root = document.documentElement;
 
         if (theme === 'dark' || theme === 'light') {
           root.classList.remove('light', 'dark');
           root.classList.add(theme);
-        }
-
-        if (color) {
-          root.style.setProperty('--primary', color);
-          root.style.setProperty('--accent', color);
-          root.style.setProperty('--ring', color);
         }
 
         if (lang) root.lang = lang;

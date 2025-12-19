@@ -95,8 +95,10 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                     <SettingsAppearanceTab
                         theme={settings.theme}
                         setTheme={settings.setTheme}
-                        primaryColor={settings.primaryColor}
-                        setPrimaryColor={settings.setPrimaryColor}
+                        lightUiThemeId={settings.lightUiThemeId}
+                        setLightUiThemeId={settings.setLightUiThemeId}
+                        darkUiThemeId={settings.darkUiThemeId}
+                        setDarkUiThemeId={settings.setDarkUiThemeId}
                         uiLanguage={settings.uiLanguage}
                         setUiLanguage={settings.setUiLanguage}
                         customCSS={settings.customCSS}

@@ -76,8 +76,10 @@ const en: Messages = {
   'settings.appearance.uiTheme': 'UI Theme',
   'settings.appearance.darkMode': 'Dark Mode',
   'settings.appearance.darkMode.desc': 'Toggle between light and dark theme',
-  'settings.appearance.accentColor': 'Accent Color',
-  'settings.appearance.customColor': 'Custom color',
+  'settings.appearance.themeColor': 'Theme Color',
+  'settings.appearance.themeColor.desc': 'Pick a preset palette for each theme',
+  'settings.appearance.themeColor.light': 'Light palette',
+  'settings.appearance.themeColor.dark': 'Dark palette',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
     'Add custom CSS to personalize the app appearance. Changes apply immediately.',

@@ -161,6 +161,21 @@ function hslToHex(h, s, l) {
   return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`;
 }
 
+function normalizeBackgroundColor(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (raw.startsWith("#")) return raw;
+
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const h = Number(parts[0]);
+  const s = Number(String(parts[1]).replace("%", ""));
+  const l = Number(String(parts[2]).replace("%", ""));
+  if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(l)) return null;
+  return hslToHex(h, s, l);
+}
+
 function parseBackgroundFromIndexHtml(indexHtml, theme) {
   if (!indexHtml) return null;
 
@@ -531,6 +546,18 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     // Also update settings window if open
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.setBackgroundColor(themeConfig.background);
+    }
+    return true;
+  });
+
+  ipcMain.handle("netcatty:setBackgroundColor", (_event, color) => {
+    const normalized = normalizeBackgroundColor(color);
+    if (!normalized) return false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setBackgroundColor(normalized);
+    }
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.setBackgroundColor(normalized);
     }
     return true;
   });

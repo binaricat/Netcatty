@@ -221,6 +221,7 @@ interface NetcattyBridge {
   getSystemInfo?(): Promise<{ username: string; hostname: string }>;
   
   setTheme?(theme: 'light' | 'dark'): Promise<boolean>;
+  setBackgroundColor?(color: string): Promise<boolean>;
   setLanguage?(language: string): Promise<boolean>;
   // Window controls for custom title bar (Windows/Linux)
   windowMinimize?(): Promise<void>;
