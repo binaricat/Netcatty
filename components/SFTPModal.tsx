@@ -200,7 +200,7 @@ const getFileIcon = (fileName: string, isDirectory: boolean) => {
 
   // Default
   return <File size={18} className={iconClass} />;
-  };
+};
 
 // Format bytes with appropriate unit (B, KB, MB, GB)
 const formatBytes = (bytes: number | string): string => {
