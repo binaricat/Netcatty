@@ -240,7 +240,7 @@ async function waitForRootPaint(win, { timeoutMs = 400, intervalMs = 30 } = {}) 
   return false;
 }
 
-function setupDeferredShow(win, { timeoutMs = 3000 } = {}) {
+function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true } = {}) {
   const webContentsId = (() => {
     try {
       return win?.webContents?.id;
@@ -269,7 +269,9 @@ function setupDeferredShow(win, { timeoutMs = 3000 } = {}) {
 
   const tryShow = () => {
     if (shown) return;
-    if (readyToShow && rendererReady) showOnce();
+    if (!readyToShow) return;
+    if (waitForRendererReady && !rendererReady) return;
+    showOnce();
   };
 
   const markRendererReady = () => {
@@ -398,10 +400,10 @@ async function openSettingsWindow(electronModule, options) {
   const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
 
   const win = new BrowserWindow({
-    width: 800,
-    height: 650,
-    minWidth: 700,
-    minHeight: 500,
+    width: 980,
+    height: 720,
+    minWidth: 820,
+    minHeight: 600,
     backgroundColor,
     icon: appIcon,
     // NOTE: Do NOT set parent on Windows - it can cause the main window to close
@@ -438,7 +440,7 @@ async function openSettingsWindow(electronModule, options) {
   }
 
   // Defer show until renderer is ready; use fallback timeout to avoid keeping window hidden forever.
-  setupDeferredShow(win, { timeoutMs: isDev ? 3000 : 1500 });
+  setupDeferredShow(win, { timeoutMs: isDev ? 1200 : 600, waitForRendererReady: false });
 
   // Clean up reference when closed
   win.on('closed', () => {
