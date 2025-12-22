@@ -562,29 +562,33 @@ export class CloudSyncManager {
     this.adapters.set(provider, adapter);
 
     this.updateProviderStatus(provider, 'connecting');
-
-    if (provider === 'github') {
-      // GitHub uses Device Flow
-      const ghAdapter = adapter as GitHubAdapter;
-      const deviceFlow = await ghAdapter.startAuth();
-      
-      return {
-        type: 'device_code',
-        data: deviceFlow,
-      };
-    } else {
-      // Google and OneDrive use PKCE with redirect
-      const redirectUri = 'http://127.0.0.1:45678/oauth/callback';
-      
-      if (provider === 'google') {
-        const gdAdapter = adapter as GoogleDriveAdapter;
-        const url = await gdAdapter.startAuth(redirectUri);
-        return { type: 'url', data: { url, redirectUri } };
+    try {
+      if (provider === 'github') {
+        // GitHub uses Device Flow
+        const ghAdapter = adapter as GitHubAdapter;
+        const deviceFlow = await ghAdapter.startAuth();
+        
+        return {
+          type: 'device_code',
+          data: deviceFlow,
+        };
       } else {
-        const odAdapter = adapter as OneDriveAdapter;
-        const url = await odAdapter.startAuth(redirectUri);
-        return { type: 'url', data: { url, redirectUri } };
+        // Google and OneDrive use PKCE with redirect
+        const redirectUri = 'http://127.0.0.1:45678/oauth/callback';
+        
+        if (provider === 'google') {
+          const gdAdapter = adapter as GoogleDriveAdapter;
+          const url = await gdAdapter.startAuth(redirectUri);
+          return { type: 'url', data: { url, redirectUri } };
+        } else {
+          const odAdapter = adapter as OneDriveAdapter;
+          const url = await odAdapter.startAuth(redirectUri);
+          return { type: 'url', data: { url, redirectUri } };
+        }
       }
+    } catch (error) {
+      this.updateProviderStatus(provider, 'error', String(error));
+      throw error;
     }
   }
 
