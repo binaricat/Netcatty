@@ -558,14 +558,15 @@ async function openSettingsWindow(electronModule, options) {
     minHeight: 600,
     backgroundColor,
     icon: appIcon,
+    fullscreenable: !isMac,
     // NOTE: Do NOT set parent on Windows - it can cause the main window to close
     // when the settings window is closed in some edge cases.
     parent: isMac ? mainWindow : undefined,
     modal: false,
     show: false,
-    frame: false,
+    frame: isMac,
     titleBarStyle: isMac ? "hiddenInset" : undefined,
-    trafficLightPosition: isMac ? { x: 16, y: 18 } : undefined,
+    trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
     webPreferences: {
       preload,
       contextIsolation: true,
@@ -575,6 +576,14 @@ async function openSettingsWindow(electronModule, options) {
   });
 
   settingsWindow = win;
+
+  if (isMac) {
+    try {
+      win.setWindowButtonVisibility(true);
+    } catch {
+      // ignore
+    }
+  }
 
   win.on("enter-full-screen", () => {
     win.webContents?.send("netcatty:window:fullscreen-changed", true);
