@@ -38,10 +38,13 @@ jobs:
         if: matrix.os == 'macos-latest'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          ELECTRON_BUILDER_PUBLISH: "never"
         run: npm run pack:mac
 
       - name: Build package (Windows)
         if: matrix.os == 'windows-latest'
+        env:
+          ELECTRON_BUILDER_PUBLISH: "never"
         run: npm run pack:win
 
       - name: Upload artifacts
