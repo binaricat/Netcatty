@@ -3,7 +3,6 @@
   "appId": "com.netcatty.app",
   "productName": "Netcatty",
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
-  "publish": "never",
   "icon": "public/icon.png",
   "directories": {
     "buildResources": "build",
