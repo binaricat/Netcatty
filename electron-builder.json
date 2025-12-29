@@ -23,12 +23,16 @@
   "mac": {
     "target": [
       {
-        "target": "pkg",
+        "target": "dmg",
+        "arch": ["arm64"]
+      },
+      {
+        "target": "zip",
         "arch": ["arm64"]
       }
     ],
     "category": "public.app-category.developer-tools",
-    "hardenedRuntime": true,
+    "hardenedRuntime": false,
     "gatekeeperAssess": false,
     "entitlements": "electron/entitlements.mac.plist",
     "entitlementsInherit": "electron/entitlements.mac.plist",

@@ -36,6 +36,8 @@ jobs:
 
       - name: Build package (macOS)
         if: matrix.os == 'macos-latest'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm run pack:mac
 
       - name: Build package (Windows)
