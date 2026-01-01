@@ -93,7 +93,17 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: |
+            artifacts/*.dmg
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/*.msi
+            artifacts/*.AppImage
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.tar.gz
+            artifacts/*.blockmap
+            artifacts/latest*.yml
           generate_release_notes: true
           fail_on_unmatched_files: false
           token: ${{ secrets.RELEASE_TOKEN }}
