@@ -32,6 +32,14 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting version to ${VERSION}"
+          npm pkg set version="${VERSION}"
+
       - name: Build package (macOS)
         if: matrix.os == 'macos-latest'
         env:
