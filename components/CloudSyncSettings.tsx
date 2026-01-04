@@ -20,6 +20,7 @@ import {
     Eye,
     EyeOff,
     Github,
+    HardDrive,
     Key,
     Loader2,
     RefreshCw,
@@ -32,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
 import { useI18n } from '../application/i18n/I18nProvider';
-import type { CloudProvider, ConflictInfo, SyncPayload, WebDAVAuthType, WebDAVConfig, S3Config } from '../domain/sync';
+import type { CloudProvider, ConflictInfo, SyncPayload, WebDAVAuthType, WebDAVConfig, S3Config, SMBConfig } from '../domain/sync';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -748,6 +749,18 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
     const [s3ErrorDetail, setS3ErrorDetail] = useState<string | null>(null);
     const [isSavingS3, setIsSavingS3] = useState(false);
 
+    // SMB dialog state
+    const [showSmbDialog, setShowSmbDialog] = useState(false);
+    const [smbShare, setSmbShare] = useState('');
+    const [smbUsername, setSmbUsername] = useState('');
+    const [smbPassword, setSmbPassword] = useState('');
+    const [smbDomain, setSmbDomain] = useState('');
+    const [smbPort, setSmbPort] = useState('');
+    const [showSmbSecret, setShowSmbSecret] = useState(false);
+    const [smbError, setSmbError] = useState<string | null>(null);
+    const [smbErrorDetail, setSmbErrorDetail] = useState<string | null>(null);
+    const [isSavingSmb, setIsSavingSmb] = useState(false);
+
     // Clear local data dialog
     const [showClearLocalDialog, setShowClearLocalDialog] = useState(false);
 
@@ -862,6 +875,19 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
         setShowS3Dialog(true);
     };
 
+    const openSmbDialog = () => {
+        const config = sync.providers.smb.config as SMBConfig | undefined;
+        setSmbShare(config?.share || '');
+        setSmbUsername(config?.username || '');
+        setSmbPassword(config?.password || '');
+        setSmbDomain(config?.domain || '');
+        setSmbPort(config?.port?.toString() || '');
+        setShowSmbSecret(false);
+        setSmbError(null);
+        setSmbErrorDetail(null);
+        setShowSmbDialog(true);
+    };
+
     const handleSaveWebdav = async () => {
         const endpoint = normalizeEndpoint(webdavEndpoint);
         if (!endpoint) {
@@ -951,6 +977,56 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
             toast.error(message, t('cloudSync.connect.s3.failedTitle'));
         } finally {
             setIsSavingS3(false);
+        }
+    };
+
+    const handleSaveSmb = async () => {
+        if (!smbShare.trim()) {
+            setSmbError(t('cloudSync.smb.validation.share'));
+            setSmbErrorDetail(null);
+            return;
+        }
+
+        // Validate port if provided
+        let parsedPort: number | undefined;
+        if (smbPort.trim()) {
+            const portNum = parseInt(smbPort.trim(), 10);
+            if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                setSmbError(t('cloudSync.smb.validation.port'));
+                setSmbErrorDetail(null);
+                return;
+            }
+            parsedPort = portNum;
+        }
+
+        const config: SMBConfig = {
+            share: smbShare.trim(),
+            username: smbUsername.trim() || undefined,
+            password: smbPassword || undefined,
+            domain: smbDomain.trim() || undefined,
+            port: parsedPort,
+        };
+
+        setIsSavingSmb(true);
+        setSmbError(null);
+        setSmbErrorDetail(null);
+        try {
+            await disconnectOtherProviders('smb');
+            await sync.connectSMB(config);
+            toast.success(t('cloudSync.connect.smb.success'));
+            setShowSmbDialog(false);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : t('common.unknownError');
+            setSmbError(message);
+            setSmbErrorDetail(
+                buildErrorDetails(error, {
+                    share: smbShare.trim(),
+                    domain: smbDomain.trim() || null,
+                }),
+            );
+            toast.error(message, t('cloudSync.connect.smb.failedTitle'));
+        } finally {
+            setIsSavingSmb(false);
         }
     };
 
@@ -1121,6 +1197,23 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         onConnect={openS3Dialog}
                         onDisconnect={() => sync.disconnectProvider('s3')}
                         onSync={() => handleSync('s3')}
+                    />
+
+                    <ProviderCard
+                        provider="smb"
+                        name={t('cloudSync.provider.smb')}
+                        icon={<HardDrive size={24} />}
+                    isConnected={sync.providers.smb.status === 'connected' || sync.providers.smb.status === 'syncing'}
+                    isSyncing={sync.providers.smb.status === 'syncing'}
+                    isConnecting={sync.providers.smb.status === 'connecting'}
+                    account={sync.providers.smb.account}
+                    lastSync={sync.providers.smb.lastSync}
+                    error={sync.providers.smb.error}
+                    disabled={sync.hasAnyConnectedProvider && sync.providers.smb.status !== 'connected' && sync.providers.smb.status !== 'syncing'}
+                        onEdit={openSmbDialog}
+                        onConnect={openSmbDialog}
+                        onDisconnect={() => sync.disconnectProvider('smb')}
+                        onSync={() => handleSync('smb')}
                     />
                 </TabsContent>
 
@@ -1470,6 +1563,101 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             className="gap-2"
                         >
                             {isSavingS3 ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
+                            {t('common.save')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={showSmbDialog} onOpenChange={setShowSmbDialog}>
+                <DialogContent className="sm:max-w-[460px] max-h-[80vh] overflow-y-auto z-[70]">
+                    <DialogHeader>
+                        <DialogTitle>{t('cloudSync.smb.title')}</DialogTitle>
+                        <DialogDescription>{t('cloudSync.smb.desc')}</DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>{t('cloudSync.smb.share')}</Label>
+                            <Input
+                                value={smbShare}
+                                onChange={(e) => setSmbShare(e.target.value)}
+                                placeholder="//server/share or smb://server/share"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>{t('cloudSync.smb.username')}</Label>
+                            <Input
+                                value={smbUsername}
+                                onChange={(e) => setSmbUsername(e.target.value)}
+                                autoComplete="username"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>{t('cloudSync.smb.password')}</Label>
+                            <Input
+                                type={showSmbSecret ? 'text' : 'password'}
+                                value={smbPassword}
+                                onChange={(e) => setSmbPassword(e.target.value)}
+                                autoComplete="current-password"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>{t('cloudSync.smb.domain')}</Label>
+                            <Input
+                                value={smbDomain}
+                                onChange={(e) => setSmbDomain(e.target.value)}
+                                placeholder={t('cloudSync.smb.domainPlaceholder')}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>{t('cloudSync.smb.port')}</Label>
+                            <Input
+                                type="number"
+                                value={smbPort}
+                                onChange={(e) => setSmbPort(e.target.value)}
+                                placeholder="445"
+                            />
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
+                            <input
+                                type="checkbox"
+                                checked={showSmbSecret}
+                                onChange={(e) => setShowSmbSecret(e.target.checked)}
+                                className="accent-primary"
+                            />
+                            {t('cloudSync.smb.showSecret')}
+                        </label>
+
+                        {smbError && (
+                            <p className="text-sm text-red-500">{smbError}</p>
+                        )}
+                        {smbErrorDetail && (
+                            <pre className="text-xs text-red-400 whitespace-pre-wrap rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                                {smbErrorDetail}
+                            </pre>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setShowSmbDialog(false)}
+                            disabled={isSavingSmb}
+                        >
+                            {t('common.cancel')}
+                        </Button>
+                        <Button
+                            onClick={handleSaveSmb}
+                            disabled={isSavingSmb}
+                            className="gap-2"
+                        >
+                            {isSavingSmb ? <Loader2 size={16} className="animate-spin" /> : <HardDrive size={16} />}
                             {t('common.save')}
                         </Button>
                     </DialogFooter>
