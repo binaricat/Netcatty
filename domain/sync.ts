@@ -42,7 +42,7 @@ export type ConflictResolution =
 /**
  * Supported cloud storage providers
  */
-export type CloudProvider = 'github' | 'google' | 'onedrive' | 'webdav' | 's3';
+export type CloudProvider = 'github' | 'google' | 'onedrive' | 'webdav' | 's3' | 'smb';
 
 export type WebDAVAuthType = 'basic' | 'digest' | 'token';
 
@@ -63,6 +63,14 @@ export interface S3Config {
   sessionToken?: string;
   prefix?: string;
   forcePathStyle?: boolean;
+}
+
+export interface SMBConfig {
+  share: string;           // SMB share path (e.g., //server/share or smb://server/share)
+  username?: string;
+  password?: string;
+  domain?: string;         // Windows domain (optional)
+  port?: number;           // SMB port (default: 445)
 }
 
 /**
@@ -104,7 +112,7 @@ export interface ProviderConnection {
   status: ProviderConnectionStatus;
   account?: ProviderAccount;
   tokens?: OAuthTokens;
-  config?: WebDAVConfig | S3Config;
+  config?: WebDAVConfig | S3Config | SMBConfig;
   lastSync?: number;        // Unix timestamp
   lastSyncVersion?: number;
   resourceId?: string;      // gistId / fileId / itemId
@@ -373,6 +381,7 @@ export const SYNC_STORAGE_KEYS = {
   PROVIDER_ONEDRIVE: 'netcatty_provider_onedrive_v1',
   PROVIDER_WEBDAV: 'netcatty_provider_webdav_v1',
   PROVIDER_S3: 'netcatty_provider_s3_v1',
+  PROVIDER_SMB: 'netcatty_provider_smb_v1',
   LOCAL_SYNC_META: 'netcatty_local_sync_meta_v1',
 } as const;
 

@@ -19,6 +19,7 @@ import {
   type SyncHistoryEntry,
   type WebDAVConfig,
   type S3Config,
+  type SMBConfig,
   formatLastSync,
   getSyncDotColor,
 } from '../../domain/sync';
@@ -76,6 +77,7 @@ export interface CloudSyncHook {
   connectOneDrive: () => Promise<string>;
   connectWebDAV: (config: WebDAVConfig) => Promise<void>;
   connectS3: (config: S3Config) => Promise<void>;
+  connectSMB: (config: SMBConfig) => Promise<void>;
   completePKCEAuth: (
     provider: 'google' | 'onedrive',
     code: string,
@@ -351,6 +353,10 @@ export const useCloudSync = (): CloudSyncHook => {
   const connectS3 = useCallback(async (config: S3Config): Promise<void> => {
     await manager.connectConfigProvider('s3', config);
   }, []);
+
+  const connectSMB = useCallback(async (config: SMBConfig): Promise<void> => {
+    await manager.connectConfigProvider('smb', config);
+  }, []);
   
   // ========== Settings ==========
   
@@ -448,6 +454,7 @@ export const useCloudSync = (): CloudSyncHook => {
     connectOneDrive,
     connectWebDAV,
     connectS3,
+    connectSMB,
     completePKCEAuth,
     disconnectProvider,
     
