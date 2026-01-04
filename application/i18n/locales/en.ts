@@ -356,6 +356,9 @@ const en: Messages = {
   'pf.view.list': 'List',
   'pf.rule.summary.dynamic': 'SOCKS on {bindAddress}:{localPort}',
   'pf.rule.summary.default': '{bindAddress}:{localPort} -> {remoteHost}:{remotePort}',
+  'pf.deleteActive.title': 'Delete Active Port Forwarding?',
+  'pf.deleteActive.desc': 'This port forwarding rule "{label}" is currently active. Deleting it will stop the tunnel first.',
+  'pf.deleteActive.confirm': 'Stop and Delete',
 
   // SFTP
   'sftp.newFolder': 'New Folder',

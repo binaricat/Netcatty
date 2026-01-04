@@ -649,6 +649,9 @@ const zhCN: Messages = {
   'pf.view.list': '列表',
   'pf.rule.summary.dynamic': 'SOCKS 监听于 {bindAddress}:{localPort}',
   'pf.rule.summary.default': '{bindAddress}:{localPort} -> {remoteHost}:{remotePort}',
+  'pf.deleteActive.title': '删除正在运行的端口转发？',
+  'pf.deleteActive.desc': '端口转发规则 "{label}" 当前正在运行。删除前将先关闭转发连接。',
+  'pf.deleteActive.confirm': '关闭并删除',
 
   // SFTP (pane + conflict)
   'sftp.pane.local': '本地',
