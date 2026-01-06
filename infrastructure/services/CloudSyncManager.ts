@@ -1031,7 +1031,12 @@ export class CloudSyncManager {
       this.notifyStateChange(); // Notify UI of conflict resolution
       return payload;
     } else {
-      // USE_LOCAL - just clear conflict, caller will re-sync
+      // USE_LOCAL - update localUpdatedAt to prevent immediate re-conflict on sync.
+      // This is necessary when localUpdatedAt was 0 (fresh install) or stale; setting
+      // it to now ensures the subsequent upload won't immediately trigger a conflict.
+      this.state.localUpdatedAt = Date.now();
+      this.saveSyncConfig();
+      // Clear conflict state after updating localUpdatedAt
       this.state.currentConflict = null;
       this.state.syncState = 'IDLE';
       this.notifyStateChange(); // Notify UI of conflict resolution
