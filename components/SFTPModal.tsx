@@ -389,7 +389,13 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
 
   // Handle initial entries to upload (from drag-and-drop to terminal)
   const initialUploadTriggeredRef = useRef(false);
+  const prevLoadingRef = useRef(loading);
   useEffect(() => {
+    // Detect when loading transitions from true to false (initial load complete)
+    const wasLoading = prevLoadingRef.current;
+    prevLoadingRef.current = loading;
+    const justFinishedLoading = wasLoading && !loading;
+
     // Reset the flag when initialEntriesToUpload changes
     if (!initialEntriesToUpload || initialEntriesToUpload.length === 0) {
       initialUploadTriggeredRef.current = false;
@@ -399,14 +405,16 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     // Prevent duplicate uploads
     if (initialUploadTriggeredRef.current) return;
 
-    // Wait for SFTP connection to be established (files loaded and not loading)
-    if (!open || loading || files.length === 0) return;
+    // Wait for SFTP connection to be established
+    // Trigger when: modal is open AND loading just finished (works for empty directories too)
+    if (!open || loading) return;
+    if (!justFinishedLoading) return;
 
     initialUploadTriggeredRef.current = true;
 
     // Trigger upload with full DropEntry data (preserves directory structure)
     handleUploadEntries(initialEntriesToUpload);
-  }, [initialEntriesToUpload, open, loading, files.length, handleUploadEntries]);
+  }, [initialEntriesToUpload, open, loading, handleUploadEntries]);
 
   // Display files with parent entry (like SftpView)
   const displayFiles = useMemo(() => {
