@@ -949,13 +949,35 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (isLocalConnection) {
         // Local terminal: Insert absolute paths
         const paths: string[] = [];
+        const seenPaths = new Set<string>();
+        
         for (const entry of dropEntries) {
           if (entry.file) {
-            const path = getPathForFile(entry.file);
-            if (path) {
-              // Quote paths with spaces
-              const quotedPath = path.includes(' ') ? `"${path}"` : path;
-              paths.push(quotedPath);
+            const fullPath = getPathForFile(entry.file);
+            if (!fullPath) continue;
+            
+            // Check if this is a file inside a dropped folder
+            const pathParts = entry.relativePath.split('/');
+            if (pathParts.length > 1) {
+              // This is a nested file in a folder - extract the folder path
+              const rootFolderName = pathParts[0];
+              // Calculate the folder path by finding where the relative path starts
+              const relativePathInFull = entry.relativePath.replace(/\//g, fullPath.includes('\\') ? '\\' : '/');
+              const folderPath = fullPath.substring(0, fullPath.length - relativePathInFull.length - 1) + 
+                                (fullPath.includes('\\') ? '\\' : '/') + rootFolderName;
+              
+              if (!seenPaths.has(folderPath)) {
+                const quotedPath = folderPath.includes(' ') ? `"${folderPath}"` : folderPath;
+                paths.push(quotedPath);
+                seenPaths.add(folderPath);
+              }
+            } else {
+              // Single file (not in a folder)
+              if (!seenPaths.has(fullPath)) {
+                const quotedPath = fullPath.includes(' ') ? `"${fullPath}"` : fullPath;
+                paths.push(quotedPath);
+                seenPaths.add(fullPath);
+              }
             }
           }
         }
