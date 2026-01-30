@@ -45,6 +45,8 @@ interface SFTPModalProps {
   onClose: () => void;
   /** Initial path to open in SFTP. If not accessible, falls back to home directory. */
   initialPath?: string;
+  /** Initial files to upload when SFTP modal opens. Used for drag-and-drop to terminal. */
+  initialFilesToUpload?: File[];
 }
 
 const SFTPModal: React.FC<SFTPModalProps> = ({
@@ -53,6 +55,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
   open,
   onClose,
   initialPath,
+  initialFilesToUpload,
 }) => {
   const {
     openSftp,
@@ -348,6 +351,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     uploadTasks,
     dragActive,
     handleDownload,
+    handleUploadMultiple,
     handleFileSelect,
     handleFolderSelect,
     handleDrag,
@@ -380,6 +384,31 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     await closeSftpSession();
     onClose();
   };
+
+  // Handle initial files to upload (from drag-and-drop to terminal)
+  useEffect(() => {
+    const uploadInitialFiles = async () => {
+      if (initialFilesToUpload && initialFilesToUpload.length > 0 && open) {
+        // Wait a bit for the SFTP connection to be established
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Trigger upload once modal is open and SFTP connection is established
+        const fileList = {
+          length: initialFilesToUpload.length,
+          item: (index: number) => initialFilesToUpload[index],
+          [Symbol.iterator]: function* () {
+            for (const file of initialFilesToUpload) {
+              yield file;
+            }
+          },
+        } as FileList;
+        
+        handleUploadMultiple(fileList);
+      }
+    };
+    
+    uploadInitialFiles();
+  }, [initialFilesToUpload, open, handleUploadMultiple]);
 
   // Display files with parent entry (like SftpView)
   const displayFiles = useMemo(() => {
