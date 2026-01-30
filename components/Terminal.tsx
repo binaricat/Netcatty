@@ -42,7 +42,7 @@ import { useTerminalSearch } from "./terminal/hooks/useTerminalSearch";
 import { useTerminalContextActions } from "./terminal/hooks/useTerminalContextActions";
 import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useServerStats } from "./terminal/hooks/useServerStats";
-import { extractDropEntries, getPathForFile } from "../lib/sftpFileUtils";
+import { extractDropEntries, getPathForFile, DropEntry } from "../lib/sftpFileUtils";
 
 interface TerminalProps {
   host: Host;
@@ -215,7 +215,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Drag and drop state
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragCounterRef = useRef(0);
-  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
+  const [pendingUploadEntries, setPendingUploadEntries] = useState<DropEntry[]>([]);
 
   const terminalSearch = useTerminalSearch({ searchAddonRef, termRef });
   const {
@@ -999,11 +999,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       } else {
         // Remote terminal: Trigger SFTP upload
-        const files = dropEntries
-          .filter(entry => entry.file !== null)
-          .map(entry => entry.file!);
+        // Filter to only entries with files (not empty directory markers)
+        const uploadEntries = dropEntries.filter(entry => entry.file !== null);
 
-        if (files.length > 0) {
+        if (uploadEntries.length > 0) {
           // Get current working directory for SFTP initial path
           let initialPath: string | undefined = undefined;
           if (sessionRef.current) {
@@ -1017,7 +1016,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             }
           }
 
-          setPendingUploadFiles(files);
+          setPendingUploadEntries(uploadEntries);
           flushSync(() => {
             setSftpInitialPath(initialPath);
           });
@@ -1579,10 +1578,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           open={showSFTP && status === "connected"}
           onClose={() => {
             setShowSFTP(false);
-            setPendingUploadFiles([]);
+            setPendingUploadEntries([]);
           }}
           initialPath={sftpInitialPath}
-          initialFilesToUpload={pendingUploadFiles}
+          initialEntriesToUpload={pendingUploadEntries}
         />
       </div>
     </TerminalContextMenu>
