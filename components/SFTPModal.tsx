@@ -386,29 +386,35 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
   };
 
   // Handle initial files to upload (from drag-and-drop to terminal)
+  const initialUploadTriggeredRef = useRef(false);
   useEffect(() => {
-    const uploadInitialFiles = async () => {
-      if (initialFilesToUpload && initialFilesToUpload.length > 0 && open) {
-        // Wait a bit for the SFTP connection to be established
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Trigger upload once modal is open and SFTP connection is established
-        const fileList = {
-          length: initialFilesToUpload.length,
-          item: (index: number) => initialFilesToUpload[index],
-          [Symbol.iterator]: function* () {
-            for (const file of initialFilesToUpload) {
-              yield file;
-            }
-          },
-        } as FileList;
-        
-        handleUploadMultiple(fileList);
-      }
-    };
-    
-    uploadInitialFiles();
-  }, [initialFilesToUpload, open, handleUploadMultiple]);
+    // Reset the flag when initialFilesToUpload changes
+    if (!initialFilesToUpload || initialFilesToUpload.length === 0) {
+      initialUploadTriggeredRef.current = false;
+      return;
+    }
+
+    // Prevent duplicate uploads
+    if (initialUploadTriggeredRef.current) return;
+
+    // Wait for SFTP connection to be established (files loaded and not loading)
+    if (!open || loading || files.length === 0) return;
+
+    initialUploadTriggeredRef.current = true;
+
+    // Trigger upload once modal is open and SFTP connection is established
+    const fileList = {
+      length: initialFilesToUpload.length,
+      item: (index: number) => initialFilesToUpload[index],
+      [Symbol.iterator]: function* () {
+        for (const file of initialFilesToUpload) {
+          yield file;
+        }
+      },
+    } as FileList;
+
+    handleUploadMultiple(fileList);
+  }, [initialFilesToUpload, open, loading, files.length, handleUploadMultiple]);
 
   // Display files with parent entry (like SftpView)
   const displayFiles = useMemo(() => {

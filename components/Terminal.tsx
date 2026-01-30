@@ -910,7 +910,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.types.includes('Files')) {
-      e.dataTransfer.dropEffect = isLocalConnection ? 'copy' : 'copy';
+      e.dataTransfer.dropEffect = 'copy';
     }
   };
 
@@ -950,26 +950,35 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // Local terminal: Insert absolute paths
         const paths: string[] = [];
         const seenPaths = new Set<string>();
-        
+
         for (const entry of dropEntries) {
           if (entry.file) {
             const fullPath = getPathForFile(entry.file);
             if (!fullPath) continue;
-            
+
             // Check if this is a file inside a dropped folder
             const pathParts = entry.relativePath.split('/');
             if (pathParts.length > 1) {
-              // This is a nested file in a folder - extract the folder path
+              // This is a nested file in a folder - extract the root folder path
               const rootFolderName = pathParts[0];
-              // Calculate the folder path by finding where the relative path starts
-              const relativePathInFull = entry.relativePath.replace(/\//g, fullPath.includes('\\') ? '\\' : '/');
-              const folderPath = fullPath.substring(0, fullPath.length - relativePathInFull.length - 1) + 
-                                (fullPath.includes('\\') ? '\\' : '/') + rootFolderName;
-              
-              if (!seenPaths.has(folderPath)) {
-                const quotedPath = folderPath.includes(' ') ? `"${folderPath}"` : folderPath;
-                paths.push(quotedPath);
-                seenPaths.add(folderPath);
+              // Determine the path separator used in fullPath
+              const separator = fullPath.includes('\\') ? '\\' : '/';
+              // Find the position of the root folder name in the full path
+              const rootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName + separator);
+              const altRootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName);
+              const folderStartIndex = rootFolderIndex !== -1 ? rootFolderIndex + 1 :
+                                       (altRootFolderIndex !== -1 ? altRootFolderIndex + 1 : -1);
+
+              if (folderStartIndex !== -1) {
+                // Extract path up to and including the root folder
+                const folderEndIndex = folderStartIndex + rootFolderName.length;
+                const folderPath = fullPath.substring(0, folderEndIndex);
+
+                if (!seenPaths.has(folderPath)) {
+                  const quotedPath = folderPath.includes(' ') ? `"${folderPath}"` : folderPath;
+                  paths.push(quotedPath);
+                  seenPaths.add(folderPath);
+                }
               }
             } else {
               // Single file (not in a folder)
