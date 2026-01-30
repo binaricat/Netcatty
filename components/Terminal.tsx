@@ -1002,9 +1002,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const files = dropEntries
           .filter(entry => entry.file !== null)
           .map(entry => entry.file!);
-        
+
         if (files.length > 0) {
+          // Get current working directory for SFTP initial path
+          let initialPath: string | undefined = undefined;
+          if (sessionRef.current) {
+            try {
+              const result = await terminalBackend.getSessionPwd(sessionRef.current);
+              if (result.success && result.cwd) {
+                initialPath = result.cwd;
+              }
+            } catch {
+              // Silently fail and open SFTP without initial path
+            }
+          }
+
           setPendingUploadFiles(files);
+          flushSync(() => {
+            setSftpInitialPath(initialPath);
+          });
           setShowSFTP(true);
         }
       }
