@@ -999,10 +999,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       } else {
         // Remote terminal: Trigger SFTP upload
-        // Filter to only entries with files (not empty directory markers)
-        const uploadEntries = dropEntries.filter(entry => entry.file !== null);
-
-        if (uploadEntries.length > 0) {
+        // Pass all entries including directory markers to preserve empty folders
+        if (dropEntries.length > 0) {
           // Get current working directory for SFTP initial path
           let initialPath: string | undefined = undefined;
           if (sessionRef.current) {
@@ -1016,7 +1014,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             }
           }
 
-          setPendingUploadEntries(uploadEntries);
+          setPendingUploadEntries(dropEntries);
           flushSync(() => {
             setSftpInitialPath(initialPath);
           });
