@@ -352,7 +352,6 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     uploadTasks,
     dragActive,
     handleDownload,
-    handleUploadMultiple,
     handleUploadEntries,
     handleFileSelect,
     handleFolderSelect,
