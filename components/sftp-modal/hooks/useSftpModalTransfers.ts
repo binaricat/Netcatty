@@ -13,10 +13,10 @@ import {
 } from "../../../lib/uploadService";
 import { DropEntry } from "../../../lib/sftpFileUtils";
 
-interface UploadTask {
+interface TransferTask {
   id: string;
   fileName: string;
-  status: "pending" | "uploading" | "completed" | "failed" | "cancelled";
+  status: "pending" | "uploading" | "downloading" | "completed" | "failed" | "cancelled";
   progress: number;
   totalBytes: number;
   transferredBytes: number;
@@ -26,7 +26,11 @@ interface UploadTask {
   isDirectory?: boolean;
   fileCount?: number;
   completedCount?: number;
+  direction: "upload" | "download";
 }
+
+// Keep UploadTask as alias for backwards compatibility
+type UploadTask = TransferTask;
 
 interface UseSftpModalTransfersParams {
   currentPath: string;
@@ -86,6 +90,7 @@ interface UseSftpModalTransfersResult {
   handleDrag: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
   cancelUpload: () => Promise<void>;
+  cancelTask: (taskId: string) => Promise<void>;
   dismissTask: (taskId: string) => void;
 }
 
@@ -216,6 +221,7 @@ export const useSftpModalTransfers = ({
           speed: 0,
           startTime: Date.now(),
           isDirectory: true,
+          direction: "upload",
         };
         setUploadTasks(prev => [...prev, scanningTask]);
       },
@@ -233,6 +239,7 @@ export const useSftpModalTransfers = ({
           speed: 0,
           startTime: Date.now(),
           isDirectory: task.isDirectory,
+          direction: "upload",
         };
         setUploadTasks(prev => [...prev, uploadTask]);
       },
@@ -379,45 +386,10 @@ export const useSftpModalTransfers = ({
       try {
         const fullPath = joinPath(currentPath, file.name);
 
-        // For remote SFTP files, use streaming download with save dialog
-        if (!isLocalSession && showSaveDialog && startStreamTransfer) {
-          // Show save dialog to get target path
-          const targetPath = await showSaveDialog(file.name);
-          if (!targetPath) {
-            // User cancelled
-            return;
-          }
-
+        // For local files, use blob download (file is already on local filesystem)
+        if (isLocalSession) {
           setLoading(true);
-          const sftpId = await ensureSftp();
-          const transferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-          await new Promise<void>((resolve, reject) => {
-            startStreamTransfer(
-              {
-                transferId,
-                sourcePath: fullPath,
-                targetPath,
-                sourceType: 'sftp',
-                targetType: 'local',
-                sourceSftpId: sftpId,
-              },
-              undefined, // onProgress - could add progress UI later
-              () => {
-                toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
-                resolve();
-              },
-              (error) => {
-                reject(new Error(error));
-              }
-            );
-          });
-        } else {
-          // Fallback: For local files or when streaming is not available
-          setLoading(true);
-          const content = isLocalSession
-            ? await readLocalFile(fullPath)
-            : await readSftp(await ensureSftp(), fullPath);
+          const content = await readLocalFile(fullPath);
           const blob = new Blob([content], { type: "application/octet-stream" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
@@ -427,6 +399,144 @@ export const useSftpModalTransfers = ({
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
+          return;
+        }
+
+        // For remote SFTP files, use streaming download with save dialog
+        if (!showSaveDialog || !startStreamTransfer) {
+          toast.error(t("sftp.error.downloadFailed"), "SFTP");
+          return;
+        }
+
+        // Show save dialog to get target path
+        const targetPath = await showSaveDialog(file.name);
+        if (!targetPath) {
+          // User cancelled the save dialog
+          return;
+        }
+
+        const sftpId = await ensureSftp();
+        const transferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const fileSize = typeof file.size === 'number' ? file.size : parseInt(file.size, 10) || 0;
+
+        // Create download task for progress display
+        const downloadTask: TransferTask = {
+          id: transferId,
+          fileName: file.name,
+          status: "downloading",
+          progress: 0,
+          totalBytes: fileSize,
+          transferredBytes: 0,
+          speed: 0,
+          startTime: Date.now(),
+          direction: "download",
+        };
+        setUploadTasks(prev => [...prev, downloadTask]);
+
+        // Track if this download was cancelled or error was handled
+        let wasCancelled = false;
+        let errorHandled = false;
+
+        const result = await startStreamTransfer(
+          {
+            transferId,
+            sourcePath: fullPath,
+            targetPath,
+            sourceType: 'sftp',
+            targetType: 'local',
+            sourceSftpId: sftpId,
+            totalBytes: fileSize,
+          },
+          // onProgress
+          (transferred, total, speed) => {
+            setUploadTasks(prev =>
+              prev.map(task =>
+                task.id === transferId
+                  ? {
+                      ...task,
+                      transferredBytes: transferred,
+                      totalBytes: total,
+                      progress: total > 0 ? Math.round((transferred / total) * 100) : 0,
+                      speed,
+                    }
+                  : task
+              )
+            );
+          },
+          // onComplete
+          () => {
+            setUploadTasks(prev =>
+              prev.map(task =>
+                task.id === transferId
+                  ? { ...task, status: "completed" as const, progress: 100 }
+                  : task
+              )
+            );
+            toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+          },
+          // onError
+          (error) => {
+            errorHandled = true;
+            // Check if this is a cancellation error
+            if (error.includes('cancelled') || error.includes('canceled')) {
+              wasCancelled = true;
+              setUploadTasks(prev =>
+                prev.map(task =>
+                  task.id === transferId
+                    ? { ...task, status: "cancelled" as const, speed: 0 }
+                    : task
+                )
+              );
+            } else {
+              setUploadTasks(prev =>
+                prev.map(task =>
+                  task.id === transferId
+                    ? { ...task, status: "failed" as const, error }
+                    : task
+                )
+              );
+              toast.error(error, "SFTP");
+            }
+          }
+        );
+
+        // Check if bridge doesn't support streaming (returns undefined)
+        if (result === undefined) {
+          // Remove the pending task and show error
+          setUploadTasks(prev => prev.filter(task => task.id !== transferId));
+          toast.error(t("sftp.error.downloadFailed"), "SFTP");
+          return;
+        }
+
+        // Handle result - check for cancellation in result.error as well
+        // (backend may set error without calling onError callback)
+        if (result?.error) {
+          const isCancelError = result.error.includes('cancelled') || result.error.includes('canceled');
+          if (isCancelError) {
+            // Mark as cancelled if not already done by onError
+            if (!wasCancelled) {
+              setUploadTasks(prev =>
+                prev.map(task =>
+                  task.id === transferId
+                    ? { ...task, status: "cancelled" as const, speed: 0 }
+                    : task
+                )
+              );
+            }
+            // Don't show error for cancellation
+            return;
+          }
+          // For non-cancel errors, only show toast if onError didn't already handle it
+          if (!errorHandled) {
+            setUploadTasks(prev =>
+              prev.map(task =>
+                task.id === transferId
+                  ? { ...task, status: "failed" as const, error: result.error }
+                  : task
+              )
+            );
+            toast.error(result.error, "SFTP");
+          }
         }
       } catch (e) {
         toast.error(
@@ -437,7 +547,7 @@ export const useSftpModalTransfers = ({
         setLoading(false);
       }
     },
-    [currentPath, ensureSftp, isLocalSession, joinPath, readLocalFile, readSftp, setLoading, showSaveDialog, startStreamTransfer, t],
+    [currentPath, ensureSftp, isLocalSession, joinPath, readLocalFile, setLoading, showSaveDialog, startStreamTransfer, t],
   );
 
 
@@ -647,6 +757,56 @@ export const useSftpModalTransfers = ({
     setUploading(false);
   }, []);
 
+  // Cancel a specific task (works for both uploads and downloads)
+  const cancelTask = useCallback(async (taskId: string) => {
+    // Find the task to determine its type
+    const task = uploadTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    if (task.direction === "download") {
+      // For download tasks, cancel only this specific transfer
+      if (cancelTransfer) {
+        try {
+          await cancelTransfer(taskId);
+        } catch (e) {
+          // Ignore cancellation errors
+        }
+      }
+      // Mark task as cancelled
+      setUploadTasks(prev =>
+        prev.map(t =>
+          t.id === taskId
+            ? { ...t, status: "cancelled" as const, speed: 0 }
+            : t
+        )
+      );
+    } else {
+      // For upload tasks, cancel the entire upload batch
+      // because controller.cancel() cancels all active uploads
+      const controller = uploadControllerRef.current;
+      if (controller) {
+        // Mark all active transfer IDs as cancelled before calling cancel
+        const activeIds = controller.getActiveTransferIds();
+        for (const id of activeIds) {
+          cancelledTransferIdsRef.current.add(id);
+        }
+        await controller.cancel();
+      }
+
+      // Mark ALL uploading/pending tasks as cancelled (not just the clicked one)
+      setUploadTasks(prev =>
+        prev.map(t =>
+          t.status === "uploading" || t.status === "pending"
+            ? { ...t, status: "cancelled" as const, speed: 0 }
+            : t
+        )
+      );
+
+      // Reset uploading state
+      setUploading(false);
+    }
+  }, [uploadTasks, cancelTransfer]);
+
   const dismissTask = useCallback((taskId: string) => {
     setUploadTasks(prev => prev.filter(t => t.id !== taskId));
   }, []);
@@ -664,6 +824,7 @@ export const useSftpModalTransfers = ({
     handleDrag,
     handleDrop,
     cancelUpload,
+    cancelTask,
     dismissTask,
   };
 };

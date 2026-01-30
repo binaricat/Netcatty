@@ -1,31 +1,33 @@
 import React from "react";
-import { Loader2, Upload, X, XCircle } from "lucide-react";
+import { Download, Loader2, Upload, X, XCircle } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 
-interface UploadTask {
+interface TransferTask {
   id: string;
   fileName: string;
   totalBytes: number;
   transferredBytes: number;
   progress: number;
   speed: number;
-  status: "pending" | "uploading" | "completed" | "failed" | "cancelled";
+  status: "pending" | "uploading" | "downloading" | "completed" | "failed" | "cancelled";
   error?: string;
+  direction: "upload" | "download";
 }
 
 interface SftpModalUploadTasksProps {
-  tasks: UploadTask[];
+  tasks: TransferTask[];
   t: (key: string, params?: Record<string, unknown>) => string;
   onCancel?: () => void;
+  onCancelTask?: (taskId: string) => void;
   onDismiss?: (taskId: string) => void;
 }
 
-export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ tasks, t, onCancel, onDismiss }) => {
+export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ tasks, t, onCancel, onCancelTask, onDismiss }) => {
   if (tasks.length === 0) return null;
 
   // Helper function to get localized display name for compressed uploads
-  const getDisplayName = (task: UploadTask) => {
+  const getDisplayName = (task: TransferTask) => {
     // Check for explicit phase marker format: "folderName|phase"
     // This is the format sent by uploadService.ts for compressed uploads
     if (task.fileName.includes('|')) {
@@ -96,14 +98,18 @@ export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ task
               className="px-4 py-2.5 flex items-center gap-3 border-b border-border/30 last:border-b-0"
             >
               <div className="shrink-0">
-                {task.status === "uploading" && (
+                {(task.status === "uploading" || task.status === "downloading") && (
                   <Loader2 size={14} className="animate-spin text-primary" />
                 )}
                 {task.status === "pending" && (
-                  <Upload size={14} className="text-muted-foreground animate-pulse" />
+                  task.direction === "download"
+                    ? <Download size={14} className="text-muted-foreground animate-pulse" />
+                    : <Upload size={14} className="text-muted-foreground animate-pulse" />
                 )}
                 {task.status === "completed" && (
-                  <Upload size={14} className="text-green-500" />
+                  task.direction === "download"
+                    ? <Download size={14} className="text-green-500" />
+                    : <Upload size={14} className="text-green-500" />
                 )}
                 {task.status === "failed" && (
                   <XCircle size={14} className="text-destructive" />
@@ -117,18 +123,18 @@ export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ task
                   <span className="text-xs font-medium truncate">
                     {getDisplayName(task)}
                   </span>
-                  {task.status === "uploading" && task.speed > 0 && (
+                  {(task.status === "uploading" || task.status === "downloading") && task.speed > 0 && (
                     <span className="text-[10px] text-primary font-mono shrink-0">
                       {formatSpeed(task.speed)}
                     </span>
                   )}
-                  {task.status === "uploading" && remainingStr && (
+                  {(task.status === "uploading" || task.status === "downloading") && remainingStr && (
                     <span className="text-[10px] text-muted-foreground shrink-0">
                       {remainingStr}
                     </span>
                   )}
                 </div>
-                {(task.status === "uploading" || task.status === "pending") && (
+                {(task.status === "uploading" || task.status === "downloading" || task.status === "pending") && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
                       <div
@@ -140,30 +146,30 @@ export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ task
                         )}
                         style={{
                           width:
-                            task.status === "uploading"
+                            task.status === "uploading" || task.status === "downloading"
                               ? `${task.progress}%`
                               : undefined,
                         }}
                       />
                     </div>
                     <span className="text-[10px] text-muted-foreground font-mono shrink-0 w-8 text-right">
-                      {task.status === "uploading" ? `${Math.round(task.progress)}%` : "..."}
+                      {task.status === "uploading" || task.status === "downloading" ? `${Math.round(task.progress)}%` : "..."}
                     </span>
                   </div>
                 )}
-                {task.status === "uploading" && task.totalBytes > 0 && (
+                {(task.status === "uploading" || task.status === "downloading") && task.totalBytes > 0 && (
                   <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
                     {formatBytes(task.transferredBytes)} / {formatBytes(task.totalBytes)}
                   </div>
                 )}
                 {task.status === "completed" && (
                   <div className="text-[10px] text-green-600 mt-0.5">
-                    {t("sftp.upload.completed")} - {formatBytes(task.totalBytes)}
+                    {t(task.direction === "download" ? "sftp.download.completed" : "sftp.upload.completed")} - {formatBytes(task.totalBytes)}
                   </div>
                 )}
                 {task.status === "cancelled" && (
                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {t("sftp.upload.cancelled")}
+                    {t(task.direction === "download" ? "sftp.download.cancelled" : "sftp.upload.cancelled")}
                   </div>
                 )}
                 {task.status === "failed" && task.error && (
@@ -178,12 +184,19 @@ export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ task
                     {t("sftp.task.waiting")}
                   </span>
                 )}
-                {(task.status === "uploading" || task.status === "pending") && onCancel && (
+                {(task.status === "uploading" || task.status === "downloading" || task.status === "pending") && (onCancelTask || onCancel) && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 text-destructive hover:text-destructive"
-                    onClick={onCancel}
+                    onClick={() => {
+                      // For download tasks or when onCancelTask is available, use task-specific cancel
+                      if (onCancelTask) {
+                        onCancelTask(task.id);
+                      } else if (onCancel) {
+                        onCancel();
+                      }
+                    }}
                     title={t("sftp.action.cancel")}
                   >
                     <X size={12} />

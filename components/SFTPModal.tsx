@@ -359,6 +359,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     handleDrag,
     handleDrop,
     cancelUpload,
+    cancelTask,
     dismissTask,
   } = useSftpModalTransfers({
     currentPath,
@@ -627,7 +628,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
           formatDate={formatDate}
         />
 
-        <SftpModalUploadTasks tasks={uploadTasks} t={t} onCancel={cancelUpload} onDismiss={dismissTask} />
+        <SftpModalUploadTasks tasks={uploadTasks} t={t} onCancel={cancelUpload} onCancelTask={cancelTask} onDismiss={dismissTask} />
 
         <SftpModalFooter
           t={t}

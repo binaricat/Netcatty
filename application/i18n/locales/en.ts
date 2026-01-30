@@ -647,6 +647,10 @@ const en: Messages = {
   'sftp.upload.cancelled': 'Upload cancelled',
   'sftp.upload.cancel': 'Cancel',
 
+  // SFTP Download
+  'sftp.download.completed': 'Downloaded',
+  'sftp.download.cancelled': 'Download cancelled',
+
   // SFTP Reconnecting
   'sftp.reconnecting.title': 'Reconnecting...',
   'sftp.reconnecting.desc': 'Connection lost, attempting to reconnect',

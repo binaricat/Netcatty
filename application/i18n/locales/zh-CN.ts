@@ -913,6 +913,10 @@ const zhCN: Messages = {
   'sftp.upload.cancelled': '上传已取消',
   'sftp.upload.cancel': '取消',
 
+  // SFTP Download
+  'sftp.download.completed': '已下载',
+  'sftp.download.cancelled': '下载已取消',
+
   // SFTP Reconnecting
   'sftp.reconnecting.title': '正在重连...',
   'sftp.reconnecting.desc': '连接已断开，正在尝试重新连接',
