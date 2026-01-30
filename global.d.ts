@@ -536,6 +536,9 @@ declare global {
     openWithApplication?(filePath: string, appPath: string): Promise<boolean>;
     downloadSftpToTemp?(sftpId: string, remotePath: string, fileName: string, encoding?: SftpFilenameEncoding): Promise<string>;
 
+    // Save dialog for file downloads
+    showSaveDialog?(defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null>;
+
     // File watcher for auto-sync feature
     startFileWatch?(localPath: string, remotePath: string, sftpId: string, encoding?: SftpFilenameEncoding): Promise<{ watchId: string }>;
     stopFileWatch?(watchId: string, cleanupTempFile?: boolean): Promise<{ success: boolean }>;

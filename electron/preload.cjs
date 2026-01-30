@@ -705,7 +705,11 @@ const api = {
     ipcRenderer.invoke("netcatty:openWithApplication", { filePath, appPath }),
   downloadSftpToTemp: (sftpId, remotePath, fileName, encoding) =>
     ipcRenderer.invoke("netcatty:sftp:downloadToTemp", { sftpId, remotePath, fileName, encoding }),
-  
+
+  // Save dialog for file downloads
+  showSaveDialog: (defaultPath, filters) =>
+    ipcRenderer.invoke("netcatty:showSaveDialog", { defaultPath, filters }),
+
   // File watcher for auto-sync feature
   startFileWatch: (localPath, remotePath, sftpId, encoding) =>
     ipcRenderer.invoke("netcatty:filewatch:start", { localPath, remotePath, sftpId, encoding }),

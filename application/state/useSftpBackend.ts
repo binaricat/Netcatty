@@ -188,6 +188,15 @@ export const useSftpBackend = () => {
     return bridge.selectApplication();
   }, []);
 
+  const showSaveDialog = useCallback(async (
+    defaultPath: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.showSaveDialog) return null;
+    return bridge.showSaveDialog(defaultPath, filters);
+  }, []);
+
   const downloadSftpToTempAndOpen = useCallback(async (
     sftpId: string,
     remotePath: string,
@@ -268,6 +277,7 @@ export const useSftpBackend = () => {
     cancelSftpUpload,
     onTransferProgress,
     selectApplication,
+    showSaveDialog,
     downloadSftpToTempAndOpen,
   };
 };

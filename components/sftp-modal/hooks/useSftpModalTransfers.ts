@@ -67,6 +67,7 @@ interface UseSftpModalTransfersParams {
     onError?: (error: string) => void
   ) => Promise<{ transferId: string; totalBytes?: number; error?: string }>;
   cancelTransfer?: (transferId: string) => Promise<void>;
+  showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   setLoading: (loading: boolean) => void;
   t: (key: string, params?: Record<string, unknown>) => string;
   useCompressedUpload?: boolean; // Enable compressed folder uploads
@@ -104,6 +105,7 @@ export const useSftpModalTransfers = ({
   cancelSftpUpload,
   startStreamTransfer,
   cancelTransfer,
+  showSaveDialog,
   setLoading,
   t,
   useCompressedUpload = false,
@@ -376,19 +378,56 @@ export const useSftpModalTransfers = ({
     async (file: RemoteFile) => {
       try {
         const fullPath = joinPath(currentPath, file.name);
-        setLoading(true);
-        const content = isLocalSession
-          ? await readLocalFile(fullPath)
-          : await readSftp(await ensureSftp(), fullPath);
-        const blob = new Blob([content], { type: "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+
+        // For remote SFTP files, use streaming download with save dialog
+        if (!isLocalSession && showSaveDialog && startStreamTransfer) {
+          // Show save dialog to get target path
+          const targetPath = await showSaveDialog(file.name);
+          if (!targetPath) {
+            // User cancelled
+            return;
+          }
+
+          setLoading(true);
+          const sftpId = await ensureSftp();
+          const transferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          await new Promise<void>((resolve, reject) => {
+            startStreamTransfer(
+              {
+                transferId,
+                sourcePath: fullPath,
+                targetPath,
+                sourceType: 'sftp',
+                targetType: 'local',
+                sourceSftpId: sftpId,
+              },
+              undefined, // onProgress - could add progress UI later
+              () => {
+                toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+                resolve();
+              },
+              (error) => {
+                reject(new Error(error));
+              }
+            );
+          });
+        } else {
+          // Fallback: For local files or when streaming is not available
+          setLoading(true);
+          const content = isLocalSession
+            ? await readLocalFile(fullPath)
+            : await readSftp(await ensureSftp(), fullPath);
+          const blob = new Blob([content], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = file.name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
       } catch (e) {
         toast.error(
           e instanceof Error ? e.message : t("sftp.error.downloadFailed"),
@@ -398,7 +437,7 @@ export const useSftpModalTransfers = ({
         setLoading(false);
       }
     },
-    [currentPath, ensureSftp, isLocalSession, joinPath, readLocalFile, readSftp, setLoading, t],
+    [currentPath, ensureSftp, isLocalSession, joinPath, readLocalFile, readSftp, setLoading, showSaveDialog, startStreamTransfer, t],
   );
 
 

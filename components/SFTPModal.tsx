@@ -82,6 +82,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     cancelSftpUpload,
     startStreamTransfer,
     cancelTransfer,
+    showSaveDialog,
   } = useSftpBackend();
   const { t } = useI18n();
   const { sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload } = useSettingsState();
@@ -376,6 +377,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     cancelSftpUpload,
     startStreamTransfer,
     cancelTransfer,
+    showSaveDialog,
     setLoading,
     t,
     useCompressedUpload: sftpUseCompressedUpload,
