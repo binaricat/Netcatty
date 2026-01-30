@@ -18,6 +18,7 @@ import React, { memo, useLayoutEffect, useMemo, useRef } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
+import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSettingsState } from "../application/state/useSettingsState";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
@@ -66,6 +67,9 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
   }), [t]);
 
   const sftp = useSftpState(hosts, keys, identities, fileWatchHandlers);
+
+  // Get stream transfer functions for optimized downloads
+  const { showSaveDialog, startStreamTransfer } = useSftpBackend();
 
   // Store sftp in a ref so callbacks can access the latest instance
   // without needing to re-create when sftp changes
@@ -130,6 +134,9 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
+    showSaveDialog,
+    startStreamTransfer,
+    getSftpIdForConnection: sftp.getSftpIdForConnection,
   });
 
   const visibleTransfers = useMemo(

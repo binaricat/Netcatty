@@ -20,6 +20,23 @@ interface UseSftpViewFileOpsParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
+  startStreamTransfer?: (
+    options: {
+      transferId: string;
+      sourcePath: string;
+      targetPath: string;
+      sourceType: 'local' | 'sftp';
+      targetType: 'local' | 'sftp';
+      sourceSftpId?: string;
+      targetSftpId?: string;
+      totalBytes?: number;
+    },
+    onProgress?: (transferred: number, total: number, speed: number) => void,
+    onComplete?: () => void,
+    onError?: (error: string) => void
+  ) => Promise<{ transferId: string; totalBytes?: number; error?: string }>;
+  getSftpIdForConnection?: (connectionId: string) => string | undefined;
 }
 
 interface UseSftpViewFileOpsResult {
@@ -88,6 +105,9 @@ export const useSftpViewFileOps = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
+  showSaveDialog,
+  startStreamTransfer,
+  getSftpIdForConnection,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
@@ -328,19 +348,58 @@ export const useSftpViewFileOps = ({
       const fullPath = sftpRef.current.joinPath(pane.connection.currentPath, file.name);
 
       try {
-        const content = await sftpRef.current.readBinaryFile(side, fullPath);
+        // For remote SFTP files, use streaming download with save dialog
+        if (!pane.connection.isLocal && showSaveDialog && startStreamTransfer && getSftpIdForConnection) {
+          const sftpId = getSftpIdForConnection(pane.connection.id);
+          if (!sftpId) {
+            throw new Error("SFTP session not found");
+          }
 
-        const blob = new Blob([content], { type: "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+          // Show save dialog to get target path
+          const targetPath = await showSaveDialog(file.name);
+          if (!targetPath) {
+            // User cancelled
+            return;
+          }
 
-        toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+          const transferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          await new Promise<void>((resolve, reject) => {
+            startStreamTransfer(
+              {
+                transferId,
+                sourcePath: fullPath,
+                targetPath,
+                sourceType: 'sftp',
+                targetType: 'local',
+                sourceSftpId: sftpId,
+              },
+              undefined, // onProgress
+              () => {
+                toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+                resolve();
+              },
+              (error) => {
+                reject(new Error(error));
+              }
+            );
+          });
+        } else {
+          // Fallback: For local files or when streaming is not available
+          const content = await sftpRef.current.readBinaryFile(side, fullPath);
+
+          const blob = new Blob([content], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = file.name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+        }
       } catch (e) {
         logger.error("[SftpView] Failed to download file:", e);
         toast.error(
@@ -349,7 +408,7 @@ export const useSftpViewFileOps = ({
         );
       }
     },
-    [sftpRef, t],
+    [sftpRef, t, showSaveDialog, startStreamTransfer, getSftpIdForConnection],
   );
 
   const onDownloadFileLeft = useCallback(

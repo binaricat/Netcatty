@@ -61,6 +61,11 @@ export const useSftpState = (
   // SFTP session refs
   const sftpSessionsRef = useRef<Map<string, string>>(new Map()); // connectionId -> sftpId
 
+  // Getter for sftpId from connectionId (for stream transfers)
+  const getSftpIdForConnection = useCallback((connectionId: string) => {
+    return sftpSessionsRef.current.get(connectionId);
+  }, []);
+
   // Directory listing cache (connectionId + path)
   const DIR_CACHE_TTL_MS = 10_000;
   const dirCacheRef = useRef<
@@ -279,6 +284,7 @@ export const useSftpState = (
     clearCompletedTransfers,
     dismissTransfer,
     resolveConflict,
+    getSftpIdForConnection,
   });
   methodsRef.current = {
     getFilteredFiles,
@@ -320,6 +326,7 @@ export const useSftpState = (
     clearCompletedTransfers,
     dismissTransfer,
     resolveConflict,
+    getSftpIdForConnection,
   };
 
   // Create stable method wrappers that call through methodsRef
@@ -365,6 +372,7 @@ export const useSftpState = (
     clearCompletedTransfers: () => methodsRef.current.clearCompletedTransfers(),
     dismissTransfer: (...args: Parameters<typeof dismissTransfer>) => methodsRef.current.dismissTransfer(...args),
     resolveConflict: (...args: Parameters<typeof resolveConflict>) => methodsRef.current.resolveConflict(...args),
+    getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
   }), []); // Empty deps - these wrappers never change
 
   // Return object with stable method references but reactive state

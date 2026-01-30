@@ -19,6 +19,23 @@ interface UseSftpViewPaneCallbacksParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
+  startStreamTransfer?: (
+    options: {
+      transferId: string;
+      sourcePath: string;
+      targetPath: string;
+      sourceType: 'local' | 'sftp';
+      targetType: 'local' | 'sftp';
+      sourceSftpId?: string;
+      targetSftpId?: string;
+      totalBytes?: number;
+    },
+    onProgress?: (transferred: number, total: number, speed: number) => void,
+    onComplete?: () => void,
+    onError?: (error: string) => void
+  ) => Promise<{ transferId: string; totalBytes?: number; error?: string }>;
+  getSftpIdForConnection?: (connectionId: string) => string | undefined;
 }
 
 export const useSftpViewPaneCallbacks = ({
@@ -28,6 +45,9 @@ export const useSftpViewPaneCallbacks = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
+  showSaveDialog,
+  startStreamTransfer,
+  getSftpIdForConnection,
 }: UseSftpViewPaneCallbacksParams) => {
   const paneActions = useSftpViewPaneActions({ sftpRef });
   const fileOps = useSftpViewFileOps({
@@ -37,6 +57,9 @@ export const useSftpViewPaneCallbacks = ({
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
+    showSaveDialog,
+    startStreamTransfer,
+    getSftpIdForConnection,
   });
 
   /* eslint-disable react-hooks/exhaustive-deps -- Handlers use refs, so they are stable */
