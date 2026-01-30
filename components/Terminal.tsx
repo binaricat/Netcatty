@@ -44,6 +44,56 @@ import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useServerStats } from "./terminal/hooks/useServerStats";
 import { extractDropEntries, getPathForFile, DropEntry } from "../lib/sftpFileUtils";
 
+/**
+ * Extract unique root paths from drop entries for local terminal path insertion.
+ * For nested files, extracts the root folder path; for single files, uses the full path.
+ * Paths with spaces are quoted.
+ */
+function extractRootPathsFromDropEntries(dropEntries: DropEntry[]): string[] {
+  const paths: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const entry of dropEntries) {
+    if (!entry.file) continue;
+
+    const fullPath = getPathForFile(entry.file);
+    if (!fullPath) continue;
+
+    const pathParts = entry.relativePath.split('/');
+
+    if (pathParts.length > 1) {
+      // Nested file in a folder - extract the root folder path
+      const rootFolderName = pathParts[0];
+      const separator = fullPath.includes('\\') ? '\\' : '/';
+
+      // Find the position of the root folder name in the full path
+      const rootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName + separator);
+      const altRootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName);
+      const folderStartIndex = rootFolderIndex !== -1
+        ? rootFolderIndex + 1
+        : (altRootFolderIndex !== -1 ? altRootFolderIndex + 1 : -1);
+
+      if (folderStartIndex !== -1) {
+        const folderEndIndex = folderStartIndex + rootFolderName.length;
+        const folderPath = fullPath.substring(0, folderEndIndex);
+
+        if (!seenPaths.has(folderPath)) {
+          paths.push(folderPath.includes(' ') ? `"${folderPath}"` : folderPath);
+          seenPaths.add(folderPath);
+        }
+      }
+    } else {
+      // Single file (not in a folder)
+      if (!seenPaths.has(fullPath)) {
+        paths.push(fullPath.includes(' ') ? `"${fullPath}"` : fullPath);
+        seenPaths.add(fullPath);
+      }
+    }
+  }
+
+  return paths;
+}
+
 interface TerminalProps {
   host: Host;
   keys: SSHKey[];
@@ -948,48 +998,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
       if (isLocalConnection) {
         // Local terminal: Insert absolute paths
-        const paths: string[] = [];
-        const seenPaths = new Set<string>();
-
-        for (const entry of dropEntries) {
-          if (entry.file) {
-            const fullPath = getPathForFile(entry.file);
-            if (!fullPath) continue;
-
-            // Check if this is a file inside a dropped folder
-            const pathParts = entry.relativePath.split('/');
-            if (pathParts.length > 1) {
-              // This is a nested file in a folder - extract the root folder path
-              const rootFolderName = pathParts[0];
-              // Determine the path separator used in fullPath
-              const separator = fullPath.includes('\\') ? '\\' : '/';
-              // Find the position of the root folder name in the full path
-              const rootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName + separator);
-              const altRootFolderIndex = fullPath.lastIndexOf(separator + rootFolderName);
-              const folderStartIndex = rootFolderIndex !== -1 ? rootFolderIndex + 1 :
-                                       (altRootFolderIndex !== -1 ? altRootFolderIndex + 1 : -1);
-
-              if (folderStartIndex !== -1) {
-                // Extract path up to and including the root folder
-                const folderEndIndex = folderStartIndex + rootFolderName.length;
-                const folderPath = fullPath.substring(0, folderEndIndex);
-
-                if (!seenPaths.has(folderPath)) {
-                  const quotedPath = folderPath.includes(' ') ? `"${folderPath}"` : folderPath;
-                  paths.push(quotedPath);
-                  seenPaths.add(folderPath);
-                }
-              }
-            } else {
-              // Single file (not in a folder)
-              if (!seenPaths.has(fullPath)) {
-                const quotedPath = fullPath.includes(' ') ? `"${fullPath}"` : fullPath;
-                paths.push(quotedPath);
-                seenPaths.add(fullPath);
-              }
-            }
-          }
-        }
+        const paths = extractRootPathsFromDropEntries(dropEntries);
 
         if (paths.length > 0 && termRef.current && sessionRef.current) {
           const pathsText = paths.join(' ');
@@ -999,27 +1008,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       } else {
         // Remote terminal: Trigger SFTP upload
-        // Pass all entries including directory markers to preserve empty folders
-        if (dropEntries.length > 0) {
-          // Get current working directory for SFTP initial path
-          let initialPath: string | undefined = undefined;
-          if (sessionRef.current) {
-            try {
-              const result = await terminalBackend.getSessionPwd(sessionRef.current);
-              if (result.success && result.cwd) {
-                initialPath = result.cwd;
-              }
-            } catch {
-              // Silently fail and open SFTP without initial path
+        // Get current working directory for SFTP initial path
+        let initialPath: string | undefined = undefined;
+        if (sessionRef.current) {
+          try {
+            const result = await terminalBackend.getSessionPwd(sessionRef.current);
+            if (result.success && result.cwd) {
+              initialPath = result.cwd;
             }
+          } catch {
+            // Silently fail and open SFTP without initial path
           }
-
-          setPendingUploadEntries(dropEntries);
-          flushSync(() => {
-            setSftpInitialPath(initialPath);
-          });
-          setShowSFTP(true);
         }
+
+        setPendingUploadEntries(dropEntries);
+        // Use flushSync to ensure sftpInitialPath is updated synchronously
+        // before setShowSFTP(true) triggers the modal open
+        flushSync(() => {
+          setSftpInitialPath(initialPath);
+        });
+        setShowSFTP(true);
       }
     } catch (error) {
       logger.error("Failed to handle file drop", error);
