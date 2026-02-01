@@ -86,6 +86,9 @@ const LazyProtocolSelectDialog = lazy(() => import('./components/ProtocolSelectD
 const LazyQuickSwitcher = lazy(() =>
   import('./components/QuickSwitcher').then((m) => ({ default: m.QuickSwitcher })),
 );
+const LazyCreateWorkspaceDialog = lazy(() =>
+  import('./components/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
+);
 
 const IS_DEV = import.meta.env.DEV;
 const HOTKEY_DEBUG =
@@ -150,6 +153,7 @@ function App({ settings }: { settings: SettingsState }) {
   const { t } = useI18n();
 
   const [isQuickSwitcherOpen, setIsQuickSwitcherOpen] = useState(false);
+  const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
   const [quickSearch, setQuickSearch] = useState('');
   // Protocol selection dialog state for QuickSwitcher
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(null);
@@ -232,6 +236,7 @@ function App({ settings }: { settings: SettingsState }) {
     closeSession,
     closeWorkspace,
     updateSessionStatus,
+    createWorkspaceWithHosts,
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,
@@ -1081,8 +1086,8 @@ function App({ settings }: { settings: SettingsState }) {
               setQuickSearch('');
             }}
             onCreateWorkspace={() => {
-              // TODO: Implement workspace creation
               setIsQuickSwitcherOpen(false);
+              setIsCreateWorkspaceOpen(true);
             }}
             onClose={() => {
               setIsQuickSwitcherOpen(false);
@@ -1146,6 +1151,17 @@ function App({ settings }: { settings: SettingsState }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {isCreateWorkspaceOpen && (
+        <Suspense fallback={null}>
+          <LazyCreateWorkspaceDialog
+            isOpen={isCreateWorkspaceOpen}
+            onClose={() => setIsCreateWorkspaceOpen(false)}
+            hosts={hosts}
+            onCreate={createWorkspaceWithHosts}
+          />
+        </Suspense>
+      )}
 
       {/* Protocol Select Dialog for QuickSwitcher */}
       {protocolSelectHost && (

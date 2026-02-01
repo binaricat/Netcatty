@@ -134,7 +134,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     [sessions]
   );
 
-  const showCategorized = isFocused || query.trim().length > 0;
+  const showCategorized = query.trim().length > 0;
 
   // Memoize flat items list and index map
   const { flatItems, itemIndexMap } = useMemo(() => {

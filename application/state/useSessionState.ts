@@ -286,6 +286,69 @@ export const useSessionState = () => {
     setWorkspaceRenameValue('');
   }, []);
 
+  const createWorkspaceWithHosts = useCallback((name: string, hosts: Host[]) => {
+    if (hosts.length === 0) return;
+
+    // Create sessions for each host
+    const newSessions: TerminalSession[] = hosts.map(host => {
+      // Handle serial hosts specially
+      if (host.protocol === 'serial') {
+        const serialConfig: SerialConfig = host.serialConfig || {
+          path: host.hostname,
+          baudRate: host.port || 115200,
+          dataBits: 8,
+          stopBits: 1,
+          parity: 'none',
+          flowControl: 'none',
+          localEcho: false,
+          lineMode: false,
+        };
+
+        const portName = serialConfig.path.split('/').pop() || serialConfig.path;
+        return {
+          id: crypto.randomUUID(),
+          hostId: host.id,
+          hostLabel: host.label || `Serial: ${portName}`,
+          hostname: serialConfig.path,
+          username: '',
+          status: 'connecting',
+          protocol: 'serial',
+          serialConfig: serialConfig,
+        };
+      }
+
+      return {
+        id: crypto.randomUUID(),
+        hostId: host.id,
+        hostLabel: host.label,
+        hostname: host.hostname,
+        username: host.username,
+        status: 'connecting',
+        protocol: host.protocol,
+        port: host.port,
+        moshEnabled: host.moshEnabled,
+      };
+    });
+
+    const sessionIds = newSessions.map(s => s.id);
+
+    // Create workspace
+    const workspace = createWorkspaceFromSessionIds(sessionIds, {
+      title: name,
+      viewMode: 'split',
+    });
+
+    // Assign workspaceId to sessions
+    const sessionsWithWorkspace = newSessions.map(s => ({
+      ...s,
+      workspaceId: workspace.id
+    }));
+
+    setSessions(prev => [...prev, ...sessionsWithWorkspace]);
+    setWorkspaces(prev => [...prev, workspace]);
+    setActiveTabId(workspace.id);
+  }, [setActiveTabId]);
+
   const createWorkspaceFromSessions = useCallback((
     baseSessionId: string,
     joiningSessionId: string,
@@ -669,6 +732,7 @@ export const useSessionState = () => {
     closeSession,
     closeWorkspace,
     updateSessionStatus,
+    createWorkspaceWithHosts,
     createWorkspaceFromSessions,
     addSessionToWorkspace,
     updateSplitSizes,

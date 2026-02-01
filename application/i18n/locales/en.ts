@@ -48,11 +48,14 @@ const en: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': 'Delete Host "{name}"?',
   'confirm.deleteIdentity': 'Delete Identity "{name}"?',
+  'dialog.createWorkspace.title': 'Create Workspace',
   'dialog.renameWorkspace.title': 'Rename workspace',
   'dialog.renameSession.title': 'Rename session',
   'field.name': 'Name',
+  'field.selectHosts': 'Select Hosts',
   'placeholder.workspaceName': 'Workspace name',
   'placeholder.sessionName': 'Session name',
+  'placeholder.searchHosts': 'Search hosts...',
   'toast.settingsUnavailable': 'Settings window is unavailable on this platform.',
 
   // Settings shell
