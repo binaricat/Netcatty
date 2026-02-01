@@ -76,31 +76,29 @@ function isKeyEncrypted(keyContent) {
 /**
  * Find default SSH private key from user's ~/.ssh directory
  * Skips encrypted keys that require a passphrase to allow password/keyboard-interactive auth
- * @returns {{ privateKey: string, keyPath: string, keyName: string } | null}
+ * @returns {Promise<{ privateKey: string, keyPath: string, keyName: string } | null>}
  */
-function findDefaultPrivateKey() {
+async function findDefaultPrivateKey() {
   const sshDir = path.join(os.homedir(), ".ssh");
   log("Searching for default SSH keys", { sshDir, keyNames: DEFAULT_KEY_NAMES });
   for (const name of DEFAULT_KEY_NAMES) {
     const keyPath = path.join(sshDir, name);
-    log("Checking key file", { keyPath, exists: fs.existsSync(keyPath) });
-    if (fs.existsSync(keyPath)) {
-      try {
-        const privateKey = fs.readFileSync(keyPath, "utf8");
-        // Skip encrypted keys - they require a passphrase and would abort
-        // authentication before password/keyboard-interactive can be tried
-        const encrypted = isKeyEncrypted(privateKey);
-        log("Key file read", { keyPath, keyName: name, encrypted, keyLength: privateKey.length });
-        if (encrypted) {
-          log("Skipping encrypted default key", { keyPath, keyName: name });
-          continue;
-        }
-        log("Found default key", { keyPath, keyName: name });
-        return { privateKey, keyPath, keyName: name };
-      } catch (e) {
-        log("Failed to read default key", { keyPath, error: e.message });
+    try {
+      await fs.promises.access(keyPath, fs.constants.F_OK);
+      const privateKey = await fs.promises.readFile(keyPath, "utf8");
+      // Skip encrypted keys - they require a passphrase and would abort
+      // authentication before password/keyboard-interactive can be tried
+      const encrypted = isKeyEncrypted(privateKey);
+      log("Key file read", { keyPath, keyName: name, encrypted, keyLength: privateKey.length });
+      if (encrypted) {
+        log("Skipping encrypted default key", { keyPath, keyName: name });
         continue;
       }
+      log("Found default key", { keyPath, keyName: name });
+      return { privateKey, keyPath, keyName: name };
+    } catch (e) {
+      log("Failed to read default key", { keyPath, error: e.message });
+      continue;
     }
   }
   log("No suitable default SSH key found");
@@ -110,29 +108,33 @@ function findDefaultPrivateKey() {
 /**
  * Find ALL default SSH private keys from user's ~/.ssh directory
  * Returns all non-encrypted keys for fallback authentication
- * @returns {Array<{ privateKey: string, keyPath: string, keyName: string }>}
+ * @returns {Promise<Array<{ privateKey: string, keyPath: string, keyName: string }>>}
  */
-function findAllDefaultPrivateKeys() {
+async function findAllDefaultPrivateKeys() {
   const sshDir = path.join(os.homedir(), ".ssh");
-  const keys = [];
   log("Searching for ALL default SSH keys", { sshDir, keyNames: DEFAULT_KEY_NAMES });
-  for (const name of DEFAULT_KEY_NAMES) {
+
+  const promises = DEFAULT_KEY_NAMES.map(async (name) => {
     const keyPath = path.join(sshDir, name);
-    if (fs.existsSync(keyPath)) {
-      try {
-        const privateKey = fs.readFileSync(keyPath, "utf8");
-        const encrypted = isKeyEncrypted(privateKey);
-        if (!encrypted) {
-          keys.push({ privateKey, keyPath, keyName: name });
-          log("Found default key for fallback", { keyPath, keyName: name });
-        } else {
-          log("Skipping encrypted key", { keyPath, keyName: name });
-        }
-      } catch (e) {
-        log("Failed to read key", { keyPath, error: e.message });
+    try {
+      await fs.promises.access(keyPath, fs.constants.F_OK);
+      const privateKey = await fs.promises.readFile(keyPath, "utf8");
+      const encrypted = isKeyEncrypted(privateKey);
+      if (!encrypted) {
+        log("Found default key for fallback", { keyPath, keyName: name });
+        return { privateKey, keyPath, keyName: name };
+      } else {
+        log("Skipping encrypted key", { keyPath, keyName: name });
+        return null;
       }
+    } catch (e) {
+      log("Failed to read key", { keyPath, error: e.message });
+      return null;
     }
-  }
+  });
+
+  const results = await Promise.all(promises);
+  const keys = results.filter(Boolean);
   log("Found default SSH keys", { count: keys.length, keyNames: keys.map(k => k.keyName) });
   return keys;
 }
@@ -308,6 +310,9 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
       if (jump.password) connOpts.password = jump.password;
 
+      // Get default keys (either from options if pre-fetched, or fetch them now)
+      const defaultKeys = options._defaultKeys || await findAllDefaultPrivateKeys();
+
       // Build auth handler using shared helper
       // Pass unlocked encrypted keys from options so jump hosts can use them for retry
       const authConfig = buildAuthHandler({
@@ -318,6 +323,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         username: connOpts.username,
         logPrefix: `[Chain] Hop ${i + 1}`,
         unlockedEncryptedKeys: options._unlockedEncryptedKeys || [],
+        defaultKeys,
       });
       applyAuthToConnOpts(connOpts, authConfig);
 
@@ -508,13 +514,13 @@ async function startSSHSession(event, options) {
     let defaultKeyInfo = null;
     let allDefaultKeys = [];
     let usedDefaultKeyAsPrimary = false;
-    const defaultKey = findDefaultPrivateKey();
+    const defaultKey = await findDefaultPrivateKey();
     if (defaultKey) {
       defaultKeyInfo = defaultKey;
       log("Found default SSH key for fallback", { keyPath: defaultKey.keyPath, keyName: defaultKey.keyName });
     }
     // Also find ALL default keys for comprehensive fallback
-    allDefaultKeys = findAllDefaultPrivateKeys();
+    allDefaultKeys = await findAllDefaultPrivateKeys();
 
     // Use unlocked encrypted keys if provided (from retry after auth failure)
     // These are passed via _unlockedEncryptedKeys from startSSHSessionWrapper
@@ -814,6 +820,9 @@ async function startSSHSession(event, options) {
 
     // Handle chain/proxy connections
     if (hasJumpHosts) {
+      // Pass fetched keys to chain connection to avoid re-reading files
+      options._defaultKeys = allDefaultKeys;
+
       const chainResult = await connectThroughChain(
         event,
         options,
@@ -1257,7 +1266,7 @@ async function startSSHSessionWrapper(event, options) {
       // Check if there are encrypted default keys we haven't tried yet
       // Only offer retry if no unlocked keys were provided in this attempt
       if (!options._unlockedEncryptedKeys || options._unlockedEncryptedKeys.length === 0) {
-        const allKeysWithEncrypted = findAllDefaultPrivateKeysFromHelper({ includeEncrypted: true });
+        const allKeysWithEncrypted = await findAllDefaultPrivateKeysFromHelper({ includeEncrypted: true });
         const encryptedKeys = allKeysWithEncrypted.filter(k => k.isEncrypted);
         
         if (encryptedKeys.length > 0) {
@@ -1720,8 +1729,11 @@ function registerHandlers(ipcMain) {
     const keys = [];
     for (const name of DEFAULT_KEY_NAMES) {
       const keyPath = path.join(sshDir, name);
-      if (fs.existsSync(keyPath)) {
+      try {
+        await fs.promises.access(keyPath, fs.constants.F_OK);
         keys.push({ name, path: keyPath });
+      } catch {
+        // ignore missing keys
       }
     }
     return keys;

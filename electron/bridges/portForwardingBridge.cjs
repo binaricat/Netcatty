@@ -10,6 +10,7 @@ const {
   buildAuthHandler, 
   createKeyboardInteractiveHandler, 
   applyAuthToConnOpts,
+  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
 } = require("./sshAuthHelper.cjs");
 
 // Active port forwarding tunnels
@@ -76,6 +77,9 @@ async function startPortForward(event, payload) {
       connectOpts.password = password;
     }
 
+    // Get default keys
+    const defaultKeys = await findAllDefaultPrivateKeysFromHelper();
+
     // Build auth handler using shared helper
     const authConfig = buildAuthHandler({
       privateKey,
@@ -83,6 +87,7 @@ async function startPortForward(event, payload) {
       passphrase,
       username: connectOpts.username,
       logPrefix: "[PortForward]",
+      defaultKeys,
     });
     applyAuthToConnOpts(connectOpts, authConfig);
 

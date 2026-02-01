@@ -28,6 +28,7 @@ const {
   createKeyboardInteractiveHandler, 
   applyAuthToConnOpts,
   safeSend: authSafeSend,
+  findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
 } = require("./sshAuthHelper.cjs");
 
 // SFTP clients storage - shared reference passed from main
@@ -325,6 +326,9 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
 
       if (jump.password) connOpts.password = jump.password;
 
+      // Get default keys (either from options if pre-fetched, or fetch them now)
+      const defaultKeys = options._defaultKeys || await findAllDefaultPrivateKeysFromHelper();
+
       // Build auth handler using shared helper
       // Pass unlocked encrypted keys from options so jump hosts can use them for retry
       const authConfig = buildAuthHandler({
@@ -335,6 +339,7 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
         username: connOpts.username,
         logPrefix: `[SFTP Chain] Hop ${i + 1}`,
         unlockedEncryptedKeys: options._unlockedEncryptedKeys || [],
+        defaultKeys,
       });
       applyAuthToConnOpts(connOpts, authConfig);
 
@@ -654,6 +659,9 @@ async function openSftp(event, options) {
   const client = new SftpClient();
   const connId = options.sessionId || `${Date.now()}-sftp-${Math.random().toString(16).slice(2)}`;
 
+  // Get default keys early to use for both chain and target
+  const defaultKeys = await findAllDefaultPrivateKeysFromHelper();
+
   // Check if we need to connect through jump hosts
   const jumpHosts = options.jumpHosts || [];
   const hasJumpHosts = jumpHosts.length > 0;
@@ -665,6 +673,10 @@ async function openSftp(event, options) {
   // Handle chain/proxy connections
   if (hasJumpHosts) {
     console.log(`[SFTP] Opening connection through ${jumpHosts.length} jump host(s) to ${options.hostname}:${options.port || 22}`);
+
+    // Pass default keys to chain connection
+    options._defaultKeys = defaultKeys;
+
     const chainResult = await connectThroughChainForSftp(
       event,
       options,
@@ -731,6 +743,7 @@ async function openSftp(event, options) {
     agent: connectOpts.agent,
     username: connectOpts.username,
     logPrefix: "[SFTP]",
+    defaultKeys,
   });
   applyAuthToConnOpts(connectOpts, authConfig);
 

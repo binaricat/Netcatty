@@ -68,22 +68,21 @@ const passphraseHandler = require("./passphraseHandler.cjs");
  /**
   * Find default SSH private key from user's ~/.ssh directory
   * Skips encrypted keys that require a passphrase
-  * @returns {{ privateKey: string, keyPath: string, keyName: string } | null}
+  * @returns {Promise<{ privateKey: string, keyPath: string, keyName: string } | null>}
   */
- function findDefaultPrivateKey() {
+ async function findDefaultPrivateKey() {
    const sshDir = path.join(os.homedir(), ".ssh");
    for (const name of DEFAULT_KEY_NAMES) {
      const keyPath = path.join(sshDir, name);
-     if (fs.existsSync(keyPath)) {
-       try {
-         const privateKey = fs.readFileSync(keyPath, "utf8");
-         if (isKeyEncrypted(privateKey)) {
-           continue;
-         }
-         return { privateKey, keyPath, keyName: name };
-       } catch {
+     try {
+       await fs.promises.access(keyPath, fs.constants.F_OK);
+       const privateKey = await fs.promises.readFile(keyPath, "utf8");
+       if (isKeyEncrypted(privateKey)) {
          continue;
        }
+       return { privateKey, keyPath, keyName: name };
+     } catch {
+       continue;
      }
    }
    return null;
@@ -93,33 +92,34 @@ const passphraseHandler = require("./passphraseHandler.cjs");
   * Find ALL default SSH private keys from user's ~/.ssh directory
  * @param {Object} [options]
  * @param {boolean} [options.includeEncrypted=false] - If true, include encrypted keys with isEncrypted flag
- * @returns {Array<{ privateKey: string, keyPath: string, keyName: string, isEncrypted?: boolean }>}
+ * @returns {Promise<Array<{ privateKey: string, keyPath: string, keyName: string, isEncrypted?: boolean }>>}
   */
-function findAllDefaultPrivateKeys(options = {}) {
+async function findAllDefaultPrivateKeys(options = {}) {
   const { includeEncrypted = false } = options;
    const sshDir = path.join(os.homedir(), ".ssh");
-   const keys = [];
-   for (const name of DEFAULT_KEY_NAMES) {
+
+   const promises = DEFAULT_KEY_NAMES.map(async (name) => {
      const keyPath = path.join(sshDir, name);
-     if (fs.existsSync(keyPath)) {
-       try {
-         const privateKey = fs.readFileSync(keyPath, "utf8");
-        const encrypted = isKeyEncrypted(privateKey);
-        if (encrypted && !includeEncrypted) {
-          continue; // Skip encrypted keys when not including them
-         }
-        keys.push({ 
-          privateKey, 
-          keyPath, 
-          keyName: name,
-          ...(includeEncrypted ? { isEncrypted: encrypted } : {})
-        });
-       } catch {
-         continue;
+     try {
+       await fs.promises.access(keyPath, fs.constants.F_OK);
+       const privateKey = await fs.promises.readFile(keyPath, "utf8");
+       const encrypted = isKeyEncrypted(privateKey);
+       if (encrypted && !includeEncrypted) {
+          return null;
        }
+       return {
+         privateKey,
+         keyPath,
+         keyName: name,
+         ...(includeEncrypted ? { isEncrypted: encrypted } : {})
+       };
+     } catch {
+       return null;
      }
-   }
-   return keys;
+   });
+
+   const results = await Promise.all(promises);
+   return results.filter(Boolean);
  }
  
  /**
@@ -146,7 +146,7 @@ function findAllDefaultPrivateKeys(options = {}) {
  * @param {Array} [options.unlockedEncryptedKeys] - Array of unlocked encrypted keys with passphrases
   */
  function buildAuthHandler(options) {
-  const { privateKey, password, passphrase, agent, username, logPrefix = "[SSH]", unlockedEncryptedKeys = [] } = options;
+  const { privateKey, password, passphrase, agent, username, logPrefix = "[SSH]", unlockedEncryptedKeys = [], defaultKeys = [] } = options;
    
   // Determine what type of explicit auth the user configured
   const hasExplicitKey = !!privateKey;
@@ -159,7 +159,6 @@ function findAllDefaultPrivateKeys(options = {}) {
   const isKeyOnly = hasExplicitKey && !hasExplicitAgent;
   
    const sshAgentSocket = getSshAgentSocket();
-   const defaultKeys = findAllDefaultPrivateKeys();
    
   // Only use system ssh-agent BEFORE user's auth when:
   // - User explicitly configured agent, OR
@@ -465,7 +464,7 @@ function findAllDefaultPrivateKeys(options = {}) {
  * @returns {Promise<{ keys: Array<{ privateKey: string, keyPath: string, keyName: string, passphrase: string }>, cancelled: boolean }>}
  */
 async function requestPassphrasesForEncryptedKeys(sender, hostname) {
-  const allKeys = findAllDefaultPrivateKeys({ includeEncrypted: true });
+  const allKeys = await findAllDefaultPrivateKeys({ includeEncrypted: true });
   const encryptedKeys = allKeys.filter(k => k.isEncrypted);
   
   if (encryptedKeys.length === 0) {
