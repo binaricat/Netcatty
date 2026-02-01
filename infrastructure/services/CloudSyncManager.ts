@@ -1131,19 +1131,37 @@ export class CloudSyncManager {
       return results;
     }
 
-    if (this.state.securityState !== 'UNLOCKED') {
-      return results; // Or throw? Caller handles it.
-    }
-
-    if (!this.masterPassword) {
-      return results;
-    }
-
     const connectedProviders = Object.entries(this.state.providers)
       .filter(([_, conn]) => conn.status === 'connected')
       .map(([p]) => p as CloudProvider);
 
     if (connectedProviders.length === 0) {
+      return results;
+    }
+
+    if (this.state.securityState !== 'UNLOCKED') {
+      const error = 'Vault is locked';
+      connectedProviders.forEach((provider) => {
+        results.set(provider, {
+          success: false,
+          provider,
+          action: 'none',
+          error,
+        });
+      });
+      return results;
+    }
+
+    if (!this.masterPassword) {
+      const error = 'Master password not available';
+      connectedProviders.forEach((provider) => {
+        results.set(provider, {
+          success: false,
+          provider,
+          action: 'none',
+          error,
+        });
+      });
       return results;
     }
 
