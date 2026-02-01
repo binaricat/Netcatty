@@ -1165,15 +1165,9 @@ export class CloudSyncManager {
     });
 
     const checkResults = await Promise.all(checkTasks);
-    const normalizedCheckResults = checkResults.map((result) => {
-      if (!result.error && result.check?.error) {
-        return { ...result, error: result.check.error };
-      }
-      return result;
-    });
 
     // 2. Analyze Results & Handle Conflicts
-    const conflict = normalizedCheckResults.find((r) => !r.error && r.check?.conflict);
+    const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
 
     if (conflict && conflict.check?.remoteFile) {
       const { provider, check } = conflict;
@@ -1196,7 +1190,7 @@ export class CloudSyncManager {
       });
 
       // Populate results
-      for (const r of normalizedCheckResults) {
+      for (const r of checkResults) {
         if (r.error) {
           results.set(r.provider as CloudProvider, {
             success: false,
@@ -1227,13 +1221,13 @@ export class CloudSyncManager {
     }
 
     // 3. Encrypt Once
-    const validUploads = normalizedCheckResults.filter(
+    const validUploads = checkResults.filter(
       (r) => !r.error && !r.check?.conflict && r.adapter
     ) as { provider: CloudProvider; adapter: CloudAdapter }[];
 
     if (validUploads.length === 0) {
       // Process errors if any
-      normalizedCheckResults.forEach((r) => {
+      checkResults.forEach((r) => {
         if (r.error) {
           results.set(r.provider as CloudProvider, {
             success: false,
@@ -1296,7 +1290,7 @@ export class CloudSyncManager {
     }
 
     // Process errors from initial checks (if any)
-    normalizedCheckResults.forEach((r) => {
+    checkResults.forEach((r) => {
       if (r.error) {
         results.set(r.provider as CloudProvider, {
           success: false,
