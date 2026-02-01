@@ -3,6 +3,7 @@ import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisi
 import { useAutoSync } from './application/state/useAutoSync';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
 import { usePortForwardingAutoStart } from './application/state/usePortForwardingAutoStart';
+import { usePortForwardingState } from './application/state/usePortForwardingState';
 import { useSessionState } from './application/state/useSessionState';
 import { useSettingsState } from './application/state/useSettingsState';
 import { useUpdateCheck } from './application/state/useUpdateCheck';
@@ -254,6 +255,9 @@ function App({ settings }: { settings: SettingsState }) {
   // isMacClient is used for window controls styling
   const isMacClient = typeof navigator !== 'undefined' && /Mac|Macintosh/.test(navigator.userAgent);
 
+  // Get port forwarding rules and import function
+  const { rules: portForwardingRules, importRules: importPortForwardingRules } = usePortForwardingState();
+
   // Auto-sync hook for cloud sync
   const { syncNow: handleSyncNow } = useAutoSync({
     hosts,
@@ -261,7 +265,7 @@ function App({ settings }: { settings: SettingsState }) {
     identities,
     snippets,
     customGroups,
-    portForwardingRules: undefined, // TODO: Add port forwarding rules from usePortForwardingState
+    portForwardingRules,
     knownHosts,
     onApplyPayload: (payload) => {
       importDataFromString(JSON.stringify({
@@ -271,6 +275,10 @@ function App({ settings }: { settings: SettingsState }) {
         snippets: payload.snippets,
         customGroups: payload.customGroups,
       }));
+
+      if (payload.portForwardingRules) {
+        importPortForwardingRules(payload.portForwardingRules);
+      }
     },
   });
 

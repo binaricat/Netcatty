@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Host, PortForwardingRule } from "../../domain/models";
 import {
   STORAGE_KEY_PF_PREFER_FORM_MODE,
@@ -40,6 +40,7 @@ export interface UsePortForwardingStateResult {
   updateRule: (id: string, updates: Partial<PortForwardingRule>) => void;
   deleteRule: (id: string) => void;
   duplicateRule: (id: string) => void;
+  importRules: (rules: PortForwardingRule[]) => void;
 
   setRuleStatus: (
     id: string,
@@ -63,8 +64,50 @@ export interface UsePortForwardingStateResult {
   selectedRule: PortForwardingRule | undefined;
 }
 
+// Global Store State
+let globalRules: PortForwardingRule[] = [];
+let isInitialized = false;
+const listeners = new Set<(rules: PortForwardingRule[]) => void>();
+
+// Store Actions
+const notifyListeners = () => {
+  listeners.forEach((listener) => listener(globalRules));
+};
+
+const setGlobalRules = (newRules: PortForwardingRule[]) => {
+  globalRules = newRules;
+  notifyListeners();
+  localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, newRules);
+};
+
+// Initialization Logic
+const initializeStore = async () => {
+  if (isInitialized) return;
+  isInitialized = true;
+
+  await syncWithBackend();
+
+  const saved = localStorageAdapter.read<PortForwardingRule[]>(
+    STORAGE_KEY_PORT_FORWARDING,
+  );
+  if (saved && Array.isArray(saved)) {
+    // Sync status with active connections in the service layer
+    const _activeRuleIds = getActiveRuleIds();
+    const withSyncedStatus = saved.map((r) => {
+      const conn = getActiveConnection(r.id);
+      if (conn) {
+        // This rule has an active connection, preserve its status
+        return { ...r, status: conn.status, error: conn.error };
+      }
+      // No active connection, reset to inactive
+      return { ...r, status: "inactive" as const, error: undefined };
+    });
+    setGlobalRules(withSyncedStatus);
+  }
+};
+
 export const usePortForwardingState = (): UsePortForwardingStateResult => {
-  const [rules, setRules] = useState<PortForwardingRule[]>([]);
+  const [rules, setRules] = useState<PortForwardingRule[]>(globalRules);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useStoredViewMode(
     STORAGE_KEY_PF_VIEW_MODE,
@@ -76,49 +119,31 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     return localStorageAdapter.readBoolean(STORAGE_KEY_PF_PREFER_FORM_MODE) ?? false;
   });
 
-  // Track if sync has been executed for this component instance
-  const syncExecutedRef = useRef(false);
-
   const setPreferFormMode = useCallback((prefer: boolean) => {
     setPreferFormModeState(prefer);
     localStorageAdapter.writeBoolean(STORAGE_KEY_PF_PREFER_FORM_MODE, prefer);
   }, []);
 
-  // Load rules from storage on mount and sync with backend
+  // Initialize store on mount (only once globally)
   useEffect(() => {
-    const loadAndSync = async () => {
-      // Only sync once per component instance (prevents duplicate calls from React StrictMode)
-      if (!syncExecutedRef.current) {
-        syncExecutedRef.current = true;
-        await syncWithBackend();
-      }
+    void initializeStore();
+  }, []);
 
-      const saved = localStorageAdapter.read<PortForwardingRule[]>(
-        STORAGE_KEY_PORT_FORWARDING,
-      );
-      if (saved && Array.isArray(saved)) {
-        // Sync status with active connections in the service layer
-        const _activeRuleIds = getActiveRuleIds();
-        const withSyncedStatus = saved.map((r) => {
-          const conn = getActiveConnection(r.id);
-          if (conn) {
-            // This rule has an active connection, preserve its status
-            return { ...r, status: conn.status, error: conn.error };
-          }
-          // No active connection, reset to inactive
-          return { ...r, status: "inactive" as const, error: undefined };
-        });
-        setRules(withSyncedStatus);
-      }
+  // Subscribe to global store
+  useEffect(() => {
+    // If global state was updated before we subscribed (e.g. init finished), update local state
+    if (rules !== globalRules) {
+        setRules(globalRules);
+    }
+
+    const listener = (newRules: PortForwardingRule[]) => {
+      setRules(newRules);
     };
-    
-    void loadAndSync();
-  }, []);
-
-  // Persist rules to storage whenever they change
-  const persistRules = useCallback((updatedRules: PortForwardingRule[]) => {
-    localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, updatedRules);
-  }, []);
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, [rules]);
 
   const addRule = useCallback(
     (
@@ -130,47 +155,38 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         createdAt: Date.now(),
         status: "inactive",
       };
-      setRules((prev) => {
-        const updated = [...prev, newRule];
-        persistRules(updated);
-        return updated;
-      });
+      const updated = [...globalRules, newRule];
+      setGlobalRules(updated);
       setSelectedRuleId(newRule.id);
       return newRule;
     },
-    [persistRules],
+    [],
   );
 
   const updateRule = useCallback(
     (id: string, updates: Partial<PortForwardingRule>) => {
-      setRules((prev) => {
-        const updated = prev.map((r) =>
-          r.id === id ? { ...r, ...updates } : r,
-        );
-        persistRules(updated);
-        return updated;
-      });
+      const updated = globalRules.map((r) =>
+        r.id === id ? { ...r, ...updates } : r,
+      );
+      setGlobalRules(updated);
     },
-    [persistRules],
+    [],
   );
 
   const deleteRule = useCallback(
     (id: string) => {
-      setRules((prev) => {
-        const updated = prev.filter((r) => r.id !== id);
-        persistRules(updated);
-        return updated;
-      });
+      const updated = globalRules.filter((r) => r.id !== id);
+      setGlobalRules(updated);
       if (selectedRuleId === id) {
         setSelectedRuleId(null);
       }
     },
-    [selectedRuleId, persistRules],
+    [selectedRuleId],
   );
 
   const duplicateRule = useCallback(
     (id: string) => {
-      const original = rules.find((r) => r.id === id);
+      const original = globalRules.find((r) => r.id === id);
       if (!original) return;
 
       const copy: PortForwardingRule = {
@@ -182,33 +198,31 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         error: undefined,
         lastUsedAt: undefined,
       };
-      setRules((prev) => {
-        const updated = [...prev, copy];
-        persistRules(updated);
-        return updated;
-      });
+      const updated = [...globalRules, copy];
+      setGlobalRules(updated);
       setSelectedRuleId(copy.id);
     },
-    [rules, persistRules],
+    [],
   );
+
+  const importRules = useCallback((newRules: PortForwardingRule[]) => {
+      setGlobalRules(newRules);
+  }, []);
 
   const setRuleStatus = useCallback(
     (id: string, status: PortForwardingRule["status"], error?: string) => {
-      setRules((prev) => {
-        const updated = prev.map((r) => {
-          if (r.id !== id) return r;
-          return {
-            ...r,
-            status,
-            error,
-            lastUsedAt: status === "active" ? Date.now() : r.lastUsedAt,
-          };
-        });
-        persistRules(updated);
-        return updated;
+      const updated = globalRules.map((r) => {
+        if (r.id !== id) return r;
+        return {
+          ...r,
+          status,
+          error,
+          lastUsedAt: status === "active" ? Date.now() : r.lastUsedAt,
+        };
       });
+      setGlobalRules(updated);
     },
-    [persistRules],
+    [],
   );
 
   const startTunnel = useCallback(
@@ -301,6 +315,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     updateRule,
     deleteRule,
     duplicateRule,
+    importRules,
 
     setRuleStatus,
     startTunnel,
