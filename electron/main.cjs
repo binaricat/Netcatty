@@ -267,22 +267,22 @@ let cloudSyncSessionPassword = null;
 const CLOUD_SYNC_PASSWORD_FILE = "netcatty_cloud_sync_master_password_v1";
 
 // Key management helpers
-const ensureKeyDir = () => {
+const ensureKeyDir = async () => {
   try {
-    fs.mkdirSync(keyRoot, { recursive: true, mode: 0o700 });
+    await fs.promises.mkdir(keyRoot, { recursive: true, mode: 0o700 });
   } catch (err) {
     console.warn("Unable to ensure key cache dir", err);
   }
 };
 
-const writeKeyToDisk = (keyId, privateKey) => {
+const writeKeyToDisk = async (keyId, privateKey) => {
   if (!privateKey) return null;
-  ensureKeyDir();
+  await ensureKeyDir();
   const filename = `${keyId || "temp"}.pem`;
   const target = path.join(keyRoot, filename);
   const normalized = privateKey.endsWith("\n") ? privateKey : `${privateKey}\n`;
   try {
-    fs.writeFileSync(target, normalized, { mode: 0o600 });
+    await fs.promises.writeFile(target, normalized, { mode: 0o600 });
     return target;
   } catch (err) {
     console.error("Failed to persist private key", err);
