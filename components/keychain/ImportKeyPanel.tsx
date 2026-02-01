@@ -2,7 +2,7 @@
  * Import Key Panel - Import existing SSH key
  */
 
-import { Upload } from 'lucide-react';
+import { Eye, EyeOff, Upload } from 'lucide-react';
 import React,{ useCallback,useRef } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { SSHKey } from '../../types';
@@ -15,12 +15,16 @@ import { detectKeyType } from './utils';
 interface ImportKeyPanelProps {
     draftKey: Partial<SSHKey>;
     setDraftKey: (key: Partial<SSHKey>) => void;
+    showPassphrase: boolean;
+    setShowPassphrase: (show: boolean) => void;
     onImport: () => void;
 }
 
 export const ImportKeyPanel: React.FC<ImportKeyPanelProps> = ({
     draftKey,
     setDraftKey,
+    showPassphrase,
+    setShowPassphrase,
     onImport,
 }) => {
     const { t } = useI18n();
@@ -130,6 +134,41 @@ export const ImportKeyPanel: React.FC<ImportKeyPanelProps> = ({
                     placeholder={t('keychain.field.certificatePlaceholder')}
                     className="min-h-[80px] font-mono text-xs"
                 />
+            </div>
+
+            <div className="space-y-2">
+                <Label>{t('terminal.auth.passphrase')}</Label>
+                <div className="relative">
+                    <Input
+                        type={showPassphrase ? 'text' : 'password'}
+                        value={draftKey.passphrase || ''}
+                        onChange={e => setDraftKey({ ...draftKey, passphrase: e.target.value })}
+                        placeholder={t('keychain.generate.passphrasePlaceholder')}
+                        className="pr-10"
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+                        onClick={() => setShowPassphrase(!showPassphrase)}
+                    >
+                        {showPassphrase ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+                <input
+                    type="checkbox"
+                    id="savePassphraseImport"
+                    checked={draftKey.savePassphrase || false}
+                    onChange={e => setDraftKey({ ...draftKey, savePassphrase: e.target.checked })}
+                    className="h-4 w-4 rounded border-border"
+                />
+                <Label htmlFor="savePassphraseImport" className="text-sm font-normal cursor-pointer">
+                    {t('keychain.generate.savePassphrase')}
+                </Label>
             </div>
 
             <div

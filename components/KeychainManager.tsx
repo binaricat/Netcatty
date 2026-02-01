@@ -916,6 +916,8 @@ echo $3 >> "$FILE"`);
               <ImportKeyPanel
                 draftKey={draftKey}
                 setDraftKey={setDraftKey}
+                showPassphrase={showPassphrase}
+                setShowPassphrase={setShowPassphrase}
                 onImport={handleImport}
               />
             )}
