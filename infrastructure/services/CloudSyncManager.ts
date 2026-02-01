@@ -31,6 +31,7 @@ import {
   generateDeviceId,
   getDefaultDeviceName,
 } from '../../domain/sync';
+import packageJson from '../../package.json';
 import { EncryptionService } from './EncryptionService';
 import { createAdapter, type CloudAdapter } from './adapters';
 import type { GitHubAdapter } from './adapters/GitHubAdapter';
@@ -890,7 +891,7 @@ export class CloudSyncManager {
         this.masterPassword,
         this.state.deviceId,
         this.state.deviceName,
-        '1.0.0', // TODO: Get from package.json
+        packageJson.version,
         this.state.localVersion
       );
 

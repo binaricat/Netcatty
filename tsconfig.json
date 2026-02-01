@@ -10,6 +10,7 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "types": [
       "node",
       "vite/client"
