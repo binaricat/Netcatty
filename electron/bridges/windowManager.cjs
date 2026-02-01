@@ -116,6 +116,28 @@ async function saveWindowState(state) {
   }
 }
 
+let pendingWindowStateWrite = null;
+let queuedWindowState = null;
+
+async function queueWindowStateSave(state) {
+  if (!state) return false;
+  queuedWindowState = state;
+  if (pendingWindowStateWrite) {
+    return pendingWindowStateWrite;
+  }
+  pendingWindowStateWrite = (async () => {
+    let lastResult = true;
+    while (queuedWindowState) {
+      const nextState = queuedWindowState;
+      queuedWindowState = null;
+      lastResult = await saveWindowState(nextState);
+    }
+    pendingWindowStateWrite = null;
+    return lastResult;
+  })();
+  return pendingWindowStateWrite;
+}
+
 /**
  * Get the current window bounds state for saving
  * @param {BrowserWindow} win - The window to get bounds from
@@ -604,7 +626,7 @@ async function createWindow(electronModule, options) {
     if (saveStateTimer) clearTimeout(saveStateTimer);
     saveStateTimer = setTimeout(() => {
       const state = getWindowBoundsState(win, lastNormalBounds);
-      if (state) saveWindowState(state);
+      if (state) queueWindowStateSave(state);
     }, 500);
   };
 
