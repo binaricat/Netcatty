@@ -26,6 +26,7 @@ import {
   type SyncHistoryEntry,
   type WebDAVConfig,
   type S3Config,
+  type SyncedFile,
   SYNC_CONSTANTS,
   SYNC_STORAGE_KEYS,
   generateDeviceId,
@@ -797,6 +798,105 @@ export class CloudSyncManager {
   // ==========================================================================
 
   /**
+   * Helper: Check for conflicts with a specific provider
+   */
+  private async checkProviderConflict(
+    provider: CloudProvider,
+    adapter: CloudAdapter
+  ): Promise<{
+    conflict: boolean;
+    error?: string;
+    remoteFile?: SyncedFile;
+  }> {
+    try {
+      const remoteFile = await adapter.download();
+
+      if (remoteFile) {
+        // Compare versions
+        if (remoteFile.meta.updatedAt > this.state.localUpdatedAt) {
+          return {
+            conflict: true,
+            remoteFile,
+          };
+        }
+      }
+      return { conflict: false };
+    } catch (error) {
+      return { conflict: false, error: String(error) };
+    }
+  }
+
+  /**
+   * Helper: Upload encrypted file to a provider
+   */
+  private async uploadToProvider(
+    provider: CloudProvider,
+    adapter: CloudAdapter,
+    syncedFile: SyncedFile
+  ): Promise<SyncResult> {
+    try {
+      await adapter.upload(syncedFile);
+
+      // Update local state (safe to do multiple times if values are same)
+      this.state.localVersion = syncedFile.meta.version;
+      this.state.localUpdatedAt = syncedFile.meta.updatedAt;
+      this.state.remoteVersion = syncedFile.meta.version;
+      this.state.remoteUpdatedAt = syncedFile.meta.updatedAt;
+      this.state.providers[provider].lastSync = Date.now();
+      this.state.providers[provider].lastSyncVersion = syncedFile.meta.version;
+
+      this.saveSyncConfig();
+      this.saveProviderConnection(provider, this.state.providers[provider]);
+      this.notifyStateChange();
+
+      // Add to sync history
+      this.addSyncHistoryEntry({
+        timestamp: Date.now(),
+        provider,
+        action: 'upload',
+        success: true,
+        localVersion: syncedFile.meta.version,
+        remoteVersion: syncedFile.meta.version,
+        deviceName: this.state.deviceName,
+      });
+
+      this.updateProviderStatus(provider, 'connected');
+
+      const result: SyncResult = {
+        success: true,
+        provider,
+        action: 'upload',
+        version: syncedFile.meta.version,
+      };
+
+      this.emit({ type: 'SYNC_COMPLETED', provider, result });
+      return result;
+    } catch (error) {
+      this.updateProviderStatus(provider, 'error', String(error));
+
+      // Add to sync history
+      this.addSyncHistoryEntry({
+        timestamp: Date.now(),
+        provider,
+        action: 'upload',
+        success: false,
+        localVersion: this.state.localVersion,
+        deviceName: this.state.deviceName,
+        error: String(error),
+      });
+
+      this.emit({ type: 'SYNC_ERROR', provider, error: String(error) });
+
+      return {
+        success: false,
+        provider,
+        action: 'none',
+        error: String(error),
+      };
+    }
+  }
+
+  /**
    * Build sync payload from current app state
    */
   buildPayload(data: {
@@ -856,36 +956,41 @@ export class CloudSyncManager {
     this.emit({ type: 'SYNC_STARTED', provider });
 
     try {
-      // Check for remote version first
-      const remoteFile = await adapter.download();
+      // 1. Check for conflict
+      const checkResult = await this.checkProviderConflict(provider, adapter);
 
-      if (remoteFile) {
-        // Compare versions
-        if (remoteFile.meta.updatedAt > this.state.localUpdatedAt) {
-          // Remote is newer - conflict
-          this.state.syncState = 'CONFLICT';
-          this.state.currentConflict = {
-            provider,
-            localVersion: this.state.localVersion,
-            localUpdatedAt: this.state.localUpdatedAt,
-            localDeviceName: this.state.deviceName,
-            remoteVersion: remoteFile.meta.version,
-            remoteUpdatedAt: remoteFile.meta.updatedAt,
-            remoteDeviceName: remoteFile.meta.deviceName,
-          };
-
-          this.emit({ type: 'CONFLICT_DETECTED', conflict: this.state.currentConflict });
-          
-          return {
-            success: false,
-            provider,
-            action: 'none',
-            conflictDetected: true,
-          };
-        }
+      if (checkResult.error) {
+        throw new Error(checkResult.error);
       }
 
-      // Encrypt and upload
+      if (checkResult.conflict && checkResult.remoteFile) {
+        const remoteFile = checkResult.remoteFile;
+        // Remote is newer - conflict
+        this.state.syncState = 'CONFLICT';
+        this.state.currentConflict = {
+          provider,
+          localVersion: this.state.localVersion,
+          localUpdatedAt: this.state.localUpdatedAt,
+          localDeviceName: this.state.deviceName,
+          remoteVersion: remoteFile.meta.version,
+          remoteUpdatedAt: remoteFile.meta.updatedAt,
+          remoteDeviceName: remoteFile.meta.deviceName,
+        };
+
+        this.emit({
+          type: 'CONFLICT_DETECTED',
+          conflict: this.state.currentConflict,
+        });
+
+        return {
+          success: false,
+          provider,
+          action: 'none',
+          conflictDetected: true,
+        };
+      }
+
+      // 2. Encrypt
       const syncedFile = await EncryptionService.encryptPayload(
         payload,
         this.masterPassword,
@@ -895,42 +1000,17 @@ export class CloudSyncManager {
         this.state.localVersion
       );
 
-      await adapter.upload(syncedFile);
+      // 3. Upload
+      const result = await this.uploadToProvider(provider, adapter, syncedFile);
 
-      // Update local state
-      this.state.localVersion = syncedFile.meta.version;
-      this.state.localUpdatedAt = syncedFile.meta.updatedAt;
-      this.state.remoteVersion = syncedFile.meta.version;
-      this.state.remoteUpdatedAt = syncedFile.meta.updatedAt;
-      this.state.providers[provider].lastSync = Date.now();
-      this.state.providers[provider].lastSyncVersion = syncedFile.meta.version;
-
-      this.saveSyncConfig();
-      this.saveProviderConnection(provider, this.state.providers[provider]);
-      this.notifyStateChange(); // Notify UI immediately after version update
-
-      // Add to sync history
-      this.addSyncHistoryEntry({
-        timestamp: Date.now(),
-        provider,
-        action: 'upload',
-        success: true,
-        localVersion: syncedFile.meta.version,
-        remoteVersion: syncedFile.meta.version,
-        deviceName: this.state.deviceName,
-      });
-
-      this.state.syncState = 'IDLE';
-      this.updateProviderStatus(provider, 'connected');
-
-      const result: SyncResult = {
-        success: true,
-        provider,
-        action: 'upload',
-        version: syncedFile.meta.version,
-      };
-
-      this.emit({ type: 'SYNC_COMPLETED', provider, result });
+      if (result.success) {
+        this.state.syncState = 'IDLE';
+      } else {
+        this.state.syncState = 'ERROR';
+        if (result.error) {
+          this.state.lastError = result.error;
+        }
+      }
       return result;
 
     } catch (error) {
@@ -1051,19 +1131,177 @@ export class CloudSyncManager {
       return results;
     }
 
+    if (this.state.securityState !== 'UNLOCKED') {
+      return results; // Or throw? Caller handles it.
+    }
+
+    if (!this.masterPassword) {
+      return results;
+    }
+
     const connectedProviders = Object.entries(this.state.providers)
       .filter(([_, conn]) => conn.status === 'connected')
       .map(([p]) => p as CloudProvider);
 
-    for (const provider of connectedProviders) {
-      const result = await this.syncToProvider(provider, payload);
-      results.set(provider, result);
-      
-      // Stop on conflict
-      if (result.conflictDetected) {
-        break;
-      }
+    if (connectedProviders.length === 0) {
+      return results;
     }
+
+    this.state.syncState = 'SYNCING';
+
+    // 1. Parallel Checks
+    const checkTasks = connectedProviders.map(async (provider) => {
+      try {
+        // We handle connection error here to prevent one provider blocking others
+        const adapter = await this.getConnectedAdapter(provider);
+        this.updateProviderStatus(provider, 'syncing');
+        this.emit({ type: 'SYNC_STARTED', provider });
+
+        const check = await this.checkProviderConflict(provider, adapter);
+        return { provider, adapter, check };
+      } catch (error) {
+        return { provider, error: String(error) };
+      }
+    });
+
+    const checkResults = await Promise.all(checkTasks);
+
+    // 2. Analyze Results & Handle Conflicts
+    const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
+
+    if (conflict && conflict.check?.remoteFile) {
+      const { provider, check } = conflict;
+      const remoteFile = check.remoteFile!;
+
+      this.state.syncState = 'CONFLICT';
+      this.state.currentConflict = {
+        provider: provider as CloudProvider,
+        localVersion: this.state.localVersion,
+        localUpdatedAt: this.state.localUpdatedAt,
+        localDeviceName: this.state.deviceName,
+        remoteVersion: remoteFile.meta.version,
+        remoteUpdatedAt: remoteFile.meta.updatedAt,
+        remoteDeviceName: remoteFile.meta.deviceName,
+      };
+
+      this.emit({
+        type: 'CONFLICT_DETECTED',
+        conflict: this.state.currentConflict,
+      });
+
+      // Populate results
+      for (const r of checkResults) {
+        if (r.error) {
+          results.set(r.provider as CloudProvider, {
+            success: false,
+            provider: r.provider as CloudProvider,
+            action: 'none',
+            error: r.error,
+          });
+          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
+          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+        } else if (r.provider === provider) {
+          results.set(provider as CloudProvider, {
+            success: false,
+            provider: provider as CloudProvider,
+            action: 'none',
+            conflictDetected: true,
+          });
+        } else {
+          // Others are reset to connected
+          this.updateProviderStatus(r.provider as CloudProvider, 'connected');
+          results.set(r.provider as CloudProvider, {
+            success: true, // Should we mark as success if skipped?
+            provider: r.provider as CloudProvider,
+            action: 'none',
+          });
+        }
+      }
+      return results;
+    }
+
+    // 3. Encrypt Once
+    const validUploads = checkResults.filter(
+      (r) => !r.error && !r.check?.conflict && r.adapter
+    ) as { provider: CloudProvider; adapter: CloudAdapter }[];
+
+    if (validUploads.length === 0) {
+      // Process errors if any
+      checkResults.forEach((r) => {
+        if (r.error) {
+          results.set(r.provider as CloudProvider, {
+            success: false,
+            provider: r.provider as CloudProvider,
+            action: 'none',
+            error: r.error,
+          });
+          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
+          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+        }
+      });
+      this.state.syncState = 'ERROR';
+      return results;
+    }
+
+    let syncedFile: SyncedFile;
+    try {
+      syncedFile = await EncryptionService.encryptPayload(
+        payload,
+        this.masterPassword,
+        this.state.deviceId,
+        this.state.deviceName,
+        packageJson.version,
+        this.state.localVersion
+      );
+    } catch (error) {
+      const msg = String(error);
+      this.state.syncState = 'ERROR';
+      this.state.lastError = msg;
+      
+      // Fail all
+      for (const r of validUploads) {
+        this.updateProviderStatus(r.provider, 'error', msg);
+        this.emit({ type: 'SYNC_ERROR', provider: r.provider, error: msg });
+        results.set(r.provider, {
+          success: false,
+          provider: r.provider,
+          action: 'none',
+          error: msg,
+        });
+      }
+      return results;
+    }
+
+    // 4. Parallel Uploads
+    const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
+      const result = await this.uploadToProvider(provider, adapter, syncedFile);
+      results.set(provider, result);
+    });
+
+    await Promise.all(uploadTasks);
+
+    // 5. Final State Update
+    const hasSuccess = Array.from(results.values()).some((r) => r.success);
+    if (hasSuccess) {
+      this.state.syncState = 'IDLE';
+    } else {
+      this.state.syncState = 'ERROR';
+      // lastError is set by uploadToProvider
+    }
+
+    // Process errors from initial checks (if any)
+    checkResults.forEach((r) => {
+      if (r.error) {
+        results.set(r.provider as CloudProvider, {
+          success: false,
+          provider: r.provider as CloudProvider,
+          action: 'none',
+          error: r.error,
+        });
+        this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
+        this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+      }
+    });
 
     return results;
   }
