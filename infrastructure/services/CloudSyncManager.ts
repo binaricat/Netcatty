@@ -1158,9 +1158,6 @@ export class CloudSyncManager {
         this.emit({ type: 'SYNC_STARTED', provider });
 
         const check = await this.checkProviderConflict(provider, adapter);
-        if (check.error) {
-          return { provider, adapter, check, error: check.error };
-        }
         return { provider, adapter, check };
       } catch (error) {
         return { provider, error: String(error) };
