@@ -1167,7 +1167,9 @@ export class CloudSyncManager {
     const checkResults = await Promise.all(checkTasks);
 
     // 2. Analyze Results & Handle Conflicts
-    const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
+    const conflict = checkResults.find(
+      (r) => !r.error && !r.check?.error && r.check?.conflict
+    );
 
     if (conflict && conflict.check?.remoteFile) {
       const { provider, check } = conflict;
@@ -1191,15 +1193,20 @@ export class CloudSyncManager {
 
       // Populate results
       for (const r of checkResults) {
-        if (r.error) {
+        const checkError = r.error ?? r.check?.error;
+        if (checkError) {
           results.set(r.provider as CloudProvider, {
             success: false,
             provider: r.provider as CloudProvider,
             action: 'none',
-            error: r.error,
+            error: checkError,
           });
-          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
-          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+          this.updateProviderStatus(r.provider as CloudProvider, 'error', checkError);
+          this.emit({
+            type: 'SYNC_ERROR',
+            provider: r.provider as CloudProvider,
+            error: checkError,
+          });
         } else if (r.provider === provider) {
           results.set(provider as CloudProvider, {
             success: false,
@@ -1222,21 +1229,26 @@ export class CloudSyncManager {
 
     // 3. Encrypt Once
     const validUploads = checkResults.filter(
-      (r) => !r.error && !r.check?.conflict && r.adapter
+      (r) => !r.error && !r.check?.error && !r.check?.conflict && r.adapter
     ) as { provider: CloudProvider; adapter: CloudAdapter }[];
 
     if (validUploads.length === 0) {
       // Process errors if any
       checkResults.forEach((r) => {
-        if (r.error) {
+        const checkError = r.error ?? r.check?.error;
+        if (checkError) {
           results.set(r.provider as CloudProvider, {
             success: false,
             provider: r.provider as CloudProvider,
             action: 'none',
-            error: r.error,
+            error: checkError,
           });
-          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
-          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+          this.updateProviderStatus(r.provider as CloudProvider, 'error', checkError);
+          this.emit({
+            type: 'SYNC_ERROR',
+            provider: r.provider as CloudProvider,
+            error: checkError,
+          });
         }
       });
       this.state.syncState = 'ERROR';
@@ -1291,15 +1303,20 @@ export class CloudSyncManager {
 
     // Process errors from initial checks (if any)
     checkResults.forEach((r) => {
-      if (r.error) {
+      const checkError = r.error ?? r.check?.error;
+      if (checkError) {
         results.set(r.provider as CloudProvider, {
           success: false,
           provider: r.provider as CloudProvider,
           action: 'none',
-          error: r.error,
+          error: checkError,
         });
-        this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
-        this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+        this.updateProviderStatus(r.provider as CloudProvider, 'error', checkError);
+        this.emit({
+          type: 'SYNC_ERROR',
+          provider: r.provider as CloudProvider,
+          error: checkError,
+        });
       }
     });
 
