@@ -66,21 +66,26 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showNewHostPanel, setShowNewHostPanel] = useState(false);
 
+  const selectableHosts = useMemo(
+    () => hosts.filter((host) => host.protocol !== "serial"),
+    [hosts]
+  );
+
   // Get all unique tags from hosts
   const allTags = useMemo(() => {
     const tagSet = new Set<string>();
-    hosts.forEach((h) => {
+    selectableHosts.forEach((h) => {
       if (h.tags) {
         h.tags.forEach((tag) => tagSet.add(tag));
       }
     });
     return Array.from(tagSet).sort();
-  }, [hosts]);
+  }, [selectableHosts]);
 
   // Get unique group paths from both hosts and customGroups
   const allGroupPaths = useMemo(() => {
     const pathSet = new Set<string>();
-    hosts.forEach((h) => {
+    selectableHosts.forEach((h) => {
       if (h.group) {
         // Add all parent paths as well
         const parts = h.group.split("/");
@@ -91,7 +96,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     });
     customGroups.forEach((g) => pathSet.add(g));
     return Array.from(pathSet).sort();
-  }, [hosts, customGroups]);
+  }, [selectableHosts, customGroups]);
 
   // Get groups at current level
   const groupsWithCounts = useMemo(() => {
@@ -105,7 +110,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         const topLevel = path.split("/")[0];
         if (!seen.has(topLevel)) {
           seen.add(topLevel);
-          const count = hosts.filter(
+          const count = selectableHosts.filter(
             (h) =>
               h.group &&
               (h.group === topLevel || h.group.startsWith(`${topLevel}/`)),
@@ -119,7 +124,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         const fullPath = `${prefix}${nextLevel}`;
         if (!seen.has(fullPath)) {
           seen.add(fullPath);
-          const count = hosts.filter(
+          const count = selectableHosts.filter(
             (h) =>
               h.group &&
               (h.group === fullPath || h.group.startsWith(`${fullPath}/`)),
@@ -130,11 +135,11 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     });
 
     return groups;
-  }, [allGroupPaths, currentPath, hosts]);
+  }, [allGroupPaths, currentPath, selectableHosts]);
 
   // Get hosts at current level with filtering and sorting
   const filteredHosts = useMemo(() => {
-    let result = hosts;
+    let result = selectableHosts;
 
     // Filter by current path
     if (currentPath) {
@@ -180,7 +185,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     });
 
     return result;
-  }, [hosts, currentPath, searchQuery, selectedTags, sortMode]);
+  }, [selectableHosts, currentPath, searchQuery, selectedTags, sortMode]);
 
   // Build breadcrumb from current path
   const breadcrumbs = useMemo(() => {
@@ -390,7 +395,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
             if (onContinue) {
               onContinue();
             } else {
-              const host = hosts.find((h) => selectedHostIds.includes(h.id));
+              const host = selectableHosts.find((h) => selectedHostIds.includes(h.id));
               if (host) {
                 onSelect(host);
               }
