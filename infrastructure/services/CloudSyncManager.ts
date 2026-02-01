@@ -1165,9 +1165,18 @@ export class CloudSyncManager {
     });
 
     const checkResults = await Promise.all(checkTasks);
+    const normalizedCheckResults = checkResults.map((result) => {
+      if (!result.error && result.check?.error) {
+        return {
+          ...result,
+          error: result.check.error,
+        };
+      }
+      return result;
+    });
 
     // 2. Analyze Results & Handle Conflicts
-    const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
+    const conflict = normalizedCheckResults.find((r) => !r.error && r.check?.conflict);
 
     if (conflict && conflict.check?.remoteFile) {
       const { provider, check } = conflict;
@@ -1190,7 +1199,7 @@ export class CloudSyncManager {
       });
 
       // Populate results
-      for (const r of checkResults) {
+      for (const r of normalizedCheckResults) {
         if (r.error) {
           results.set(r.provider as CloudProvider, {
             success: false,
@@ -1221,13 +1230,13 @@ export class CloudSyncManager {
     }
 
     // 3. Encrypt Once
-    const validUploads = checkResults.filter(
+    const validUploads = normalizedCheckResults.filter(
       (r) => !r.error && !r.check?.conflict && r.adapter
     ) as { provider: CloudProvider; adapter: CloudAdapter }[];
 
     if (validUploads.length === 0) {
       // Process errors if any
-      checkResults.forEach((r) => {
+      normalizedCheckResults.forEach((r) => {
         if (r.error) {
           results.set(r.provider as CloudProvider, {
             success: false,
@@ -1257,7 +1266,7 @@ export class CloudSyncManager {
       const msg = String(error);
       this.state.syncState = 'ERROR';
       this.state.lastError = msg;
-      
+
       // Fail all
       for (const r of validUploads) {
         this.updateProviderStatus(r.provider, 'error', msg);
@@ -1290,7 +1299,7 @@ export class CloudSyncManager {
     }
 
     // Process errors from initial checks (if any)
-    checkResults.forEach((r) => {
+    normalizedCheckResults.forEach((r) => {
       if (r.error) {
         results.set(r.provider as CloudProvider, {
           success: false,
