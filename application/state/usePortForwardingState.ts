@@ -9,7 +9,6 @@ import { localStorageAdapter } from "../../infrastructure/persistence/localStora
 import {
   clearReconnectTimer,
   getActiveConnection,
-  getActiveRuleIds,
   startPortForward,
   stopPortForward,
   syncWithBackend,
@@ -80,6 +79,25 @@ const setGlobalRules = (newRules: PortForwardingRule[]) => {
   localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, newRules);
 };
 
+const normalizeRulesWithConnections = (rules: PortForwardingRule[]) => {
+  return rules.map((rule) => {
+    const connection = getActiveConnection(rule.id);
+    if (connection) {
+      return {
+        ...rule,
+        status: connection.status,
+        error: connection.error,
+      };
+    }
+
+    return {
+      ...rule,
+      status: "inactive",
+      error: undefined,
+    };
+  });
+};
+
 // Initialization Logic
 const initializeStore = async () => {
   if (isInitialized) return;
@@ -91,18 +109,7 @@ const initializeStore = async () => {
     STORAGE_KEY_PORT_FORWARDING,
   );
   if (saved && Array.isArray(saved)) {
-    // Sync status with active connections in the service layer
-    const _activeRuleIds = getActiveRuleIds();
-    const withSyncedStatus = saved.map((r) => {
-      const conn = getActiveConnection(r.id);
-      if (conn) {
-        // This rule has an active connection, preserve its status
-        return { ...r, status: conn.status, error: conn.error };
-      }
-      // No active connection, reset to inactive
-      return { ...r, status: "inactive" as const, error: undefined };
-    });
-    setGlobalRules(withSyncedStatus);
+    setGlobalRules(normalizeRulesWithConnections(saved));
   }
 };
 
@@ -133,7 +140,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
   useEffect(() => {
     // If global state was updated before we subscribed (e.g. init finished), update local state
     if (rules !== globalRules) {
-        setRules(globalRules);
+      setRules(globalRules);
     }
 
     const listener = (newRules: PortForwardingRule[]) => {
@@ -206,7 +213,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
   );
 
   const importRules = useCallback((newRules: PortForwardingRule[]) => {
-    setGlobalRules(newRules);
+    setGlobalRules(normalizeRulesWithConnections(newRules));
   }, []);
 
   const setRuleStatus = useCallback(
