@@ -872,6 +872,7 @@ export class CloudSyncManager {
       this.emit({ type: 'SYNC_COMPLETED', provider, result });
       return result;
     } catch (error) {
+      this.state.lastError = String(error);
       this.updateProviderStatus(provider, 'error', String(error));
 
       // Add to sync history
