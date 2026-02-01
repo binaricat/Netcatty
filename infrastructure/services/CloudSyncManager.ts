@@ -1072,6 +1072,12 @@ export class CloudSyncManager {
   // Auto-Sync
   // ==========================================================================
 
+  setDeviceName(name: string): void {
+    this.state.deviceName = name;
+    this.saveToStorage(SYNC_STORAGE_KEYS.DEVICE_NAME, name);
+    this.notifyStateChange();
+  }
+
   setAutoSync(enabled: boolean, intervalMinutes?: number): void {
     this.state.autoSyncEnabled = enabled;
     if (intervalMinutes) {

@@ -358,8 +358,8 @@ export const useCloudSync = (): CloudSyncHook => {
     manager.setAutoSync(enabled, intervalMinutes);
   }, []);
   
-  const setDeviceName = useCallback((_name: string) => {
-    // TODO: Add setDeviceName to CloudSyncManager if needed
+  const setDeviceName = useCallback((name: string) => {
+    manager.setDeviceName(name);
   }, []);
   
   // ========== Utilities ==========
