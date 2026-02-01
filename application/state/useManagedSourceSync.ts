@@ -233,6 +233,31 @@ export const useManagedSourceSync = ({
       const prevHostMap = new Map<string, Host>(prevHosts.map((h) => [h.id, h]));
       const currHostMap = new Map<string, Host>(hosts.map((h) => [h.id, h]));
 
+      // Index hosts by managedSourceId to avoid O(N*M) lookups
+      const prevHostsBySource = new Map<string, Host[]>();
+      for (const h of prevHosts) {
+        if (h.managedSourceId) {
+          let list = prevHostsBySource.get(h.managedSourceId);
+          if (!list) {
+            list = [];
+            prevHostsBySource.set(h.managedSourceId, list);
+          }
+          list.push(h);
+        }
+      }
+
+      const currHostsBySource = new Map<string, Host[]>();
+      for (const h of hosts) {
+        if (h.managedSourceId) {
+          let list = currHostsBySource.get(h.managedSourceId);
+          if (!list) {
+            list = [];
+            currHostsBySource.set(h.managedSourceId, list);
+          }
+          list.push(h);
+        }
+      }
+
       // Helper to check if a host's SSH-relevant fields changed
       const hostChanged = (prevHost: Host | undefined, currHost: Host | undefined): boolean => {
         if (!prevHost || !currHost) return prevHost !== currHost;
@@ -245,8 +270,8 @@ export const useManagedSourceSync = ({
       };
 
       for (const source of managedSources) {
-        const prevManaged = prevHosts.filter((h) => h.managedSourceId === source.id);
-        const currManaged = hosts.filter((h) => h.managedSourceId === source.id);
+        const prevManaged = prevHostsBySource.get(source.id) || [];
+        const currManaged = currHostsBySource.get(source.id) || [];
 
         console.log(`[ManagedSourceSync] Source ${source.groupName}: prev=${prevManaged.length}, curr=${currManaged.length}`);
 
