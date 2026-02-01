@@ -87,13 +87,28 @@ function loadWindowState() {
 }
 
 /**
- * Save window state to disk
+ * Save window state to disk (synchronous)
  */
-function saveWindowState(state) {
+function saveWindowStateSync(state) {
   try {
     const statePath = getWindowStatePath();
     if (!statePath) return false;
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    return true;
+  } catch (err) {
+    debugLog("Failed to save window state:", err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Save window state to disk (asynchronous)
+ */
+async function saveWindowState(state) {
+  try {
+    const statePath = getWindowStatePath();
+    if (!statePath) return false;
+    await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
     return true;
   } catch (err) {
     debugLog("Failed to save window state:", err?.message || err);
@@ -614,7 +629,7 @@ async function createWindow(electronModule, options) {
   win.on("close", () => {
     if (saveStateTimer) clearTimeout(saveStateTimer);
     const state = getWindowBoundsState(win, lastNormalBounds);
-    if (state) saveWindowState(state);
+    if (state) saveWindowStateSync(state);
     // Close settings window when main window closes
     closeSettingsWindow();
   });
