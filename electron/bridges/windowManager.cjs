@@ -118,6 +118,7 @@ async function saveWindowState(state) {
 
 let pendingWindowStateWrite = null;
 let queuedWindowState = null;
+let windowStateCloseRequested = false;
 
 async function queueWindowStateSave(state) {
   if (!state) return false;
@@ -648,11 +649,33 @@ async function createWindow(electronModule, options) {
   });
 
   // Save state when window is about to close
-  win.on("close", () => {
+  win.on("close", (event) => {
+    if (windowStateCloseRequested) {
+      return;
+    }
     if (saveStateTimer) clearTimeout(saveStateTimer);
     const state = getWindowBoundsState(win, lastNormalBounds);
+    if (state && pendingWindowStateWrite) {
+      event.preventDefault();
+      queuedWindowState = state;
+      pendingWindowStateWrite
+        .catch(() => {
+          // ignore async write errors before closing
+        })
+        .finally(() => {
+          const finalState = getWindowBoundsState(win, lastNormalBounds);
+          if (finalState) saveWindowStateSync(finalState);
+          closeSettingsWindow();
+          windowStateCloseRequested = true;
+          try {
+            win.close();
+          } catch {
+            // ignore
+          }
+        });
+      return;
+    }
     if (state) saveWindowStateSync(state);
-    // Close settings window when main window closes
     closeSettingsWindow();
   });
 
