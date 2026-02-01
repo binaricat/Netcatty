@@ -258,6 +258,17 @@ function App({ settings }: { settings: SettingsState }) {
   // Get port forwarding rules and import function
   const { rules: portForwardingRules, importRules: importPortForwardingRules } = usePortForwardingState();
 
+  const portForwardingRulesForSync = useMemo(
+    () =>
+      portForwardingRules.map((rule) => ({
+        ...rule,
+        status: "inactive",
+        error: undefined,
+        lastUsedAt: undefined,
+      })),
+    [portForwardingRules],
+  );
+
   // Auto-sync hook for cloud sync
   const { syncNow: handleSyncNow } = useAutoSync({
     hosts,
@@ -265,7 +276,7 @@ function App({ settings }: { settings: SettingsState }) {
     identities,
     snippets,
     customGroups,
-    portForwardingRules,
+    portForwardingRules: portForwardingRulesForSync,
     knownHosts,
     onApplyPayload: (payload) => {
       importDataFromString(JSON.stringify({
