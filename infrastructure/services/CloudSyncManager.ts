@@ -1286,7 +1286,10 @@ export class CloudSyncManager {
       this.state.syncState = 'IDLE';
     } else {
       this.state.syncState = 'ERROR';
-      // lastError is set by uploadToProvider
+      const firstError = Array.from(results.values()).find((r) => !r.success && r.error)?.error;
+      if (firstError) {
+        this.state.lastError = firstError;
+      }
     }
 
     // Process errors from initial checks (if any)
