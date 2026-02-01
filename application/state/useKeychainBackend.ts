@@ -15,6 +15,8 @@ export const useKeychainBackend = () => {
     privateKey?: string;
     command: string;
     timeout?: number;
+    enableKeyboardInteractive?: boolean;
+    sessionId?: string;
   }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.execCommand) throw new Error("execCommand unavailable");

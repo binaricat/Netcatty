@@ -97,6 +97,8 @@ export const ExportKeyPanel: React.FC<ExportKeyPanelProps> = ({
                 privateKey: hostPrivateKey,
                 command,
                 timeout: 30000,
+                enableKeyboardInteractive: true,
+                sessionId: `export-key:${exportHost.id}:${keyItem.id}`,
             });
 
             // Check result

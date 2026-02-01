@@ -1116,6 +1116,8 @@ echo $3 >> "$FILE"`);
                         privateKey: hostPrivateKey,
                         command,
                         timeout: 30000,
+                        enableKeyboardInteractive: true,
+                        sessionId: `export-key:${exportHost.id}:${panel.key.id}`,
                       });
 
                       // Check result - code 0, null, or undefined with no stderr is success

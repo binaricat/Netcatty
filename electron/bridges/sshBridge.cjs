@@ -1107,12 +1107,18 @@ async function startSSHSession(event, options) {
  * Execute a one-off command via SSH
  */
 async function execCommand(event, payload) {
+  const enableKeyboardInteractive = !!payload.enableKeyboardInteractive;
+  const baseTimeoutMs = payload.timeout || 10000;
+  const timeoutMs = enableKeyboardInteractive ? Math.max(baseTimeoutMs, 120000) : baseTimeoutMs;
+  const sender = event.sender;
+  const sessionId = payload.sessionId || `exec-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const defaultKeys = enableKeyboardInteractive ? await findAllDefaultPrivateKeysFromHelper() : [];
+
   return new Promise((resolve, reject) => {
     const conn = new SSHClient();
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const timeoutMs = payload.timeout || 10000;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -1168,7 +1174,7 @@ async function execCommand(event, payload) {
       host: payload.hostname,
       port: payload.port || 22,
       username: payload.username,
-      readyTimeout: timeoutMs,
+      readyTimeout: enableKeyboardInteractive ? Math.max(timeoutMs, 120000) : timeoutMs,
       keepaliveInterval: 0,
     };
 
@@ -1192,7 +1198,29 @@ async function execCommand(event, payload) {
 
     if (payload.password) connectOpts.password = payload.password;
 
-    if (authAgent) {
+    if (enableKeyboardInteractive) {
+      connectOpts.tryKeyboard = true;
+
+      const authConfig = buildAuthHandler({
+        privateKey: connectOpts.privateKey,
+        password: connectOpts.password,
+        passphrase: connectOpts.passphrase,
+        agent: connectOpts.agent,
+        username: connectOpts.username,
+        logPrefix: "[SSH Exec]",
+        defaultKeys,
+      });
+
+      applyAuthToConnOpts(connectOpts, authConfig);
+
+      conn.on("keyboard-interactive", createKeyboardInteractiveHandler({
+        sender,
+        sessionId,
+        hostname: payload.hostname,
+        password: payload.password,
+        logPrefix: "[SSH Exec]",
+      }));
+    } else if (authAgent) {
       const order = ["agent"];
       if (connectOpts.password) order.push("password");
       connectOpts.authHandler = order;

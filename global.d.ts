@@ -182,6 +182,8 @@ declare global {
       privateKey?: string;
       command: string;
       timeout?: number;
+      enableKeyboardInteractive?: boolean;
+      sessionId?: string;
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;
     /** Get current working directory from an active SSH session */
     getSessionPwd?(sessionId: string): Promise<{ success: boolean; cwd?: string; error?: string }>;
