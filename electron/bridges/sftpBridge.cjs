@@ -171,6 +171,18 @@ const ensureRemoteDirInternal = async (sftp, dirPath, encoding) => {
   const normalized = path.posix.normalize(dirPath);
   if (!normalized || normalized === ".") return;
 
+  // Optimization: Check if the full path already exists to avoid O(N) round trips
+  // This is the common case (e.g. uploading multiple files to the same directory)
+  const encodedFull = encodePath(normalized, encoding);
+  try {
+    const stats = await statAsync(sftp, encodedFull);
+    if (stats.isDirectory()) {
+      return;
+    }
+  } catch (err) {
+    // If path doesn't exist or other error, proceed to recursive check
+  }
+
   const isAbsolute = normalized.startsWith("/");
   const parts = normalized.split("/").filter(Boolean);
   let current = isAbsolute ? "/" : "";
