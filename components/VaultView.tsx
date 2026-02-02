@@ -34,6 +34,7 @@ import { useTreeExpandedState } from "../application/state/useTreeExpandedState"
 import { sanitizeHost } from "../domain/host";
 import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/vaultImport";
 import type { VaultImportFormat } from "../domain/vaultImport";
+import type { HotkeyScheme, KeyBinding } from "../domain/models";
 import { STORAGE_KEY_VAULT_HOSTS_VIEW_MODE, STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from "../infrastructure/config/storageKeys";
 import { cn } from "../lib/utils";
 import {
@@ -104,6 +105,8 @@ interface VaultViewProps {
   connectionLogs: ConnectionLog[];
   managedSources: ManagedSource[];
   sessions: TerminalSession[];
+  hotkeyScheme: HotkeyScheme;
+  keyBindings: KeyBinding[];
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onCreateLocalTerminal: () => void;
@@ -144,6 +147,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   connectionLogs,
   managedSources,
   sessions,
+  hotkeyScheme,
+  keyBindings,
   onOpenSettings,
   onOpenQuickSwitcher,
   onCreateLocalTerminal,
@@ -2075,6 +2080,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             hosts={hosts}
             customGroups={customGroups}
             shellHistory={shellHistory}
+            hotkeyScheme={hotkeyScheme}
+            keyBindings={keyBindings}
             onPackagesChange={onUpdateSnippetPackages}
             onSave={(s) =>
               onUpdateSnippets(

@@ -998,6 +998,8 @@ function App({ settings }: { settings: SettingsState }) {
             connectionLogs={connectionLogs}
             managedSources={managedSources}
             sessions={sessions}
+            hotkeyScheme={hotkeyScheme}
+            keyBindings={keyBindings}
             onOpenSettings={handleOpenSettings}
             onOpenQuickSwitcher={handleOpenQuickSwitcher}
             onCreateLocalTerminal={handleCreateLocalTerminal}
