@@ -157,39 +157,66 @@ export const useSftpKeyboardShortcuts = ({
 
             // Cross-pane paste - use startTransfer
             try {
-              const transferResults = await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
-                sourcePane,
-                sourcePath: clipboard.sourcePath,
-                sourceConnectionId: clipboard.sourceConnectionId,
-              });
+              const isCut = clipboard.operation === "cut";
+              const pendingNames = new Set(clipboard.files.map((file) => file.name));
+              const completedNames = new Set<string>();
+              const failedNames = new Set<string>();
 
-              if (clipboard.operation === "cut") {
-                const completedNames = transferResults
-                  .filter((result) => result.status === "completed")
-                  .map((result) => result.fileName);
-                const remainingFiles = clipboard.files.filter(
-                  (file) => !completedNames.includes(file.name),
-                );
-
-                if (completedNames.length > 0) {
-                  await sftp.deleteFilesAtPath(
-                    clipboard.sourceSide,
-                    clipboard.sourceConnectionId,
-                    clipboard.sourcePath,
-                    completedNames,
-                  );
+              const updateClipboardAfterCompletion = (showToast: boolean) => {
+                if (!isCut) return;
+                const current = sftpClipboardStore.get();
+                if (
+                  !current ||
+                  current.operation !== "cut" ||
+                  current.sourceConnectionId !== clipboard.sourceConnectionId ||
+                  current.sourcePath !== clipboard.sourcePath ||
+                  current.sourceSide !== clipboard.sourceSide
+                ) {
+                  return;
                 }
 
+                const remainingFiles = current.files.filter((file) => !completedNames.has(file.name));
                 if (remainingFiles.length === 0) {
                   sftpClipboardStore.clear();
                 } else {
                   sftpClipboardStore.updateFiles(remainingFiles);
-                  const hadFailures = transferResults.some((result) => result.status !== "completed");
-                  if (hadFailures) {
-                    toast.info("Some items could not be transferred and were kept in the clipboard.", "SFTP");
-                  }
                 }
-              }
+
+                if (showToast && failedNames.size > 0) {
+                  toast.info("Some items could not be transferred and were kept in the clipboard.", "SFTP");
+                }
+              };
+
+              const handleTransferComplete = async (result: { fileName: string; status: string }) => {
+                if (!isCut) return;
+                if (!pendingNames.has(result.fileName)) return;
+                pendingNames.delete(result.fileName);
+
+                if (result.status === "completed") {
+                  try {
+                    await sftp.deleteFilesAtPath(
+                      clipboard.sourceSide,
+                      clipboard.sourceConnectionId,
+                      clipboard.sourcePath,
+                      [result.fileName],
+                    );
+                    completedNames.add(result.fileName);
+                  } catch {
+                    failedNames.add(result.fileName);
+                  }
+                } else {
+                  failedNames.add(result.fileName);
+                }
+
+                updateClipboardAfterCompletion(pendingNames.size === 0);
+              };
+
+              await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
+                sourcePane,
+                sourcePath: clipboard.sourcePath,
+                sourceConnectionId: clipboard.sourceConnectionId,
+                onTransferComplete: handleTransferComplete,
+              });
             } catch (error) {
               toast.error("Paste failed. Please try again.", "SFTP");
             }
