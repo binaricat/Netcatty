@@ -701,6 +701,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
                   <RuleCard
                     key={rule.id}
                     rule={rule}
+                    host={hosts.find((h) => h.id === rule.hostId)}
                     viewMode={viewMode}
                     isSelected={selectedRuleId === rule.id}
                     isPending={pendingOperations.has(rule.id)}

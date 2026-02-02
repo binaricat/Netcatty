@@ -5,16 +5,18 @@
 import { Copy,Loader2,Pencil,Play,Square,Trash2 } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { PortForwardingRule } from '../../domain/models';
+import { Host, PortForwardingRule } from '../../domain/models';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { ContextMenu,ContextMenuContent,ContextMenuItem,ContextMenuSeparator,ContextMenuTrigger } from '../ui/context-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { getStatusColor,getTypeColor } from './utils';
 
 export type ViewMode = 'grid' | 'list';
 
 export interface RuleCardProps {
     rule: PortForwardingRule;
+    host?: Host; // The relay host for this rule (for tooltip display)
     viewMode: ViewMode;
     isSelected: boolean;
     isPending: boolean;
@@ -28,6 +30,7 @@ export interface RuleCardProps {
 
 export const RuleCard: React.FC<RuleCardProps> = ({
     rule,
+    host,
     viewMode,
     isSelected,
     isPending,
@@ -74,12 +77,39 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                                 />
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                <span className="truncate">
-                                    {rule.type === 'dynamic'
-                                        ? t('pf.rule.summary.dynamic', { bindAddress: rule.bindAddress, localPort: rule.localPort })
-                                        : t('pf.rule.summary.default', { bindAddress: rule.bindAddress, localPort: rule.localPort, remoteHost: rule.remoteHost, remotePort: rule.remotePort })
-                                    }
-                                </span>
+                                <TooltipProvider delayDuration={300}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="truncate cursor-default">
+                                                {rule.type === 'dynamic'
+                                                    ? t('pf.rule.summary.dynamic', { bindAddress: rule.bindAddress, localPort: rule.localPort })
+                                                    : t('pf.rule.summary.default', { bindAddress: rule.bindAddress, localPort: rule.localPort, remoteHost: rule.remoteHost, remotePort: rule.remotePort })
+                                                }
+                                            </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom" align="start" className="max-w-xs">
+                                            <div className="space-y-1 text-xs">
+                                                {host ? (
+                                                    <>
+                                                        <div className="font-medium">{t('pf.tooltip.relayHost')}</div>
+                                                        <div>{t('pf.tooltip.hostLabel')}: {host.label}</div>
+                                                        <div>{t('pf.tooltip.hostAddress')}: {host.username}@{host.hostname}:{host.port}</div>
+                                                    </>
+                                                ) : (
+                                                    <div className="text-muted-foreground">{t('pf.tooltip.noHost')}</div>
+                                                )}
+                                                <div className="border-t border-border/40 pt-1 mt-1">
+                                                    {rule.type === 'dynamic'
+                                                        ? t('pf.tooltip.dynamicDesc')
+                                                        : rule.type === 'local'
+                                                            ? t('pf.tooltip.localDesc')
+                                                            : t('pf.tooltip.remoteDesc')
+                                                    }
+                                                </div>
+                                            </div>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
                             </div>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
