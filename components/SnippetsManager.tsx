@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
 import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/storageKeys';
-import { cn } from '../lib/utils';
+import { cn, isMacPlatform } from '../lib/utils';
 import { Host, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import { DEFAULT_KEY_BINDINGS, keyEventToString, ManagedSource } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
@@ -93,7 +93,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
   const [shortkeyError, setShortkeyError] = useState<string | null>(null);
 
-  // Get all existing shortkeys for conflict detection (excluding current snippet)
+  // Get all existing shortkeys for conflict detection (excluding current snippet).
+  // Uses case-insensitive comparison to prevent conflicts between shortcuts that differ
+  // only in case (e.g., "Ctrl + A" vs "Ctrl + a"), which would map to the same key press.
   const existingShortkeyMap = useMemo(() => {
     const map = new Map<string, string>();
     snippets.forEach(s => {
@@ -104,7 +106,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     return map;
   }, [snippets, editingSnippet.id]);
 
-  // Get all system key bindings for conflict detection
+  // Get all system key bindings for conflict detection (case-insensitive)
   const systemShortkeys = useMemo(() => {
     const set = new Set<string>();
     DEFAULT_KEY_BINDINGS.forEach(binding => {
@@ -114,7 +116,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     return set;
   }, []);
 
-  // Validate shortkey for conflicts
+  // Validate shortkey for conflicts (case-insensitive comparison)
   const validateShortkey = useCallback((key: string): string | null => {
     if (!key) return null;
     
@@ -134,13 +136,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     return null;
   }, [systemShortkeys, existingShortkeyMap, t]);
 
-  // Detect platform for key event formatting
-  const isMac = useMemo(() => {
-    if (typeof navigator !== 'undefined') {
-      return /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-    }
-    return false;
-  }, []);
+  // Detect platform for key event formatting (using shared utility)
+  const isMac = useMemo(() => isMacPlatform(), []);
 
   // Handle shortkey recording
   useEffect(() => {
@@ -180,7 +177,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       setShortkeyError(null);
     };
 
-    // Delay adding click handler to avoid immediate closure
+    // Delay adding click handler by 100ms to prevent the button click that
+    // initiated recording from immediately triggering the click handler
     const timer = setTimeout(() => {
       window.addEventListener('click', handleClick, true);
     }, 100);

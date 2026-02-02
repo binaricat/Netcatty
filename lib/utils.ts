@@ -13,3 +13,14 @@ export function cn(...inputs: ClassValue[]) {
 export function normalizeLineEndings(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
+
+/**
+ * Detect if the current platform is macOS.
+ * Used for keyboard shortcut handling to differentiate between Mac and PC shortcuts.
+ */
+export function isMacPlatform(): boolean {
+  if (typeof navigator !== 'undefined') {
+    return /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  }
+  return false;
+}

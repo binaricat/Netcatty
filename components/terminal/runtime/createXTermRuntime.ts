@@ -18,7 +18,7 @@ import {
   resolveXTermPerformanceConfig,
 } from "../../../infrastructure/config/xtermPerformance";
 import { logger } from "../../../lib/logger";
-import { normalizeLineEndings } from "../../../lib/utils";
+import { isMacPlatform, normalizeLineEndings } from "../../../lib/utils";
 import type {
   Host,
   KeyBinding,
@@ -337,7 +337,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
 
     const currentScheme = ctx.hotkeySchemeRef.current;
-    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && /Mac|iPod|iPhone|iPad/.test(navigator.platform));
+    // Use shared utility for platform detection when hotkey scheme is disabled
+    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
 
     // Check snippet shortcuts first (even if hotkeys are disabled)
     const snippets = ctx.snippetsRef?.current;
