@@ -350,10 +350,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             e.preventDefault();
             e.stopPropagation();
             // Send the snippet command to the terminal
-            ctx.terminalBackend.writeToSession(
-              id,
-              `${normalizeLineEndings(snippet.command)}\r`,
-            );
+            const payload = `${normalizeLineEndings(snippet.command)}\r`;
+            ctx.terminalBackend.writeToSession(id, payload);
+            if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
+              ctx.onBroadcastInputRef.current(payload, ctx.sessionId);
+            }
             return false;
           }
           return true;
