@@ -5,7 +5,7 @@
  * Supports copy, cut, paste, select all, rename, delete, refresh, and new folder.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
 import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
@@ -13,6 +13,7 @@ import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { isNavigableDirectory } from "../index";
+import { toast } from "../../ui/toast";
 
 // SFTP action names that we handle
 const SFTP_ACTIONS = new Set([
@@ -148,15 +149,14 @@ export const useSftpKeyboardShortcuts = ({
           if (clipboard.sourceSide !== focusedSide) {
             // Cross-pane paste - use startTransfer
             sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide);
+            
+            // Clear clipboard only for cut operations
+            if (clipboard.operation === "cut") {
+              sftpClipboardStore.clear();
+            }
           } else {
-            // Same-pane paste (copy within same pane)
-            // This would require a different mechanism - for now we skip it
-            // as cross-pane paste is the primary use case
-          }
-          
-          // Clear clipboard only for cut operations
-          if (clipboard.operation === "cut") {
-            sftpClipboardStore.clear();
+            // Same-pane paste is not supported - show info toast
+            toast.info("Paste within the same pane is not supported. Use copy to other pane instead.", "SFTP");
           }
           break;
         }

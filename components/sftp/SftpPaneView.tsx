@@ -207,7 +207,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       setFileNameError(null);
       setShowNewFileDialog(true);
     },
-  }), [openRenameDialog, openDeleteConfirm, setShowNewFolderDialog, setShowNewFileDialog, setNewFileName, setFileNameError, getNextUntitledName, pane.files]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- State setters are stable and don't need to be in deps
+  }), [openRenameDialog, openDeleteConfirm, getNextUntitledName, pane.files]);
   
   useSftpDialogActionHandler(side, dialogActionHandlers);
 
