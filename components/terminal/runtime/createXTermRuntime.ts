@@ -345,17 +345,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (snippets && snippets.length > 0) {
       for (const snippet of snippets) {
         if (snippet.shortkey && matchesKeyBinding(e, snippet.shortkey, isMac)) {
-          e.preventDefault();
-          e.stopPropagation();
           const id = ctx.sessionRef.current;
           if (id && ctx.statusRef.current === "connected") {
+            e.preventDefault();
+            e.stopPropagation();
             // Send the snippet command to the terminal
             ctx.terminalBackend.writeToSession(
               id,
               `${normalizeLineEndings(snippet.command)}\r`,
             );
+            return false;
           }
-          return false;
+          return true;
         }
       }
     }
