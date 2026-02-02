@@ -160,6 +160,7 @@ export const useSftpState = (
     createDirectory,
     createFile,
     deleteFiles,
+    deleteFilesAtPath,
     renameFile,
     changePermissions,
   } = useSftpPaneActions({
@@ -269,6 +270,7 @@ export const useSftpState = (
     createDirectory,
     createFile,
     deleteFiles,
+    deleteFilesAtPath,
     renameFile,
     changePermissions,
     readTextFile,
@@ -313,6 +315,7 @@ export const useSftpState = (
     createDirectory,
     createFile,
     deleteFiles,
+    deleteFilesAtPath,
     renameFile,
     changePermissions,
     readTextFile,
@@ -361,6 +364,8 @@ export const useSftpState = (
     createDirectory: (...args: Parameters<typeof createDirectory>) => methodsRef.current.createDirectory(...args),
     createFile: (...args: Parameters<typeof createFile>) => methodsRef.current.createFile(...args),
     deleteFiles: (...args: Parameters<typeof deleteFiles>) => methodsRef.current.deleteFiles(...args),
+    deleteFilesAtPath: (...args: Parameters<typeof deleteFilesAtPath>) =>
+      methodsRef.current.deleteFilesAtPath(...args),
     renameFile: (...args: Parameters<typeof renameFile>) => methodsRef.current.renameFile(...args),
     changePermissions: (...args: Parameters<typeof changePermissions>) => methodsRef.current.changePermissions(...args),
     readTextFile: (...args: Parameters<typeof readTextFile>) => methodsRef.current.readTextFile(...args),

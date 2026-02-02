@@ -59,7 +59,7 @@ export const useSftpKeyboardShortcuts = ({
   isActive,
 }: UseSftpKeyboardShortcutsParams) => {
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+    async (e: KeyboardEvent) => {
       // Skip if shortcuts are disabled or SFTP is not active
       if (hotkeyScheme === "disabled" || !isActive) return;
 
@@ -156,15 +156,24 @@ export const useSftpKeyboardShortcuts = ({
             }
 
             // Cross-pane paste - use startTransfer
-            sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
-              sourcePane,
-              sourcePath: clipboard.sourcePath,
-              sourceConnectionId: clipboard.sourceConnectionId,
-            });
-            
-            // Clear clipboard only for cut operations
-            if (clipboard.operation === "cut") {
-              sftpClipboardStore.clear();
+            try {
+              await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
+                sourcePane,
+                sourcePath: clipboard.sourcePath,
+                sourceConnectionId: clipboard.sourceConnectionId,
+              });
+
+              if (clipboard.operation === "cut") {
+                await sftp.deleteFilesAtPath(
+                  clipboard.sourceSide,
+                  clipboard.sourceConnectionId,
+                  clipboard.sourcePath,
+                  clipboard.files.map((file) => file.name),
+                );
+                sftpClipboardStore.clear();
+              }
+            } catch (error) {
+              toast.error("Paste failed. Please try again.", "SFTP");
             }
           } else {
             // Same-pane paste is not supported - show info toast

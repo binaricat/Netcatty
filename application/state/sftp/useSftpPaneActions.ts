@@ -39,6 +39,12 @@ interface UseSftpPaneActionsResult {
   createDirectory: (side: "left" | "right", name: string) => Promise<void>;
   createFile: (side: "left" | "right", name: string) => Promise<void>;
   deleteFiles: (side: "left" | "right", fileNames: string[]) => Promise<void>;
+  deleteFilesAtPath: (
+    side: "left" | "right",
+    connectionId: string,
+    path: string,
+    fileNames: string[],
+  ) => Promise<void>;
   renameFile: (side: "left" | "right", oldName: string, newName: string) => Promise<void>;
   changePermissions: (side: "left" | "right", filePath: string, mode: string) => Promise<void>;
 }
@@ -452,6 +458,75 @@ export const useSftpPaneActions = ({
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
   );
 
+  const deleteFilesAtPath = useCallback(
+    async (
+      side: "left" | "right",
+      connectionId: string,
+      path: string,
+      fileNames: string[],
+    ) => {
+      const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
+      const pane = sideTabs.tabs.find((tab) => tab.connection?.id === connectionId);
+      if (!pane?.connection) return;
+
+      try {
+        for (const name of fileNames) {
+          const fullPath = joinPath(path, name);
+
+          if (pane.connection.isLocal) {
+            await netcattyBridge.get()?.deleteLocalFile?.(fullPath);
+          } else {
+            const sftpId = sftpSessionsRef.current.get(pane.connection.id);
+            if (!sftpId) {
+              handleSessionError(side, new Error("SFTP session not found"));
+              return;
+            }
+            await netcattyBridge.get()?.deleteSftp?.(sftpId, fullPath, pane.filenameEncoding);
+          }
+        }
+
+        clearCacheForConnection(pane.connection.id);
+
+        if (sideTabs.activeTabId === pane.id && pane.connection.currentPath === path) {
+          await refresh(side);
+        } else {
+          updateTab(side, pane.id, (prev) => {
+            if (!prev.connection || prev.connection.id !== connectionId) return prev;
+            if (prev.connection.currentPath !== path) return prev;
+
+            const removeSet = new Set(fileNames);
+            const filteredFiles = prev.files.filter((file) => !removeSet.has(file.name));
+            const nextSelection = new Set(prev.selectedFiles);
+            for (const name of fileNames) {
+              nextSelection.delete(name);
+            }
+            return {
+              ...prev,
+              files: filteredFiles,
+              selectedFiles: nextSelection,
+            };
+          });
+        }
+      } catch (err) {
+        if (isSessionError(err)) {
+          handleSessionError(side, err as Error);
+          return;
+        }
+        throw err;
+      }
+    },
+    [
+      clearCacheForConnection,
+      handleSessionError,
+      isSessionError,
+      leftTabsRef,
+      refresh,
+      rightTabsRef,
+      sftpSessionsRef,
+      updateTab,
+    ],
+  );
+
   const renameFile = useCallback(
     async (side: "left" | "right", oldName: string, newName: string) => {
       const pane = getActivePane(side);
@@ -529,6 +604,7 @@ export const useSftpPaneActions = ({
     createDirectory,
     createFile,
     deleteFiles,
+    deleteFilesAtPath,
     renameFile,
     changePermissions,
   };
