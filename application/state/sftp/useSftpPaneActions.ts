@@ -470,13 +470,20 @@ export const useSftpPaneActions = ({
       if (!pane?.connection) {
         throw new Error("Source pane is no longer available");
       }
+      const bridge = netcattyBridge.get();
+      if (!bridge) {
+        throw new Error("Netcatty bridge not available");
+      }
 
       try {
         for (const name of fileNames) {
           const fullPath = joinPath(path, name);
 
           if (pane.connection.isLocal) {
-            await netcattyBridge.get()?.deleteLocalFile?.(fullPath);
+            if (!bridge.deleteLocalFile) {
+              throw new Error("Local delete unavailable");
+            }
+            await bridge.deleteLocalFile(fullPath);
           } else {
             const sftpId = sftpSessionsRef.current.get(pane.connection.id);
             if (!sftpId) {
@@ -484,7 +491,10 @@ export const useSftpPaneActions = ({
               handleSessionError(side, error);
               throw error;
             }
-            await netcattyBridge.get()?.deleteSftp?.(sftpId, fullPath, pane.filenameEncoding);
+            if (!bridge.deleteSftp) {
+              throw new Error("SFTP delete unavailable");
+            }
+            await bridge.deleteSftp(sftpId, fullPath, pane.filenameEncoding);
           }
         }
 
