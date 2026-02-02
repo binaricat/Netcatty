@@ -279,9 +279,19 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         tryKeyboard: true,
         algorithms: {
           // Prioritize fastest ciphers (GCM modes are hardware-accelerated)
-          cipher: ['aes128-gcm@openssh.com', 'aes256-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
-          // Prioritize faster key exchange
-          kex: ['curve25519-sha256', 'curve25519-sha256@libssh.org', 'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'diffie-hellman-group14-sha256'],
+          cipher: [
+            'aes128-gcm@openssh.com', 'aes256-gcm@openssh.com',
+            'chacha20-poly1305@openssh.com',
+            'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
+          ],
+          // Prioritize modern key exchange algorithms for broad compatibility
+          kex: [
+            'curve25519-sha256', 'curve25519-sha256@libssh.org',
+            'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
+            'diffie-hellman-group14-sha256',
+            'diffie-hellman-group16-sha512', 'diffie-hellman-group18-sha512',
+            'diffie-hellman-group-exchange-sha256',
+          ],
           compress: ['none'],
         },
       };
@@ -458,9 +468,19 @@ async function startSSHSession(event, options) {
       tryKeyboard: true,
       algorithms: {
         // Prioritize fastest ciphers (GCM modes are hardware-accelerated)
-        cipher: ['aes128-gcm@openssh.com', 'aes256-gcm@openssh.com', 'aes128-ctr', 'aes256-ctr'],
-        // Prioritize faster key exchange
-        kex: ['curve25519-sha256', 'curve25519-sha256@libssh.org', 'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'diffie-hellman-group14-sha256'],
+        cipher: [
+          'aes128-gcm@openssh.com', 'aes256-gcm@openssh.com',
+          'chacha20-poly1305@openssh.com',
+          'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
+        ],
+        // Prioritize modern key exchange algorithms for broad compatibility
+        kex: [
+          'curve25519-sha256', 'curve25519-sha256@libssh.org',
+          'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
+          'diffie-hellman-group14-sha256',
+          'diffie-hellman-group16-sha512', 'diffie-hellman-group18-sha512',
+          'diffie-hellman-group-exchange-sha256',
+        ],
         compress: ['none'],
       },
     };
