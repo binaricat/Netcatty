@@ -24,6 +24,7 @@ interface UseSftpModalKeyboardShortcutsParams {
   hotkeyScheme: "disabled" | "mac" | "pc";
   open: boolean;
   files: RemoteFile[];
+  visibleFiles: RemoteFile[];
   selectedFiles: Set<string>;
   setSelectedFiles: (files: Set<string>) => void;
   onRefresh: () => void;
@@ -55,6 +56,7 @@ export const useSftpModalKeyboardShortcuts = ({
   hotkeyScheme,
   open,
   files,
+  visibleFiles,
   selectedFiles,
   setSelectedFiles,
   onRefresh,
@@ -92,7 +94,7 @@ export const useSftpModalKeyboardShortcuts = ({
         case "sftpSelectAll": {
           // Select all files
           const allFileNames = new Set(
-            files.filter((f) => f.name !== "..").map((f) => f.name)
+            visibleFiles.filter((f) => f.name !== "..").map((f) => f.name)
           );
           setSelectedFiles(allFileNames);
           break;
@@ -130,7 +132,19 @@ export const useSftpModalKeyboardShortcuts = ({
         }
       }
     },
-    [hotkeyScheme, open, files, selectedFiles, setSelectedFiles, onRefresh, onRename, onDelete, onNewFolder, keyBindings]
+    [
+      hotkeyScheme,
+      open,
+      files,
+      visibleFiles,
+      selectedFiles,
+      setSelectedFiles,
+      onRefresh,
+      onRename,
+      onDelete,
+      onNewFolder,
+      keyBindings,
+    ]
   );
 
   useEffect(() => {

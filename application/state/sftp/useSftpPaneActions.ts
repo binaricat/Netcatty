@@ -467,7 +467,9 @@ export const useSftpPaneActions = ({
     ) => {
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
       const pane = sideTabs.tabs.find((tab) => tab.connection?.id === connectionId);
-      if (!pane?.connection) return;
+      if (!pane?.connection) {
+        throw new Error("Source pane is no longer available");
+      }
 
       try {
         for (const name of fileNames) {
@@ -478,8 +480,9 @@ export const useSftpPaneActions = ({
           } else {
             const sftpId = sftpSessionsRef.current.get(pane.connection.id);
             if (!sftpId) {
-              handleSessionError(side, new Error("SFTP session not found"));
-              return;
+              const error = new Error("SFTP session not found");
+              handleSessionError(side, error);
+              throw error;
             }
             await netcattyBridge.get()?.deleteSftp?.(sftpId, fullPath, pane.filenameEncoding);
           }
@@ -510,7 +513,7 @@ export const useSftpPaneActions = ({
       } catch (err) {
         if (isSessionError(err)) {
           handleSessionError(side, err as Error);
-          return;
+          throw err;
         }
         throw err;
       }

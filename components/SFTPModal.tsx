@@ -550,6 +550,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     hotkeyScheme,
     open,
     files,
+    visibleFiles: displayFiles,
     selectedFiles,
     setSelectedFiles,
     onRefresh: () => loadFiles(currentPath, { force: true }),
