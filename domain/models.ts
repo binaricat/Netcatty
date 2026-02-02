@@ -300,6 +300,8 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
   else if (eventKey === 'ArrowLeft') eventKey = '←';
   else if (eventKey === 'ArrowRight') eventKey = '→';
   else if (eventKey === 'Escape') eventKey = 'Esc';
+  else if (eventKey === 'Backspace') eventKey = '⌫';
+  else if (eventKey === 'Delete') eventKey = 'Delete';
   else if (eventKey === '[') eventKey = '[';
   else if (eventKey === ']') eventKey = ']';
   
@@ -342,7 +344,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'sftp-paste', action: 'sftpPaste', label: 'Paste Files', mac: '⌘ + V', pc: 'Ctrl + V', category: 'sftp' },
   { id: 'sftp-select-all', action: 'sftpSelectAll', label: 'Select All Files', mac: '⌘ + A', pc: 'Ctrl + A', category: 'sftp' },
   { id: 'sftp-rename', action: 'sftpRename', label: 'Rename File', mac: 'F2', pc: 'F2', category: 'sftp' },
-  { id: 'sftp-delete', action: 'sftpDelete', label: 'Delete Files', mac: '⌘ + ⌫', pc: 'Del', category: 'sftp' },
+  { id: 'sftp-delete', action: 'sftpDelete', label: 'Delete Files', mac: '⌘ + ⌫', pc: 'Delete', category: 'sftp' },
   { id: 'sftp-refresh', action: 'sftpRefresh', label: 'Refresh', mac: '⌘ + R', pc: 'F5', category: 'sftp' },
   { id: 'sftp-new-folder', action: 'sftpNewFolder', label: 'New Folder', mac: '⌘ + Shift + N', pc: 'Ctrl + Shift + N', category: 'sftp' },
 ];
