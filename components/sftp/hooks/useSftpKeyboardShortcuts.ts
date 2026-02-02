@@ -12,7 +12,7 @@ import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
-import { isNavigableDirectory } from "../index";
+import { filterHiddenFiles, isNavigableDirectory, useSftpShowHiddenFiles } from "../index";
 import { toast } from "../../ui/toast";
 
 // SFTP action names that we handle
@@ -58,6 +58,7 @@ export const useSftpKeyboardShortcuts = ({
   sftpRef,
   isActive,
 }: UseSftpKeyboardShortcutsParams) => {
+  const showHiddenFiles = useSftpShowHiddenFiles();
   const handleKeyDown = useCallback(
     async (e: KeyboardEvent) => {
       // Skip if shortcuts are disabled or SFTP is not active
@@ -234,7 +235,14 @@ export const useSftpKeyboardShortcuts = ({
 
         case "sftpSelectAll": {
           // Select all files in the current pane
-          const allFileNames = pane.files
+          const term = pane.filter.trim().toLowerCase();
+          let visibleFiles = filterHiddenFiles(pane.files, showHiddenFiles);
+          if (term) {
+            visibleFiles = visibleFiles.filter(
+              (f) => f.name === ".." || f.name.toLowerCase().includes(term),
+            );
+          }
+          const allFileNames = visibleFiles
             .filter((f) => f.name !== "..")
             .map((f) => f.name);
           sftp.rangeSelect(focusedSide, allFileNames);
@@ -270,7 +278,7 @@ export const useSftpKeyboardShortcuts = ({
         }
       }
     },
-    [hotkeyScheme, isActive, keyBindings, sftpRef]
+    [hotkeyScheme, isActive, keyBindings, sftpRef, showHiddenFiles]
   );
 
   useEffect(() => {
