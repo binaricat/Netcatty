@@ -292,20 +292,26 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
     if (e.metaKey !== needMeta) return false;
   }
   
-  // Check key
-  let eventKey = e.key;
-  if (eventKey === ' ') eventKey = 'Space';
-  else if (eventKey === 'ArrowUp') eventKey = '↑';
-  else if (eventKey === 'ArrowDown') eventKey = '↓';
-  else if (eventKey === 'ArrowLeft') eventKey = '←';
-  else if (eventKey === 'ArrowRight') eventKey = '→';
-  else if (eventKey === 'Escape') eventKey = 'Esc';
-  else if (eventKey === 'Backspace') eventKey = '⌫';
-  else if (eventKey === 'Delete') eventKey = 'Delete';
-  else if (eventKey === '[') eventKey = '[';
-  else if (eventKey === ']') eventKey = ']';
-  
-  return eventKey.toLowerCase() === key.toLowerCase();
+  const normalizeKey = (rawKey: string): string => {
+    let normalizedKey = rawKey;
+    if (normalizedKey === ' ') normalizedKey = 'Space';
+    else if (normalizedKey === 'ArrowUp') normalizedKey = '↑';
+    else if (normalizedKey === 'ArrowDown') normalizedKey = '↓';
+    else if (normalizedKey === 'ArrowLeft') normalizedKey = '←';
+    else if (normalizedKey === 'ArrowRight') normalizedKey = '→';
+    else if (normalizedKey === 'Escape') normalizedKey = 'Esc';
+    else if (normalizedKey === 'Backspace') normalizedKey = '⌫';
+    else if (normalizedKey === 'Delete') normalizedKey = 'Del';
+    else if (normalizedKey === '[') normalizedKey = '[';
+    else if (normalizedKey === ']') normalizedKey = ']';
+    else if (normalizedKey === 'Del') normalizedKey = 'Del';
+    return normalizedKey;
+  };
+
+  const eventKey = normalizeKey(e.key);
+  const parsedKey = normalizeKey(key);
+
+  return eventKey.toLowerCase() === parsedKey.toLowerCase();
 };
 
 export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
