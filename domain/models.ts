@@ -174,7 +174,7 @@ export interface KeyBinding {
   label: string;
   mac: string; // e.g., '⌘+1', '⌘+⌥+arrows'
   pc: string; // e.g., 'Ctrl+1', 'Ctrl+Alt+arrows'
-  category: 'tabs' | 'terminal' | 'navigation' | 'app';
+  category: 'tabs' | 'terminal' | 'navigation' | 'app' | 'sftp';
 }
 
 // User's custom key bindings - only stores overrides from defaults
@@ -335,6 +335,16 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'quick-switch', action: 'quickSwitch', label: 'Quick Switch', mac: '⌘ + J', pc: 'Ctrl + J', category: 'app' },
   { id: 'snippets', action: 'snippets', label: 'Open Snippets', mac: '⌘ + Shift + S', pc: 'Ctrl + Shift + S', category: 'app' },
   { id: 'broadcast', action: 'broadcast', label: 'Switch the Broadcast Mode', mac: '⌘ + B', pc: 'Ctrl + B', category: 'app' },
+
+  // SFTP Operations
+  { id: 'sftp-copy', action: 'sftpCopy', label: 'Copy Files', mac: '⌘ + C', pc: 'Ctrl + C', category: 'sftp' },
+  { id: 'sftp-cut', action: 'sftpCut', label: 'Cut Files', mac: '⌘ + X', pc: 'Ctrl + X', category: 'sftp' },
+  { id: 'sftp-paste', action: 'sftpPaste', label: 'Paste Files', mac: '⌘ + V', pc: 'Ctrl + V', category: 'sftp' },
+  { id: 'sftp-select-all', action: 'sftpSelectAll', label: 'Select All Files', mac: '⌘ + A', pc: 'Ctrl + A', category: 'sftp' },
+  { id: 'sftp-rename', action: 'sftpRename', label: 'Rename File', mac: 'F2', pc: 'F2', category: 'sftp' },
+  { id: 'sftp-delete', action: 'sftpDelete', label: 'Delete Files', mac: '⌘ + ⌫', pc: 'Del', category: 'sftp' },
+  { id: 'sftp-refresh', action: 'sftpRefresh', label: 'Refresh', mac: '⌘ + R', pc: 'F5', category: 'sftp' },
+  { id: 'sftp-new-folder', action: 'sftpNewFolder', label: 'New Folder', mac: '⌘ + Shift + N', pc: 'Ctrl + Shift + N', category: 'sftp' },
 ];
 
 // Terminal appearance settings

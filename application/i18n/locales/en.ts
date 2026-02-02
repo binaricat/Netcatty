@@ -253,6 +253,7 @@ const en: Messages = {
   'settings.shortcuts.category.terminal': 'Terminal',
   'settings.shortcuts.category.navigation': 'Navigation',
   'settings.shortcuts.category.app': 'App',
+  'settings.shortcuts.category.sftp': 'SFTP',
 
   // Context menus / common actions
   'action.newHost': 'New Host',

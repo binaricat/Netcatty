@@ -14,7 +14,7 @@
  * - components/sftp/SftpHostPicker.tsx - Host selection dialog
  */
 
-import React, { memo, useLayoutEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
@@ -37,6 +37,8 @@ import { Loader2 } from "lucide-react";
 import { SftpContextProvider, activeTabStore } from "./sftp";
 import { useSftpViewPaneCallbacks } from "./sftp/hooks/useSftpViewPaneCallbacks";
 import { useSftpViewTabs } from "./sftp/hooks/useSftpViewTabs";
+import { useSftpKeyboardShortcuts } from "./sftp/hooks/useSftpKeyboardShortcuts";
+import { sftpFocusStore, SftpFocusedSide } from "./sftp/hooks/useSftpFocusedPane";
 
 // Wrapper component that subscribes to activeTabId for CSS visibility
 // This isolates the activeTabId subscription - only this component re-renders on tab switch
@@ -51,7 +53,7 @@ interface SftpViewProps {
 const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => {
   const { t } = useI18n();
   const isActive = useIsSftpActive();
-  const { sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles } = useSettingsState();
+  const { sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, hotkeyScheme, keyBindings } = useSettingsState();
 
   // File watch event handlers (stable refs to avoid re-creating the useSftpState options)
   const fileWatchHandlers = useMemo(() => ({
@@ -83,6 +85,19 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
   // Store auto-sync setting in ref for stable callbacks
   const autoSyncRef = useRef(sftpAutoSync);
   autoSyncRef.current = sftpAutoSync;
+
+  // SFTP keyboard shortcuts handler
+  useSftpKeyboardShortcuts({
+    keyBindings,
+    hotkeyScheme,
+    sftpRef,
+    isActive,
+  });
+
+  // Handle pane focus when clicking on a pane container
+  const handlePaneFocus = useCallback((side: SftpFocusedSide) => {
+    sftpFocusStore.setFocusedSide(side);
+  }, []);
 
   // Sync activeTabId to external store (allows child components to subscribe without parent re-render)
   // Using useLayoutEffect to sync before paint
@@ -200,7 +215,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
         style={containerStyle}
       >
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0 border-t border-border/70">
-          <div className="relative border-r border-border/70 flex flex-col">
+          <div 
+            className="relative border-r border-border/70 flex flex-col"
+            onClick={() => handlePaneFocus("left")}
+          >
             {/* Left side tab bar - only show when there are tabs */}
             {leftTabsInfo.length > 0 && (
               <SftpTabBar
@@ -240,7 +258,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
               )}
             </div>
           </div>
-          <div className="relative flex flex-col">
+          <div 
+            className="relative flex flex-col"
+            onClick={() => handlePaneFocus("right")}
+          >
             {/* Right side tab bar - only show when there are tabs */}
             {rightTabsInfo.length > 0 && (
               <SftpTabBar

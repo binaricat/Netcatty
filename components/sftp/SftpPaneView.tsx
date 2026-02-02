@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState, useTransition } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { logger } from "../../lib/logger";
 import { useRenderTracker } from "../../lib/useRenderTracker";
@@ -21,6 +21,7 @@ import { useSftpPaneFiles } from "./hooks/useSftpPaneFiles";
 import { useSftpPanePath } from "./hooks/useSftpPanePath";
 import { useSftpPaneSorting } from "./hooks/useSftpPaneSorting";
 import { useSftpPaneVirtualList } from "./hooks/useSftpPaneVirtualList";
+import { useSftpDialogActionHandler } from "./hooks/useSftpDialogAction";
 
 interface SftpPaneWrapperProps {
   side: "left" | "right";
@@ -194,6 +195,21 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     isActive,
     sortedDisplayFiles,
   });
+
+  // Handle keyboard shortcut dialog actions
+  const dialogActionHandlers = useMemo(() => ({
+    onRename: (fileName: string) => openRenameDialog(fileName),
+    onDelete: (fileNames: string[]) => openDeleteConfirm(fileNames),
+    onNewFolder: () => setShowNewFolderDialog(true),
+    onNewFile: () => {
+      const defaultName = getNextUntitledName(pane.files.map(f => f.name));
+      setNewFileName(defaultName);
+      setFileNameError(null);
+      setShowNewFileDialog(true);
+    },
+  }), [openRenameDialog, openDeleteConfirm, setShowNewFolderDialog, setShowNewFileDialog, setNewFileName, setFileNameError, getNextUntitledName, pane.files]);
+  
+  useSftpDialogActionHandler(side, dialogActionHandlers);
 
   const handleSortWithTransition = (field: typeof sortField) => {
     startTransition(() => handleSort(field));

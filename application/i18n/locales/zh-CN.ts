@@ -1048,6 +1048,7 @@ const zhCN: Messages = {
   'settings.shortcuts.category.terminal': '终端',
   'settings.shortcuts.category.navigation': '导航',
   'settings.shortcuts.category.app': '应用',
+  'settings.shortcuts.category.sftp': 'SFTP',
 
   // Host Details (sub-panels)
   'hostDetails.proxyPanel.title': 'Proxy',

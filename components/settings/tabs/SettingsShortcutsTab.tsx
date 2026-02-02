@@ -115,7 +115,7 @@ export default function SettingsShortcutsTab(props: {
     };
   }, [recordingBindingId, recordingScheme, setIsHotkeyRecording]);
 
-  const categories = useMemo(() => ["tabs", "terminal", "navigation", "app"] as const, []);
+  const categories = useMemo(() => ["tabs", "terminal", "navigation", "app", "sftp"] as const, []);
 
   return (
     <SettingsTabContent value="shortcuts">
