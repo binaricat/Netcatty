@@ -97,18 +97,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
   const [shortkeyError, setShortkeyError] = useState<string | null>(null);
 
-  // Get all existing shortkeys for conflict detection (excluding current snippet).
-  // Uses case-insensitive comparison to prevent conflicts between shortcuts that differ
-  // only in case (e.g., "Ctrl + A" vs "Ctrl + a"), which would map to the same key press.
-  const existingShortkeyMap = useMemo(() => {
-    const map = new Map<string, string>();
-    snippets.forEach(s => {
-      if (s.shortkey && s.id !== editingSnippet.id) {
-        map.set(s.shortkey.toLowerCase(), s.label);
-      }
-    });
-    return map;
-  }, [snippets, editingSnippet.id]);
+  const existingShortkeys = useMemo(() => (
+    snippets.filter(s => Boolean(s.shortkey) && s.id !== editingSnippet.id)
+  ), [snippets, editingSnippet.id]);
 
   const isMac = useMemo(() => (
     hotkeyScheme === 'mac' || (hotkeyScheme === 'disabled' && isMacPlatform())
@@ -164,10 +155,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   }, []);
 
   // Validate shortkey for conflicts (case-insensitive comparison)
+  const normalizeKeyString = useCallback((value: string) => (
+    value.toLowerCase().replace(/\s+/g, '')
+  ), []);
+
   const validateShortkey = useCallback((key: string): string | null => {
     if (!key) return null;
-    
-    const keyLower = key.toLowerCase();
     
     const syntheticEvent = buildKeyEventFromString(key);
     if (syntheticEvent) {
@@ -180,13 +173,31 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     }
     
     // Check other snippet shortcuts
-    const conflictingSnippet = existingShortkeyMap.get(keyLower);
-    if (conflictingSnippet) {
-      return t('snippets.shortkey.error.snippetConflict', { name: conflictingSnippet });
+    if (syntheticEvent) {
+      for (const snippet of existingShortkeys) {
+        if (snippet.shortkey && matchesKeyBinding(syntheticEvent, snippet.shortkey, isMac)) {
+          return t('snippets.shortkey.error.snippetConflict', { name: snippet.label });
+        }
+      }
+    } else {
+      const normalizedKey = normalizeKeyString(key);
+      const conflictingSnippet = existingShortkeys.find(snippet => (
+        snippet.shortkey && normalizeKeyString(snippet.shortkey) === normalizedKey
+      ));
+      if (conflictingSnippet) {
+        return t('snippets.shortkey.error.snippetConflict', { name: conflictingSnippet.label });
+      }
     }
     
     return null;
-  }, [activeSystemBindings, buildKeyEventFromString, existingShortkeyMap, isMac, t]);
+  }, [
+    activeSystemBindings,
+    buildKeyEventFromString,
+    existingShortkeys,
+    isMac,
+    normalizeKeyString,
+    t,
+  ]);
 
   // Handle shortkey recording
   useEffect(() => {
