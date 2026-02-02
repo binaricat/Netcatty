@@ -5,7 +5,7 @@ import { useStoredViewMode } from '../application/state/useStoredViewMode';
 import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/storageKeys';
 import { cn, isMacPlatform } from '../lib/utils';
 import { Host, ShellHistoryEntry, Snippet, SSHKey } from '../types';
-import { DEFAULT_KEY_BINDINGS, keyEventToString, ManagedSource } from '../domain/models';
+import { HotkeyScheme, KeyBinding, keyEventToString, ManagedSource, matchesKeyBinding, parseKeyCombo } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
 import SelectHostPanel from './SelectHostPanel';
 import { AsidePanel, AsidePanelContent } from './ui/aside-panel';
@@ -25,6 +25,8 @@ interface SnippetsManagerProps {
   hosts: Host[];
   customGroups?: string[];
   shellHistory: ShellHistoryEntry[];
+  hotkeyScheme: HotkeyScheme;
+  keyBindings: KeyBinding[];
   onSave: (snippet: Snippet) => void;
   onDelete: (id: string) => void;
   onPackagesChange: (packages: string[]) => void;
@@ -46,6 +48,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   hosts,
   customGroups = [],
   shellHistory,
+  hotkeyScheme,
+  keyBindings,
   onSave,
   onDelete,
   onPackagesChange,
@@ -106,14 +110,57 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     return map;
   }, [snippets, editingSnippet.id]);
 
-  // Get all system key bindings for conflict detection (case-insensitive)
-  const systemShortkeys = useMemo(() => {
-    const set = new Set<string>();
-    DEFAULT_KEY_BINDINGS.forEach(binding => {
-      if (binding.mac && binding.mac !== 'Disabled') set.add(binding.mac.toLowerCase());
-      if (binding.pc && binding.pc !== 'Disabled') set.add(binding.pc.toLowerCase());
+  const isMac = useMemo(() => (
+    hotkeyScheme === 'mac' || (hotkeyScheme === 'disabled' && isMacPlatform())
+  ), [hotkeyScheme]);
+
+  const activeSystemBindings = useMemo(() => {
+    if (hotkeyScheme === 'disabled') return [];
+    return keyBindings
+      .map(binding => (hotkeyScheme === 'mac' ? binding.mac : binding.pc))
+      .filter(binding => Boolean(binding) && binding !== 'Disabled');
+  }, [hotkeyScheme, keyBindings]);
+
+  const buildKeyEventFromString = useCallback((keyString: string) => {
+    const parsed = parseKeyCombo(keyString);
+    if (!parsed) return null;
+
+    const modifiers = new Set(parsed.modifiers);
+    const key = parsed.key;
+    const normalizedKey = (() => {
+      switch (key) {
+        case 'Space':
+          return ' ';
+        case '↑':
+          return 'ArrowUp';
+        case '↓':
+          return 'ArrowDown';
+        case '←':
+          return 'ArrowLeft';
+        case '→':
+          return 'ArrowRight';
+        case 'Esc':
+          return 'Escape';
+        case '⌫':
+          return 'Backspace';
+        case 'Del':
+          return 'Delete';
+        case '↵':
+          return 'Enter';
+        case '⇥':
+          return 'Tab';
+        default:
+          return key.length === 1 ? key.toLowerCase() : key;
+      }
+    })();
+
+    return new KeyboardEvent('keydown', {
+      key: normalizedKey,
+      metaKey: modifiers.has('⌘') || modifiers.has('Win'),
+      ctrlKey: modifiers.has('⌃') || modifiers.has('Ctrl'),
+      altKey: modifiers.has('⌥') || modifiers.has('Alt'),
+      shiftKey: modifiers.has('Shift'),
     });
-    return set;
   }, []);
 
   // Validate shortkey for conflicts (case-insensitive comparison)
@@ -122,9 +169,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     
     const keyLower = key.toLowerCase();
     
-    // Check system shortcuts
-    if (systemShortkeys.has(keyLower)) {
-      return t('snippets.shortkey.error.systemConflict');
+    const syntheticEvent = buildKeyEventFromString(key);
+    if (syntheticEvent) {
+      const conflictsSystem = activeSystemBindings.some(binding => (
+        matchesKeyBinding(syntheticEvent, binding, isMac)
+      ));
+      if (conflictsSystem) {
+        return t('snippets.shortkey.error.systemConflict');
+      }
     }
     
     // Check other snippet shortcuts
@@ -134,10 +186,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     }
     
     return null;
-  }, [systemShortkeys, existingShortkeyMap, t]);
-
-  // Detect platform for key event formatting (using shared utility)
-  const isMac = useMemo(() => isMacPlatform(), []);
+  }, [activeSystemBindings, buildKeyEventFromString, existingShortkeyMap, isMac, t]);
 
   // Handle shortkey recording
   useEffect(() => {

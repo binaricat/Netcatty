@@ -85,6 +85,7 @@ import { SortDropdown, SortMode } from "./ui/sort-dropdown";
 import { TagFilterDropdown } from "./ui/tag-filter-dropdown";
 import { toast } from "./ui/toast";
 import { Badge } from "./ui/badge";
+import { HotkeyScheme, KeyBinding } from "../domain/models";
 
 const LazyProtocolSelectDialog = lazy(() => import("./ProtocolSelectDialog"));
 const LazyConnectionLogsManager = lazy(() => import("./ConnectionLogsManager"));
@@ -104,6 +105,8 @@ interface VaultViewProps {
   connectionLogs: ConnectionLog[];
   managedSources: ManagedSource[];
   sessions: TerminalSession[];
+  hotkeyScheme: HotkeyScheme;
+  keyBindings: KeyBinding[];
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onCreateLocalTerminal: () => void;
@@ -144,6 +147,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   connectionLogs,
   managedSources,
   sessions,
+  hotkeyScheme,
+  keyBindings,
   onOpenSettings,
   onOpenQuickSwitcher,
   onCreateLocalTerminal,
@@ -2075,6 +2080,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             hosts={hosts}
             customGroups={customGroups}
             shellHistory={shellHistory}
+            hotkeyScheme={hotkeyScheme}
+            keyBindings={keyBindings}
             onPackagesChange={onUpdateSnippetPackages}
             onSave={(s) =>
               onUpdateSnippets(
