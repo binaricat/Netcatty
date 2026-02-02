@@ -12,7 +12,7 @@ import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
-import { filterHiddenFiles, isNavigableDirectory, useSftpShowHiddenFiles } from "../index";
+import { filterHiddenFiles, isNavigableDirectory } from "../index";
 import { toast } from "../../ui/toast";
 
 // SFTP action names that we handle
@@ -32,6 +32,7 @@ interface UseSftpKeyboardShortcutsParams {
   hotkeyScheme: "disabled" | "mac" | "pc";
   sftpRef: MutableRefObject<SftpStateApi>;
   isActive: boolean;
+  showHiddenFiles: boolean;
 }
 
 /**
@@ -57,8 +58,8 @@ export const useSftpKeyboardShortcuts = ({
   hotkeyScheme,
   sftpRef,
   isActive,
+  showHiddenFiles,
 }: UseSftpKeyboardShortcutsParams) => {
-  const showHiddenFiles = useSftpShowHiddenFiles();
   const handleKeyDown = useCallback(
     async (e: KeyboardEvent) => {
       // Skip if shortcuts are disabled or SFTP is not active
@@ -87,9 +88,9 @@ export const useSftpKeyboardShortcuts = ({
 
       const sftp = sftpRef.current;
       const focusedSide = sftpFocusStore.getFocusedSide();
-      
+
       // Get the active pane for the focused side
-      const pane = focusedSide === "left" 
+      const pane = focusedSide === "left"
         ? sftp.leftTabs.tabs.find(p => p.id === sftp.leftTabs.activeTabId)
         : sftp.rightTabs.tabs.find(p => p.id === sftp.rightTabs.activeTabId);
 
@@ -100,7 +101,7 @@ export const useSftpKeyboardShortcuts = ({
           // Copy selected files to clipboard
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length === 0) return;
-          
+
           const clipboardFiles: SftpClipboardFile[] = selectedFiles.map((name: string) => {
             const file = pane.files.find((f) => f.name === name);
             return {
@@ -108,7 +109,7 @@ export const useSftpKeyboardShortcuts = ({
               isDirectory: file ? isNavigableDirectory(file) : false,
             };
           });
-          
+
           sftpClipboardStore.copy(
             clipboardFiles,
             pane.connection.currentPath,
@@ -122,7 +123,7 @@ export const useSftpKeyboardShortcuts = ({
           // Cut selected files to clipboard
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length === 0) return;
-          
+
           const clipboardFiles: SftpClipboardFile[] = selectedFiles.map((name: string) => {
             const file = pane.files.find((f) => f.name === name);
             return {
@@ -130,7 +131,7 @@ export const useSftpKeyboardShortcuts = ({
               isDirectory: file ? isNavigableDirectory(file) : false,
             };
           });
-          
+
           sftpClipboardStore.cut(
             clipboardFiles,
             pane.connection.currentPath,
@@ -144,7 +145,7 @@ export const useSftpKeyboardShortcuts = ({
           // Paste files from clipboard
           const clipboard = sftpClipboardStore.get();
           if (!clipboard || clipboard.files.length === 0) return;
-          
+
           // Use startTransfer to paste files from source to current pane
           // The transfer direction is determined by clipboard sourceSide and current focusedSide
           if (clipboard.sourceSide !== focusedSide) {

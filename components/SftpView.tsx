@@ -38,7 +38,7 @@ import { SftpContextProvider, activeTabStore } from "./sftp";
 import { useSftpViewPaneCallbacks } from "./sftp/hooks/useSftpViewPaneCallbacks";
 import { useSftpViewTabs } from "./sftp/hooks/useSftpViewTabs";
 import { useSftpKeyboardShortcuts } from "./sftp/hooks/useSftpKeyboardShortcuts";
-import { sftpFocusStore, SftpFocusedSide } from "./sftp/hooks/useSftpFocusedPane";
+import { sftpFocusStore, SftpFocusedSide, useSftpFocusedSide } from "./sftp/hooks/useSftpFocusedPane";
 
 // Wrapper component that subscribes to activeTabId for CSS visibility
 // This isolates the activeTabId subscription - only this component re-renders on tab switch
@@ -92,7 +92,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
     hotkeyScheme,
     sftpRef,
     isActive,
+    showHiddenFiles: sftpShowHiddenFiles,
   });
+
+  // Subscribe to focused side for visual indicator
+  const focusedSide = useSftpFocusedSide();
 
   // Handle pane focus when clicking on a pane container
   const handlePaneFocus = useCallback((side: SftpFocusedSide) => {
@@ -215,8 +219,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
         style={containerStyle}
       >
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0 border-t border-border/70">
-          <div 
-            className="relative border-r border-border/70 flex flex-col"
+          <div
+            className={cn(
+              "relative border-r border-border/70 flex flex-col",
+              focusedSide === "left" && "ring-1 ring-inset ring-primary/70"
+            )}
             onClick={() => handlePaneFocus("left")}
           >
             {/* Left side tab bar - only show when there are tabs */}
@@ -258,8 +265,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
               )}
             </div>
           </div>
-          <div 
-            className="relative flex flex-col"
+          <div
+            className={cn(
+              "relative flex flex-col",
+              focusedSide === "right" && "ring-1 ring-inset ring-primary/70"
+            )}
             onClick={() => handlePaneFocus("right")}
           >
             {/* Right side tab bar - only show when there are tabs */}
