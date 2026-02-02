@@ -197,19 +197,30 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   });
 
   // Handle keyboard shortcut dialog actions
-  const dialogActionHandlers = useMemo(() => ({
-    onRename: (fileName: string) => openRenameDialog(fileName),
-    onDelete: (fileNames: string[]) => openDeleteConfirm(fileNames),
-    onNewFolder: () => setShowNewFolderDialog(true),
-    onNewFile: () => {
-      const defaultName = getNextUntitledName(pane.files.map(f => f.name));
-      setNewFileName(defaultName);
-      setFileNameError(null);
-      setShowNewFileDialog(true);
-    },
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- State setters are stable and don't need to be in deps
-  }), [openRenameDialog, openDeleteConfirm, getNextUntitledName, pane.files]);
-  
+  const dialogActionHandlers = useMemo(
+    () => ({
+      onRename: (fileName: string) => openRenameDialog(fileName),
+      onDelete: (fileNames: string[]) => openDeleteConfirm(fileNames),
+      onNewFolder: () => setShowNewFolderDialog(true),
+      onNewFile: () => {
+        const defaultName = getNextUntitledName(pane.files.map(f => f.name));
+        setNewFileName(defaultName);
+        setFileNameError(null);
+        setShowNewFileDialog(true);
+      },
+    }),
+    [
+      getNextUntitledName,
+      openDeleteConfirm,
+      openRenameDialog,
+      pane.files,
+      setFileNameError,
+      setNewFileName,
+      setShowNewFileDialog,
+      setShowNewFolderDialog,
+    ],
+  );
+
   useSftpDialogActionHandler(side, dialogActionHandlers);
 
   const handleSortWithTransition = (field: typeof sortField) => {
