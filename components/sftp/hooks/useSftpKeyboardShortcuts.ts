@@ -157,20 +157,38 @@ export const useSftpKeyboardShortcuts = ({
 
             // Cross-pane paste - use startTransfer
             try {
-              await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
+              const transferResults = await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
                 sourcePane,
                 sourcePath: clipboard.sourcePath,
                 sourceConnectionId: clipboard.sourceConnectionId,
               });
 
               if (clipboard.operation === "cut") {
-                await sftp.deleteFilesAtPath(
-                  clipboard.sourceSide,
-                  clipboard.sourceConnectionId,
-                  clipboard.sourcePath,
-                  clipboard.files.map((file) => file.name),
+                const completedNames = transferResults
+                  .filter((result) => result.status === "completed")
+                  .map((result) => result.fileName);
+                const remainingFiles = clipboard.files.filter(
+                  (file) => !completedNames.includes(file.name),
                 );
-                sftpClipboardStore.clear();
+
+                if (completedNames.length > 0) {
+                  await sftp.deleteFilesAtPath(
+                    clipboard.sourceSide,
+                    clipboard.sourceConnectionId,
+                    clipboard.sourcePath,
+                    completedNames,
+                  );
+                }
+
+                if (remainingFiles.length === 0) {
+                  sftpClipboardStore.clear();
+                } else {
+                  sftpClipboardStore.updateFiles(remainingFiles);
+                  const hadFailures = transferResults.some((result) => result.status !== "completed");
+                  if (hadFailures) {
+                    toast.info("Some items could not be transferred and were kept in the clipboard.", "SFTP");
+                  }
+                }
               }
             } catch (error) {
               toast.error("Paste failed. Please try again.", "SFTP");

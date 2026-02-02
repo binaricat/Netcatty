@@ -34,7 +34,7 @@ interface UseSftpTransfersResult {
       sourcePath?: string;
       sourceConnectionId?: string;
     },
-  ) => Promise<void>;
+  ) => Promise<TransferResult[]>;
   addExternalUpload: (task: TransferTask) => void;
   updateExternalUpload: (taskId: string, updates: Partial<TransferTask>) => void;
   cancelTransfer: (transferId: string) => Promise<void>;
@@ -42,6 +42,12 @@ interface UseSftpTransfersResult {
   clearCompletedTransfers: () => void;
   dismissTransfer: (transferId: string) => void;
   resolveConflict: (conflictId: string, action: "replace" | "skip" | "duplicate") => Promise<void>;
+}
+
+interface TransferResult {
+  id: string;
+  fileName: string;
+  status: TransferStatus;
 }
 
 export const useSftpTransfers = ({
@@ -310,7 +316,7 @@ export const useSftpTransfers = ({
     sourcePane: SftpPane,
     targetPane: SftpPane,
     targetSide: "left" | "right",
-  ) => {
+  ): Promise<TransferStatus> => {
     const updateTask = (updates: Partial<TransferTask>) => {
       setTransfers((prev) =>
         prev.map((t) => (t.id === task.id ? { ...t, ...updates } : t)),
@@ -466,7 +472,7 @@ export const useSftpTransfers = ({
             status: "pending",
             totalBytes: sourceStat?.size || estimatedSize,
           });
-          return;
+          return "pending";
         }
       }
 
@@ -512,6 +518,7 @@ export const useSftpTransfers = ({
       );
 
       await refresh(targetSide);
+      return "completed";
     } catch (err) {
       if (useSimulatedProgress) {
         stopProgressSimulation(task.id);
@@ -523,7 +530,7 @@ export const useSftpTransfers = ({
 
       if (isCancelled) {
         // Don't update status - cancelTransfer already set it to cancelled
-        return;
+        return "cancelled";
       }
 
       updateTask({
@@ -532,6 +539,7 @@ export const useSftpTransfers = ({
         endTime: Date.now(),
         speed: 0,
       });
+      return "failed";
     }
   };
 
@@ -549,7 +557,7 @@ export const useSftpTransfers = ({
       const sourcePane = options?.sourcePane ?? getActivePane(sourceSide);
       const targetPane = getActivePane(targetSide);
 
-      if (!sourcePane?.connection || !targetPane?.connection) return;
+      if (!sourcePane?.connection || !targetPane?.connection) return [];
 
       const sourceEncoding: SftpFilenameEncoding = sourcePane.connection.isLocal
         ? "auto"
@@ -612,9 +620,18 @@ export const useSftpTransfers = ({
 
       setTransfers((prev) => [...prev, ...newTasks]);
 
+      const results: TransferResult[] = [];
+
       for (const task of newTasks) {
-        await processTransfer(task, sourcePane, targetPane, targetSide);
+        const status = await processTransfer(task, sourcePane, targetPane, targetSide);
+        results.push({
+          id: task.id,
+          fileName: task.fileName,
+          status,
+        });
       }
+
+      return results;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [getActivePane, sftpSessionsRef],

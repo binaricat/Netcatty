@@ -86,6 +86,22 @@ export const sftpClipboardStore = {
   },
 
   /**
+   * Update clipboard file list (used for partial cut transfers)
+   */
+  updateFiles: (files: SftpClipboardFile[]) => {
+    if (!clipboardState) return;
+    if (files.length === 0) {
+      clipboardState = null;
+    } else {
+      clipboardState = {
+        ...clipboardState,
+        files,
+      };
+    }
+    notifyListeners();
+  },
+
+  /**
    * Check if there are files in the clipboard
    */
   hasFiles: (): boolean => clipboardState !== null && clipboardState.files.length > 0,
