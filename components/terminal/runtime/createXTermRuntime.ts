@@ -355,6 +355,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
               ctx.onBroadcastInputRef.current(payload, ctx.sessionId);
             }
+            if (ctx.onCommandExecuted) {
+              const cmd = snippet.command.trim();
+              if (cmd) ctx.onCommandExecuted(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
+              ctx.commandBufferRef.current = "";
+            }
             return false;
           }
           return true;
