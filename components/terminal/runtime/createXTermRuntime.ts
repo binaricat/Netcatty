@@ -350,7 +350,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           const id = ctx.sessionRef.current;
           if (id && ctx.statusRef.current === "connected") {
             // Send the snippet command to the terminal
-            ctx.terminalBackend.writeToSession(id, normalizeLineEndings(snippet.command));
+            ctx.terminalBackend.writeToSession(
+              id,
+              `${normalizeLineEndings(snippet.command)}\r`,
+            );
           }
           return false;
         }
