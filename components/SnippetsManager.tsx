@@ -106,10 +106,33 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   ), [hotkeyScheme]);
 
   const activeSystemBindings = useMemo(() => {
-    if (hotkeyScheme === 'disabled') return [];
-    return keyBindings
-      .map(binding => (hotkeyScheme === 'mac' ? binding.mac : binding.pc))
-      .filter(binding => Boolean(binding) && binding !== 'Disabled');
+    return keyBindings.flatMap((binding) => {
+      const entries: { binding: string; isMac: boolean }[] = [];
+      const macBinding = binding.mac;
+      const pcBinding = binding.pc;
+
+      if (hotkeyScheme === 'mac') {
+        if (macBinding && macBinding !== 'Disabled') {
+          entries.push({ binding: macBinding, isMac: true });
+        }
+        return entries;
+      }
+
+      if (hotkeyScheme === 'pc') {
+        if (pcBinding && pcBinding !== 'Disabled') {
+          entries.push({ binding: pcBinding, isMac: false });
+        }
+        return entries;
+      }
+
+      if (macBinding && macBinding !== 'Disabled') {
+        entries.push({ binding: macBinding, isMac: true });
+      }
+      if (pcBinding && pcBinding !== 'Disabled') {
+        entries.push({ binding: pcBinding, isMac: false });
+      }
+      return entries;
+    });
   }, [hotkeyScheme, keyBindings]);
 
   const buildKeyEventFromString = useCallback((keyString: string) => {
@@ -164,8 +187,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     
     const syntheticEvent = buildKeyEventFromString(key);
     if (syntheticEvent) {
-      const conflictsSystem = activeSystemBindings.some(binding => (
-        matchesKeyBinding(syntheticEvent, binding, isMac)
+      const conflictsSystem = activeSystemBindings.some(({ binding, isMac: bindingIsMac }) => (
+        matchesKeyBinding(syntheticEvent, binding, bindingIsMac)
       ));
       if (conflictsSystem) {
         return t('snippets.shortkey.error.systemConflict');
