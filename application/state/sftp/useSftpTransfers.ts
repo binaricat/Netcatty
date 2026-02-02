@@ -48,6 +48,7 @@ interface UseSftpTransfersResult {
 interface TransferResult {
   id: string;
   fileName: string;
+  originalFileName?: string;
   status: TransferStatus;
 }
 
@@ -281,6 +282,7 @@ export const useSftpTransfers = ({
         ...task,
         id: crypto.randomUUID(),
         fileName: file.name,
+        originalFileName: file.name,
         sourcePath: joinPath(task.sourcePath, file.name),
         targetPath: joinPath(task.targetPath, file.name),
         isDirectory: file.type === "directory",
@@ -523,7 +525,12 @@ export const useSftpTransfers = ({
       const completionHandler = completionHandlersRef.current.get(task.id);
       if (completionHandler) {
         try {
-          await completionHandler({ id: task.id, fileName: task.fileName, status: "completed" });
+          await completionHandler({
+            id: task.id,
+            fileName: task.fileName,
+            originalFileName: task.originalFileName ?? task.fileName,
+            status: "completed",
+          });
         } finally {
           completionHandlersRef.current.delete(task.id);
         }
@@ -543,7 +550,12 @@ export const useSftpTransfers = ({
         const completionHandler = completionHandlersRef.current.get(task.id);
         if (completionHandler) {
           try {
-            await completionHandler({ id: task.id, fileName: task.fileName, status: "cancelled" });
+            await completionHandler({
+              id: task.id,
+              fileName: task.fileName,
+              originalFileName: task.originalFileName ?? task.fileName,
+              status: "cancelled",
+            });
           } finally {
             completionHandlersRef.current.delete(task.id);
           }
@@ -560,7 +572,12 @@ export const useSftpTransfers = ({
       const completionHandler = completionHandlersRef.current.get(task.id);
       if (completionHandler) {
         try {
-          await completionHandler({ id: task.id, fileName: task.fileName, status: "failed" });
+          await completionHandler({
+            id: task.id,
+            fileName: task.fileName,
+            originalFileName: task.originalFileName ?? task.fileName,
+            status: "failed",
+          });
         } finally {
           completionHandlersRef.current.delete(task.id);
         }
@@ -631,6 +648,7 @@ export const useSftpTransfers = ({
         newTasks.push({
           id: crypto.randomUUID(),
           fileName: file.name,
+          originalFileName: file.name,
           sourcePath: joinPath(sourcePath, file.name),
           targetPath: joinPath(targetPath, file.name),
           sourceConnectionId,
@@ -660,6 +678,7 @@ export const useSftpTransfers = ({
         results.push({
           id: task.id,
           fileName: task.fileName,
+          originalFileName: task.originalFileName ?? task.fileName,
           status,
         });
       }
@@ -779,7 +798,12 @@ export const useSftpTransfers = ({
         const completionHandler = completionHandlersRef.current.get(conflictId);
         if (completionHandler) {
           try {
-            await completionHandler({ id: task.id, fileName: task.fileName, status: "cancelled" });
+            await completionHandler({
+              id: task.id,
+              fileName: task.fileName,
+              originalFileName: task.originalFileName ?? task.fileName,
+              status: "cancelled",
+            });
           } finally {
             completionHandlersRef.current.delete(conflictId);
           }

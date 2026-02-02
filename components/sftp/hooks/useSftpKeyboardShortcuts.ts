@@ -187,10 +187,15 @@ export const useSftpKeyboardShortcuts = ({
                 }
               };
 
-              const handleTransferComplete = async (result: { fileName: string; status: string }) => {
+              const handleTransferComplete = async (result: {
+                fileName: string;
+                originalFileName?: string;
+                status: string;
+              }) => {
                 if (!isCut) return;
-                if (!pendingNames.has(result.fileName)) return;
-                pendingNames.delete(result.fileName);
+                const sourceFileName = result.originalFileName ?? result.fileName;
+                if (!pendingNames.has(sourceFileName)) return;
+                pendingNames.delete(sourceFileName);
 
                 if (result.status === "completed") {
                   try {
@@ -198,14 +203,14 @@ export const useSftpKeyboardShortcuts = ({
                       clipboard.sourceSide,
                       clipboard.sourceConnectionId,
                       clipboard.sourcePath,
-                      [result.fileName],
+                      [sourceFileName],
                     );
-                    completedNames.add(result.fileName);
+                    completedNames.add(sourceFileName);
                   } catch {
-                    failedNames.add(result.fileName);
+                    failedNames.add(sourceFileName);
                   }
                 } else {
-                  failedNames.add(result.fileName);
+                  failedNames.add(sourceFileName);
                 }
 
                 updateClipboardAfterCompletion(pendingNames.size === 0);

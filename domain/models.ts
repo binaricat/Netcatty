@@ -572,6 +572,7 @@ export type TransferDirection = 'upload' | 'download' | 'remote-to-remote' | 'lo
 export interface TransferTask {
   id: string;
   fileName: string;
+  originalFileName?: string;
   sourcePath: string;
   targetPath: string;
   sourceConnectionId: string;
