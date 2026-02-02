@@ -29,6 +29,11 @@ interface UseSftpTransfersResult {
     sourceFiles: { name: string; isDirectory: boolean }[],
     sourceSide: "left" | "right",
     targetSide: "left" | "right",
+    options?: {
+      sourcePane?: SftpPane;
+      sourcePath?: string;
+      sourceConnectionId?: string;
+    },
   ) => Promise<void>;
   addExternalUpload: (task: TransferTask) => void;
   updateExternalUpload: (taskId: string, updates: Partial<TransferTask>) => void;
@@ -535,8 +540,13 @@ export const useSftpTransfers = ({
       sourceFiles: { name: string; isDirectory: boolean }[],
       sourceSide: "left" | "right",
       targetSide: "left" | "right",
+      options?: {
+        sourcePane?: SftpPane;
+        sourcePath?: string;
+        sourceConnectionId?: string;
+      },
     ) => {
-      const sourcePane = getActivePane(sourceSide);
+      const sourcePane = options?.sourcePane ?? getActivePane(sourceSide);
       const targetPane = getActivePane(targetSide);
 
       if (!sourcePane?.connection || !targetPane?.connection) return;
@@ -545,12 +555,13 @@ export const useSftpTransfers = ({
         ? "auto"
         : sourcePane.filenameEncoding || "auto";
 
-      const sourcePath = sourcePane.connection.currentPath;
+      const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
       const targetPath = targetPane.connection.currentPath;
+      const sourceConnectionId = options?.sourceConnectionId ?? sourcePane.connection.id;
 
       const sourceSftpId = sourcePane.connection.isLocal
         ? null
-        : sftpSessionsRef.current.get(sourcePane.connection.id);
+        : sftpSessionsRef.current.get(sourceConnectionId);
 
       const newTasks: TransferTask[] = [];
 
@@ -587,7 +598,7 @@ export const useSftpTransfers = ({
           fileName: file.name,
           sourcePath: joinPath(sourcePath, file.name),
           targetPath: joinPath(targetPath, file.name),
-          sourceConnectionId: sourcePane.connection!.id,
+          sourceConnectionId,
           targetConnectionId: targetPane.connection!.id,
           direction,
           status: "pending" as TransferStatus,
