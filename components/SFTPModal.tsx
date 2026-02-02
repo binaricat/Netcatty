@@ -21,6 +21,7 @@ import { useSftpModalPath } from "./sftp-modal/hooks/useSftpModalPath";
 import { useSftpModalSelection } from "./sftp-modal/hooks/useSftpModalSelection";
 import { useSftpModalSession } from "./sftp-modal/hooks/useSftpModalSession";
 import { useSftpModalFileActions } from "./sftp-modal/hooks/useSftpModalFileActions";
+import { useSftpModalKeyboardShortcuts } from "./sftp-modal/hooks/useSftpModalKeyboardShortcuts";
 import { joinPath, isRootPath, getParentPath } from "./sftp-modal/pathUtils";
 import { toast } from "./ui/toast";
 import { Dialog, DialogContent } from "./ui/dialog";
@@ -85,7 +86,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     showSaveDialog,
   } = useSftpBackend();
   const { t } = useI18n();
-  const { sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload } = useSettingsState();
+  const { sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, hotkeyScheme, keyBindings } = useSettingsState();
   const isLocalSession = host.protocol === "local";
   const [filenameEncoding, setFilenameEncoding] = useState<SftpFilenameEncoding>(
     host.sftpEncoding ?? "auto"
@@ -506,6 +507,55 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     onNavigate: handleNavigate,
     onOpenFile: handleOpenFile,
     onNavigateUp: handleUp,
+  });
+
+  // Keyboard shortcuts for modal
+  const handleKeyboardRename = useCallback((file: RemoteFile) => {
+    openRenameDialog(file);
+  }, [openRenameDialog]);
+
+  const handleKeyboardDelete = useCallback((fileNames: string[]) => {
+    // Find the files to pass to confirm dialog
+    if (fileNames.length === 0) return;
+    if (!confirm(t("sftp.deleteConfirm.title", { count: fileNames.length }))) return;
+    
+    // Delete files
+    (async () => {
+      try {
+        for (const fileName of fileNames) {
+          const fullPath = joinPathForSession(currentPath, fileName);
+          if (isLocalSession) {
+            await deleteLocalFile(fullPath);
+          } else {
+            await deleteSftpWithEncoding(await ensureSftp(), fullPath);
+          }
+        }
+        await loadFiles(currentPath, { force: true });
+        setSelectedFiles(new Set());
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : t("sftp.error.deleteFailed"),
+          "SFTP",
+        );
+      }
+    })();
+  }, [currentPath, isLocalSession, deleteLocalFile, deleteSftpWithEncoding, ensureSftp, loadFiles, setSelectedFiles, t, joinPathForSession]);
+
+  const handleKeyboardNewFolder = useCallback(() => {
+    handleCreateFolder();
+  }, [handleCreateFolder]);
+
+  useSftpModalKeyboardShortcuts({
+    keyBindings,
+    hotkeyScheme,
+    open,
+    files,
+    selectedFiles,
+    setSelectedFiles,
+    onRefresh: () => loadFiles(currentPath, { force: true }),
+    onRename: handleKeyboardRename,
+    onDelete: handleKeyboardDelete,
+    onNewFolder: handleKeyboardNewFolder,
   });
 
   const handleDeleteSelected = async () => {
