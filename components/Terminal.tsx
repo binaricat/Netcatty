@@ -235,6 +235,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   isBroadcastEnabledRef.current = isBroadcastEnabled;
   onBroadcastInputRef.current = onBroadcastInput;
 
+  // Snippets ref for shortkey support in terminal
+  const snippetsRef = useRef(snippets);
+  snippetsRef.current = snippets;
+
   const terminalBackend = useTerminalBackend();
   const { resizeSession } = terminalBackend;
 
@@ -425,6 +429,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           onHotkeyActionRef,
           isBroadcastEnabledRef,
           onBroadcastInputRef,
+          snippetsRef,
           sessionId,
           statusRef,
           onCommandExecuted,

@@ -1240,6 +1240,15 @@ const en: Messages = {
   'snippets.renameDialog.error.duplicate': 'A package with this name already exists',
   'snippets.renameDialog.error.invalidChars': 'Package name can only contain letters, numbers, hyphens, and underscores',
 
+  // Snippet Shortkey
+  'snippets.field.shortkey': 'Keyboard Shortcut',
+  'snippets.shortkey.placeholder': 'Click to set shortcut',
+  'snippets.shortkey.recording': 'Press a key combination...',
+  'snippets.shortkey.hint': 'Press this shortcut in terminal to quickly send the command.',
+  'snippets.shortkey.clear': 'Clear shortcut',
+  'snippets.shortkey.error.systemConflict': 'This shortcut conflicts with a system shortcut',
+  'snippets.shortkey.error.snippetConflict': 'This shortcut is already used by snippet: {name}',
+
   // Serial Port
   'serial.button': 'Serial',
   'serial.modal.title': 'Connect to Serial Port',

@@ -136,6 +136,7 @@ export interface Snippet {
   tags?: string[];
   package?: string; // package path
   targets?: string[]; // host ids
+  shortkey?: string; // Keyboard shortcut to send this snippet in terminal (e.g., "F1", "Ctrl + F1")
 }
 
 export interface TerminalLine {

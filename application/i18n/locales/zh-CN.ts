@@ -1226,6 +1226,15 @@ const zhCN: Messages = {
   'snippets.renameDialog.error.duplicate': '已存在同名的代码包',
   'snippets.renameDialog.error.invalidChars': '代码包名称只能包含字母、数字、连字符和下划线',
 
+  // Snippet Shortkey
+  'snippets.field.shortkey': '快捷键',
+  'snippets.shortkey.placeholder': '点击设置快捷键',
+  'snippets.shortkey.recording': '请按下快捷键组合...',
+  'snippets.shortkey.hint': '在终端中按下此快捷键可快速发送命令。',
+  'snippets.shortkey.clear': '清除快捷键',
+  'snippets.shortkey.error.systemConflict': '此快捷键与系统快捷键冲突',
+  'snippets.shortkey.error.snippetConflict': '此快捷键已被代码片段使用：{name}',
+
   // Serial Port
   'serial.button': '串口',
   'serial.modal.title': '连接串口',

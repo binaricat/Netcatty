@@ -1,11 +1,11 @@
-import { Check, ChevronDown, Clock, Copy, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Loader2, Package, Play, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Clock, Copy, Edit2, FileCode, FolderPlus, Keyboard, LayoutGrid, List as ListIcon, Loader2, Package, Play, Plus, RotateCcw, Search, Trash2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
 import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/storageKeys';
 import { cn } from '../lib/utils';
 import { Host, ShellHistoryEntry, Snippet, SSHKey } from '../types';
-import { ManagedSource } from '../domain/models';
+import { DEFAULT_KEY_BINDINGS, keyEventToString, ManagedSource } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
 import SelectHostPanel from './SelectHostPanel';
 import { AsidePanel, AsidePanelContent } from './ui/aside-panel';
@@ -89,6 +89,110 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  // Shortkey recording state
+  const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
+  const [shortkeyError, setShortkeyError] = useState<string | null>(null);
+
+  // Get all existing shortkeys for conflict detection (excluding current snippet)
+  const existingShortkeyMap = useMemo(() => {
+    const map = new Map<string, string>();
+    snippets.forEach(s => {
+      if (s.shortkey && s.id !== editingSnippet.id) {
+        map.set(s.shortkey.toLowerCase(), s.label);
+      }
+    });
+    return map;
+  }, [snippets, editingSnippet.id]);
+
+  // Get all system key bindings for conflict detection
+  const systemShortkeys = useMemo(() => {
+    const set = new Set<string>();
+    DEFAULT_KEY_BINDINGS.forEach(binding => {
+      if (binding.mac && binding.mac !== 'Disabled') set.add(binding.mac.toLowerCase());
+      if (binding.pc && binding.pc !== 'Disabled') set.add(binding.pc.toLowerCase());
+    });
+    return set;
+  }, []);
+
+  // Validate shortkey for conflicts
+  const validateShortkey = useCallback((key: string): string | null => {
+    if (!key) return null;
+    
+    const keyLower = key.toLowerCase();
+    
+    // Check system shortcuts
+    if (systemShortkeys.has(keyLower)) {
+      return t('snippets.shortkey.error.systemConflict');
+    }
+    
+    // Check other snippet shortcuts
+    const conflictingSnippet = existingShortkeyMap.get(keyLower);
+    if (conflictingSnippet) {
+      return t('snippets.shortkey.error.snippetConflict', { name: conflictingSnippet });
+    }
+    
+    return null;
+  }, [systemShortkeys, existingShortkeyMap, t]);
+
+  // Detect platform for key event formatting
+  const isMac = useMemo(() => {
+    if (typeof navigator !== 'undefined') {
+      return /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+    }
+    return false;
+  }, []);
+
+  // Handle shortkey recording
+  useEffect(() => {
+    if (!isRecordingShortkey) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Escape cancels recording
+      if (e.key === 'Escape') {
+        setIsRecordingShortkey(false);
+        setShortkeyError(null);
+        return;
+      }
+
+      // Skip pure modifier keys
+      if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
+
+      const keyString = keyEventToString(e, isMac);
+      
+      // Validate the new shortkey
+      const error = validateShortkey(keyString);
+      if (error) {
+        setShortkeyError(error);
+        // Don't stop recording, let user try again
+        return;
+      }
+      
+      setShortkeyError(null);
+      setEditingSnippet(prev => ({ ...prev, shortkey: keyString }));
+      setIsRecordingShortkey(false);
+    };
+
+    const handleClick = () => {
+      setIsRecordingShortkey(false);
+      setShortkeyError(null);
+    };
+
+    // Delay adding click handler to avoid immediate closure
+    const timer = setTimeout(() => {
+      window.addEventListener('click', handleClick, true);
+    }, 100);
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('click', handleClick, true);
+    };
+  }, [isRecordingShortkey, isMac, validateShortkey]);
+
   const handleEdit = (snippet?: Snippet) => {
     if (snippet) {
       setEditingSnippet(snippet);
@@ -114,6 +218,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         tags: editingSnippet.tags || [],
         package: editingSnippet.package || '',
         targets: targetSelection,
+        shortkey: editingSnippet.shortkey,
       });
       setRightPanelMode('none');
     }
@@ -606,6 +711,50 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               />
             </Card>
 
+            {/* Shortkey */}
+            <Card className="p-3 space-y-2 bg-card border-border/80">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.shortkey')}</p>
+                {editingSnippet.shortkey && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => {
+                      setEditingSnippet(prev => ({ ...prev, shortkey: undefined }));
+                      setShortkeyError(null);
+                    }}
+                    title={t('snippets.shortkey.clear')}
+                  >
+                    <RotateCcw size={12} />
+                  </Button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsRecordingShortkey(true);
+                  setShortkeyError(null);
+                }}
+                className={cn(
+                  "w-full h-10 px-3 text-sm font-mono rounded-lg border transition-colors flex items-center justify-center gap-2",
+                  isRecordingShortkey
+                    ? "border-primary bg-primary/10 animate-pulse"
+                    : "border-border hover:border-primary/50 bg-background"
+                )}
+              >
+                <Keyboard size={14} className="text-muted-foreground" />
+                {isRecordingShortkey
+                  ? t('snippets.shortkey.recording')
+                  : editingSnippet.shortkey || t('snippets.shortkey.placeholder')}
+              </button>
+              {shortkeyError && (
+                <p className="text-xs text-destructive">{shortkeyError}</p>
+              )}
+              <p className="text-[11px] text-muted-foreground">{t('snippets.shortkey.hint')}</p>
+            </Card>
+
             {/* Targets */}
             <Card className="p-3 space-y-3 bg-card border-border/80">
               <div className="flex items-center justify-between">
@@ -895,6 +1044,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                               {snippet.command.replace(/\s+/g, ' ') || t('snippets.commandFallback')}
                             </div>
                           </div>
+                          {snippet.shortkey && (
+                            <div className="shrink-0 px-2 py-1 text-[10px] font-mono rounded border border-border bg-muted/50 text-muted-foreground">
+                              {snippet.shortkey}
+                            </div>
+                          )}
                           {viewMode === 'list' && (
                             <Button
                               variant="ghost"

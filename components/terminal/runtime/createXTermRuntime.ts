@@ -26,6 +26,7 @@ import type {
   TerminalSettings,
   TerminalTheme,
 } from "../../../types";
+import { matchesKeyBinding } from "../../../domain/models";
 
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
@@ -65,6 +66,9 @@ export type CreateXTermRuntimeContext = {
   onBroadcastInputRef: RefObject<
     ((data: string, sourceSessionId: string) => void) | undefined
   >;
+
+  // Snippets for shortkey support
+  snippetsRef?: RefObject<{ id: string; command: string; shortkey?: string }[]>;
 
   sessionId: string;
   statusRef: RefObject<TerminalSession["status"]>;
@@ -333,12 +337,30 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
 
     const currentScheme = ctx.hotkeySchemeRef.current;
+    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && /Mac|iPod|iPhone|iPad/.test(navigator.platform));
+
+    // Check snippet shortcuts first (even if hotkeys are disabled)
+    const snippets = ctx.snippetsRef?.current;
+    if (snippets && snippets.length > 0) {
+      for (const snippet of snippets) {
+        if (snippet.shortkey && matchesKeyBinding(e, snippet.shortkey, isMac)) {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = ctx.sessionRef.current;
+          if (id && ctx.statusRef.current === "connected") {
+            // Send the snippet command to the terminal
+            ctx.terminalBackend.writeToSession(id, normalizeLineEndings(snippet.command));
+          }
+          return false;
+        }
+      }
+    }
+
     const currentBindings = ctx.keyBindingsRef.current;
     if (currentScheme === "disabled" || currentBindings.length === 0) {
       return true;
     }
 
-    const isMac = currentScheme === "mac";
     const matched = checkAppShortcut(e, currentBindings, isMac);
     if (!matched) return true;
 
