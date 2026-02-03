@@ -113,9 +113,10 @@ export const HostKeywordHighlightPopover: React.FC<HostKeywordHighlightPopoverPr
     }
   };
 
-  // Disable if no host (local terminal)
+  // Disable if no host (local/serial terminal sessions)
   const isLocalTerminal = host?.protocol === 'local' || host?.id?.startsWith('local-');
-  const isDisabled = !host || !onUpdateHost || isLocalTerminal;
+  const isSerialTerminal = host?.protocol === 'serial' || host?.id?.startsWith('serial-');
+  const isDisabled = !host || !onUpdateHost || isLocalTerminal || isSerialTerminal;
 
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
