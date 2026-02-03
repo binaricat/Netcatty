@@ -1,6 +1,6 @@
 /**
  * Terminal Toolbar
- * Displays SFTP, Scripts, Theme, Search buttons and close button in terminal status bar
+ * Displays SFTP, Scripts, Theme, Highlight, Search buttons and close button in terminal status bar
  */
 import { FolderInput, X, Zap, Palette, Search } from 'lucide-react';
 import React, { useState } from 'react';
@@ -10,6 +10,7 @@ import { Button } from '../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { ScrollArea } from '../ui/scroll-area';
 import ThemeCustomizeModal from './ThemeCustomizeModal';
+import HostKeywordHighlightPopover from './HostKeywordHighlightPopover';
 
 export interface TerminalToolbarProps {
     status: 'connecting' | 'connected' | 'disconnected';
@@ -55,6 +56,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
 }) => {
     const { t } = useI18n();
     const [themeModalOpen, setThemeModalOpen] = useState(false);
+    const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
     const buttonBase = "h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent";
 
     const isLocalTerminal = host?.protocol === 'local' || host?.id?.startsWith('local-');
@@ -162,6 +164,14 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             >
                 <Palette size={12} />
             </Button>
+
+            <HostKeywordHighlightPopover
+                host={host}
+                onUpdateHost={onUpdateHost}
+                isOpen={highlightPopoverOpen}
+                setIsOpen={setHighlightPopoverOpen}
+                buttonClassName={buttonBase}
+            />
 
             <Button
                 variant="secondary"

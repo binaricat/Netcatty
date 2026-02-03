@@ -12,6 +12,9 @@ export type { TerminalConnectionProgressProps } from './TerminalConnectionProgre
 export { TerminalToolbar } from './TerminalToolbar';
 export type { TerminalToolbarProps } from './TerminalToolbar';
 
+export { HostKeywordHighlightPopover } from './HostKeywordHighlightPopover';
+export type { HostKeywordHighlightPopoverProps } from './HostKeywordHighlightPopover';
+
 export { TerminalConnectionDialog } from './TerminalConnectionDialog';
 export type { ChainProgress,TerminalConnectionDialogProps } from './TerminalConnectionDialog';
 

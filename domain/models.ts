@@ -96,6 +96,9 @@ export interface Host {
   sftpEncoding?: SftpFilenameEncoding; // Filename encoding for SFTP operations
   // Managed source: if this host is managed by an external file (e.g., ~/.ssh/config)
   managedSourceId?: string; // Reference to ManagedSource.id
+  // Host-level keyword highlighting (overrides/extends global settings)
+  keywordHighlightRules?: KeywordHighlightRule[];
+  keywordHighlightEnabled?: boolean;
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';

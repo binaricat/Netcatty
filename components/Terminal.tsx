@@ -216,12 +216,29 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   useEffect(() => {
     if (xtermRuntimeRef.current) {
-      xtermRuntimeRef.current.keywordHighlighter.setRules(
-        terminalSettings?.keywordHighlightRules ?? [],
-        terminalSettings?.keywordHighlightEnabled ?? false
-      );
+      // Merge global rules with host-level rules
+      // Host-level rules are appended to global rules, allowing hosts to add custom highlighting
+      const globalRules = terminalSettings?.keywordHighlightRules ?? [];
+      const hostRules = host?.keywordHighlightRules ?? [];
+      
+      // Check if highlighting is enabled at either global or host level
+      const globalEnabled = terminalSettings?.keywordHighlightEnabled ?? false;
+      const hostEnabled = host?.keywordHighlightEnabled ?? false;
+      
+      // Merge rules: global rules + host-specific rules
+      const mergedRules = [...globalRules, ...hostRules];
+      
+      // Enable highlighting if either global or host-level is enabled
+      const isEnabled = globalEnabled || hostEnabled;
+      
+      xtermRuntimeRef.current.keywordHighlighter.setRules(mergedRules, isEnabled);
     }
-  }, [terminalSettings?.keywordHighlightEnabled, terminalSettings?.keywordHighlightRules]);
+  }, [
+    terminalSettings?.keywordHighlightEnabled,
+    terminalSettings?.keywordHighlightRules,
+    host?.keywordHighlightEnabled,
+    host?.keywordHighlightRules
+  ]);
 
   const hotkeySchemeRef = useRef(hotkeyScheme);
   const keyBindingsRef = useRef(keyBindings);
