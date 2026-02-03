@@ -220,17 +220,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       // Host-level rules are appended to global rules, allowing hosts to add custom highlighting
       const globalRules = terminalSettings?.keywordHighlightRules ?? [];
       const hostRules = host?.keywordHighlightRules ?? [];
-      
+
       // Check if highlighting is enabled at either global or host level
       const globalEnabled = terminalSettings?.keywordHighlightEnabled ?? false;
       const hostEnabled = host?.keywordHighlightEnabled ?? false;
-      
-      // Merge rules: global rules + host-specific rules
-      const mergedRules = [...globalRules, ...hostRules];
-      
+
+      // Merge rules: include only rules from enabled sources
+      const mergedRules = [
+        ...(globalEnabled ? globalRules : []),
+        ...(hostEnabled ? hostRules : [])
+      ];
+
       // Enable highlighting if either global or host-level is enabled
       const isEnabled = globalEnabled || hostEnabled;
-      
+
       xtermRuntimeRef.current.keywordHighlighter.setRules(mergedRules, isEnabled);
     }
   }, [
