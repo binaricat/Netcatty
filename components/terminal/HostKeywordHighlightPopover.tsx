@@ -203,6 +203,7 @@ export const HostKeywordHighlightPopover: React.FC<HostKeywordHighlightPopoverPr
                       value={rule.color}
                       onChange={(e) => handleColorChange(rule.id, e.target.value)}
                       className="sr-only"
+                      aria-label={`${t('terminal.toolbar.hostHighlight.changeColor')} ${rule.label}`}
                     />
                     <span
                       className="block w-6 h-4 rounded cursor-pointer border border-border/50 hover:border-border"
@@ -241,6 +242,7 @@ export const HostKeywordHighlightPopover: React.FC<HostKeywordHighlightPopoverPr
                 value={newRuleColor}
                 onChange={(e) => setNewRuleColor(e.target.value)}
                 className="sr-only"
+                aria-label={t('terminal.toolbar.hostHighlight.selectColor')}
               />
               <span
                 className="block w-7 h-7 rounded cursor-pointer border border-border/50 hover:border-border"

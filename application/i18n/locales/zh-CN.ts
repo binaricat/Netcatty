@@ -564,6 +564,8 @@ const zhCN: Messages = {
   'terminal.toolbar.hostHighlight.patternPlaceholder': '正则表达式（例如：\\bfailed\\b）',
   'terminal.toolbar.hostHighlight.invalidPattern': '无效的正则表达式',
   'terminal.toolbar.hostHighlight.clearAll': '清除全部',
+  'terminal.toolbar.hostHighlight.changeColor': '更改高亮颜色',
+  'terminal.toolbar.hostHighlight.selectColor': '选择新规则的颜色',
   'terminal.serverStats.cpu': 'CPU 使用率',
   'terminal.serverStats.cpuCores': 'CPU 核心使用率',
   'terminal.serverStats.memory': '内存使用',
