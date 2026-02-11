@@ -323,7 +323,7 @@ async function startTelnetSession(event, options) {
       
       if (cleanData.length > 0) {
         const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:data", { sessionId, data: cleanData.toString('binary') });
+        contents?.send("netcatty:data", { sessionId, data: cleanData.toString('utf8') });
       }
     });
 
@@ -515,7 +515,7 @@ async function startSerialSession(event, options) {
 
         serialPort.on('data', (data) => {
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:data", { sessionId, data: data.toString('binary') });
+          contents?.send("netcatty:data", { sessionId, data: data.toString('utf8') });
         });
 
         serialPort.on('error', (err) => {
