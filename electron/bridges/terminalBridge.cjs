@@ -316,7 +316,17 @@ async function startTelnetSession(event, options) {
       resolve({ sessionId });
     });
 
-    const telnetDecoder = new StringDecoder('utf8');
+    const charsetToNodeEncoding = (charset) => {
+      if (!charset) return 'utf8';
+      const normalized = String(charset).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (['utf8', 'utf-8'].includes(normalized)) return 'utf8';
+      if (['latin1', 'iso88591', 'iso-8859-1', 'binary'].includes(normalized)) return 'latin1';
+      if (normalized === 'ascii') return 'ascii';
+      if (['utf16le', 'ucs2'].includes(normalized)) return 'utf16le';
+      return 'utf8';
+    };
+
+    const telnetDecoder = new StringDecoder(charsetToNodeEncoding(options.charset));
 
     socket.on('data', (data) => {
       const session = sessions.get(sessionId);
@@ -519,7 +529,7 @@ async function startSerialSession(event, options) {
         };
         sessions.set(sessionId, session);
 
-        const serialDecoder = new StringDecoder('utf8');
+        const serialDecoder = new StringDecoder('latin1');
 
         serialPort.on('data', (data) => {
           const decoded = serialDecoder.write(data);
