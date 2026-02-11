@@ -7,6 +7,7 @@ const os = require("node:os");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { StringDecoder } = require("node:string_decoder");
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
 
@@ -315,15 +316,20 @@ async function startTelnetSession(event, options) {
       resolve({ sessionId });
     });
 
+    const telnetDecoder = new StringDecoder('utf8');
+
     socket.on('data', (data) => {
       const session = sessions.get(sessionId);
       if (!session) return;
 
       const cleanData = handleTelnetNegotiation(data);
-      
+
       if (cleanData.length > 0) {
-        const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:data", { sessionId, data: cleanData.toString('utf8') });
+        const decoded = telnetDecoder.write(cleanData);
+        if (decoded) {
+          const contents = electronModule.webContents.fromId(session.webContentsId);
+          contents?.send("netcatty:data", { sessionId, data: decoded });
+        }
       }
     });
 
@@ -513,9 +519,14 @@ async function startSerialSession(event, options) {
         };
         sessions.set(sessionId, session);
 
+        const serialDecoder = new StringDecoder('utf8');
+
         serialPort.on('data', (data) => {
-          const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:data", { sessionId, data: data.toString('utf8') });
+          const decoded = serialDecoder.write(data);
+          if (decoded) {
+            const contents = electronModule.webContents.fromId(session.webContentsId);
+            contents?.send("netcatty:data", { sessionId, data: decoded });
+          }
         });
 
         serialPort.on('error', (err) => {
