@@ -543,8 +543,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
       <div className="absolute inset-x-0 top-0 h-1 app-drag pointer-events-auto z-10" style={dragRegionStyle} aria-hidden />
       <div
-        className="h-8 px-3 flex items-center gap-2 app-drag"
-        style={{ ...dragRegionStyle, paddingLeft: isMacClient && !isWindowFullscreen ? 76 : 12 }}
+        className="h-8 flex items-center gap-2 app-drag"
+        style={{ ...dragRegionStyle, paddingLeft: isMacClient && !isWindowFullscreen ? 76 : 12, paddingRight: isMacClient ? 12 : 0 }}
       >
         {/* Fixed left tabs: Vaults and SFTP */}
         <div className="flex items-center gap-2 flex-shrink-0 app-drag">
@@ -654,8 +654,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         </div>
         {/* Custom window controls for Windows/Linux */}
         {!isMacClient && <WindowControls />}
-        {/* Small drag shim to the right edge */}
-        <div className="w-2 h-8 app-drag flex-shrink-0" />
+        {/* Small drag shim to the right edge (macOS only – on Windows the close button should touch the edge) */}
+        {isMacClient && <div className="w-2 h-8 app-drag flex-shrink-0" />}
       </div>
     </div>
   );
