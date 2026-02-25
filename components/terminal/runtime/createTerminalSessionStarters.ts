@@ -5,10 +5,14 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { logger } from "../../../lib/logger";
 import type { Host, Identity, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
 import {
+  buildHostAuthPlan,
+  buildJumpHostAuthPlans,
+  resolveHostChainConnectionMode,
+} from "../../../domain/authPolicy";
+import {
   isEncryptedCredentialPlaceholder,
   sanitizeCredentialValue,
 } from "../../../domain/credentials";
-import { resolveHostAuth } from "../../../domain/sshAuth";
 
 type TerminalBackendApi = {
   backendAvailable: () => boolean;
@@ -174,7 +178,7 @@ const attachSessionToTerminal = (
 
 const runDistroDetection = async (
   ctx: TerminalSessionStartersContext,
-  auth: { username: string; password?: string; key?: SSHKey },
+  auth: { username: string; password?: string; privateKey?: string },
 ) => {
   if (!ctx.terminalBackend.execAvailable()) return;
   try {
@@ -183,7 +187,7 @@ const runDistroDetection = async (
       username: auth.username || "root",
       port: ctx.host.port || 22,
       password: auth.password,
-      privateKey: auth.key?.privateKey,
+      privateKey: auth.privateKey,
       command: "cat /etc/os-release 2>/dev/null || uname -a",
       timeout: 8000,
     });
@@ -222,7 +226,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
 
     const pendingAuth = ctx.pendingAuthRef.current;
-    const resolvedAuth = resolveHostAuth({
+    const resolvedAuth = buildHostAuthPlan({
       host: ctx.host,
       keys: ctx.keys,
       identities: ctx.identities,
@@ -238,12 +242,20 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     });
 
     const effectiveUsername = resolvedAuth.username || "root";
-    const key = resolvedAuth.key;
-    const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
-    const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
-    const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-    const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(key?.privateKey);
-    let usedKey: SSHKey | undefined;
+    const selectedAuthMethod = resolvedAuth.authMethod;
+    const rawPrimaryPassword = resolvedAuth.password;
+    const rawPrimaryPrivateKey = resolvedAuth.privateKey;
+    const rawPrimaryPassphrase = resolvedAuth.passphrase;
+    const effectivePassword = sanitizeCredentialValue(rawPrimaryPassword);
+    const effectivePrivateKey = sanitizeCredentialValue(rawPrimaryPrivateKey);
+    const effectiveCertificate = resolvedAuth.certificate;
+    const effectivePublicKey = resolvedAuth.publicKey;
+    const effectiveKeyId = resolvedAuth.keyId;
+    const effectiveKeySource = resolvedAuth.keySource;
+    const effectivePassphrase = sanitizeCredentialValue(rawPrimaryPassphrase);
+    const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(rawPrimaryPassword);
+    const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(rawPrimaryPrivateKey);
+    let usedPrivateKey: string | undefined;
     let usedPassword: string | undefined;
 
     const isAuthError = (err: unknown): boolean => {
@@ -270,16 +282,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       : undefined;
 
     const jumpHostsWithUnavailableCredentials: string[] = [];
-    const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost) => {
-      const jumpAuth = resolveHostAuth({
-        host: jumpHost,
-        keys: ctx.keys,
-        identities: ctx.identities,
-      });
-      const jumpKey = jumpAuth.key;
-      const rawJumpPassword = jumpAuth.password;
-      const rawJumpPrivateKey = jumpKey?.privateKey;
-      const rawJumpPassphrase = jumpAuth.passphrase || jumpKey?.passphrase;
+    const jumpMode = resolveHostChainConnectionMode(ctx.host);
+    const jumpHosts = buildJumpHostAuthPlans({
+      jumpHosts: ctx.resolvedChainHosts,
+      keys: ctx.keys,
+      identities: ctx.identities,
+    }).map<NetcattyJumpHost>((jumpHostPlan) => {
+      const rawJumpPassword = jumpHostPlan.password;
+      const rawJumpPrivateKey = jumpHostPlan.privateKey;
+      const rawJumpPassphrase = jumpHostPlan.passphrase;
       const jumpPassword = sanitizeCredentialValue(rawJumpPassword);
       const jumpPrivateKey = sanitizeCredentialValue(rawJumpPrivateKey);
       const jumpPassphrase = sanitizeCredentialValue(rawJumpPassphrase);
@@ -290,23 +301,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         isEncryptedCredentialPlaceholder(rawJumpPassphrase);
 
       if (hasEncryptedJumpCredential && !jumpPassword && !jumpPrivateKey) {
-        jumpHostsWithUnavailableCredentials.push(jumpHost.label || jumpHost.hostname);
+        jumpHostsWithUnavailableCredentials.push(jumpHostPlan.label || jumpHostPlan.hostname);
       }
 
       return {
-        hostname: jumpHost.hostname,
-        port: jumpHost.port || 22,
-        username: jumpAuth.username || "root",
+        ...jumpHostPlan,
         password: jumpPassword,
         privateKey: jumpPrivateKey,
-        certificate: jumpKey?.certificate,
         passphrase: jumpPassphrase,
-        publicKey: jumpKey?.publicKey,
-        keyId: jumpAuth.keyId,
-        keySource: jumpKey?.source,
-        label: jumpHost.label,
       };
     });
+    const useChainProgress = jumpHosts.length > 0 && jumpMode !== "relay-shell";
 
     if (hasEncryptedProxyPassword && !proxyConfig?.password && proxyConfig?.username) {
       const message = tr(
@@ -343,7 +348,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const totalHops = jumpHosts.length + 1;
     let unsubscribeChainProgress: (() => void) | undefined;
 
-    if (jumpHosts.length > 0) {
+    if (useChainProgress) {
       ctx.setChainProgress({
         currentHop: 1,
         totalHops,
@@ -376,31 +381,34 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       // DEBUG: Log key info for troubleshooting
       console.log("[Terminal] Starting SSH session with key info:", {
-        keyId: key?.id,
-        keyLabel: key?.label,
-        keySource: key?.source,
-        hasPublicKey: !!key?.publicKey,
-        hasPrivateKey: !!key?.privateKey,
+        keyId: effectiveKeyId,
+        keySource: effectiveKeySource,
+        hasPublicKey: !!effectivePublicKey,
+        hasPrivateKey: !!effectivePrivateKey,
       });
 
       const startAttempt = async (attempt: {
         password?: string;
-        key?: SSHKey;
+        privateKey?: string;
+        certificate?: string;
+        publicKey?: string;
+        keyId?: string;
+        keySource?: SSHKey["source"];
+        passphrase?: string;
       }): Promise<string> => {
         return ctx.terminalBackend.startSSHSession({
           sessionId: ctx.sessionId,
           hostname: ctx.host.hostname,
           username: effectiveUsername,
+          authMethod: selectedAuthMethod,
           port: ctx.host.port || 22,
           password: attempt.password,
-          privateKey: attempt.key?.privateKey,
-          certificate: attempt.key?.certificate,
-          publicKey: attempt.key?.publicKey,
-          keyId: attempt.key?.id,
-          keySource: attempt.key?.source,
-          passphrase: attempt.key
-            ? (effectivePassphrase || sanitizeCredentialValue(attempt.key.passphrase))
-            : undefined,
+          privateKey: attempt.privateKey,
+          certificate: attempt.certificate,
+          publicKey: attempt.publicKey,
+          keyId: attempt.keyId,
+          keySource: attempt.keySource,
+          passphrase: attempt.passphrase,
           agentForwarding: ctx.host.agentForwarding,
           cols: term.cols,
           rows: term.rows,
@@ -408,14 +416,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           env: termEnv,
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
+          jumpMode: jumpHosts.length > 0 ? jumpMode : undefined,
           keepaliveInterval: ctx.terminalSettings?.keepaliveInterval,
         });
       };
 
       let id: string;
       // Respect explicit auth method selection - don't use key if password auth was explicitly selected
-      const authMethod = resolvedAuth.authMethod;
-      const hasKeyMaterial = !!sanitizeCredentialValue(key?.privateKey) && authMethod !== 'password';
+      const authMethod = selectedAuthMethod;
+      const hasKeyMaterial = !!effectivePrivateKey && authMethod !== "password";
       const hasPassword = !!effectivePassword;
 
       const needsCredentialReentry =
@@ -458,8 +467,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       if (hasKeyMaterial) {
         try {
-          id = await startAttempt({ key });
-          usedKey = key;
+          id = await startAttempt({
+            privateKey: effectivePrivateKey,
+            certificate: effectiveCertificate,
+            publicKey: effectivePublicKey,
+            keyId: effectiveKeyId,
+            keySource: effectiveKeySource,
+            passphrase: effectivePassphrase,
+          });
+          usedPrivateKey = effectivePrivateKey;
         } catch (err) {
           if (isAuthError(err) && hasPassword) {
             ctx.setProgressLogs((prev) => [
@@ -527,7 +543,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         void runDistroDetection(ctx, {
           username: effectiveUsername,
           password: usedPassword,
-          key: usedKey,
+          privateKey: usedPrivateKey,
         }),
       600,
     );

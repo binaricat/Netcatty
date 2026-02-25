@@ -12,8 +12,11 @@ export interface ProxyConfig {
 }
 
 // Host chain configuration for jump host / bastion connections
+export type HostChainConnectionMode = 'proxy-tunnel' | 'relay-shell';
+
 export interface HostChainConfig {
   hostIds: string[]; // Array of host IDs in order (first = closest to client)
+  connectionMode?: HostChainConnectionMode; // How to traverse the chain
 }
 
 // Environment variable for SSH session

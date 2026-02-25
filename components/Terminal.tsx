@@ -21,7 +21,12 @@ import {
   TerminalSettings,
   KeyBinding,
 } from "../types";
-import { resolveHostAuth } from "../domain/sshAuth";
+import {
+  buildHostAuthPlan,
+  buildJumpHostAuthPlans,
+  resolveChainHostsForHost,
+  resolveHostChainConnectionMode,
+} from "../domain/authPolicy";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
 import SFTPModal from "./SFTPModal";
@@ -501,7 +506,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           setProgressLogs(["Initializing Mosh connection..."]);
           await sessionStarters.startMosh(term);
         } else {
-          const resolvedAuth = resolveHostAuth({ host, keys, identities });
+          const resolvedAuth = buildHostAuthPlan({ host, keys, identities });
           const hasPassword = !!resolvedAuth.password;
           const hasKey = !!resolvedAuth.keyId;
           const hasPendingAuth = pendingAuthRef.current;
@@ -1591,7 +1596,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         <SFTPModal
           host={host}
           credentials={(() => {
-            const resolvedAuth = resolveHostAuth({ host, keys, identities });
+            const resolvedAuth = buildHostAuthPlan({ host, keys, identities });
 
             // Build proxy config if present
             const proxyConfig = host.proxyConfig
@@ -1604,48 +1609,29 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               }
               : undefined;
 
-            // Build jump hosts array if host chain is configured
-            let jumpHosts: NetcattyJumpHost[] | undefined;
-            if (host.hostChain?.hostIds && host.hostChain.hostIds.length > 0) {
-              jumpHosts = host.hostChain.hostIds
-                .map((hostId) => allHosts.find((h) => h.id === hostId))
-                .filter((h): h is Host => !!h)
-                .map((jumpHost) => {
-                  const jumpAuth = resolveHostAuth({
-                    host: jumpHost,
-                    keys,
-                    identities,
-                  });
-                  const jumpKey = jumpAuth.key;
-                  return {
-                    hostname: jumpHost.hostname,
-                    port: jumpHost.port || 22,
-                    username: jumpAuth.username || "root",
-                    password: jumpAuth.password,
-                    privateKey: jumpKey?.privateKey,
-                    certificate: jumpKey?.certificate,
-                    passphrase: jumpAuth.passphrase || jumpKey?.passphrase,
-                    publicKey: jumpKey?.publicKey,
-                    keyId: jumpAuth.keyId,
-                    keySource: jumpKey?.source,
-                    label: jumpHost.label,
-                  };
-                });
-            }
+            const chainHosts = resolveChainHostsForHost(host, allHosts);
+            const jumpHosts = buildJumpHostAuthPlans({
+              jumpHosts: chainHosts,
+              keys,
+              identities,
+            });
+            const jumpMode = resolveHostChainConnectionMode(host);
 
             return {
+              authMethod: resolvedAuth.authMethod,
               username: resolvedAuth.username,
               hostname: host.hostname,
               port: host.port,
               password: resolvedAuth.password,
-              privateKey: resolvedAuth.key?.privateKey,
-              certificate: resolvedAuth.key?.certificate,
+              privateKey: resolvedAuth.privateKey,
+              certificate: resolvedAuth.certificate,
               passphrase: resolvedAuth.passphrase,
-              publicKey: resolvedAuth.key?.publicKey,
+              publicKey: resolvedAuth.publicKey,
               keyId: resolvedAuth.keyId,
-              keySource: resolvedAuth.key?.source,
+              keySource: resolvedAuth.keySource,
               proxy: proxyConfig,
               jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
+              jumpMode: jumpHosts.length > 0 ? jumpMode : undefined,
               sftpSudo: host.sftpSudo,
             };
           })()}

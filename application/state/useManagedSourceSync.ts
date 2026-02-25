@@ -292,9 +292,12 @@ export const useManagedSourceSync = ({
           // Compare hostChain arrays for ProxyJump changes
           const prevChain = prev.hostChain?.hostIds || [];
           const currChain = curr.hostChain?.hostIds || [];
+          const prevChainMode = prev.hostChain?.connectionMode || "proxy-tunnel";
+          const currChainMode = curr.hostChain?.connectionMode || "proxy-tunnel";
           const chainChanged =
             prevChain.length !== currChain.length ||
-            prevChain.some((id, i) => id !== currChain[i]);
+            prevChain.some((id, i) => id !== currChain[i]) ||
+            prevChainMode !== currChainMode;
 
           const hasChanged =
             prev.hostname !== curr.hostname ||

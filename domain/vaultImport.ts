@@ -682,7 +682,7 @@ const importFromSshConfig = (text: string): VaultImportResult => {
         continue;
       }
 
-      const hostChain: HostChainConfig = { hostIds: resolvedIds };
+      const hostChain: HostChainConfig = { hostIds: resolvedIds, connectionMode: "proxy-tunnel" };
       host.hostChain = hostChain;
     }
 
@@ -1071,4 +1071,3 @@ export const exportHostsToCsvWithStats = (hosts: Host[]): ExportHostsResult => {
     skippedCount: skippedHosts.length,
   };
 };
-

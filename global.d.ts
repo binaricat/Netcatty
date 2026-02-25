@@ -25,6 +25,7 @@ declare global {
     hostname: string;
     port: number;
     username: string;
+    authMethod?: 'password' | 'key' | 'certificate';
     password?: string;
     privateKey?: string;
     certificate?: string;
@@ -49,6 +50,7 @@ declare global {
     sessionId?: string;
     hostname: string;
     username: string;
+    authMethod?: 'password' | 'key' | 'certificate';
     port?: number;
     password?: string;
     privateKey?: string;
@@ -70,6 +72,8 @@ declare global {
     proxy?: NetcattyProxyConfig;
     // Jump hosts (bastion chain)
     jumpHosts?: NetcattyJumpHost[];
+    // Jump chain traversal mode
+    jumpMode?: 'proxy-tunnel' | 'relay-shell';
     // SSH-level keepalive interval in seconds (0 = disabled)
     keepaliveInterval?: number;
     // Use sudo for SFTP server
@@ -105,8 +109,11 @@ declare global {
     hostname: string;
     port?: number;
     username: string;
+    authMethod?: 'password' | 'key' | 'certificate';
     password?: string;
     privateKey?: string;
+    passphrase?: string;
+    _authTraceId?: string;
   }
 
   interface PortForwardResult {
@@ -245,6 +252,8 @@ declare global {
       cb: (request: {
         requestId: string;
         sessionId: string;
+        traceId?: string | null;
+        source?: string;
         name: string;
         instructions: string;
         prompts: Array<{ prompt: string; echo: boolean }>;

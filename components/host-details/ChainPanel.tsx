@@ -5,12 +5,13 @@
 import { ArrowDown,Plus,X } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { Host } from '../../types';
+import { Host, HostChainConnectionMode } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
 import { AsidePanel } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { ScrollArea } from '../ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface ChainPanelProps {
     formLabel: string;
@@ -18,8 +19,10 @@ export interface ChainPanelProps {
     form: Host;
     chainedHosts: Host[];
     availableHostsForChain: Host[];
+    connectionMode: HostChainConnectionMode;
     onAddHost: (hostId: string) => void;
     onRemoveHost: (index: number) => void;
+    onConnectionModeChange: (mode: HostChainConnectionMode) => void;
     onClearChain: () => void;
     onBack: () => void;
     onCancel: () => void;
@@ -31,8 +34,10 @@ export const ChainPanel: React.FC<ChainPanelProps> = ({
     form,
     chainedHosts,
     availableHostsForChain,
+    connectionMode,
     onAddHost,
     onRemoveHost,
+    onConnectionModeChange,
     onClearChain,
     onBack,
     onCancel,
@@ -60,6 +65,33 @@ export const ChainPanel: React.FC<ChainPanelProps> = ({
                         <Button className="w-full h-10" onClick={() => { }}>
                             <Plus size={14} className="mr-2" /> {t('hostDetails.chain.addHost')}
                         </Button>
+                    </Card>
+
+                    <Card className="p-3 space-y-2 bg-card border-border/80">
+                        <p className="text-xs font-semibold text-muted-foreground">
+                            {t("hostDetails.chain.mode")}
+                        </p>
+                        <Select
+                            value={connectionMode}
+                            onValueChange={(value) => onConnectionModeChange(value as HostChainConnectionMode)}
+                        >
+                            <SelectTrigger className="h-9">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="proxy-tunnel">
+                                    {t("hostDetails.chain.mode.proxyTunnel")}
+                                </SelectItem>
+                                <SelectItem value="relay-shell">
+                                    {t("hostDetails.chain.mode.relayShell")}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            {connectionMode === "relay-shell"
+                                ? t("hostDetails.chain.mode.relayShell.desc")
+                                : t("hostDetails.chain.mode.proxyTunnel.desc")}
+                        </p>
                     </Card>
 
                     {/* Chain visualization */}

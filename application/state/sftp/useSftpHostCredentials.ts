@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import type { Host, Identity, SSHKey } from "../../../domain/models";
-import { resolveHostAuth } from "../../../domain/sshAuth";
+import {
+  buildHostAuthPlan,
+  buildJumpHostAuthPlans,
+  resolveChainHostsForHost,
+  resolveHostChainConnectionMode,
+} from "../../../domain/authPolicy";
 
 interface UseSftpHostCredentialsParams {
   hosts: Host[];
@@ -15,8 +20,7 @@ export const useSftpHostCredentials = ({
 }: UseSftpHostCredentialsParams) =>
   useCallback(
     (host: Host): NetcattySSHOptions => {
-      const resolved = resolveHostAuth({ host, keys, identities });
-      const key = resolved.key || null;
+      const resolved = buildHostAuthPlan({ host, keys, identities });
 
       const proxyConfig = host.proxyConfig
         ? {
@@ -28,46 +32,29 @@ export const useSftpHostCredentials = ({
           }
         : undefined;
 
-      let jumpHosts: NetcattyJumpHost[] | undefined;
-      if (host.hostChain?.hostIds && host.hostChain.hostIds.length > 0) {
-        jumpHosts = host.hostChain.hostIds
-          .map((hostId) => hosts.find((h) => h.id === hostId))
-          .filter((h): h is Host => !!h)
-          .map((jumpHost) => {
-            const jumpAuth = resolveHostAuth({
-              host: jumpHost,
-              keys,
-              identities,
-            });
-            const jumpKey = jumpAuth.key;
-            return {
-              hostname: jumpHost.hostname,
-              port: jumpHost.port || 22,
-              username: jumpAuth.username || "root",
-              password: jumpAuth.password,
-              privateKey: jumpKey?.privateKey,
-              certificate: jumpKey?.certificate,
-              passphrase: jumpAuth.passphrase || jumpKey?.passphrase,
-              publicKey: jumpKey?.publicKey,
-              keyId: jumpAuth.keyId,
-              keySource: jumpKey?.source,
-              label: jumpHost.label,
-            };
-          });
-      }
+      const chainHosts = resolveChainHostsForHost(host, hosts);
+      const jumpHosts = buildJumpHostAuthPlans({
+        jumpHosts: chainHosts,
+        keys,
+        identities,
+      });
+      const jumpMode = resolveHostChainConnectionMode(host);
 
       return {
         hostname: host.hostname,
         username: resolved.username,
+        authMethod: resolved.authMethod,
         port: host.port || 22,
         password: resolved.password,
-        privateKey: key?.privateKey,
-        certificate: key?.certificate,
-        publicKey: key?.publicKey,
+        privateKey: resolved.privateKey,
+        certificate: resolved.certificate,
+        publicKey: resolved.publicKey,
         keyId: resolved.keyId,
-        keySource: key?.source,
+        keySource: resolved.keySource,
+        passphrase: resolved.passphrase,
         proxy: proxyConfig,
         jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
+        jumpMode: jumpHosts.length > 0 ? jumpMode : undefined,
         sudo: host.sftpSudo,
       };
     },

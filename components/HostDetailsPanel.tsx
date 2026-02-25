@@ -26,10 +26,11 @@ import {
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
+import { resolveHostChainConnectionMode } from "../domain/authPolicy";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
 import { MIN_FONT_SIZE, MAX_FONT_SIZE } from "../infrastructure/config/fonts";
 import { cn } from "../lib/utils";
-import { EnvVar, Host, Identity, ManagedSource, ProxyConfig, SSHKey } from "../types";
+import { EnvVar, Host, HostChainConnectionMode, Identity, ManagedSource, ProxyConfig, SSHKey } from "../types";
 import { DistroAvatar } from "./DistroAvatar";
 import ThemeSelectPanel from "./ThemeSelectPanel";
 import {
@@ -209,6 +210,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       ...prev,
       hostChain: {
         hostIds: [...(prev.hostChain?.hostIds || []), hostId],
+        connectionMode: prev.hostChain?.connectionMode || "proxy-tunnel",
       },
     }));
   };
@@ -218,9 +220,20 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       ...prev,
       hostChain: {
         hostIds: (prev.hostChain?.hostIds || []).filter((_, i) => i !== index),
+        connectionMode: prev.hostChain?.connectionMode || "proxy-tunnel",
       },
     }));
   };
+
+  const setChainConnectionMode = useCallback((mode: HostChainConnectionMode) => {
+    setForm((prev) => ({
+      ...prev,
+      hostChain: {
+        hostIds: prev.hostChain?.hostIds || [],
+        connectionMode: mode,
+      },
+    }));
+  }, []);
 
   const clearHostChain = useCallback(() => {
     setForm((prev) => {
@@ -329,6 +342,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       .map((id) => allHosts.find((h) => h.id === id))
       .filter(Boolean) as Host[];
   }, [allHosts, form.hostChain?.hostIds]);
+  const chainConnectionMode = resolveHostChainConnectionMode(form);
 
   // Compute group options for Combobox
   const groupOptions: ComboboxOption[] = useMemo(() => {
@@ -438,8 +452,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         form={form}
         chainedHosts={chainedHosts}
         availableHostsForChain={availableHostsForChain}
+        connectionMode={chainConnectionMode}
         onAddHost={addHostToChain}
         onRemoveHost={removeHostFromChain}
+        onConnectionModeChange={setChainConnectionMode}
         onClearChain={clearHostChain}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
@@ -1263,7 +1279,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                     size={14}
                     className="text-muted-foreground flex-shrink-0"
                   />
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground truncate">
                     {t("hostDetails.jumpHosts.hops", { count: chainedHosts.length })}
                   </span>
                 </div>
@@ -1277,6 +1293,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 />
               </div>
               <div className="w-full space-y-1 pl-5">
+                <div className="text-xs text-muted-foreground">
+                  {t("hostDetails.chain.mode")}:{" "}
+                  {chainConnectionMode === "relay-shell"
+                    ? t("hostDetails.chain.mode.relayShell")
+                    : t("hostDetails.chain.mode.proxyTunnel")}
+                </div>
                 {chainedHosts.slice(0, 5).map((h, idx) => (
                   <div key={h.id} className="flex items-center gap-1 text-sm">
                     <span className="text-muted-foreground">{idx + 1}.</span>

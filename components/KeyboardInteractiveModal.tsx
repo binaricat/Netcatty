@@ -4,7 +4,7 @@
  * This modal displays prompts from the SSH server and collects user responses.
  */
 import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Button } from "./ui/button";
 import {
@@ -24,6 +24,8 @@ export interface KeyboardInteractivePrompt {
 
 export interface KeyboardInteractiveRequest {
   requestId: string;
+  traceId?: string | null;
+  source?: string;
   name: string;
   instructions: string;
   prompts: KeyboardInteractivePrompt[];
@@ -46,15 +48,39 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
   const [responses, setResponses] = useState<string[]>([]);
   const [showPasswords, setShowPasswords] = useState<boolean[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
+
+  const getAutofillPasswordIndex = useCallback((prompts: KeyboardInteractivePrompt[]) => {
+    const passwordPromptPattern = /password|passphrase|passwd|密码|口令/i;
+    const oneTimeCodePattern = /otp|token|verification|verify|\bcode\b|验证码|动态码|二次验证|双因素|2fa|mfa/i;
+
+    for (let i = 0; i < prompts.length; i++) {
+      const prompt = prompts[i];
+      if (prompt.echo) continue;
+      const text = (prompt.prompt || "").toLowerCase();
+      if (passwordPromptPattern.test(text) && !oneTimeCodePattern.test(text)) {
+        return i;
+      }
+    }
+    return -1;
+  }, []);
 
   // Reset state when request changes
   useEffect(() => {
     if (request) {
-      setResponses(request.prompts.map(() => ""));
+      inputRefs.current = [];
+      const initialResponses = request.prompts.map(() => "");
+      if (request.savedPassword) {
+        const passwordPromptIndex = getAutofillPasswordIndex(request.prompts);
+        if (passwordPromptIndex >= 0) {
+          initialResponses[passwordPromptIndex] = request.savedPassword;
+        }
+      }
+      setResponses(initialResponses);
       setShowPasswords(request.prompts.map(() => false));
       setIsSubmitting(false);
     }
-  }, [request]);
+  }, [request, getAutofillPasswordIndex]);
 
   const handleResponseChange = useCallback((index: number, value: string) => {
     setResponses((prev) => {
@@ -84,13 +110,17 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
   }, [request, onCancel]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !isSubmitting) {
+    (e: React.KeyboardEvent, index: number) => {
+      if (e.key === "Enter" && !isSubmitting && request) {
         e.preventDefault();
+        if (index < request.prompts.length - 1) {
+          inputRefs.current[index + 1]?.focus();
+          return;
+        }
         handleSubmit();
       }
     },
-    [handleSubmit, isSubmitting]
+    [handleSubmit, isSubmitting, request]
   );
 
   if (!request) return null;
@@ -137,11 +167,14 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                     type={isPassword && !showPassword ? "password" : "text"}
                     value={responses[index] || ""}
                     onChange={(e) => handleResponseChange(index, e.target.value)}
-                    onKeyDown={handleKeyDown}
+                    onKeyDown={(e) => handleKeyDown(e, index)}
                     placeholder=""
                     className={isPassword ? "pr-10" : undefined}
                     autoFocus={index === 0}
                     disabled={isSubmitting}
+                    ref={(el) => {
+                      inputRefs.current[index] = el;
+                    }}
                   />
                   {isPassword && (
                     <button

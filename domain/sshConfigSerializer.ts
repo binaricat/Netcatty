@@ -67,6 +67,10 @@ const buildProxyJumpValue = (
   if (!host.hostChain?.hostIds || host.hostChain.hostIds.length === 0) {
     return null;
   }
+  // relay-shell is runtime-only behavior and has no equivalent ProxyJump directive
+  if (host.hostChain.connectionMode === "relay-shell") {
+    return null;
+  }
 
   const hostMap = new Map(allHosts.map(h => [h.id, h]));
   const jumpParts: string[] = [];
