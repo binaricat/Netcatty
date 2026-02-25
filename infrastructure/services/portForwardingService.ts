@@ -202,10 +202,12 @@ export const startPortForward = async (
   try {
     // Generate a unique tunnel ID
     const tunnelId = `pf-${rule.id}-${Date.now()}`;
+    const authTraceId = `pf-auth-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     
     // Get the private key if using key auth
     let privateKey: string | undefined;
-    if (host.identityFileId) {
+    const usePasswordOnly = host.authMethod === "password";
+    if (host.identityFileId && !usePasswordOnly) {
       const key = keys.find(k => k.id === host.identityFileId);
       if (key) {
         privateKey = key.privateKey;
@@ -254,8 +256,10 @@ export const startPortForward = async (
       hostname: host.hostname,
       port: host.port,
       username: host.username,
+      authMethod: host.authMethod,
       password: host.password,
       privateKey,
+      _authTraceId: authTraceId,
     });
     
     if (!result.success) {

@@ -7,6 +7,7 @@ const net = require("node:net");
 const { Client: SSHClient } = require("ssh2");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { 
+  generateAuthTraceId,
   buildAuthHandler, 
   createKeyboardInteractiveHandler, 
   applyAuthToConnOpts,
@@ -42,6 +43,7 @@ async function startPortForward(event, payload) {
     hostname,
     port = 22,
     username,
+    authMethod,
     password,
     privateKey,
     passphrase,
@@ -49,6 +51,13 @@ async function startPortForward(event, payload) {
 
   const conn = new SSHClient();
   const sender = event.sender;
+  const authTraceId = payload._authTraceId || generateAuthTraceId("pf-auth");
+  console.log("[PortForward] Auth trace created", {
+    traceId: authTraceId,
+    tunnelId,
+    hostname,
+    username,
+  });
 
   const sendStatus = (status, error = null) => {
     if (!sender.isDestroyed()) {
@@ -84,6 +93,8 @@ async function startPortForward(event, payload) {
     privateKey,
     password,
     passphrase,
+    authMethod,
+    traceId: authTraceId,
     username: connectOpts.username,
     logPrefix: "[PortForward]",
     defaultKeys,
@@ -96,6 +107,8 @@ async function startPortForward(event, payload) {
     sessionId: tunnelId,
     hostname,
     password,
+    traceId: authTraceId,
+    source: "port-forward",
     logPrefix: "[PortForward]",
   }));
 

@@ -10,7 +10,11 @@
 const passphraseHandler = require("./passphraseHandler.cjs");
  
  // Default SSH key names in priority order
- const DEFAULT_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
+const DEFAULT_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
+
+function generateAuthTraceId(prefix = "auth") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
  
  /**
   * Check if an SSH private key is encrypted (requires passphrase)
@@ -133,247 +137,274 @@ async function findAllDefaultPrivateKeys(options = {}) {
    return process.env.SSH_AUTH_SOCK || null;
  }
  
- /**
-  * Build authentication handler with default key fallback support
-  * @param {Object} options
-  * @param {string} [options.privateKey] - Explicitly configured private key
-  * @param {string} [options.password] - Password for authentication
+/**
+ * Build authentication handler with default key fallback support
+ * @param {Object} options
+ * @param {string} [options.privateKey] - Explicitly configured private key
+ * @param {string} [options.password] - Password for authentication
  * @param {string} [options.passphrase] - Passphrase for encrypted private key
-  * @param {Object} [options.agent] - SSH agent (NetcattyAgent or socket path)
-  * @param {string} options.username - SSH username
-  * @param {string} [options.logPrefix] - Log prefix for debugging
-  * @returns {{ authHandler: Function|Array, privateKey: string|null, agent: string|Object|null, usedDefaultKeys: boolean }}
+ * @param {Object} [options.agent] - SSH agent (NetcattyAgent or socket path)
+ * @param {"password"|"key"|"certificate"} [options.authMethod] - Preferred auth method from UI/domain model
+ * @param {string} [options.traceId] - Correlation trace id for auth debugging
+ * @param {string} options.username - SSH username
+ * @param {string} [options.logPrefix] - Log prefix for debugging
+ * @returns {{ authHandler: Function|Array, privateKey: string|null, agent: string|Object|null, usedDefaultKeys: boolean }}
  * @param {Array} [options.unlockedEncryptedKeys] - Array of unlocked encrypted keys with passphrases
-  */
- function buildAuthHandler(options) {
-  const { privateKey, password, passphrase, agent, username, logPrefix = "[SSH]", unlockedEncryptedKeys = [], defaultKeys = [] } = options;
-   
-  // Determine what type of explicit auth the user configured
-  const hasExplicitKey = !!privateKey;
+ */
+function buildAuthHandler(options) {
+  const {
+    privateKey,
+    password,
+    passphrase,
+    agent,
+    authMethod,
+    traceId,
+    username,
+    logPrefix = "[SSH]",
+    unlockedEncryptedKeys = [],
+    defaultKeys = [],
+  } = options;
+
+  const normalizedAuthMethod =
+    authMethod === "password" || authMethod === "key" || authMethod === "certificate"
+      ? authMethod
+      : null;
+
+  // If UI/domain explicitly selected password auth, do not try key/agent first.
+  const enforcePasswordOnly = normalizedAuthMethod === "password";
+  const effectivePrivateKey = enforcePasswordOnly ? null : privateKey;
+  const effectivePassphrase = enforcePasswordOnly ? undefined : passphrase;
+
+  const hasExplicitKey = !!effectivePrivateKey;
   const hasExplicitPassword = !!password;
   const hasExplicitAgent = !!agent;
   const hasExplicitAuth = hasExplicitKey || hasExplicitPassword || hasExplicitAgent;
-  
-  // Determine if this is a password-only or key-only connection
+
   const isPasswordOnly = hasExplicitPassword && !hasExplicitKey && !hasExplicitAgent;
   const isKeyOnly = hasExplicitKey && !hasExplicitAgent;
-  
-   const sshAgentSocket = getSshAgentSocket();
-   
-  // Only use system ssh-agent BEFORE user's auth when:
-  // - User explicitly configured agent, OR
-  // - No explicit auth is configured (pure fallback mode)
-  // When user configured key/password, system agent should only be used AFTER as fallback
+  const sshAgentSocket = getSshAgentSocket();
+
+  // Only use system agent first when user selected agent or no explicit auth at all.
   const useAgentFirst = hasExplicitAgent || !hasExplicitAuth;
-  
-  // Determine effective agent
   const effectiveAgent = agent || (useAgentFirst ? sshAgentSocket : null);
-  
+
   // Determine effective privateKey (user-provided takes priority)
-  const effectivePrivateKey = privateKey || (!hasExplicitAuth && defaultKeys.length > 0 ? defaultKeys[0].privateKey : null);
-  
-  // Determine fallback keys (keys to try after user's primary auth fails)
-  // - If user provided a key: all default keys are fallbacks
-  // - If no explicit auth: first default key is primary, rest are fallbacks  
-  // - If password-only or agent-only: all default keys are fallbacks (tried after primary)
-  const fallbackKeys = hasExplicitKey 
-    ? defaultKeys 
-    : !hasExplicitAuth 
-      ? defaultKeys.slice(1) 
-      : defaultKeys;
-  
-  // Check if we need dynamic handler (have fallback options)
-  const hasFallbackOptions = fallbackKeys.length > 0 || 
-    (!hasExplicitAgent && sshAgentSocket) || 
-    (isPasswordOnly && defaultKeys.length > 0);
-  
-  // If only simple auth methods and no fallback keys needed, use array-based handler
-  if (hasExplicitAuth && !hasFallbackOptions) {
-    const authMethods = [];
-    if (effectiveAgent) authMethods.push("agent");
-    if (privateKey) authMethods.push("publickey");
-    if (password) authMethods.push("password");
-    authMethods.push("keyboard-interactive");
-    
-    return {
-      authHandler: authMethods,
-      privateKey: effectivePrivateKey,
-      agent: effectiveAgent,
-      usedDefaultKeys: false,
-    };
-   }
-   
-  // Build comprehensive authMethods array with all auth options
-  // Order depends on what user explicitly configured:
-  // - Password-only: password -> agent -> default keys -> keyboard-interactive
-  // - Key-only: user key -> password -> agent -> default keys -> keyboard-interactive  
-  // - Agent configured: agent -> user key -> password -> default keys -> keyboard-interactive
-  // - No explicit auth: agent -> default keys -> keyboard-interactive
+  const defaultPrimaryKey =
+    !enforcePasswordOnly && !hasExplicitAuth && defaultKeys.length > 0
+      ? defaultKeys[0].privateKey
+      : null;
+  const effectivePrimaryPrivateKey = effectivePrivateKey || defaultPrimaryKey;
+
+  // Determine fallback keys (keys to try after primary auth fails)
+  const fallbackKeys = enforcePasswordOnly
+    ? []
+    : hasExplicitKey
+      ? defaultKeys
+      : !hasExplicitAuth
+        ? defaultKeys.slice(1)
+        : defaultKeys;
+
   const authMethods = [];
-  
-  if (isPasswordOnly) {
-    // Password-only: password first, then fallbacks
+
+  if (enforcePasswordOnly) {
+    // User explicitly selected password auth — try password first, then keyboard-interactive
+    // as fallback (some servers only support keyboard-interactive for password entry).
+    if (password) {
+      authMethods.push({ type: "password", id: "password" });
+    }
+    authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
+  } else if (isPasswordOnly) {
+    authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
     authMethods.push({ type: "password", id: "password" });
-    
-    // Add agent and default keys AFTER password as fallback
     if (sshAgentSocket) {
       authMethods.push({ type: "agent", id: "agent" });
     }
     for (const keyInfo of defaultKeys) {
-      authMethods.push({ 
-        type: "publickey", 
-        key: keyInfo.privateKey, 
-        id: `publickey-default-${keyInfo.keyName}` 
+      authMethods.push({
+        type: "publickey",
+        key: keyInfo.privateKey,
+        id: `publickey-default-${keyInfo.keyName}`
       });
     }
   } else if (isKeyOnly) {
-    // Key-only: user key first, then password (if any), then agent/default keys as fallback
-    
-    // 1. User-provided key first
-    authMethods.push({ 
-      type: "publickey", 
-      key: privateKey, 
-      passphrase: passphrase,
-      id: "publickey-user" 
+    authMethods.push({
+      type: "publickey",
+      key: effectivePrivateKey,
+      passphrase: effectivePassphrase,
+      id: "publickey-user"
     });
-    
-    // 2. Password (if configured alongside key)
     if (password) {
       authMethods.push({ type: "password", id: "password" });
     }
-    
-    // 3. System agent as fallback (AFTER user's key)
     if (sshAgentSocket) {
       authMethods.push({ type: "agent", id: "agent" });
     }
-    
-    // 4. Default keys as fallback
     for (const keyInfo of fallbackKeys) {
-      authMethods.push({ 
-        type: "publickey", 
-        key: keyInfo.privateKey, 
-        id: `publickey-default-${keyInfo.keyName}` 
+      authMethods.push({
+        type: "publickey",
+        key: keyInfo.privateKey,
+        id: `publickey-default-${keyInfo.keyName}`
       });
     }
   } else {
-    // Agent configured or no explicit auth: agent -> user key -> password -> default keys
-    
-    // 1. Agent (user-provided or system)
     if (effectiveAgent) {
       authMethods.push({ type: "agent", id: "agent" });
     }
-    
-    // 2. User-provided key
-    if (privateKey) {
-      authMethods.push({ 
-        type: "publickey", 
-        key: privateKey, 
-        passphrase: passphrase,
-        id: "publickey-user" 
+    if (effectivePrivateKey) {
+      authMethods.push({
+        type: "publickey",
+        key: effectivePrivateKey,
+        passphrase: effectivePassphrase,
+        id: "publickey-user"
       });
     }
-    
-    // 3. Password (if configured)
     if (password) {
       authMethods.push({ type: "password", id: "password" });
     }
-    
-    // 4. Default keys as fallback
     for (const keyInfo of fallbackKeys) {
-      authMethods.push({ 
-        type: "publickey", 
-        key: keyInfo.privateKey, 
-        id: `publickey-default-${keyInfo.keyName}` 
+      authMethods.push({
+        type: "publickey",
+        key: keyInfo.privateKey,
+        id: `publickey-default-${keyInfo.keyName}`
       });
     }
-    
-    // 5. If no user key provided, add first default key at the beginning (after agent)
-    if (!privateKey && defaultKeys.length > 0) {
+    if (!effectivePrivateKey && defaultKeys.length > 0) {
       const insertIndex = effectiveAgent ? 1 : 0;
-      authMethods.splice(insertIndex, 0, { 
-        type: "publickey", 
-        key: defaultKeys[0].privateKey, 
-        id: `publickey-default-${defaultKeys[0].keyName}` 
+      authMethods.splice(insertIndex, 0, {
+        type: "publickey",
+        key: defaultKeys[0].privateKey,
+        id: `publickey-default-${defaultKeys[0].keyName}`
       });
     }
   }
-  
-  // Add unlocked encrypted default keys (user provided passphrases for these)
-  for (const keyInfo of unlockedEncryptedKeys) {
-    authMethods.push({ 
-      type: "publickey", 
-      key: keyInfo.privateKey, 
-      passphrase: keyInfo.passphrase,
-      id: `publickey-encrypted-${keyInfo.keyName}` 
-    });
+
+  if (!enforcePasswordOnly) {
+    for (const keyInfo of unlockedEncryptedKeys) {
+      authMethods.push({
+        type: "publickey",
+        key: keyInfo.privateKey,
+        passphrase: keyInfo.passphrase,
+        id: `publickey-encrypted-${keyInfo.keyName}`
+      });
+    }
   }
-  
-  // Keyboard-interactive as last resort
-  authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
-   
-  console.log(`${logPrefix} Auth methods configured`, { 
-      isPasswordOnly,
-      hasUserKey: !!privateKey,
-      hasPassword: !!password,
-      hasAgent: !!effectiveAgent,
-      methodCount: authMethods.length,
-      methods: authMethods.map(m => m.id),
-    });
-  
-   // Use dynamic authHandler to try all keys
-   let authIndex = 0;
-   const attemptedMethodIds = new Set();
-   
-   const authHandler = (methodsLeft, partialSuccess, callback) => {
-     const availableMethods = methodsLeft || ["publickey", "password", "keyboard-interactive", "agent"];
-     
-     while (authIndex < authMethods.length) {
-       const method = authMethods[authIndex];
-       authIndex++;
-       
-       if (attemptedMethodIds.has(method.id)) continue;
-       attemptedMethodIds.add(method.id);
-       
-      if (method.type === "agent" && (availableMethods.includes("publickey") || availableMethods.includes("agent"))) {
-        console.log(`${logPrefix} Trying agent auth`);
-        return callback("agent");
-      } else if (method.type === "publickey" && availableMethods.includes("publickey")) {
-         console.log(`${logPrefix} Trying publickey auth:`, method.id);
-         const pubkeyAuth = {
-           type: "publickey",
-           username,
-           key: method.key,
-         };
-         if (method.passphrase) {
-           pubkeyAuth.passphrase = method.passphrase;
-         }
-         return callback(pubkeyAuth);
-      } else if (method.type === "password" && availableMethods.includes("password")) {
-        console.log(`${logPrefix} Trying password auth`);
-        return callback({
-          type: "password",
-          username,
-          password,
+
+  if (!authMethods.some((m) => m.type === "keyboard-interactive")) {
+    authMethods.push({ type: "keyboard-interactive", id: "keyboard-interactive" });
+  }
+
+  console.log(`${logPrefix} Auth methods configured`, {
+    traceId: traceId || null,
+    authMethod: normalizedAuthMethod || "auto",
+    enforcePasswordOnly,
+    isPasswordOnly,
+    hasUserKey: !!effectivePrivateKey,
+    hasPassword: !!password,
+    hasAgent: !!effectiveAgent,
+    methodCount: authMethods.length,
+    methods: authMethods.map((m) => m.id),
+  });
+
+  let authIndex = 0;
+  const attemptedMethodIds = new Set();
+  let lastTriedMethod = null;
+
+  const invokeMethod = (method, callback, phase = "") => {
+    attemptedMethodIds.add(method.id);
+    lastTriedMethod = method.id;
+    const phaseSuffix = phase ? ` (${phase})` : "";
+
+    if (method.type === "agent") {
+      console.log(`${logPrefix} Trying agent auth${phaseSuffix}`, { id: method.id, traceId: traceId || null });
+      return callback("agent");
+    }
+    if (method.type === "publickey") {
+      console.log(`${logPrefix} Trying publickey auth${phaseSuffix}`, { id: method.id, traceId: traceId || null });
+      const pubkeyAuth = {
+        type: "publickey",
+        username,
+        key: method.key,
+      };
+      if (method.passphrase) {
+        pubkeyAuth.passphrase = method.passphrase;
+      }
+      return callback(pubkeyAuth);
+    }
+    if (method.type === "password") {
+      console.log(`${logPrefix} Trying password auth${phaseSuffix}`, { id: method.id, traceId: traceId || null });
+      return callback({
+        type: "password",
+        username,
+        password,
+      });
+    }
+
+    console.log(`${logPrefix} Trying keyboard-interactive auth${phaseSuffix}`, { id: method.id, traceId: traceId || null });
+    return callback("keyboard-interactive");
+  };
+
+  const authHandler = (methodsLeft, partialSuccess, callback) => {
+    const availableMethods = methodsLeft || ["publickey", "password", "keyboard-interactive", "agent"];
+
+    if (partialSuccess && methodsLeft && methodsLeft.length > 0) {
+      if (lastTriedMethod) {
+        attemptedMethodIds.add(lastTriedMethod);
+      }
+
+      for (const serverMethod of methodsLeft) {
+        const matchingMethod = authMethods.find((candidate) => {
+          if (attemptedMethodIds.has(candidate.id)) return false;
+          if (serverMethod === "keyboard-interactive") {
+            return candidate.type === "keyboard-interactive";
+          }
+          if (serverMethod === "password") {
+            return candidate.type === "password";
+          }
+          if (serverMethod === "publickey") {
+            return candidate.type === "publickey" || candidate.type === "agent";
+          }
+          return false;
         });
-       } else if (method.type === "keyboard-interactive" && availableMethods.includes("keyboard-interactive")) {
-         return callback("keyboard-interactive");
-       }
-     }
-     return callback(false);
-   };
-   
-  // Determine the agent to return - if authMethods includes agent, we need to provide the socket
-  // even if effectiveAgent is null (for fallback scenarios)
-  const hasAgentInMethods = authMethods.some(m => m.type === "agent");
+
+        if (matchingMethod) {
+          return invokeMethod(matchingMethod, callback, "partial-success");
+        }
+      }
+
+      console.log(`${logPrefix} No matching auth method for partialSuccess`, { methodsLeft, traceId: traceId || null });
+      return callback(false);
+    }
+
+    while (authIndex < authMethods.length) {
+      const method = authMethods[authIndex];
+      authIndex++;
+
+      if (attemptedMethodIds.has(method.id)) continue;
+
+      const methodName =
+        method.type === "agent" ? "publickey" :
+          method.type;
+      if (!availableMethods.includes(methodName) && !availableMethods.includes(method.type)) {
+        continue;
+      }
+
+      return invokeMethod(method, callback);
+    }
+
+    return callback(false);
+  };
+
+  const hasAgentInMethods = authMethods.some((m) => m.type === "agent");
   const returnAgent = effectiveAgent || (hasAgentInMethods ? sshAgentSocket : null);
-  
-   return {
-     authHandler,
-    privateKey: effectivePrivateKey,
+  const usedDefaultKeys = authMethods.some((m) => typeof m.id === "string" && m.id.startsWith("publickey-default-"));
+
+  return {
+    authHandler,
+    privateKey: effectivePrimaryPrivateKey,
     agent: returnAgent,
-     usedDefaultKeys: true,
-   };
- }
+    usedDefaultKeys,
+  };
+}
  
  /**
   * Create a keyboard-interactive event handler
@@ -381,15 +412,26 @@ async function findAllDefaultPrivateKeys(options = {}) {
   * @param {Object} options.sender - Electron webContents sender
   * @param {string} options.sessionId - Session/connection ID
   * @param {string} options.hostname - Host being connected to
-  * @param {string} [options.password] - Saved password for fill button
-  * @param {string} [options.logPrefix] - Log prefix for debugging
+ * @param {string} [options.password] - Saved password for fill button
+ * @param {string} [options.logPrefix] - Log prefix for debugging
+ * @param {string} [options.traceId] - Correlation trace id for auth debugging
+ * @param {string} [options.source] - Source context (ssh/sftp/port-forward)
   * @returns {Function} - Event handler for 'keyboard-interactive' event
   */
  function createKeyboardInteractiveHandler(options) {
-   const { sender, sessionId, hostname, password, logPrefix = "[SSH]" } = options;
+   const {
+     sender,
+     sessionId,
+     hostname,
+     password,
+     logPrefix = "[SSH]",
+     traceId,
+     source = "ssh",
+   } = options;
    
    return (name, instructions, instructionsLang, prompts, finish) => {
      console.log(`${logPrefix} ${hostname} keyboard-interactive auth requested`, {
+       traceId: traceId || null,
        name,
        instructions,
        promptCount: prompts?.length || 0,
@@ -407,7 +449,12 @@ async function findAllDefaultPrivateKeys(options = {}) {
      keyboardInteractiveHandler.storeRequest(requestId, (userResponses) => {
        console.log(`${logPrefix} Received user responses, finishing keyboard-interactive`);
        finish(userResponses);
-     }, sender.id, sessionId);
+     }, sender.id, sessionId, {
+       traceId: traceId || null,
+       source,
+       promptCount: prompts.length,
+       hostname,
+     });
      
      const promptsData = prompts.map((p) => ({
        prompt: p.prompt,
@@ -419,6 +466,8 @@ async function findAllDefaultPrivateKeys(options = {}) {
      safeSend(sender, "netcatty:keyboard-interactive", {
        requestId,
        sessionId,
+       traceId: traceId || null,
+       source,
        name: name || hostname,
        instructions: instructions || "",
        prompts: promptsData,
@@ -518,9 +567,10 @@ async function requestPassphrasesForEncryptedKeys(sender, hostname) {
   return { keys: unlockedKeys, cancelled: wasCancelled };
 }
 
- module.exports = {
-   DEFAULT_KEY_NAMES,
-   isKeyEncrypted,
+module.exports = {
+  DEFAULT_KEY_NAMES,
+  generateAuthTraceId,
+  isKeyEncrypted,
    findDefaultPrivateKey,
    findAllDefaultPrivateKeys,
    getSshAgentSocket,

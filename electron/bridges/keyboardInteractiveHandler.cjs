@@ -5,7 +5,7 @@
  */
 
 // Keyboard-interactive authentication pending requests
-// Map of requestId -> { finishCallback, webContentsId, sessionId, createdAt, timeoutId }
+// Map of requestId -> { finishCallback, webContentsId, sessionId, createdAt, timeoutId, metadata }
 const keyboardInteractiveRequests = new Map();
 
 // TTL for abandoned requests (5 minutes)
@@ -21,12 +21,34 @@ function generateRequestId(prefix = 'ki') {
 /**
  * Store a keyboard-interactive request with TTL cleanup
  */
-function storeRequest(requestId, finishCallback, webContentsId, sessionId) {
+function storeRequest(requestId, finishCallback, webContentsId, sessionId, metadata = {}) {
+  const createdAt = Date.now();
+
+  if (metadata && Object.keys(metadata).length > 0) {
+    console.log("[KeyboardInteractive] storeRequest", {
+      requestId,
+      sessionId,
+      webContentsId,
+      traceId: metadata.traceId || null,
+      source: metadata.source || null,
+      promptCount: metadata.promptCount || null,
+    });
+  }
+
   // Set up TTL timeout to clean up abandoned requests
   const timeoutId = setTimeout(() => {
     const pending = keyboardInteractiveRequests.get(requestId);
     if (pending) {
       console.warn(`[KeyboardInteractive] Request ${requestId} timed out after ${REQUEST_TTL_MS / 1000}s, cleaning up`);
+      if (pending.metadata) {
+        console.warn("[KeyboardInteractive] timeout metadata", {
+          requestId,
+          sessionId: pending.sessionId,
+          traceId: pending.metadata.traceId || null,
+          source: pending.metadata.source || null,
+          ageMs: Date.now() - pending.createdAt,
+        });
+      }
       keyboardInteractiveRequests.delete(requestId);
       // Call finish with empty responses to abort the authentication
       try {
@@ -41,8 +63,9 @@ function storeRequest(requestId, finishCallback, webContentsId, sessionId) {
     finishCallback,
     webContentsId,
     sessionId,
-    createdAt: Date.now(),
+    createdAt,
     timeoutId,
+    metadata,
   });
 }
 
@@ -72,9 +95,27 @@ function handleResponse(_event, payload) {
 
   if (cancelled) {
     console.log(`[KeyboardInteractive] Auth cancelled for ${requestId}`);
+    if (pending.metadata) {
+      console.log("[KeyboardInteractive] cancel metadata", {
+        requestId,
+        sessionId: pending.sessionId,
+        traceId: pending.metadata.traceId || null,
+        source: pending.metadata.source || null,
+        ageMs: Date.now() - pending.createdAt,
+      });
+    }
     pending.finishCallback([]); // Empty responses to cancel
   } else {
     console.log(`[KeyboardInteractive] Auth response received for ${requestId}, responses count:`, responses?.length);
+    if (pending.metadata) {
+      console.log("[KeyboardInteractive] response metadata", {
+        requestId,
+        sessionId: pending.sessionId,
+        traceId: pending.metadata.traceId || null,
+        source: pending.metadata.source || null,
+        ageMs: Date.now() - pending.createdAt,
+      });
+    }
     pending.finishCallback(responses);
   }
 

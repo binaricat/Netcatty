@@ -14,6 +14,7 @@ const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const {
+  generateAuthTraceId,
   buildAuthHandler,
   createKeyboardInteractiveHandler,
   applyAuthToConnOpts,
@@ -220,6 +221,62 @@ function resolveLangFromCharset(charset) {
   return trimmed;
 }
 
+// Validate that a value only contains safe SSH identifier characters.
+// Rejects shell metacharacters to prevent command injection in relay-shell mode.
+const SAFE_SSH_IDENTIFIER = /^[a-zA-Z0-9._\-:@\[\]%]+$/;
+
+function assertSafeSshValue(value, label) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid ${label}: must be a non-empty string`);
+  }
+  if (!SAFE_SSH_IDENTIFIER.test(value)) {
+    throw new Error(`Invalid ${label}: contains disallowed characters`);
+  }
+}
+
+function shellEscapeForSh(value) {
+  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function formatJumpForProxyArg(jump) {
+  if (!jump) return "";
+  assertSafeSshValue(jump.hostname, "jump hostname");
+  if (jump.username) assertSafeSshValue(jump.username, "jump username");
+  const username = jump.username ? `${jump.username}@` : "";
+  const isIPv6 = typeof jump.hostname === "string" && jump.hostname.includes(":");
+  const hostPart = isIPv6 ? `[${jump.hostname}]` : jump.hostname;
+  const portPart = jump.port && jump.port !== 22 ? `:${Number(jump.port)}` : "";
+  return `${username}${hostPart}${portPart}`;
+}
+
+function buildRelayShellCommand(options, jumpHosts) {
+  const targetPort = Number(options.port) || 22;
+  const targetUsername = options.username || "root";
+  const rawTargetHostname = options.hostname;
+
+  assertSafeSshValue(rawTargetHostname, "target hostname");
+  assertSafeSshValue(targetUsername, "target username");
+
+  const targetHostname =
+    typeof rawTargetHostname === "string" && rawTargetHostname.includes(":")
+      ? `[${rawTargetHostname}]`
+      : rawTargetHostname;
+  const relayHopsAfterFirst = (jumpHosts || []).slice(1).map(formatJumpForProxyArg).filter(Boolean);
+  const targetUserHost = `${targetUsername}@${targetHostname}`;
+
+  console.log("[RelayShell] Building relay command (StrictHostKeyChecking=accept-new: target host key will be auto-accepted on first connect)");
+
+  let command = "ssh -tt";
+  command += " -o PreferredAuthentications=publickey,keyboard-interactive,password";
+  command += " -o StrictHostKeyChecking=accept-new";
+  if (relayHopsAfterFirst.length > 0) {
+    command += ` -J ${shellEscapeForSh(relayHopsAfterFirst.join(","))}`;
+  }
+  command += ` -p ${targetPort}`;
+  command += ` ${shellEscapeForSh(targetUserHost)}`;
+  return command;
+}
+
 function safeSend(sender, channel, payload) {
   try {
     if (!sender || sender.isDestroyed()) return;
@@ -244,6 +301,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
   const sender = event.sender;
   const connections = [];
   let currentSocket = null;
+  const authTraceId = options._authTraceId || generateAuthTraceId("ssh-chain-auth");
 
   const sendProgress = (hop, total, label, status) => {
     if (!sender.isDestroyed()) {
@@ -329,6 +387,8 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         password: connOpts.password,
         passphrase: connOpts.passphrase,
         agent: connOpts.agent,
+        authMethod: jump.authMethod,
+        traceId: authTraceId,
         username: connOpts.username,
         logPrefix: `[Chain] Hop ${i + 1}`,
         unlockedEncryptedKeys: options._unlockedEncryptedKeys || [],
@@ -371,6 +431,8 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           sessionId,
           hostname: hopLabel,
           password: jump.password,
+          traceId: authTraceId,
+          source: "ssh-chain",
           logPrefix: `[Chain] Hop ${i + 1}/${totalHops}`,
         }));
         console.log(`[Chain] Hop ${i + 1}/${totalHops}: Connecting to ${hopLabel}...`);
@@ -430,6 +492,15 @@ async function startSSHSession(event, options) {
   const sessionId =
     options.sessionId ||
     `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const authTraceId = options._authTraceId || generateAuthTraceId("ssh-auth");
+  options._authTraceId = authTraceId;
+  log("Auth trace created", {
+    traceId: authTraceId,
+    sessionId,
+    hostname: options.hostname,
+    username: options.username,
+    jumpHosts: Array.isArray(options.jumpHosts) ? options.jumpHosts.length : 0,
+  });
 
   const cols = options.cols || 80;
   const rows = options.rows || 24;
@@ -445,10 +516,14 @@ async function startSSHSession(event, options) {
     const conn = new SSHClient();
     let chainConnections = [];
     let connectionSocket = null;
+    let relayShellCommand = null;
+    let relayHopLabel = null;
 
     // Determine if we have jump hosts
     const jumpHosts = options.jumpHosts || [];
     const hasJumpHosts = jumpHosts.length > 0;
+    const jumpMode = options.jumpMode === "relay-shell" ? "relay-shell" : "proxy-tunnel";
+    const useRelayShell = hasJumpHosts && jumpMode === "relay-shell";
     const hasProxy = !!options.proxy;
     const totalHops = jumpHosts.length + 1; // +1 for final target
 
@@ -836,8 +911,80 @@ async function startSSHSession(event, options) {
       }
     }
 
+    if (useRelayShell) {
+      // In relay-shell mode the SSH transport targets the first relay hop, not the final target.
+      // Build auth config directly for the relay — skip computing target auth (it would be overwritten).
+      const relay = jumpHosts[0];
+      relayHopLabel = relay.label || `${relay.hostname}:${relay.port || 22}`;
+      relayShellCommand = buildRelayShellCommand(options, jumpHosts);
+
+      connectOpts.host = relay.hostname;
+      connectOpts.port = relay.port || 22;
+      connectOpts.username = relay.username || "root";
+      delete connectOpts.privateKey;
+      delete connectOpts.password;
+      delete connectOpts.passphrase;
+      delete connectOpts.agent;
+
+      const relayHasCertificate = typeof relay.certificate === "string" && relay.certificate.trim().length > 0;
+      if (relayHasCertificate) {
+        connectOpts.agent = new NetcattyAgent({
+          mode: "certificate",
+          webContents: event.sender,
+          meta: {
+            label: relay.keyId || relay.username || "",
+            certificate: relay.certificate,
+            privateKey: relay.privateKey,
+            passphrase: relay.passphrase,
+          },
+        });
+      } else if (relay.privateKey) {
+        connectOpts.privateKey = relay.privateKey;
+        if (relay.passphrase) connectOpts.passphrase = relay.passphrase;
+      }
+      if (relay.password) {
+        connectOpts.password = relay.password;
+      }
+
+      const relayAuthConfig = buildAuthHandler({
+        privateKey: connectOpts.privateKey,
+        password: connectOpts.password,
+        passphrase: connectOpts.passphrase,
+        agent: connectOpts.agent,
+        authMethod: relay.authMethod,
+        traceId: authTraceId,
+        username: connectOpts.username,
+        logPrefix: "[RelayShell]",
+        unlockedEncryptedKeys,
+        defaultKeys: allDefaultKeys,
+      });
+      applyAuthToConnOpts(connectOpts, relayAuthConfig);
+
+      log("Relay shell mode enabled", {
+        traceId: authTraceId,
+        relay: relayHopLabel,
+        relayUsername: connectOpts.username,
+        target: `${options.username || "root"}@${options.hostname}:${options.port || 22}`,
+      });
+    } else {
+      // Normal (non-relay) mode: apply unified auth policy for the target host.
+      const unifiedAuthConfig = buildAuthHandler({
+        privateKey: connectOpts.privateKey,
+        password: connectOpts.password,
+        passphrase: connectOpts.passphrase,
+        agent: connectOpts.agent,
+        authMethod: options.authMethod,
+        traceId: authTraceId,
+        username: connectOpts.username,
+        logPrefix: hasJumpHosts ? "[Chain]" : "[SSH]",
+        unlockedEncryptedKeys,
+        defaultKeys: allDefaultKeys,
+      });
+      applyAuthToConnOpts(connectOpts, unifiedAuthConfig);
+    }
+
     // Handle chain/proxy connections
-    if (hasJumpHosts) {
+    if (hasJumpHosts && !useRelayShell) {
       // Pass fetched keys to chain connection to avoid re-reading files
       options._defaultKeys = allDefaultKeys;
 
@@ -857,6 +1004,16 @@ async function startSSHSession(event, options) {
       delete connectOpts.port;
 
       sendProgress(totalHops, totalHops, options.hostname, 'connecting');
+    } else if (useRelayShell && hasProxy) {
+      sendProgress(1, totalHops, relayHopLabel || options.hostname, "connecting");
+      connectionSocket = await createProxySocket(
+        options.proxy,
+        connectOpts.host,
+        connectOpts.port || 22
+      );
+      connectOpts.sock = connectionSocket;
+      delete connectOpts.host;
+      delete connectOpts.port;
     } else if (hasProxy) {
       sendProgress(1, 1, options.hostname, 'connecting');
       connectionSocket = await createProxySocket(
@@ -870,19 +1027,22 @@ async function startSSHSession(event, options) {
     }
 
     return new Promise((resolve, reject) => {
-      const logPrefix = hasJumpHosts ? '[Chain]' : '[SSH]';
+      const logPrefix = useRelayShell ? '[RelayShell]' : hasJumpHosts ? '[Chain]' : '[SSH]';
       conn.on("ready", () => {
         console.log(`${logPrefix} ${options.hostname} ready`);
 
         // Cache the successful auth method
-        if (connectOpts._lastTriedMethodRef) {
+        if (!useRelayShell && connectOpts._lastTriedMethodRef) {
           const successMethod = connectOpts._lastTriedMethodRef();
           if (successMethod) {
             setCachedAuthMethod(connectOpts.username, options.hostname, options.port, successMethod);
           }
         }
 
-        if (hasJumpHosts || hasProxy) {
+        if (useRelayShell) {
+          sendProgress(1, totalHops, relayHopLabel || "relay", "connected");
+          sendProgress(totalHops, totalHops, options.hostname, "connecting");
+        } else if (hasJumpHosts || hasProxy) {
           sendProgress(totalHops, totalHops, options.hostname, 'connected');
         }
 
@@ -970,8 +1130,18 @@ async function startSSHSession(event, options) {
               }
             });
 
-            // Run startup command if specified
-            if (options.startupCommand) {
+            if (useRelayShell && relayShellCommand) {
+              setTimeout(() => {
+                stream.write(`${relayShellCommand}\n`);
+                // Note: we cannot detect when the target shell is ready, so
+                // mark progress as "connecting" (not "connected") for the target hop.
+                sendProgress(totalHops, totalHops, options.hostname, "connecting");
+                if (options.startupCommand) {
+                  console.warn("[RelayShell] startupCommand is ignored in relay-shell mode (target shell auth is uncontrolled)");
+                }
+              }, 300);
+            } else if (options.startupCommand) {
+              // Run startup command if specified
               setTimeout(() => {
                 stream.write(`${options.startupCommand}\n`);
               }, 300);
@@ -984,6 +1154,9 @@ async function startSSHSession(event, options) {
 
       conn.on("error", (err) => {
         const contents = event.sender;
+        const authFailureHost = useRelayShell
+          ? (relayHopLabel || jumpHosts[0]?.hostname || options.hostname)
+          : options.hostname;
 
         const isAuthError = err.message?.toLowerCase().includes('authentication') ||
           err.message?.toLowerCase().includes('auth') ||
@@ -992,15 +1165,17 @@ async function startSSHSession(event, options) {
 
         // Clear cached auth method on auth failure so next attempt tries all methods
         if (isAuthError) {
-          clearCachedAuthMethod(connectOpts.username, options.hostname, options.port);
-          console.log(`${logPrefix} ${options.hostname} auth failed:`, err.message);
+          if (!useRelayShell) {
+            clearCachedAuthMethod(connectOpts.username, options.hostname, options.port);
+          }
+          console.log(`${logPrefix} ${authFailureHost} auth failed:`, err.message);
           safeSend(contents, "netcatty:auth:failed", {
             sessionId,
             error: err.message,
-            hostname: options.hostname
+            hostname: authFailureHost
           });
         } else {
-          console.error(`${logPrefix} ${options.hostname} error:`, err.message);
+          console.error(`${logPrefix} ${authFailureHost} error:`, err.message);
         }
 
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message });
@@ -1033,47 +1208,17 @@ async function startSSHSession(event, options) {
       });
 
       // Handle keyboard-interactive authentication (2FA/MFA)
-      conn.on("keyboard-interactive", (name, instructions, instructionsLang, prompts, finish) => {
-        console.log(`${logPrefix} ${options.hostname} keyboard-interactive auth requested`, {
-          name,
-          instructions,
-          promptCount: prompts?.length || 0,
-          prompts: prompts?.map(p => ({ prompt: p.prompt, echo: p.echo })),
-        });
-
-        // If there are no prompts, just call finish with empty array
-        if (!prompts || prompts.length === 0) {
-          console.log(`${logPrefix} No prompts, finishing keyboard-interactive`);
-          finish([]);
-          return;
-        }
-
-        // Forward ALL prompts to user - no auto-fill to avoid semantic detection issues
-        // (Prompt text is admin-customizable and may not contain expected keywords)
-        const requestId = keyboardInteractiveHandler.generateRequestId('ssh');
-
-        keyboardInteractiveHandler.storeRequest(requestId, (userResponses) => {
-          console.log(`${logPrefix} Received user responses, finishing keyboard-interactive`);
-          finish(userResponses);
-        }, sender.id, sessionId);
-
-        const promptsData = prompts.map((p) => ({
-          prompt: p.prompt,
-          echo: p.echo,
-        }));
-
-        console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
-
-        safeSend(sender, "netcatty:keyboard-interactive", {
-          requestId,
-          sessionId,
-          name: name || "",
-          instructions: instructions || "",
-          prompts: promptsData,
-          hostname: options.hostname,
-          savedPassword: options.password || null, // Pass saved password for optional fill button
-        });
-      });
+      conn.on("keyboard-interactive", createKeyboardInteractiveHandler({
+        sender,
+        sessionId,
+        hostname: useRelayShell
+          ? (relayHopLabel || jumpHosts[0]?.hostname || options.hostname)
+          : options.hostname,
+        password: useRelayShell ? (jumpHosts[0]?.password || options.password) : options.password,
+        traceId: authTraceId,
+        source: "ssh",
+        logPrefix,
+      }));
 
 
       // Enable keyboard-interactive authentication in authHandler
@@ -1110,6 +1255,9 @@ async function startSSHSession(event, options) {
         }
       };
 
+      if (useRelayShell && !hasProxy) {
+        sendProgress(1, totalHops, relayHopLabel || "relay", "connecting");
+      }
       console.log(`${logPrefix} Connecting to ${options.hostname}...`);
       conn.connect(connectOpts);
     });
@@ -1130,6 +1278,7 @@ async function execCommand(event, payload) {
   const timeoutMs = enableKeyboardInteractive ? Math.max(baseTimeoutMs, 120000) : baseTimeoutMs;
   const sender = event.sender;
   const sessionId = payload.sessionId || `exec-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const authTraceId = generateAuthTraceId("ssh-exec-auth");
   const defaultKeys = enableKeyboardInteractive ? await findAllDefaultPrivateKeysFromHelper() : [];
 
   return new Promise((resolve, reject) => {
@@ -1224,6 +1373,8 @@ async function execCommand(event, payload) {
         password: connectOpts.password,
         passphrase: connectOpts.passphrase,
         agent: connectOpts.agent,
+        authMethod: payload.authMethod,
+        traceId: authTraceId,
         username: connectOpts.username,
         logPrefix: "[SSH Exec]",
         defaultKeys,
@@ -1236,6 +1387,8 @@ async function execCommand(event, payload) {
         sessionId,
         hostname: payload.hostname,
         password: payload.password,
+        traceId: authTraceId,
+        source: "ssh-exec",
         logPrefix: "[SSH Exec]",
       }));
     } else if (authAgent) {

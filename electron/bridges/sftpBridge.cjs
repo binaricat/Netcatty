@@ -24,6 +24,7 @@ const fileWatcherBridge = require("./fileWatcherBridge.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const { 
+  generateAuthTraceId,
   buildAuthHandler, 
   createKeyboardInteractiveHandler, 
   applyAuthToConnOpts,
@@ -281,6 +282,7 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
   const sender = event.sender;
   const connections = [];
   let currentSocket = null;
+  const authTraceId = options._authTraceId || generateAuthTraceId("sftp-chain-auth");
 
   try {
     // Connect through each jump host
@@ -359,6 +361,8 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
         password: connOpts.password,
         passphrase: connOpts.passphrase,
         agent: connOpts.agent,
+        authMethod: jump.authMethod,
+        traceId: authTraceId,
         username: connOpts.username,
         logPrefix: `[SFTP Chain] Hop ${i + 1}`,
         unlockedEncryptedKeys: options._unlockedEncryptedKeys || [],
@@ -399,6 +403,8 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
           sessionId: connId,
           hostname: hopLabel,
           password: jump.password,
+          traceId: authTraceId,
+          source: "sftp-chain",
           logPrefix: `[SFTP Chain] Hop ${i + 1}/${jumpHosts.length}`,
         }));
         conn.connect(connOpts);
@@ -681,6 +687,15 @@ async function connectSudoSftp(client, password) {
 async function openSftp(event, options) {
   const client = new SftpClient();
   const connId = options.sessionId || `${Date.now()}-sftp-${Math.random().toString(16).slice(2)}`;
+  const authTraceId = options._authTraceId || generateAuthTraceId("sftp-auth");
+  options._authTraceId = authTraceId;
+  console.log("[SFTP] Auth trace created", {
+    traceId: authTraceId,
+    connId,
+    hostname: options.hostname,
+    username: options.username,
+    jumpHosts: Array.isArray(options.jumpHosts) ? options.jumpHosts.length : 0,
+  });
 
   // Get default keys early to use for both chain and target
   const defaultKeys = await findAllDefaultPrivateKeysFromHelper();
@@ -688,7 +703,12 @@ async function openSftp(event, options) {
   // Check if we need to connect through jump hosts
   const jumpHosts = options.jumpHosts || [];
   const hasJumpHosts = jumpHosts.length > 0;
+  const jumpMode = options.jumpMode === "relay-shell" ? "relay-shell" : "proxy-tunnel";
   const hasProxy = !!options.proxy;
+
+  if (hasJumpHosts && jumpMode === "relay-shell") {
+    throw new Error("SFTP over relay-shell mode is not supported yet. Switch jump chain mode to Proxy Tunnel.");
+  }
 
   let chainConnections = [];
   let connectionSocket = null;
@@ -764,6 +784,8 @@ async function openSftp(event, options) {
     password: connectOpts.password,
     passphrase: connectOpts.passphrase,
     agent: connectOpts.agent,
+    authMethod: options.authMethod,
+    traceId: authTraceId,
     username: connectOpts.username,
     logPrefix: "[SFTP]",
     defaultKeys,
@@ -776,6 +798,8 @@ async function openSftp(event, options) {
     sessionId: connId,
     hostname: options.hostname,
     password: options.password,
+    traceId: authTraceId,
+    source: "sftp",
     logPrefix: "[SFTP]",
   });
 
