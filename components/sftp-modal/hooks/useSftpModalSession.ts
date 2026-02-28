@@ -20,6 +20,7 @@ interface UseSftpModalSessionParams {
     proxy?: NetcattyProxyConfig;
     jumpHosts?: NetcattyJumpHost[];
     sftpSudo?: boolean;
+    legacyAlgorithms?: boolean;
   };
   initialPath?: string;
   isLocalSession: boolean;
@@ -39,6 +40,7 @@ interface UseSftpModalSessionParams {
     proxy?: NetcattyProxyConfig;
     jumpHosts?: NetcattyJumpHost[];
     sudo?: boolean;
+    legacyAlgorithms?: boolean;
   }) => Promise<string>;
   closeSftp: (sftpId: string) => Promise<void>;
   listSftp: (sftpId: string, path: string) => Promise<RemoteFile[]>;
@@ -112,6 +114,7 @@ export const useSftpModalSession = ({
       proxy: credentials.proxy,
       jumpHosts: credentials.jumpHosts,
       sudo: credentials.sftpSudo,
+      legacyAlgorithms: credentials.legacyAlgorithms,
     });
     sftpIdRef.current = sftpId;
     return sftpId;
@@ -131,6 +134,7 @@ export const useSftpModalSession = ({
     credentials.proxy,
     credentials.jumpHosts,
     credentials.sftpSudo,
+    credentials.legacyAlgorithms,
     openSftp,
   ]);
 

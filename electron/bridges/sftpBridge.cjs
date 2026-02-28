@@ -23,9 +23,9 @@ const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const fileWatcherBridge = require("./fileWatcherBridge.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
-const { 
-  buildAuthHandler, 
-  createKeyboardInteractiveHandler, 
+const {
+  buildAuthHandler,
+  createKeyboardInteractiveHandler,
   applyAuthToConnOpts,
   safeSend: authSafeSend,
   findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
@@ -255,6 +255,44 @@ const ensureRemoteDirForSession = async (sftpId, dirPath, requestedEncoding) => 
 };
 
 /**
+ * Build SSH algorithm configuration for SFTP connections.
+ * When legacyEnabled is true, legacy algorithms are appended for older device compatibility.
+ */
+function buildSftpAlgorithms(legacyEnabled) {
+  const algorithms = {
+    cipher: [
+      'aes128-gcm@openssh.com', 'aes256-gcm@openssh.com',
+      'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
+    ],
+    kex: [
+      'curve25519-sha256', 'curve25519-sha256@libssh.org',
+      'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
+      'diffie-hellman-group14-sha256',
+      'diffie-hellman-group16-sha512', 'diffie-hellman-group18-sha512',
+      'diffie-hellman-group-exchange-sha256',
+    ],
+    compress: ['none'],
+  };
+
+  if (legacyEnabled) {
+    algorithms.kex.push(
+      'diffie-hellman-group14-sha1',
+      'diffie-hellman-group1-sha1',
+    );
+    algorithms.cipher.push(
+      'aes128-cbc', 'aes256-cbc', '3des-cbc',
+    );
+    algorithms.serverHostKey = [
+      'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521',
+      'rsa-sha2-512', 'rsa-sha2-256',
+      'ssh-rsa', 'ssh-dss',
+    ];
+  }
+
+  return algorithms;
+}
+
+/**
  * Send message to renderer safely
  */
 function safeSend(sender, channel, payload) {
@@ -307,22 +345,7 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
         keepaliveCountMax: 3,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
-        algorithms: {
-          // Prioritize fastest ciphers (GCM modes are hardware-accelerated)
-          cipher: [
-            'aes128-gcm@openssh.com', 'aes256-gcm@openssh.com',
-            'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
-          ],
-          // Prioritize modern key exchange algorithms for broad compatibility
-          kex: [
-            'curve25519-sha256', 'curve25519-sha256@libssh.org',
-            'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
-            'diffie-hellman-group14-sha256',
-            'diffie-hellman-group16-sha512', 'diffie-hellman-group18-sha512',
-            'diffie-hellman-group-exchange-sha256',
-          ],
-          compress: ['none'],
-        },
+        algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
       };
 
       // Auth - support agent (certificate), key, and password fallback
@@ -726,6 +749,7 @@ async function openSftp(event, options) {
     // Enable keyboard-interactive authentication (required for 2FA/MFA)
     tryKeyboard: true,
     readyTimeout: 120000, // 2 minutes for 2FA input
+    algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
   };
 
   // Use the tunneled socket if we have one

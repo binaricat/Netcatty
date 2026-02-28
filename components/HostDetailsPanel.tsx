@@ -16,6 +16,7 @@ import {
   Plus,
   Settings2,
   Shield,
+  ShieldAlert,
   Tag,
   TerminalSquare,
   User,
@@ -1226,6 +1227,30 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                   {t("hostDetails.agentForwarding.agentNotRunningHint")}
                 </p>
               </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Legacy Algorithms */}
+        <Card className="p-3 space-y-2 bg-card border-border/80">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={14} className="text-muted-foreground" />
+            <p className="text-xs font-semibold">{t("hostDetails.section.legacyAlgorithms")}</p>
+          </div>
+          <ToggleRow
+            label={t("hostDetails.legacyAlgorithms")}
+            enabled={!!form.legacyAlgorithms}
+            onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("hostDetails.legacyAlgorithms.desc")}
+          </p>
+          {form.legacyAlgorithms && (
+            <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+              <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                {t("hostDetails.legacyAlgorithms.warning")}
+              </p>
             </div>
           )}
         </Card>

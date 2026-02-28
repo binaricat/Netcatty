@@ -1647,6 +1647,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               proxy: proxyConfig,
               jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
               sftpSudo: host.sftpSudo,
+              legacyAlgorithms: host.legacyAlgorithms,
             };
           })()}
           open={showSFTP && status === "connected"}

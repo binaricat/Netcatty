@@ -402,6 +402,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             ? (effectivePassphrase || sanitizeCredentialValue(attempt.key.passphrase))
             : undefined,
           agentForwarding: ctx.host.agentForwarding,
+          legacyAlgorithms: ctx.host.legacyAlgorithms,
           cols: term.cols,
           rows: term.rows,
           charset: ctx.host.charset,

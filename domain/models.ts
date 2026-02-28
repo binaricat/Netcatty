@@ -99,6 +99,8 @@ export interface Host {
   // Host-level keyword highlighting (overrides/extends global settings)
   keywordHighlightRules?: KeywordHighlightRule[];
   keywordHighlightEnabled?: boolean;
+  // Legacy SSH algorithm support for older network equipment (switches, routers)
+  legacyAlgorithms?: boolean;
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';
@@ -194,7 +196,7 @@ export const parseKeyCombo = (keyStr: string): { modifiers: string[]; key: strin
 // Convert keyboard event to a key string
 export const keyEventToString = (e: KeyboardEvent, isMac: boolean): string => {
   const parts: string[] = [];
-  
+
   if (isMac) {
     if (e.metaKey) parts.push('⌘');
     if (e.ctrlKey) parts.push('⌃');
@@ -206,7 +208,7 @@ export const keyEventToString = (e: KeyboardEvent, isMac: boolean): string => {
     if (e.shiftKey) parts.push('Shift');
     if (e.metaKey) parts.push('Win');
   }
-  
+
   // Get the key name
   let keyName = e.key;
   // Normalize special keys
@@ -221,12 +223,12 @@ export const keyEventToString = (e: KeyboardEvent, isMac: boolean): string => {
   else if (keyName === 'Enter') keyName = '↵';
   else if (keyName === 'Tab') keyName = '⇥';
   else if (keyName.length === 1) keyName = keyName.toUpperCase();
-  
+
   // Don't include modifier keys themselves
   if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) {
     return parts.join(' + ');
   }
-  
+
   parts.push(keyName);
   return parts.join(' + ');
 };
@@ -234,7 +236,7 @@ export const keyEventToString = (e: KeyboardEvent, isMac: boolean): string => {
 // Check if a keyboard event matches a key binding string
 export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boolean): boolean => {
   if (!keyStr || keyStr === 'Disabled') return false;
-  
+
   // Handle range patterns like "[1...9]"
   if (keyStr.includes('[1...9]')) {
     const basePattern = keyStr.replace('[1...9]', '');
@@ -244,7 +246,7 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
     const testStr = basePattern + key;
     return matchesKeyBinding(e, testStr.trim(), isMac);
   }
-  
+
   // Handle arrow key patterns like "arrows"
   if (keyStr.includes('arrows')) {
     const basePattern = keyStr.replace('arrows', '');
@@ -252,18 +254,18 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
     // Check if it's an arrow key
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return false;
     // Map arrow key to symbol for matching
-    const arrowSymbol = key === 'ArrowUp' ? '↑' 
+    const arrowSymbol = key === 'ArrowUp' ? '↑'
       : key === 'ArrowDown' ? '↓'
-      : key === 'ArrowLeft' ? '←'
-      : '→';
+        : key === 'ArrowLeft' ? '←'
+          : '→';
     // Check modifiers match the base pattern
     const testStr = basePattern + arrowSymbol;
     return matchesKeyBinding(e, testStr.trim(), isMac);
   }
-  
+
   const parsed = parseKeyCombo(keyStr);
   if (!parsed) return false;
-  
+
   const { modifiers, key } = parsed;
 
   const hasMacModifiers = modifiers.some((modifier) => ['⌘', '⌃', '⌥'].includes(modifier));
@@ -271,14 +273,14 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
   if ((!isMac && hasMacModifiers) || (isMac && hasPcModifiers)) {
     return false;
   }
-  
+
   // Check modifiers
   if (isMac) {
     const needMeta = modifiers.includes('⌘');
     const needCtrl = modifiers.includes('⌃');
     const needAlt = modifiers.includes('⌥');
     const needShift = modifiers.includes('Shift');
-    
+
     if (e.metaKey !== needMeta) return false;
     if (e.ctrlKey !== needCtrl) return false;
     if (e.altKey !== needAlt) return false;
@@ -288,13 +290,13 @@ export const matchesKeyBinding = (e: KeyboardEvent, keyStr: string, isMac: boole
     const needAlt = modifiers.includes('Alt');
     const needShift = modifiers.includes('Shift');
     const needMeta = modifiers.includes('Win');
-    
+
     if (e.ctrlKey !== needCtrl) return false;
     if (e.altKey !== needAlt) return false;
     if (e.shiftKey !== needShift) return false;
     if (e.metaKey !== needMeta) return false;
   }
-  
+
   const normalizeKey = (rawKey: string): string => {
     let normalizedKey = rawKey;
     if (normalizedKey === ' ') normalizedKey = 'Space';
@@ -524,17 +526,17 @@ export interface RemoteFile {
 
 export type WorkspaceNode =
   | {
-      id: string;
-      type: 'pane';
-      sessionId: string;
-    }
+    id: string;
+    type: 'pane';
+    sessionId: string;
+  }
   | {
-      id: string;
-      type: 'split';
-      direction: 'horizontal' | 'vertical';
-      children: WorkspaceNode[];
-      sizes?: number[]; // relative sizes for children
-    };
+    id: string;
+    type: 'split';
+    direction: 'horizontal' | 'vertical';
+    children: WorkspaceNode[];
+    sizes?: number[]; // relative sizes for children
+  };
 
 export type WorkspaceViewMode = 'split' | 'focus';
 

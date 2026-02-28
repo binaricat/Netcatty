@@ -42,6 +42,7 @@ interface SFTPModalProps {
     proxy?: NetcattyProxyConfig;
     jumpHosts?: NetcattyJumpHost[];
     sftpSudo?: boolean;
+    legacyAlgorithms?: boolean;
   };
   open: boolean;
   onClose: () => void;
@@ -526,7 +527,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     // Find the files to pass to confirm dialog
     if (fileNames.length === 0) return;
     if (!confirm(t("sftp.deleteConfirm.title", { count: fileNames.length }))) return;
-    
+
     // Delete files
     (async () => {
       try {

@@ -72,6 +72,8 @@ declare global {
     jumpHosts?: NetcattyJumpHost[];
     // SSH-level keepalive interval in seconds (0 = disabled)
     keepaliveInterval?: number;
+    // Enable legacy SSH algorithms for older network equipment
+    legacyAlgorithms?: boolean;
     // Use sudo for SFTP server
     sudo?: boolean;
   }
