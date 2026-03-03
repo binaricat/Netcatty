@@ -210,7 +210,8 @@ export const isHiddenFile = <T extends { name: string; hidden?: boolean }>(
 };
 
 /** @deprecated Use isHiddenFile instead */
-export const isWindowsHiddenFile = isHiddenFile;
+export const isWindowsHiddenFile = <T extends { name: string; hidden?: boolean }>(file: T): boolean =>
+    isHiddenFile(file, true);
 
 /**
  * Filter files based on hidden file visibility setting.
