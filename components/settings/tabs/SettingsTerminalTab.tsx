@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { AlertCircle, ChevronRight, Import, Minus, Plus, RotateCcw } from "lucide-react";
+import { AlertCircle, ChevronRight, Import, Minus, Palette, Plus, RotateCcw } from "lucide-react";
 import type {
   CursorShape,
   LinkModifier,
@@ -20,6 +20,8 @@ import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { ThemeSelectModal } from "../ThemeSelectModal";
 import { TerminalFontSelect } from "../TerminalFontSelect";
+import { CustomThemeModal } from "../../terminal/CustomThemeModal";
+import type { TerminalTheme } from "../../../domain/models";
 
 // Theme preview button component
 const ThemePreviewButton: React.FC<{
@@ -128,6 +130,25 @@ export default function SettingsTerminalTab(props: {
     e.target.value = '';
   }, [setTerminalThemeId]);
 
+  // New custom theme modal
+  const [customThemeModalOpen, setCustomThemeModalOpen] = useState(false);
+  const [customThemeData, setCustomThemeData] = useState<TerminalTheme | null>(null);
+
+  const handleNewCustomTheme = useCallback(() => {
+    const base = TERMINAL_THEMES.find(t => t.id === terminalThemeId)
+      || customThemeStore.getThemeById(terminalThemeId)
+      || TERMINAL_THEMES[0];
+    const newTheme: TerminalTheme = {
+      ...base,
+      id: `custom-${Date.now()}`,
+      name: `${base.name} (Custom)`,
+      isCustom: true,
+      colors: { ...base.colors },
+    };
+    setCustomThemeData(newTheme);
+    setCustomThemeModalOpen(true);
+  }, [terminalThemeId]);
+
   // Fetch default shell on mount
   useEffect(() => {
     const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
@@ -225,8 +246,17 @@ export default function SettingsTerminalTab(props: {
         onSelect={setTerminalThemeId}
       />
 
-      {/* Import .itermcolors button */}
+      {/* Theme action buttons */}
       <div className="flex items-center gap-2 -mt-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={handleNewCustomTheme}
+        >
+          <Palette size={14} />
+          {t('terminal.customTheme.new')}
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -244,6 +274,25 @@ export default function SettingsTerminalTab(props: {
           onChange={handleImportItermcolors}
         />
       </div>
+
+      {/* Custom Theme Modal */}
+      {customThemeData && (
+        <CustomThemeModal
+          open={customThemeModalOpen}
+          theme={customThemeData}
+          isNew={true}
+          onSave={(theme) => {
+            customThemeStore.addTheme(theme);
+            setTerminalThemeId(theme.id);
+            setCustomThemeModalOpen(false);
+            setCustomThemeData(null);
+          }}
+          onCancel={() => {
+            setCustomThemeModalOpen(false);
+            setCustomThemeData(null);
+          }}
+        />
+      )}
 
       <SectionHeader title={t("settings.terminal.section.font")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
