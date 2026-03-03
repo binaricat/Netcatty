@@ -7,7 +7,7 @@
 // Utilities
 export {
   formatBytes, formatDate,
-  formatSpeed, formatTransferBytes, getFileIcon, isNavigableDirectory, isWindowsHiddenFile, filterHiddenFiles, type ColumnWidths, type SortField,
+  formatSpeed, formatTransferBytes, getFileIcon, isNavigableDirectory, isHiddenFile, isWindowsHiddenFile, filterHiddenFiles, type ColumnWidths, type SortField,
   type SortOrder
 } from './utils';
 

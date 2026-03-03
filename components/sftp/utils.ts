@@ -3,23 +3,23 @@
  */
 
 import {
-Database,
-ExternalLink,
-File,
-FileArchive,
-FileAudio,
-FileCode,
-FileImage,
-FileSpreadsheet,
-FileText,
-FileType,
-FileVideo,
-Folder,
-Globe,
-Key,
-Lock,
-Settings,
-Terminal,
+    Database,
+    ExternalLink,
+    File,
+    FileArchive,
+    FileAudio,
+    FileCode,
+    FileImage,
+    FileSpreadsheet,
+    FileText,
+    FileType,
+    FileVideo,
+    Folder,
+    Globe,
+    Key,
+    Lock,
+    Settings,
+    Terminal,
 } from 'lucide-react';
 import React from 'react';
 import { SftpFileEntry } from '../../types';
@@ -74,7 +74,7 @@ export const formatSpeed = (bytesPerSecond: number): string => {
  */
 export const getFileIcon = (entry: SftpFileEntry): React.ReactElement => {
     if (entry.type === 'directory') return React.createElement(Folder, { size: 14 });
-    
+
     // For symlink files (not directories), show a special symlink icon
     if (entry.type === 'symlink' && entry.linkTarget !== 'directory') {
         return React.createElement(ExternalLink, { size: 14, className: "text-cyan-500" });
@@ -189,31 +189,31 @@ export const isNavigableDirectory = (entry: SftpFileEntry): boolean => {
 };
 
 /**
- * Check if a file is hidden on Windows
- * Only applies to local Windows filesystem where the hidden attribute is set
- * The ".." parent directory entry is never considered hidden
- * 
- * Note: On Unix/Linux, there's no system-level hidden file concept.
- * Dotfiles are just a convention, not actual hidden files, so we don't filter them.
+ * Check if a file is hidden
+ * Covers both Windows (hidden attribute) and Unix/Linux (dotfile convention).
+ * The ".." parent directory entry is never considered hidden.
  */
-export const isWindowsHiddenFile = <T extends { name: string; hidden?: boolean }>(file: T): boolean => {
+export const isHiddenFile = <T extends { name: string; hidden?: boolean }>(file: T): boolean => {
     if (file.name === "..") return false;
-    return file.hidden === true;
+    // Windows hidden attribute
+    if (file.hidden === true) return true;
+    // Unix/Linux dotfile convention
+    if (file.name.startsWith(".")) return true;
+    return false;
 };
 
+/** @deprecated Use isHiddenFile instead */
+export const isWindowsHiddenFile = isHiddenFile;
+
 /**
- * Filter files based on Windows hidden file visibility setting
- * Only filters files with the Windows hidden attribute set
- * Always preserves ".." parent directory entry
- * 
- * This setting only affects local Windows filesystem browsing.
- * On Unix/Linux systems and remote SFTP connections, all files are shown
- * because there's no system-level hidden file concept (dotfiles are just a convention).
+ * Filter files based on hidden file visibility setting.
+ * Filters both Windows hidden files and Unix/Linux dotfiles.
+ * Always preserves ".." parent directory entry.
  */
 export const filterHiddenFiles = <T extends { name: string; hidden?: boolean }>(
     files: T[],
     showHiddenFiles: boolean
 ): T[] => {
     if (showHiddenFiles) return files;
-    return files.filter((f) => !isWindowsHiddenFile(f));
+    return files.filter((f) => !isHiddenFile(f));
 };
