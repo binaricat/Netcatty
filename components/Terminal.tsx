@@ -30,6 +30,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { toast } from "./ui/toast";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
+import { customThemeStore } from "../application/state/customThemeStore";
 
 import { TerminalConnectionDialog } from "./terminal/TerminalConnectionDialog";
 import { TerminalToolbar } from "./terminal/TerminalToolbar";
@@ -352,7 +353,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const effectiveTheme = useMemo(() => {
     if (host.theme) {
-      const hostTheme = TERMINAL_THEMES.find((t) => t.id === host.theme);
+      const hostTheme = TERMINAL_THEMES.find((t) => t.id === host.theme)
+        || customThemeStore.getThemeById(host.theme);
       if (hostTheme) return hostTheme;
     }
     return terminalTheme;

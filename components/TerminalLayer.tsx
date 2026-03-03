@@ -11,6 +11,7 @@ import { DistroAvatar } from './DistroAvatar';
 import Terminal from './Terminal';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
+import { customThemeStore } from '../application/state/customThemeStore';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 
@@ -439,7 +440,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!activeWorkspace || !focusedSessionId) return terminalTheme.colors;
     const focusedHost = sessionHostsMap.get(focusedSessionId);
     if (focusedHost?.theme) {
-      const hostTheme = TERMINAL_THEMES.find(t => t.id === focusedHost.theme);
+      const hostTheme = TERMINAL_THEMES.find(t => t.id === focusedHost.theme)
+        || customThemeStore.getThemeById(focusedHost.theme);
       if (hostTheme) return hostTheme.colors;
     }
     return terminalTheme.colors;

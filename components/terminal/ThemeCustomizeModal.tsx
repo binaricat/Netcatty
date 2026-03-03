@@ -7,34 +7,41 @@
  * - Real-time preview: changes are applied immediately to the terminal
  * - Save: persists the current settings
  * - Cancel: reverts to the original settings when modal was opened
+ * - Custom themes: create, edit, delete, import .itermcolors
  */
 
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Minus, Palette, Plus, Type, X } from 'lucide-react';
+import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Type, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useAvailableFonts } from '../../application/state/fontStore';
 import { TERMINAL_THEMES, TerminalThemeConfig } from '../../infrastructure/config/terminalThemes';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, TerminalFont } from '../../infrastructure/config/fonts';
+import { useCustomThemes, useCustomThemeActions } from '../../application/state/customThemeStore';
+import { parseItermcolors } from '../../infrastructure/parsers/itermcolorsParser';
+import { CustomThemeEditor } from './CustomThemeEditor';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+import { TerminalTheme } from '../../domain/models';
 
-type TabType = 'theme' | 'font';
+type TabType = 'theme' | 'font' | 'custom';
 
 // Memoized theme item component to prevent unnecessary re-renders
 const ThemeItem = memo(({
     theme,
     isSelected,
-    onSelect
+    onSelect,
+    onEdit,
 }: {
     theme: TerminalThemeConfig;
     isSelected: boolean;
     onSelect: (id: string) => void;
+    onEdit?: (id: string) => void;
 }) => (
     <button
         onClick={() => onSelect(theme.id)}
         className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all',
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all group',
             isSelected
                 ? 'bg-primary/15 ring-1 ring-primary'
                 : 'hover:bg-muted'
@@ -53,9 +60,20 @@ const ThemeItem = memo(({
             <div className={cn('text-xs font-medium truncate', isSelected ? 'text-primary' : 'text-foreground')}>
                 {theme.name}
             </div>
-            <div className="text-[10px] text-muted-foreground capitalize">{theme.type}</div>
+            <div className="text-[10px] text-muted-foreground capitalize">
+                {theme.type}
+                {theme.isCustom && ' • custom'}
+            </div>
         </div>
-        {isSelected && (
+        {onEdit && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onEdit(theme.id); }}
+                className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 opacity-0 group-hover:opacity-100 transition-all"
+            >
+                <Pencil size={11} />
+            </button>
+        )}
+        {isSelected && !onEdit && (
             <Check size={14} className="text-primary flex-shrink-0" />
         )}
     </button>
@@ -176,64 +194,47 @@ const TerminalPreview = memo(({
                     <span style={{ color: theme.colors.foreground }}>server</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {'  ,g$$P"     """Y$$.".        '}
+                    {'  ,g$$P"     """Y$$."".        '}
                     <span style={{ color: theme.colors.foreground }}>-----------</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {' ,$$P\'              `$$$.     '}
+                    {` ,$$P'              $$$.     `}
                     <span style={{ color: theme.colors.blue }}>OS</span>
                     <span style={{ color: theme.colors.foreground }}>: Ubuntu 22.04 LTS</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {'\',$$P       ,ggs.     `$$b:   '}
+                    {`'', $$P, ggs.     $$b:   `}
                     <span style={{ color: theme.colors.blue }}>Kernel</span>
                     <span style={{ color: theme.colors.foreground }}>: 5.15.0-generic</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {'`d$$\'     ,$P"\'   .    $$$    '}
+                    {`d$$'     ,$P"'   .    $$$    `}
                     <span style={{ color: theme.colors.blue }}>Uptime</span>
                     <span style={{ color: theme.colors.foreground }}>: 42 days, 3 hours</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {' $$P      d$\'     ,    $$P    '}
+                    {` $$P      d$'     ,    $$P    `}
                     <span style={{ color: theme.colors.blue }}>Shell</span>
                     <span style={{ color: theme.colors.foreground }}>: bash 5.1.16</span>
                 </div>
                 <div style={{ color: theme.colors.cyan }}>
-                    {' $$:      $$.   -    ,d$$\'    '}
+                    {` $$:      $$.   -    ,d$$'    `}
                     <span style={{ color: theme.colors.blue }}>Memory</span>
                     <span style={{ color: theme.colors.foreground }}>: 4.2G / 16G (26%)</span>
                 </div>
                 <div>&nbsp;</div>
-                <div>
-                    <span style={{ color: theme.colors.green }}>user@server</span>
-                    <span style={{ color: theme.colors.foreground }}>:</span>
-                    <span style={{ color: theme.colors.blue }}>~</span>
-                    <span style={{ color: theme.colors.foreground }}>$ </span>
-                    <span>ls -la</span>
+                {/* ANSI color palette preview row */}
+                <div className="flex gap-0.5 mt-1">
+                    {[theme.colors.black, theme.colors.red, theme.colors.green, theme.colors.yellow,
+                    theme.colors.blue, theme.colors.magenta, theme.colors.cyan, theme.colors.white].map((c, i) => (
+                        <div key={i} className="w-4 h-3 rounded-sm" style={{ backgroundColor: c }} />
+                    ))}
                 </div>
-                <div>
-                    <span style={{ color: theme.colors.blue }}>drwxr-xr-x</span>
-                    <span style={{ color: theme.colors.foreground }}>  5 user group </span>
-                    <span style={{ color: theme.colors.yellow }}>4.0K</span>
-                    <span style={{ color: theme.colors.foreground }}> Dec 12 10:30 </span>
-                    <span style={{ color: theme.colors.blue }}>.config</span>
-                </div>
-                <div>
-                    <span style={{ color: theme.colors.magenta }}>-rwxr-xr-x</span>
-                    <span style={{ color: theme.colors.foreground }}>  1 user group </span>
-                    <span style={{ color: theme.colors.yellow }}>2.1K</span>
-                    <span style={{ color: theme.colors.foreground }}> Dec 11 15:22 </span>
-                    <span style={{ color: theme.colors.green }}>deploy.sh</span>
-                </div>
-                <div>
-                    <span style={{ color: theme.colors.cyan }}>lrwxrwxrwx</span>
-                    <span style={{ color: theme.colors.foreground }}>  1 user group </span>
-                    <span style={{ color: theme.colors.yellow }}>  24</span>
-                    <span style={{ color: theme.colors.foreground }}> Dec 10 09:15 </span>
-                    <span style={{ color: theme.colors.cyan }}>logs</span>
-                    <span style={{ color: theme.colors.foreground }}> -{'>'} </span>
-                    <span style={{ color: theme.colors.foreground }}>/var/log/app</span>
+                <div className="flex gap-0.5">
+                    {[theme.colors.brightBlack, theme.colors.brightRed, theme.colors.brightGreen, theme.colors.brightYellow,
+                    theme.colors.brightBlue, theme.colors.brightMagenta, theme.colors.brightCyan, theme.colors.brightWhite].map((c, i) => (
+                        <div key={i} className="w-4 h-3 rounded-sm" style={{ backgroundColor: c }} />
+                    ))}
                 </div>
                 <div>&nbsp;</div>
                 <div>
@@ -267,10 +268,18 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
 }) => {
     const { t } = useI18n();
     const availableFonts = useAvailableFonts();
+    const customThemes = useCustomThemes();
+    const { addTheme, updateTheme, deleteTheme } = useCustomThemeActions();
+
     const [activeTab, setActiveTab] = useState<TabType>('theme');
     const [selectedTheme, setSelectedTheme] = useState(currentThemeId);
     const [selectedFont, setSelectedFont] = useState(currentFontFamilyId);
     const [fontSize, setFontSize] = useState(currentFontSize);
+
+    // Custom theme editor state
+    const [editingTheme, setEditingTheme] = useState<TerminalTheme | null>(null);
+    const [isNewTheme, setIsNewTheme] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Store original values when modal opens (for cancel/revert)
     const originalValuesRef = useRef({
@@ -278,6 +287,12 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         font: currentFontFamilyId,
         fontSize: currentFontSize,
     });
+
+    // Combine built-in + custom themes
+    const allThemes = useMemo(
+        () => [...TERMINAL_THEMES, ...customThemes],
+        [customThemes]
+    );
 
     // Sync state when modal opens
     useEffect(() => {
@@ -292,6 +307,8 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
             setSelectedTheme(currentThemeId);
             setSelectedFont(currentFontFamilyId);
             setFontSize(currentFontSize);
+            setEditingTheme(null);
+            setIsNewTheme(false);
         }
     }, [open, currentThemeId, currentFontFamilyId, currentFontSize]);
 
@@ -300,13 +317,14 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         [selectedFont, availableFonts]
     );
     const currentTheme = useMemo(
-        () => TERMINAL_THEMES.find(t => t.id === selectedTheme) || TERMINAL_THEMES[0],
-        [selectedTheme]
+        () => editingTheme || allThemes.find(t => t.id === selectedTheme) || TERMINAL_THEMES[0],
+        [selectedTheme, allThemes, editingTheme]
     );
 
     // Handle theme selection - apply immediately for real-time preview
     const handleThemeSelect = useCallback((themeId: string) => {
         setSelectedTheme(themeId);
+        setEditingTheme(null);
         onThemeChange?.(themeId); // Apply immediately
     }, [onThemeChange]);
 
@@ -325,11 +343,110 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         });
     }, [onFontSizeChange]);
 
+    // ---- Custom Theme Actions ----
+
+    const handleNewTheme = useCallback(() => {
+        // Clone current theme as starting point
+        const base = allThemes.find(t => t.id === selectedTheme) || TERMINAL_THEMES[0];
+        const newTheme: TerminalTheme = {
+            ...base,
+            id: `custom-${Date.now()}`,
+            name: `${base.name} (Custom)`,
+            isCustom: true,
+            colors: { ...base.colors },
+        };
+        setEditingTheme(newTheme);
+        setIsNewTheme(true);
+    }, [selectedTheme, allThemes]);
+
+    const handleImportFile = useCallback(() => {
+        fileInputRef.current?.click();
+    }, []);
+
+    const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const name = file.name.replace(/\.itermcolors$/i, '');
+        const reader = new FileReader();
+        reader.onload = () => {
+            const xml = reader.result as string;
+            const parsed = parseItermcolors(xml, name);
+            if (parsed) {
+                addTheme(parsed);
+                setSelectedTheme(parsed.id);
+                onThemeChange?.(parsed.id);
+                setActiveTab('theme');
+            }
+        };
+        reader.readAsText(file);
+        // Reset file input so the same file can be re-imported
+        e.target.value = '';
+    }, [addTheme, onThemeChange]);
+
+    const handleEditTheme = useCallback((themeId: string) => {
+        const theme = customThemes.find(t => t.id === themeId);
+        if (theme) {
+            setEditingTheme({ ...theme, colors: { ...theme.colors } });
+            setIsNewTheme(false);
+            setActiveTab('custom');
+        }
+    }, [customThemes]);
+
+    const handleEditorChange = useCallback((theme: TerminalTheme) => {
+        setEditingTheme(theme);
+    }, []);
+
+    const handleEditorBack = useCallback(() => {
+        if (editingTheme) {
+            if (isNewTheme) {
+                // Save new theme
+                addTheme(editingTheme);
+                setSelectedTheme(editingTheme.id);
+                onThemeChange?.(editingTheme.id);
+            } else {
+                // Save edits
+                updateTheme(editingTheme.id, editingTheme);
+                // If this is the currently selected theme, refresh the preview
+                if (selectedTheme === editingTheme.id) {
+                    onThemeChange?.(editingTheme.id);
+                }
+            }
+        }
+        setEditingTheme(null);
+        setIsNewTheme(false);
+        setActiveTab('theme');
+    }, [editingTheme, isNewTheme, addTheme, updateTheme, selectedTheme, onThemeChange]);
+
+    const handleEditorDelete = useCallback(() => {
+        if (editingTheme) {
+            deleteTheme(editingTheme.id);
+            // If deleting the selected theme, revert to default
+            if (selectedTheme === editingTheme.id) {
+                setSelectedTheme(TERMINAL_THEMES[0].id);
+                onThemeChange?.(TERMINAL_THEMES[0].id);
+            }
+        }
+        setEditingTheme(null);
+        setIsNewTheme(false);
+        setActiveTab('theme');
+    }, [editingTheme, deleteTheme, selectedTheme, onThemeChange]);
+
     // Save: just close (changes are already applied)
     const handleSave = useCallback(() => {
+        // If editing a custom theme, save it first
+        if (editingTheme) {
+            if (isNewTheme) {
+                addTheme(editingTheme);
+                setSelectedTheme(editingTheme.id);
+                onThemeChange?.(editingTheme.id);
+            } else {
+                updateTheme(editingTheme.id, editingTheme);
+            }
+        }
         onSave?.();
         onClose();
-    }, [onSave, onClose]);
+    }, [editingTheme, isNewTheme, addTheme, updateTheme, onSave, onClose, onThemeChange]);
 
     // Cancel: revert to original values
     const handleCancel = useCallback(() => {
@@ -358,6 +475,9 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
 
     if (!open) return null;
 
+    // Separate built-in and custom themes for display in the theme list
+    const builtinThemes = TERMINAL_THEMES;
+
     const modalContent = (
         <div
             className="fixed inset-0 flex items-center justify-center bg-black/60"
@@ -371,14 +491,14 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-border">
                     <div className="flex items-center gap-3">
-                         <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/10">
-                             <Palette size={16} className="text-primary" />
-                         </div>
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/10">
+                            <Palette size={16} className="text-primary" />
+                        </div>
                         <h2 className="text-sm font-semibold text-foreground">{t('terminal.themeModal.title')}</h2>
-                     </div>
-                     <button
-                         onClick={handleCancel}
-                         className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    </div>
+                    <button
+                        onClick={handleCancel}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     >
                         <X size={16} />
                     </button>
@@ -391,126 +511,222 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
                         {/* Tab Bar */}
                         <div className="flex p-2 gap-1 shrink-0 border-b border-border">
                             <button
-                                onClick={() => setActiveTab('theme')}
+                                onClick={() => { setActiveTab('theme'); setEditingTheme(null); }}
                                 className={cn(
-                                    'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all',
+                                    'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all',
                                     activeTab === 'theme'
                                         ? 'bg-primary/15 text-primary'
                                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                                 )}
-                             >
-                                 <Palette size={13} />
+                            >
+                                <Palette size={13} />
                                 {t('terminal.themeModal.tab.theme')}
-                             </button>
-                             <button
-                                 onClick={() => setActiveTab('font')}
-                                 className={cn(
-                                    'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all',
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('font')}
+                                className={cn(
+                                    'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all',
                                     activeTab === 'font'
                                         ? 'bg-primary/15 text-primary'
                                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                                 )}
-                             >
-                                 <Type size={13} />
+                            >
+                                <Type size={13} />
                                 {t('terminal.themeModal.tab.font')}
-                             </button>
-                         </div>
-
-                        {/* List Content */}
-                        <div className="flex-1 min-h-0 overflow-y-auto p-2">
-                            {activeTab === 'theme' && (
-                                <div className="space-y-1">
-                                    {TERMINAL_THEMES.map(theme => (
-                                        <ThemeItem
-                                            key={theme.id}
-                                            theme={theme}
-                                            isSelected={selectedTheme === theme.id}
-                                            onSelect={handleThemeSelect}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-                            {activeTab === 'font' && (
-                                <div className="space-y-1">
-                                    {availableFonts.map(font => (
-                                        <FontItem
-                                            key={font.id}
-                                            font={font}
-                                            isSelected={selectedFont === font.id}
-                                            onSelect={handleFontSelect}
-                                        />
-                                    ))}
-                                </div>
-                            )}
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('custom')}
+                                className={cn(
+                                    'flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all',
+                                    activeTab === 'custom'
+                                        ? 'bg-primary/15 text-primary'
+                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                )}
+                            >
+                                <Sparkles size={13} />
+                                {t('terminal.themeModal.tab.custom')}
+                            </button>
                         </div>
 
-                        {/* Font Size Control (only in font tab) */}
-                         {activeTab === 'font' && (
-                             <div className="p-3 border-t border-border shrink-0">
-                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold">
-                                    {t('terminal.themeModal.fontSize')}
+                        {/* List Content */}
+                        {activeTab === 'custom' && editingTheme ? (
+                            <CustomThemeEditor
+                                theme={editingTheme}
+                                onChange={handleEditorChange}
+                                onBack={handleEditorBack}
+                                onDelete={isNewTheme ? undefined : handleEditorDelete}
+                                isNew={isNewTheme}
+                            />
+                        ) : (
+                            <>
+                                <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                                    {activeTab === 'theme' && (
+                                        <div className="space-y-1">
+                                            {/* Built-in themes */}
+                                            {builtinThemes.map(theme => (
+                                                <ThemeItem
+                                                    key={theme.id}
+                                                    theme={theme}
+                                                    isSelected={selectedTheme === theme.id && !editingTheme}
+                                                    onSelect={handleThemeSelect}
+                                                />
+                                            ))}
+                                            {/* Custom themes section */}
+                                            {customThemes.length > 0 && (
+                                                <>
+                                                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1.5 px-1 font-semibold">
+                                                        {t('terminal.customTheme.section')}
+                                                    </div>
+                                                    {customThemes.map(theme => (
+                                                        <ThemeItem
+                                                            key={theme.id}
+                                                            theme={theme}
+                                                            isSelected={selectedTheme === theme.id && !editingTheme}
+                                                            onSelect={handleThemeSelect}
+                                                            onEdit={handleEditTheme}
+                                                        />
+                                                    ))}
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                    {activeTab === 'font' && (
+                                        <div className="space-y-1">
+                                            {availableFonts.map(font => (
+                                                <FontItem
+                                                    key={font.id}
+                                                    font={font}
+                                                    isSelected={selectedFont === font.id}
+                                                    onSelect={handleFontSelect}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                    {activeTab === 'custom' && !editingTheme && (
+                                        <div className="space-y-2">
+                                            {/* Actions */}
+                                            <button
+                                                onClick={handleNewTheme}
+                                                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
+                                            >
+                                                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-primary/10 text-primary">
+                                                    <Plus size={16} />
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.new')}</div>
+                                                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.newDesc')}</div>
+                                                </div>
+                                            </button>
+                                            <button
+                                                onClick={handleImportFile}
+                                                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
+                                            >
+                                                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-blue-500/10 text-blue-500">
+                                                    <Download size={16} />
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.import')}</div>
+                                                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.importDesc')}</div>
+                                                </div>
+                                            </button>
+                                            <input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept=".itermcolors"
+                                                onChange={handleFileSelected}
+                                                className="hidden"
+                                            />
+
+                                            {/* Custom themes list */}
+                                            {customThemes.length > 0 && (
+                                                <>
+                                                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1 px-1 font-semibold">
+                                                        {t('terminal.customTheme.yourThemes')}
+                                                    </div>
+                                                    {customThemes.map(theme => (
+                                                        <ThemeItem
+                                                            key={theme.id}
+                                                            theme={theme}
+                                                            isSelected={selectedTheme === theme.id}
+                                                            onSelect={handleThemeSelect}
+                                                            onEdit={handleEditTheme}
+                                                        />
+                                                    ))}
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                                 <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-2">
-                                    <button
-                                        onClick={() => handleFontSizeChange(-1)}
-                                        disabled={fontSize <= MIN_FONT_SIZE}
-                                        className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
-                                    >
-                                        <Minus size={14} />
-                                    </button>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-xl font-bold text-foreground tabular-nums">{fontSize}</span>
-                                        <span className="text-[10px] text-muted-foreground">px</span>
+
+                                {/* Font Size Control (only in font tab) */}
+                                {activeTab === 'font' && (
+                                    <div className="p-3 border-t border-border shrink-0">
+                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold">
+                                            {t('terminal.themeModal.fontSize')}
+                                        </div>
+                                        <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-2">
+                                            <button
+                                                onClick={() => handleFontSizeChange(-1)}
+                                                disabled={fontSize <= MIN_FONT_SIZE}
+                                                className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                                            >
+                                                <Minus size={14} />
+                                            </button>
+                                            <div className="flex items-baseline gap-1">
+                                                <span className="text-xl font-bold text-foreground tabular-nums">{fontSize}</span>
+                                                <span className="text-[10px] text-muted-foreground">px</span>
+                                            </div>
+                                            <button
+                                                onClick={() => handleFontSizeChange(1)}
+                                                disabled={fontSize >= MAX_FONT_SIZE}
+                                                className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                                            >
+                                                <Plus size={14} />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <button
-                                        onClick={() => handleFontSizeChange(1)}
-                                        disabled={fontSize >= MAX_FONT_SIZE}
-                                        className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
-                                    >
-                                        <Plus size={14} />
-                                    </button>
-                                </div>
-                            </div>
+                                )}
+                            </>
                         )}
                     </div>
 
-                     {/* Right Panel - Large Preview */}
-                     <div className="flex-1 flex flex-col min-w-0 p-4">
+                    {/* Right Panel - Large Preview */}
+                    <div className="flex-1 flex flex-col min-w-0 p-4">
                         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 font-semibold">
                             {t('terminal.themeModal.livePreview')}
                         </div>
-                         <TerminalPreview theme={currentTheme} font={currentFont} fontSize={fontSize} />
+                        <TerminalPreview theme={currentTheme} font={currentFont} fontSize={fontSize} />
 
                         {/* Info line */}
                         <div className="mt-3 text-xs text-muted-foreground flex items-center justify-between">
                             <span>
                                 {currentTheme.name} • {currentFont.name} • {fontSize}px
-                             </span>
-                             <span className="text-[10px] uppercase">
+                            </span>
+                            <span className="text-[10px] uppercase">
                                 {t('terminal.themeModal.themeType', { type: currentTheme.type })}
-                             </span>
-                         </div>
-                     </div>
+                            </span>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Footer */}
                 <div className="flex gap-3 px-5 py-3 shrink-0 border-t border-border bg-muted/20">
-                     <Button
-                         variant="ghost"
-                         onClick={handleCancel}
-                         className="flex-1 h-10"
-                     >
+                    <Button
+                        variant="ghost"
+                        onClick={handleCancel}
+                        className="flex-1 h-10"
+                    >
                         {t('common.cancel')}
-                     </Button>
-                     <Button
-                         onClick={handleSave}
-                         className="flex-1 h-10"
-                     >
+                    </Button>
+                    <Button
+                        onClick={handleSave}
+                        className="flex-1 h-10"
+                    >
                         {t('common.save')}
-                     </Button>
-                 </div>
-             </div>
-         </div>
+                    </Button>
+                </div>
+            </div>
+        </div>
     );
 
     // Use Portal to render at document root

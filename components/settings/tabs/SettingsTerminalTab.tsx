@@ -11,6 +11,7 @@ import { DEFAULT_KEYWORD_HIGHLIGHT_RULES } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TerminalFont } from "../../../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../../../infrastructure/config/terminalThemes";
+import { customThemeStore } from "../../../application/state/customThemeStore";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -102,7 +103,9 @@ export default function SettingsTerminalTab(props: {
 
   // Get current selected theme
   const currentTheme = useMemo(() => {
-    return TERMINAL_THEMES.find(t => t.id === terminalThemeId) || TERMINAL_THEMES[0];
+    return TERMINAL_THEMES.find(t => t.id === terminalThemeId)
+      || customThemeStore.getThemeById(terminalThemeId)
+      || TERMINAL_THEMES[0];
   }, [terminalThemeId]);
 
   // Fetch default shell on mount

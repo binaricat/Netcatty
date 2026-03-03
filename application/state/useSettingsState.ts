@@ -30,6 +30,7 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
+import { customThemeStore } from '../state/customThemeStore';
 import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
 import { DARK_UI_THEMES, LIGHT_UI_THEMES, UiThemeTokens, getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { UI_FONTS, DEFAULT_UI_FONT_ID } from '../../infrastructure/config/uiFonts';
@@ -767,7 +768,9 @@ export const useSettingsState = () => {
   }, []);
 
   const currentTerminalTheme = useMemo(
-    () => TERMINAL_THEMES.find(t => t.id === terminalThemeId) || TERMINAL_THEMES[0],
+    () => TERMINAL_THEMES.find(t => t.id === terminalThemeId)
+      || customThemeStore.getThemeById(terminalThemeId)
+      || TERMINAL_THEMES[0],
     [terminalThemeId]
   );
 

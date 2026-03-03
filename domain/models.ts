@@ -484,6 +484,7 @@ export interface TerminalTheme {
   id: string;
   name: string;
   type: 'dark' | 'light';
+  isCustom?: boolean;
   colors: {
     background: string;
     foreground: string;
