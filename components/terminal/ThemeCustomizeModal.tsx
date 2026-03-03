@@ -12,14 +12,14 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Trash2, Type, X } from 'lucide-react';
+import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Type, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useAvailableFonts } from '../../application/state/fontStore';
 import { TERMINAL_THEMES, TerminalThemeConfig } from '../../infrastructure/config/terminalThemes';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, TerminalFont } from '../../infrastructure/config/fonts';
 import { useCustomThemes, useCustomThemeActions } from '../../application/state/customThemeStore';
 import { parseItermcolors } from '../../infrastructure/parsers/itermcolorsParser';
-import { CustomThemeEditor } from './CustomThemeEditor';
+import { CustomThemeModal } from './CustomThemeModal';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 import { TerminalTheme } from '../../domain/models';
@@ -393,44 +393,21 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         }
     }, [customThemes]);
 
-    const handleEditorChange = useCallback((theme: TerminalTheme) => {
-        setEditingTheme(theme);
-    }, []);
 
     const handleEditorBack = useCallback(() => {
-        if (editingTheme) {
-            if (isNewTheme) {
-                // Save new theme
-                addTheme(editingTheme);
-                setSelectedTheme(editingTheme.id);
-                onThemeChange?.(editingTheme.id);
-            } else {
-                // Save edits
-                updateTheme(editingTheme.id, editingTheme);
-                // If this is the currently selected theme, refresh the preview
-                if (selectedTheme === editingTheme.id) {
-                    onThemeChange?.(editingTheme.id);
-                }
-            }
-        }
         setEditingTheme(null);
         setIsNewTheme(false);
-        setActiveTab('theme');
-    }, [editingTheme, isNewTheme, addTheme, updateTheme, selectedTheme, onThemeChange]);
+    }, []);
 
-    const handleEditorDelete = useCallback(() => {
-        if (editingTheme) {
-            deleteTheme(editingTheme.id);
-            // If deleting the selected theme, revert to default
-            if (selectedTheme === editingTheme.id) {
-                setSelectedTheme(TERMINAL_THEMES[0].id);
-                onThemeChange?.(TERMINAL_THEMES[0].id);
-            }
+    const handleEditorDelete = useCallback((themeId: string) => {
+        deleteTheme(themeId);
+        if (selectedTheme === themeId) {
+            setSelectedTheme(TERMINAL_THEMES[0].id);
+            onThemeChange?.(TERMINAL_THEMES[0].id);
         }
         setEditingTheme(null);
         setIsNewTheme(false);
-        setActiveTab('theme');
-    }, [editingTheme, deleteTheme, selectedTheme, onThemeChange]);
+    }, [deleteTheme, selectedTheme, onThemeChange]);
 
     // Save: just close (changes are already applied)
     const handleSave = useCallback(() => {
@@ -549,144 +526,135 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
                         </div>
 
                         {/* List Content */}
-                        {activeTab === 'custom' && editingTheme ? (
-                            <CustomThemeEditor
-                                theme={editingTheme}
-                                onChange={handleEditorChange}
-                                onBack={handleEditorBack}
-                                isNew={isNewTheme}
-                            />
-                        ) : (
-                            <>
-                                <div className="flex-1 min-h-0 overflow-y-auto p-2">
-                                    {activeTab === 'theme' && (
-                                        <div className="space-y-1">
-                                            {/* Built-in themes */}
-                                            {builtinThemes.map(theme => (
-                                                <ThemeItem
-                                                    key={theme.id}
-                                                    theme={theme}
-                                                    isSelected={selectedTheme === theme.id && !editingTheme}
-                                                    onSelect={handleThemeSelect}
-                                                />
-                                            ))}
-                                            {/* Custom themes section */}
-                                            {customThemes.length > 0 && (
-                                                <>
-                                                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1.5 px-1 font-semibold">
-                                                        {t('terminal.customTheme.section')}
-                                                    </div>
-                                                    {customThemes.map(theme => (
-                                                        <ThemeItem
-                                                            key={theme.id}
-                                                            theme={theme}
-                                                            isSelected={selectedTheme === theme.id && !editingTheme}
-                                                            onSelect={handleThemeSelect}
-                                                            onEdit={handleEditTheme}
-                                                        />
-                                                    ))}
-                                                </>
-                                            )}
-                                        </div>
-                                    )}
-                                    {activeTab === 'font' && (
-                                        <div className="space-y-1">
-                                            {availableFonts.map(font => (
-                                                <FontItem
-                                                    key={font.id}
-                                                    font={font}
-                                                    isSelected={selectedFont === font.id}
-                                                    onSelect={handleFontSelect}
-                                                />
-                                            ))}
-                                        </div>
-                                    )}
-                                    {activeTab === 'custom' && !editingTheme && (
-                                        <div className="space-y-2">
-                                            {/* Actions */}
-                                            <button
-                                                onClick={handleNewTheme}
-                                                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
-                                            >
-                                                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-primary/10 text-primary">
-                                                    <Plus size={16} />
-                                                </div>
-                                                <div>
-                                                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.new')}</div>
-                                                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.newDesc')}</div>
-                                                </div>
-                                            </button>
-                                            <button
-                                                onClick={handleImportFile}
-                                                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
-                                            >
-                                                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-blue-500/10 text-blue-500">
-                                                    <Download size={16} />
-                                                </div>
-                                                <div>
-                                                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.import')}</div>
-                                                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.importDesc')}</div>
-                                                </div>
-                                            </button>
-                                            <input
-                                                ref={fileInputRef}
-                                                type="file"
-                                                accept=".itermcolors"
-                                                onChange={handleFileSelected}
-                                                className="hidden"
+                        <>
+                            <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                                {activeTab === 'theme' && (
+                                    <div className="space-y-1">
+                                        {/* Built-in themes */}
+                                        {builtinThemes.map(theme => (
+                                            <ThemeItem
+                                                key={theme.id}
+                                                theme={theme}
+                                                isSelected={selectedTheme === theme.id && !editingTheme}
+                                                onSelect={handleThemeSelect}
                                             />
-
-                                            {/* Custom themes list */}
-                                            {customThemes.length > 0 && (
-                                                <>
-                                                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1 px-1 font-semibold">
-                                                        {t('terminal.customTheme.yourThemes')}
-                                                    </div>
-                                                    {customThemes.map(theme => (
-                                                        <ThemeItem
-                                                            key={theme.id}
-                                                            theme={theme}
-                                                            isSelected={selectedTheme === theme.id}
-                                                            onSelect={handleThemeSelect}
-                                                            onEdit={handleEditTheme}
-                                                        />
-                                                    ))}
-                                                </>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Font Size Control (only in font tab) */}
-                                {activeTab === 'font' && (
-                                    <div className="p-3 border-t border-border shrink-0">
-                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold">
-                                            {t('terminal.themeModal.fontSize')}
-                                        </div>
-                                        <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-2">
-                                            <button
-                                                onClick={() => handleFontSizeChange(-1)}
-                                                disabled={fontSize <= MIN_FONT_SIZE}
-                                                className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
-                                            >
-                                                <Minus size={14} />
-                                            </button>
-                                            <div className="flex items-baseline gap-1">
-                                                <span className="text-xl font-bold text-foreground tabular-nums">{fontSize}</span>
-                                                <span className="text-[10px] text-muted-foreground">px</span>
-                                            </div>
-                                            <button
-                                                onClick={() => handleFontSizeChange(1)}
-                                                disabled={fontSize >= MAX_FONT_SIZE}
-                                                className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
-                                            >
-                                                <Plus size={14} />
-                                            </button>
-                                        </div>
+                                        ))}
+                                        {/* Custom themes section */}
+                                        {customThemes.length > 0 && (
+                                            <>
+                                                <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1.5 px-1 font-semibold">
+                                                    {t('terminal.customTheme.section')}
+                                                </div>
+                                                {customThemes.map(theme => (
+                                                    <ThemeItem
+                                                        key={theme.id}
+                                                        theme={theme}
+                                                        isSelected={selectedTheme === theme.id && !editingTheme}
+                                                        onSelect={handleThemeSelect}
+                                                        onEdit={handleEditTheme}
+                                                    />
+                                                ))}
+                                            </>
+                                        )}
                                     </div>
                                 )}
-                            </>
-                        )}
+                                {activeTab === 'font' && (
+                                    <div className="space-y-1">
+                                        {availableFonts.map(font => (
+                                            <FontItem
+                                                key={font.id}
+                                                font={font}
+                                                isSelected={selectedFont === font.id}
+                                                onSelect={handleFontSelect}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                                {activeTab === 'custom' && !editingTheme && (
+                                    <div className="space-y-2">
+                                        {/* Actions */}
+                                        <button
+                                            onClick={handleNewTheme}
+                                            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
+                                        >
+                                            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-primary/10 text-primary">
+                                                <Plus size={16} />
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.new')}</div>
+                                                <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.newDesc')}</div>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={handleImportFile}
+                                            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left hover:bg-muted transition-colors"
+                                        >
+                                            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-blue-500/10 text-blue-500">
+                                                <Download size={16} />
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.import')}</div>
+                                                <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.importDesc')}</div>
+                                            </div>
+                                        </button>
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept=".itermcolors"
+                                            onChange={handleFileSelected}
+                                            className="hidden"
+                                        />
+
+                                        {/* Custom themes list */}
+                                        {customThemes.length > 0 && (
+                                            <>
+                                                <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-3 mb-1 px-1 font-semibold">
+                                                    {t('terminal.customTheme.yourThemes')}
+                                                </div>
+                                                {customThemes.map(theme => (
+                                                    <ThemeItem
+                                                        key={theme.id}
+                                                        theme={theme}
+                                                        isSelected={selectedTheme === theme.id}
+                                                        onSelect={handleThemeSelect}
+                                                        onEdit={handleEditTheme}
+                                                    />
+                                                ))}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Font Size Control (only in font tab) */}
+                            {activeTab === 'font' && (
+                                <div className="p-3 border-t border-border shrink-0">
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold">
+                                        {t('terminal.themeModal.fontSize')}
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-2">
+                                        <button
+                                            onClick={() => handleFontSizeChange(-1)}
+                                            disabled={fontSize <= MIN_FONT_SIZE}
+                                            className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                                        >
+                                            <Minus size={14} />
+                                        </button>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-xl font-bold text-foreground tabular-nums">{fontSize}</span>
+                                            <span className="text-[10px] text-muted-foreground">px</span>
+                                        </div>
+                                        <button
+                                            onClick={() => handleFontSizeChange(1)}
+                                            disabled={fontSize >= MAX_FONT_SIZE}
+                                            className="w-8 h-8 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                                        >
+                                            <Plus size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     </div>
 
                     {/* Right Panel - Large Preview */}
@@ -710,28 +678,16 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
 
                 {/* Footer */}
                 <div className="flex gap-3 px-5 py-3 shrink-0 border-t border-border bg-muted/20">
-                    {/* Delete button for existing custom themes */}
-                    {editingTheme && !isNewTheme && (
-                        <Button
-                            variant="ghost"
-                            onClick={handleEditorDelete}
-                            className="h-10 text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5"
-                        >
-                            <Trash2 size={14} />
-                            {t('terminal.customTheme.delete')}
-                        </Button>
-                    )}
-                    <div className="flex-1" />
                     <Button
                         variant="ghost"
                         onClick={handleCancel}
-                        className="h-10 px-6"
+                        className="flex-1 h-10"
                     >
                         {t('common.cancel')}
                     </Button>
                     <Button
                         onClick={handleSave}
-                        className="h-10 px-8"
+                        className="flex-1 h-10"
                     >
                         {t('common.save')}
                     </Button>
@@ -741,7 +697,34 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
     );
 
     // Use Portal to render at document root
-    return createPortal(modalContent, document.body);
+    return (
+        <>
+            {createPortal(modalContent, document.body)}
+            {editingTheme && (
+                <CustomThemeModal
+                    open={!!editingTheme}
+                    theme={editingTheme}
+                    isNew={isNewTheme}
+                    onSave={(theme) => {
+                        if (isNewTheme) {
+                            addTheme(theme);
+                            setSelectedTheme(theme.id);
+                            onThemeChange?.(theme.id);
+                        } else {
+                            updateTheme(theme.id, theme);
+                            if (selectedTheme === theme.id) {
+                                onThemeChange?.(theme.id);
+                            }
+                        }
+                        setEditingTheme(null);
+                        setIsNewTheme(false);
+                    }}
+                    onDelete={isNewTheme ? undefined : handleEditorDelete}
+                    onCancel={handleEditorBack}
+                />
+            )}
+        </>
+    );
 };
 
 export default ThemeCustomizeModal;
