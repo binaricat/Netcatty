@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { AlertCircle, ChevronRight, Import, Minus, Palette, Plus, RotateCcw } from "lucide-react";
+import { AlertCircle, ChevronRight, Import, Minus, Palette, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type {
   CursorShape,
   LinkModifier,
@@ -133,6 +133,12 @@ export default function SettingsTerminalTab(props: {
   // New custom theme modal
   const [customThemeModalOpen, setCustomThemeModalOpen] = useState(false);
   const [customThemeData, setCustomThemeData] = useState<TerminalTheme | null>(null);
+  const [isEditingTheme, setIsEditingTheme] = useState(false);
+
+  // Check if current theme is a custom theme
+  const isCustomTheme = useMemo(() => {
+    return currentTheme?.isCustom === true;
+  }, [currentTheme]);
 
   const handleNewCustomTheme = useCallback(() => {
     const base = TERMINAL_THEMES.find(t => t.id === terminalThemeId)
@@ -146,8 +152,22 @@ export default function SettingsTerminalTab(props: {
       colors: { ...base.colors },
     };
     setCustomThemeData(newTheme);
+    setIsEditingTheme(false);
     setCustomThemeModalOpen(true);
   }, [terminalThemeId]);
+
+  const handleEditCustomTheme = useCallback(() => {
+    if (!currentTheme?.isCustom) return;
+    setCustomThemeData({ ...currentTheme, colors: { ...currentTheme.colors } });
+    setIsEditingTheme(true);
+    setCustomThemeModalOpen(true);
+  }, [currentTheme]);
+
+  const handleDeleteCustomTheme = useCallback(() => {
+    if (!currentTheme?.isCustom) return;
+    customThemeStore.deleteTheme(currentTheme.id);
+    setTerminalThemeId(TERMINAL_THEMES[0].id);
+  }, [currentTheme, setTerminalThemeId]);
 
   // Fetch default shell on mount
   useEffect(() => {
@@ -266,6 +286,28 @@ export default function SettingsTerminalTab(props: {
           <Import size={14} />
           {t('terminal.customTheme.import')}
         </Button>
+        {isCustomTheme && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleEditCustomTheme}
+            >
+              <Pencil size={14} />
+              {t('common.edit')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive hover:text-destructive"
+              onClick={handleDeleteCustomTheme}
+            >
+              <Trash2 size={14} />
+              {t('common.delete')}
+            </Button>
+          </>
+        )}
         <input
           ref={importFileRef}
           type="file"
@@ -280,13 +322,23 @@ export default function SettingsTerminalTab(props: {
         <CustomThemeModal
           open={customThemeModalOpen}
           theme={customThemeData}
-          isNew={true}
+          isNew={!isEditingTheme}
           onSave={(theme) => {
-            customThemeStore.addTheme(theme);
+            if (isEditingTheme) {
+              customThemeStore.updateTheme(theme.id, theme);
+            } else {
+              customThemeStore.addTheme(theme);
+            }
             setTerminalThemeId(theme.id);
             setCustomThemeModalOpen(false);
             setCustomThemeData(null);
           }}
+          onDelete={isEditingTheme ? (themeId) => {
+            customThemeStore.deleteTheme(themeId);
+            setTerminalThemeId(TERMINAL_THEMES[0].id);
+            setCustomThemeModalOpen(false);
+            setCustomThemeData(null);
+          } : undefined}
           onCancel={() => {
             setCustomThemeModalOpen(false);
             setCustomThemeData(null);
