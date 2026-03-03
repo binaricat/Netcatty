@@ -4,7 +4,7 @@
  * Opens on top of ThemeCustomizeModal for creating/editing custom themes.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, X } from 'lucide-react';
 import { TerminalTheme } from '../../domain/models';
@@ -127,6 +127,19 @@ export const CustomThemeModal: React.FC<CustomThemeModalProps> = ({
     const themeInfo = useMemo(() => {
         return `${editingTheme.name} • ${editingTheme.type.toUpperCase()}`;
     }, [editingTheme.name, editingTheme.type]);
+
+    // Handle Escape key — close child editor
+    useEffect(() => {
+        if (!open) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                onCancel();
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown, true); // capture phase
+        return () => document.removeEventListener('keydown', handleKeyDown, true);
+    }, [open, onCancel]);
 
     if (!open) return null;
 

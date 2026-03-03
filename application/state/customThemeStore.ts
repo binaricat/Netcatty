@@ -23,6 +23,8 @@ class CustomThemeStore {
     private themes: TerminalTheme[] = [];
     private listeners = new Set<Listener>();
     private loaded = false;
+    /** Cached merged array for stable useSyncExternalStore snapshots */
+    private cachedAllThemes: TerminalTheme[] | null = null;
 
     constructor() {
         this.loadFromStorage();
@@ -39,6 +41,7 @@ class CustomThemeStore {
             // ignore corrupt data
         }
         this.loaded = true;
+        this.cachedAllThemes = null; // invalidate cache
     };
 
     private saveToStorage = () => {
@@ -50,6 +53,7 @@ class CustomThemeStore {
     };
 
     private notify = () => {
+        this.cachedAllThemes = null; // invalidate cache on any mutation
         this.listeners.forEach(listener => listener());
     };
 
@@ -85,12 +89,17 @@ class CustomThemeStore {
         return () => this.listeners.delete(listener);
     };
 
-    // ---- Getters ----
+    // ---- Getters (stable references for useSyncExternalStore) ----
 
     getCustomThemes = (): TerminalTheme[] => this.themes;
 
-    /** Returns all themes: built-in + custom */
-    getAllThemes = (): TerminalTheme[] => [...TERMINAL_THEMES, ...this.themes];
+    /** Returns all themes: built-in + custom (cached for snapshot stability) */
+    getAllThemes = (): TerminalTheme[] => {
+        if (!this.cachedAllThemes) {
+            this.cachedAllThemes = [...TERMINAL_THEMES, ...this.themes];
+        }
+        return this.cachedAllThemes;
+    };
 
     /** Find a theme by ID across both built-in and custom */
     getThemeById = (id: string): TerminalTheme | undefined => {
