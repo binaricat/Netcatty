@@ -367,7 +367,7 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         const file = e.target.files?.[0];
         if (!file) return;
 
-        const name = file.name.replace(/\.itermcolors$/i, '');
+        const name = file.name.replace(/\.(itermcolors|xml)$/i, '');
         const reader = new FileReader();
         reader.onload = () => {
             const xml = reader.result as string;
@@ -377,12 +377,18 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
                 setSelectedTheme(parsed.id);
                 onThemeChange?.(parsed.id);
                 setActiveTab('theme');
+            } else {
+                console.error('[ThemeCustomize] Failed to parse .itermcolors file:', file.name);
+                window.alert(t('terminal.customTheme.importError') || 'Failed to parse the selected file. Please ensure it is a valid .itermcolors XML file.');
             }
+        };
+        reader.onerror = () => {
+            console.error('[ThemeCustomize] Failed to read file:', file.name, reader.error);
         };
         reader.readAsText(file);
         // Reset file input so the same file can be re-imported
         e.target.value = '';
-    }, [addTheme, onThemeChange]);
+    }, [addTheme, onThemeChange, t]);
 
     const handleEditTheme = useCallback((themeId: string) => {
         const theme = customThemes.find(t => t.id === themeId);
@@ -435,15 +441,15 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
         onClose();
     }, [onThemeChange, onFontFamilyChange, onFontSizeChange, onClose]);
 
-    // Handle ESC key - same as cancel
+    // Handle ESC key - same as cancel, but skip when child editor is open
     useEffect(() => {
         if (!open) return;
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') handleCancel();
+            if (e.key === 'Escape' && !editingTheme) handleCancel();
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, handleCancel]);
+    }, [open, handleCancel, editingTheme]);
 
     // Handle backdrop click - same as cancel
     const handleBackdropClick = useCallback((e: React.MouseEvent) => {

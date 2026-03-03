@@ -51,30 +51,52 @@ const ColorInput = memo(({
     label: string;
     value: string;
     onChange: (value: string) => void;
-}) => (
-    <div className="flex items-center gap-2">
-        <div className="relative">
+}) => {
+    // Local state for text input — allows partial hex while typing
+    const [textValue, setTextValue] = React.useState(value);
+    // Sync external value changes into local state
+    React.useEffect(() => { setTextValue(value); }, [value]);
+
+    const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const v = e.target.value;
+        if (!/^#[0-9a-fA-F]{0,6}$/.test(v)) return;
+        setTextValue(v);
+        // Only commit complete hex values (#rgb or #rrggbb)
+        if (/^#[0-9a-fA-F]{3}$/.test(v) || /^#[0-9a-fA-F]{6}$/.test(v)) {
+            // Normalize #rgb to #rrggbb
+            const normalized = v.length === 4
+                ? `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`
+                : v;
+            onChange(normalized);
+        }
+    };
+
+    // On blur, revert to the last committed value if incomplete
+    const handleBlur = () => { setTextValue(value); };
+
+    return (
+        <div className="flex items-center gap-2">
+            <div className="relative">
+                <input
+                    type="color"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    className="w-6 h-6 rounded cursor-pointer border border-border/50 p-0"
+                    style={{ appearance: 'none', WebkitAppearance: 'none', background: value }}
+                />
+            </div>
+            <span className="text-[10px] text-muted-foreground flex-1 truncate">{label}</span>
             <input
-                type="color"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                className="w-6 h-6 rounded cursor-pointer border border-border/50 p-0"
-                style={{ appearance: 'none', WebkitAppearance: 'none', background: value }}
+                type="text"
+                value={textValue}
+                onChange={handleTextChange}
+                onBlur={handleBlur}
+                className="w-[68px] text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-background text-foreground uppercase"
+                spellCheck={false}
             />
         </div>
-        <span className="text-[10px] text-muted-foreground flex-1 truncate">{label}</span>
-        <input
-            type="text"
-            value={value}
-            onChange={(e) => {
-                const v = e.target.value;
-                if (/^#[0-9a-fA-F]{0,6}$/.test(v)) onChange(v);
-            }}
-            className="w-[68px] text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-background text-foreground uppercase"
-            spellCheck={false}
-        />
-    </div>
-));
+    );
+});
 ColorInput.displayName = 'ColorInput';
 
 interface CustomThemeEditorProps {
