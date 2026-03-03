@@ -27,7 +27,7 @@ import {
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
-import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
+import { customThemeStore } from "../application/state/customThemeStore";
 import { MIN_FONT_SIZE, MAX_FONT_SIZE } from "../infrastructure/config/fonts";
 import { cn } from "../lib/utils";
 import { EnvVar, Host, Identity, ManagedSource, ProxyConfig, SSHKey } from "../types";
@@ -1117,21 +1117,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
               style={{
                 backgroundColor:
-                  TERMINAL_THEMES.find(
-                    (t) => t.id === (form.theme || "flexoki-dark"),
-                  )?.colors.background || "#100F0F",
+                  customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.background || "#100F0F",
                 color:
-                  TERMINAL_THEMES.find(
-                    (t) => t.id === (form.theme || "flexoki-dark"),
-                  )?.colors.foreground || "#CECDC3",
+                  customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.foreground || "#CECDC3",
               }}
             >
               <div className="p-0.5">
                 <div
                   style={{
-                    color: TERMINAL_THEMES.find(
-                      (t) => t.id === (form.theme || "flexoki-dark"),
-                    )?.colors.green,
+                    color: customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.green,
                   }}
                 >
                   $
@@ -1139,9 +1133,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               </div>
             </div>
             <span className="text-sm flex-1">
-              {TERMINAL_THEMES.find(
-                (t) => t.id === (form.theme || "flexoki-dark"),
-              )?.name || "Flexoki Dark"}
+              {customThemeStore.getThemeById(form.theme || "flexoki-dark")?.name || "Flexoki Dark"}
             </span>
           </button>
 
@@ -1506,35 +1498,20 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
                 style={{
                   backgroundColor:
-                    TERMINAL_THEMES.find(
-                      (t) =>
-                        t.id ===
-                        (form.protocols?.find((p) => p.protocol === "telnet")
-                          ?.theme ||
-                          form.theme ||
-                          "flexoki-dark"),
+                    customThemeStore.getThemeById(
+                      form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
                     )?.colors.background || "#100F0F",
                   color:
-                    TERMINAL_THEMES.find(
-                      (t) =>
-                        t.id ===
-                        (form.protocols?.find((p) => p.protocol === "telnet")
-                          ?.theme ||
-                          form.theme ||
-                          "flexoki-dark"),
+                    customThemeStore.getThemeById(
+                      form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
                     )?.colors.foreground || "#CECDC3",
                 }}
               >
                 <div className="p-0.5">
                   <div
                     style={{
-                      color: TERMINAL_THEMES.find(
-                        (t) =>
-                          t.id ===
-                          (form.protocols?.find((p) => p.protocol === "telnet")
-                            ?.theme ||
-                            form.theme ||
-                            "flexoki-dark"),
+                      color: customThemeStore.getThemeById(
+                        form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
                       )?.colors.green,
                     }}
                   >
@@ -1543,13 +1520,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 </div>
               </div>
               <span className="text-sm flex-1">
-                {TERMINAL_THEMES.find(
-                  (t) =>
-                    t.id ===
-                    (form.protocols?.find((p) => p.protocol === "telnet")
-                      ?.theme ||
-                      form.theme ||
-                      "flexoki-dark"),
+                {customThemeStore.getThemeById(
+                  form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
                 )?.name || "Flexoki Dark"}
               </span>
             </button>
