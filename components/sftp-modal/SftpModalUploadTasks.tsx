@@ -64,7 +64,7 @@ export const SftpModalUploadTasks: React.FC<SftpModalUploadTasksProps> = ({ task
   return (
     <div className="border-t border-border/60 bg-secondary/50 flex-shrink-0">
       <div className="max-h-40 overflow-y-auto overflow-x-hidden">
-        {tasks.map((task) => {
+        {[...tasks].reverse().map((task) => {
           const formatSpeed = (bytesPerSec: number) => {
             if (bytesPerSec <= 0) return "";
             if (bytesPerSec >= 1024 * 1024)

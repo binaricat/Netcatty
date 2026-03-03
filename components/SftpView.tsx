@@ -167,7 +167,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities }) => 
   });
 
   const visibleTransfers = useMemo(
-    () => sftp.transfers.slice(-5),
+    () => [...sftp.transfers].reverse().slice(0, 5),
     [sftp.transfers],
   );
 
