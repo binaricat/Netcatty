@@ -4,10 +4,18 @@ import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
 import { STORAGE_KEY_CUSTOM_THEMES } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 
+// Access the Electron bridge for cross-window IPC
+type NetcattyBridge = {
+    notifySettingsChanged?(payload: { key: string; value: unknown }): void;
+    onSettingsChanged?(cb: (payload: { key: string; value: unknown }) => void): () => void;
+};
+const getBridge = (): NetcattyBridge | undefined =>
+    (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+
 /**
  * Custom Theme Store - manages user-created terminal themes
  * Uses useSyncExternalStore pattern (same as fontStore)
- * Persists to localStorage
+ * Persists to localStorage + cross-window IPC sync
  */
 type Listener = () => void;
 
@@ -18,6 +26,7 @@ class CustomThemeStore {
 
     constructor() {
         this.loadFromStorage();
+        this.setupCrossWindowSync();
     }
 
     private loadFromStorage = () => {
@@ -44,6 +53,33 @@ class CustomThemeStore {
         this.listeners.forEach(listener => listener());
     };
 
+    /** Broadcast change to other Electron windows via IPC */
+    private broadcastChange = () => {
+        try {
+            getBridge()?.notifySettingsChanged?.({
+                key: STORAGE_KEY_CUSTOM_THEMES,
+                value: this.themes,
+            });
+        } catch {
+            // not in Electron or bridge unavailable
+        }
+    };
+
+    /** Listen for changes from other windows and reload */
+    private setupCrossWindowSync = () => {
+        try {
+            getBridge()?.onSettingsChanged?.((payload) => {
+                if (payload.key === STORAGE_KEY_CUSTOM_THEMES) {
+                    // Another window changed custom themes — reload from localStorage
+                    this.loadFromStorage();
+                    this.notify();
+                }
+            });
+        } catch {
+            // not in Electron or bridge unavailable
+        }
+    };
+
     subscribe = (listener: Listener): (() => void) => {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
@@ -67,6 +103,7 @@ class CustomThemeStore {
         this.themes = [...this.themes, { ...theme, isCustom: true }];
         this.saveToStorage();
         this.notify();
+        this.broadcastChange();
     };
 
     updateTheme = (id: string, updates: Partial<TerminalTheme>) => {
@@ -75,12 +112,14 @@ class CustomThemeStore {
         );
         this.saveToStorage();
         this.notify();
+        this.broadcastChange();
     };
 
     deleteTheme = (id: string) => {
         this.themes = this.themes.filter(t => t.id !== id);
         this.saveToStorage();
         this.notify();
+        this.broadcastChange();
     };
 }
 
