@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState, useMemo } from "react";
-import { AlertCircle, ChevronRight, Minus, Plus, RotateCcw } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { AlertCircle, ChevronRight, Import, Minus, Plus, RotateCcw } from "lucide-react";
 import type {
   CursorShape,
   LinkModifier,
@@ -12,6 +12,7 @@ import { useI18n } from "../../../application/i18n/I18nProvider";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TerminalFont } from "../../../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../../../infrastructure/config/terminalThemes";
 import { customThemeStore } from "../../../application/state/customThemeStore";
+import { parseItermcolors } from "../../../infrastructure/parsers/itermcolorsParser";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -107,6 +108,25 @@ export default function SettingsTerminalTab(props: {
       || customThemeStore.getThemeById(terminalThemeId)
       || TERMINAL_THEMES[0];
   }, [terminalThemeId]);
+
+  // Import .itermcolors file
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const handleImportItermcolors = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const name = file.name.replace(/\.itermcolors$/i, '');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const xml = reader.result as string;
+      const parsed = parseItermcolors(xml, name);
+      if (parsed) {
+        customThemeStore.addTheme(parsed);
+        setTerminalThemeId(parsed.id);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, [setTerminalThemeId]);
 
   // Fetch default shell on mount
   useEffect(() => {
@@ -204,6 +224,26 @@ export default function SettingsTerminalTab(props: {
         selectedThemeId={terminalThemeId}
         onSelect={setTerminalThemeId}
       />
+
+      {/* Import .itermcolors button */}
+      <div className="flex items-center gap-2 -mt-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => importFileRef.current?.click()}
+        >
+          <Import size={14} />
+          {t('terminal.customTheme.import')}
+        </Button>
+        <input
+          ref={importFileRef}
+          type="file"
+          accept=".itermcolors"
+          className="hidden"
+          onChange={handleImportItermcolors}
+        />
+      </div>
 
       <SectionHeader title={t("settings.terminal.section.font")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
