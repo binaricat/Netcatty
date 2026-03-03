@@ -133,14 +133,14 @@ export const CustomThemeModal: React.FC<CustomThemeModalProps> = ({
     const modalContent = (
         <div
             className="fixed inset-0 z-[300] flex items-center justify-center"
-            onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
         >
-            {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            {/* Backdrop — clicking it dismisses the modal */}
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
 
             {/* Modal */}
             <div className="relative z-10 bg-popover/95 backdrop-blur-xl rounded-xl shadow-2xl border border-border/50 flex flex-col"
                 style={{ width: 'min(820px, 90vw)', height: 'min(600px, 85vh)' }}
+                onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-border">

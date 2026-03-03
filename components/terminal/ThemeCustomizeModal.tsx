@@ -38,10 +38,13 @@ const ThemeItem = memo(({
     onSelect: (id: string) => void;
     onEdit?: (id: string) => void;
 }) => (
-    <button
+    <div
+        role="button"
+        tabIndex={0}
         onClick={() => onSelect(theme.id)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(theme.id); } }}
         className={cn(
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all group',
+            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all group cursor-pointer',
             isSelected
                 ? 'bg-primary/15 ring-1 ring-primary'
                 : 'hover:bg-muted'
@@ -66,17 +69,20 @@ const ThemeItem = memo(({
             </div>
         </div>
         {onEdit && (
-            <button
+            <div
+                role="button"
+                tabIndex={0}
                 onClick={(e) => { e.stopPropagation(); onEdit(theme.id); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onEdit(theme.id); } }}
                 className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 opacity-0 group-hover:opacity-100 transition-all"
             >
                 <Pencil size={11} />
-            </button>
+            </div>
         )}
         {isSelected && !onEdit && (
             <Check size={14} className="text-primary flex-shrink-0" />
         )}
-    </button>
+    </div>
 ));
 ThemeItem.displayName = 'ThemeItem';
 
