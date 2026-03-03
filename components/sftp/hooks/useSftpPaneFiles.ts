@@ -29,12 +29,12 @@ export const useSftpPaneFiles = ({
 }: UseSftpPaneFilesParams): UseSftpPaneFilesResult => {
   const filteredFiles = useMemo(() => {
     const term = filter.trim().toLowerCase();
-    let nextFiles = filterHiddenFiles(files, showHiddenFiles);
+    let nextFiles = filterHiddenFiles(files, showHiddenFiles, connection?.isLocal);
     if (!term) return nextFiles;
     return nextFiles.filter(
       (f) => f.name === ".." || f.name.toLowerCase().includes(term),
     );
-  }, [files, filter, showHiddenFiles]);
+  }, [files, filter, showHiddenFiles, connection?.isLocal]);
 
   const displayFiles = useMemo(() => {
     if (!connection) return [];
@@ -50,7 +50,7 @@ export const useSftpPaneFiles = ({
       lastModified: 0,
       lastModifiedFormatted: "--",
     };
-    return [parentEntry, ...filteredFiles.filter((f) => f.name !== "..")] ;
+    return [parentEntry, ...filteredFiles.filter((f) => f.name !== "..")];
   }, [connection, filteredFiles]);
 
   const sortedDisplayFiles = useMemo(() => {
