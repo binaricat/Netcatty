@@ -887,6 +887,7 @@ const zhCN: Messages = {
   'common.import': '导入',
   'common.generate': '生成',
   'common.delete': '删除',
+  'common.edit': '编辑',
   'common.clear': '清除',
   'common.optional': '可选',
   'common.selectPlaceholder': '请选择...',

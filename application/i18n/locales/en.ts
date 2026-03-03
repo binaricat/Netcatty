@@ -14,6 +14,7 @@ const en: Messages = {
   'common.import': 'Import',
   'common.generate': 'Generate',
   'common.delete': 'Delete',
+  'common.edit': 'Edit',
   'common.clear': 'Clear',
   'common.optional': 'Optional',
   'common.selectPlaceholder': 'Select...',
