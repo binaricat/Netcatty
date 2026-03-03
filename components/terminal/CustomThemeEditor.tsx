@@ -5,7 +5,6 @@
  */
 
 import React, { useCallback, memo } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import { TerminalTheme } from '../../domain/models';
 import { useI18n } from '../../application/i18n/I18nProvider';
 
@@ -81,15 +80,15 @@ ColorInput.displayName = 'ColorInput';
 interface CustomThemeEditorProps {
     theme: TerminalTheme;
     onChange: (theme: TerminalTheme) => void;
-    onBack: () => void;
+    onBack?: () => void;  // kept for API compat but no longer rendered
     isNew?: boolean;
 }
 
 export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
     theme,
     onChange,
-    onBack,
-    isNew,
+    onBack: _onBack,
+    isNew: _isNew,
 }) => {
     const { t } = useI18n();
 
@@ -128,19 +127,6 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
 
     return (
         <div className="flex flex-col h-full">
-            {/* Header */}
-            <div className="flex items-center gap-2 p-2 border-b border-border shrink-0">
-                <button
-                    onClick={onBack}
-                    className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                    <ArrowLeft size={14} />
-                </button>
-                <span className="text-xs font-medium text-foreground truncate flex-1">
-                    {isNew ? t('terminal.customTheme.newTitle') : t('terminal.customTheme.editTitle')}
-                </span>
-            </div>
-
             {/* Name + Type */}
             <div className="p-2 space-y-2 border-b border-border shrink-0">
                 <div>
