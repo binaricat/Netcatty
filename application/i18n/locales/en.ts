@@ -1017,6 +1017,7 @@ const en: Messages = {
   'terminal.customTheme.editTitle': 'Edit Theme',
   'terminal.customTheme.import': 'Import .itermcolors',
   'terminal.customTheme.importDesc': 'Import from iTerm2 color scheme file',
+  'terminal.customTheme.importError': 'Failed to parse the selected file. Please ensure it is a valid .itermcolors XML file.',
   'terminal.customTheme.delete': 'Delete Theme',
   'terminal.customTheme.confirmDelete': 'Confirm Delete',
   'terminal.customTheme.name': 'Name',

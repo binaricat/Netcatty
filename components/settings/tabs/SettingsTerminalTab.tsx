@@ -115,20 +115,32 @@ export default function SettingsTerminalTab(props: {
   const importFileRef = useRef<HTMLInputElement>(null);
   const handleImportItermcolors = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const name = file.name.replace(/\.itermcolors$/i, '');
+    if (!file) {
+      console.log('[Settings] No file selected');
+      return;
+    }
+    console.log('[Settings] File selected:', file.name, 'size:', file.size);
+    const name = file.name.replace(/\.(itermcolors|xml)$/i, '');
     const reader = new FileReader();
     reader.onload = () => {
       const xml = reader.result as string;
+      console.log('[Settings] File read successfully, length:', xml.length);
       const parsed = parseItermcolors(xml, name);
       if (parsed) {
+        console.log('[Settings] Theme parsed successfully:', parsed.id, parsed.name);
         customThemeStore.addTheme(parsed);
         setTerminalThemeId(parsed.id);
+      } else {
+        console.error('[Settings] Failed to parse .itermcolors file:', file.name);
+        window.alert(t('terminal.customTheme.importError') || 'Failed to parse the selected file. Please ensure it is a valid .itermcolors XML file.');
       }
+    };
+    reader.onerror = () => {
+      console.error('[Settings] Failed to read file:', file.name, reader.error);
     };
     reader.readAsText(file);
     e.target.value = '';
-  }, [setTerminalThemeId]);
+  }, [setTerminalThemeId, t]);
 
   // New custom theme modal
   const [customThemeModalOpen, setCustomThemeModalOpen] = useState(false);

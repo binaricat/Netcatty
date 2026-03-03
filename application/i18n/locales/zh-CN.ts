@@ -700,6 +700,7 @@ const zhCN: Messages = {
   'terminal.customTheme.editTitle': '编辑主题',
   'terminal.customTheme.import': '导入 .itermcolors',
   'terminal.customTheme.importDesc': '从 iTerm2 配色方案文件导入',
+  'terminal.customTheme.importError': '无法解析所选文件，请确保它是有效的 .itermcolors XML 文件。',
   'terminal.customTheme.delete': '删除主题',
   'terminal.customTheme.confirmDelete': '确认删除',
   'terminal.customTheme.name': '名称',
