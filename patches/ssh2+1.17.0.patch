@@ -1,3 +1,112 @@
+diff --git a/node_modules/ssh2/lib/client.js b/node_modules/ssh2/lib/client.js
+index 7291c2c..8943c9a 100644
+--- a/node_modules/ssh2/lib/client.js
++++ b/node_modules/ssh2/lib/client.js
+@@ -2170,6 +2170,29 @@ function getKeyAlgos(client, key, serverSigAlgs) {
+           return [];
+       }
+       return [['ssh-rsa', 'sha1']];
++
++    // OpenSSH RSA user certificates
++    // - publickey algorithm name must be the *cert* variant
++    // - signature algorithm uses the non-cert variant (handled in Protocol.js)
++    case 'ssh-rsa-cert-v01@openssh.com':
++    case 'rsa-sha2-256-cert-v01@openssh.com':
++    case 'rsa-sha2-512-cert-v01@openssh.com':
++      if (client._protocol._compatFlags & COMPAT.IMPLY_RSA_SHA2_SIGALGS) {
++        if (!Array.isArray(serverSigAlgs))
++          serverSigAlgs = ['rsa-sha2-256', 'rsa-sha2-512'];
++        else
++          serverSigAlgs = ['rsa-sha2-256', 'rsa-sha2-512', ...serverSigAlgs];
++      }
++      if (Array.isArray(serverSigAlgs)) {
++        // Prefer SHA-512 when available (matches modern OpenSSH default)
++        if (serverSigAlgs.indexOf('rsa-sha2-512') !== -1)
++          return [['rsa-sha2-512-cert-v01@openssh.com', 'sha512']];
++        if (serverSigAlgs.indexOf('rsa-sha2-256') !== -1)
++          return [['rsa-sha2-256-cert-v01@openssh.com', 'sha256']];
++        if (serverSigAlgs.indexOf('ssh-rsa') === -1)
++          return [];
++      }
++      return [['ssh-rsa-cert-v01@openssh.com', 'sha1']];
+   }
+ }
+ 
+diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/protocol/Protocol.js
+index 7302488..95584c5 100644
+--- a/node_modules/ssh2/lib/protocol/Protocol.js
++++ b/node_modules/ssh2/lib/protocol/Protocol.js
+@@ -701,11 +701,19 @@ class Protocol {
+       if (signature === false)
+         throw new Error('Error while converting handshake signature');
+ 
++      let sigAlgo = keyAlgo;
++      if (signature && typeof signature === 'object' && signature._signatureAlgorithm)
++        sigAlgo = signature._signatureAlgorithm;
++      else if (typeof keyAlgo === 'string'
++               && keyAlgo.endsWith('-cert-v01@openssh.com'))
++        sigAlgo = keyAlgo.slice(0, -'-cert-v01@openssh.com'.length);
++
+       const sigLen = signature.length;
++      const sigAlgoLen = Buffer.byteLength(sigAlgo);
+       p = this._packetRW.write.allocStart;
+       packet = this._packetRW.write.alloc(
+         1 + 4 + userLen + 4 + 14 + 4 + 9 + 1 + 4 + algoLen + 4 + pubKeyLen + 4
+-          + 4 + algoLen + 4 + sigLen
++          + 4 + sigAlgoLen + 4 + sigLen
+       );
+ 
+       // TODO: simply copy from original "packet" to new `packet` to avoid
+@@ -729,12 +737,12 @@ class Protocol {
+       writeUInt32BE(packet, pubKeyLen, p += algoLen);
+       packet.set(pubKey, p += 4);
+ 
+-      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += pubKeyLen);
++      writeUInt32BE(packet, 4 + sigAlgoLen + 4 + sigLen, p += pubKeyLen);
+ 
+-      writeUInt32BE(packet, algoLen, p += 4);
+-      packet.utf8Write(keyAlgo, p += 4, algoLen);
++      writeUInt32BE(packet, sigAlgoLen, p += 4);
++      packet.utf8Write(sigAlgo, p += 4, sigAlgoLen);
+ 
+-      writeUInt32BE(packet, sigLen, p += algoLen);
++      writeUInt32BE(packet, sigLen, p += sigAlgoLen);
+       packet.set(signature, p += 4);
+ 
+       // Servers shouldn't send packet type 60 in response to signed publickey
+@@ -810,19 +818,27 @@ class Protocol {
+       if (!signature)
+         throw new Error('Error while converting handshake signature');
+ 
++      let sigAlgo = keyAlgo;
++      if (signature && typeof signature === 'object' && signature._signatureAlgorithm)
++        sigAlgo = signature._signatureAlgorithm;
++      else if (typeof keyAlgo === 'string'
++               && keyAlgo.endsWith('-cert-v01@openssh.com'))
++        sigAlgo = keyAlgo.slice(0, -'-cert-v01@openssh.com'.length);
++
+       const sigLen = signature.length;
++      const sigAlgoLen = Buffer.byteLength(sigAlgo);
+       const reqDataLen = (data.length - sesLen - 4);
+       p = this._packetRW.write.allocStart;
+       const packet = this._packetRW.write.alloc(
+-        reqDataLen + 4 + 4 + algoLen + 4 + sigLen
++        reqDataLen + 4 + 4 + sigAlgoLen + 4 + sigLen
+       );
+ 
+       bufferCopy(data, packet, 4 + sesLen, data.length, p);
+ 
+-      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += reqDataLen);
+-      writeUInt32BE(packet, algoLen, p += 4);
+-      packet.utf8Write(keyAlgo, p += 4, algoLen);
+-      writeUInt32BE(packet, sigLen, p += algoLen);
++      writeUInt32BE(packet, 4 + sigAlgoLen + 4 + sigLen, p += reqDataLen);
++      writeUInt32BE(packet, sigAlgoLen, p += 4);
++      packet.utf8Write(sigAlgo, p += 4, sigAlgoLen);
++      writeUInt32BE(packet, sigLen, p += sigAlgoLen);
+       packet.set(signature, p += 4);
+ 
+       this._authsQueue.push('hostbased');
 diff --git a/node_modules/ssh2/lib/protocol/SFTP.js b/node_modules/ssh2/lib/protocol/SFTP.js
 index 9f33c02..9751164 100644
 --- a/node_modules/ssh2/lib/protocol/SFTP.js
@@ -617,3 +726,1189 @@ index 9f33c02..9751164 100644
        }
        if (names !== undefined) {
          sftp._debug && sftp._debug(
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/Makefile b/node_modules/ssh2/lib/protocol/crypto/build/Makefile
+index 953728d..3bbc1b8 100644
+--- a/node_modules/ssh2/lib/protocol/crypto/build/Makefile
++++ b/node_modules/ssh2/lib/protocol/crypto/build/Makefile
+@@ -148,10 +148,10 @@ cmd_pch_mm = $(CC.$(TOOLSET)) $(GYP_PCH_OBJCXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+ # Use $(4) for the command, since $(2) and $(3) are used as flag by do_cmd
+ # already.
+ quiet_cmd_mac_tool = MACTOOL $(4) $<
+-cmd_mac_tool = /opt/homebrew/opt/python@3.13/bin/python3.13 gyp-mac-tool $(4) $< "$@"
++cmd_mac_tool = /Users/idouying/work/math_env/bin/python3 gyp-mac-tool $(4) $< "$@"
+ 
+ quiet_cmd_mac_package_framework = PACKAGE FRAMEWORK $@
+-cmd_mac_package_framework = /opt/homebrew/opt/python@3.13/bin/python3.13 gyp-mac-tool package-framework "$@" $(4)
++cmd_mac_package_framework = /Users/idouying/work/math_env/bin/python3 gyp-mac-tool package-framework "$@" $(4)
+ 
+ quiet_cmd_infoplist = INFOPLIST $@
+ cmd_infoplist = $(CC.$(TOOLSET)) -E -P -Wno-trigraphs -x c $(INFOPLIST_DEFINES) "$<" -o "$@"
+@@ -167,7 +167,7 @@ quiet_cmd_symlink = SYMLINK $@
+ cmd_symlink = ln -sf "$<" "$@"
+ 
+ quiet_cmd_alink = LIBTOOL-STATIC $@
+-cmd_alink = rm -f $@ && /opt/homebrew/opt/python@3.13/bin/python3.13 gyp-mac-tool filter-libtool libtool $(GYP_LIBTOOLFLAGS) -static -o $@ $(filter %.o,$^)
++cmd_alink = rm -f $@ && /Users/idouying/work/math_env/bin/python3 gyp-mac-tool filter-libtool libtool $(GYP_LIBTOOLFLAGS) -static -o $@ $(filter %.o,$^)
+ 
+ quiet_cmd_link = LINK($(TOOLSET)) $@
+ cmd_link = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o "$@" $(LD_INPUTS) $(LIBS)
+@@ -331,8 +331,8 @@ ifeq ($(strip $(foreach prefix,$(NO_LOAD),\
+ endif
+ 
+ quiet_cmd_regen_makefile = ACTION Regenerating $@
+-cmd_regen_makefile = cd $(srcdir); /usr/local/node-v24.14.0/lib/node_modules/npm/node_modules/node-gyp/gyp/gyp_main.py -fmake --ignore-environment "-Dlibrary=shared_library" "-Dvisibility=default" "-Dnode_root_dir=/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0" "-Dnode_gyp_dir=/usr/local/node-v24.14.0/lib/node_modules/npm/node_modules/node-gyp" "-Dnode_lib_file=/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/<(target_arch)/node.lib" "-Dmodule_root_dir=/private/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/tmp-44308-3rFK3Keqp6kg/node_modules/ssh2/lib/protocol/crypto" "-Dnode_engine=v8" "--depth=." "-Goutput_dir=." "--generator-output=build" -I/private/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/tmp-44308-3rFK3Keqp6kg/node_modules/ssh2/lib/protocol/crypto/build/config.gypi -I/usr/local/node-v24.14.0/lib/node_modules/npm/node_modules/node-gyp/addon.gypi -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/common.gypi "--toplevel-dir=." binding.gyp
+-Makefile: $(srcdir)/../../../../../../../../../../../../usr/local/node-v24.14.0/lib/node_modules/npm/node_modules/node-gyp/addon.gypi $(srcdir)/../../../../../../.node-gyp/24.14.0/include/node/common.gypi $(srcdir)/binding.gyp $(srcdir)/build/config.gypi
++cmd_regen_makefile = cd $(srcdir); /Users/idouying/work/Netcatty/node_modules/node-gyp/gyp/gyp_main.py -fmake --ignore-environment "-Dlibrary=shared_library" "-Dvisibility=default" "-Dnode_root_dir=/Users/idouying/Library/Caches/node-gyp/20.18.3" "-Dnode_gyp_dir=/Users/idouying/work/Netcatty/node_modules/node-gyp" "-Dnode_lib_file=/Users/idouying/Library/Caches/node-gyp/20.18.3/<(target_arch)/node.lib" "-Dmodule_root_dir=/Users/idouying/work/Netcatty/node_modules/ssh2/lib/protocol/crypto" "-Dnode_engine=v8" "--depth=." "-Goutput_dir=." "--generator-output=build" -I/Users/idouying/work/Netcatty/node_modules/ssh2/lib/protocol/crypto/build/config.gypi -I/Users/idouying/work/Netcatty/node_modules/node-gyp/addon.gypi -I/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/common.gypi "--toplevel-dir=." binding.gyp
++Makefile: $(srcdir)/../../../../../../../Library/Caches/node-gyp/20.18.3/include/node/common.gypi $(srcdir)/../../../../node-gyp/addon.gypi $(srcdir)/binding.gyp $(srcdir)/build/config.gypi
+ 	$(call do_cmd,regen_makefile)
+ 
+ # "all" is a concatenation of the "all" targets from all the included
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d b/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d
+index cc9d89a..7067343 100644
+--- a/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d
++++ b/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d
+@@ -1,75 +1,68 @@
+-cmd_Release/obj.target/sshcrypto/src/binding.o := c++ -o Release/obj.target/sshcrypto/src/binding.o ../src/binding.cc '-DNODE_GYP_MODULE_NAME=sshcrypto' '-DUSING_UV_SHARED=1' '-DUSING_V8_SHARED=1' '-DV8_DEPRECATION_WARNINGS=1' '-D_GLIBCXX_USE_CXX11_ABI=1' '-D_FILE_OFFSET_BITS=64' '-D_DARWIN_USE_64_BIT_INODE=1' '-D_LARGEFILE_SOURCE' '-DOPENSSL_NO_PINSHARED' '-DOPENSSL_THREADS' '-DOPENSSL_API_COMPAT=0x10100000L' '-DREAL_OPENSSL_MAJOR=3' '-DBUILDING_NODE_EXTENSION' -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/src -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/config -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/openssl/include -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/uv/include -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/zlib -I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/v8/include -I../../../../../nan  -O3 -gdwarf-2 -fno-strict-aliasing -mmacosx-version-min=13.5 -arch arm64 -Wall -Wendif-labels -W -Wno-unused-parameter -std=gnu++20 -stdlib=libc++ -fno-rtti -fno-exceptions -MMD -MF ./Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d.raw   -c
++cmd_Release/obj.target/sshcrypto/src/binding.o := c++ -o Release/obj.target/sshcrypto/src/binding.o ../src/binding.cc '-DNODE_GYP_MODULE_NAME=sshcrypto' '-DUSING_UV_SHARED=1' '-DUSING_V8_SHARED=1' '-DV8_DEPRECATION_WARNINGS=1' '-D_GLIBCXX_USE_CXX11_ABI=1' '-D_DARWIN_USE_64_BIT_INODE=1' '-D_LARGEFILE_SOURCE' '-D_FILE_OFFSET_BITS=64' '-DOPENSSL_NO_PINSHARED' '-DOPENSSL_THREADS' '-DOPENSSL_API_COMPAT=0x10100000L' '-DREAL_OPENSSL_MAJOR=3' '-DBUILDING_NODE_EXTENSION' -I/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node -I/Users/idouying/Library/Caches/node-gyp/20.18.3/src -I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/config -I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/openssl/include -I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/uv/include -I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/zlib -I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/v8/include -I../../../../../nan  -O3 -gdwarf-2 -mmacosx-version-min=10.15 -arch arm64 -Wall -Wendif-labels -W -Wno-unused-parameter -std=gnu++17 -stdlib=libc++ -fno-rtti -fno-exceptions -fno-strict-aliasing -MMD -MF ./Release/.deps/Release/obj.target/sshcrypto/src/binding.o.d.raw   -c
+ Release/obj.target/sshcrypto/src/binding.o: ../src/binding.cc \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/common.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8config.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-array-buffer.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-local-handle.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-handle-base.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-internal.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-memory-span.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-object.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-maybe.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/internal/conditional-stack-allocated.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/macros.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/internal/compiler-specific.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/type-traits.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-persistent-handle.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-weak-callback-info.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-primitive.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-data.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-value.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-sandbox.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-traced-handle.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-platform.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-source-location.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-container.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-context.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-snapshot.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-isolate.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-callbacks.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-promise.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-debug.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-script.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-message.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-embedder-heap.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-exception.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-function-callback.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-microtask.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-statistics.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-unwinder.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-embedder-state-scope.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-date.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-extension.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-external.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-function.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-template.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-initialization.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-json.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-locker.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-microtask-queue.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-primitive-object.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-proxy.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-regexp.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-typed-array.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-value-serializer.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-version.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-wasm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_version.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_api.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/js_native_api.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/js_native_api_types.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_api_types.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_buffer.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/cppgc/common.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8config.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-array-buffer.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-local-handle.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-internal.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-version.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-object.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-maybe.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-persistent-handle.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-weak-callback-info.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-primitive.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-data.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-value.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-traced-handle.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-container.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-context.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-snapshot.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-date.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-debug.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-script.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-callbacks.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-promise.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-message.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-exception.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-extension.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-external.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-function.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-function-callback.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-template.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-memory-span.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-initialization.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-isolate.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-embedder-heap.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-microtask.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-statistics.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-unwinder.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-embedder-state-scope.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-platform.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-json.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-locker.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-microtask-queue.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-primitive-object.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-proxy.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-regexp.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-typed-array.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-value-serializer.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-wasm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_version.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_api.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/js_native_api.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/js_native_api_types.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_api_types.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_buffer.h \
+   ../../../../../nan/nan.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/errno.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/version.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/unix.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/threadpool.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/darwin.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_object_wrap.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/errno.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/version.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/unix.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/threadpool.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/darwin.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_object_wrap.h \
+   ../../../../../nan/nan_callbacks.h \
+   ../../../../../nan/nan_callbacks_12_inl.h \
+   ../../../../../nan/nan_maybe_43_inl.h \
+@@ -82,123 +75,115 @@ Release/obj.target/sshcrypto/src/binding.o: ../src/binding.cc \
+   ../../../../../nan/nan_private.h \
+   ../../../../../nan/nan_typedarray_contents.h \
+   ../../../../../nan/nan_json.h ../../../../../nan/nan_scriptorigin.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/configuration.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./configuration_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/configuration.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/err.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./err_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/err.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/macros.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/opensslconf.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/opensslv.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./opensslv_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/opensslv.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/e_os2.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/types.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/safestack.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./safestack_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/safestack.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/stack.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bio.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./bio_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/bio.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/crypto.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./crypto_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/crypto.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/cryptoerr.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/symhacks.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/cryptoerr_legacy.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/core.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bioerr.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/lhash.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./lhash_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/lhash.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/evp.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/core_dispatch.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/indicator.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/params.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bn.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bnerr.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/evperr.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/objects.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/obj_mac.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/asn1.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./asn1_asm.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/asn1.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/asn1err.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/objectserr.h \
+-  /var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/hmac.h
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/configuration.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./configuration_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/configuration.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/err.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./err_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/err.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/macros.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/opensslconf.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/opensslv.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./opensslv_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/opensslv.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/e_os2.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/types.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/safestack.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./safestack_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/safestack.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/stack.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bio.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./bio_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/bio.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/crypto.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./crypto_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/crypto.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/cryptoerr.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/symhacks.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/cryptoerr_legacy.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/core.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bioerr.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/lhash.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./lhash_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/lhash.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/evp.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/core_dispatch.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/evperr.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/params.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bn.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bnerr.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/objects.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/obj_mac.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/asn1.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./asn1_asm.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/asn1.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/asn1err.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/objectserr.h \
++  /Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/hmac.h
+ ../src/binding.cc:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/common.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8config.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-array-buffer.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-local-handle.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-handle-base.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-internal.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-memory-span.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-object.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-maybe.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/internal/conditional-stack-allocated.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/macros.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/internal/compiler-specific.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/cppgc/type-traits.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-persistent-handle.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-weak-callback-info.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-primitive.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-data.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-value.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-sandbox.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-traced-handle.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-platform.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-source-location.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-container.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-context.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-snapshot.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-isolate.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-callbacks.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-promise.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-debug.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-script.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-message.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-embedder-heap.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-exception.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-function-callback.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-microtask.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-statistics.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-unwinder.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-embedder-state-scope.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-date.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-extension.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-external.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-function.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-template.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-initialization.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-json.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-locker.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-microtask-queue.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-primitive-object.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-proxy.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-regexp.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-typed-array.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-value-serializer.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-version.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/v8-wasm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_version.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_api.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/js_native_api.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/js_native_api_types.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_api_types.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_buffer.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/cppgc/common.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8config.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-array-buffer.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-local-handle.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-internal.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-version.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-object.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-maybe.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-persistent-handle.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-weak-callback-info.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-primitive.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-data.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-value.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-traced-handle.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-container.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-context.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-snapshot.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-date.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-debug.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-script.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-callbacks.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-promise.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-message.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-exception.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-extension.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-external.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-function.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-function-callback.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-template.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-memory-span.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-initialization.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-isolate.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-embedder-heap.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-microtask.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-statistics.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-unwinder.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-embedder-state-scope.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-platform.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-json.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-locker.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-microtask-queue.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-primitive-object.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-proxy.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-regexp.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-typed-array.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-value-serializer.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/v8-wasm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_version.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_api.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/js_native_api.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/js_native_api_types.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_api_types.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_buffer.h:
+ ../../../../../nan/nan.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/errno.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/version.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/unix.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/threadpool.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/uv/darwin.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/node_object_wrap.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/errno.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/version.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/unix.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/threadpool.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/uv/darwin.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/node_object_wrap.h:
+ ../../../../../nan/nan_callbacks.h:
+ ../../../../../nan/nan_callbacks_12_inl.h:
+ ../../../../../nan/nan_maybe_43_inl.h:
+@@ -213,49 +198,48 @@ Release/obj.target/sshcrypto/src/binding.o: ../src/binding.cc \
+ ../../../../../nan/nan_typedarray_contents.h:
+ ../../../../../nan/nan_json.h:
+ ../../../../../nan/nan_scriptorigin.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/configuration.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./configuration_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/configuration.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/err.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./err_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/err.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/macros.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/opensslconf.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/opensslv.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./opensslv_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/opensslv.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/e_os2.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/types.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/safestack.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./safestack_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/safestack.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/stack.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bio.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./bio_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/bio.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/crypto.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./crypto_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/crypto.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/cryptoerr.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/symhacks.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/cryptoerr_legacy.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/core.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bioerr.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/lhash.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./lhash_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/lhash.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/evp.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/core_dispatch.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/indicator.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/params.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bn.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/bnerr.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/evperr.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/objects.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/obj_mac.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/asn1.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/./asn1_asm.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/asn1.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/asn1err.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/objectserr.h:
+-/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node/openssl/hmac.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/configuration.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./configuration_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/configuration.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/err.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./err_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/err.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/macros.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/opensslconf.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/opensslv.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./opensslv_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/opensslv.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/e_os2.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/types.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/safestack.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./safestack_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/safestack.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/stack.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bio.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./bio_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/bio.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/crypto.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./crypto_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/crypto.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/cryptoerr.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/symhacks.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/cryptoerr_legacy.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/core.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bioerr.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/lhash.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./lhash_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/lhash.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/evp.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/core_dispatch.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/evperr.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/params.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bn.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/bnerr.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/objects.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/obj_mac.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/asn1.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/./asn1_asm.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/././archs/darwin64-arm64-cc/asm/include/openssl/asn1.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/asn1err.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/objectserr.h:
++/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node/openssl/hmac.h:
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/sshcrypto.node.d b/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/sshcrypto.node.d
+index b64beef..66f5e3b 100644
+--- a/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/sshcrypto.node.d
++++ b/node_modules/ssh2/lib/protocol/crypto/build/Release/.deps/Release/sshcrypto.node.d
+@@ -1 +1 @@
+-cmd_Release/sshcrypto.node := c++ -bundle -undefined dynamic_lookup -Wl,-search_paths_first -mmacosx-version-min=13.5 -arch arm64 -L./Release -stdlib=libc++  -o Release/sshcrypto.node Release/obj.target/sshcrypto/src/binding.o 
++cmd_Release/sshcrypto.node := c++ -bundle -undefined dynamic_lookup -Wl,-search_paths_first -mmacosx-version-min=10.15 -arch arm64 -L./Release -stdlib=libc++  -o Release/sshcrypto.node Release/obj.target/sshcrypto/src/binding.o 
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/Release/obj.target/sshcrypto/src/binding.o b/node_modules/ssh2/lib/protocol/crypto/build/Release/obj.target/sshcrypto/src/binding.o
+index 4ce1a7c..acf6905 100644
+Binary files a/node_modules/ssh2/lib/protocol/crypto/build/Release/obj.target/sshcrypto/src/binding.o and b/node_modules/ssh2/lib/protocol/crypto/build/Release/obj.target/sshcrypto/src/binding.o differ
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node b/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node
+index d8ff40e..e17ff62 100755
+Binary files a/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node and b/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node differ
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/config.gypi b/node_modules/ssh2/lib/protocol/crypto/build/config.gypi
+index 153ed8f..fcc58ba 100644
+--- a/node_modules/ssh2/lib/protocol/crypto/build/config.gypi
++++ b/node_modules/ssh2/lib/protocol/crypto/build/config.gypi
+@@ -1,46 +1,50 @@
+ # Do not edit. File was generated by node-gyp's "configure" step
+ {
++  "target_defaults": {
++    "cflags": [],
++    "default_configuration": "Release",
++    "defines": [],
++    "include_dirs": [],
++    "libraries": [],
++    "msvs_configuration_platform": "ARM64",
++    "xcode_configuration_platform": "arm64"
++  },
+   "variables": {
+-    "use_ccache_win": 0,
++    "arm_fpu": "neon",
++    "asan": 0,
+     "clang": 1,
+-    "llvm_version": "16.0",
+-    "xcode_version": "16.0",
+-    "node_prefix": "/",
+-    "node_install_npm": "true",
+-    "node_install_corepack": "true",
+-    "control_flow_guard": "false",
+-    "node_use_amaro": "true",
++    "coverage": "false",
++    "dcheck_always_on": 0,
++    "debug_nghttp2": "false",
+     "debug_node": "false",
++    "enable_lto": "false",
++    "enable_pgo_generate": "false",
++    "enable_pgo_use": "false",
+     "error_on_warn": "false",
+-    "suppress_all_error_on_warn": "false",
+-    "use_prefix_to_find_headers": "false",
++    "force_dynamic_crt": 0,
+     "host_arch": "arm64",
+-    "target_arch": "arm64",
++    "icu_data_in": "../../deps/icu-tmp/icudt75l.dat",
++    "icu_endianness": "l",
++    "icu_gyp_path": "tools/icu/icu-generic.gyp",
++    "icu_path": "deps/icu-small",
++    "icu_small": "false",
++    "icu_ver_major": "75",
++    "is_debug": 0,
++    "libdir": "lib",
++    "llvm_version": "16.0",
++    "napi_build_version": "9",
++    "node_builtin_shareable_builtins": [
++      "deps/cjs-module-lexer/lexer.js",
++      "deps/cjs-module-lexer/dist/lexer.js",
++      "deps/undici/undici.js"
++    ],
+     "node_byteorder": "little",
+-    "want_separate_host_toolset": 0,
+-    "arm_fpu": "neon",
+-    "node_use_node_snapshot": "true",
+-    "node_use_node_code_cache": "true",
+-    "node_write_snapshot_as_array_literals": "false",
+-    "node_enable_v8_vtunejit": "false",
+-    "enable_pgo_generate": "false",
+-    "enable_pgo_use": "false",
+-    "enable_lto": "false",
+-    "single_executable_application": "true",
+-    "node_with_ltcg": "false",
+-    "node_tag": "",
+-    "node_release_urlbase": "https://nodejs.org/download/release/",
+     "node_debug_lib": "false",
+-    "debug_nghttp2": "false",
+-    "node_no_browser_globals": "false",
+-    "node_shared": "false",
+-    "libdir": "lib",
+-    "node_module_version": 137,
+-    "shlib_suffix": "137.dylib",
+-    "asan": 0,
+-    "ubsan": 0,
+-    "coverage": "false",
+-    "node_target_type": "executable",
++    "node_enable_d8": "false",
++    "node_enable_v8_vtunejit": "false",
++    "node_fipsinstall": "false",
++    "node_install_corepack": "true",
++    "node_install_npm": "true",
+     "node_library_files": [
+       "lib/_http_agent.js",
+       "lib/_http_client.js",
+@@ -82,12 +86,8 @@
+       "lib/internal/assert.js",
+       "lib/internal/assert/assertion_error.js",
+       "lib/internal/assert/calltracker.js",
+-      "lib/internal/assert/myers_diff.js",
+       "lib/internal/assert/utils.js",
+-      "lib/internal/async_context_frame.js",
+       "lib/internal/async_hooks.js",
+-      "lib/internal/async_local_storage/async_context_frame.js",
+-      "lib/internal/async_local_storage/async_hooks.js",
+       "lib/internal/blob.js",
+       "lib/internal/blocklist.js",
+       "lib/internal/bootstrap/node.js",
+@@ -113,22 +113,17 @@
+       "lib/internal/console/global.js",
+       "lib/internal/constants.js",
+       "lib/internal/crypto/aes.js",
+-      "lib/internal/crypto/argon2.js",
+       "lib/internal/crypto/certificate.js",
+       "lib/internal/crypto/cfrg.js",
+-      "lib/internal/crypto/chacha20_poly1305.js",
+       "lib/internal/crypto/cipher.js",
+       "lib/internal/crypto/diffiehellman.js",
+       "lib/internal/crypto/ec.js",
+       "lib/internal/crypto/hash.js",
+       "lib/internal/crypto/hashnames.js",
+       "lib/internal/crypto/hkdf.js",
+-      "lib/internal/crypto/kem.js",
+       "lib/internal/crypto/keygen.js",
+       "lib/internal/crypto/keys.js",
+       "lib/internal/crypto/mac.js",
+-      "lib/internal/crypto/ml_dsa.js",
+-      "lib/internal/crypto/ml_kem.js",
+       "lib/internal/crypto/pbkdf2.js",
+       "lib/internal/crypto/random.js",
+       "lib/internal/crypto/rsa.js",
+@@ -138,7 +133,6 @@
+       "lib/internal/crypto/webcrypto.js",
+       "lib/internal/crypto/webidl.js",
+       "lib/internal/crypto/x509.js",
+-      "lib/internal/data_url.js",
+       "lib/internal/debugger/inspect.js",
+       "lib/internal/debugger/inspect_client.js",
+       "lib/internal/debugger/inspect_repl.js",
+@@ -147,11 +141,8 @@
+       "lib/internal/dns/promises.js",
+       "lib/internal/dns/utils.js",
+       "lib/internal/encoding.js",
+-      "lib/internal/encoding/single-byte.js",
+-      "lib/internal/encoding/util.js",
+       "lib/internal/error_serdes.js",
+       "lib/internal/errors.js",
+-      "lib/internal/errors/error_source.js",
+       "lib/internal/event_target.js",
+       "lib/internal/events/abort_listener.js",
+       "lib/internal/events/symbols.js",
+@@ -162,7 +153,6 @@
+       "lib/internal/fs/cp/cp-sync.js",
+       "lib/internal/fs/cp/cp.js",
+       "lib/internal/fs/dir.js",
+-      "lib/internal/fs/glob.js",
+       "lib/internal/fs/promises.js",
+       "lib/internal/fs/read/context.js",
+       "lib/internal/fs/recursive_watch.js",
+@@ -177,17 +167,11 @@
+       "lib/internal/http2/compat.js",
+       "lib/internal/http2/core.js",
+       "lib/internal/http2/util.js",
+-      "lib/internal/inspector/network.js",
+-      "lib/internal/inspector/network_http.js",
+-      "lib/internal/inspector/network_http2.js",
+-      "lib/internal/inspector/network_resources.js",
+-      "lib/internal/inspector/network_undici.js",
+       "lib/internal/inspector_async_hook.js",
+       "lib/internal/inspector_network_tracking.js",
+       "lib/internal/js_stream_socket.js",
+       "lib/internal/legacy/processbinding.js",
+       "lib/internal/linkedlist.js",
+-      "lib/internal/locks.js",
+       "lib/internal/main/check_syntax.js",
+       "lib/internal/main/embedding.js",
+       "lib/internal/main/eval_stdin.js",
+@@ -203,9 +187,9 @@
+       "lib/internal/main/worker_thread.js",
+       "lib/internal/mime.js",
+       "lib/internal/modules/cjs/loader.js",
+-      "lib/internal/modules/customization_hooks.js",
+       "lib/internal/modules/esm/assert.js",
+       "lib/internal/modules/esm/create_dynamic_module.js",
++      "lib/internal/modules/esm/fetch_module.js",
+       "lib/internal/modules/esm/formats.js",
+       "lib/internal/modules/esm/get_format.js",
+       "lib/internal/modules/esm/hooks.js",
+@@ -214,6 +198,7 @@
+       "lib/internal/modules/esm/loader.js",
+       "lib/internal/modules/esm/module_job.js",
+       "lib/internal/modules/esm/module_map.js",
++      "lib/internal/modules/esm/package_config.js",
+       "lib/internal/modules/esm/resolve.js",
+       "lib/internal/modules/esm/shared_constants.js",
+       "lib/internal/modules/esm/translators.js",
+@@ -222,7 +207,6 @@
+       "lib/internal/modules/helpers.js",
+       "lib/internal/modules/package_json_reader.js",
+       "lib/internal/modules/run_main.js",
+-      "lib/internal/modules/typescript.js",
+       "lib/internal/navigator.js",
+       "lib/internal/net.js",
+       "lib/internal/options.js",
+@@ -239,11 +223,13 @@
+       "lib/internal/perf/timerify.js",
+       "lib/internal/perf/usertiming.js",
+       "lib/internal/perf/utils.js",
++      "lib/internal/policy/manifest.js",
++      "lib/internal/policy/sri.js",
+       "lib/internal/priority_queue.js",
+       "lib/internal/process/execution.js",
+-      "lib/internal/process/finalization.js",
+       "lib/internal/process/per_thread.js",
+       "lib/internal/process/permission.js",
++      "lib/internal/process/policy.js",
+       "lib/internal/process/pre_execution.js",
+       "lib/internal/process/promises.js",
+       "lib/internal/process/report.js",
+@@ -253,10 +239,6 @@
+       "lib/internal/process/worker_thread_only.js",
+       "lib/internal/promise_hooks.js",
+       "lib/internal/querystring.js",
+-      "lib/internal/quic/quic.js",
+-      "lib/internal/quic/state.js",
+-      "lib/internal/quic/stats.js",
+-      "lib/internal/quic/symbols.js",
+       "lib/internal/readline/callbacks.js",
+       "lib/internal/readline/emitKeypressEvents.js",
+       "lib/internal/readline/interface.js",
+@@ -264,7 +246,6 @@
+       "lib/internal/readline/utils.js",
+       "lib/internal/repl.js",
+       "lib/internal/repl/await.js",
+-      "lib/internal/repl/completion.js",
+       "lib/internal/repl/history.js",
+       "lib/internal/repl/utils.js",
+       "lib/internal/socket_list.js",
+@@ -272,7 +253,6 @@
+       "lib/internal/source_map/prepare_stack_trace.js",
+       "lib/internal/source_map/source_map.js",
+       "lib/internal/source_map/source_map_cache.js",
+-      "lib/internal/source_map/source_map_cache_map.js",
+       "lib/internal/stream_base_commons.js",
+       "lib/internal/streams/add-abort-signal.js",
+       "lib/internal/streams/compose.js",
+@@ -281,7 +261,6 @@
+       "lib/internal/streams/duplexify.js",
+       "lib/internal/streams/duplexpair.js",
+       "lib/internal/streams/end-of-stream.js",
+-      "lib/internal/streams/fast-utf8-stream.js",
+       "lib/internal/streams/from.js",
+       "lib/internal/streams/lazy_transform.js",
+       "lib/internal/streams/legacy.js",
+@@ -295,7 +274,6 @@
+       "lib/internal/streams/writable.js",
+       "lib/internal/test/binding.js",
+       "lib/internal/test/transfer.js",
+-      "lib/internal/test_runner/assert.js",
+       "lib/internal/test_runner/coverage.js",
+       "lib/internal/test_runner/harness.js",
+       "lib/internal/test_runner/mock/loader.js",
+@@ -304,20 +282,17 @@
+       "lib/internal/test_runner/reporter/dot.js",
+       "lib/internal/test_runner/reporter/junit.js",
+       "lib/internal/test_runner/reporter/lcov.js",
+-      "lib/internal/test_runner/reporter/rerun.js",
+       "lib/internal/test_runner/reporter/spec.js",
+       "lib/internal/test_runner/reporter/tap.js",
+       "lib/internal/test_runner/reporter/utils.js",
+       "lib/internal/test_runner/reporter/v8-serializer.js",
+       "lib/internal/test_runner/runner.js",
+-      "lib/internal/test_runner/snapshot.js",
+       "lib/internal/test_runner/test.js",
+       "lib/internal/test_runner/tests_stream.js",
+       "lib/internal/test_runner/utils.js",
+       "lib/internal/timers.js",
+-      "lib/internal/tls/common.js",
+       "lib/internal/tls/secure-context.js",
+-      "lib/internal/tls/wrap.js",
++      "lib/internal/tls/secure-pair.js",
+       "lib/internal/trace_events_async_hooks.js",
+       "lib/internal/tty.js",
+       "lib/internal/url.js",
+@@ -325,12 +300,12 @@
+       "lib/internal/util/colors.js",
+       "lib/internal/util/comparisons.js",
+       "lib/internal/util/debuglog.js",
+-      "lib/internal/util/diff.js",
++      "lib/internal/util/embedding.js",
+       "lib/internal/util/inspect.js",
+       "lib/internal/util/inspector.js",
++      "lib/internal/util/iterable_weak_map.js",
+       "lib/internal/util/parse_args/parse_args.js",
+       "lib/internal/util/parse_args/utils.js",
+-      "lib/internal/util/trace_sigint.js",
+       "lib/internal/util/types.js",
+       "lib/internal/v8/startup_snapshot.js",
+       "lib/internal/v8_prof_polyfill.js",
+@@ -342,7 +317,6 @@
+       "lib/internal/watch_mode/files_watcher.js",
+       "lib/internal/watchdog.js",
+       "lib/internal/webidl.js",
+-      "lib/internal/webstorage.js",
+       "lib/internal/webstreams/adapters.js",
+       "lib/internal/webstreams/compression.js",
+       "lib/internal/webstreams/encoding.js",
+@@ -353,10 +327,8 @@
+       "lib/internal/webstreams/util.js",
+       "lib/internal/webstreams/writablestream.js",
+       "lib/internal/worker.js",
+-      "lib/internal/worker/clone_dom_exception.js",
+       "lib/internal/worker/io.js",
+       "lib/internal/worker/js_transferable.js",
+-      "lib/internal/worker/messaging.js",
+       "lib/module.js",
+       "lib/net.js",
+       "lib/os.js",
+@@ -367,12 +339,10 @@
+       "lib/process.js",
+       "lib/punycode.js",
+       "lib/querystring.js",
+-      "lib/quic.js",
+       "lib/readline.js",
+       "lib/readline/promises.js",
+       "lib/repl.js",
+       "lib/sea.js",
+-      "lib/sqlite.js",
+       "lib/stream.js",
+       "lib/stream/consumers.js",
+       "lib/stream/promises.js",
+@@ -395,139 +365,79 @@
+       "lib/worker_threads.js",
+       "lib/zlib.js"
+     ],
+-    "node_cctest_sources": [
+-      "src/node_snapshot_stub.cc",
+-      "test/cctest/inspector/test_network_requests_buffer.cc",
+-      "test/cctest/inspector/test_node_protocol.cc",
+-      "test/cctest/node_test_fixture.cc",
+-      "test/cctest/test_aliased_buffer.cc",
+-      "test/cctest/test_base64.cc",
+-      "test/cctest/test_base_object_ptr.cc",
+-      "test/cctest/test_cppgc.cc",
+-      "test/cctest/test_crypto_clienthello.cc",
+-      "test/cctest/test_dataqueue.cc",
+-      "test/cctest/test_environment.cc",
+-      "test/cctest/test_inspector_socket.cc",
+-      "test/cctest/test_inspector_socket_server.cc",
+-      "test/cctest/test_json_utils.cc",
+-      "test/cctest/test_linked_binding.cc",
+-      "test/cctest/test_lru_cache.cc",
+-      "test/cctest/test_node_api.cc",
+-      "test/cctest/test_node_crypto.cc",
+-      "test/cctest/test_node_crypto_env.cc",
+-      "test/cctest/test_node_postmortem_metadata.cc",
+-      "test/cctest/test_node_task_runner.cc",
+-      "test/cctest/test_path.cc",
+-      "test/cctest/test_per_process.cc",
+-      "test/cctest/test_platform.cc",
+-      "test/cctest/test_quic_cid.cc",
+-      "test/cctest/test_quic_error.cc",
+-      "test/cctest/test_quic_tokens.cc",
+-      "test/cctest/test_report.cc",
+-      "test/cctest/test_sockaddr.cc",
+-      "test/cctest/test_string_bytes.cc",
+-      "test/cctest/test_traced_value.cc",
+-      "test/cctest/test_util.cc",
+-      "test/cctest/node_test_fixture.h"
+-    ],
+-    "napi_build_version": "10",
+-    "node_shared_zlib": "false",
+-    "node_shared_http_parser": "false",
+-    "node_shared_libuv": "false",
++    "node_module_version": 115,
++    "node_no_browser_globals": "false",
++    "node_prefix": "/usr/local",
++    "node_release_urlbase": "https://nodejs.org/download/release/",
++    "node_shared": "false",
+     "node_shared_ada": "false",
+-    "node_shared_simdjson": "false",
+-    "node_shared_simdutf": "false",
+     "node_shared_brotli": "false",
+     "node_shared_cares": "false",
+-    "node_shared_gtest": "false",
+-    "node_shared_hdr_histogram": "false",
+-    "node_shared_merve": "false",
+-    "node_shared_nbytes": "false",
++    "node_shared_http_parser": "false",
++    "node_shared_libuv": "false",
+     "node_shared_nghttp2": "false",
+     "node_shared_nghttp3": "false",
+     "node_shared_ngtcp2": "false",
+-    "node_use_sqlite": "true",
+-    "node_shared_sqlite": "false",
++    "node_shared_openssl": "false",
++    "node_shared_simdjson": "false",
++    "node_shared_simdutf": "false",
+     "node_shared_uvwasi": "false",
+-    "node_shared_zstd": "false",
+-    "v8_enable_webassembly": 1,
++    "node_shared_zlib": "false",
++    "node_tag": "",
++    "node_target_type": "executable",
++    "node_use_bundled_v8": "true",
++    "node_use_node_code_cache": "true",
++    "node_use_node_snapshot": "true",
++    "node_use_openssl": "true",
++    "node_use_v8_platform": "true",
++    "node_with_ltcg": "false",
++    "node_without_node_options": "false",
++    "node_write_snapshot_as_array_literals": "false",
++    "openssl_is_fips": "false",
++    "openssl_quic": "true",
++    "ossfuzz": "false",
++    "shlib_suffix": "115.dylib",
++    "single_executable_application": "true",
++    "target_arch": "arm64",
++    "ubsan": 0,
++    "use_prefix_to_find_headers": "false",
++    "v8_enable_31bit_smis_on_64bit_arch": 0,
++    "v8_enable_extensible_ro_snapshot": 0,
++    "v8_enable_gdbjit": 0,
++    "v8_enable_hugepage": 0,
++    "v8_enable_i18n_support": 1,
++    "v8_enable_inspector": 1,
+     "v8_enable_javascript_promise_hooks": 1,
+     "v8_enable_lite_mode": 0,
+-    "v8_enable_gdbjit": 0,
+-    "v8_optimized_debug": 1,
+-    "dcheck_always_on": 0,
++    "v8_enable_maglev": 0,
+     "v8_enable_object_print": 1,
+-    "v8_random_seed": 0,
+-    "v8_promise_internal_field_count": 1,
+-    "v8_use_siphash": 1,
+-    "v8_enable_maglev": 1,
+     "v8_enable_pointer_compression": 0,
+     "v8_enable_sandbox": 0,
+-    "v8_enable_pointer_compression_shared_cage": 0,
+-    "v8_enable_external_code_space": 0,
+-    "v8_enable_31bit_smis_on_64bit_arch": 0,
+-    "v8_enable_extensible_ro_snapshot": 0,
++    "v8_enable_shared_ro_heap": 1,
++    "v8_enable_v8_checks": 0,
++    "v8_enable_webassembly": 1,
++    "v8_no_strict_aliasing": 1,
++    "v8_optimized_debug": 1,
++    "v8_promise_internal_field_count": 1,
++    "v8_random_seed": 0,
+     "v8_trace_maps": 0,
+-    "node_use_v8_platform": "true",
+-    "node_use_bundled_v8": "true",
+-    "force_dynamic_crt": 0,
+-    "node_enable_d8": "false",
+-    "node_enable_v8windbg": "false",
+-    "v8_enable_hugepage": 0,
+-    "node_use_openssl": "true",
+-    "node_shared_openssl": "false",
+-    "openssl_is_fips": "false",
+-    "node_quic": "false",
+-    "node_fipsinstall": "false",
+-    "node_without_node_options": "false",
+-    "openssl_quic": "false",
+-    "icu_small": "false",
+-    "v8_enable_i18n_support": 1,
+-    "icu_gyp_path": "tools/icu/icu-generic.gyp",
+-    "icu_path": "deps/icu-small",
+-    "icu_ver_major": "78",
+-    "icu_endianness": "l",
+-    "icu_data_in": "../../deps/icu-tmp/icudt78l.dat",
+-    "v8_enable_inspector": 1,
+-    "node_builtin_shareable_builtins": [
+-      "deps/undici/undici.js",
+-      "deps/amaro/dist/index.js"
+-    ],
+-    "ossfuzz": "false",
+-    "nodedir": "/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0",
+-    "python": "/opt/homebrew/opt/python@3.13/bin/python3.13",
++    "v8_use_siphash": 1,
++    "want_separate_host_toolset": 0,
++    "xcode_version": "16.0",
++    "nodedir": "/Users/idouying/Library/Caches/node-gyp/20.18.3",
++    "python": "/Users/idouying/work/math_env/bin/python3",
+     "standalone_static_library": 1,
+-    "target": "v24.14.0",
++    "target": "v20.18.3",
+     "real_openssl_major": "3",
+-    "prefix": "/usr/local/node-v24.14.0",
+-    "user_agent": "npm/11.9.0 node/v24.14.0 darwin arm64 workspaces/false",
++    "prefix": "/usr/local",
++    "user_agent": "npm/10.8.2 node/v20.18.3 darwin arm64 workspaces/false",
+     "cache": "/Users/idouying/.npm",
+-    "node_gyp": "/usr/local/node-v24.14.0/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js",
+-    "force": "true",
+-    "npm_version": "11.9.0",
++    "node_gyp": "/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js",
++    "npm_version": "10.8.2",
+     "userconfig": "/Users/idouying/.npmrc",
+     "init_module": "/Users/idouying/.npm-init.js",
+-    "globalconfig": "/usr/local/node-v24.14.0/etc/npmrc",
+-    "local_prefix": "/private/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/tmp-44308-3rFK3Keqp6kg",
+-    "global_prefix": "/usr/local/node-v24.14.0"
+-  },
+-  "target_defaults": {
+-    "include_dirs": [],
+-    "libraries": [],
+-    "defines": [],
+-    "cflags": [],
+-    "default_configuration": "Release",
+-    "configurations": {
+-      "Release": {
+-        "variables": {},
+-        "v8_enable_v8_checks": 1
+-      },
+-      "Debug": {
+-        "variables": {},
+-        "v8_enable_v8_checks": 0
+-      }
+-    },
+-    "msvs_configuration_platform": "ARM64",
+-    "xcode_configuration_platform": "arm64"
++    "globalconfig": "/usr/local/etc/npmrc",
++    "local_prefix": "/Users/idouying/work/Netcatty",
++    "global_prefix": "/usr/local"
+   }
+ }
+diff --git a/node_modules/ssh2/lib/protocol/crypto/build/sshcrypto.target.mk b/node_modules/ssh2/lib/protocol/crypto/build/sshcrypto.target.mk
+index 969e6c2..be24815 100644
+--- a/node_modules/ssh2/lib/protocol/crypto/build/sshcrypto.target.mk
++++ b/node_modules/ssh2/lib/protocol/crypto/build/sshcrypto.target.mk
+@@ -8,9 +8,9 @@ DEFS_Debug := \
+ 	'-DUSING_V8_SHARED=1' \
+ 	'-DV8_DEPRECATION_WARNINGS=1' \
+ 	'-D_GLIBCXX_USE_CXX11_ABI=1' \
+-	'-D_FILE_OFFSET_BITS=64' \
+ 	'-D_DARWIN_USE_64_BIT_INODE=1' \
+ 	'-D_LARGEFILE_SOURCE' \
++	'-D_FILE_OFFSET_BITS=64' \
+ 	'-DOPENSSL_NO_PINSHARED' \
+ 	'-DOPENSSL_THREADS' \
+ 	'-DOPENSSL_API_COMPAT=0x10100000L' \
+@@ -23,8 +23,7 @@ DEFS_Debug := \
+ CFLAGS_Debug := \
+ 	-O0 \
+ 	-gdwarf-2 \
+-	-fno-strict-aliasing \
+-	-mmacosx-version-min=13.5 \
++	-mmacosx-version-min=10.15 \
+ 	-arch \
+ 	arm64 \
+ 	-Wall \
+@@ -33,14 +32,16 @@ CFLAGS_Debug := \
+ 	-Wno-unused-parameter
+ 
+ # Flags passed to only C files.
+-CFLAGS_C_Debug :=
++CFLAGS_C_Debug := \
++	-fno-strict-aliasing
+ 
+ # Flags passed to only C++ files.
+ CFLAGS_CC_Debug := \
+-	-std=gnu++20 \
++	-std=gnu++17 \
+ 	-stdlib=libc++ \
+ 	-fno-rtti \
+-	-fno-exceptions
++	-fno-exceptions \
++	-fno-strict-aliasing
+ 
+ # Flags passed to only ObjC files.
+ CFLAGS_OBJC_Debug :=
+@@ -49,13 +50,13 @@ CFLAGS_OBJC_Debug :=
+ CFLAGS_OBJCC_Debug :=
+ 
+ INCS_Debug := \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/src \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/config \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/openssl/include \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/uv/include \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/zlib \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/v8/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/src \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/config \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/openssl/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/uv/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/zlib \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/v8/include \
+ 	-I$(srcdir)/../../../../nan
+ 
+ DEFS_Release := \
+@@ -64,9 +65,9 @@ DEFS_Release := \
+ 	'-DUSING_V8_SHARED=1' \
+ 	'-DV8_DEPRECATION_WARNINGS=1' \
+ 	'-D_GLIBCXX_USE_CXX11_ABI=1' \
+-	'-D_FILE_OFFSET_BITS=64' \
+ 	'-D_DARWIN_USE_64_BIT_INODE=1' \
+ 	'-D_LARGEFILE_SOURCE' \
++	'-D_FILE_OFFSET_BITS=64' \
+ 	'-DOPENSSL_NO_PINSHARED' \
+ 	'-DOPENSSL_THREADS' \
+ 	'-DOPENSSL_API_COMPAT=0x10100000L' \
+@@ -77,8 +78,7 @@ DEFS_Release := \
+ CFLAGS_Release := \
+ 	-O3 \
+ 	-gdwarf-2 \
+-	-fno-strict-aliasing \
+-	-mmacosx-version-min=13.5 \
++	-mmacosx-version-min=10.15 \
+ 	-arch \
+ 	arm64 \
+ 	-Wall \
+@@ -87,14 +87,16 @@ CFLAGS_Release := \
+ 	-Wno-unused-parameter
+ 
+ # Flags passed to only C files.
+-CFLAGS_C_Release :=
++CFLAGS_C_Release := \
++	-fno-strict-aliasing
+ 
+ # Flags passed to only C++ files.
+ CFLAGS_CC_Release := \
+-	-std=gnu++20 \
++	-std=gnu++17 \
+ 	-stdlib=libc++ \
+ 	-fno-rtti \
+-	-fno-exceptions
++	-fno-exceptions \
++	-fno-strict-aliasing
+ 
+ # Flags passed to only ObjC files.
+ CFLAGS_OBJC_Release :=
+@@ -103,13 +105,13 @@ CFLAGS_OBJC_Release :=
+ CFLAGS_OBJCC_Release :=
+ 
+ INCS_Release := \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/include/node \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/src \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/config \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/openssl/openssl/include \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/uv/include \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/zlib \
+-	-I/var/folders/19/rfh6910534l1dgdx0nbfjlm40000gn/T/.node-gyp/24.14.0/deps/v8/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/include/node \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/src \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/config \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/openssl/openssl/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/uv/include \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/zlib \
++	-I/Users/idouying/Library/Caches/node-gyp/20.18.3/deps/v8/include \
+ 	-I$(srcdir)/../../../../nan
+ 
+ OBJS := \
+@@ -144,7 +146,7 @@ $(obj).$(TOOLSET)/$(TARGET)/%.o: $(obj)/%.cc FORCE_DO_CMD
+ LDFLAGS_Debug := \
+ 	-undefined dynamic_lookup \
+ 	-Wl,-search_paths_first \
+-	-mmacosx-version-min=13.5 \
++	-mmacosx-version-min=10.15 \
+ 	-arch \
+ 	arm64 \
+ 	-L$(builddir) \
+@@ -157,7 +159,7 @@ LIBTOOLFLAGS_Debug := \
+ LDFLAGS_Release := \
+ 	-undefined dynamic_lookup \
+ 	-Wl,-search_paths_first \
+-	-mmacosx-version-min=13.5 \
++	-mmacosx-version-min=10.15 \
+ 	-arch \
+ 	arm64 \
+ 	-L$(builddir) \

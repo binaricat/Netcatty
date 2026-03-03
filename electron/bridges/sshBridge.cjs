@@ -165,9 +165,14 @@ function checkWindowsSshAgent() {
   });
 }
 
-// Simple file logger for debugging
-const logFile = path.join(require("os").tmpdir(), "netcatty-ssh.log");
+const DEBUG_SSH = process.env.NETCATTY_SSH_DEBUG === "1";
+
+// Debug logger (disabled by default)
+const logFile = DEBUG_SSH
+  ? path.join(require("os").tmpdir(), "netcatty-ssh.log")
+  : null;
 const log = (msg, data) => {
+  if (!DEBUG_SSH) return;
   const line = `[${new Date().toISOString()}] ${msg} ${data ? JSON.stringify(data) : ""}\n`;
   try { fs.appendFileSync(logFile, line); } catch { }
   console.log("[SSH]", msg, data ? JSON.stringify(data, null, 2) : "");
