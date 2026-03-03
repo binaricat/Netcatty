@@ -162,11 +162,16 @@ export const useSftpTransfers = ({
             prev.map((t) => {
               if (t.id !== task.id) return t;
               if (t.status === "cancelled") return t;
+              const normalizedTotal = total > 0 ? total : t.totalBytes;
+              const normalizedTransferred = Math.max(
+                t.transferredBytes,
+                Math.min(transferred, normalizedTotal > 0 ? normalizedTotal : transferred),
+              );
               return {
                 ...t,
-                transferredBytes: transferred,
-                totalBytes: total || t.totalBytes,
-                speed,
+                transferredBytes: normalizedTransferred,
+                totalBytes: normalizedTotal,
+                speed: Number.isFinite(speed) && speed > 0 ? speed : 0,
               };
             }),
           );
@@ -773,7 +778,27 @@ export const useSftpTransfers = ({
 
   const updateExternalUpload = useCallback((taskId: string, updates: Partial<TransferTask>) => {
     setTransfers((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t)),
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+
+        const merged: TransferTask = { ...t, ...updates };
+
+        // Keep progress monotonic and bounded for stable progress UI.
+        if (typeof merged.totalBytes === "number" && merged.totalBytes > 0) {
+          merged.transferredBytes = Math.max(
+            t.transferredBytes,
+            Math.min(merged.transferredBytes, merged.totalBytes),
+          );
+        } else {
+          merged.transferredBytes = Math.max(t.transferredBytes, merged.transferredBytes);
+        }
+
+        if (!Number.isFinite(merged.speed) || merged.speed < 0) {
+          merged.speed = 0;
+        }
+
+        return merged;
+      }),
     );
   }, []);
 

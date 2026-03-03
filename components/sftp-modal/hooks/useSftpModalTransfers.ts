@@ -251,13 +251,22 @@ export const useSftpModalTransfers = ({
             if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
               return task;
             }
-            
+
+            const totalBytes = progress.total > 0 ? progress.total : task.totalBytes;
+            const clampedTransferred = Math.max(
+              task.transferredBytes,
+              Math.min(progress.transferred, totalBytes > 0 ? totalBytes : progress.transferred)
+            );
+            const rawPercent = totalBytes > 0 ? (clampedTransferred / totalBytes) * 100 : task.progress;
+            const clampedPercent = Math.max(task.progress, Math.min(rawPercent, 100));
+
             return {
               ...task,
               status: "uploading" as const,
-              progress: progress.percent,
-              transferredBytes: progress.transferred,
-              speed: progress.speed,
+              totalBytes,
+              progress: clampedPercent,
+              transferredBytes: clampedTransferred,
+              speed: Number.isFinite(progress.speed) && progress.speed > 0 ? progress.speed : 0,
             };
           })
         );
@@ -453,10 +462,18 @@ export const useSftpModalTransfers = ({
                 task.id === transferId
                   ? {
                       ...task,
-                      transferredBytes: transferred,
-                      totalBytes: total,
-                      progress: total > 0 ? Math.round((transferred / total) * 100) : 0,
-                      speed,
+                      transferredBytes: Math.max(
+                        task.transferredBytes,
+                        Math.min(transferred, total > 0 ? total : transferred)
+                      ),
+                      totalBytes: total > 0 ? total : task.totalBytes,
+                      progress: (() => {
+                        const effectiveTotal = total > 0 ? total : task.totalBytes;
+                        if (effectiveTotal <= 0) return task.progress;
+                        const percent = (Math.max(task.transferredBytes, transferred) / effectiveTotal) * 100;
+                        return Math.max(task.progress, Math.min(percent, 100));
+                      })(),
+                      speed: Number.isFinite(speed) && speed > 0 ? speed : 0,
                     }
                   : task
               )
@@ -467,7 +484,13 @@ export const useSftpModalTransfers = ({
             setUploadTasks(prev =>
               prev.map(task =>
                 task.id === transferId
-                  ? { ...task, status: "completed" as const, progress: 100 }
+                  ? {
+                      ...task,
+                      status: "completed" as const,
+                      progress: 100,
+                      transferredBytes: task.totalBytes > 0 ? task.totalBytes : task.transferredBytes,
+                      speed: 0,
+                    }
                   : task
               )
             );
