@@ -8,7 +8,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { cn } from "../lib/utils";
 import { ConnectionLog, TerminalTheme } from "../types";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
-import { customThemeStore } from "../application/state/customThemeStore";
+import { useCustomThemes } from "../application/state/customThemeStore";
 import { Button } from "./ui/button";
 import ThemeCustomizeModal from "./terminal/ThemeCustomizeModal";
 
@@ -37,15 +37,18 @@ const LogViewComponent: React.FC<LogViewProps> = ({
     const [themeModalOpen, setThemeModalOpen] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
 
+    // Subscribe to custom theme changes so editing triggers re-render
+    const customThemes = useCustomThemes();
+
     // Use log's saved theme/fontSize or fall back to defaults
     const currentTheme = useMemo(() => {
         if (log.themeId) {
             return TERMINAL_THEMES.find(t => t.id === log.themeId)
-                || customThemeStore.getThemeById(log.themeId)
+                || customThemes.find(t => t.id === log.themeId)
                 || defaultTerminalTheme;
         }
         return defaultTerminalTheme;
-    }, [log.themeId, defaultTerminalTheme]);
+    }, [log.themeId, defaultTerminalTheme, customThemes]);
 
     const currentFontSize = log.fontSize ?? defaultFontSize;
 

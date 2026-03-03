@@ -11,7 +11,7 @@ import { DistroAvatar } from './DistroAvatar';
 import Terminal from './Terminal';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
-import { customThemeStore } from '../application/state/customThemeStore';
+import { useCustomThemes } from '../application/state/customThemeStore';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 
@@ -435,17 +435,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
 
+  // Subscribe to custom theme changes so editing triggers re-render
+  const customThemes = useCustomThemes();
+
   // Resolve the effective theme for the compose bar in workspace mode
   const composeBarThemeColors = useMemo(() => {
     if (!activeWorkspace || !focusedSessionId) return terminalTheme.colors;
     const focusedHost = sessionHostsMap.get(focusedSessionId);
     if (focusedHost?.theme) {
       const hostTheme = TERMINAL_THEMES.find(t => t.id === focusedHost.theme)
-        || customThemeStore.getThemeById(focusedHost.theme);
+        || customThemes.find(t => t.id === focusedHost.theme);
       if (hostTheme) return hostTheme.colors;
     }
     return terminalTheme.colors;
-  }, [activeWorkspace, focusedSessionId, sessionHostsMap, terminalTheme]);
+  }, [activeWorkspace, focusedSessionId, sessionHostsMap, terminalTheme, customThemes]);
 
   // Handle compose bar send for workspace mode
   const handleComposeSend = useCallback((text: string) => {

@@ -11,7 +11,7 @@ import { DEFAULT_KEYWORD_HIGHLIGHT_RULES } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TerminalFont } from "../../../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../../../infrastructure/config/terminalThemes";
-import { customThemeStore } from "../../../application/state/customThemeStore";
+import { customThemeStore, useCustomThemes } from "../../../application/state/customThemeStore";
 import { parseItermcolors } from "../../../infrastructure/parsers/itermcolorsParser";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
@@ -104,12 +104,15 @@ export default function SettingsTerminalTab(props: {
   const [dirValidation, setDirValidation] = useState<{ valid: boolean; message?: string } | null>(null);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
 
+  // Subscribe to custom theme changes so editing in-place triggers re-render
+  const customThemes = useCustomThemes();
+
   // Get current selected theme
   const currentTheme = useMemo(() => {
     return TERMINAL_THEMES.find(t => t.id === terminalThemeId)
-      || customThemeStore.getThemeById(terminalThemeId)
+      || customThemes.find(t => t.id === terminalThemeId)
       || TERMINAL_THEMES[0];
-  }, [terminalThemeId]);
+  }, [terminalThemeId, customThemes]);
 
   // Import .itermcolors file
   const importFileRef = useRef<HTMLInputElement>(null);

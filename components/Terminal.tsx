@@ -30,7 +30,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { toast } from "./ui/toast";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { TERMINAL_THEMES } from "../infrastructure/config/terminalThemes";
-import { customThemeStore } from "../application/state/customThemeStore";
+import { useCustomThemes } from "../application/state/customThemeStore";
 
 import { TerminalConnectionDialog } from "./terminal/TerminalConnectionDialog";
 import { TerminalToolbar } from "./terminal/TerminalToolbar";
@@ -351,14 +351,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [pendingHostKeyInfo, setPendingHostKeyInfo] = useState<HostKeyInfo | null>(null);
   const pendingConnectionRef = useRef<(() => void) | null>(null);
 
+  // Subscribe to custom theme changes so editing triggers re-render
+  const customThemes = useCustomThemes();
+
   const effectiveTheme = useMemo(() => {
     if (host.theme) {
       const hostTheme = TERMINAL_THEMES.find((t) => t.id === host.theme)
-        || customThemeStore.getThemeById(host.theme);
+        || customThemes.find((t) => t.id === host.theme);
       if (hostTheme) return hostTheme;
     }
     return terminalTheme;
-  }, [host.theme, terminalTheme]);
+  }, [host.theme, terminalTheme, customThemes]);
 
   const resolvedChainHosts =
     (host.hostChain?.hostIds
