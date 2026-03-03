@@ -12,7 +12,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Type, X } from 'lucide-react';
+import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Trash2, Type, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useAvailableFonts } from '../../application/state/fontStore';
 import { TERMINAL_THEMES, TerminalThemeConfig } from '../../infrastructure/config/terminalThemes';
@@ -554,7 +554,6 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
                                 theme={editingTheme}
                                 onChange={handleEditorChange}
                                 onBack={handleEditorBack}
-                                onDelete={isNewTheme ? undefined : handleEditorDelete}
                                 isNew={isNewTheme}
                             />
                         ) : (
@@ -711,16 +710,28 @@ export const ThemeCustomizeModal: React.FC<ThemeCustomizeModalProps> = ({
 
                 {/* Footer */}
                 <div className="flex gap-3 px-5 py-3 shrink-0 border-t border-border bg-muted/20">
+                    {/* Delete button for existing custom themes */}
+                    {editingTheme && !isNewTheme && (
+                        <Button
+                            variant="ghost"
+                            onClick={handleEditorDelete}
+                            className="h-10 text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5"
+                        >
+                            <Trash2 size={14} />
+                            {t('terminal.customTheme.delete')}
+                        </Button>
+                    )}
+                    <div className="flex-1" />
                     <Button
                         variant="ghost"
                         onClick={handleCancel}
-                        className="flex-1 h-10"
+                        className="h-10 px-6"
                     >
                         {t('common.cancel')}
                     </Button>
                     <Button
                         onClick={handleSave}
-                        className="flex-1 h-10"
+                        className="h-10 px-8"
                     >
                         {t('common.save')}
                     </Button>

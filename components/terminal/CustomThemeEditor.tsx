@@ -4,11 +4,11 @@
  * Uses native <input type="color"> for zero-dependency color picking.
  */
 
-import React, { useCallback, useState, memo } from 'react';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import React, { useCallback, memo } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { TerminalTheme } from '../../domain/models';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { Button } from '../ui/button';
+
 
 interface ColorFieldDef {
     key: keyof TerminalTheme['colors'];
@@ -82,7 +82,6 @@ interface CustomThemeEditorProps {
     theme: TerminalTheme;
     onChange: (theme: TerminalTheme) => void;
     onBack: () => void;
-    onDelete?: () => void;
     isNew?: boolean;
 }
 
@@ -90,11 +89,9 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
     theme,
     onChange,
     onBack,
-    onDelete,
     isNew,
 }) => {
     const { t } = useI18n();
-    const [confirmDelete, setConfirmDelete] = useState(false);
 
     const updateColor = useCallback((key: keyof TerminalTheme['colors'], value: string) => {
         onChange({
@@ -177,40 +174,6 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
                 {renderColorGroup(t('terminal.customTheme.group.normal'), NORMAL_COLORS)}
                 {renderColorGroup(t('terminal.customTheme.group.bright'), BRIGHT_COLORS)}
             </div>
-
-            {/* Delete button (for existing themes) */}
-            {!isNew && onDelete && (
-                <div className="p-2 border-t border-border shrink-0">
-                    {confirmDelete ? (
-                        <div className="flex gap-1">
-                            <Button
-                                variant="destructive"
-                                size="sm"
-                                className="flex-1 h-7 text-xs"
-                                onClick={onDelete}
-                            >
-                                {t('terminal.customTheme.confirmDelete')}
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => setConfirmDelete(false)}
-                            >
-                                {t('common.cancel')}
-                            </Button>
-                        </div>
-                    ) : (
-                        <button
-                            onClick={() => setConfirmDelete(true)}
-                            className="w-full flex items-center justify-center gap-1.5 text-xs text-destructive hover:bg-destructive/10 rounded-md py-1.5 transition-colors"
-                        >
-                            <Trash2 size={12} />
-                            {t('terminal.customTheme.delete')}
-                        </button>
-                    )}
-                </div>
-            )}
         </div>
     );
 };
