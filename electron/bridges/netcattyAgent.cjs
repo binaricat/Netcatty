@@ -119,7 +119,7 @@ function buildCertificateIdentityKey({ certType, certBlob, comment, privateKey, 
   key._certType = modernCertType;
   key._signatureAlgo = modernCertType.includes('512') ? 'rsa-sha2-512' : 'rsa-sha2-256';
   key.comment = comment || key.comment;
-  key.getPublicSSH = () => certBlob;  // Return ORIGINAL unmodified certificate blob  
+  key.getPublicSSH = () => certBlob;  // Return ORIGINAL unmodified certificate blob
   // CRITICAL: Override sign() to ensure it returns signature algorithm, not cert type
   // ssh2's authPK needs the signature algorithm for constructing the signature blob
   // but key.type is the cert type. We need to provide the signature algorithm separately.
