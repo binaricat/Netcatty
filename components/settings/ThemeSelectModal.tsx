@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Check, Palette, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { TERMINAL_THEMES, TerminalThemeConfig } from '../../infrastructure/config/terminalThemes';
+import { useCustomThemes } from '../../application/state/customThemeStore';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 
@@ -73,6 +74,8 @@ export const ThemeSelectModal: React.FC<ThemeSelectModalProps> = ({
         const light = TERMINAL_THEMES.filter(t => t.type === 'light');
         return { darkThemes: dark, lightThemes: light };
     }, []);
+
+    const customThemes = useCustomThemes();
 
     // Handle theme selection - select and close
     const handleThemeSelect = useCallback((themeId: string) => {
@@ -164,6 +167,25 @@ export const ThemeSelectModal: React.FC<ThemeSelectModalProps> = ({
                             ))}
                         </div>
                     </div>
+
+                    {/* Custom Themes Section */}
+                    {customThemes.length > 0 && (
+                        <div className="mt-4">
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold px-1">
+                                {t('terminal.customTheme.section')}
+                            </div>
+                            <div className="space-y-1">
+                                {customThemes.map(theme => (
+                                    <ThemeItem
+                                        key={theme.id}
+                                        theme={theme}
+                                        isSelected={selectedThemeId === theme.id}
+                                        onSelect={handleThemeSelect}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}
