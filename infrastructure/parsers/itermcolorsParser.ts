@@ -58,18 +58,22 @@ function isDarkBackground(hex: string): boolean {
  * Returns a hex color string like '#rrggbb'.
  */
 function parseColorDict(dictElement: Element): string | null {
-    const keys = dictElement.getElementsByTagName('key');
-    const reals = dictElement.getElementsByTagName('real');
-
+    const children = dictElement.children;
     let r = 0, g = 0, b = 0;
     let found = 0;
 
-    for (let i = 0; i < keys.length; i++) {
-        const key = keys[i].textContent?.trim();
-        const realEl = reals[i];
-        if (!key || !realEl) continue;
+    for (let i = 0; i < children.length - 1; i++) {
+        const child = children[i];
+        if (child.tagName !== 'key') continue;
 
-        const value = parseFloat(realEl.textContent || '0');
+        const key = child.textContent?.trim();
+        const valueEl = children[i + 1];
+        if (!key || !valueEl) continue;
+
+        // Only process <real> values; skip <string> (e.g. "Color Space")
+        if (valueEl.tagName !== 'real') continue;
+
+        const value = parseFloat(valueEl.textContent || '0');
         if (key === 'Red Component') { r = value; found++; }
         else if (key === 'Green Component') { g = value; found++; }
         else if (key === 'Blue Component') { b = value; found++; }
