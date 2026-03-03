@@ -70,10 +70,16 @@ function parseColorDict(dictElement: Element): string | null {
         const valueEl = children[i + 1];
         if (!key || !valueEl) continue;
 
-        // Only process <real> values; skip <string> (e.g. "Color Space")
-        if (valueEl.tagName !== 'real') continue;
+        // Accept <real> (float 0.0–1.0) and <integer> (0–255) plist types
+        const tag = valueEl.tagName;
+        if (tag !== 'real' && tag !== 'integer') continue;
 
-        const value = parseFloat(valueEl.textContent || '0');
+        const raw = parseFloat(valueEl.textContent || '0');
+        if (isNaN(raw)) continue; // reject non-numeric content
+
+        // Normalize: <integer> values are 0-255, <real> values are 0.0-1.0
+        const value = tag === 'integer' ? raw / 255 : raw;
+
         if (key === 'Red Component') { r = value; found++; }
         else if (key === 'Green Component') { g = value; found++; }
         else if (key === 'Blue Component') { b = value; found++; }
