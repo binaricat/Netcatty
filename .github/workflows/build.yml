@@ -94,6 +94,10 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
+          # Buster is EOL — switch to archived repos
+          sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list
+          sed -i 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' /etc/apt/sources.list
+          sed -i '/buster-updates/d' /etc/apt/sources.list
           apt-get update
           apt-get install -y curl build-essential python3 git libfuse2 file rpm
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
