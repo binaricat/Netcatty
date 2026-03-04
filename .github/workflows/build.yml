@@ -79,13 +79,14 @@ jobs:
             release/*.tar.gz
           if-no-files-found: ignore
 
-  # Dedicated job for Linux ARM64 — builds inside Debian Buster (GLIBC 2.28)
-  # to ensure compatibility with older distros like UOS/Deepin.
+  # Dedicated job for Linux ARM64 — builds inside Debian Bullseye (GLIBC 2.31)
+  # to ensure compatibility with older distros like UOS/Deepin (GLIBC 2.28).
+  # Key: GLIBC < 2.34 avoids the libpthread-merge symbol requirement.
   build-linux-arm64:
     name: build-linux-arm64
     runs-on: ubuntu-24.04-arm
     container:
-      image: debian:buster
+      image: debian:bullseye
     env:
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_ID: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_ID }}
@@ -94,10 +95,6 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          # Buster is EOL — switch to archived repos
-          sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list
-          sed -i 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' /etc/apt/sources.list
-          sed -i '/buster-updates/d' /etc/apt/sources.list
           apt-get update
           apt-get install -y curl build-essential python3 git libfuse2 file rpm
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
