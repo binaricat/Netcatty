@@ -1215,7 +1215,18 @@ export class CloudSyncManager {
     }
 
     const connectedProviders = Object.entries(this.state.providers)
-      .filter(([_, conn]) => conn.status === 'connected')
+      .filter(([p, conn]) => {
+        if (conn.status === 'connected') return true;
+        // Auto-recover: retry providers stuck in 'error' if tokens/config still exist
+        if (conn.status === 'error' && (conn.tokens || conn.config)) {
+          this.state.providers[p as CloudProvider].status = 'connected';
+          this.state.providers[p as CloudProvider].error = undefined;
+          // Clear cached adapter so a fresh one is created with current (decrypted) tokens
+          this.adapters.delete(p as CloudProvider);
+          return true;
+        }
+        return false;
+      })
       .map(([p]) => p as CloudProvider);
 
     if (connectedProviders.length === 0) {
