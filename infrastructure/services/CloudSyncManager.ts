@@ -83,6 +83,9 @@ export class CloudSyncManager {
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private masterPassword: string | null = null; // In memory only!
   private hasStorageListener = false;
+  // Promise that resolves once startup provider secret decryption finishes.
+  // Awaited by getConnectedAdapter() to prevent using still-encrypted tokens.
+  private decryptionReady: Promise<void>;
   // Per-provider sequence counters for async decrypt callbacks (startup,
   // cross-window storage events).  Bumped by any state mutation so stale
   // decrypt results are discarded.
@@ -101,7 +104,7 @@ export class CloudSyncManager {
     this.stateSnapshot = { ...this.state };
     this.setupCrossWindowSync();
     // Decrypt provider secrets asynchronously after initial load
-    this.initProviderDecryption();
+    this.decryptionReady = this.initProviderDecryption();
   }
 
   // ==========================================================================
@@ -399,6 +402,8 @@ export class CloudSyncManager {
   };
 
   private async getConnectedAdapter(provider: CloudProvider): Promise<CloudAdapter> {
+    // Ensure startup decryption has finished before reading tokens
+    await this.decryptionReady;
     const connection = this.state.providers[provider];
     const tokens = connection?.tokens;
     const config = connection?.config;
