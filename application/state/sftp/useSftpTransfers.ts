@@ -123,6 +123,63 @@ export const useSftpTransfers = ({
     }
   }, []);
 
+  const getEntrySize = useCallback((entry: SftpFileEntry): number => {
+    if (typeof entry.size === "string") {
+      const parsed = parseInt(entry.size, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+    return typeof entry.size === "number" && entry.size > 0 ? entry.size : 0;
+  }, []);
+
+  const estimateDirectoryBytes = useCallback(
+    async (
+      sourcePath: string,
+      sourceSftpId: string | null,
+      sourceIsLocal: boolean,
+      sourceEncoding: SftpFilenameEncoding,
+      rootTaskId: string,
+    ): Promise<number> => {
+      if (cancelledTasksRef.current.has(rootTaskId)) {
+        throw new Error("Transfer cancelled");
+      }
+
+      const files = sourceIsLocal
+        ? await listLocalFiles(sourcePath)
+        : sourceSftpId
+          ? await listRemoteFiles(sourceSftpId, sourcePath, sourceEncoding)
+          : null;
+
+      if (!files) {
+        throw new Error("No source connection");
+      }
+
+      let totalBytes = 0;
+
+      for (const file of files) {
+        if (file.name === "..") continue;
+
+        if (cancelledTasksRef.current.has(rootTaskId)) {
+          throw new Error("Transfer cancelled");
+        }
+
+        if (file.type === "directory") {
+          totalBytes += await estimateDirectoryBytes(
+            joinPath(sourcePath, file.name),
+            sourceSftpId,
+            sourceIsLocal,
+            sourceEncoding,
+            rootTaskId,
+          );
+        } else {
+          totalBytes += getEntrySize(file);
+        }
+      }
+
+      return totalBytes;
+    },
+    [getEntrySize, listLocalFiles, listRemoteFiles],
+  );
+
   const transferFile = async (
     task: TransferTask,
     sourceSftpId: string | null,
@@ -367,7 +424,23 @@ export const useSftpTransfers = ({
       : targetPane.filenameEncoding || "auto";
 
     let actualFileSize = task.totalBytes;
-    if (!task.isDirectory && actualFileSize === 0) {
+    if (task.isDirectory) {
+      try {
+        const sourceSftpId = sourcePane.connection?.isLocal
+          ? null
+          : sftpSessionsRef.current.get(sourcePane.connection!.id);
+
+        actualFileSize = await estimateDirectoryBytes(
+          task.sourcePath,
+          sourceSftpId,
+          sourcePane.connection!.isLocal,
+          sourceEncoding,
+          task.id,
+        );
+      } catch {
+        // Fall back to the existing estimate below if size discovery fails.
+      }
+    } else if (actualFileSize === 0) {
       try {
         const sourceSftpId = sourcePane.connection?.isLocal
           ? null
@@ -520,10 +593,15 @@ export const useSftpTransfers = ({
           setTransfers((prev) =>
             prev.map((t) => {
               if (t.id !== task.id || t.status === "cancelled") return t;
-              const newTotal = Math.max(t.totalBytes, totalProgress, completedBytes + currentFileTotal);
+              const newTotal = t.totalBytes > 0
+                ? t.totalBytes
+                : Math.max(totalProgress, completedBytes + currentFileTotal);
               return {
                 ...t,
-                transferredBytes: Math.max(t.transferredBytes, totalProgress),
+                transferredBytes: Math.max(
+                  t.transferredBytes,
+                  Math.min(totalProgress, newTotal),
+                ),
                 totalBytes: newTotal,
                 speed: Number.isFinite(speed) && speed > 0 ? speed : t.speed,
               };
