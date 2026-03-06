@@ -4,6 +4,9 @@ import type { SftpPaneCallbacks, SftpDragCallbacks } from "../SftpContext";
 import { joinPath } from "../../../application/state/sftp/utils";
 import { isNavigableDirectory } from "../index";
 
+const isExplicitDropTarget = (entry: SftpFileEntry): boolean =>
+  entry.type === "symlink" && entry.linkTarget === "directory";
+
 interface UseSftpPaneDragAndSelectParams {
   side: "left" | "right";
   pane: { selectedFiles: Set<string>; connection?: { currentPath: string } };
@@ -135,7 +138,7 @@ export const useSftpPaneDragAndSelect = ({
   const handleEntryDragOver = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
       if (!draggedFiles || draggedFiles[0]?.side === side) return;
-      if (isNavigableDirectory(entry) && entry.name !== "..") {
+      if (isExplicitDropTarget(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
         setDragOverEntry(entry.name);
@@ -147,7 +150,7 @@ export const useSftpPaneDragAndSelect = ({
   const handleEntryDrop = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
       if (!draggedFiles || draggedFiles[0]?.side === side) return;
-      if (isNavigableDirectory(entry) && entry.name !== "..") {
+      if (isExplicitDropTarget(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
         setDragOverEntry(null);
