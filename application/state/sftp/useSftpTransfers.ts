@@ -127,12 +127,6 @@ export const useSftpTransfers = ({
     cancelledTasksRef.current.delete(taskId);
   }, []);
 
-  const clearCancelledTasks = useCallback((taskIds: string[]) => {
-    for (const taskId of taskIds) {
-      cancelledTasksRef.current.delete(taskId);
-    }
-  }, []);
-
   const isTransferCancelledError = useCallback(
     (error: unknown): boolean =>
       error instanceof Error && error.message === "Transfer cancelled",
@@ -883,41 +877,52 @@ export const useSftpTransfers = ({
       const task = transfers.find((t) => t.id === transferId);
       if (!task) return;
 
+      const retriedTask: TransferTask = {
+        ...task,
+        id: crypto.randomUUID(),
+        status: "pending" as TransferStatus,
+        error: undefined,
+        transferredBytes: 0,
+        speed: 0,
+        startTime: Date.now(),
+        endTime: undefined,
+      };
+
       const sourceSide = task.sourceConnectionId.startsWith("left") ? "left" : "right";
       const targetSide = task.targetConnectionId.startsWith("left") ? "left" : "right";
       const sourcePane = getActivePane(sourceSide as "left" | "right");
       const targetPane = getActivePane(targetSide as "left" | "right");
 
       if (sourcePane?.connection && targetPane?.connection) {
-        clearCancelledTask(transferId);
+        const completionHandler = completionHandlersRef.current.get(transferId);
+        if (completionHandler) {
+          completionHandlersRef.current.set(retriedTask.id, completionHandler);
+          completionHandlersRef.current.delete(transferId);
+        }
+
         setTransfers((prev) =>
           prev.map((t) =>
             t.id === transferId
-              ? { ...t, status: "pending" as TransferStatus, error: undefined }
+              ? retriedTask
               : t,
           ),
         );
-        await processTransfer(task, sourcePane, targetPane, targetSide);
+        await processTransfer(retriedTask, sourcePane, targetPane, targetSide);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [transfers, getActivePane, clearCancelledTask],
+    [transfers, getActivePane],
   );
 
   const clearCompletedTransfers = useCallback(() => {
-    setTransfers((prev) => {
-      const removedTaskIds = prev
-        .filter((t) => t.status === "completed" || t.status === "cancelled")
-        .map((t) => t.id);
-      clearCancelledTasks(removedTaskIds);
-      return prev.filter((t) => t.status !== "completed" && t.status !== "cancelled");
-    });
-  }, [clearCancelledTasks]);
+    setTransfers((prev) =>
+      prev.filter((t) => t.status !== "completed" && t.status !== "cancelled"),
+    );
+  }, []);
 
   const dismissTransfer = useCallback((transferId: string) => {
-    clearCancelledTask(transferId);
     setTransfers((prev) => prev.filter((t) => t.id !== transferId));
-  }, [clearCancelledTask]);
+  }, []);
 
   const addExternalUpload = useCallback((task: TransferTask) => {
     // Filter out any pending scanning tasks before adding the new task.

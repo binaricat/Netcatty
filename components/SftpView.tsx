@@ -78,10 +78,12 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     },
   }), [t]);
 
-  const sftp = useSftpState(hosts, keys, identities, {
+  const sftpOptions = useMemo(() => ({
     ...fileWatchHandlers,
     useCompressedUpload: sftpUseCompressedUpload,
-  });
+  }), [fileWatchHandlers, sftpUseCompressedUpload]);
+
+  const sftp = useSftpState(hosts, keys, identities, sftpOptions);
 
   // Get stream transfer functions for optimized downloads
   const { showSaveDialog, startStreamTransfer } = useSftpBackend();
