@@ -8,7 +8,6 @@
 
 import React, { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { Host, SftpFileEntry, SftpFilenameEncoding } from "../../types";
-import type { SftpPane } from "../../application/state/sftp/types";
 
 // Types for the context
 export interface SftpPaneCallbacks {
@@ -30,10 +29,7 @@ export interface SftpPaneCallbacks {
     onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
     onReceiveFromOtherPane: (
         files: { name: string; isDirectory: boolean }[],
-        options?: {
-            targetPane?: SftpPane;
-            targetPath?: string;
-        },
+        targetPath?: string,
     ) => void;
     onEditPermissions?: (file: SftpFileEntry) => void;
     // File operations
