@@ -440,16 +440,40 @@ function App({ settings }: { settings: SettingsState }) {
         return;
       }
 
+      const { username, hostname: localHost } = systemInfoRef.current;
+      if (host.protocol === 'serial') {
+        const portName = host.hostname.split('/').pop() || host.hostname;
+        const sessionId = connectToHost(host);
+        addConnectionLog({
+          sessionId,
+          hostId: host.id,
+          hostLabel: host.label || `Serial: ${portName}`,
+          hostname: host.hostname,
+          username,
+          protocol: 'serial',
+          startTime: Date.now(),
+          localUsername: username,
+          localHostname: localHost,
+          saved: false,
+        });
+        return;
+      }
+
+      const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
+      const resolvedAuth = resolveHostAuth({ host, keys, identities });
+      const sessionId = connectToHost(host);
       addConnectionLog({
+        sessionId,
         hostId: host.id,
         hostLabel: host.label,
         hostname: host.hostname,
-        username: host.username,
-        localHostname: "",
+        username: resolvedAuth.username || 'root',
+        protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
+        startTime: Date.now(),
+        localUsername: username,
+        localHostname: localHost,
         saved: false,
       });
-
-      connectToHost(host);
     };
 
     const bridge = netcattyBridge.get();
@@ -461,7 +485,7 @@ function App({ settings }: { settings: SettingsState }) {
       unsubscribeJump?.();
       unsubscribeConnect?.();
     };
-  }, [addConnectionLog, connectToHost, hosts, sessions, setActiveTabId, setWorkspaceFocusedSession, t]);
+  }, [addConnectionLog, connectToHost, hosts, identities, keys, sessions, setActiveTabId, setWorkspaceFocusedSession, t]);
 
   // Keyboard-interactive authentication (2FA/MFA) event listener
   useEffect(() => {
@@ -895,7 +919,9 @@ function App({ settings }: { settings: SettingsState }) {
   // Wrapper to create local terminal with logging
   const handleCreateLocalTerminal = useCallback(() => {
     const { username, hostname } = systemInfoRef.current;
+    const sessionId = createLocalTerminal();
     addConnectionLog({
+      sessionId,
       hostId: '',
       hostLabel: 'Local Terminal',
       hostname: 'localhost',
@@ -906,7 +932,6 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: hostname,
       saved: false,
     });
-    createLocalTerminal();
   }, [addConnectionLog, createLocalTerminal]);
 
   // Wrapper to connect to host with logging
@@ -916,7 +941,9 @@ function App({ settings }: { settings: SettingsState }) {
     // Handle serial hosts separately
     if (host.protocol === 'serial') {
       const portName = host.hostname.split('/').pop() || host.hostname;
+      const sessionId = connectToHost(host);
       addConnectionLog({
+        sessionId,
         hostId: host.id,
         hostLabel: host.label || `Serial: ${portName}`,
         hostname: host.hostname,
@@ -927,13 +954,14 @@ function App({ settings }: { settings: SettingsState }) {
         localHostname: localHost,
         saved: false,
       });
-      connectToHost(host);
       return;
     }
 
     const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
     const resolvedAuth = resolveHostAuth({ host, keys, identities });
+    const sessionId = connectToHost(host);
     addConnectionLog({
+      sessionId,
       hostId: host.id,
       hostLabel: host.label,
       hostname: host.hostname,
@@ -944,14 +972,15 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: localHost,
       saved: false,
     });
-    connectToHost(host);
   }, [addConnectionLog, connectToHost, identities, keys]);
 
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig) => {
     const { username, hostname } = systemInfoRef.current;
     const portName = config.path.split('/').pop() || config.path;
+    const sessionId = createSerialSession(config);
     addConnectionLog({
+      sessionId,
       hostId: '',
       hostLabel: `Serial: ${portName}`,
       hostname: config.path,
@@ -962,32 +991,23 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: hostname,
       saved: false,
     });
-    createSerialSession(config);
   }, [addConnectionLog, createSerialSession]);
 
   // Handle terminal data capture when session exits
   const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => {
     if (IS_DEV) console.log('[handleTerminalDataCapture] Called', { sessionId, dataLength: data.length });
-    // Find the connection log for this session
     const session = sessions.find(s => s.id === sessionId);
     if (IS_DEV) console.log('[handleTerminalDataCapture] Session', session);
-    if (!session) {
-      if (IS_DEV) console.log('[handleTerminalDataCapture] No session found');
-      return;
-    }
+    if (IS_DEV) console.log('[handleTerminalDataCapture] All logs:', connectionLogs.map(l => ({ id: l.id, sessionId: l.sessionId, hostname: l.hostname, endTime: l.endTime, hasTerminalData: !!l.terminalData })));
 
-    if (IS_DEV) console.log('[handleTerminalDataCapture] Looking for logs with hostname:', session.hostname);
-    if (IS_DEV) console.log('[handleTerminalDataCapture] All logs:', connectionLogs.map(l => ({ id: l.id, hostname: l.hostname, endTime: l.endTime, hasTerminalData: !!l.terminalData })));
-
-    // Find the most recent log matching this session's hostname and doesn't have terminalData yet
-    // For local terminal, hostname is 'localhost'
-    // Sort by startTime descending to find the most recent matching log
+    // Prefer the persisted sessionId because the session may already have been
+    // removed from state by the time the terminal unmount cleanup runs.
     const matchingLog = connectionLogs
-      .filter(log =>
-        log.hostname === session.hostname &&
-        !log.endTime &&
-        !log.terminalData
-      )
+      .filter((log) => {
+        if (log.endTime || log.terminalData) return false;
+        if (log.sessionId) return log.sessionId === sessionId;
+        return !!session && log.hostname === session.hostname;
+      })
       .sort((a, b) => b.startTime - a.startTime)[0];
 
     if (IS_DEV) console.log('[handleTerminalDataCapture] Matching log', matchingLog);

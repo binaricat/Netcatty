@@ -49,9 +49,10 @@ export const useSessionState = () => {
       username: 'local',
       status: 'connecting',
     };
-	    setSessions(prev => [...prev, newSession]);
-	    setActiveTabId(sessionId);
-	  }, [setActiveTabId]);
+    setSessions(prev => [...prev, newSession]);
+    setActiveTabId(sessionId);
+    return sessionId;
+  }, [setActiveTabId]);
 
   const createSerialSession = useCallback((config: SerialConfig) => {
     const sessionId = crypto.randomUUID();
@@ -69,6 +70,7 @@ export const useSessionState = () => {
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(sessionId);
+    return sessionId;
   }, [setActiveTabId]);
 
   const connectToHost = useCallback((host: Host) => {
@@ -100,7 +102,7 @@ export const useSessionState = () => {
       };
       setSessions(prev => [...prev, newSession]);
       setActiveTabId(sessionId);
-      return;
+      return sessionId;
     }
 
     const newSession: TerminalSession = {
@@ -115,9 +117,10 @@ export const useSessionState = () => {
       port: host.port,
       moshEnabled: host.moshEnabled,
     };
-	    setSessions(prev => [...prev, newSession]);
-	    setActiveTabId(newSession.id);
-	  }, [setActiveTabId]);
+    setSessions(prev => [...prev, newSession]);
+    setActiveTabId(newSession.id);
+    return newSession.id;
+  }, [setActiveTabId]);
 
   const updateSessionStatus = useCallback((sessionId: string, status: TerminalSession['status']) => {
     setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status } : s));
