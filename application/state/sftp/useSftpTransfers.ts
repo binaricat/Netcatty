@@ -123,6 +123,12 @@ export const useSftpTransfers = ({
     }
   }, []);
 
+  const isTransferCancelledError = useCallback(
+    (error: unknown): boolean =>
+      error instanceof Error && error.message === "Transfer cancelled",
+    [],
+  );
+
   const getEntrySize = useCallback((entry: SftpFileEntry): number => {
     if (typeof entry.size === "string") {
       const parsed = parseInt(entry.size, 10);
@@ -437,7 +443,10 @@ export const useSftpTransfers = ({
           sourceEncoding,
           task.id,
         );
-      } catch {
+      } catch (err) {
+        if (isTransferCancelledError(err)) {
+          throw err;
+        }
         // Fall back to the existing estimate below if size discovery fails.
       }
     } else if (actualFileSize === 0) {
@@ -593,9 +602,11 @@ export const useSftpTransfers = ({
           setTransfers((prev) =>
             prev.map((t) => {
               if (t.id !== task.id || t.status === "cancelled") return t;
-              const newTotal = t.totalBytes > 0
-                ? t.totalBytes
-                : Math.max(totalProgress, completedBytes + currentFileTotal);
+              const newTotal = Math.max(
+                t.totalBytes,
+                totalProgress,
+                completedBytes + currentFileTotal,
+              );
               return {
                 ...t,
                 transferredBytes: Math.max(
