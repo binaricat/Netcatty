@@ -39,6 +39,7 @@ interface UseSftpTransfersResult {
   addExternalUpload: (task: TransferTask) => void;
   updateExternalUpload: (taskId: string, updates: Partial<TransferTask>) => void;
   cancelTransfer: (transferId: string) => Promise<void>;
+  isTransferCancelled: (transferId: string) => boolean;
   retryTransfer: (transferId: string) => Promise<void>;
   clearCompletedTransfers: () => void;
   dismissTransfer: (transferId: string) => void;
@@ -875,7 +876,7 @@ export const useSftpTransfers = ({
   const retryTransfer = useCallback(
     async (transferId: string) => {
       const task = transfers.find((t) => t.id === transferId);
-      if (!task) return;
+      if (!task || task.retryable === false) return;
 
       const retriedTask: TransferTask = {
         ...task,
@@ -922,6 +923,10 @@ export const useSftpTransfers = ({
 
   const dismissTransfer = useCallback((transferId: string) => {
     setTransfers((prev) => prev.filter((t) => t.id !== transferId));
+  }, []);
+
+  const isTransferCancelled = useCallback((transferId: string) => {
+    return cancelledTasksRef.current.has(transferId);
   }, []);
 
   const addExternalUpload = useCallback((task: TransferTask) => {
@@ -1053,6 +1058,7 @@ export const useSftpTransfers = ({
     addExternalUpload,
     updateExternalUpload,
     cancelTransfer,
+    isTransferCancelled,
     retryTransfer,
     clearCompletedTransfers,
     dismissTransfer,

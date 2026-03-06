@@ -14,6 +14,13 @@ const keyboardInteractiveListeners = new Set();
 const passphraseListeners = new Set();
 const passphraseTimeoutListeners = new Set();
 
+function cleanupTransferListeners(transferId) {
+  transferProgressListeners.delete(transferId);
+  transferCompleteListeners.delete(transferId);
+  transferErrorListeners.delete(transferId);
+  transferCancelledListeners.delete(transferId);
+}
+
 ipcRenderer.on("netcatty:data", (_event, payload) => {
   const set = dataListeners.get(payload.sessionId);
   if (!set) return;
@@ -144,11 +151,7 @@ ipcRenderer.on("netcatty:transfer:complete", (_event, payload) => {
       console.error("Transfer complete callback failed", err);
     }
   }
-  // Cleanup listeners
-  transferProgressListeners.delete(payload.transferId);
-  transferCompleteListeners.delete(payload.transferId);
-  transferErrorListeners.delete(payload.transferId);
-  transferCancelledListeners.delete(payload.transferId);
+  cleanupTransferListeners(payload.transferId);
 });
 
 ipcRenderer.on("netcatty:transfer:error", (_event, payload) => {
@@ -160,11 +163,7 @@ ipcRenderer.on("netcatty:transfer:error", (_event, payload) => {
       console.error("Transfer error callback failed", err);
     }
   }
-  // Cleanup listeners
-  transferProgressListeners.delete(payload.transferId);
-  transferCompleteListeners.delete(payload.transferId);
-  transferErrorListeners.delete(payload.transferId);
-  transferCancelledListeners.delete(payload.transferId);
+  cleanupTransferListeners(payload.transferId);
 });
 
 ipcRenderer.on("netcatty:transfer:cancelled", (_event, payload) => {
@@ -172,10 +171,7 @@ ipcRenderer.on("netcatty:transfer:cancelled", (_event, payload) => {
   if (cb) {
     try { cb(); } catch { }
   }
-  transferProgressListeners.delete(payload.transferId);
-  transferCompleteListeners.delete(payload.transferId);
-  transferErrorListeners.delete(payload.transferId);
-  transferCancelledListeners.delete(payload.transferId);
+  cleanupTransferListeners(payload.transferId);
 });
 
 // Upload with progress listeners
@@ -551,11 +547,7 @@ const api = {
     return ipcRenderer.invoke("netcatty:transfer:start", options);
   },
   cancelTransfer: async (transferId) => {
-    // Cleanup listeners
-    transferProgressListeners.delete(transferId);
-    transferCompleteListeners.delete(transferId);
-    transferErrorListeners.delete(transferId);
-    transferCancelledListeners.delete(transferId);
+    cleanupTransferListeners(transferId);
     return ipcRenderer.invoke("netcatty:transfer:cancel", { transferId });
   },
   // Compressed folder upload
@@ -727,7 +719,12 @@ const api = {
     if (onComplete) transferCompleteListeners.set(transferId, onComplete);
     if (onError) transferErrorListeners.set(transferId, onError);
     if (onCancelled) transferCancelledListeners.set(transferId, onCancelled);
-    return ipcRenderer.invoke("netcatty:sftp:downloadToTempWithProgress", { sftpId, remotePath, fileName, encoding, transferId });
+    return ipcRenderer
+      .invoke("netcatty:sftp:downloadToTempWithProgress", { sftpId, remotePath, fileName, encoding, transferId })
+      .catch((err) => {
+        cleanupTransferListeners(transferId);
+        throw err;
+      });
   },
 
   // Save dialog for file downloads

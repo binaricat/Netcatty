@@ -23,6 +23,7 @@ interface UseSftpExternalOperationsParams {
   useCompressedUpload?: boolean;
   addExternalUpload?: (task: TransferTask) => void;
   updateExternalUpload?: (taskId: string, updates: Partial<TransferTask>) => void;
+  isTransferCancelled?: (taskId: string) => boolean;
   dismissExternalUpload?: (taskId: string) => void;
 }
 
@@ -55,6 +56,7 @@ export const useSftpExternalOperations = (
     useCompressedUpload = false,
     addExternalUpload,
     updateExternalUpload,
+    isTransferCancelled,
     dismissExternalUpload,
   } = params;
 
@@ -184,12 +186,23 @@ export const useSftpExternalOperations = (
 
       let localTempPath: string;
       let wasCancelled = false;
+      let externalTransferId: string | undefined;
+      const isLocalTempDownloadCancelled = () =>
+        !!externalTransferId && !!isTransferCancelled?.(externalTransferId);
+      const cleanupTempDownload = async (filePath: string) => {
+        if (!bridge.deleteTempFile) return;
+        try {
+          await bridge.deleteTempFile(filePath);
+        } catch (err) {
+          console.warn("[SFTP] Failed to delete cancelled temp download:", err);
+        }
+      };
 
       if (bridge.downloadSftpToTempWithProgress && addExternalUpload && updateExternalUpload) {
-        const transferId = `download-temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        externalTransferId = `download-temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
         addExternalUpload({
-          id: transferId,
+          id: externalTransferId,
           fileName,
           sourcePath: remotePath,
           targetPath: "(temp)",
@@ -202,6 +215,7 @@ export const useSftpExternalOperations = (
           speed: 0,
           startTime: Date.now(),
           isDirectory: false,
+          retryable: false,
         });
 
         try {
@@ -210,23 +224,17 @@ export const useSftpExternalOperations = (
             remotePath,
             fileName,
             pane.filenameEncoding,
-            transferId,
+            externalTransferId,
             (transferred, total, speed) => {
-              updateExternalUpload(transferId, {
+              updateExternalUpload(externalTransferId, {
                 transferredBytes: transferred,
                 totalBytes: total,
                 speed,
               });
             },
-            () => {
-              updateExternalUpload(transferId, {
-                status: "completed" as TransferStatus,
-                endTime: Date.now(),
-                speed: 0,
-              });
-            },
+            undefined,
             (error) => {
-              updateExternalUpload(transferId, {
+              updateExternalUpload(externalTransferId, {
                 status: "failed" as TransferStatus,
                 endTime: Date.now(),
                 error,
@@ -234,7 +242,7 @@ export const useSftpExternalOperations = (
               });
             },
             () => {
-              updateExternalUpload(transferId, {
+              updateExternalUpload(externalTransferId, {
                 status: "cancelled" as TransferStatus,
                 endTime: Date.now(),
                 speed: 0,
@@ -244,7 +252,7 @@ export const useSftpExternalOperations = (
           wasCancelled = result.cancelled;
           localTempPath = result.localPath;
         } catch (err) {
-          updateExternalUpload(transferId, {
+          updateExternalUpload(externalTransferId, {
             status: "failed" as TransferStatus,
             endTime: Date.now(),
             error: err instanceof Error ? err.message : String(err),
@@ -259,6 +267,17 @@ export const useSftpExternalOperations = (
           }
           return { localTempPath: "" };
         }
+
+        if (isLocalTempDownloadCancelled()) {
+          await cleanupTempDownload(localTempPath);
+          return { localTempPath: "" };
+        }
+
+        updateExternalUpload(externalTransferId, {
+          status: "completed" as TransferStatus,
+          endTime: Date.now(),
+          speed: 0,
+        });
       } else {
         localTempPath = await bridge.downloadSftpToTemp(
           sftpId,
@@ -266,6 +285,11 @@ export const useSftpExternalOperations = (
           fileName,
           pane.filenameEncoding,
         );
+      }
+
+      if (isLocalTempDownloadCancelled()) {
+        await cleanupTempDownload(localTempPath);
+        return { localTempPath: "" };
       }
 
       if (bridge.registerTempFile) {
@@ -276,7 +300,19 @@ export const useSftpExternalOperations = (
         }
       }
 
-      await bridge.openWithApplication(localTempPath, appPath);
+      try {
+        await bridge.openWithApplication(localTempPath, appPath);
+      } catch (err) {
+        if (externalTransferId) {
+          updateExternalUpload(externalTransferId, {
+            status: "failed" as TransferStatus,
+            endTime: Date.now(),
+            error: err instanceof Error ? err.message : String(err),
+            speed: 0,
+          });
+        }
+        throw err;
+      }
 
       let watchId: string | undefined;
       if (options?.enableWatch && bridge.startFileWatch) {
@@ -295,7 +331,7 @@ export const useSftpExternalOperations = (
 
       return { localTempPath, watchId };
     },
-    [getActivePane, sftpSessionsRef, addExternalUpload, updateExternalUpload],
+    [getActivePane, sftpSessionsRef, addExternalUpload, updateExternalUpload, isTransferCancelled],
   );
 
   // Create upload callbacks that translate to TransferTask updates

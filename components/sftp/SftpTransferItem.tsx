@@ -121,7 +121,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({ task, onCancel
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-                {task.status === 'failed' && (
+                {task.status === 'failed' && task.retryable !== false && (
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRetry} title="Retry">
                         <RefreshCw size={12} />
                     </Button>

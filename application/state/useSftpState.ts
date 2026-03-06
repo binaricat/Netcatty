@@ -213,6 +213,7 @@ export const useSftpState = (
     addExternalUpload,
     updateExternalUpload,
     cancelTransfer,
+    isTransferCancelled,
     retryTransfer,
     clearCompletedTransfers,
     dismissTransfer,
@@ -241,6 +242,7 @@ export const useSftpState = (
     useCompressedUpload: options?.useCompressedUpload,
     addExternalUpload,
     updateExternalUpload,
+    isTransferCancelled,
     dismissExternalUpload: dismissTransfer,
   });
 

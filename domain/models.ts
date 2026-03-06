@@ -612,6 +612,7 @@ export interface TransferTask {
   childTasks?: string[]; // For directory transfers
   parentTaskId?: string;
   skipConflictCheck?: boolean; // Skip conflict check for replace operations
+  retryable?: boolean; // False for task types that cannot be safely replayed through generic retry
 }
 
 export interface FileConflict {

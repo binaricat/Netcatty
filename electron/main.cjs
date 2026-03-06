@@ -648,27 +648,40 @@ const registerBridges = (win) => {
   // the UI already transitions the task to "cancelled" via the dedicated event.
   ipcMain.handle("netcatty:sftp:downloadToTempWithProgress", async (event, { sftpId, remotePath, fileName, encoding, transferId }) => {
     const localPath = await tempDirBridge.getTempFilePath(fileName);
-
-    const payload = {
-      transferId,
-      sourcePath: remotePath,
-      targetPath: localPath,
-      sourceType: "sftp",
-      targetType: "local",
-      sourceSftpId: sftpId,
-      sourceEncoding: encoding,
-      totalBytes: 0,
+    const cleanupPartialDownload = async () => {
+      try {
+        await fs.promises.rm(localPath, { force: true });
+      } catch (err) {
+        console.warn(`[Main] Failed to clean temp download after interruption: ${localPath}`, err);
+      }
     };
 
-    const result = await transferBridge.startTransfer(event, payload);
+    try {
+      const payload = {
+        transferId,
+        sourcePath: remotePath,
+        targetPath: localPath,
+        sourceType: "sftp",
+        targetType: "local",
+        sourceSftpId: sftpId,
+        sourceEncoding: encoding,
+        totalBytes: 0,
+      };
 
-    if (result.error) {
-      if (result.error === "Transfer cancelled") {
-        return { localPath, cancelled: true };
+      const result = await transferBridge.startTransfer(event, payload);
+
+      if (result.error) {
+        await cleanupPartialDownload();
+        if (result.error === "Transfer cancelled") {
+          return { localPath, cancelled: true };
+        }
+        throw new Error(result.error);
       }
-      throw new Error(result.error);
+      return { localPath, cancelled: false };
+    } catch (err) {
+      await cleanupPartialDownload();
+      throw err;
     }
-    return { localPath, cancelled: false };
   });
 
   // Delete a temp file (for cleanup when editors close)
