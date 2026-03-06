@@ -27,7 +27,6 @@ import { useSftpConnections } from "./sftp/useSftpConnections";
 import { useSftpFileWatch } from "./sftp/useSftpFileWatch";
 import { useSftpSessionCleanup } from "./sftp/useSftpSessionCleanup";
 import { useSftpSessionErrors } from "./sftp/useSftpSessionErrors";
-import { useSettingsState } from "./useSettingsState";
 
 // types + utils now live in ./sftp/*
 
@@ -37,7 +36,6 @@ export const useSftpState = (
   identities: Identity[],
   options?: SftpStateOptions
 ) => {
-  const { sftpUseCompressedUpload } = useSettingsState();
   const tabsState = useSftpTabsState();
   const {
     leftTabs,
@@ -240,7 +238,7 @@ export const useSftpState = (
     getActivePane,
     refresh,
     sftpSessionsRef,
-    useCompressedUpload: sftpUseCompressedUpload,
+    useCompressedUpload: options?.useCompressedUpload,
     addExternalUpload,
     updateExternalUpload,
     dismissExternalUpload: dismissTransfer,

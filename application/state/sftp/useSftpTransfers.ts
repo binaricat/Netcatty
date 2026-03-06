@@ -123,6 +123,16 @@ export const useSftpTransfers = ({
     }
   }, []);
 
+  const clearCancelledTask = useCallback((taskId: string) => {
+    cancelledTasksRef.current.delete(taskId);
+  }, []);
+
+  const clearCancelledTasks = useCallback((taskIds: string[]) => {
+    for (const taskId of taskIds) {
+      cancelledTasksRef.current.delete(taskId);
+    }
+  }, []);
+
   const isTransferCancelledError = useCallback(
     (error: unknown): boolean =>
       error instanceof Error && error.message === "Transfer cancelled",
@@ -705,6 +715,7 @@ export const useSftpTransfers = ({
             completionHandlersRef.current.delete(task.id);
           }
         }
+        clearCancelledTask(task.id);
         return "cancelled";
       }
 
@@ -863,10 +874,6 @@ export const useSftpTransfers = ({
         }
       }
 
-      // Clean up cancelled task ID after a delay to ensure all async ops see it
-      setTimeout(() => {
-        cancelledTasksRef.current.delete(transferId);
-      }, 5000);
     },
     [stopProgressSimulation],
   );
@@ -882,6 +889,7 @@ export const useSftpTransfers = ({
       const targetPane = getActivePane(targetSide as "left" | "right");
 
       if (sourcePane?.connection && targetPane?.connection) {
+        clearCancelledTask(transferId);
         setTransfers((prev) =>
           prev.map((t) =>
             t.id === transferId
@@ -893,18 +901,23 @@ export const useSftpTransfers = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [transfers, getActivePane],
+    [transfers, getActivePane, clearCancelledTask],
   );
 
   const clearCompletedTransfers = useCallback(() => {
-    setTransfers((prev) =>
-      prev.filter((t) => t.status !== "completed" && t.status !== "cancelled"),
-    );
-  }, []);
+    setTransfers((prev) => {
+      const removedTaskIds = prev
+        .filter((t) => t.status === "completed" || t.status === "cancelled")
+        .map((t) => t.id);
+      clearCancelledTasks(removedTaskIds);
+      return prev.filter((t) => t.status !== "completed" && t.status !== "cancelled");
+    });
+  }, [clearCancelledTasks]);
 
   const dismissTransfer = useCallback((transferId: string) => {
+    clearCancelledTask(transferId);
     setTransfers((prev) => prev.filter((t) => t.id !== transferId));
-  }, []);
+  }, [clearCancelledTask]);
 
   const addExternalUpload = useCallback((task: TransferTask) => {
     // Filter out any pending scanning tasks before adding the new task.

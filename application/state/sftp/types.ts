@@ -52,4 +52,5 @@ export interface FileWatchErrorEvent {
 export interface SftpStateOptions {
   onFileWatchSynced?: (event: FileWatchSyncedEvent) => void;
   onFileWatchError?: (event: FileWatchErrorEvent) => void;
+  useCompressedUpload?: boolean;
 }
