@@ -430,6 +430,7 @@ export const useSftpTransfers = ({
       : targetPane.filenameEncoding || "auto";
 
     let actualFileSize = task.totalBytes;
+    let prescanCancelled = false;
     if (task.isDirectory) {
       try {
         const sourceSftpId = sourcePane.connection?.isLocal
@@ -445,7 +446,7 @@ export const useSftpTransfers = ({
         );
       } catch (err) {
         if (isTransferCancelledError(err)) {
-          throw err;
+          prescanCancelled = true;
         }
         // Fall back to the existing estimate below if size discovery fails.
       }
@@ -480,13 +481,6 @@ export const useSftpTransfers = ({
 
     const hasStreamingTransfer = !!netcattyBridge.get()?.startStreamTransfer;
 
-    updateTask({
-      status: "transferring",
-      totalBytes: estimatedSize,
-      transferredBytes: 0,
-      startTime: Date.now(),
-    });
-
     const sourceSftpId = sourcePane.connection?.isLocal
       ? null
       : sftpSessionsRef.current.get(sourcePane.connection!.id);
@@ -506,12 +500,24 @@ export const useSftpTransfers = ({
     }
 
     let useSimulatedProgress = false;
-    if (!hasStreamingTransfer && !task.isDirectory) {
-      useSimulatedProgress = true;
-      startProgressSimulation(task.id, estimatedSize);
-    }
 
     try {
+      if (prescanCancelled) {
+        throw new Error("Transfer cancelled");
+      }
+
+      updateTask({
+        status: "transferring",
+        totalBytes: estimatedSize,
+        transferredBytes: 0,
+        startTime: Date.now(),
+      });
+
+      if (!hasStreamingTransfer && !task.isDirectory) {
+        useSimulatedProgress = true;
+        startProgressSimulation(task.id, estimatedSize);
+      }
+
       if (!task.skipConflictCheck && !task.isDirectory && targetPane.connection) {
         let targetExists = false;
         let existingStat: { size: number; mtime: number } | null = null;
