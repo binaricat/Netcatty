@@ -214,11 +214,7 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 Or browse all releases at [GitHub Releases](https://github.com/binaricat/Netcatty/releases).
 
-> **⚠️ macOS Users:** Since the app is not code-signed, macOS Gatekeeper will block it. After downloading, run this command to remove the quarantine attribute:
-> ```bash
-> xattr -cr /Applications/Netcatty.app
-> ```
-> Or right-click the app → Open → Click "Open" in the dialog.
+> **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.
 
 ### Prerequisites
 - Node.js 18+ and npm

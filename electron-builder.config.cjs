@@ -35,7 +35,6 @@ module.exports = {
         ],
         category: 'public.app-category.developer-tools',
         hardenedRuntime: true,
-        gatekeeperAssess: false,
         notarize: true,
         entitlements: 'electron/entitlements.mac.plist',
         entitlementsInherit: 'electron/entitlements.mac.plist',

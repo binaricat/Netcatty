@@ -214,11 +214,7 @@ Netcatty 会自动识别并在主机列表中展示对应的系统图标：
 
 或在 [GitHub Releases](https://github.com/binaricat/Netcatty/releases) 浏览所有版本。
 
-> **⚠️ macOS 用户注意：** 由于应用未经代码签名，macOS Gatekeeper 会阻止运行。下载后，请在终端运行以下命令移除隔离属性：
-> ```bash
-> xattr -cr /Applications/Netcatty.app
-> ```
-> 或者右键点击应用 → 打开 → 在弹出的对话框中点击"打开"。
+> **macOS 用户注意：** 当前发布版本应已完成代码签名和公证。如果 Gatekeeper 仍然提示风险，请确认您下载的是 GitHub Releases 中的最新官方构建。
 
 ### 前置条件
 - Node.js 18+ 和 npm
