@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
+import type { SftpPane } from "../../../application/state/sftp/types";
 import type { SftpPaneCallbacks, SftpDragCallbacks } from "../SftpContext";
 import { joinPath } from "../../../application/state/sftp/utils";
-import { isNavigableDirectory } from "../index";
 
 const isExplicitDropTarget = (entry: SftpFileEntry): boolean =>
   entry.type === "symlink" && entry.linkTarget === "directory";
 
 interface UseSftpPaneDragAndSelectParams {
   side: "left" | "right";
-  pane: { selectedFiles: Set<string>; connection?: { currentPath: string } };
+  pane: SftpPane;
   sortedDisplayFiles: SftpFileEntry[];
   draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
   onDragStart: SftpDragCallbacks["onDragStart"];
@@ -96,6 +96,12 @@ export const useSftpPaneDragAndSelect = ({
       if (draggedFiles[0]?.side !== side) {
         onReceiveFromOtherPane(
           draggedFiles.map((f) => ({ name: f.name, isDirectory: f.isDirectory })),
+          pane.connection
+            ? {
+              targetPane: pane,
+              targetPath: pane.connection.currentPath,
+            }
+            : undefined,
         );
       }
       return;
@@ -157,7 +163,10 @@ export const useSftpPaneDragAndSelect = ({
         setIsDragOverPane(false);
         onReceiveFromOtherPane(
           draggedFiles.map((f) => ({ name: f.name, isDirectory: f.isDirectory })),
-          joinPath(pane.connection?.currentPath || "/", entry.name),
+          {
+            targetPane: pane.connection ? pane : undefined,
+            targetPath: joinPath(pane.connection?.currentPath || "/", entry.name),
+          },
         );
       }
     },

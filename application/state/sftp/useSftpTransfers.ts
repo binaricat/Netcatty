@@ -33,6 +33,7 @@ interface UseSftpTransfersResult {
       sourcePane?: SftpPane;
       sourcePath?: string;
       sourceConnectionId?: string;
+      targetPane?: SftpPane;
       targetPath?: string;
       onTransferComplete?: (result: TransferResult) => void | Promise<void>;
     },
@@ -646,12 +647,13 @@ export const useSftpTransfers = ({
         sourcePane?: SftpPane;
         sourcePath?: string;
         sourceConnectionId?: string;
+        targetPane?: SftpPane;
         targetPath?: string;
         onTransferComplete?: (result: TransferResult) => void | Promise<void>;
       },
     ) => {
       const sourcePane = options?.sourcePane ?? getActivePane(sourceSide);
-      const targetPane = getActivePane(targetSide);
+      const targetPane = options?.targetPane ?? getActivePane(targetSide);
 
       if (!sourcePane?.connection || !targetPane?.connection) return [];
 

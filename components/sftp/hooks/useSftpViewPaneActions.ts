@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
+import type { SftpPane } from "../../../application/state/sftp/types";
 import type { SftpDragCallbacks } from "../SftpContext";
 
 interface UseSftpViewPaneActionsParams {
@@ -42,11 +43,17 @@ interface UseSftpViewPaneActionsResult {
   onCopyToOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
   onReceiveFromOtherPaneLeft: (
     files: { name: string; isDirectory: boolean }[],
-    targetPath?: string,
+    options?: {
+      targetPane?: SftpPane;
+      targetPath?: string;
+    },
   ) => void;
   onReceiveFromOtherPaneRight: (
     files: { name: string; isDirectory: boolean }[],
-    targetPath?: string,
+    options?: {
+      targetPane?: SftpPane;
+      targetPath?: string;
+    },
   ) => void;
 }
 
@@ -82,13 +89,23 @@ export const useSftpViewPaneActions = ({
     [sftpRef],
   );
   const onReceiveFromOtherPaneLeft = useCallback(
-    (files: { name: string; isDirectory: boolean }[], targetPath?: string) =>
-      sftpRef.current.startTransfer(files, "right", "left", { targetPath }),
+    (
+      files: { name: string; isDirectory: boolean }[],
+      options?: {
+        targetPane?: SftpPane;
+        targetPath?: string;
+      },
+    ) => sftpRef.current.startTransfer(files, "right", "left", options),
     [sftpRef],
   );
   const onReceiveFromOtherPaneRight = useCallback(
-    (files: { name: string; isDirectory: boolean }[], targetPath?: string) =>
-      sftpRef.current.startTransfer(files, "left", "right", { targetPath }),
+    (
+      files: { name: string; isDirectory: boolean }[],
+      options?: {
+        targetPane?: SftpPane;
+        targetPath?: string;
+      },
+    ) => sftpRef.current.startTransfer(files, "left", "right", options),
     [sftpRef],
   );
 
