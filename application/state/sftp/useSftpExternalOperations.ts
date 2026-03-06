@@ -20,6 +20,7 @@ interface UseSftpExternalOperationsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   refresh: (side: "left" | "right") => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
+  useCompressedUpload?: boolean;
   addExternalUpload?: (task: TransferTask) => void;
   updateExternalUpload?: (taskId: string, updates: Partial<TransferTask>) => void;
   dismissExternalUpload?: (taskId: string) => void;
@@ -47,7 +48,15 @@ interface SftpExternalOperationsResult {
 export const useSftpExternalOperations = (
   params: UseSftpExternalOperationsParams
 ): SftpExternalOperationsResult => {
-  const { getActivePane, refresh, sftpSessionsRef, addExternalUpload, updateExternalUpload, dismissExternalUpload } = params;
+  const {
+    getActivePane,
+    refresh,
+    sftpSessionsRef,
+    useCompressedUpload = false,
+    addExternalUpload,
+    updateExternalUpload,
+    dismissExternalUpload,
+  } = params;
 
   // Upload controller for cancellation support
   const uploadControllerRef = useRef<UploadController | null>(null);
@@ -402,6 +411,7 @@ export const useSftpExternalOperations = (
             bridge: createUploadBridge,
             joinPath,
             callbacks,
+            useCompressedUpload,
           },
           controller
         );
@@ -415,7 +425,14 @@ export const useSftpExternalOperations = (
         uploadControllerRef.current = null;
       }
     },
-    [getActivePane, refresh, sftpSessionsRef, createUploadCallbacks, createUploadBridge],
+    [
+      getActivePane,
+      refresh,
+      sftpSessionsRef,
+      createUploadCallbacks,
+      createUploadBridge,
+      useCompressedUpload,
+    ],
   );
 
   const cancelExternalUpload = useCallback(async () => {
