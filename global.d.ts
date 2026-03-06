@@ -542,6 +542,17 @@ declare global {
     selectApplication?(): Promise<{ path: string; name: string } | null>;
     openWithApplication?(filePath: string, appPath: string): Promise<boolean>;
     downloadSftpToTemp?(sftpId: string, remotePath: string, fileName: string, encoding?: SftpFilenameEncoding): Promise<string>;
+    downloadSftpToTempWithProgress?(
+      sftpId: string,
+      remotePath: string,
+      fileName: string,
+      encoding: SftpFilenameEncoding | undefined,
+      transferId: string,
+      onProgress?: (transferred: number, total: number, speed: number) => void,
+      onComplete?: () => void,
+      onError?: (error: string) => void,
+      onCancelled?: () => void
+    ): Promise<{ localPath: string; cancelled: boolean }>;
 
     // Save dialog for file downloads
     showSaveDialog?(defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null>;

@@ -641,6 +641,36 @@ const registerBridges = (win) => {
     return localPath;
   });
 
+  // Download SFTP file to temp with progress reporting via transfer events.
+  // Progress/complete/cancelled events are delivered via the netcatty:transfer:*
+  // channels (handled by transferBridge.startTransfer), so the IPC return value
+  // only carries the resolved temp path. Cancellation is NOT an error here —
+  // the UI already transitions the task to "cancelled" via the dedicated event.
+  ipcMain.handle("netcatty:sftp:downloadToTempWithProgress", async (event, { sftpId, remotePath, fileName, encoding, transferId }) => {
+    const localPath = await tempDirBridge.getTempFilePath(fileName);
+
+    const payload = {
+      transferId,
+      sourcePath: remotePath,
+      targetPath: localPath,
+      sourceType: "sftp",
+      targetType: "local",
+      sourceSftpId: sftpId,
+      sourceEncoding: encoding,
+      totalBytes: 0,
+    };
+
+    const result = await transferBridge.startTransfer(event, payload);
+
+    if (result.error) {
+      if (result.error === "Transfer cancelled") {
+        return { localPath, cancelled: true };
+      }
+      throw new Error(result.error);
+    }
+    return { localPath, cancelled: false };
+  });
+
   // Delete a temp file (for cleanup when editors close)
   ipcMain.handle("netcatty:deleteTempFile", async (_event, { filePath }) => {
     try {

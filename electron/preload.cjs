@@ -5,6 +5,7 @@ const exitListeners = new Map();
 const transferProgressListeners = new Map();
 const transferCompleteListeners = new Map();
 const transferErrorListeners = new Map();
+const transferCancelledListeners = new Map();
 const chainProgressListeners = new Map();
 const authFailedListeners = new Map();
 const languageChangeListeners = new Set();
@@ -147,6 +148,7 @@ ipcRenderer.on("netcatty:transfer:complete", (_event, payload) => {
   transferProgressListeners.delete(payload.transferId);
   transferCompleteListeners.delete(payload.transferId);
   transferErrorListeners.delete(payload.transferId);
+  transferCancelledListeners.delete(payload.transferId);
 });
 
 ipcRenderer.on("netcatty:transfer:error", (_event, payload) => {
@@ -162,13 +164,18 @@ ipcRenderer.on("netcatty:transfer:error", (_event, payload) => {
   transferProgressListeners.delete(payload.transferId);
   transferCompleteListeners.delete(payload.transferId);
   transferErrorListeners.delete(payload.transferId);
+  transferCancelledListeners.delete(payload.transferId);
 });
 
 ipcRenderer.on("netcatty:transfer:cancelled", (_event, payload) => {
-  // Just cleanup listeners, the UI already knows it's cancelled
+  const cb = transferCancelledListeners.get(payload.transferId);
+  if (cb) {
+    try { cb(); } catch { }
+  }
   transferProgressListeners.delete(payload.transferId);
   transferCompleteListeners.delete(payload.transferId);
   transferErrorListeners.delete(payload.transferId);
+  transferCancelledListeners.delete(payload.transferId);
 });
 
 // Upload with progress listeners
@@ -548,6 +555,7 @@ const api = {
     transferProgressListeners.delete(transferId);
     transferCompleteListeners.delete(transferId);
     transferErrorListeners.delete(transferId);
+    transferCancelledListeners.delete(transferId);
     return ipcRenderer.invoke("netcatty:transfer:cancel", { transferId });
   },
   // Compressed folder upload
@@ -714,6 +722,13 @@ const api = {
     ipcRenderer.invoke("netcatty:openWithApplication", { filePath, appPath }),
   downloadSftpToTemp: (sftpId, remotePath, fileName, encoding) =>
     ipcRenderer.invoke("netcatty:sftp:downloadToTemp", { sftpId, remotePath, fileName, encoding }),
+  downloadSftpToTempWithProgress: (sftpId, remotePath, fileName, encoding, transferId, onProgress, onComplete, onError, onCancelled) => {
+    if (onProgress) transferProgressListeners.set(transferId, onProgress);
+    if (onComplete) transferCompleteListeners.set(transferId, onComplete);
+    if (onError) transferErrorListeners.set(transferId, onError);
+    if (onCancelled) transferCancelledListeners.set(transferId, onCancelled);
+    return ipcRenderer.invoke("netcatty:sftp:downloadToTempWithProgress", { sftpId, remotePath, fileName, encoding, transferId });
+  },
 
   // Save dialog for file downloads
   showSaveDialog: (defaultPath, filters) =>
