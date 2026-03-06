@@ -335,15 +335,11 @@ const ensureRemoteDirForSession = async (sftpId, dirPath, requestedEncoding) => 
   if (!dirPath || dirPath === ".") return true;
 
   const encoding = resolveEncodingForRequest(sftpId, requestedEncoding);
-  if (encoding === "utf-8") {
-    await requireSftpChannel(client);
-    const encodedPath = encodePath(dirPath, encoding);
-    await client.mkdir(encodedPath, true);
-    return true;
-  }
-
   const sftp = await requireSftpChannel(client);
 
+  // Always walk the path segment-by-segment. This lets sftp.stat() follow
+  // symlinked directory segments before deciding whether the next mkdir is
+  // valid, which avoids recursive mkdir failures on paths like /link/subdir.
   const normalizedPath = await normalizeRemotePathString(client, dirPath);
   await ensureRemoteDirInternal(sftp, normalizedPath, encoding);
   return true;
