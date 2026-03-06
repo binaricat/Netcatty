@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPaneCallbacks, SftpDragCallbacks } from "../SftpContext";
-import { joinPath } from "../../../application/state/sftp/utils";
 import { isNavigableDirectory } from "../index";
 
 interface UseSftpPaneDragAndSelectParams {
   side: "left" | "right";
-  pane: { selectedFiles: Set<string>; connection?: { currentPath: string } };
+  pane: { selectedFiles: Set<string> };
   sortedDisplayFiles: SftpFileEntry[];
   draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
   onDragStart: SftpDragCallbacks["onDragStart"];
@@ -154,11 +153,10 @@ export const useSftpPaneDragAndSelect = ({
         setIsDragOverPane(false);
         onReceiveFromOtherPane(
           draggedFiles.map((f) => ({ name: f.name, isDirectory: f.isDirectory })),
-          joinPath(pane.connection?.currentPath || "/", entry.name),
         );
       }
     },
-    [draggedFiles, onReceiveFromOtherPane, pane, side],
+    [draggedFiles, onReceiveFromOtherPane, side],
   );
 
   const handleRowSelect = useCallback(

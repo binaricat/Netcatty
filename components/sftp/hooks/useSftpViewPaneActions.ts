@@ -40,14 +40,8 @@ interface UseSftpViewPaneActionsResult {
   onRenameFileRight: (old: string, newName: string) => void;
   onCopyToOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
   onCopyToOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
-  onReceiveFromOtherPaneLeft: (
-    files: { name: string; isDirectory: boolean }[],
-    targetPath?: string,
-  ) => void;
-  onReceiveFromOtherPaneRight: (
-    files: { name: string; isDirectory: boolean }[],
-    targetPath?: string,
-  ) => void;
+  onReceiveFromOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
+  onReceiveFromOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
 }
 
 export const useSftpViewPaneActions = ({
@@ -82,13 +76,13 @@ export const useSftpViewPaneActions = ({
     [sftpRef],
   );
   const onReceiveFromOtherPaneLeft = useCallback(
-    (files: { name: string; isDirectory: boolean }[], targetPath?: string) =>
-      sftpRef.current.startTransfer(files, "right", "left", { targetPath }),
+    (files: { name: string; isDirectory: boolean }[]) =>
+      sftpRef.current.startTransfer(files, "right", "left"),
     [sftpRef],
   );
   const onReceiveFromOtherPaneRight = useCallback(
-    (files: { name: string; isDirectory: boolean }[], targetPath?: string) =>
-      sftpRef.current.startTransfer(files, "left", "right", { targetPath }),
+    (files: { name: string; isDirectory: boolean }[]) =>
+      sftpRef.current.startTransfer(files, "left", "right"),
     [sftpRef],
   );
 
