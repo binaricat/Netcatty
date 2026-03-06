@@ -404,6 +404,18 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_EDITOR_WORD_WRAP && typeof value === 'boolean') {
         setEditorWordWrapState((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_SESSION_LOGS_ENABLED && typeof value === 'boolean') {
+        setSessionLogsEnabled((prev) => (prev === value ? prev : value));
+      }
+      if (key === STORAGE_KEY_SESSION_LOGS_DIR && typeof value === 'string') {
+        setSessionLogsDir((prev) => (prev === value ? prev : value));
+      }
+      if (
+        key === STORAGE_KEY_SESSION_LOGS_FORMAT &&
+        (value === 'txt' || value === 'raw' || value === 'html')
+      ) {
+        setSessionLogsFormat((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_HOTKEY_SCHEME && (value === 'disabled' || value === 'mac' || value === 'pc')) {
         setHotkeyScheme(value);
       }
@@ -560,6 +572,25 @@ export const useSettingsState = () => {
           setEditorWordWrapState(newValue);
         }
       }
+      if (e.key === STORAGE_KEY_SESSION_LOGS_ENABLED && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== sessionLogsEnabled) {
+          setSessionLogsEnabled(newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_SESSION_LOGS_DIR && e.newValue !== null) {
+        if (e.newValue !== sessionLogsDir) {
+          setSessionLogsDir(e.newValue);
+        }
+      }
+      if (e.key === STORAGE_KEY_SESSION_LOGS_FORMAT && e.newValue) {
+        if (
+          (e.newValue === 'txt' || e.newValue === 'raw' || e.newValue === 'html') &&
+          e.newValue !== sessionLogsFormat
+        ) {
+          setSessionLogsFormat(e.newValue);
+        }
+      }
       // Sync SFTP compressed upload setting from other windows
       if (e.key === STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD && e.newValue !== null) {
         const newValue = e.newValue === 'true' || e.newValue === 'enabled';
@@ -571,7 +602,7 @@ export const useSettingsState = () => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, mergeIncomingTerminalSettings]);
+  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, mergeIncomingTerminalSettings]);
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
