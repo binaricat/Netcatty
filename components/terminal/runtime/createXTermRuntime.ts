@@ -121,8 +121,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const settings = ctx.terminalSettingsRef.current;
   const rendererType = settings?.rendererType ?? "auto";
   const bridge = netcattyBridge.get();
-  const isLocalTerminalHost =
-    ctx.host.protocol === "local" || ctx.host.hostname === "localhost";
+  const isLocalTerminalHost = ctx.host.protocol === "local";
   const windowsPty =
     platform === "win32" && isLocalTerminalHost
       ? bridge?.getWindowsPtyInfo?.() ?? { backend: "conpty" as const }
