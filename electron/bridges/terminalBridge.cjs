@@ -720,10 +720,7 @@ function registerHandlers(ipcMain) {
  * Get the default shell for the current platform
  */
 function getDefaultShell() {
-  if (process.platform === "win32") {
-    return findExecutable("powershell") || "powershell.exe";
-  }
-  return process.env.SHELL || "/bin/bash";
+  return getDefaultLocalShell();
 }
 
 /**
