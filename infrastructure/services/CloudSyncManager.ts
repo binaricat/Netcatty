@@ -36,7 +36,6 @@ import packageJson from '../../package.json';
 import { EncryptionService } from './EncryptionService';
 import { createAdapter, type CloudAdapter } from './adapters';
 import type { GitHubAdapter } from './adapters/GitHubAdapter';
-import { netcattyBridge } from './netcattyBridge';
 import type { GoogleDriveAdapter } from './adapters/GoogleDriveAdapter';
 import type { OneDriveAdapter } from './adapters/OneDriveAdapter';
 import {
@@ -199,20 +198,14 @@ export class CloudSyncManager {
    * in-memory so adapters can use them.
    */
   private async initProviderDecryption(): Promise<void> {
-    // If the Electron bridge is not yet available, decryptField() will
-    // silently return encrypted values unchanged (no-op fallback).
-    // Detect this early and defer real decryption to getConnectedAdapter().
-    const b = netcattyBridge.get();
-    if (!b?.credentialsDecrypt) {
-      console.warn('[CloudSync] Bridge unavailable during startup decryption — will retry on first adapter access');
-      return;
-    }
-
+    let anyFailure = false;
+    let anyAttempted = false;
     const providers: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
     for (const p of providers) {
       try {
         const conn = this.state.providers[p];
         if (conn.tokens || conn.config) {
+          anyAttempted = true;
           const seq = ++this.providerDecryptSeq[p];
           const decrypted = await decryptProviderSecrets(conn);
           // Only apply if no newer update has occurred during the async gap
@@ -221,10 +214,16 @@ export class CloudSyncManager {
           }
         }
       } catch {
-        // Decryption failure is non-fatal; the adapter will fail on use
+        // Decryption failed — likely the Electron IPC handler is not yet
+        // registered.  Mark as failure so getConnectedAdapter() will retry.
+        anyFailure = true;
       }
     }
-    this.decryptionEffective = true;
+    // Only mark effective if we actually decrypted at least one provider
+    // without errors, OR if no providers needed decryption at all.
+    if (!anyFailure || !anyAttempted) {
+      this.decryptionEffective = true;
+    }
     this.notifyStateChange();
   }
 
@@ -420,9 +419,9 @@ export class CloudSyncManager {
     // Ensure startup decryption has finished before reading tokens
     await this.decryptionReady;
 
-    // If startup decryption was a no-op (bridge not ready at construction),
-    // retry decryption for this provider now — the bridge should be
-    // available by the time an actual sync is attempted.
+    // If startup decryption was a no-op (bridge IPC handler not ready at
+    // construction), retry decryption for this provider now — the handler
+    // should be registered by the time an actual sync is attempted.
     if (!this.decryptionEffective) {
       const conn = this.state.providers[provider];
       if (conn.tokens || conn.config) {
@@ -433,14 +432,11 @@ export class CloudSyncManager {
             this.state.providers[provider] = decrypted;
             this.notifyStateChange();
           }
+          // Decryption succeeded — mark as effective
+          this.decryptionEffective = true;
         } catch {
-          // Decryption failure will surface when adapter tries to use tokens
+          // Still failing — will surface when adapter tries to use tokens
         }
-      }
-      // Mark effective once bridge is confirmed available
-      const b = netcattyBridge.get();
-      if (b?.credentialsDecrypt) {
-        this.decryptionEffective = true;
       }
     }
 
