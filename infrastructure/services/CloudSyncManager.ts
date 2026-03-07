@@ -86,10 +86,12 @@ export class CloudSyncManager {
   // Promise that resolves once startup provider secret decryption finishes.
   // Awaited by getConnectedAdapter() to prevent using still-encrypted tokens.
   private decryptionReady: Promise<void>;
-  // True once initProviderDecryption() has successfully run with a working
-  // Electron bridge.  When false, getConnectedAdapter() will retry
-  // decryption for the requested provider before using the tokens.
-  private decryptionEffective = false;
+  // Per-provider flag: true once that provider's secrets have been
+  // successfully decrypted.  When false, getConnectedAdapter() will
+  // retry decryption before using the tokens.
+  private providerDecrypted: Record<CloudProvider, boolean> = {
+    github: false, google: false, onedrive: false, webdav: false, s3: false,
+  };
   // Per-provider sequence counters for async decrypt callbacks (startup,
   // cross-window storage events).  Bumped by any state mutation so stale
   // decrypt results are discarded.
@@ -198,31 +200,26 @@ export class CloudSyncManager {
    * in-memory so adapters can use them.
    */
   private async initProviderDecryption(): Promise<void> {
-    let anyFailure = false;
-    let anyAttempted = false;
     const providers: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
     for (const p of providers) {
       try {
         const conn = this.state.providers[p];
         if (conn.tokens || conn.config) {
-          anyAttempted = true;
           const seq = ++this.providerDecryptSeq[p];
           const decrypted = await decryptProviderSecrets(conn);
           // Only apply if no newer update has occurred during the async gap
           if (seq === this.providerDecryptSeq[p]) {
             this.state.providers[p] = decrypted;
+            this.providerDecrypted[p] = true;
           }
+        } else {
+          // No secrets to decrypt — mark as done
+          this.providerDecrypted[p] = true;
         }
       } catch {
         // Decryption failed — likely the Electron IPC handler is not yet
-        // registered.  Mark as failure so getConnectedAdapter() will retry.
-        anyFailure = true;
+        // registered.  getConnectedAdapter() will retry for this provider.
       }
-    }
-    // Only mark effective if we actually decrypted at least one provider
-    // without errors, OR if no providers needed decryption at all.
-    if (!anyFailure || !anyAttempted) {
-      this.decryptionEffective = true;
     }
     this.notifyStateChange();
   }
@@ -419,10 +416,9 @@ export class CloudSyncManager {
     // Ensure startup decryption has finished before reading tokens
     await this.decryptionReady;
 
-    // If startup decryption was a no-op (bridge IPC handler not ready at
-    // construction), retry decryption for this provider now — the handler
-    // should be registered by the time an actual sync is attempted.
-    if (!this.decryptionEffective) {
+    // If this provider's secrets were not successfully decrypted at
+    // startup (IPC handler not registered yet), retry now.
+    if (!this.providerDecrypted[provider]) {
       const conn = this.state.providers[provider];
       if (conn.tokens || conn.config) {
         try {
@@ -430,10 +426,9 @@ export class CloudSyncManager {
           const decrypted = await decryptProviderSecrets(conn);
           if (seq === this.providerDecryptSeq[provider]) {
             this.state.providers[provider] = decrypted;
+            this.providerDecrypted[provider] = true;
             this.notifyStateChange();
           }
-          // Decryption succeeded — mark as effective
-          this.decryptionEffective = true;
         } catch {
           // Still failing — will surface when adapter tries to use tokens
         }
