@@ -427,6 +427,13 @@ export class CloudSyncManager {
           if (seq === this.providerDecryptSeq[provider]) {
             this.state.providers[provider] = decrypted;
             this.providerDecrypted[provider] = true;
+            // Evict any adapter cached with the old (encrypted) tokens
+            // so a fresh one is built from the decrypted credentials below.
+            const stale = this.adapters.get(provider);
+            if (stale) {
+              stale.signOut();
+              this.adapters.delete(provider);
+            }
             this.notifyStateChange();
           }
         } catch {
