@@ -19,6 +19,7 @@ import {
 } from "../../../infrastructure/config/xtermPerformance";
 import { logger } from "../../../lib/logger";
 import { isMacPlatform, normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
+import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import type {
   Host,
   KeyBinding,
@@ -119,6 +120,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const settings = ctx.terminalSettingsRef.current;
   const rendererType = settings?.rendererType ?? "auto";
+  const bridge = netcattyBridge.get();
+  const windowsPty =
+    platform === "win32" && ctx.host.protocol === "local"
+      ? bridge?.getWindowsPtyInfo?.() ?? { backend: "conpty" as const }
+      : undefined;
 
   const performanceConfig = resolveXTermPerformanceConfig({
     platform,
@@ -157,6 +163,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const term = new XTerm({
     ...performanceConfig.options,
+    ...(windowsPty ? { windowsPty } : {}),
     // Override ignoreBracketedPasteMode if user explicitly disables bracketed paste
     ignoreBracketedPasteMode: settings?.disableBracketedPaste ?? performanceConfig.options.ignoreBracketedPasteMode,
     fontSize: effectiveFontSize,

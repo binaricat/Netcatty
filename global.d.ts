@@ -124,9 +124,15 @@ declare global {
     error?: string;
   }
 
+  interface NetcattyWindowsPtyInfo {
+    backend: 'conpty' | 'winpty';
+    buildNumber?: number;
+  }
+
   type PortForwardStatusCallback = (status: 'inactive' | 'connecting' | 'active' | 'error', error?: string) => void;
 
   interface NetcattyBridge {
+    getWindowsPtyInfo?(): NetcattyWindowsPtyInfo | null;
     startSSHSession(options: NetcattySSHOptions): Promise<string>;
     startTelnetSession?(options: {
       sessionId?: string;

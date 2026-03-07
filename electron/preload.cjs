@@ -1,4 +1,5 @@
 const { ipcRenderer, contextBridge, webUtils } = require("electron");
+const os = require("node:os");
 
 const dataListeners = new Map();
 const exitListeners = new Map();
@@ -323,6 +324,19 @@ ipcRenderer.on("netcatty:trayPanel:setMenuData", (_event, data) => {
 });
 
 const api = {
+  getWindowsPtyInfo: () => {
+    if (process.platform !== "win32") {
+      return null;
+    }
+
+    const releaseParts = os.release().split(".");
+    const buildNumber = Number.parseInt(releaseParts[2] || "", 10);
+    const hasBuildNumber = Number.isFinite(buildNumber);
+    const backend =
+      hasBuildNumber && buildNumber < 18309 ? "winpty" : "conpty";
+
+    return hasBuildNumber ? { backend, buildNumber } : { backend };
+  },
   startSSHSession: async (options) => {
     const result = await ipcRenderer.invoke("netcatty:start", options);
     return result.sessionId;
