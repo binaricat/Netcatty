@@ -36,15 +36,34 @@ function init(deps) {
 /**
  * Find executable path on Windows
  */
+function isWindowsAppExecutionAlias(filePath) {
+  if (!filePath || process.platform !== "win32") return false;
+
+  const normalizedPath = path.normalize(filePath).toLowerCase();
+  const windowsAppsDir = path.join(
+    process.env.LOCALAPPDATA || "",
+    "Microsoft",
+    "WindowsApps",
+  ).toLowerCase();
+
+  return !!windowsAppsDir && normalizedPath.startsWith(`${windowsAppsDir}${path.sep}`);
+}
+
 function findExecutable(name) {
   if (process.platform !== "win32") return name;
   
   const { execFileSync } = require("child_process");
   try {
     const result = execFileSync("where.exe", [name], { encoding: "utf8" });
-    const firstLine = result.split(/\r?\n/)[0].trim();
-    if (firstLine && fs.existsSync(firstLine)) {
-      return firstLine;
+    const candidates = result
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) continue;
+      if (name === "pwsh" && isWindowsAppExecutionAlias(candidate)) continue;
+      return candidate;
     }
   } catch (err) {
     console.warn(`Could not find ${name} via where.exe:`, err.message);
