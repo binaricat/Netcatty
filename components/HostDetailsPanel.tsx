@@ -156,13 +156,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   // Group input state for inline creation suggestion
   const [groupInputValue, setGroupInputValue] = useState(form.group || "");
 
-  // Check if the entered group is new (doesn't exist)
-  // Reserved for future use: showing inline "create new group" suggestion
-  const _isNewGroup = useMemo(() => {
-    const trimmed = groupInputValue.trim();
-    return trimmed.length > 0 && !groups.includes(trimmed);
-  }, [groupInputValue, groups]);
-
   useEffect(() => {
     if (initialData) {
       // Ensure telnetEnabled is set when protocol is telnet

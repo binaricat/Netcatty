@@ -2495,7 +2495,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           open={isQuickConnectOpen}
           target={quickConnectTarget}
           keys={keys}
-          knownHosts={knownHosts}
           onConnect={handleQuickConnect}
           onSaveHost={handleQuickConnectSaveHost}
           onClose={() => {

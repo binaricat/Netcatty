@@ -197,19 +197,6 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
     }));
   }, [currentPath]);
 
-  const _handleBack = () => {
-    if (currentPath) {
-      const parts = currentPath.split("/");
-      if (parts.length > 1) {
-        setCurrentPath(parts.slice(0, -1).join("/"));
-      } else {
-        setCurrentPath(null);
-      }
-    } else {
-      onBack();
-    }
-  };
-
   return (
     <div
       className={cn(

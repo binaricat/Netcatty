@@ -342,7 +342,7 @@ export async function uploadFromDataTransfer(
 
     if (folderEntries.length > 0) {
       try {
-        const compressedResults = await uploadFoldersCompressed(folderEntries, entries, targetPath, sftpId, callbacks, controller);
+        const compressedResults = await uploadFoldersCompressed(folderEntries, targetPath, sftpId, callbacks, controller);
 
         // Check if any folders failed due to lack of compression support
         const failedFolders = compressedResults.filter(result =>
@@ -429,7 +429,7 @@ export async function uploadFromFileList(
 
     if (folderEntries.length > 0) {
       try {
-        const compressedResults = await uploadFoldersCompressed(folderEntries, entries, targetPath, sftpId, callbacks, controller);
+        const compressedResults = await uploadFoldersCompressed(folderEntries, targetPath, sftpId, callbacks, controller);
 
         // Check if any folders failed due to lack of compression support
         const failedFolders = compressedResults.filter(result =>
@@ -931,7 +931,6 @@ export async function uploadEntriesDirect(
  */
 async function uploadFoldersCompressed(
   folderEntries: Array<[string, DropEntry[]]>,
-  allEntries: DropEntry[],
   targetPath: string,
   sftpId: string,
   callbacks?: UploadCallbacks,

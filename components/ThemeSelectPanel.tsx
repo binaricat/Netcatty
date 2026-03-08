@@ -70,18 +70,6 @@ const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
         return [...TERMINAL_THEMES, ...customThemes];
     }, [customThemes]);
 
-    // Group themes by type - reserved for future sectioned view
-    const _groupedThemes = useMemo(() => {
-        const dark = allThemes.filter(t => t.type === 'dark');
-        const light = allThemes.filter(t => t.type === 'light');
-        return { dark, light };
-    }, [allThemes]);
-
-    // Find selected theme info - reserved for displaying selection details
-    const _selectedTheme = useMemo(() => {
-        return allThemes.find(t => t.id === selectedThemeId);
-    }, [selectedThemeId, allThemes]);
-
     const renderThemeItem = (theme: TerminalTheme) => {
         const isSelected = theme.id === selectedThemeId;
 

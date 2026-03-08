@@ -15,8 +15,6 @@ export { IdentityCard } from './IdentityCard';
 export { KeyCard } from './KeyCard';
 
 // Panel components
-export { EditKeyPanel } from './EditKeyPanel';
-export { ExportKeyPanel } from './ExportKeyPanel';
 export { GenerateStandardPanel } from './GenerateStandardPanel';
 export { IdentityPanel } from './IdentityPanel';
 export { ImportKeyPanel } from './ImportKeyPanel';

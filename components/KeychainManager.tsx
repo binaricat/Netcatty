@@ -450,11 +450,6 @@ echo $3 >> "$FILE"`);
     [onDeleteIdentity, panel, closePanel],
   );
 
-  // Copy to clipboard
-  const _copyToClipboard = useCallback((_text: string) => {
-    navigator.clipboard.writeText(_text);
-  }, []);
-
   // Get icon for key source
   const getKeyIcon = (key: SSHKey) => {
     if (key.certificate) return <BadgeCheck size={16} />;
@@ -502,46 +497,6 @@ echo $3 >> "$FILE"`);
 
       // Reset input so same file can be selected again
       event.target.value = "";
-    },
-    [],
-  );
-
-  // Handle drag and drop
-  const _handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const file = event.dataTransfer.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      if (content) {
-        let detectedType: KeyType = "ED25519";
-        const lc = content.toLowerCase();
-        if (lc.includes("rsa")) detectedType = "RSA";
-        else if (lc.includes("ecdsa") || lc.includes("ec private"))
-          detectedType = "ECDSA";
-        else if (lc.includes("ed25519")) detectedType = "ED25519";
-
-        const label = file.name.replace(/\.(pem|key|pub|ppk)$/i, "");
-
-        setDraftKey((prev) => ({
-          ...prev,
-          privateKey: content,
-          label: prev.label || label,
-          type: detectedType,
-        }));
-      }
-    };
-    reader.readAsText(file);
-  }, []);
-
-  const _handleDragOver = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
     },
     [],
   );

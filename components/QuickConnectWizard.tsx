@@ -14,7 +14,7 @@ import React, { useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import type { QuickConnectTarget } from "../domain/quickConnect";
 import { cn } from "../lib/utils";
-import { Host, KnownHost, SSHKey } from "../types";
+import { Host, SSHKey } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -30,7 +30,6 @@ interface QuickConnectWizardProps {
   open: boolean;
   target: QuickConnectTarget;
   keys: SSHKey[];
-  knownHosts: KnownHost[];
   warnings?: string[];
   onConnect: (host: Host) => void;
   onSaveHost?: (host: Host) => void;
@@ -42,7 +41,6 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
   open,
   target,
   keys,
-  knownHosts,
   warnings,
   onConnect,
   onSaveHost,
@@ -69,16 +67,7 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
   const [password, setPassword] = useState("");
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [saveCredentials, _setSaveCredentials] = useState(true);
-
-  // Check if host is in known hosts
-  const _existingKnownHost = useMemo(() => {
-    return knownHosts.find(
-      (kh) =>
-        kh.hostname === target.hostname &&
-        (kh.port === port || (!kh.port && port === 22)),
-    );
-  }, [knownHosts, target.hostname, port]);
+  const [saveCredentials] = useState(true);
 
   // Reset state when target changes
   React.useEffect(() => {

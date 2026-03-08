@@ -1144,8 +1144,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       : status === "connecting"
         ? "bg-amber-400"
         : "bg-rose-500";
-  const _isConnecting = status === "connecting";
-  const _hasError = Boolean(error);
 
   return (
     <TerminalContextMenu

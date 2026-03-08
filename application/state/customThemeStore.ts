@@ -22,7 +22,6 @@ type Listener = () => void;
 class CustomThemeStore {
     private themes: TerminalTheme[] = [];
     private listeners = new Set<Listener>();
-    private loaded = false;
     /** Cached merged array for stable useSyncExternalStore snapshots */
     private cachedAllThemes: TerminalTheme[] | null = null;
 
@@ -40,7 +39,6 @@ class CustomThemeStore {
         } catch {
             // ignore corrupt data
         }
-        this.loaded = true;
         this.cachedAllThemes = null; // invalidate cache
     };
 

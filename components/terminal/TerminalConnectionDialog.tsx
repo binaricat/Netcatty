@@ -31,7 +31,7 @@ export interface TerminalConnectionDialogProps {
     authProps: Omit<TerminalAuthDialogProps, 'keys'>;
     keys: SSHKey[];
     // Progress props
-    progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs' | '_setShowLogs'>;
+    progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs'>;
 }
 
 // Helper to get protocol display info
@@ -166,7 +166,6 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                         status={status}
                         error={error}
                         showLogs={showLogs}
-                        _setShowLogs={setShowLogs}
                         {...progressProps}
                     />
                 )}

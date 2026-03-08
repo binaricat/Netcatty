@@ -563,7 +563,6 @@ export class OneDriveAdapter {
   }
 
   private async runWithAuthRetry<T>(
-    context: string,
     operation: (accessToken: string) => Promise<T>
   ): Promise<T> {
     const accessToken = await this.ensureValidToken();
@@ -593,7 +592,7 @@ export class OneDriveAdapter {
    * Initialize or find sync file
    */
   async initializeSync(): Promise<string | null> {
-    return this.runWithAuthRetry('initializeSync', async (accessToken) => {
+    return this.runWithAuthRetry(async (accessToken) => {
       this.fileId = await findSyncFile(accessToken);
       return this.fileId;
     });
@@ -603,7 +602,7 @@ export class OneDriveAdapter {
    * Upload sync file
    */
   async upload(syncedFile: SyncedFile): Promise<string> {
-    return this.runWithAuthRetry('upload', async (accessToken) => {
+    return this.runWithAuthRetry(async (accessToken) => {
       this.fileId = await uploadSyncFile(accessToken, syncedFile);
       return this.fileId;
     });
@@ -613,7 +612,7 @@ export class OneDriveAdapter {
    * Download sync file
    */
   async download(): Promise<SyncedFile | null> {
-    return this.runWithAuthRetry('download', async (accessToken) => {
+    return this.runWithAuthRetry(async (accessToken) => {
       if (!this.fileId) {
         this.fileId = await findSyncFile(accessToken);
       }
@@ -629,7 +628,7 @@ export class OneDriveAdapter {
       return;
     }
 
-    await this.runWithAuthRetry('deleteSync', async (accessToken) => {
+    await this.runWithAuthRetry(async (accessToken) => {
       await deleteSyncFile(accessToken, this.fileId as string);
       this.fileId = null;
     });

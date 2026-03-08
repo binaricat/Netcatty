@@ -135,8 +135,6 @@ export const useGlobalHotkeys = ({
     e.stopPropagation();
 
     const currentActions = actionsRef.current;
-    const _tabs = orderedTabsRef.current;
-
     switch (action) {
       case 'switchToTab': {
         const num = parseInt(e.key, 10);

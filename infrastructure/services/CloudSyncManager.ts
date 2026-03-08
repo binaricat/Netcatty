@@ -911,7 +911,6 @@ export class CloudSyncManager {
    * Helper: Check for conflicts with a specific provider
    */
   private async checkProviderConflict(
-    provider: CloudProvider,
     adapter: CloudAdapter
   ): Promise<{
     conflict: boolean;
@@ -1070,7 +1069,7 @@ export class CloudSyncManager {
 
     try {
       // 1. Check for conflict
-      const checkResult = await this.checkProviderConflict(provider, adapter);
+      const checkResult = await this.checkProviderConflict(adapter);
 
       if (checkResult.error) {
         throw new Error(checkResult.error);
@@ -1281,7 +1280,7 @@ export class CloudSyncManager {
         this.updateProviderStatus(provider, 'syncing');
         this.emit({ type: 'SYNC_STARTED', provider });
 
-        const check = await this.checkProviderConflict(provider, adapter);
+        const check = await this.checkProviderConflict(adapter);
         return { provider, adapter, check };
       } catch (error) {
         return { provider, error: String(error) };
