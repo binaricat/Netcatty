@@ -443,7 +443,7 @@ const STRICT_IPV4_OCTET_PATTERN = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
 export const URL_HIGHLIGHT_PATTERN =
   "\\b(?:https?:\\/\\/|www\\.)[^\\s<>\"'`]+(?<![.,;:!?])";
 export const IPV4_HIGHLIGHT_PATTERN =
-  `(?<![\\d.])(?<![Vv])(?<!ver\\s)(?<!version\\s)(?<!Version\\s)(?:${STRICT_IPV4_OCTET_PATTERN}\\.){3}${STRICT_IPV4_OCTET_PATTERN}(?![\\d.])`;
+  `(?<![\\w.])(?<![Vv])(?<!ver\\s)(?<!version\\s)(?:${STRICT_IPV4_OCTET_PATTERN}\\.){3}${STRICT_IPV4_OCTET_PATTERN}(?![\\w.])`;
 export const MAC_ADDRESS_HIGHLIGHT_PATTERN =
   '\\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b';
 
