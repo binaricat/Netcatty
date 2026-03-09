@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
-import { SyncConfig, TerminalSettings, DEFAULT_TERMINAL_SETTINGS, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat } from '../../domain/models';
+import { SyncConfig, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
 import {
   STORAGE_KEY_COLOR,
   STORAGE_KEY_SYNC,
@@ -192,7 +192,7 @@ export const useSettingsState = () => {
   });
   const [terminalSettings, setTerminalSettingsState] = useState<TerminalSettings>(() => {
     const stored = localStorageAdapter.read<TerminalSettings>(STORAGE_KEY_TERM_SETTINGS);
-    return stored ? { ...DEFAULT_TERMINAL_SETTINGS, ...stored } : DEFAULT_TERMINAL_SETTINGS;
+    return normalizeTerminalSettings(stored);
   });
   const [hotkeyScheme, setHotkeyScheme] = useState<HotkeyScheme>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_HOTKEY_SCHEME);
@@ -270,9 +270,10 @@ export const useSettingsState = () => {
 
   const setTerminalSettings = useCallback((nextValue: SetStateAction<TerminalSettings>) => {
     setTerminalSettingsState((prev) => {
-      const next = typeof nextValue === 'function'
+      const candidate = typeof nextValue === 'function'
         ? (nextValue as (prevState: TerminalSettings) => TerminalSettings)(prev)
         : nextValue;
+      const next = normalizeTerminalSettings(candidate);
       if (areTerminalSettingsEqual(prev, next)) {
         return prev;
       }
@@ -283,7 +284,7 @@ export const useSettingsState = () => {
 
   const mergeIncomingTerminalSettings = useCallback((incoming: Partial<TerminalSettings>) => {
     setTerminalSettingsState((prev) => {
-      const next = { ...prev, ...incoming };
+      const next = normalizeTerminalSettings({ ...prev, ...incoming });
       if (areTerminalSettingsEqual(prev, next)) {
         return prev;
       }
@@ -544,7 +545,7 @@ export const useSettingsState = () => {
       if (e.key === STORAGE_KEY_TERM_SETTINGS && e.newValue) {
         try {
           const newSettings = JSON.parse(e.newValue) as TerminalSettings;
-          mergeIncomingTerminalSettings({ ...DEFAULT_TERMINAL_SETTINGS, ...newSettings });
+          mergeIncomingTerminalSettings(newSettings);
         } catch {
           // ignore parse errors
         }

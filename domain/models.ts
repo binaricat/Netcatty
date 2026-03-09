@@ -438,14 +438,78 @@ export interface TerminalSettings {
   rendererType: 'auto' | 'webgl' | 'canvas'; // Terminal renderer: auto (detect based on hardware), webgl, or canvas
 }
 
+const STRICT_IPV4_OCTET_PATTERN = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+
+export const URL_HIGHLIGHT_PATTERN =
+  "\\b(?:https?:\\/\\/|www\\.)[^\\s<>\"'`]+(?<![.,;:!?])";
+export const IPV4_HIGHLIGHT_PATTERN =
+  `(?<![\\d.])(?<![Vv])(?<!ver\\s)(?<!version\\s)(?<!Version\\s)(?:${STRICT_IPV4_OCTET_PATTERN}\\.){3}${STRICT_IPV4_OCTET_PATTERN}(?![\\d.])`;
+export const MAC_ADDRESS_HIGHLIGHT_PATTERN =
+  '\\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b';
+
 export const DEFAULT_KEYWORD_HIGHLIGHT_RULES: KeywordHighlightRule[] = [
   { id: 'error', label: 'Error', patterns: ['\\[error\\]', '\\[err\\]', '\\berror\\b', '\\bfail(ed)?\\b', '\\bfatal\\b', '\\bcritical\\b', '\\bexception\\b'], color: '#F87171', enabled: true },
   { id: 'warning', label: 'Warning', patterns: ['\\[warn(ing)?\\]', '\\bwarn(ing)?\\b', '\\bcaution\\b', '\\bdeprecated\\b'], color: '#FBBF24', enabled: true },
   { id: 'ok', label: 'OK', patterns: ['\\[ok\\]', '\\bok\\b', '\\bsuccess(ful)?\\b', '\\bpassed\\b', '\\bcompleted\\b', '\\bdone\\b'], color: '#34D399', enabled: true },
   { id: 'info', label: 'Info', patterns: ['\\[info\\]', '\\[notice\\]', '\\[note\\]', '\\bnotice\\b', '\\bnote\\b'], color: '#3B82F6', enabled: true },
   { id: 'debug', label: 'Debug', patterns: ['\\[debug\\]', '\\[trace\\]', '\\[verbose\\]', '\\bdebug\\b', '\\btrace\\b', '\\bverbose\\b'], color: '#A78BFA', enabled: true },
-  { id: 'ip-mac', label: 'IP address & MAC', patterns: ['\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b', '\\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b'], color: '#EC4899', enabled: true },
+  { id: 'ip-mac', label: 'URL, IP & MAC', patterns: [URL_HIGHLIGHT_PATTERN, IPV4_HIGHLIGHT_PATTERN, MAC_ADDRESS_HIGHLIGHT_PATTERN], color: '#EC4899', enabled: true },
 ];
+
+const cloneKeywordHighlightRule = (rule: KeywordHighlightRule): KeywordHighlightRule => ({
+  ...rule,
+  patterns: [...rule.patterns],
+});
+
+export const normalizeKeywordHighlightRules = (
+  rules?: KeywordHighlightRule[],
+): KeywordHighlightRule[] => {
+  if (!rules || rules.length === 0) {
+    return DEFAULT_KEYWORD_HIGHLIGHT_RULES.map(cloneKeywordHighlightRule);
+  }
+
+  const defaultRulesById = new Map(
+    DEFAULT_KEYWORD_HIGHLIGHT_RULES.map((rule) => [rule.id, rule] as const),
+  );
+
+  const normalizedRules = rules.map((rule) => {
+    const defaultRule = defaultRulesById.get(rule.id);
+    if (!defaultRule) {
+      return cloneKeywordHighlightRule(rule);
+    }
+
+    return {
+      ...defaultRule,
+      color: rule.color,
+      enabled: rule.enabled,
+    };
+  });
+
+  const existingRuleIds = new Set(normalizedRules.map((rule) => rule.id));
+  for (const defaultRule of DEFAULT_KEYWORD_HIGHLIGHT_RULES) {
+    if (!existingRuleIds.has(defaultRule.id)) {
+      normalizedRules.push(cloneKeywordHighlightRule(defaultRule));
+    }
+  }
+
+  return normalizedRules;
+};
+
+export const normalizeTerminalSettings = (
+  settings?: Partial<TerminalSettings> | null,
+): TerminalSettings => {
+  const mergedSettings = {
+    ...DEFAULT_TERMINAL_SETTINGS,
+    ...(settings ?? {}),
+  };
+
+  return {
+    ...mergedSettings,
+    keywordHighlightRules: normalizeKeywordHighlightRules(
+      mergedSettings.keywordHighlightRules,
+    ),
+  };
+};
 
 export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollback: 10000,
