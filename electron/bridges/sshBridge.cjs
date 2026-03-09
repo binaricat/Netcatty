@@ -20,6 +20,7 @@ const {
   safeSend: authSafeSend,
   requestPassphrasesForEncryptedKeys,
   findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
+  getSshAgentSocket,
 } = require("./sshAuthHelper.cjs");
 
 // Default SSH key names in priority order
@@ -163,6 +164,16 @@ function checkWindowsSshAgent() {
       });
     });
   });
+}
+
+async function getAvailableAgentSocket() {
+  if (process.platform === "win32") {
+    const agentStatus = await checkWindowsSshAgent();
+    log("Windows SSH Agent check", agentStatus);
+    return agentStatus.running ? "\\\\.\\pipe\\openssh-ssh-agent" : null;
+  }
+
+  return getSshAgentSocket();
 }
 
 const DEBUG_SSH = process.env.NETCATTY_SSH_DEBUG === "1";
@@ -592,14 +603,7 @@ async function startSSHSession(event, options) {
     // If no primary auth method configured, try ssh-agent first, then ALL default keys
     if (!connectOpts.privateKey && !connectOpts.password && !connectOpts.agent) {
       // First, try to use ssh-agent if available (this is what regular SSH does)
-      let sshAgentSocket;
-      if (process.platform === "win32") {
-        const agentStatus = await checkWindowsSshAgent();
-        log("Windows SSH Agent check", agentStatus);
-        sshAgentSocket = agentStatus.running ? "\\\\.\\pipe\\openssh-ssh-agent" : null;
-      } else {
-        sshAgentSocket = process.env.SSH_AUTH_SOCK;
-      }
+      const sshAgentSocket = await getAvailableAgentSocket();
 
       if (sshAgentSocket) {
         log("No auth method configured, trying ssh-agent first", { agentSocket: sshAgentSocket });
@@ -627,15 +631,7 @@ async function startSSHSession(event, options) {
     // Agent forwarding
     if (options.agentForwarding) {
       if (!connectOpts.agent) {
-        if (process.platform === "win32") {
-          const agentStatus = await checkWindowsSshAgent();
-          log("Windows SSH Agent check (agentForwarding)", agentStatus);
-          if (agentStatus.running) {
-            connectOpts.agent = "\\\\.\\pipe\\openssh-ssh-agent";
-          }
-        } else {
-          connectOpts.agent = process.env.SSH_AUTH_SOCK;
-        }
+        connectOpts.agent = await getAvailableAgentSocket();
       }
       // Only enable forwarding when an agent is actually available
       if (connectOpts.agent) {

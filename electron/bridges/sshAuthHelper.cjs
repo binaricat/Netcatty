@@ -130,7 +130,17 @@ function getSshAgentSocket() {
   if (process.platform === "win32") {
     return "\\\\.\\pipe\\openssh-ssh-agent";
   }
-  return process.env.SSH_AUTH_SOCK || null;
+  const agentSocket = process.env.SSH_AUTH_SOCK;
+  if (!agentSocket) return null;
+
+  try {
+    const stats = fs.statSync(agentSocket);
+    return typeof stats.isSocket === "function" && stats.isSocket()
+      ? agentSocket
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
