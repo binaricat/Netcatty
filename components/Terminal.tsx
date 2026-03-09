@@ -215,6 +215,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false);
   const commandBufferRef = useRef<string>("");
+  const [isAlternateScreen, setIsAlternateScreen] = useState(false);
   const serialLineBufferRef = useRef<string>("");
 
   const terminalSettingsRef = useRef(terminalSettings);
@@ -882,6 +883,23 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     term.onSelectionChange(onSelectionChange);
   }, [terminalSettings?.copyOnSelect]);
 
+  // Track alternate screen mode (tmux, vim, htop, etc.)
+  // When in alternate screen, disable Netcatty's context menu to avoid
+  // conflicting with the application's own mouse handling (e.g. tmux menus)
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+
+    const disposable = term.buffer.onBufferChange((buf) => {
+      setIsAlternateScreen(buf.type === 'alternate');
+    });
+
+    // Set initial state in case buffer is already alternate
+    setIsAlternateScreen(term.buffer.active.type === 'alternate');
+
+    return () => disposable.dispose();
+  }, [sessionId]);
+
   useEffect(() => {
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -1151,6 +1169,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       hotkeyScheme={hotkeyScheme}
       keyBindings={keyBindings}
       rightClickBehavior={terminalSettings?.rightClickBehavior}
+      isAlternateScreen={isAlternateScreen}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
       onSelectAll={terminalContextActions.onSelectAll}

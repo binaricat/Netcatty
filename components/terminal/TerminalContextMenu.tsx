@@ -28,6 +28,7 @@ export interface TerminalContextMenuProps {
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
   keyBindings?: KeyBinding[];
   rightClickBehavior?: RightClickBehavior;
+  isAlternateScreen?: boolean;
   onCopy?: () => void;
   onPaste?: () => void;
   onSelectAll?: () => void;
@@ -44,6 +45,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   hotkeyScheme = 'mac',
   keyBindings,
   rightClickBehavior = 'context-menu',
+  isAlternateScreen = false,
   onCopy,
   onPaste,
   onSelectAll,
@@ -73,10 +75,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const splitVShortcut = getShortcut('split-vertical');
   const clearShortcut = getShortcut('clear-buffer');
 
-  const showContextMenu = rightClickBehavior === 'context-menu';
+  const showContextMenu = rightClickBehavior === 'context-menu' && !isAlternateScreen;
 
   const handleRightClick = useCallback(
     (e: React.MouseEvent) => {
+      // In alternate screen (tmux, vim, etc.), let the terminal application
+      // handle right-click natively to avoid conflicting menus
+      if (isAlternateScreen) return;
+
       if (rightClickBehavior === 'paste') {
         e.preventDefault();
         e.stopPropagation();
@@ -87,7 +93,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         onSelectWord?.();
       }
     },
-    [rightClickBehavior, onPaste, onSelectWord],
+    [rightClickBehavior, onPaste, onSelectWord, isAlternateScreen],
   );
 
   // Always use ContextMenu wrapper to maintain consistent React tree structure
