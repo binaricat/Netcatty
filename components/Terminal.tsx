@@ -930,12 +930,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const disableBracketedPasteRef = useRef(terminalSettings?.disableBracketedPaste ?? false);
   disableBracketedPasteRef.current = terminalSettings?.disableBracketedPaste ?? false;
 
+  const scrollOnPasteRef = useRef(terminalSettings?.scrollOnPaste ?? true);
+  scrollOnPasteRef.current = terminalSettings?.scrollOnPaste ?? true;
+
   const terminalContextActions = useTerminalContextActions({
     termRef,
     sessionRef,
     terminalBackend,
     onHasSelectionChange: setHasSelection,
     disableBracketedPasteRef,
+    scrollOnPasteRef,
   });
 
   const handleSnippetClick = (cmd: string) => {
