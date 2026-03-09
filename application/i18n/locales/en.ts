@@ -244,7 +244,7 @@ const en: Messages = {
   'settings.terminal.behavior.rightClick.paste': 'Paste',
   'settings.terminal.behavior.rightClick.selectWord': 'Select word',
   'settings.terminal.behavior.copyOnSelect': 'Copy on select',
-  'settings.terminal.behavior.copyOnSelect.desc': 'Automatically copy selected text',
+  'settings.terminal.behavior.copyOnSelect.desc': 'Automatically copy selected text. In tmux/vim with mouse mode, hold Shift to select',
   'settings.terminal.behavior.middleClickPaste': 'Middle-click paste',
   'settings.terminal.behavior.middleClickPaste.desc':
     'Paste clipboard content on middle-click',

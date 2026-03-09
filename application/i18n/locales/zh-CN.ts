@@ -1115,7 +1115,7 @@ const zhCN: Messages = {
   'settings.terminal.behavior.rightClick.paste': '粘贴',
   'settings.terminal.behavior.rightClick.selectWord': '选择单词',
   'settings.terminal.behavior.copyOnSelect': '选择即复制',
-  'settings.terminal.behavior.copyOnSelect.desc': '自动复制选中的文本',
+  'settings.terminal.behavior.copyOnSelect.desc': '自动复制选中的文本。在 tmux/vim 鼠标模式下，按住 Shift 拖选即可选中文本',
   'settings.terminal.behavior.middleClickPaste': '中键粘贴',
   'settings.terminal.behavior.middleClickPaste.desc': '中键点击时粘贴剪贴板内容',
   'settings.terminal.behavior.bracketedPaste': '括号粘贴模式',
