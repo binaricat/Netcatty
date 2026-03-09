@@ -85,9 +85,12 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
 
   // Load app version on mount
   useEffect(() => {
-    netcattyBridge.get()?.getAppInfo?.().then((info) => {
-      setAppVersion(info?.version ?? '');
-    }).catch(() => {});
+    const promise = netcattyBridge.get()?.getAppInfo?.();
+    if (promise) {
+      promise.then((info) => {
+        setAppVersion(info?.version ?? '');
+      }).catch(() => {});
+    }
   }, []);
 
   // Subscribe to auto-update events

@@ -127,11 +127,14 @@ function registerHandlers(ipcMain) {
     }
 
     try {
+      // Capture the requesting window NOW so events always go back to the
+      // renderer that initiated the download, even if focus changes later.
+      const senderWindow = getSenderWindow();
+
       // Wire progress events before starting the download.
       const progressHandler = (info) => {
-        const win = getSenderWindow();
-        if (win && !win.isDestroyed()) {
-          win.webContents.send("netcatty:update:download-progress", {
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send("netcatty:update:download-progress", {
             percent: info.percent ?? 0,
             bytesPerSecond: info.bytesPerSecond ?? 0,
             transferred: info.transferred ?? 0,
@@ -141,9 +144,8 @@ function registerHandlers(ipcMain) {
       };
 
       const downloadedHandler = () => {
-        const win = getSenderWindow();
-        if (win && !win.isDestroyed()) {
-          win.webContents.send("netcatty:update:downloaded");
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send("netcatty:update:downloaded");
         }
         // Cleanup one-shot listeners.
         updater.removeListener("download-progress", progressHandler);
@@ -152,9 +154,8 @@ function registerHandlers(ipcMain) {
       };
 
       const errorHandler = (err) => {
-        const win = getSenderWindow();
-        if (win && !win.isDestroyed()) {
-          win.webContents.send("netcatty:update:error", {
+        if (senderWindow && !senderWindow.isDestroyed()) {
+          senderWindow.webContents.send("netcatty:update:error", {
             error: err?.message || "Download failed",
           });
         }
