@@ -29,12 +29,12 @@ export const useSftpPaneFiles = ({
 }: UseSftpPaneFilesParams): UseSftpPaneFilesResult => {
   const filteredFiles = useMemo(() => {
     const term = filter.trim().toLowerCase();
-    let nextFiles = filterHiddenFiles(files, showHiddenFiles, connection?.isLocal);
+    let nextFiles = filterHiddenFiles(files, showHiddenFiles);
     if (!term) return nextFiles;
     return nextFiles.filter(
       (f) => f.name === ".." || f.name.toLowerCase().includes(term),
     );
-  }, [files, filter, showHiddenFiles, connection?.isLocal]);
+  }, [files, filter, showHiddenFiles]);
 
   const displayFiles = useMemo(() => {
     if (!connection) return [];

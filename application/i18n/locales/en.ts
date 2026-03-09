@@ -741,9 +741,9 @@ const en: Messages = {
 
   // Settings > SFTP Show Hidden Files
   'settings.sftp.showHiddenFiles': 'Show hidden files',
-  'settings.sftp.showHiddenFiles.desc': 'Display files with the Windows hidden attribute in the SFTP file browser when browsing local Windows filesystem.',
+  'settings.sftp.showHiddenFiles.desc': 'Display hidden files (dotfiles on Unix/macOS and files with the hidden attribute on Windows) in the SFTP file browser.',
   'settings.sftp.showHiddenFiles.enable': 'Show hidden files',
-  'settings.sftp.showHiddenFiles.enableDesc': 'Display Windows hidden files when browsing local filesystem',
+  'settings.sftp.showHiddenFiles.enableDesc': 'Display hidden files when browsing both local and remote filesystems',
 
   // Settings > SFTP Compressed Upload
   'settings.sftp.compressedUpload': 'Folder Compression Transfer',

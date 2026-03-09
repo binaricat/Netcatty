@@ -192,39 +192,37 @@ export const isNavigableDirectory = (entry: SftpFileEntry): boolean => {
  * Check if a file is hidden
  * - Windows: checks the `hidden` attribute (set by localFsBridge)
  * - Unix/Linux (remote): also treats dotfiles (names starting with '.') as hidden
- * The ".." parent directory entry is never considered hidden.
+/**
+ * A file is considered hidden if:
+ * - It has the Windows hidden attribute (`hidden === true`), OR
+ * - Its name starts with a dot (Unix/Linux dotfile convention)
  *
- * @param isLocal  When true, only the Windows hidden attribute is checked.
- *                 This prevents `.gitignore` etc. from disappearing on local Windows panes.
+ * The ".." parent directory entry is never considered hidden.
  */
 export const isHiddenFile = <T extends { name: string; hidden?: boolean }>(
     file: T,
-    isLocal?: boolean
 ): boolean => {
     if (file.name === "..") return false;
-    // Windows hidden attribute — always checked
+    // Windows hidden attribute
     if (file.hidden === true) return true;
-    // Unix/Linux dotfile convention — only on remote/non-local connections
-    if (!isLocal && file.name.startsWith(".")) return true;
+    // Unix/Linux dotfile convention
+    if (file.name.startsWith(".")) return true;
     return false;
 };
 
 /** @deprecated Use isHiddenFile instead */
 export const isWindowsHiddenFile = <T extends { name: string; hidden?: boolean }>(file: T): boolean =>
-    isHiddenFile(file, true);
+    isHiddenFile(file);
 
 /**
  * Filter files based on hidden file visibility setting.
- * Filters Windows hidden files and, on remote connections, Unix/Linux dotfiles.
+ * Filters Windows hidden files and Unix/Linux dotfiles on all connections.
  * Always preserves ".." parent directory entry.
- *
- * @param isLocal  Pass true for local filesystem panes to skip dotfile filtering.
  */
 export const filterHiddenFiles = <T extends { name: string; hidden?: boolean }>(
     files: T[],
     showHiddenFiles: boolean,
-    isLocal?: boolean
 ): T[] => {
     if (showHiddenFiles) return files;
-    return files.filter((f) => !isHiddenFile(f, isLocal));
+    return files.filter((f) => !isHiddenFile(f));
 };

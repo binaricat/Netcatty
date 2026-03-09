@@ -238,7 +238,7 @@ export const useSftpKeyboardShortcuts = ({
         case "sftpSelectAll": {
           // Select all files in the current pane
           const term = pane.filter.trim().toLowerCase();
-          let visibleFiles = filterHiddenFiles(pane.files, showHiddenFiles, pane.connection.isLocal);
+          let visibleFiles = filterHiddenFiles(pane.files, showHiddenFiles);
           if (term) {
             visibleFiles = visibleFiles.filter(
               (f) => f.name === ".." || f.name.toLowerCase().includes(term),

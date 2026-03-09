@@ -1066,9 +1066,9 @@ const zhCN: Messages = {
 
   // Settings > SFTP Show Hidden Files
   'settings.sftp.showHiddenFiles': '显示隐藏文件',
-  'settings.sftp.showHiddenFiles.desc': '在浏览本地 Windows 文件系统时，显示具有 Windows 隐藏属性的文件。',
+  'settings.sftp.showHiddenFiles.desc': '在 SFTP 文件浏览器中显示隐藏文件（Unix/macOS 点文件和 Windows 隐藏属性文件）。',
   'settings.sftp.showHiddenFiles.enable': '显示隐藏文件',
-  'settings.sftp.showHiddenFiles.enableDesc': '浏览本地文件系统时显示 Windows 隐藏文件',
+  'settings.sftp.showHiddenFiles.enableDesc': '浏览本地和远程文件系统时显示隐藏文件',
 
   // Settings > SFTP Compressed Upload
   'settings.sftp.compressedUpload': '文件夹压缩传输',

@@ -481,7 +481,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
   // Display files with parent entry (like SftpView)
   const displayFiles = useMemo(() => {
     // Filter hidden files using utility function
-    const visibleFiles = filterHiddenFiles(files, sftpShowHiddenFiles, isLocalSession);
+    const visibleFiles = filterHiddenFiles(files, sftpShowHiddenFiles);
 
     // Check if we're at root
     const atRoot = isRootPathForSession(currentPath);
@@ -495,7 +495,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
       lastModified: undefined,
     };
     return [parentEntry, ...visibleFiles.filter((f) => f.name !== "..")];
-  }, [files, currentPath, isRootPathForSession, sftpShowHiddenFiles, isLocalSession]);
+  }, [files, currentPath, isRootPathForSession, sftpShowHiddenFiles]);
 
   // Sorted files
   const sortedFiles = useMemo(() => {
