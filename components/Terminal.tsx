@@ -215,7 +215,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false);
   const commandBufferRef = useRef<string>("");
-  const [isAlternateScreen, setIsAlternateScreen] = useState(false);
+  const [hasMouseTracking, setHasMouseTracking] = useState(false);
+  const mouseTrackingRef = useRef(false);
   const serialLineBufferRef = useRef<string>("");
 
   const terminalSettingsRef = useRef(terminalSettings);
@@ -883,19 +884,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     term.onSelectionChange(onSelectionChange);
   }, [terminalSettings?.copyOnSelect]);
 
-  // Track alternate screen mode (tmux, vim, htop, etc.)
-  // When in alternate screen, disable Netcatty's context menu to avoid
-  // conflicting with the application's own mouse handling (e.g. tmux menus)
+  // Track whether the terminal application has enabled mouse tracking
+  // (e.g. tmux with `set -g mouse on`, vim with `set mouse=a`).
+  // When mouse tracking is active, disable Netcatty's context menu to avoid
+  // conflicting with the application's own mouse handling.
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
 
-    const disposable = term.buffer.onBufferChange((buf) => {
-      setIsAlternateScreen(buf.type === 'alternate');
+    const disposable = term.onWriteParsed(() => {
+      const tracking = term.modes.mouseTrackingMode !== 'none';
+      if (tracking !== mouseTrackingRef.current) {
+        mouseTrackingRef.current = tracking;
+        setHasMouseTracking(tracking);
+      }
     });
 
-    // Set initial state in case buffer is already alternate
-    setIsAlternateScreen(term.buffer.active.type === 'alternate');
+    // Set initial state
+    const initial = term.modes.mouseTrackingMode !== 'none';
+    mouseTrackingRef.current = initial;
+    setHasMouseTracking(initial);
 
     return () => disposable.dispose();
   }, [sessionId]);
@@ -1169,7 +1177,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       hotkeyScheme={hotkeyScheme}
       keyBindings={keyBindings}
       rightClickBehavior={terminalSettings?.rightClickBehavior}
-      isAlternateScreen={isAlternateScreen}
+      isAlternateScreen={hasMouseTracking}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
       onSelectAll={terminalContextActions.onSelectAll}
