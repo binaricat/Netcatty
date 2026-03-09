@@ -158,9 +158,14 @@
         var lang = localStorage.getItem('netcatty_ui_language_v1');
         var root = document.documentElement;
 
-        if (theme === 'dark' || theme === 'light') {
+        // Resolve 'system' (or absent — default is 'system') via OS preference
+        var resolved = theme;
+        if (!theme || theme === 'system') {
+          resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+        }
+        if (resolved === 'dark' || resolved === 'light') {
           root.classList.remove('light', 'dark');
-          root.classList.add(theme);
+          root.classList.add(resolved);
         }
 
         if (accentMode === 'custom' && accentColor) {
@@ -169,7 +174,7 @@
           root.style.setProperty('--ring', accentColor);
           var parts = accentColor.split(/\s+/);
           var lightness = parseFloat((parts[2] || '').replace('%', ''));
-          var accentForeground = theme === 'dark'
+          var accentForeground = resolved === 'dark'
             ? '220 40% 96%'
             : (!isNaN(lightness) && lightness < 55 ? '0 0% 98%' : '222 47% 12%');
           root.style.setProperty('--accent-foreground', accentForeground);
