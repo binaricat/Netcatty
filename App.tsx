@@ -310,7 +310,10 @@ function App({ settings }: { settings: SettingsState }) {
   }, [handleSyncNow]);
 
   // Update check hook - checks for new versions on startup
-  const { updateState, openReleasePage, dismissUpdate } = useUpdateCheck();
+  const { updateState, dismissUpdate } = useUpdateCheck();
+
+  // Window controls - must be before update toast effect which uses openSettingsWindow
+  const { openSettingsWindow } = useWindowControls();
 
   // Show toast notification when update is available
   useEffect(() => {
@@ -322,14 +325,14 @@ function App({ settings }: { settings: SettingsState }) {
           title: t('update.available.title'),
           duration: 8000, // Show longer for update notifications
           onClick: () => {
-            openReleasePage();
+            void openSettingsWindow();
             dismissUpdate();
           },
-          actionLabel: t('update.downloadNow'),
+          actionLabel: t('update.viewInSettings'),
         }
       );
     }
-  }, [updateState.hasUpdate, updateState.latestRelease, t, openReleasePage, dismissUpdate]);
+  }, [updateState.hasUpdate, updateState.latestRelease, t, openSettingsWindow, dismissUpdate]);
 
   // Memoize keys for port forwarding to prevent unnecessary re-renders
   const portForwardingKeys = useMemo(
@@ -1094,7 +1097,6 @@ function App({ settings }: { settings: SettingsState }) {
     setIsQuickSwitcherOpen(true);
   }, []);
 
-  const { openSettingsWindow } = useWindowControls();
 
   const handleOpenSettings = useCallback(() => {
     void (async () => {

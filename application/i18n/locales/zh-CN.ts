@@ -160,6 +160,7 @@ const zhCN: Messages = {
   'update.upToDate.message': '当前版本 ({version}) 已是最新。',
   'update.error': '检查更新失败',
   'update.downloadNow': '立即下载',
+  'update.viewInSettings': '在设置中查看',
   'update.remindLater': '稍后提醒',
   'update.skipVersion': '跳过此版本',
 

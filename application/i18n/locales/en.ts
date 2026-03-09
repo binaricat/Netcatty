@@ -176,6 +176,7 @@ const en: Messages = {
   'update.upToDate.message': 'You are running the latest version ({version}).',
   'update.error': 'Failed to check for updates',
   'update.downloadNow': 'Download Now',
+  'update.viewInSettings': 'View in Settings',
   'update.remindLater': 'Remind Later',
   'update.skipVersion': 'Skip This Version',
 
