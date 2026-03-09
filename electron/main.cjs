@@ -82,6 +82,7 @@ const sessionLogsBridge = require("./bridges/sessionLogsBridge.cjs");
 const compressUploadBridge = require("./bridges/compressUploadBridge.cjs");
 const globalShortcutBridge = require("./bridges/globalShortcutBridge.cjs");
 const credentialBridge = require("./bridges/credentialBridge.cjs");
+const autoUpdateBridge = require("./bridges/autoUpdateBridge.cjs");
 const windowManager = require("./bridges/windowManager.cjs");
 
 // GPU settings
@@ -405,6 +406,8 @@ const registerBridges = (win) => {
   compressUploadBridge.registerHandlers(ipcMain);
   globalShortcutBridge.registerHandlers(ipcMain);
   credentialBridge.registerHandlers(ipcMain, electronModule);
+  autoUpdateBridge.init(deps);
+  autoUpdateBridge.registerHandlers(ipcMain);
 
   // Settings window handler
   ipcMain.handle("netcatty:settings:open", async () => {

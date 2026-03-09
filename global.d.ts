@@ -609,6 +609,26 @@ declare global {
     credentialsEncrypt?(plaintext: string): Promise<string>;
     credentialsDecrypt?(value: string): Promise<string>;
 
+    // Auto-update
+    checkForUpdate?(): Promise<{
+      available: boolean;
+      supported?: boolean;
+      version?: string;
+      releaseNotes?: string;
+      releaseDate?: string | null;
+      error?: string;
+    }>;
+    downloadUpdate?(): Promise<{ success: boolean; error?: string }>;
+    installUpdate?(): void;
+    onUpdateDownloadProgress?(cb: (progress: {
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }) => void): () => void;
+    onUpdateDownloaded?(cb: () => void): () => void;
+    onUpdateError?(cb: (payload: { error: string }) => void): () => void;
+
     // Global Toggle Hotkey (Quake Mode)
     registerGlobalHotkey?(hotkey: string): Promise<{ success: boolean; enabled?: boolean; error?: string; accelerator?: string }>;
     unregisterGlobalHotkey?(): Promise<{ success: boolean }>;

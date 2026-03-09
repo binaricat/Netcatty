@@ -90,5 +90,13 @@ module.exports = {
             }
         ],
         category: 'Development'
-    }
+    },
+    publish: [
+        {
+            provider: 'github',
+            owner: 'binaricat',
+            repo: 'Netcatty',
+            releaseType: 'release'
+        }
+    ]
 };

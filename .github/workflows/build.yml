@@ -73,12 +73,15 @@ jobs:
           name: netcatty-${{ matrix.name }}
           path: |
             release/*.dmg
+            release/*.zip
             release/*.exe
             release/*.msi
             release/*.AppImage
             release/*.deb
             release/*.rpm
             release/*.tar.gz
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: ignore
 
   # Linux x64 — builds directly on ubuntu-latest (no container).
@@ -130,6 +133,8 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.rpm
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: ignore
 
   # Dedicated job for Linux ARM64 — builds inside Debian Bullseye (GLIBC 2.31)
@@ -184,6 +189,8 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.rpm
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: ignore
 
   release:
@@ -219,10 +226,13 @@ jobs:
           body_path: release_notes.md
           files: |
             artifacts/*.dmg
+            artifacts/*.zip
             artifacts/*.exe
             artifacts/*.AppImage
             artifacts/*.deb
             artifacts/*.rpm
+            artifacts/*.yml
+            artifacts/*.blockmap
           generate_release_notes: true
           fail_on_unmatched_files: false
           token: ${{ secrets.RELEASE_TOKEN }}

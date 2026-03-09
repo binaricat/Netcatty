@@ -1,6 +1,16 @@
 /**
- * Update Service - Checks GitHub releases for new versions
+ * Update Service
+ *
+ * Combines two update mechanisms:
+ * 1. GitHub API-based version comparison (used by useUpdateCheck for notification banner)
+ * 2. electron-updater bridge (used by SettingsSystemTab for download/install)
  */
+
+import { netcattyBridge } from "./netcattyBridge";
+
+// ================================
+// Part 1: GitHub API Version Check
+// ================================
 
 const GITHUB_API_URL = 'https://api.github.com/repos/binaricat/Netcatty/releases/latest';
 const RELEASES_PAGE_URL = 'https://github.com/binaricat/Netcatty/releases';
@@ -60,69 +70,46 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Fetch the latest release info from GitHub
+ * Check for updates via GitHub API (compares version strings).
+ * Used by useUpdateCheck for the notification banner.
  */
-export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
+export async function checkForUpdates(currentVersion: string): Promise<UpdateCheckResult> {
   try {
     const response = await fetch(GITHUB_API_URL, {
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        // Using anonymous access - rate limited to 60 requests/hour
-      },
+      headers: { Accept: 'application/vnd.github.v3+json' },
     });
 
     if (!response.ok) {
-      if (response.status === 404) {
-        // No releases yet
-        return null;
-      }
-      throw new Error(`GitHub API error: ${response.status}`);
+      throw new Error(`GitHub API returned ${response.status}`);
     }
 
     const data = await response.json();
+    const latestVersion = (data.tag_name as string).replace(/^v/i, '');
 
-    return {
-      version: data.tag_name?.replace(/^v/i, '') || '0.0.0',
-      tagName: data.tag_name || '',
-      name: data.name || data.tag_name || '',
+    const latestRelease: ReleaseInfo = {
+      version: latestVersion,
+      tagName: data.tag_name,
+      name: data.name || data.tag_name,
       body: data.body || '',
-      htmlUrl: data.html_url || RELEASES_PAGE_URL,
-      publishedAt: data.published_at || '',
-      assets: (data.assets || []).map((asset: { name?: string; browser_download_url?: string; size?: number }) => ({
-        name: asset.name || '',
-        browserDownloadUrl: asset.browser_download_url || '',
-        size: asset.size || 0,
+      htmlUrl: data.html_url,
+      publishedAt: data.published_at,
+      assets: (data.assets || []).map((a: { name: string; browser_download_url: string; size: number }) => ({
+        name: a.name,
+        browserDownloadUrl: a.browser_download_url,
+        size: a.size,
       })),
     };
+
+    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+
+    return { hasUpdate, currentVersion, latestRelease };
   } catch (error) {
-    console.warn('[UpdateService] Failed to fetch latest release:', error);
-    return null;
-  }
-}
-
-/**
- * Check for updates
- */
-export async function checkForUpdates(currentVersion: string): Promise<UpdateCheckResult> {
-  const result: UpdateCheckResult = {
-    hasUpdate: false,
-    currentVersion,
-    latestRelease: null,
-  };
-
-  try {
-    const release = await fetchLatestRelease();
-    if (!release) {
-      return result;
-    }
-
-    result.latestRelease = release;
-    result.hasUpdate = compareVersions(release.version, currentVersion) > 0;
-
-    return result;
-  } catch (error) {
-    result.error = error instanceof Error ? error.message : 'Unknown error';
-    return result;
+    return {
+      hasUpdate: false,
+      currentVersion,
+      latestRelease: null,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 }
 
@@ -144,7 +131,7 @@ export function getDownloadUrlForPlatform(
   platform: string
 ): string | null {
   const assets = release.assets;
-  
+
   // Platform-specific file patterns
   const patterns: Record<string, RegExp[]> = {
     win32: [/\.exe$/i, /win.*\.zip$/i, /windows/i],
@@ -153,7 +140,7 @@ export function getDownloadUrlForPlatform(
   };
 
   const platformPatterns = patterns[platform] || [];
-  
+
   for (const pattern of platformPatterns) {
     const asset = assets.find((a) => pattern.test(a.name));
     if (asset) {
@@ -163,4 +150,74 @@ export function getDownloadUrlForPlatform(
 
   // Fallback to release page
   return null;
+}
+
+// =============================================
+// Part 2: electron-updater Bridge (IPC-based)
+// =============================================
+
+export interface ElectronUpdateCheckResult {
+  available: boolean;
+  supported?: boolean;
+  version?: string;
+  releaseNotes?: string;
+  releaseDate?: string | null;
+  error?: string;
+}
+
+export interface UpdateDownloadProgress {
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+}
+
+export async function checkForUpdate(): Promise<ElectronUpdateCheckResult> {
+  const bridge = netcattyBridge.get();
+  if (!bridge?.checkForUpdate) {
+    return { available: false, supported: false, error: "Bridge unavailable" };
+  }
+  try {
+    return await bridge.checkForUpdate();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { available: false, error: message };
+  }
+}
+
+export async function downloadUpdate(): Promise<{ success: boolean; error?: string }> {
+  const bridge = netcattyBridge.get();
+  if (!bridge?.downloadUpdate) {
+    return { success: false, error: "Bridge unavailable" };
+  }
+  return bridge.downloadUpdate();
+}
+
+export function installUpdate(): void {
+  const bridge = netcattyBridge.get();
+  bridge?.installUpdate?.();
+}
+
+export function onDownloadProgress(
+  cb: (progress: UpdateDownloadProgress) => void,
+): (() => void) | undefined {
+  return netcattyBridge.get()?.onUpdateDownloadProgress?.(cb);
+}
+
+export function onDownloaded(cb: () => void): (() => void) | undefined {
+  return netcattyBridge.get()?.onUpdateDownloaded?.(cb);
+}
+
+export function onError(
+  cb: (payload: { error: string }) => void,
+): (() => void) | undefined {
+  return netcattyBridge.get()?.onUpdateError?.(cb);
+}
+
+/** Returns the GitHub Releases page URL, optionally for a specific version tag. */
+export function getReleasesUrl(version?: string): string {
+  if (version) {
+    return `${RELEASES_PAGE_URL}/tag/v${version}`;
+  }
+  return `${RELEASES_PAGE_URL}/latest`;
 }

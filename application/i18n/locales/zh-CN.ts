@@ -77,6 +77,23 @@ const zhCN: Messages = {
   'settings.system.credentials.unavailableHint': '在其他用户或机器上加密的凭据无法在此处解密。请在当前设备重新输入并保存凭据。',
   'settings.system.credentials.portabilityHint': '云同步可跨设备，因为使用主密钥加密；本地 safeStorage 加密仅绑定当前系统用户/设备。',
 
+  // Settings > System > Software Update
+  'settings.update.title': '软件更新',
+  'settings.update.currentVersion': '当前版本',
+  'settings.update.checkForUpdates': '检查更新',
+  'settings.update.checking': '检查中...',
+  'settings.update.upToDate': '当前已是最新版本。',
+  'settings.update.available': '新版本 {version} 已发布。',
+  'settings.update.download': '下载更新',
+  'settings.update.downloading': '正在下载... {percent}%',
+  'settings.update.readyToInstall': '更新已下载，准备安装。',
+  'settings.update.restartNow': '重启并更新',
+  'settings.update.error': '检查更新失败。',
+  'settings.update.downloadError': '下载失败。',
+  'settings.update.manualDownload': '前往 GitHub 下载',
+  'settings.update.manualDownloadHint': '当前平台不支持自动更新，请前往 GitHub 下载最新版本。',
+  'settings.update.hint': 'Netcatty 从 GitHub Releases 检查更新。',
+
   // Settings > Session Logs
   'settings.sessionLogs.title': '会话日志',
   'settings.sessionLogs.description': '配置会话日志导出和自动保存设置。',

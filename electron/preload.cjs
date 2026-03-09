@@ -14,6 +14,9 @@ const fullscreenChangeListeners = new Set();
 const keyboardInteractiveListeners = new Set();
 const passphraseListeners = new Set();
 const passphraseTimeoutListeners = new Set();
+const updateDownloadProgressListeners = new Set();
+const updateDownloadedListeners = new Set();
+const updateErrorListeners = new Set();
 
 function cleanupTransferListeners(transferId) {
   transferProgressListeners.delete(transferId);
@@ -127,6 +130,37 @@ ipcRenderer.on("netcatty:passphrase-timeout", (_event, payload) => {
       cb(payload);
     } catch (err) {
       console.error("Passphrase timeout callback failed", err);
+    }
+  });
+});
+
+// Auto-update events
+ipcRenderer.on("netcatty:update:download-progress", (_event, payload) => {
+  updateDownloadProgressListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Update download-progress callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:update:downloaded", () => {
+  updateDownloadedListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch (err) {
+      console.error("Update downloaded callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:update:error", (_event, payload) => {
+  updateErrorListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Update error callback failed", err);
     }
   });
 });
@@ -878,6 +912,23 @@ const api = {
   credentialsAvailable: () => ipcRenderer.invoke("netcatty:credentials:available"),
   credentialsEncrypt: (plaintext) => ipcRenderer.invoke("netcatty:credentials:encrypt", plaintext),
   credentialsDecrypt: (value) => ipcRenderer.invoke("netcatty:credentials:decrypt", value),
+
+  // Auto-update
+  checkForUpdate: () => ipcRenderer.invoke("netcatty:update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("netcatty:update:download"),
+  installUpdate: () => ipcRenderer.invoke("netcatty:update:install"),
+  onUpdateDownloadProgress: (cb) => {
+    updateDownloadProgressListeners.add(cb);
+    return () => updateDownloadProgressListeners.delete(cb);
+  },
+  onUpdateDownloaded: (cb) => {
+    updateDownloadedListeners.add(cb);
+    return () => updateDownloadedListeners.delete(cb);
+  },
+  onUpdateError: (cb) => {
+    updateErrorListeners.add(cb);
+    return () => updateErrorListeners.delete(cb);
+  },
 };
 
 // Merge with existing netcatty (if any) to avoid stale objects on hot reload

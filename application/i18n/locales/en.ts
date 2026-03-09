@@ -93,6 +93,23 @@ const en: Messages = {
   'settings.system.credentials.unavailableHint': 'Credentials encrypted on another user profile or machine cannot be decrypted here. Re-enter and save credentials on this device.',
   'settings.system.credentials.portabilityHint': 'Cloud Sync is portable because it uses your master key encryption. Local safeStorage encryption is device/user scoped.',
 
+  // Settings > System > Software Update
+  'settings.update.title': 'Software Update',
+  'settings.update.currentVersion': 'Current version',
+  'settings.update.checkForUpdates': 'Check for Updates',
+  'settings.update.checking': 'Checking...',
+  'settings.update.upToDate': 'You are using the latest version.',
+  'settings.update.available': 'New version {version} is available.',
+  'settings.update.download': 'Download Update',
+  'settings.update.downloading': 'Downloading... {percent}%',
+  'settings.update.readyToInstall': 'Update downloaded and ready to install.',
+  'settings.update.restartNow': 'Restart to Update',
+  'settings.update.error': 'Failed to check for updates.',
+  'settings.update.downloadError': 'Download failed.',
+  'settings.update.manualDownload': 'Download from GitHub',
+  'settings.update.manualDownloadHint': 'Auto-update is not available on this platform. Download the latest version from GitHub.',
+  'settings.update.hint': 'Netcatty checks for updates from GitHub Releases.',
+
   // Settings > Session Logs
   'settings.sessionLogs.title': 'Session Logs',
   'settings.sessionLogs.description': 'Configure session log export and auto-save settings.',
