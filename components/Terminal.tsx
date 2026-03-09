@@ -1041,6 +1041,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!termRef.current) return;
     cleanupSession();
     auth.resetForRetry();
+    hasRunStartupCommandRef.current = false;
     setStatus("connecting");
     setError(null);
     setProgressLogs(["Retrying secure channel..."]);
