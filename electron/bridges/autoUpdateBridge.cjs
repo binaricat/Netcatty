@@ -94,11 +94,13 @@ function registerHandlers(ipcMain) {
 
       const { version, releaseNotes, releaseDate } = result.updateInfo;
 
-      // Compare with current version — electron-updater may return the
-      // same version when there is nothing newer.
+      // Compare with current version using semver ordering.
+      // Only report an update when the feed version is strictly newer,
+      // avoiding false positives for pre-release or nightly builds.
       const { app } = _deps?.electronModule || {};
       const currentVersion = app?.getVersion?.() || "0.0.0";
-      if (version === currentVersion) {
+      const isNewer = currentVersion.localeCompare(version, undefined, { numeric: true, sensitivity: 'base' }) < 0;
+      if (!isNewer) {
         return { available: false, supported: true };
       }
 
@@ -171,6 +173,14 @@ function registerHandlers(ipcMain) {
       await updater.downloadUpdate();
       return { success: true };
     } catch (err) {
+      // Clean up listeners to prevent leaks if downloadUpdate() rejects
+      // before the error event is emitted.
+      const updaterForCleanup = getAutoUpdater();
+      if (updaterForCleanup) {
+        updaterForCleanup.removeAllListeners("download-progress");
+        updaterForCleanup.removeAllListeners("update-downloaded");
+        updaterForCleanup.removeAllListeners("error");
+      }
       console.error("[AutoUpdate] Download failed:", err?.message || err);
       return { success: false, error: err?.message || "Download failed" };
     }
