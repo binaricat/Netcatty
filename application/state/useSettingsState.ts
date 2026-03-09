@@ -156,10 +156,10 @@ export const useSettingsState = () => {
     const stored = readStoredString(STORAGE_KEY_THEME);
     return stored && isValidTheme(stored) ? stored : DEFAULT_THEME;
   });
-  // resolvedTheme is always 'light' or 'dark' — derived from theme + OS preference
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() =>
-    theme === 'system' ? getSystemPreference() : theme
-  );
+  // Track the OS color scheme preference (updated by matchMedia listener)
+  const [systemPreference, setSystemPreference] = useState<'light' | 'dark'>(getSystemPreference);
+  // resolvedTheme is always 'light' or 'dark' — derived synchronously from theme + OS preference
+  const resolvedTheme: 'light' | 'dark' = theme === 'system' ? systemPreference : theme;
   const [lightUiThemeId, setLightUiThemeId] = useState<string>(() => {
     const stored = readStoredString(STORAGE_KEY_UI_THEME_LIGHT);
     return stored && isValidUiThemeId('light', stored) ? stored : DEFAULT_LIGHT_UI_THEME;
@@ -305,7 +305,6 @@ export const useSettingsState = () => {
   const syncAppearanceFromStorage = useCallback(() => {
     const storedTheme = readStoredString(STORAGE_KEY_THEME);
     const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
-    const nextResolved = nextTheme === 'system' ? getSystemPreference() : nextTheme;
     const storedLightId = readStoredString(STORAGE_KEY_UI_THEME_LIGHT);
     const nextLightId = storedLightId && isValidUiThemeId('light', storedLightId) ? storedLightId : lightUiThemeId;
     const storedDarkId = readStoredString(STORAGE_KEY_UI_THEME_DARK);
@@ -316,14 +315,14 @@ export const useSettingsState = () => {
     const nextAccent = storedAccent && isValidHslToken(storedAccent) ? storedAccent.trim() : customAccent;
 
     setTheme(nextTheme);
-    setResolvedTheme(nextResolved);
     setLightUiThemeId(nextLightId);
     setDarkUiThemeId(nextDarkId);
     setAccentMode(nextAccentMode);
     setCustomAccent(nextAccent);
 
-    const tokens = getUiThemeById(nextResolved, nextResolved === 'dark' ? nextDarkId : nextLightId).tokens;
-    applyThemeTokens(nextResolved, tokens, nextAccentMode, nextAccent);
+    const effective = nextTheme === 'system' ? getSystemPreference() : nextTheme;
+    const tokens = getUiThemeById(effective, effective === 'dark' ? nextDarkId : nextLightId).tokens;
+    applyThemeTokens(effective, tokens, nextAccentMode, nextAccent);
   }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
 
   const syncCustomCssFromStorage = useCallback(() => {
@@ -347,21 +346,16 @@ export const useSettingsState = () => {
     notifySettingsChanged(STORAGE_KEY_COLOR, customAccent);
   }, [theme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, notifySettingsChanged]);
 
-  // Keep resolvedTheme in sync when theme preference changes
+  // Listen for OS color scheme changes to keep systemPreference in sync
   useEffect(() => {
-    setResolvedTheme(theme === 'system' ? getSystemPreference() : theme);
-  }, [theme]);
-
-  // Listen for OS color scheme changes when theme is 'system'
-  useEffect(() => {
-    if (theme !== 'system') return;
+    if (typeof window === 'undefined' || !window.matchMedia) return;
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = (e: MediaQueryListEvent) => {
-      setResolvedTheme(e.matches ? 'dark' : 'light');
+      setSystemPreference(e.matches ? 'dark' : 'light');
     };
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
-  }, [theme]);
+  }, []);
 
   useLayoutEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, uiLanguage);
