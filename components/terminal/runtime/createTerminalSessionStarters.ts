@@ -491,8 +491,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const commandToRun = ctx.startupCommand || ctx.host.startupCommand;
       if (commandToRun && !ctx.hasRunStartupCommandRef.current) {
         ctx.hasRunStartupCommandRef.current = true;
+        const scheduledSessionId = id;
         setTimeout(() => {
-          if (!ctx.sessionRef.current) return;
+          // Guard against stale timers: if the session changed (e.g. user
+          // clicked Start Over quickly), skip to avoid double execution
+          if (!ctx.sessionRef.current || ctx.sessionRef.current !== scheduledSessionId) return;
           ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}\r`);
           if (ctx.onCommandExecuted) {
             ctx.onCommandExecuted(commandToRun, ctx.host.id, ctx.host.label, ctx.sessionId);
@@ -611,8 +614,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const commandToRun = ctx.startupCommand || ctx.host.startupCommand;
       if (commandToRun && !ctx.hasRunStartupCommandRef.current) {
         ctx.hasRunStartupCommandRef.current = true;
+        const scheduledSessionId = id;
         setTimeout(() => {
-          if (!ctx.sessionRef.current) return;
+          if (!ctx.sessionRef.current || ctx.sessionRef.current !== scheduledSessionId) return;
           ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}\r`);
           if (ctx.onCommandExecuted) {
             ctx.onCommandExecuted(commandToRun, ctx.host.id, ctx.host.label, ctx.sessionId);
