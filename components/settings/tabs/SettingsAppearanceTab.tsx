@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { Check, Moon, Palette, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Palette, Sun } from "lucide-react";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { DARK_UI_THEMES, LIGHT_UI_THEMES } from "../../../infrastructure/config/uiThemes";
 import { useAvailableUIFonts } from "../../../application/state/uiFontStore";
@@ -9,8 +9,8 @@ import { SectionHeader, SettingsTabContent, SettingRow, Toggle, Select } from ".
 import { FontSelect } from "../FontSelect";
 
 export default function SettingsAppearanceTab(props: {
-  theme: "dark" | "light";
-  setTheme: (theme: "dark" | "light") => void;
+  theme: "dark" | "light" | "system";
+  setTheme: (theme: "dark" | "light" | "system") => void;
   lightUiThemeId: string;
   setLightUiThemeId: (themeId: string) => void;
   darkUiThemeId: string;
@@ -97,6 +97,12 @@ export default function SettingsAppearanceTab(props: {
     { name: "Slate", value: "215 16% 47%" },
   ];
 
+  const THEME_OPTIONS: { value: "light" | "system" | "dark"; icon: React.ReactNode; label: string }[] = [
+    { value: "light", icon: <Sun size={14} />, label: t("settings.appearance.theme.light") },
+    { value: "system", icon: <Monitor size={14} />, label: t("settings.appearance.theme.system") },
+    { value: "dark", icon: <Moon size={14} />, label: t("settings.appearance.theme.dark") },
+  ];
+
   const renderThemeSwatches = (
     options: { id: string; name: string; tokens: { background: string } }[],
     value: string,
@@ -153,13 +159,25 @@ export default function SettingsAppearanceTab(props: {
       <SectionHeader title={t("settings.appearance.uiTheme")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
-          label={t("settings.appearance.darkMode")}
-          description={t("settings.appearance.darkMode.desc")}
+          label={t("settings.appearance.theme")}
+          description={t("settings.appearance.theme.desc")}
         >
-          <div className="flex items-center gap-2">
-            <Sun size={14} className="text-muted-foreground" />
-            <Toggle checked={theme === "dark"} onChange={(v) => setTheme(v ? "dark" : "light")} />
-            <Moon size={14} className="text-muted-foreground" />
+          <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setTheme(opt.value)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  theme === opt.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {opt.icon}
+                {opt.label}
+              </button>
+            ))}
           </div>
         </SettingRow>
       </div>

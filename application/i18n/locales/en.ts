@@ -182,8 +182,11 @@ const en: Messages = {
 
   // Settings > Appearance
   'settings.appearance.uiTheme': 'UI Theme',
-  'settings.appearance.darkMode': 'Dark Mode',
-  'settings.appearance.darkMode.desc': 'Toggle between light and dark theme',
+  'settings.appearance.theme': 'Theme',
+  'settings.appearance.theme.desc': 'Choose light, dark, or follow system preference',
+  'settings.appearance.theme.light': 'Light',
+  'settings.appearance.theme.dark': 'Dark',
+  'settings.appearance.theme.system': 'System',
   'settings.appearance.accentColor': 'Accent Color',
   'settings.appearance.customColor': 'Custom color',
   'settings.appearance.accentColor.mode': 'Use custom accent',
