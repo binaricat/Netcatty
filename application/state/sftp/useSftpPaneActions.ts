@@ -177,17 +177,26 @@ export const useSftpPaneActions = ({
         }
 
         if (navSeqRef.current[side] !== requestId) {
-          // Another navigation on this side superseded this request;
-          // restore this tab so it isn't left with cleared files.
-          updateTab(side, activeTabId, (prev) => ({
-            ...prev,
-            connection: prev.connection
-              ? { ...prev.connection, currentPath: previousPath }
-              : null,
-            files: previousFiles,
-            selectedFiles: previousSelection,
-            loading: false,
-          }));
+          // Another navigation on this side superseded this request.
+          // Only restore if no newer navigation has already changed this tab's state;
+          // otherwise we'd overwrite the newer navigation's optimistic update.
+          updateTab(side, activeTabId, (prev) => {
+            if (prev.connection?.currentPath !== path) {
+              // A newer navigation already updated this tab; don't overwrite.
+              return prev;
+            }
+            // This tab still has the path we set; restore previous state
+            // (e.g., superseded by a different tab on the same side).
+            return {
+              ...prev,
+              connection: prev.connection
+                ? { ...prev.connection, currentPath: previousPath }
+                : null,
+              files: previousFiles,
+              selectedFiles: previousSelection,
+              loading: false,
+            };
+          });
           return;
         }
 
@@ -207,15 +216,20 @@ export const useSftpPaneActions = ({
         }));
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
-          updateTab(side, activeTabId, (prev) => ({
-            ...prev,
-            connection: prev.connection
-              ? { ...prev.connection, currentPath: previousPath }
-              : null,
-            files: previousFiles,
-            selectedFiles: previousSelection,
-            loading: false,
-          }));
+          updateTab(side, activeTabId, (prev) => {
+            if (prev.connection?.currentPath !== path) {
+              return prev;
+            }
+            return {
+              ...prev,
+              connection: prev.connection
+                ? { ...prev.connection, currentPath: previousPath }
+                : null,
+              files: previousFiles,
+              selectedFiles: previousSelection,
+              loading: false,
+            };
+          });
           return;
         }
         updateTab(side, activeTabId, (prev) => ({
