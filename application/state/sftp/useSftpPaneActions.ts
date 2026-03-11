@@ -75,8 +75,9 @@ export const useSftpPaneActions = ({
   // Track the last confirmed (successfully loaded) state per tab, so that
   // restore-on-error/supersede always reverts to a known-good state rather
   // than an intermediate optimistic state from another in-flight navigation.
+  // Includes connectionId so stale entries from a previous host are ignored.
   const lastConfirmedRef = useRef(
-    new Map<string, { path: string; files: SftpFileEntry[]; selectedFiles: Set<string> }>(),
+    new Map<string, { connectionId: string; path: string; files: SftpFileEntry[]; selectedFiles: Set<string> }>(),
   );
 
   const navigateTo = useCallback(
@@ -103,8 +104,9 @@ export const useSftpPaneActions = ({
         return;
       }
 
+      const connectionId = pane.connection.id;
       const requestId = ++navSeqRef.current[side];
-      const cacheKey = makeCacheKey(pane.connection.id, path, pane.filenameEncoding);
+      const cacheKey = makeCacheKey(connectionId, path, pane.filenameEncoding);
       const cached = options?.force
         ? undefined
         : dirCacheRef.current.get(cacheKey);
@@ -117,6 +119,7 @@ export const useSftpPaneActions = ({
         console.log("[SFTP navigateTo] Using cached files for path", { path, cacheKey });
         tabNavSeqRef.current.set(activeTabId, requestId);
         lastConfirmedRef.current.set(activeTabId, {
+          connectionId,
           path,
           files: cached.files,
           selectedFiles: new Set(),
@@ -135,9 +138,12 @@ export const useSftpPaneActions = ({
       }
 
       console.log("[SFTP navigateTo] Fetching files from server for path", { path });
-      // Seed confirmed state on the first navigation for this tab (e.g. initial load).
-      if (!lastConfirmedRef.current.has(activeTabId)) {
+      // Seed confirmed state on the first navigation for this tab, or when the
+      // connection has changed (reconnect / different host reusing the same tab).
+      const existing = lastConfirmedRef.current.get(activeTabId);
+      if (!existing || existing.connectionId !== connectionId) {
         lastConfirmedRef.current.set(activeTabId, {
+          connectionId,
           path: pane.connection.currentPath,
           files: pane.files,
           selectedFiles: pane.selectedFiles,
@@ -205,23 +211,25 @@ export const useSftpPaneActions = ({
 
         if (navSeqRef.current[side] !== requestId) {
           // Another navigation on this side superseded this request.
-          // Only restore if no newer navigation has occurred on this specific tab;
-          // otherwise we'd overwrite the newer navigation's result (including cache hits).
+          // Only restore if no newer navigation has occurred on this specific tab
+          // AND the tab still belongs to the same connection (connect/disconnect
+          // bump navSeqRef but not tabNavSeqRef).
           if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
-            // A newer navigation already handled this tab; don't touch it.
             return;
           }
-          // This tab hasn't had a newer navigation; restore previous state
-          // (e.g., superseded by a different tab on the same side).
-          updateTab(side, activeTabId, (prev) => ({
-            ...prev,
-            connection: prev.connection
-              ? { ...prev.connection, currentPath: previousPath }
-              : null,
-            files: previousFiles,
-            selectedFiles: previousSelection,
-            loading: false,
-          }));
+          updateTab(side, activeTabId, (prev) => {
+            if (prev.connection?.id !== connectionId) {
+              // Tab was reconnected or disconnected; don't restore stale state.
+              return prev;
+            }
+            return {
+              ...prev,
+              connection: { ...prev.connection, currentPath: previousPath },
+              files: previousFiles,
+              selectedFiles: previousSelection,
+              loading: false,
+            };
+          });
           return;
         }
 
@@ -231,6 +239,7 @@ export const useSftpPaneActions = ({
         });
 
         lastConfirmedRef.current.set(activeTabId, {
+          connectionId,
           path,
           files,
           selectedFiles: new Set(),
@@ -250,28 +259,34 @@ export const useSftpPaneActions = ({
           if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
             return;
           }
-          updateTab(side, activeTabId, (prev) => ({
-            ...prev,
-            connection: prev.connection
-              ? { ...prev.connection, currentPath: previousPath }
-              : null,
-            files: previousFiles,
-            selectedFiles: previousSelection,
-            loading: false,
-          }));
+          updateTab(side, activeTabId, (prev) => {
+            if (prev.connection?.id !== connectionId) {
+              return prev;
+            }
+            return {
+              ...prev,
+              connection: { ...prev.connection, currentPath: previousPath },
+              files: previousFiles,
+              selectedFiles: previousSelection,
+              loading: false,
+            };
+          });
           return;
         }
-        updateTab(side, activeTabId, (prev) => ({
-          ...prev,
-          connection: prev.connection
-            ? { ...prev.connection, currentPath: previousPath }
-            : null,
-          files: previousFiles,
-          selectedFiles: previousSelection,
-          error:
-            err instanceof Error ? err.message : "Failed to list directory",
-          loading: false,
-        }));
+        updateTab(side, activeTabId, (prev) => {
+          if (prev.connection?.id !== connectionId) {
+            return prev;
+          }
+          return {
+            ...prev,
+            connection: { ...prev.connection, currentPath: previousPath },
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            error:
+              err instanceof Error ? err.message : "Failed to list directory",
+            loading: false,
+          };
+        });
       }
     },
     [
