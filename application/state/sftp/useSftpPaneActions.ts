@@ -68,8 +68,15 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
+<<<<<<< HEAD
   // Track the latest navigation request ID per tab, so we can distinguish
   // whether a superseded request was superseded by the same tab or a different tab.
+=======
+  // Per-tab navigation sequence to distinguish superseded requests within the same tab.
+  // navSeqRef is per-side, so a navigation on a different tab of the same side can
+  // supersede this tab's request. tabNavSeqRef tracks the latest requestId per tab,
+  // allowing the superseded handler to know whether *this specific tab* has moved on.
+>>>>>>> 3fee773 (fix(sftp): track per-tab nav sequence to prevent cache-hit state overwrite)
   const tabNavSeqRef = useRef(new Map<string, number>());
 
   const navigateTo = useCallback(
@@ -108,6 +115,7 @@ export const useSftpPaneActions = ({
         cached.files
       ) {
         console.log("[SFTP navigateTo] Using cached files for path", { path, cacheKey });
+        tabNavSeqRef.current.set(activeTabId, requestId);
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
           connection: prev.connection
@@ -183,21 +191,23 @@ export const useSftpPaneActions = ({
 
         if (navSeqRef.current[side] !== requestId) {
           // Another navigation on this side superseded this request.
-          // Only restore if this tab hasn't started a newer navigation;
-          // otherwise we'd overwrite the newer navigation's optimistic update.
-          if (tabNavSeqRef.current.get(activeTabId) === requestId) {
-            // No newer navigation on this specific tab; restore previous state
-            // (e.g., superseded by a different tab on the same side).
-            updateTab(side, activeTabId, (prev) => ({
-              ...prev,
-              connection: prev.connection
-                ? { ...prev.connection, currentPath: previousPath }
-                : null,
-              files: previousFiles,
-              selectedFiles: previousSelection,
-              loading: false,
-            }));
+          // Only restore if no newer navigation has occurred on this specific tab;
+          // otherwise we'd overwrite the newer navigation's result (including cache hits).
+          if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
+            // A newer navigation already handled this tab; don't touch it.
+            return;
           }
+          // This tab hasn't had a newer navigation; restore previous state
+          // (e.g., superseded by a different tab on the same side).
+          updateTab(side, activeTabId, (prev) => ({
+            ...prev,
+            connection: prev.connection
+              ? { ...prev.connection, currentPath: previousPath }
+              : null,
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            loading: false,
+          }));
           return;
         }
 
@@ -217,17 +227,18 @@ export const useSftpPaneActions = ({
         }));
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
-          if (tabNavSeqRef.current.get(activeTabId) === requestId) {
-            updateTab(side, activeTabId, (prev) => ({
-              ...prev,
-              connection: prev.connection
-                ? { ...prev.connection, currentPath: previousPath }
-                : null,
-              files: previousFiles,
-              selectedFiles: previousSelection,
-              loading: false,
-            }));
+          if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
+            return;
           }
+          updateTab(side, activeTabId, (prev) => ({
+            ...prev,
+            connection: prev.connection
+              ? { ...prev.connection, currentPath: previousPath }
+              : null,
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            loading: false,
+          }));
           return;
         }
         updateTab(side, activeTabId, (prev) => ({
