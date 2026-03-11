@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Host, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
@@ -68,6 +68,10 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
+  // Track the latest navigation request ID per tab, so we can distinguish
+  // whether a superseded request was superseded by the same tab or a different tab.
+  const tabNavSeqRef = useRef(new Map<string, number>());
+
   const navigateTo = useCallback(
     async (
       side: "left" | "right",
@@ -121,6 +125,7 @@ export const useSftpPaneActions = ({
       const previousPath = pane.connection.currentPath;
       const previousFiles = pane.files;
       const previousSelection = pane.selectedFiles;
+      tabNavSeqRef.current.set(activeTabId, requestId);
       updateTab(side, activeTabId, (prev) => ({
         ...prev,
         connection: prev.connection
@@ -178,16 +183,12 @@ export const useSftpPaneActions = ({
 
         if (navSeqRef.current[side] !== requestId) {
           // Another navigation on this side superseded this request.
-          // Only restore if no newer navigation has already changed this tab's state;
+          // Only restore if this tab hasn't started a newer navigation;
           // otherwise we'd overwrite the newer navigation's optimistic update.
-          updateTab(side, activeTabId, (prev) => {
-            if (prev.connection?.currentPath !== path) {
-              // A newer navigation already updated this tab; don't overwrite.
-              return prev;
-            }
-            // This tab still has the path we set; restore previous state
+          if (tabNavSeqRef.current.get(activeTabId) === requestId) {
+            // No newer navigation on this specific tab; restore previous state
             // (e.g., superseded by a different tab on the same side).
-            return {
+            updateTab(side, activeTabId, (prev) => ({
               ...prev,
               connection: prev.connection
                 ? { ...prev.connection, currentPath: previousPath }
@@ -195,8 +196,8 @@ export const useSftpPaneActions = ({
               files: previousFiles,
               selectedFiles: previousSelection,
               loading: false,
-            };
-          });
+            }));
+          }
           return;
         }
 
@@ -216,11 +217,8 @@ export const useSftpPaneActions = ({
         }));
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
-          updateTab(side, activeTabId, (prev) => {
-            if (prev.connection?.currentPath !== path) {
-              return prev;
-            }
-            return {
+          if (tabNavSeqRef.current.get(activeTabId) === requestId) {
+            updateTab(side, activeTabId, (prev) => ({
               ...prev,
               connection: prev.connection
                 ? { ...prev.connection, currentPath: previousPath }
@@ -228,8 +226,8 @@ export const useSftpPaneActions = ({
               files: previousFiles,
               selectedFiles: previousSelection,
               loading: false,
-            };
-          });
+            }));
+          }
           return;
         }
         updateTab(side, activeTabId, (prev) => ({
