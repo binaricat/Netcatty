@@ -138,10 +138,12 @@ export const useSftpPaneActions = ({
       }
 
       console.log("[SFTP navigateTo] Fetching files from server for path", { path });
-      // Seed confirmed state on the first navigation for this tab, or when the
-      // connection has changed (reconnect / different host reusing the same tab).
+      // Re-seed confirmed state whenever the pane is settled (not loading), or
+      // when the connection has changed. This captures post-mutation state from
+      // optimistic updates (e.g. deleteFilesAtPath) so that a failed refresh
+      // doesn't resurrect deleted items.
       const existing = lastConfirmedRef.current.get(activeTabId);
-      if (!existing || existing.connectionId !== connectionId) {
+      if (!existing || existing.connectionId !== connectionId || !pane.loading) {
         lastConfirmedRef.current.set(activeTabId, {
           connectionId,
           path: pane.connection.currentPath,
@@ -154,12 +156,14 @@ export const useSftpPaneActions = ({
       const previousFiles = confirmed.files;
       const previousSelection = confirmed.selectedFiles;
       tabNavSeqRef.current.set(activeTabId, requestId);
+      // Keep existing files visible during loading — the loading overlay
+      // (pointer-events-none) prevents interaction. This avoids blanking a tab
+      // that gets superseded by another tab navigating on the same side.
       updateTab(side, activeTabId, (prev) => ({
         ...prev,
         connection: prev.connection
           ? { ...prev.connection, currentPath: path }
           : null,
-        files: [],
         selectedFiles: new Set(),
         loading: true,
         error: null,
