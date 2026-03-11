@@ -72,6 +72,13 @@ export const useSftpPaneActions = ({
   // whether a superseded request was superseded by the same tab or a different tab.
   const tabNavSeqRef = useRef(new Map<string, number>());
 
+  // Track the last confirmed (successfully loaded) state per tab, so that
+  // restore-on-error/supersede always reverts to a known-good state rather
+  // than an intermediate optimistic state from another in-flight navigation.
+  const lastConfirmedRef = useRef(
+    new Map<string, { path: string; files: SftpFileEntry[]; selectedFiles: Set<string> }>(),
+  );
+
   const navigateTo = useCallback(
     async (
       side: "left" | "right",
@@ -109,6 +116,11 @@ export const useSftpPaneActions = ({
       ) {
         console.log("[SFTP navigateTo] Using cached files for path", { path, cacheKey });
         tabNavSeqRef.current.set(activeTabId, requestId);
+        lastConfirmedRef.current.set(activeTabId, {
+          path,
+          files: cached.files,
+          selectedFiles: new Set(),
+        });
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
           connection: prev.connection
@@ -123,9 +135,18 @@ export const useSftpPaneActions = ({
       }
 
       console.log("[SFTP navigateTo] Fetching files from server for path", { path });
-      const previousPath = pane.connection.currentPath;
-      const previousFiles = pane.files;
-      const previousSelection = pane.selectedFiles;
+      // Seed confirmed state on the first navigation for this tab (e.g. initial load).
+      if (!lastConfirmedRef.current.has(activeTabId)) {
+        lastConfirmedRef.current.set(activeTabId, {
+          path: pane.connection.currentPath,
+          files: pane.files,
+          selectedFiles: pane.selectedFiles,
+        });
+      }
+      const confirmed = lastConfirmedRef.current.get(activeTabId)!;
+      const previousPath = confirmed.path;
+      const previousFiles = confirmed.files;
+      const previousSelection = confirmed.selectedFiles;
       tabNavSeqRef.current.set(activeTabId, requestId);
       updateTab(side, activeTabId, (prev) => ({
         ...prev,
@@ -207,6 +228,12 @@ export const useSftpPaneActions = ({
         dirCacheRef.current.set(cacheKey, {
           files,
           timestamp: Date.now(),
+        });
+
+        lastConfirmedRef.current.set(activeTabId, {
+          path,
+          files,
+          selectedFiles: new Set(),
         });
 
         updateTab(side, activeTabId, (prev) => ({
