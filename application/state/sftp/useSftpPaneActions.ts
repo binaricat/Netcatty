@@ -68,15 +68,8 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
-<<<<<<< HEAD
   // Track the latest navigation request ID per tab, so we can distinguish
   // whether a superseded request was superseded by the same tab or a different tab.
-=======
-  // Per-tab navigation sequence to distinguish superseded requests within the same tab.
-  // navSeqRef is per-side, so a navigation on a different tab of the same side can
-  // supersede this tab's request. tabNavSeqRef tracks the latest requestId per tab,
-  // allowing the superseded handler to know whether *this specific tab* has moved on.
->>>>>>> 3fee773 (fix(sftp): track per-tab nav sequence to prevent cache-hit state overwrite)
   const tabNavSeqRef = useRef(new Map<string, number>());
 
   const navigateTo = useCallback(
