@@ -124,6 +124,8 @@ export const useSftpPaneActions = ({
         connection: prev.connection
           ? { ...prev.connection, currentPath: path }
           : null,
+        files: [],
+        selectedFiles: new Set(),
         loading: true,
         error: null,
       }));
