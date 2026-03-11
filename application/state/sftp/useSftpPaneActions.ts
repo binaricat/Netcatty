@@ -176,7 +176,20 @@ export const useSftpPaneActions = ({
           }
         }
 
-        if (navSeqRef.current[side] !== requestId) return;
+        if (navSeqRef.current[side] !== requestId) {
+          // Another navigation on this side superseded this request;
+          // restore this tab so it isn't left with cleared files.
+          updateTab(side, activeTabId, (prev) => ({
+            ...prev,
+            connection: prev.connection
+              ? { ...prev.connection, currentPath: previousPath }
+              : null,
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            loading: false,
+          }));
+          return;
+        }
 
         dirCacheRef.current.set(cacheKey, {
           files,
@@ -193,7 +206,18 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
       } catch (err) {
-        if (navSeqRef.current[side] !== requestId) return;
+        if (navSeqRef.current[side] !== requestId) {
+          updateTab(side, activeTabId, (prev) => ({
+            ...prev,
+            connection: prev.connection
+              ? { ...prev.connection, currentPath: previousPath }
+              : null,
+            files: previousFiles,
+            selectedFiles: previousSelection,
+            loading: false,
+          }));
+          return;
+        }
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
           connection: prev.connection
