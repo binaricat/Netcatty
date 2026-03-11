@@ -118,7 +118,14 @@ export const useSftpPaneActions = ({
       }
 
       console.log("[SFTP navigateTo] Fetching files from server for path", { path });
-      updateTab(side, activeTabId, (prev) => ({ ...prev, loading: true, error: null }));
+      updateTab(side, activeTabId, (prev) => ({
+        ...prev,
+        connection: prev.connection
+          ? { ...prev.connection, currentPath: path }
+          : null,
+        loading: true,
+        error: null,
+      }));
 
       try {
         let files: SftpFileEntry[];
