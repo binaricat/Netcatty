@@ -118,6 +118,7 @@ export const useSftpPaneActions = ({
       }
 
       console.log("[SFTP navigateTo] Fetching files from server for path", { path });
+      const previousPath = pane.connection.currentPath;
       updateTab(side, activeTabId, (prev) => ({
         ...prev,
         connection: prev.connection
@@ -191,6 +192,9 @@ export const useSftpPaneActions = ({
         if (navSeqRef.current[side] !== requestId) return;
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
+          connection: prev.connection
+            ? { ...prev.connection, currentPath: previousPath }
+            : null,
           error:
             err instanceof Error ? err.message : "Failed to list directory",
           loading: false,
