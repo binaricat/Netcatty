@@ -43,6 +43,11 @@ export const useTerminalContextActions = ({
         terminalBackend.writeToSession(sessionRef.current, data);
         if (scrollOnPasteRef?.current) {
           term.scrollToBottom();
+          if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(() => {
+              term.scrollToBottom();
+            });
+          }
         }
       }
     } catch (err) {

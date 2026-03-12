@@ -17,6 +17,11 @@ import {
   type XTermPlatform,
   resolveXTermPerformanceConfig,
 } from "../../../infrastructure/config/xtermPerformance";
+import {
+  shouldEnableNativeUserInputAutoScroll,
+  shouldScrollOnTerminalInput,
+  shouldScrollOnTerminalPaste,
+} from "../../../domain/terminalScroll";
 import { logger } from "../../../lib/logger";
 import { isMacPlatform, normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
@@ -148,7 +153,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const fontWeightBold = settings?.fontWeightBold ?? 700;
   const lineHeight = 1 + (settings?.linePadding ?? 0) / 10;
   const minimumContrastRatio = settings?.minimumContrastRatio ?? 1;
-  const scrollOnUserInput = settings?.scrollOnInput ?? true;
+  const scrollOnUserInput = shouldEnableNativeUserInputAutoScroll(settings);
   const altIsMeta = settings?.altAsMeta ?? false;
   const wordSeparator = settings?.wordSeparators ?? " ()[]{}'\"";
   const keywordHighlightRules = settings?.keywordHighlightRules ?? [];
@@ -336,8 +341,21 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
+  const scrollViewportToBottom = () => {
+    term.scrollToBottom();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        term.scrollToBottom();
+      });
+    }
+  };
   const scrollToBottomAfterPaste = () => {
-    if (ctx.terminalSettingsRef.current?.scrollOnPaste ?? true) {
+    if (shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current)) {
+      scrollViewportToBottom();
+    }
+  };
+  const scrollToBottomAfterInput = (data: string) => {
+    if (shouldScrollOnTerminalInput(ctx.terminalSettingsRef.current, data)) {
       term.scrollToBottom();
     }
   };
@@ -543,6 +561,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
         ctx.onBroadcastInputRef.current(data, ctx.sessionId);
       }
+
+      scrollToBottomAfterInput(data);
 
       if (ctx.statusRef.current === "connected" && ctx.onCommandExecuted) {
         if (data === "\r" || data === "\n") {

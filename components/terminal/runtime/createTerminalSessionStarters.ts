@@ -2,6 +2,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import type { Dispatch, RefObject, SetStateAction } from "react";
+import { shouldScrollOnTerminalOutput } from "../../../domain/terminalScroll";
 import { logger } from "../../../lib/logger";
 import type { Host, Identity, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
 import {
@@ -68,8 +69,11 @@ export type TerminalSessionStartersContext = {
   sessionId: string;
   startupCommand?: string;
   terminalSettings?: TerminalSettings;
+  terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
   serialConfig?: SerialConfig;
+  isVisibleRef?: RefObject<boolean>;
+  pendingOutputScrollRef?: RefObject<boolean>;
 
   sessionRef: RefObject<string | null>;
   hasConnectedRef: RefObject<boolean>;
@@ -117,6 +121,41 @@ const buildTermEnv = (host: Host, terminalSettings?: TerminalSettings) => {
   return env;
 };
 
+const handleTerminalOutputAutoScroll = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+) => {
+  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+  if (!shouldScrollOnTerminalOutput(settings)) {
+    return;
+  }
+
+  if (ctx.isVisibleRef?.current === false) {
+    if (ctx.pendingOutputScrollRef) {
+      ctx.pendingOutputScrollRef.current = true;
+    }
+    return;
+  }
+
+  term.scrollToBottom();
+};
+
+const writeSessionData = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+  data: string,
+) => {
+  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+  if (!shouldScrollOnTerminalOutput(settings)) {
+    term.write(data);
+    return;
+  }
+
+  term.write(data, () => {
+    handleTerminalOutputAutoScroll(ctx, term);
+  });
+};
+
 const attachSessionToTerminal = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
@@ -139,7 +178,7 @@ const attachSessionToTerminal = (
       // Replace \n that is not preceded by \r with \r\n
       data = data.replace(/(?<!\r)\n/g, "\r\n");
     }
-    term.write(data);
+    writeSessionData(ctx, term, data);
     if (!ctx.hasConnectedRef.current) {
       ctx.updateStatus("connected");
       opts?.onConnected?.();
@@ -665,7 +704,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       ctx.sessionRef.current = id;
       ctx.disposeDataRef.current = ctx.terminalBackend.onSessionData(id, (chunk) => {
-        term.write(chunk);
+        writeSessionData(ctx, term, chunk);
         if (!ctx.hasConnectedRef.current) {
           ctx.updateStatus("connected");
           setTimeout(() => {

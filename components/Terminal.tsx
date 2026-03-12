@@ -21,6 +21,10 @@ import {
   TerminalSettings,
   KeyBinding,
 } from "../types";
+import {
+  shouldEnableNativeUserInputAutoScroll,
+  shouldScrollOnTerminalInput,
+} from "../domain/terminalScroll";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
@@ -221,6 +225,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  const isVisibleRef = useRef(isVisible);
+  isVisibleRef.current = isVisible;
+  const pendingOutputScrollRef = useRef(false);
 
   useEffect(() => {
     if (xtermRuntimeRef.current) {
@@ -416,8 +423,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     startupCommand,
     terminalSettings,
+    terminalSettingsRef,
     terminalBackend,
     serialConfig,
+    isVisibleRef,
+    pendingOutputScrollRef,
     sessionRef,
     hasConnectedRef,
     hasRunStartupCommandRef,
@@ -454,6 +464,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     let disposed = false;
     setError(null);
     hasConnectedRef.current = false;
+    pendingOutputScrollRef.current = false;
     setProgressLogs([]);
     setShowLogs(false);
     setIsCancelling(false);
@@ -703,7 +714,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           terminalSettings.drawBoldInBrightColors;
         termRef.current.options.minimumContrastRatio =
           terminalSettings.minimumContrastRatio;
-        termRef.current.options.scrollOnUserInput = terminalSettings.scrollOnInput;
+        termRef.current.options.scrollOnUserInput =
+          shouldEnableNativeUserInputAutoScroll(terminalSettings);
         termRef.current.options.altClickMovesCursor = !terminalSettings.altAsMeta;
         termRef.current.options.wordSeparator = terminalSettings.wordSeparators;
         termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
@@ -732,10 +744,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [host.fontSize, host.fontFamily, host.theme, fontFamilyId, fontSize, effectiveTheme, availableFonts]);
 
   useEffect(() => {
-    if (isVisible && fitAddonRef.current) {
-      const timer = setTimeout(() => safeFit(), 50);
-      return () => clearTimeout(timer);
-    }
+    if (!isVisible) return;
+    const timer = setTimeout(() => {
+      safeFit();
+      if (pendingOutputScrollRef.current) {
+        termRef.current?.scrollToBottom();
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => {
+            termRef.current?.scrollToBottom();
+          });
+        }
+        pendingOutputScrollRef.current = false;
+      }
+    }, 50);
+    return () => clearTimeout(timer);
   }, [isVisible]);
 
   useEffect(() => {
@@ -964,6 +986,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const scrollOnPasteRef = useRef(terminalSettings?.scrollOnPaste ?? true);
   scrollOnPasteRef.current = terminalSettings?.scrollOnPaste ?? true;
 
+  const scrollToBottomAfterProgrammaticInput = (data: string) => {
+    if (termRef.current && shouldScrollOnTerminalInput(terminalSettingsRef.current, data)) {
+      termRef.current.scrollToBottom();
+    }
+  };
+
   const terminalContextActions = useTerminalContextActions({
     termRef,
     sessionRef,
@@ -975,7 +1003,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const handleSnippetClick = (cmd: string) => {
     if (sessionRef.current) {
-      terminalBackend.writeToSession(sessionRef.current, `${cmd}\r`);
+      const payload = `${cmd}\r`;
+      terminalBackend.writeToSession(sessionRef.current, payload);
+      scrollToBottomAfterProgrammaticInput(payload);
       setIsScriptsOpen(false);
       termRef.current?.focus();
       return;
@@ -1142,6 +1172,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const pathsText = paths.join(' ');
           // Write the paths to the terminal
           terminalBackend.writeToSession(sessionRef.current, pathsText);
+          scrollToBottomAfterProgrammaticInput(pathsText);
           termRef.current.focus();
         }
       } else {
@@ -1699,6 +1730,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               if (sessionRef.current) {
                 const payload = text + '\r';
                 terminalBackend.writeToSession(sessionRef.current, payload);
+                scrollToBottomAfterProgrammaticInput(payload);
                 onBroadcastInput?.(payload, sessionRef.current);
               }
             }}
