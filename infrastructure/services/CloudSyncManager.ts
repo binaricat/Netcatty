@@ -1019,6 +1019,7 @@ export class CloudSyncManager {
     keys: SyncPayload['keys'];
     snippets: SyncPayload['snippets'];
     customGroups: SyncPayload['customGroups'];
+    snippetPackages?: SyncPayload['snippetPackages'];
     portForwardingRules?: SyncPayload['portForwardingRules'];
     knownHosts?: SyncPayload['knownHosts'];
     settings?: SyncPayload['settings'];

@@ -44,6 +44,7 @@ type ExportableVaultData = {
   identities?: Identity[];
   snippets: Snippet[];
   customGroups: string[];
+  snippetPackages?: string[];
   knownHosts?: KnownHost[];
 };
 
@@ -557,9 +558,10 @@ export const useVaultState = () => {
       identities,
       snippets,
       customGroups,
+      snippetPackages,
       knownHosts,
     }),
-    [hosts, keys, identities, snippets, customGroups, knownHosts],
+    [hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts],
   );
 
   const importData = useCallback(
@@ -569,6 +571,7 @@ export const useVaultState = () => {
       if (payload.identities) updateIdentities(payload.identities);
       if (payload.snippets) updateSnippets(payload.snippets);
       if (payload.customGroups) updateCustomGroups(payload.customGroups);
+      if (payload.snippetPackages) updateSnippetPackages(payload.snippetPackages);
       if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
     },
     [
@@ -577,6 +580,7 @@ export const useVaultState = () => {
       updateIdentities,
       updateSnippets,
       updateCustomGroups,
+      updateSnippetPackages,
       updateKnownHosts,
     ],
   );

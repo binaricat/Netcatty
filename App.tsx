@@ -283,6 +283,7 @@ function App({ settings }: { settings: SettingsState }) {
     identities,
     snippets,
     customGroups,
+    snippetPackages,
     portForwardingRules: portForwardingRulesForSync,
     knownHosts,
     onApplyPayload: (payload) => {

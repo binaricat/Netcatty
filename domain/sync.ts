@@ -161,7 +161,8 @@ export interface SyncPayload {
   identities?: import('./models').Identity[];
   snippets: import('./models').Snippet[];
   customGroups: string[];
-  
+  snippetPackages?: string[];
+
   // Port forwarding rules
   portForwardingRules?: import('./models').PortForwardingRule[];
   
