@@ -58,6 +58,7 @@ interface SftpPaneViewProps {
   pane: SftpPane;
   showHeader?: boolean;
   showEmptyHeader?: boolean;
+  onToggleShowHiddenFiles?: () => void;
 }
 
 const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
@@ -65,6 +66,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   pane,
   showHeader = true,
   showEmptyHeader = true,
+  onToggleShowHiddenFiles,
 }) => {
   const isActive = true;
 
@@ -333,6 +335,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onToggleBookmark={toggleBookmark}
         onNavigateToBookmark={callbacks.onNavigateTo}
         onDeleteBookmark={deleteBookmark}
+        showHiddenFiles={showHiddenFiles}
+        onToggleShowHiddenFiles={onToggleShowHiddenFiles}
       />
 
       <SftpPaneFileList

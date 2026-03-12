@@ -35,7 +35,7 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import {
     findSyncPayloadEncryptedCredentialPaths,
 } from '../domain/credentials';
-import type { CloudProvider, ConflictInfo, SyncPayload, WebDAVAuthType, WebDAVConfig, S3Config } from '../domain/sync';
+import { isProviderReadyForSync, type CloudProvider, type ConflictInfo, type SyncPayload, type WebDAVAuthType, type WebDAVConfig, type S3Config } from '../domain/sync';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -681,10 +681,9 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
     const disconnectOtherProviders = async (current: CloudProvider) => {
         const providers: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
-        const isActive = (status: string) => status === 'connected' || status === 'syncing';
         for (const provider of providers) {
             if (provider === current) continue;
-            if (isActive(sync.providers[provider].status)) {
+            if (isProviderReadyForSync(sync.providers[provider])) {
                 await sync.disconnectProvider(provider);
             }
         }
@@ -1061,13 +1060,13 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         provider="github"
                         name="GitHub Gist"
                         icon={<Github size={24} />}
-                        isConnected={sync.providers.github.status === 'connected' || sync.providers.github.status === 'syncing'}
+                        isConnected={isProviderReadyForSync(sync.providers.github)}
                         isSyncing={sync.providers.github.status === 'syncing'}
                         isConnecting={sync.providers.github.status === 'connecting'}
                         account={sync.providers.github.account}
                         lastSync={sync.providers.github.lastSync}
                         error={sync.providers.github.error}
-                        disabled={sync.hasAnyConnectedProvider && sync.providers.github.status !== 'connected' && sync.providers.github.status !== 'syncing'}
+                        disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.github)}
                         onConnect={handleConnectGitHub}
                         onDisconnect={() => sync.disconnectProvider('github')}
                         onSync={() => handleSync('github')}
@@ -1077,13 +1076,13 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         provider="google"
                         name="Google Drive"
                         icon={<GoogleDriveIcon className="w-6 h-6" />}
-                        isConnected={sync.providers.google.status === 'connected' || sync.providers.google.status === 'syncing'}
+                        isConnected={isProviderReadyForSync(sync.providers.google)}
                         isSyncing={sync.providers.google.status === 'syncing'}
                         isConnecting={sync.providers.google.status === 'connecting'}
                         account={sync.providers.google.account}
                         lastSync={sync.providers.google.lastSync}
                         error={sync.providers.google.error}
-                        disabled={sync.hasAnyConnectedProvider && sync.providers.google.status !== 'connected' && sync.providers.google.status !== 'syncing'}
+                        disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.google)}
                         onConnect={handleConnectGoogle}
                         onDisconnect={() => sync.disconnectProvider('google')}
                         onSync={() => handleSync('google')}
@@ -1093,13 +1092,13 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         provider="onedrive"
                         name="Microsoft OneDrive"
                         icon={<OneDriveIcon className="w-6 h-6" />}
-                        isConnected={sync.providers.onedrive.status === 'connected' || sync.providers.onedrive.status === 'syncing'}
+                        isConnected={isProviderReadyForSync(sync.providers.onedrive)}
                         isSyncing={sync.providers.onedrive.status === 'syncing'}
                         isConnecting={sync.providers.onedrive.status === 'connecting'}
                         account={sync.providers.onedrive.account}
                         lastSync={sync.providers.onedrive.lastSync}
                         error={sync.providers.onedrive.error}
-                        disabled={sync.hasAnyConnectedProvider && sync.providers.onedrive.status !== 'connected' && sync.providers.onedrive.status !== 'syncing'}
+                        disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.onedrive)}
                         onConnect={handleConnectOneDrive}
                         onDisconnect={() => sync.disconnectProvider('onedrive')}
                         onSync={() => handleSync('onedrive')}
@@ -1109,13 +1108,13 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         provider="webdav"
                         name={t('cloudSync.provider.webdav')}
                         icon={<Server size={24} />}
-                        isConnected={sync.providers.webdav.status === 'connected' || sync.providers.webdav.status === 'syncing'}
+                        isConnected={isProviderReadyForSync(sync.providers.webdav)}
                         isSyncing={sync.providers.webdav.status === 'syncing'}
                         isConnecting={sync.providers.webdav.status === 'connecting'}
                         account={sync.providers.webdav.account}
                         lastSync={sync.providers.webdav.lastSync}
                         error={sync.providers.webdav.error}
-                        disabled={sync.hasAnyConnectedProvider && sync.providers.webdav.status !== 'connected' && sync.providers.webdav.status !== 'syncing'}
+                        disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.webdav)}
                         onEdit={openWebdavDialog}
                         onConnect={openWebdavDialog}
                         onDisconnect={() => sync.disconnectProvider('webdav')}
@@ -1126,13 +1125,13 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         provider="s3"
                         name={t('cloudSync.provider.s3')}
                         icon={<Database size={24} />}
-                        isConnected={sync.providers.s3.status === 'connected' || sync.providers.s3.status === 'syncing'}
+                        isConnected={isProviderReadyForSync(sync.providers.s3)}
                         isSyncing={sync.providers.s3.status === 'syncing'}
                         isConnecting={sync.providers.s3.status === 'connecting'}
                         account={sync.providers.s3.account}
                         lastSync={sync.providers.s3.lastSync}
                         error={sync.providers.s3.error}
-                        disabled={sync.hasAnyConnectedProvider && sync.providers.s3.status !== 'connected' && sync.providers.s3.status !== 'syncing'}
+                        disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.s3)}
                         onEdit={openS3Dialog}
                         onConnect={openS3Dialog}
                         onDisconnect={() => sync.disconnectProvider('s3')}

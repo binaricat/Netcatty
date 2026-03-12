@@ -1,5 +1,5 @@
 import React from "react";
-import { Bookmark, Check, ChevronLeft, FilePlus, Folder, FolderPlus, Home, Languages, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Bookmark, Check, ChevronLeft, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -47,6 +47,8 @@ interface SftpPaneToolbarProps {
   onToggleBookmark: () => void;
   onNavigateToBookmark: (path: string) => void;
   onDeleteBookmark: (id: string) => void;
+  showHiddenFiles: boolean;
+  onToggleShowHiddenFiles?: () => void;
 }
 
 export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
@@ -86,6 +88,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   onToggleBookmark,
   onNavigateToBookmark,
   onDeleteBookmark,
+  showHiddenFiles,
+  onToggleShowHiddenFiles,
 }) => (
   <>
     {/* Toolbar - always visible when connected */}
@@ -299,6 +303,15 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
           title={t("sftp.newFile")}
         >
           <FilePlus size={14} />
+        </Button>
+        <Button
+          variant={showHiddenFiles ? "secondary" : "ghost"}
+          size="icon"
+          className={cn("h-6 w-6", showHiddenFiles && "text-primary")}
+          onClick={onToggleShowHiddenFiles}
+          title={t("settings.sftp.showHiddenFiles")}
+        >
+          {showHiddenFiles ? <EyeOff size={14} /> : <Eye size={14} />}
         </Button>
         <Button
           variant={showFilterBar || pane.filter ? "secondary" : "ghost"}

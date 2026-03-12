@@ -31,6 +31,7 @@ import {
   SYNC_STORAGE_KEYS,
   generateDeviceId,
   getDefaultDeviceName,
+  isProviderReadyForSync,
 } from '../../domain/sync';
 import packageJson from '../../package.json';
 import { EncryptionService } from './EncryptionService';
@@ -945,6 +946,7 @@ export class CloudSyncManager {
   ): Promise<SyncResult> {
     try {
       await adapter.upload(syncedFile);
+      this.state.lastError = null;
 
       // Update local state (safe to do multiple times if values are same)
       this.state.localVersion = syncedFile.meta.version;
@@ -984,6 +986,7 @@ export class CloudSyncManager {
       this.emit({ type: 'SYNC_COMPLETED', provider, result });
       return result;
     } catch (error) {
+      this.state.lastError = String(error);
       this.updateProviderStatus(provider, 'error', String(error));
 
       // Add to sync history
@@ -1064,6 +1067,7 @@ export class CloudSyncManager {
     }
 
     this.updateProviderStatus(provider, 'syncing');
+    this.state.lastError = null;
     this.state.syncState = 'SYNCING';
     this.emit({ type: 'SYNC_STARTED', provider });
 
@@ -1252,17 +1256,15 @@ export class CloudSyncManager {
     }
 
     const connectedProviders = Object.entries(this.state.providers)
-      .filter(([p, conn]) => {
-        if (conn.status === 'connected') return true;
-        // Auto-recover: retry providers stuck in 'error' if tokens/config still exist
-        if (conn.status === 'error' && (conn.tokens || conn.config)) {
-          this.state.providers[p as CloudProvider].status = 'connected';
-          this.state.providers[p as CloudProvider].error = undefined;
+      .filter(([provider, connection]) => {
+        if (!isProviderReadyForSync(connection)) return false;
+        if (connection.status === 'error') {
+          this.state.providers[provider as CloudProvider].status = 'connected';
+          this.state.providers[provider as CloudProvider].error = undefined;
           // Clear cached adapter so a fresh one is created with current (decrypted) tokens
-          this.adapters.delete(p as CloudProvider);
-          return true;
+          this.adapters.delete(provider as CloudProvider);
         }
-        return false;
+        return true;
       })
       .map(([p]) => p as CloudProvider);
 
@@ -1270,6 +1272,7 @@ export class CloudSyncManager {
       return results;
     }
 
+    this.state.lastError = null;
     this.state.syncState = 'SYNCING';
 
     // 1. Parallel Checks

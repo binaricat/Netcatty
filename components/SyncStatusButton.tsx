@@ -25,7 +25,7 @@ import {
     Server,
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
-import type { CloudProvider } from '../domain/sync';
+import { isProviderReadyForSync, type CloudProvider } from '../domain/sync';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -122,12 +122,11 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
 
     // Get connected provider (include syncing status as it's still connected)
     const getConnectedProvider = (): CloudProvider | null => {
-        const isProviderActive = (status: string) => status === 'connected' || status === 'syncing';
-        if (isProviderActive(sync.providers.github.status)) return 'github';
-        if (isProviderActive(sync.providers.google.status)) return 'google';
-        if (isProviderActive(sync.providers.onedrive.status)) return 'onedrive';
-        if (isProviderActive(sync.providers.webdav.status)) return 'webdav';
-        if (isProviderActive(sync.providers.s3.status)) return 's3';
+        if (isProviderReadyForSync(sync.providers.github)) return 'github';
+        if (isProviderReadyForSync(sync.providers.google)) return 'google';
+        if (isProviderReadyForSync(sync.providers.onedrive)) return 'onedrive';
+        if (isProviderReadyForSync(sync.providers.webdav)) return 'webdav';
+        if (isProviderReadyForSync(sync.providers.s3)) return 's3';
         return null;
     };
 
@@ -136,9 +135,9 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
 
     // Determine overall status for the button indicator
     const getOverallStatus = (): StatusIndicatorProps['status'] => {
-        if (sync.isSyncing) return 'syncing';
-        if (sync.lastError) return 'error';
-        if (sync.hasAnyConnectedProvider) return 'synced';
+        if (sync.overallSyncStatus === 'syncing') return 'syncing';
+        if (sync.overallSyncStatus === 'error' || sync.overallSyncStatus === 'conflict') return 'error';
+        if (sync.overallSyncStatus === 'synced') return 'synced';
         return 'none';
     };
 

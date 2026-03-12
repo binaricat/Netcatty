@@ -21,6 +21,7 @@ import {
   type S3Config,
   formatLastSync,
   getSyncDotColor,
+  isProviderReadyForSync,
 } from '../../domain/sync';
 import {
   CloudSyncManager,
@@ -181,13 +182,13 @@ export const useCloudSync = (): CloudSyncHook => {
   
   const hasAnyConnectedProvider = useMemo(() => {
     return (Object.values(state.providers) as ProviderConnection[]).some(
-      (p) => p.status === 'connected' || p.status === 'syncing'
+      (p) => isProviderReadyForSync(p)
     );
   }, [state.providers]);
   
   const connectedProviderCount = useMemo(() => {
     return (Object.values(state.providers) as ProviderConnection[]).filter(
-      (p) => p.status === 'connected' || p.status === 'syncing'
+      (p) => isProviderReadyForSync(p)
     ).length;
   }, [state.providers]);
   
@@ -519,7 +520,7 @@ export const useProviderStatus = (provider: CloudProvider) => {
   
   return {
     ...connection,
-    isConnected: connection.status === 'connected',
+    isConnected: isProviderReadyForSync(connection),
     isSyncing: connection.status === 'syncing',
     hasError: connection.status === 'error',
     dotColor: getSyncDotColor(connection.status),

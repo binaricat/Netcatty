@@ -110,14 +110,15 @@ const areTerminalSettingsEqual = (a: TerminalSettings, b: TerminalSettings): boo
   serializeTerminalSettings(a) === serializeTerminalSettings(b);
 
 const applyThemeTokens = (
-  theme: 'light' | 'dark',
+  themeSource: 'light' | 'dark' | 'system',
+  resolvedTheme: 'light' | 'dark',
   tokens: UiThemeTokens,
   accentMode: 'theme' | 'custom',
   accentOverride: string,
 ) => {
   const root = window.document.documentElement;
   root.classList.remove('light', 'dark');
-  root.classList.add(theme);
+  root.classList.add(resolvedTheme);
   root.style.setProperty('--background', tokens.background);
   root.style.setProperty('--foreground', tokens.foreground);
   root.style.setProperty('--card', tokens.card);
@@ -126,7 +127,7 @@ const applyThemeTokens = (
   root.style.setProperty('--popover-foreground', tokens.popoverForeground);
   const accentToken = accentMode === 'custom' ? accentOverride : tokens.accent;
   const accentLightness = parseFloat(accentToken.split(/\s+/)[2]?.replace('%', '') || '');
-  const computedAccentForeground = theme === 'dark'
+  const computedAccentForeground = resolvedTheme === 'dark'
     ? '220 40% 96%'
     : (!Number.isNaN(accentLightness) && accentLightness < 55 ? '0 0% 98%' : '222 47% 12%');
 
@@ -145,7 +146,7 @@ const applyThemeTokens = (
   root.style.setProperty('--ring', accentToken);
 
   // Sync with native window title bar (Electron)
-  netcattyBridge.get()?.setTheme?.(theme);
+  netcattyBridge.get()?.setTheme?.(themeSource);
   netcattyBridge.get()?.setBackgroundColor?.(tokens.background);
 };
 
@@ -323,7 +324,7 @@ export const useSettingsState = () => {
 
     const effective = nextTheme === 'system' ? getSystemPreference() : nextTheme;
     const tokens = getUiThemeById(effective, effective === 'dark' ? nextDarkId : nextLightId).tokens;
-    applyThemeTokens(effective, tokens, nextAccentMode, nextAccent);
+    applyThemeTokens(nextTheme, effective, tokens, nextAccentMode, nextAccent);
   }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
 
   const syncCustomCssFromStorage = useCallback(() => {
@@ -333,7 +334,7 @@ export const useSettingsState = () => {
 
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
-    applyThemeTokens(resolvedTheme, tokens, accentMode, customAccent);
+    applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
     localStorageAdapter.writeString(STORAGE_KEY_THEME, theme);
     localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, lightUiThemeId);
     localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_DARK, darkUiThemeId);

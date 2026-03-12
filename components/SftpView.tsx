@@ -63,6 +63,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     keyBindings,
     editorWordWrap,
     setEditorWordWrap,
+    setSftpShowHiddenFiles,
   } = useSettingsState();
 
   // File watch event handlers (stable refs to avoid re-creating the useSftpState options)
@@ -117,6 +118,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
   const handlePaneFocus = useCallback((side: SftpFocusedSide) => {
     sftpFocusStore.setFocusedSide(side);
   }, []);
+
+  const handleToggleHiddenFiles = useCallback(() => {
+    setSftpShowHiddenFiles((prev) => !prev);
+  }, [setSftpShowHiddenFiles]);
 
   // Sync activeTabId to external store (allows child components to subscribe without parent re-render)
   // Using useLayoutEffect to sync before paint
@@ -277,6 +282,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
                     pane={pane}
                     showHeader
                     showEmptyHeader={false}
+                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
                   />
                 </SftpPaneWrapper>
               ))}
@@ -333,6 +339,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
                     pane={pane}
                     showHeader
                     showEmptyHeader={false}
+                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
                   />
                 </SftpPaneWrapper>
               ))}

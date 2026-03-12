@@ -202,6 +202,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     drawBoldTextInBrightColors,
     minimumContrastRatio,
     scrollOnUserInput,
+    macOptionClickForcesSelection: true,
     altClickMovesCursor: !altIsMeta,
     wordSeparator,
     theme: {
@@ -335,6 +336,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
+  const scrollToBottomAfterPaste = () => {
+    if (ctx.terminalSettingsRef.current?.scrollOnPaste ?? true) {
+      term.scrollToBottom();
+    }
+  };
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
     if (e.type !== "keydown") {
@@ -421,6 +427,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               let data = normalizeLineEndings(text);
               if (term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste) data = wrapBracketedPaste(data);
               ctx.terminalBackend.writeToSession(id, data);
+              scrollToBottomAfterPaste();
             }
           });
           break;
@@ -456,6 +463,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           let data = normalizeLineEndings(text);
           if (term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste) data = wrapBracketedPaste(data);
           ctx.terminalBackend.writeToSession(ctx.sessionRef.current, data);
+          scrollToBottomAfterPaste();
         }
       } catch (err) {
         logger.warn("[Terminal] Failed to paste from clipboard:", err);

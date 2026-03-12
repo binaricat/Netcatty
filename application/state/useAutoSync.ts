@@ -15,7 +15,7 @@ import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import {
   findSyncPayloadEncryptedCredentialPaths,
 } from '../../domain/credentials';
-import type { SyncPayload } from '../../domain/sync';
+import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
 import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { toast } from '../../components/ui/toast';
@@ -36,6 +36,7 @@ interface AutoSyncConfig {
 
 // Get manager singleton for direct state access
 const manager = getCloudSyncManager();
+const AUTO_SYNC_PROVIDER_ORDER: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
 
 type SyncTrigger = 'auto' | 'manual';
 
@@ -119,7 +120,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // Get fresh state directly from CloudSyncManager singleton
       let state = manager.getState();
 
-      const hasProvider = Object.values(state.providers).some(p => p.status === 'connected');
+      const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
       const syncing = state.syncState === 'SYNCING';
 
       if (!hasProvider) {
@@ -181,7 +182,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {
     const state = manager.getState();
-    const hasProvider = Object.values(state.providers).some(p => p.status === 'connected');
+    const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
     const unlocked = state.securityState === 'UNLOCKED';
     
     if (!hasProvider || !unlocked || hasCheckedRemoteRef.current) {
@@ -191,12 +192,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     hasCheckedRemoteRef.current = true;
     
     // Find connected provider
-    const connectedProvider = 
-      state.providers.github.status === 'connected' ? 'github' :
-      state.providers.google.status === 'connected' ? 'google' :
-      state.providers.onedrive.status === 'connected' ? 'onedrive' :
-      state.providers.webdav.status === 'connected' ? 'webdav' :
-      state.providers.s3.status === 'connected' ? 's3' : null;
+    const connectedProvider = AUTO_SYNC_PROVIDER_ORDER.find((provider) =>
+      isProviderReadyForSync(state.providers[provider]),
+    ) ?? null;
     
     if (!connectedProvider) return;
     

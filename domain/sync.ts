@@ -111,6 +111,17 @@ export interface ProviderConnection {
   error?: string;
 }
 
+export const hasProviderConnectionData = (
+  connection: Pick<ProviderConnection, 'tokens' | 'config'>,
+): boolean => Boolean(connection.tokens || connection.config);
+
+export const isProviderReadyForSync = (
+  connection: Pick<ProviderConnection, 'status' | 'tokens' | 'config'>,
+): boolean =>
+  connection.status === 'connected'
+  || connection.status === 'syncing'
+  || (connection.status === 'error' && hasProviderConnectionData(connection));
+
 // ============================================================================
 // Encrypted Sync File Schema
 // ============================================================================

@@ -375,7 +375,7 @@ declare global {
     getHomeDir?(): Promise<string>;
     getSystemInfo?(): Promise<{ username: string; hostname: string }>;
 
-    setTheme?(theme: 'light' | 'dark'): Promise<boolean>;
+    setTheme?(theme: 'light' | 'dark' | 'system'): Promise<boolean>;
     setBackgroundColor?(color: string): Promise<boolean>;
     setLanguage?(language: string): Promise<boolean>;
     // Window controls for custom title bar (Windows/Linux)

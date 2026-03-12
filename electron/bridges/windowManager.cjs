@@ -1094,7 +1094,10 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.handle("netcatty:setTheme", (_event, theme) => {
     currentTheme = theme;
     nativeTheme.themeSource = theme;
-    const themeConfig = THEME_COLORS[theme] || THEME_COLORS.light;
+    const effectiveTheme = theme === "system"
+      ? (nativeTheme?.shouldUseDarkColors ? "dark" : "light")
+      : theme;
+    const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setBackgroundColor(themeConfig.background);
     }
