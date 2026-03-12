@@ -15,11 +15,7 @@ const hasPrintableTerminalInput = (data: string): boolean => {
 
 export const shouldEnableNativeUserInputAutoScroll = (
   settings?: Partial<TerminalSettings> | null,
-): boolean => {
-  const scrollOnInput = settings?.scrollOnInput ?? true;
-  const scrollOnKeyPress = settings?.scrollOnKeyPress ?? false;
-  return scrollOnInput || scrollOnKeyPress;
-};
+): boolean => settings?.scrollOnInput ?? true;
 
 export const shouldScrollOnTerminalInput = (
   settings: Partial<TerminalSettings> | null | undefined,
