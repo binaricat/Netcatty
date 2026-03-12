@@ -36,7 +36,15 @@ export const useSftpState = (
   identities: Identity[],
   options?: SftpStateOptions
 ) => {
-  const tabsState = useSftpTabsState();
+  const createPane = useCallback(
+    (id?: string, showHiddenFiles = options?.defaultShowHiddenFiles ?? false) =>
+      createEmptyPane(id, showHiddenFiles),
+    [options?.defaultShowHiddenFiles],
+  );
+
+  const tabsState = useSftpTabsState({
+    defaultShowHiddenFiles: options?.defaultShowHiddenFiles,
+  });
   const {
     leftTabs,
     rightTabs,
@@ -49,6 +57,7 @@ export const useSftpState = (
     getActivePane,
     updateTab,
     updateActiveTab,
+    setTabShowHiddenFiles,
     addTab,
     closeTab,
     selectTab,
@@ -143,7 +152,7 @@ export const useSftpState = (
     reconnectingRef,
     makeCacheKey,
     clearCacheForConnection,
-    createEmptyPane,
+    createEmptyPane: createPane,
   });
 
   const {
@@ -203,6 +212,13 @@ export const useSftpState = (
       }
     },
     [clearCacheForConnection, getActivePane, navigateTo, updateActiveTab],
+  );
+
+  const setShowHiddenFiles = useCallback(
+    (side: "left" | "right", tabId: string, showHiddenFiles: boolean) => {
+      setTabShowHiddenFiles(side, tabId, showHiddenFiles);
+    },
+    [setTabShowHiddenFiles],
   );
 
   const {
@@ -270,6 +286,7 @@ export const useSftpState = (
     selectAll,
     setFilter,
     setFilenameEncoding,
+    setShowHiddenFiles,
     createDirectory,
     createFile,
     deleteFiles,
@@ -315,6 +332,7 @@ export const useSftpState = (
     selectAll,
     setFilter,
     setFilenameEncoding,
+    setShowHiddenFiles,
     createDirectory,
     createFile,
     deleteFiles,
@@ -364,6 +382,8 @@ export const useSftpState = (
     setFilter: (...args: Parameters<typeof setFilter>) => methodsRef.current.setFilter(...args),
     setFilenameEncoding: (...args: Parameters<typeof setFilenameEncoding>) =>
       methodsRef.current.setFilenameEncoding(...args),
+    setShowHiddenFiles: (...args: Parameters<typeof setShowHiddenFiles>) =>
+      methodsRef.current.setShowHiddenFiles(...args),
     createDirectory: (...args: Parameters<typeof createDirectory>) => methodsRef.current.createDirectory(...args),
     createFile: (...args: Parameters<typeof createFile>) => methodsRef.current.createFile(...args),
     deleteFiles: (...args: Parameters<typeof deleteFiles>) => methodsRef.current.deleteFiles(...args),

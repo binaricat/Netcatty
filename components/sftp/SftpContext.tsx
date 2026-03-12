@@ -98,9 +98,6 @@ export interface SftpContextValue {
     // Callbacks for each side
     leftCallbacks: SftpPaneCallbacks;
     rightCallbacks: SftpPaneCallbacks;
-
-    // Settings
-    showHiddenFiles: boolean;
 }
 
 const SftpContext = createContext<SftpContextValue | null>(null);
@@ -140,12 +137,6 @@ export const useSftpUpdateHosts = () => {
     return context.updateHosts;
 };
 
-// Hook to get showHiddenFiles setting
-export const useSftpShowHiddenFiles = (): boolean => {
-    const context = useSftpContext();
-    return context.showHiddenFiles;
-};
-
 interface SftpContextProviderProps {
     hosts: Host[];
     updateHosts: (hosts: Host[]) => void;
@@ -153,7 +144,6 @@ interface SftpContextProviderProps {
     dragCallbacks: SftpDragCallbacks;
     leftCallbacks: SftpPaneCallbacks;
     rightCallbacks: SftpPaneCallbacks;
-    showHiddenFiles: boolean;
     children: React.ReactNode;
 }
 
@@ -164,7 +154,6 @@ export const SftpContextProvider: React.FC<SftpContextProviderProps> = ({
     dragCallbacks,
     leftCallbacks,
     rightCallbacks,
-    showHiddenFiles,
     children,
 }) => {
     // Memoize the context value to prevent unnecessary re-renders
@@ -177,9 +166,8 @@ export const SftpContextProvider: React.FC<SftpContextProviderProps> = ({
             dragCallbacks,
             leftCallbacks,
             rightCallbacks,
-            showHiddenFiles,
         }),
-        [hosts, updateHosts, draggedFiles, dragCallbacks, leftCallbacks, rightCallbacks, showHiddenFiles],
+        [hosts, updateHosts, draggedFiles, dragCallbacks, leftCallbacks, rightCallbacks],
     );
 
     return <SftpContext.Provider value={value}>{children}</SftpContext.Provider>;

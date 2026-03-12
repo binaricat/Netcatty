@@ -27,7 +27,7 @@ interface UseSftpConnectionsParams {
   reconnectingRef: MutableRefObject<{ left: boolean; right: boolean }>;
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
   clearCacheForConnection: (connectionId: string) => void;
-  createEmptyPane: (id?: string) => SftpPane;
+  createEmptyPane: (id?: string, showHiddenFiles?: boolean) => SftpPane;
 }
 
 interface UseSftpConnectionsResult {
@@ -412,7 +412,7 @@ export const useSftpConnections = ({
         }
       }
 
-      updateTab(side, activeTabId, () => createEmptyPane(activeTabId));
+      updateTab(side, activeTabId, () => createEmptyPane(activeTabId, pane.showHiddenFiles));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [getActivePane, clearCacheForConnection, updateTab],

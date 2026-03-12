@@ -10,6 +10,7 @@ export interface SftpPane {
   selectedFiles: Set<string>;
   filter: string;
   filenameEncoding: SftpFilenameEncoding;
+  showHiddenFiles: boolean;
 }
 
 // Multi-tab state for left and right sides
@@ -22,7 +23,10 @@ export interface SftpSideTabs {
 export const EMPTY_LEFT_PANE_ID = "__empty_left__";
 export const EMPTY_RIGHT_PANE_ID = "__empty_right__";
 
-export const createEmptyPane = (id?: string): SftpPane => ({
+export const createEmptyPane = (
+  id?: string,
+  showHiddenFiles = false,
+): SftpPane => ({
   id: id || crypto.randomUUID(),
   connection: null,
   files: [],
@@ -32,6 +36,7 @@ export const createEmptyPane = (id?: string): SftpPane => ({
   selectedFiles: new Set(),
   filter: "",
   filenameEncoding: "auto",
+  showHiddenFiles,
 });
 
 // File watch event types
@@ -53,4 +58,5 @@ export interface SftpStateOptions {
   onFileWatchSynced?: (event: FileWatchSyncedEvent) => void;
   onFileWatchError?: (event: FileWatchErrorEvent) => void;
   useCompressedUpload?: boolean;
+  defaultShowHiddenFiles?: boolean;
 }

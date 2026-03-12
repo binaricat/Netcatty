@@ -63,7 +63,6 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     keyBindings,
     editorWordWrap,
     setEditorWordWrap,
-    setSftpShowHiddenFiles,
   } = useSettingsState();
 
   // File watch event handlers (stable refs to avoid re-creating the useSftpState options)
@@ -82,7 +81,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
   const sftpOptions = useMemo(() => ({
     ...fileWatchHandlers,
     useCompressedUpload: sftpUseCompressedUpload,
-  }), [fileWatchHandlers, sftpUseCompressedUpload]);
+    defaultShowHiddenFiles: sftpShowHiddenFiles,
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles]);
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
 
@@ -108,7 +108,6 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     hotkeyScheme,
     sftpRef,
     isActive,
-    showHiddenFiles: sftpShowHiddenFiles,
   });
 
   // Subscribe to focused side for visual indicator
@@ -119,9 +118,13 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     sftpFocusStore.setFocusedSide(side);
   }, []);
 
-  const handleToggleHiddenFiles = useCallback(() => {
-    setSftpShowHiddenFiles((prev) => !prev);
-  }, [setSftpShowHiddenFiles]);
+  const handleToggleHiddenFiles = useCallback((side: "left" | "right", paneId: string) => {
+    const sideTabs = side === "left" ? sftpRef.current.leftTabs : sftpRef.current.rightTabs;
+    const pane = sideTabs.tabs.find((tab) => tab.id === paneId);
+    if (!pane) return;
+
+    sftpRef.current.setShowHiddenFiles(side, paneId, !pane.showHiddenFiles);
+  }, []);
 
   // Sync activeTabId to external store (allows child components to subscribe without parent re-render)
   // Using useLayoutEffect to sync before paint
@@ -230,7 +233,6 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
       dragCallbacks={dragCallbacks}
       leftCallbacks={leftCallbacks}
       rightCallbacks={rightCallbacks}
-      showHiddenFiles={sftpShowHiddenFiles}
     >
       <div
         className={cn(
@@ -282,7 +284,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
                     pane={pane}
                     showHeader
                     showEmptyHeader={false}
-                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
+                    onToggleShowHiddenFiles={() => handleToggleHiddenFiles("left", pane.id)}
                   />
                 </SftpPaneWrapper>
               ))}
@@ -339,7 +341,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
                     pane={pane}
                     showHeader
                     showEmptyHeader={false}
-                    onToggleShowHiddenFiles={handleToggleHiddenFiles}
+                    onToggleShowHiddenFiles={() => handleToggleHiddenFiles("right", pane.id)}
                   />
                 </SftpPaneWrapper>
               ))}

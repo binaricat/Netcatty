@@ -19,7 +19,6 @@ export {
   useSftpDrag,
   useSftpHosts,
   useSftpUpdateHosts,
-  useSftpShowHiddenFiles,
   useActiveTabId,
   useIsPaneActive,
   activeTabStore,

@@ -32,7 +32,6 @@ interface UseSftpKeyboardShortcutsParams {
   hotkeyScheme: "disabled" | "mac" | "pc";
   sftpRef: MutableRefObject<SftpStateApi>;
   isActive: boolean;
-  showHiddenFiles: boolean;
 }
 
 /**
@@ -58,7 +57,6 @@ export const useSftpKeyboardShortcuts = ({
   hotkeyScheme,
   sftpRef,
   isActive,
-  showHiddenFiles,
 }: UseSftpKeyboardShortcutsParams) => {
   const handleKeyDown = useCallback(
     async (e: KeyboardEvent) => {
@@ -238,7 +236,7 @@ export const useSftpKeyboardShortcuts = ({
         case "sftpSelectAll": {
           // Select all files in the current pane
           const term = pane.filter.trim().toLowerCase();
-          let visibleFiles = filterHiddenFiles(pane.files, showHiddenFiles);
+          let visibleFiles = filterHiddenFiles(pane.files, pane.showHiddenFiles);
           if (term) {
             visibleFiles = visibleFiles.filter(
               (f) => f.name === ".." || f.name.toLowerCase().includes(term),
@@ -280,7 +278,7 @@ export const useSftpKeyboardShortcuts = ({
         }
       }
     },
-    [hotkeyScheme, isActive, keyBindings, sftpRef, showHiddenFiles]
+    [hotkeyScheme, isActive, keyBindings, sftpRef]
   );
 
   useEffect(() => {
