@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ArrowUp, Bookmark, Check, ChevronRight, FilePlus, FolderPlus, FolderUp, Home, Languages, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowUp, Bookmark, Check, ChevronRight, Eye, EyeOff, FilePlus, FolderPlus, FolderUp, Home, Languages, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { Host, SftpFilenameEncoding } from "../../types";
 import { useSftpBookmarks } from "../sftp/hooks/useSftpBookmarks";
@@ -51,6 +51,8 @@ interface SftpModalHeaderProps {
   onCreateFile: () => void;
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onFolderSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  showHiddenFiles: boolean;
+  onToggleShowHiddenFiles: () => void;
   onUpdateHost?: (host: Host) => void;
   onNavigateToBookmark?: (path: string) => void;
 }
@@ -91,6 +93,8 @@ export const SftpModalHeader: React.FC<SftpModalHeaderProps> = ({
   onCreateFile,
   onFileSelect,
   onFolderSelect,
+  showHiddenFiles,
+  onToggleShowHiddenFiles,
   onUpdateHost,
   onNavigateToBookmark,
 }) => {
@@ -302,6 +306,22 @@ export const SftpModalHeader: React.FC<SftpModalHeaderProps> = ({
               </PopoverContent>
             </Popover>
           )}
+          <Tooltip
+            open={openTooltip === 'showHiddenFiles'}
+            onOpenChange={handleTooltipOpenChange('showHiddenFiles')}
+          >
+            <TooltipTrigger asChild>
+              <Button
+                variant={showHiddenFiles ? "secondary" : "ghost"}
+                size="icon"
+                className={cn("h-7 w-7", showHiddenFiles && "text-primary")}
+                onClick={onToggleShowHiddenFiles}
+              >
+                {showHiddenFiles ? <EyeOff size={14} /> : <Eye size={14} />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("settings.sftp.showHiddenFiles")}</TooltipContent>
+          </Tooltip>
 
           <div className="flex items-center gap-1 text-sm flex-1 min-w-0 overflow-hidden">
             {isEditingPath ? (

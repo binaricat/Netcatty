@@ -93,6 +93,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
   const {
     sftpAutoSync,
     sftpShowHiddenFiles,
+    setSftpShowHiddenFiles,
     sftpUseCompressedUpload,
     hotkeyScheme,
     keyBindings,
@@ -685,6 +686,10 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
           onCreateFile={handleCreateFile}
           onFileSelect={handleFileSelect}
           onFolderSelect={handleFolderSelect}
+          showHiddenFiles={sftpShowHiddenFiles}
+          onToggleShowHiddenFiles={() =>
+            setSftpShowHiddenFiles(!sftpShowHiddenFiles)
+          }
           onUpdateHost={onUpdateHost}
           onNavigateToBookmark={(path) => setCurrentPath(path)}
         />
