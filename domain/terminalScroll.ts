@@ -1,6 +1,10 @@
 import type { TerminalSettings } from "./models";
 
 const hasPrintableTerminalInput = (data: string): boolean => {
+  if (data.includes("\x1b")) {
+    return false;
+  }
+
   for (const char of data) {
     const codePoint = char.codePointAt(0);
     if (codePoint === undefined) {

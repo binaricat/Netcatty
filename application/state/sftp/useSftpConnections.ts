@@ -346,6 +346,7 @@ export const useSftpConnections = ({
       getActivePane,
       updateTab,
       clearCacheForConnection,
+      createEmptyPane,
       makeCacheKey,
       listLocalFiles,
       listRemoteFiles,
