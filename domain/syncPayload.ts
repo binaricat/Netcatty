@@ -28,13 +28,13 @@ export interface SyncableVaultData {
   identities: Identity[];
   snippets: Snippet[];
   customGroups: string[];
-  snippetPackages: string[];
+  snippetPackages?: string[];
   knownHosts: KnownHost[];
 }
 
 /** Callbacks used by `applySyncPayload` to import data into local state. */
 export interface SyncPayloadImporters {
-  /** Import vault data (hosts, keys, identities, snippets, customGroups, knownHosts). */
+  /** Import vault data (hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts). */
   importVaultData: (jsonString: string) => void;
   /** Import port-forwarding rules (lives outside the vault hook). */
   importPortForwardingRules?: (rules: PortForwardingRule[]) => void;
