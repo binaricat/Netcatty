@@ -24,7 +24,6 @@ import { useSftpModalFileActions } from "./sftp-modal/hooks/useSftpModalFileActi
 import { useSftpModalKeyboardShortcuts } from "./sftp-modal/hooks/useSftpModalKeyboardShortcuts";
 import { joinPath, isRootPath, getParentPath } from "./sftp-modal/pathUtils";
 import { toast } from "./ui/toast";
-import { Dialog, DialogContent } from "./ui/dialog";
 
 interface SFTPModalProps {
   host: Host;
@@ -649,10 +648,13 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
     }
   };
 
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-      <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0 gap-0">
+    <>
+      <div className="h-full flex flex-col bg-background border-r border-border/60 overflow-hidden">
         <SftpModalHeader
+          onClose={handleClose}
           t={t}
           host={host}
           credentials={credentials}
@@ -753,7 +755,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-      </DialogContent>
+      </div>
 
       <SftpModalDialogs
         t={t}
@@ -808,7 +810,7 @@ const SFTPModal: React.FC<SFTPModalProps> = ({
         editorWordWrap={editorWordWrap}
         onToggleWordWrap={() => setEditorWordWrap(!editorWordWrap)}
       />
-    </Dialog>
+    </>
   );
 };
 

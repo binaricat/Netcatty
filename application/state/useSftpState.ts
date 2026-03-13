@@ -153,6 +153,7 @@ export const useSftpState = (
     makeCacheKey,
     clearCacheForConnection,
     createEmptyPane: createPane,
+    autoConnectLocalOnMount: options?.autoConnectLocalOnMount,
   });
 
   const {
@@ -249,6 +250,7 @@ export const useSftpState = (
     writeTextFile,
     downloadToTempAndOpen,
     uploadExternalFiles,
+    uploadExternalEntries,
     cancelExternalUpload,
     selectApplication,
   } = useSftpExternalOperations({
@@ -298,6 +300,7 @@ export const useSftpState = (
     writeTextFile,
     downloadToTempAndOpen,
     uploadExternalFiles,
+    uploadExternalEntries,
     cancelExternalUpload,
     selectApplication,
     startTransfer,
@@ -344,6 +347,7 @@ export const useSftpState = (
     writeTextFile,
     downloadToTempAndOpen,
     uploadExternalFiles,
+    uploadExternalEntries,
     cancelExternalUpload,
     selectApplication,
     startTransfer,
@@ -396,6 +400,8 @@ export const useSftpState = (
     writeTextFile: (...args: Parameters<typeof writeTextFile>) => methodsRef.current.writeTextFile(...args),
     downloadToTempAndOpen: (...args: Parameters<typeof downloadToTempAndOpen>) => methodsRef.current.downloadToTempAndOpen(...args),
     uploadExternalFiles: (...args: Parameters<typeof uploadExternalFiles>) => methodsRef.current.uploadExternalFiles(...args),
+    uploadExternalEntries: (...args: Parameters<typeof uploadExternalEntries>) =>
+      methodsRef.current.uploadExternalEntries(...args),
     cancelExternalUpload: () => methodsRef.current.cancelExternalUpload(),
     selectApplication: () => methodsRef.current.selectApplication(),
     startTransfer: (...args: Parameters<typeof startTransfer>) => methodsRef.current.startTransfer(...args),

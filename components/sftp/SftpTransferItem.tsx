@@ -12,6 +12,7 @@ import {
     XCircle,
 } from 'lucide-react';
 import React, { memo } from 'react';
+import { getParentPath } from '../../application/state/sftp/utils';
 import { cn } from '../../lib/utils';
 import { TransferTask } from '../../types';
 import { Button } from '../ui/button';
@@ -22,9 +23,18 @@ interface SftpTransferItemProps {
     onCancel: () => void;
     onRetry: () => void;
     onDismiss: () => void;
+    canRevealTarget?: boolean;
+    onRevealTarget?: () => void;
 }
 
-const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({ task, onCancel, onRetry, onDismiss }) => {
+const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
+    task,
+    onCancel,
+    onRetry,
+    onDismiss,
+    canRevealTarget = false,
+    onRevealTarget,
+}) => {
     const progress = task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0;
 
     // Calculate remaining time from backend-reported sliding-window speed
@@ -49,33 +59,43 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({ task, onCancel
             : '';
 
     const speedFormatted = effectiveSpeed > 0 ? formatSpeed(effectiveSpeed) : '';
+    const targetDirectoryPath = task.isDirectory ? task.targetPath : getParentPath(task.targetPath);
 
-    return (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-background/60 border-t border-border/40 backdrop-blur-sm">
-            <div className="h-6 w-6 rounded flex items-center justify-center shrink-0">
-                {task.status === 'transferring' && <Loader2 size={14} className="animate-spin text-primary" />}
+    const details = (
+        <>
+            <div className="h-5 w-5 rounded flex items-center justify-center shrink-0">
+                {task.status === 'transferring' && <Loader2 size={12} className="animate-spin text-primary" />}
                 {task.status === 'pending' && (task.isDirectory
-                    ? <FolderUp size={14} className="text-muted-foreground animate-pulse" />
-                    : <ArrowDown size={14} className="text-muted-foreground animate-bounce" />
+                    ? <FolderUp size={12} className="text-muted-foreground animate-pulse" />
+                    : <ArrowDown size={12} className="text-muted-foreground animate-bounce" />
                 )}
-                {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500" />}
-                {task.status === 'failed' && <XCircle size={14} className="text-destructive" />}
-                {task.status === 'cancelled' && <XCircle size={14} className="text-muted-foreground" />}
+                {task.status === 'completed' && <CheckCircle2 size={12} className="text-green-500" />}
+                {task.status === 'failed' && <XCircle size={12} className="text-destructive" />}
+                {task.status === 'cancelled' && <XCircle size={12} className="text-muted-foreground" />}
             </div>
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm truncate font-medium">{task.fileName}</span>
+                    <span className="text-[13px] leading-5 truncate font-medium">{task.fileName}</span>
                     {task.status === 'transferring' && speedFormatted && (
-                        <span className="text-xs text-primary/80 font-mono transition-opacity duration-300">{speedFormatted}</span>
+                        <span className="text-[10px] text-primary/80 font-mono transition-opacity duration-300">{speedFormatted}</span>
                     )}
                     {task.status === 'transferring' && remainingFormatted && (
-                        <span className="text-xs text-muted-foreground transition-opacity duration-300">{remainingFormatted}</span>
+                        <span className="text-[10px] text-muted-foreground transition-opacity duration-300">{remainingFormatted}</span>
                     )}
                 </div>
+                <div
+                    className={cn(
+                        "text-[9px] mt-0.5 truncate",
+                        canRevealTarget ? "text-primary/80" : "text-muted-foreground",
+                    )}
+                    title={targetDirectoryPath}
+                >
+                    {targetDirectoryPath}
+                </div>
                 {(task.status === 'transferring' || task.status === 'pending') && (
-                    <div className="flex items-center gap-2 mt-1.5">
-                        <div className="flex-1 h-2 bg-secondary/80 rounded-full overflow-hidden">
+                    <div className="flex items-center gap-2 mt-1">
+                        <div className="flex-1 h-1.5 bg-secondary/80 rounded-full overflow-hidden">
                             <div
                                 className={cn(
                                     "h-full rounded-full relative overflow-hidden",
@@ -100,39 +120,56 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({ task, onCancel
                                 )}
                             </div>
                         </div>
-                        <span className="text-[11px] text-muted-foreground shrink-0 min-w-[40px] text-right font-mono">
+                        <span className="text-[10px] text-muted-foreground shrink-0 min-w-[34px] text-right font-mono">
                             {task.status === 'pending' ? 'waiting...' : `${Math.round(progress)}%`}
                         </span>
                     </div>
                 )}
                 {task.status === 'transferring' && bytesDisplay && (
-                    <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                    <div className="text-[9px] text-muted-foreground mt-0.5 font-mono">
                         {bytesDisplay}
                     </div>
                 )}
                 {task.status === 'completed' && bytesDisplay && (
-                    <div className="text-[10px] text-green-600 mt-0.5">
+                    <div className="text-[9px] text-green-600 mt-0.5">
                         Completed - {bytesDisplay}
                     </div>
                 )}
                 {task.status === 'failed' && task.error && (
-                    <span className="text-xs text-destructive">{task.error}</span>
+                    <span className="text-[10px] text-destructive">{task.error}</span>
                 )}
             </div>
+        </>
+    );
+
+    return (
+        <div className="flex items-center gap-2.5 px-3 py-2 bg-background/60 border-t border-border/40 backdrop-blur-sm">
+            {canRevealTarget && onRevealTarget ? (
+                <button
+                    type="button"
+                    className="flex flex-1 min-w-0 items-center gap-2.5 rounded-sm text-left transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                    onClick={onRevealTarget}
+                    title="Open transfer destination"
+                >
+                    {details}
+                </button>
+            ) : (
+                details
+            )}
 
             <div className="flex items-center gap-1 shrink-0">
                 {task.status === 'failed' && task.retryable !== false && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRetry} title="Retry">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRetry} title="Retry">
                         <RefreshCw size={12} />
                     </Button>
                 )}
                 {(task.status === 'pending' || task.status === 'transferring') && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={onCancel} title="Cancel">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onCancel} title="Cancel">
                         <X size={12} />
                     </Button>
                 )}
                 {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onDismiss} title="Dismiss">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onDismiss} title="Dismiss">
                         <X size={12} />
                     </Button>
                 )}
@@ -158,6 +195,8 @@ const arePropsEqual = (
 
     // Always re-render on fileName change
     if (prev.fileName !== next.fileName) return false;
+    if (prev.targetPath !== next.targetPath) return false;
+    if ((prevProps.canRevealTarget ?? false) !== (nextProps.canRevealTarget ?? false)) return false;
 
     // For transferring status, allow frequent re-renders for smooth progress bar
     if (next.status === 'transferring') {

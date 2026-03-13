@@ -5,7 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { Cpu, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+// flushSync removed - no longer needed
 import { useI18n } from "../application/i18n/I18nProvider";
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
@@ -28,7 +28,7 @@ import {
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
-import SFTPModal from "./SFTPModal";
+// SFTPModal removed - SFTP is now handled by SftpSidePanel in TerminalLayer
 import { Button } from "./ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { toast } from "./ui/toast";
@@ -141,6 +141,11 @@ interface TerminalProps {
   ) => void;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
+  onOpenSftp?: (
+    host: Host,
+    initialPath?: string,
+    pendingUploadEntries?: DropEntry[],
+  ) => void;
   isBroadcastEnabled?: boolean;
   onToggleBroadcast?: () => void;
   onToggleComposeBar?: () => void;
@@ -197,6 +202,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onCommandExecuted,
   onSplitHorizontal,
   onSplitVertical,
+  onOpenSftp,
   isBroadcastEnabled,
   onToggleBroadcast,
   onToggleComposeBar,
@@ -228,6 +234,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
   const pendingOutputScrollRef = useRef(false);
+  const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     if (xtermRuntimeRef.current) {
@@ -288,7 +295,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [timeLeft, setTimeLeft] = useState(CONNECTION_TIMEOUT / 1000);
   const [isCancelling, setIsCancelling] = useState(false);
   const [showSFTP, setShowSFTP] = useState(false);
-  const [sftpInitialPath, setSftpInitialPath] = useState<string | undefined>(undefined);
   const [progressValue, setProgressValue] = useState(15);
   const [hasSelection, setHasSelection] = useState(false);
 
@@ -304,7 +310,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Drag and drop state
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragCounterRef = useRef(0);
-  const [pendingUploadEntries, setPendingUploadEntries] = useState<DropEntry[]>([]);
+  // pendingUploadEntries removed - drag-drop uploads now handled by SftpSidePanel
   const [isComposeBarOpen, setIsComposeBarOpen] = useState(false);
   const [terminalEncoding, setTerminalEncoding] = useState<'utf-8' | 'gb18030'>(() => {
     if (host?.charset && /^gb/i.test(String(host.charset).trim())) return 'gb18030';
@@ -642,12 +648,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateStatus is a stable internal helper
   }, [status, auth.needsAuth, host.protocol, host.hostname]);
 
-  const safeFit = () => {
+  const safeFit = (options?: { force?: boolean; requireVisible?: boolean }) => {
     const fitAddon = fitAddonRef.current;
     if (!fitAddon) return;
+    if (options?.requireVisible && !isVisibleRef.current) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    if (!options?.force) {
+      const lastSize = lastFittedSizeRef.current;
+      if (lastSize && lastSize.width === width && lastSize.height === height) {
+        return;
+      }
+    }
 
     const runFit = () => {
       try {
+        lastFittedSizeRef.current = { width, height };
         fitAddon.fit();
       } catch (err) {
         logger.warn("Fit failed", err);
@@ -721,7 +743,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
       }
 
-      setTimeout(() => safeFit(), 50);
+      setTimeout(() => safeFit({ force: true }), 50);
     }
   }, [fontSize, effectiveTheme, terminalSettings, host.fontSize]);
 
@@ -739,14 +761,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         selectionBackground: effectiveTheme.colors.selection,
       };
 
-      setTimeout(() => safeFit(), 50);
+      setTimeout(() => safeFit({ force: true }), 50);
     }
   }, [host.fontSize, host.fontFamily, host.theme, fontFamilyId, fontSize, effectiveTheme, availableFonts]);
 
   useEffect(() => {
     if (!isVisible) return;
     const timer = setTimeout(() => {
-      safeFit();
+      safeFit({ requireVisible: true });
       if (pendingOutputScrollRef.current) {
         termRef.current?.scrollToBottom();
         if (typeof requestAnimationFrame === "function") {
@@ -828,17 +850,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [host.id, host.fontFamily, host.fontSize, fontFamilyId, fontSize, resizeSession, sessionId, terminalSettings]);
 
   useEffect(() => {
-    if (!containerRef.current || !fitAddonRef.current) return;
+    if (!isVisible || !containerRef.current || !fitAddonRef.current) return;
 
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const observer = new ResizeObserver(() => {
-      if (isResizing) return;
+      if (isResizing || !isVisibleRef.current) return;
       if (resizeTimeout) {
         clearTimeout(resizeTimeout);
       }
       resizeTimeout = setTimeout(() => {
-        safeFit();
+        safeFit({ requireVisible: true });
       }, 250);
     });
 
@@ -853,7 +875,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     if (prevIsResizingRef.current && !isResizing && isVisible) {
       const timer = setTimeout(() => {
-        safeFit();
+        safeFit({ force: true, requireVisible: true });
       }, 100);
       return () => clearTimeout(timer);
     }
@@ -863,7 +885,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     if (!isVisible || !fitAddonRef.current) return;
     const timer = setTimeout(() => {
-      safeFit();
+      safeFit({ requireVisible: true });
     }, 100);
     return () => clearTimeout(timer);
   }, [inWorkspace, isVisible]);
@@ -965,11 +987,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const handler = () => {
+      if (!isVisibleRef.current) return;
       if (resizeTimeout) {
         clearTimeout(resizeTimeout);
       }
       resizeTimeout = setTimeout(() => {
-        safeFit();
+        safeFit({ requireVisible: true });
       }, 250);
     };
 
@@ -1021,30 +1044,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   };
 
   const handleOpenSFTP = async () => {
-    // If SFTP is already open, toggle it off
+    if (onOpenSftp) {
+      // Delegate to parent (TerminalLayer) for shared SFTP side panel
+      let initialPath: string | undefined = undefined;
+      if (sessionRef.current) {
+        try {
+          const result = await terminalBackend.getSessionPwd(sessionRef.current);
+          if (result.success && result.cwd) {
+            initialPath = result.cwd;
+          }
+        } catch {
+          // Silently fail
+        }
+      }
+      onOpenSftp(host, initialPath);
+      return;
+    }
+
+    // Fallback: toggle internal SFTP state (shouldn't happen with new architecture)
     if (showSFTP) {
       setShowSFTP(false);
       return;
     }
-
-    // Try to get the current working directory from the terminal session
-    let initialPath: string | undefined = undefined;
-    if (sessionRef.current) {
-      try {
-        const result = await terminalBackend.getSessionPwd(sessionRef.current);
-        if (result.success && result.cwd) {
-          initialPath = result.cwd;
-        }
-      } catch {
-        // Silently fail and open SFTP without initial path
-      }
-    }
-
-    // Use flushSync to ensure initialPath state is committed before opening SFTP modal
-    // This prevents React's batching from causing the modal to open with stale/undefined initialPath
-    flushSync(() => {
-      setSftpInitialPath(initialPath);
-    });
     setShowSFTP(true);
   };
 
@@ -1176,27 +1197,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           termRef.current.focus();
         }
       } else {
-        // Remote terminal: Trigger SFTP upload
-        // Get current working directory for SFTP initial path
-        let initialPath: string | undefined = undefined;
-        if (sessionRef.current) {
-          try {
-            const result = await terminalBackend.getSessionPwd(sessionRef.current);
-            if (result.success && result.cwd) {
-              initialPath = result.cwd;
+        // Remote terminal: Trigger SFTP upload via parent
+        if (onOpenSftp) {
+          let initialPath: string | undefined = undefined;
+          if (sessionRef.current) {
+            try {
+              const result = await terminalBackend.getSessionPwd(sessionRef.current);
+              if (result.success && result.cwd) {
+                initialPath = result.cwd;
+              }
+            } catch {
+              // Silently fail
             }
-          } catch {
-            // Silently fail and open SFTP without initial path
           }
+          onOpenSftp(host, initialPath, dropEntries);
         }
-
-        setPendingUploadEntries(dropEntries);
-        // Use flushSync to ensure sftpInitialPath is updated synchronously
-        // before setShowSFTP(true) triggers the modal open
-        flushSync(() => {
-          setSftpInitialPath(initialPath);
-        });
-        setShowSFTP(true);
       }
     } catch (error) {
       logger.error("Failed to handle file drop", error);
@@ -1652,7 +1667,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         </div>
 
         <div
-          className="h-full flex-1 min-w-0 transition-all duration-300 relative overflow-hidden pt-8"
+          className="h-full flex-1 min-w-0 relative overflow-hidden pt-8"
           style={{ backgroundColor: effectiveTheme.colors.background }}
         >
           <div
@@ -1742,78 +1757,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             themeColors={effectiveTheme.colors}
           />
         )}
-
-        <SFTPModal
-          host={host}
-          credentials={(() => {
-            const resolvedAuth = resolveHostAuth({ host, keys, identities });
-
-            // Build proxy config if present
-            const proxyConfig = host.proxyConfig
-              ? {
-                type: host.proxyConfig.type,
-                host: host.proxyConfig.host,
-                port: host.proxyConfig.port,
-                username: host.proxyConfig.username,
-                password: host.proxyConfig.password,
-              }
-              : undefined;
-
-            // Build jump hosts array if host chain is configured
-            let jumpHosts: NetcattyJumpHost[] | undefined;
-            if (host.hostChain?.hostIds && host.hostChain.hostIds.length > 0) {
-              jumpHosts = host.hostChain.hostIds
-                .map((hostId) => allHosts.find((h) => h.id === hostId))
-                .filter((h): h is Host => !!h)
-                .map((jumpHost) => {
-                  const jumpAuth = resolveHostAuth({
-                    host: jumpHost,
-                    keys,
-                    identities,
-                  });
-                  const jumpKey = jumpAuth.key;
-                  return {
-                    hostname: jumpHost.hostname,
-                    port: jumpHost.port || 22,
-                    username: jumpAuth.username || "root",
-                    password: jumpAuth.password,
-                    privateKey: jumpKey?.privateKey,
-                    certificate: jumpKey?.certificate,
-                    passphrase: jumpAuth.passphrase || jumpKey?.passphrase,
-                    publicKey: jumpKey?.publicKey,
-                    keyId: jumpAuth.keyId,
-                    keySource: jumpKey?.source,
-                    label: jumpHost.label,
-                  };
-                });
-            }
-
-            return {
-              username: resolvedAuth.username,
-              hostname: host.hostname,
-              port: host.port,
-              password: resolvedAuth.password,
-              privateKey: resolvedAuth.key?.privateKey,
-              certificate: resolvedAuth.key?.certificate,
-              passphrase: resolvedAuth.passphrase,
-              publicKey: resolvedAuth.key?.publicKey,
-              keyId: resolvedAuth.keyId,
-              keySource: resolvedAuth.key?.source,
-              proxy: proxyConfig,
-              jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
-              sftpSudo: host.sftpSudo,
-              legacyAlgorithms: host.legacyAlgorithms,
-            };
-          })()}
-          open={showSFTP && status === "connected"}
-          onClose={() => {
-            setShowSFTP(false);
-            setPendingUploadEntries([]);
-          }}
-          initialPath={sftpInitialPath}
-          initialEntriesToUpload={pendingUploadEntries}
-          onUpdateHost={onUpdateHost}
-        />
       </div>
     </TerminalContextMenu>
   );

@@ -664,6 +664,7 @@ export interface TransferTask {
   targetPath: string;
   sourceConnectionId: string;
   targetConnectionId: string;
+  targetHostId?: string;
   direction: TransferDirection;
   status: TransferStatus;
   totalBytes: number;

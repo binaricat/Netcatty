@@ -180,6 +180,12 @@ function App({ settings }: { settings: SettingsState }) {
     hotkeyScheme,
     keyBindings,
     isHotkeyRecording,
+    sftpDoubleClickBehavior,
+    sftpAutoSync,
+    sftpShowHiddenFiles,
+    sftpUseCompressedUpload,
+    editorWordWrap,
+    setEditorWordWrap,
     sessionLogsEnabled,
     sessionLogsDir,
     sessionLogsFormat,
@@ -1307,6 +1313,13 @@ function App({ settings }: { settings: SettingsState }) {
           onSplitSession={splitSession}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
+          updateHosts={updateHosts}
+          sftpDoubleClickBehavior={sftpDoubleClickBehavior}
+          sftpAutoSync={sftpAutoSync}
+          sftpShowHiddenFiles={sftpShowHiddenFiles}
+          sftpUseCompressedUpload={sftpUseCompressedUpload}
+          editorWordWrap={editorWordWrap}
+          setEditorWordWrap={setEditorWordWrap}
         />
 
         {/* Log Views - readonly terminal replays */}

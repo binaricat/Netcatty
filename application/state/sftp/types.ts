@@ -59,4 +59,5 @@ export interface SftpStateOptions {
   onFileWatchError?: (event: FileWatchErrorEvent) => void;
   useCompressedUpload?: boolean;
   defaultShowHiddenFiles?: boolean;
+  autoConnectLocalOnMount?: boolean;
 }

@@ -5,6 +5,7 @@ import type { Host, Identity, SftpConnection, SftpFileEntry, SftpFilenameEncodin
 import type { SftpPane } from "./types";
 import { useSftpDirectoryListing } from "./useSftpDirectoryListing";
 import { useSftpHostCredentials } from "./useSftpHostCredentials";
+import { getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpConnectionsParams {
   hosts: Host[];
@@ -28,6 +29,7 @@ interface UseSftpConnectionsParams {
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
   clearCacheForConnection: (connectionId: string) => void;
   createEmptyPane: (id?: string, showHiddenFiles?: boolean) => SftpPane;
+  autoConnectLocalOnMount?: boolean;
 }
 
 interface UseSftpConnectionsResult {
@@ -59,6 +61,7 @@ export const useSftpConnections = ({
   makeCacheKey,
   clearCacheForConnection,
   createEmptyPane,
+  autoConnectLocalOnMount = true,
 }: UseSftpConnectionsParams): UseSftpConnectionsResult => {
   const getHostCredentials = useSftpHostCredentials({ hosts, keys, identities });
   const { listLocalFiles, listRemoteFiles } = useSftpDirectoryListing();
@@ -162,22 +165,29 @@ export const useSftpConnections = ({
           }));
         }
       } else {
+        const sharedHostCacheCandidate = getSharedRemoteHostCache(host.id);
+        const sharedHostCache =
+          sharedHostCacheCandidate?.filenameEncoding === filenameEncoding
+            ? sharedHostCacheCandidate
+            : null;
+        const cachedStartPath = sharedHostCache?.path ?? "/";
+
         const connection: SftpConnection = {
           id: connectionId,
           hostId: host.id,
           hostLabel: host.label,
           isLocal: false,
           status: "connecting",
-          currentPath: "/",
+          currentPath: cachedStartPath,
         };
 
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
           connection,
-          loading: true,
+          loading: !sharedHostCache,
           reconnecting: prev.reconnecting,
           error: null,
-          files: prev.reconnecting ? prev.files : [],
+          files: prev.reconnecting ? prev.files : (sharedHostCache?.files ?? []),
           filenameEncoding, // Reset encoding for new connection
         }));
 
@@ -238,64 +248,91 @@ export const useSftpConnections = ({
 
           sftpSessionsRef.current.set(connectionId, sftpId);
 
-          let startPath = "/";
-          const statSftp = netcattyBridge.get()?.statSftp;
-          if (statSftp) {
-            const candidates: string[] = [];
-            if (credentials.username === "root") {
-              candidates.push("/root");
-            } else if (credentials.username) {
-              candidates.push(`/home/${credentials.username}`);
-              candidates.push("/root");
-            } else {
-              candidates.push("/root");
-            }
-            for (const candidate of candidates) {
-              try {
-                const stat = await statSftp(sftpId, candidate, filenameEncoding);
-                if (stat?.type === "directory") {
-                  startPath = candidate;
-                  break;
+          let startPath = sharedHostCache?.path ?? "/";
+          let homeDir = sharedHostCache?.homeDir ?? startPath;
+
+          if (!sharedHostCache) {
+            const statSftp = netcattyBridge.get()?.statSftp;
+            if (statSftp) {
+              const candidates: string[] = [];
+              if (credentials.username === "root") {
+                candidates.push("/root");
+              } else if (credentials.username) {
+                candidates.push(`/home/${credentials.username}`);
+                candidates.push("/root");
+              } else {
+                candidates.push("/root");
+              }
+              for (const candidate of candidates) {
+                try {
+                  const stat = await statSftp(sftpId, candidate, filenameEncoding);
+                  if (stat?.type === "directory") {
+                    startPath = candidate;
+                    homeDir = candidate;
+                    break;
+                  }
+                } catch {
+                  // Ignore missing/permission errors
                 }
-              } catch {
-                // Ignore missing/permission errors
               }
-            }
-          } else {
-            if (credentials.username === "root") {
-              try {
-                const rootFiles = await netcattyBridge.get()?.listSftp(sftpId, "/root", filenameEncoding);
-                if (rootFiles) startPath = "/root";
-              } catch {
-                // Fallback path not available
-              }
-            } else if (credentials.username) {
-              try {
-                const homeFiles = await netcattyBridge.get()?.listSftp(
-                  sftpId,
-                  `/home/${credentials.username}`,
-                  filenameEncoding,
-                );
-                if (homeFiles) startPath = `/home/${credentials.username}`;
-              } catch {
-                // Fall through to /root check
-              }
-              if (startPath === "/") {
+            } else {
+              if (credentials.username === "root") {
                 try {
                   const rootFiles = await netcattyBridge.get()?.listSftp(sftpId, "/root", filenameEncoding);
-                  if (rootFiles) startPath = "/root";
+                  if (rootFiles) {
+                    startPath = "/root";
+                    homeDir = "/root";
+                  }
+                } catch {
+                  // Fallback path not available
+                }
+              } else if (credentials.username) {
+                try {
+                  const homeFiles = await netcattyBridge.get()?.listSftp(
+                    sftpId,
+                    `/home/${credentials.username}`,
+                    filenameEncoding,
+                  );
+                  if (homeFiles) {
+                    startPath = `/home/${credentials.username}`;
+                    homeDir = startPath;
+                  }
+                } catch {
+                  // Fall through to /root check
+                }
+                if (startPath === "/") {
+                  try {
+                    const rootFiles = await netcattyBridge.get()?.listSftp(sftpId, "/root", filenameEncoding);
+                    if (rootFiles) {
+                      startPath = "/root";
+                      homeDir = "/root";
+                    }
+                  } catch {
+                    // Fallback path not available
+                  }
+                }
+              } else {
+                try {
+                  const rootFiles = await netcattyBridge.get()?.listSftp(sftpId, "/root", filenameEncoding);
+                  if (rootFiles) {
+                    startPath = "/root";
+                    homeDir = "/root";
+                  }
                 } catch {
                   // Fallback path not available
                 }
               }
-            } else {
-              try {
-                const rootFiles = await netcattyBridge.get()?.listSftp(sftpId, "/root", filenameEncoding);
-                if (rootFiles) startPath = "/root";
-              } catch {
-                // Fallback path not available
-              }
             }
+          }
+
+          if (sharedHostCache) {
+            dirCacheRef.current.set(
+              makeCacheKey(connectionId, startPath, filenameEncoding),
+              {
+                files: sharedHostCache.files,
+                timestamp: Date.now(),
+              },
+            );
           }
 
           const files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
@@ -303,6 +340,12 @@ export const useSftpConnections = ({
           dirCacheRef.current.set(makeCacheKey(connectionId, startPath, filenameEncoding), {
             files,
             timestamp: Date.now(),
+          });
+          setSharedRemoteHostCache(host.id, {
+            path: startPath,
+            homeDir,
+            files,
+            filenameEncoding,
           });
 
           reconnectingRef.current[side] = false;
@@ -314,7 +357,7 @@ export const useSftpConnections = ({
                   ...prev.connection,
                   status: "connected",
                   currentPath: startPath,
-                  homeDir: startPath,
+                  homeDir,
                 }
               : null,
             files,
@@ -356,13 +399,17 @@ export const useSftpConnections = ({
   const initialConnectDoneRef = useRef(false);
 
   useEffect(() => {
-    if (!initialConnectDoneRef.current && leftTabs.tabs.length === 0) {
+    if (
+      autoConnectLocalOnMount &&
+      !initialConnectDoneRef.current &&
+      leftTabs.tabs.length === 0
+    ) {
       initialConnectDoneRef.current = true;
       setTimeout(() => {
         connect("left", "local");
       }, 0);
     }
-  }, [connect, leftTabs.tabs.length]);
+  }, [autoConnectLocalOnMount, connect, leftTabs.tabs.length]);
 
   useEffect(() => {
     const attemptReconnect = async (side: "left" | "right") => {

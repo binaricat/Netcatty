@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ArrowUp, Bookmark, Check, ChevronRight, Eye, EyeOff, FilePlus, FolderPlus, FolderUp, Home, Languages, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowUp, Bookmark, Check, ChevronRight, Eye, EyeOff, FilePlus, FolderPlus, FolderUp, Home, Languages, MoreHorizontal, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { Host, SftpFilenameEncoding } from "../../types";
 import { useSftpBookmarks } from "../sftp/hooks/useSftpBookmarks";
 import { DistroAvatar } from "../DistroAvatar";
 import { Button } from "../ui/button";
-import { DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -55,6 +54,7 @@ interface SftpModalHeaderProps {
   onToggleShowHiddenFiles: () => void;
   onUpdateHost?: (host: Host) => void;
   onNavigateToBookmark?: (path: string) => void;
+  onClose?: () => void;
 }
 
 export const SftpModalHeader: React.FC<SftpModalHeaderProps> = ({
@@ -97,6 +97,7 @@ export const SftpModalHeader: React.FC<SftpModalHeaderProps> = ({
   onToggleShowHiddenFiles,
   onUpdateHost,
   onNavigateToBookmark,
+  onClose,
 }) => {
   // Delay tooltip activation to prevent flickering when modal opens
   const [tooltipsReady, setTooltipsReady] = useState(false);
@@ -126,24 +127,35 @@ export const SftpModalHeader: React.FC<SftpModalHeaderProps> = ({
 
   return (
     <>
-      <DialogHeader className="px-4 py-3 border-b border-border/60 flex-shrink-0">
-        <div className="flex items-center gap-3 pr-8">
+      <div className="px-4 py-3 border-b border-border/60 flex-shrink-0">
+        <div className="flex items-center gap-3">
           <DistroAvatar
             host={host}
             fallback={host.label.slice(0, 2).toUpperCase()}
             className="h-8 w-8"
+            size="sm"
           />
           <div className="flex-1 min-w-0">
-            <DialogTitle className="text-sm font-semibold">
+            <div className="text-sm font-semibold">
               {host.label}
-            </DialogTitle>
+            </div>
             <div className="text-xs text-muted-foreground font-mono">
               {credentials.username || "root"}@{credentials.hostname}:
               {credentials.port || 22}
             </div>
           </div>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0"
+              onClick={onClose}
+            >
+              <X size={14} />
+            </Button>
+          )}
         </div>
-      </DialogHeader>
+      </div>
 
       <TooltipProvider delayDuration={500} skipDelayDuration={800} disableHoverableContent>
         <div className="px-4 py-2 border-b border-border/60 flex items-center gap-2 flex-shrink-0 bg-muted/30">

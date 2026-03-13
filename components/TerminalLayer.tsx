@@ -1,4 +1,4 @@
-import { Circle, LayoutGrid, Server } from 'lucide-react';
+import { Circle, FolderTree, LayoutGrid, Server, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
@@ -6,9 +6,11 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import { cn } from '../lib/utils';
+import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, Identity, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
 import { DistroAvatar } from './DistroAvatar';
 import Terminal from './Terminal';
+import { SftpSidePanel } from './SftpSidePanel';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
 import { useCustomThemes } from '../application/state/customThemeStore';
@@ -31,6 +33,39 @@ type ResizerHandle = {
   direction: 'vertical' | 'horizontal';
   rect: { x: number; y: number; w: number; h: number };
   splitArea: { w: number; h: number };
+};
+
+type PendingSftpUpload = {
+  requestId: string;
+  hostId: string;
+  targetPath?: string;
+  entries: DropEntry[];
+};
+
+const filterTabsSet = (source: Set<string>, validIds: Set<string>): Set<string> => {
+  let changed = false;
+  const next = new Set<string>();
+  for (const id of source) {
+    if (validIds.has(id)) {
+      next.add(id);
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? next : source;
+};
+
+const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<string, T> => {
+  let changed = false;
+  const next = new Map<string, T>();
+  for (const [id, value] of source) {
+    if (validIds.has(id)) {
+      next.set(id, value);
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? next : source;
 };
 
 interface TerminalLayerProps {
@@ -69,6 +104,14 @@ interface TerminalLayerProps {
   // Broadcast mode
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   onToggleBroadcast?: (workspaceId: string) => void;
+  // SFTP side panel
+  updateHosts: (hosts: Host[]) => void;
+  sftpDoubleClickBehavior: 'open' | 'transfer';
+  sftpAutoSync: boolean;
+  sftpShowHiddenFiles: boolean;
+  sftpUseCompressedUpload: boolean;
+  editorWordWrap: boolean;
+  setEditorWordWrap: (value: boolean) => void;
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
@@ -106,6 +149,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onSplitSession,
   isBroadcastEnabled,
   onToggleBroadcast,
+  updateHosts,
+  sftpDoubleClickBehavior,
+  sftpAutoSync,
+  sftpShowHiddenFiles,
+  sftpUseCompressedUpload,
+  editorWordWrap,
+  setEditorWordWrap,
 }) => {
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
@@ -184,6 +234,114 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Workspace-level compose bar state
   const [isComposeBarOpen, setIsComposeBarOpen] = useState(false);
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+
+  // SFTP side panel state - per-tab tracking
+  // Tracks which tab IDs have the SFTP panel open
+  const [sftpOpenTabs, setSftpOpenTabs] = useState<Set<string>>(new Set());
+  const [sftpPanelWidth, setSftpPanelWidth] = useState(320);
+  const sftpResizingRef = useRef(false);
+  const sftpOpenTabsRef = useRef(sftpOpenTabs);
+  sftpOpenTabsRef.current = sftpOpenTabs;
+
+  // Whether SFTP panel is open for the currently active tab
+  const isSftpOpenForCurrentTab = activeTabId ? sftpOpenTabs.has(activeTabId) : false;
+
+  // The host to pass to the SFTP panel - stored when the user opens SFTP
+  const [sftpHostForTab, setSftpHostForTab] = useState<Map<string, Host>>(new Map());
+  const [sftpInitialLocationForTab, setSftpInitialLocationForTab] = useState<
+    Map<string, { hostId: string; path: string }>
+  >(new Map());
+  const [sftpPendingUploadsForTab, setSftpPendingUploadsForTab] = useState<
+    Map<string, PendingSftpUpload>
+  >(new Map());
+  const sftpHostForTabRef = useRef(sftpHostForTab);
+  sftpHostForTabRef.current = sftpHostForTab;
+
+  const handleToggleWorkspaceComposeBar = useCallback(() => {
+    setIsComposeBarOpen(prev => !prev);
+  }, []);
+
+  const handleOpenSftp = useCallback((host: Host, initialPath?: string, pendingUploadEntries?: DropEntry[]) => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const isOpen = sftpOpenTabsRef.current.has(tabId);
+    const currentHostId = sftpHostForTabRef.current.get(tabId)?.id;
+    const shouldKeepOpen = !!pendingUploadEntries?.length;
+
+    setSftpOpenTabs(prev => {
+      const next = new Set(prev);
+      if (!shouldKeepOpen && isOpen && currentHostId === host.id) {
+        next.delete(tabId);
+      } else {
+        next.add(tabId);
+      }
+      return next;
+    });
+
+    // Store the host for this tab
+    setSftpHostForTab(prev => {
+      const next = new Map(prev);
+      next.set(tabId, host);
+      return next;
+    });
+
+    setSftpInitialLocationForTab(prev => {
+      const next = new Map(prev);
+      if (initialPath) {
+        next.set(tabId, { hostId: host.id, path: initialPath });
+      } else {
+        next.delete(tabId);
+      }
+      return next;
+    });
+
+    setSftpPendingUploadsForTab(prev => {
+      const next = new Map(prev);
+      if (pendingUploadEntries?.length) {
+        next.set(tabId, {
+          requestId: crypto.randomUUID(),
+          hostId: host.id,
+          targetPath: initialPath,
+          entries: pendingUploadEntries,
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const handlePendingUploadHandled = useCallback((tabId: string, requestId: string) => {
+    setSftpPendingUploadsForTab(prev => {
+      const current = prev.get(tabId);
+      if (!current || current.requestId !== requestId) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
+  }, []);
+
+  // SFTP panel resize handler
+  const handleSftpResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sftpResizingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = sftpPanelWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(200, Math.min(600, startWidth + (ev.clientX - startX)));
+      setSftpPanelWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      sftpResizingRef.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [sftpPanelWidth]);
 
   // Pre-compute host lookup map for O(1) access
   const hostMap = useMemo(() => {
@@ -225,6 +383,89 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     return map;
   }, [sessions, hostMap]);
+
+  const validTerminalTabIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const session of sessions) ids.add(session.id);
+    for (const workspace of workspaces) ids.add(workspace.id);
+    return ids;
+  }, [sessions, workspaces]);
+
+  const onSplitSessionRef = useRef(onSplitSession);
+  onSplitSessionRef.current = onSplitSession;
+  const splitHorizontalHandlersRef = useRef<Map<string, () => void>>(new Map());
+  const splitVerticalHandlersRef = useRef<Map<string, () => void>>(new Map());
+
+  useEffect(() => {
+    const validSessionIds = new Set(sessions.map((session) => session.id));
+
+    for (const [id] of splitHorizontalHandlersRef.current) {
+      if (!validSessionIds.has(id)) {
+        splitHorizontalHandlersRef.current.delete(id);
+      }
+    }
+    for (const [id] of splitVerticalHandlersRef.current) {
+      if (!validSessionIds.has(id)) {
+        splitVerticalHandlersRef.current.delete(id);
+      }
+    }
+
+    for (const session of sessions) {
+      if (!splitHorizontalHandlersRef.current.has(session.id)) {
+        splitHorizontalHandlersRef.current.set(session.id, () => {
+          onSplitSessionRef.current?.(session.id, 'horizontal');
+        });
+      }
+      if (!splitVerticalHandlersRef.current.has(session.id)) {
+        splitVerticalHandlersRef.current.set(session.id, () => {
+          onSplitSessionRef.current?.(session.id, 'vertical');
+        });
+      }
+    }
+  }, [sessions]);
+
+  const onToggleWorkspaceViewModeRef = useRef(onToggleWorkspaceViewMode);
+  onToggleWorkspaceViewModeRef.current = onToggleWorkspaceViewMode;
+  const workspaceFocusHandlersRef = useRef<Map<string, () => void>>(new Map());
+
+  const onToggleBroadcastRef = useRef(onToggleBroadcast);
+  onToggleBroadcastRef.current = onToggleBroadcast;
+  const workspaceBroadcastHandlersRef = useRef<Map<string, () => void>>(new Map());
+
+  useEffect(() => {
+    const validWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
+
+    for (const [id] of workspaceFocusHandlersRef.current) {
+      if (!validWorkspaceIds.has(id)) {
+        workspaceFocusHandlersRef.current.delete(id);
+      }
+    }
+    for (const [id] of workspaceBroadcastHandlersRef.current) {
+      if (!validWorkspaceIds.has(id)) {
+        workspaceBroadcastHandlersRef.current.delete(id);
+      }
+    }
+
+    for (const workspace of workspaces) {
+      if (!workspaceFocusHandlersRef.current.has(workspace.id)) {
+        workspaceFocusHandlersRef.current.set(workspace.id, () => {
+          onToggleWorkspaceViewModeRef.current?.(workspace.id);
+        });
+      }
+      if (!workspaceBroadcastHandlersRef.current.has(workspace.id)) {
+        workspaceBroadcastHandlersRef.current.set(workspace.id, () => {
+          onToggleBroadcastRef.current?.(workspace.id);
+        });
+      }
+    }
+  }, [workspaces]);
+
+  useEffect(() => {
+    setSftpOpenTabs(prev => filterTabsSet(prev, validTerminalTabIds));
+    setSftpHostForTab(prev => filterTabsMap(prev, validTerminalTabIds));
+    setSftpInitialLocationForTab(prev => filterTabsMap(prev, validTerminalTabIds));
+    setSftpPendingUploadsForTab(prev => filterTabsMap(prev, validTerminalTabIds));
+  }, [validTerminalTabIds]);
 
   const computeWorkspaceRects = useCallback((workspace?: Workspace, size?: { width: number; height: number }): Record<string, WorkspaceRect> => {
     if (!workspace) return {} as Record<string, WorkspaceRect>;
@@ -435,6 +676,63 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
 
+  // Resolve the SFTP host for the current tab.
+  // Uses the stored host from when the user opened SFTP, but updates when
+  // the focused session changes in workspace mode.
+  const sftpActiveHost = useMemo((): Host | null => {
+    if (!isSftpOpenForCurrentTab || !activeTabId) return null;
+    // For workspace: follow focus
+    if (activeWorkspace && focusedSessionId) {
+      return sessionHostsMap.get(focusedSessionId) ?? sftpHostForTab.get(activeTabId) ?? null;
+    }
+    // For solo session: use stored host (from when SFTP was opened)
+    return sftpHostForTab.get(activeTabId) ?? null;
+  }, [isSftpOpenForCurrentTab, activeTabId, activeWorkspace, focusedSessionId, sessionHostsMap, sftpHostForTab]);
+
+  const mountedSftpTabIds = useMemo(
+    () => Array.from(sftpHostForTab.keys()),
+    [sftpHostForTab],
+  );
+
+  // Toggle SFTP from activity bar (resolves current host automatically)
+  const handleToggleSftpFromBar = useCallback(() => {
+    if (!activeTabId) return;
+
+    if (sftpOpenTabsRef.current.has(activeTabId)) {
+      // Close
+      setSftpOpenTabs(prev => {
+        const next = new Set(prev);
+        next.delete(activeTabId);
+        return next;
+      });
+    } else {
+      // Open - resolve current host
+      let host: Host | null = null;
+      if (activeWorkspace && focusedSessionId) {
+        host = sessionHostsMap.get(focusedSessionId) ?? null;
+      } else if (activeSession) {
+        host = sessionHostsMap.get(activeSession.id) ?? null;
+      }
+      if (!host) return;
+
+      setSftpOpenTabs(prev => {
+        const next = new Set(prev);
+        next.add(activeTabId);
+        return next;
+      });
+      setSftpHostForTab(prev => {
+        const next = new Map(prev);
+        next.set(activeTabId, host);
+        return next;
+      });
+      setSftpInitialLocationForTab(prev => {
+        const next = new Map(prev);
+        next.delete(activeTabId);
+        return next;
+      });
+    }
+  }, [activeTabId, activeWorkspace, focusedSessionId, activeSession, sessionHostsMap]);
+
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();
 
@@ -621,47 +919,132 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       style={{ display: isTerminalLayerVisible ? 'flex' : 'none', zIndex: isTerminalLayerVisible ? 10 : 0 }}
     >
       <div className="flex-1 flex min-h-0 relative">
+        {/* Side panel with toolbar + content */}
+        {mountedSftpTabIds.length > 0 && (
+          <>
+            <div
+              style={{ width: isSftpOpenForCurrentTab ? sftpPanelWidth : 0 }}
+              className={cn(
+                "flex-shrink-0 h-full relative z-20",
+              )}
+            >
+              {isSftpOpenForCurrentTab && (
+                <div
+                  className="absolute right-[-3px] top-0 h-full w-2 cursor-ew-resize z-30"
+                  onMouseDown={handleSftpResizeStart}
+                />
+              )}
+              <div
+                className={cn(
+                  "h-full flex flex-col overflow-hidden",
+                  !isSftpOpenForCurrentTab && "pointer-events-none",
+                )}
+              >
+                {isSftpOpenForCurrentTab && (
+                  <div className="flex h-8 items-center justify-between px-3 py-0.5 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-6 w-6 rounded-md p-0 text-foreground opacity-90",
+                        "hover:bg-transparent hover:opacity-100",
+                      )}
+                      onClick={handleToggleSftpFromBar}
+                      title="SFTP"
+                    >
+                      <FolderTree size={15} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-6 w-6 rounded-md p-0 text-muted-foreground",
+                        "hover:bg-transparent hover:text-foreground",
+                      )}
+                      onClick={handleToggleSftpFromBar}
+                      title="Hide SFTP"
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )}
+                <div className="flex-1 min-h-0 relative">
+                  {mountedSftpTabIds.map((tabId) => {
+                    const isVisibleSftpPanel = activeTabId === tabId && sftpOpenTabs.has(tabId);
+                    return (
+                        <SftpSidePanel
+                          key={tabId}
+                          hosts={hosts}
+                          keys={keys}
+                        identities={identities}
+                        updateHosts={updateHosts}
+                        activeHost={isVisibleSftpPanel ? sftpActiveHost : null}
+                        initialLocation={
+                          isVisibleSftpPanel
+                            ? (sftpInitialLocationForTab.get(tabId) ?? null)
+                            : null
+                          }
+                        showWorkspaceHostHeader={isVisibleSftpPanel && !!activeWorkspace}
+                        isVisible={isVisibleSftpPanel}
+                        renderOverlays={isVisibleSftpPanel}
+                        pendingUpload={sftpPendingUploadsForTab.get(tabId) ?? null}
+                        onPendingUploadHandled={(requestId) => handlePendingUploadHandled(tabId, requestId)}
+                        sftpDoubleClickBehavior={sftpDoubleClickBehavior}
+                        sftpAutoSync={sftpAutoSync}
+                        sftpShowHiddenFiles={sftpShowHiddenFiles}
+                          sftpUseCompressedUpload={sftpUseCompressedUpload}
+                          editorWordWrap={editorWordWrap}
+                          setEditorWordWrap={setEditorWordWrap}
+                        />
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Focus mode sidebar */}
         {isFocusMode && renderFocusModeSidebar()}
 
-        {draggingSessionId && !isFocusMode && (
-          <div
-            ref={workspaceOverlayRef}
-            className="absolute inset-0 z-30"
-            onDragOver={(e) => {
-              if (isFocusMode) return;
-              if (!e.dataTransfer.types.includes('session-id')) return;
-              e.preventDefault();
-              e.stopPropagation();
-              const hint = computeSplitHint(e);
-              setDropHint(hint);
-            }}
-            onDragLeave={(e) => {
-              if (!e.dataTransfer.types.includes('session-id')) return;
-              setDropHint(null);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleWorkspaceDrop(e);
-            }}
-          >
-            {dropHint && (
-              <div className="absolute inset-0 pointer-events-none">
-                <div
-                  className="absolute bg-emerald-600/35 border border-emerald-400/70 backdrop-blur-sm transition-all duration-150"
-                  style={{
-                    width: dropHint.rect ? `${dropHint.rect.w}px` : dropHint.direction === 'vertical' ? '50%' : '100%',
-                    height: dropHint.rect ? `${dropHint.rect.h}px` : dropHint.direction === 'vertical' ? '100%' : '50%',
-                    left: dropHint.rect ? `${dropHint.rect.x}px` : dropHint.direction === 'vertical' ? (dropHint.position === 'left' ? 0 : '50%') : 0,
-                    top: dropHint.rect ? `${dropHint.rect.y}px` : dropHint.direction === 'vertical' ? 0 : (dropHint.position === 'top' ? 0 : '50%'),
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
-        <div ref={workspaceInnerRef} className={cn("absolute overflow-hidden", isFocusMode ? "left-56 right-0 top-0 bottom-0" : "inset-0")}>
+        <div ref={workspaceInnerRef} className="overflow-hidden relative flex-1">
+          {draggingSessionId && !isFocusMode && (
+            <div
+              ref={workspaceOverlayRef}
+              className="absolute inset-0 z-30"
+              onDragOver={(e) => {
+                if (isFocusMode) return;
+                if (!e.dataTransfer.types.includes('session-id')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const hint = computeSplitHint(e);
+                setDropHint(hint);
+              }}
+              onDragLeave={(e) => {
+                if (!e.dataTransfer.types.includes('session-id')) return;
+                setDropHint(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleWorkspaceDrop(e);
+              }}
+            >
+              {dropHint && (
+                <div className="absolute inset-0 pointer-events-none">
+                  <div
+                    className="absolute bg-emerald-600/35 border border-emerald-400/70 backdrop-blur-sm transition-all duration-150"
+                    style={{
+                      width: dropHint.rect ? `${dropHint.rect.w}px` : dropHint.direction === 'vertical' ? '50%' : '100%',
+                      height: dropHint.rect ? `${dropHint.rect.h}px` : dropHint.direction === 'vertical' ? '100%' : '50%',
+                      left: dropHint.rect ? `${dropHint.rect.x}px` : dropHint.direction === 'vertical' ? (dropHint.position === 'left' ? 0 : '50%') : 0,
+                      top: dropHint.rect ? `${dropHint.rect.y}px` : dropHint.direction === 'vertical' ? 0 : (dropHint.position === 'top' ? 0 : '50%'),
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           {sessions.map(session => {
             // Use pre-computed host to avoid creating new objects on every render
             const host = sessionHostsMap.get(session.id)!;
@@ -694,6 +1077,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
             // Check if this pane is the focused one in the workspace
             const isFocusedPane = inActiveWorkspace && !isFocusMode && session.id === focusedSessionId;
+            const workspaceFocusHandler = activeWorkspace
+              ? workspaceFocusHandlersRef.current.get(activeWorkspace.id)
+              : undefined;
+            const workspaceBroadcastHandler = activeWorkspace
+              ? workspaceBroadcastHandlersRef.current.get(activeWorkspace.id)
+              : undefined;
+            const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
+            const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
 
             return (
               <div
@@ -739,6 +1130,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   hotkeyScheme={hotkeyScheme}
                   keyBindings={keyBindings}
                   onHotkeyAction={onHotkeyAction}
+                  onOpenSftp={handleOpenSftp}
                   onCloseSession={handleCloseSession}
                   onStatusChange={handleStatusChange}
                   onSessionExit={handleSessionExit}
@@ -747,12 +1139,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   onUpdateHost={handleUpdateHost}
                   onAddKnownHost={handleAddKnownHost}
                   onCommandExecuted={handleCommandExecuted}
-                  onExpandToFocus={inActiveWorkspace && !isFocusMode && activeWorkspace ? () => onToggleWorkspaceViewMode?.(activeWorkspace.id) : undefined}
-                  onSplitHorizontal={onSplitSession ? () => onSplitSession(session.id, 'horizontal') : undefined}
-                  onSplitVertical={onSplitSession ? () => onSplitSession(session.id, 'vertical') : undefined}
+                  onExpandToFocus={inActiveWorkspace && !isFocusMode ? workspaceFocusHandler : undefined}
+                  onSplitHorizontal={onSplitSession ? splitHorizontalHandler : undefined}
+                  onSplitVertical={onSplitSession ? splitVerticalHandler : undefined}
                   isBroadcastEnabled={inActiveWorkspace && activeWorkspace ? isBroadcastEnabled?.(activeWorkspace.id) : false}
-                  onToggleBroadcast={inActiveWorkspace && activeWorkspace ? () => onToggleBroadcast?.(activeWorkspace.id) : undefined}
-                  onToggleComposeBar={inActiveWorkspace ? () => setIsComposeBarOpen(prev => !prev) : undefined}
+                  onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
+                  onToggleComposeBar={inActiveWorkspace ? handleToggleWorkspaceComposeBar : undefined}
                   isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
                   onBroadcastInput={inActiveWorkspace && activeWorkspace && isBroadcastEnabled?.(activeWorkspace.id) ? handleBroadcastInput : undefined}
                 />
@@ -851,6 +1243,12 @@ const terminalLayerAreEqual = (prev: TerminalLayerProps, next: TerminalLayerProp
     prev.fontSize === next.fontSize &&
     prev.hotkeyScheme === next.hotkeyScheme &&
     prev.keyBindings === next.keyBindings &&
+    prev.sftpDoubleClickBehavior === next.sftpDoubleClickBehavior &&
+    prev.sftpAutoSync === next.sftpAutoSync &&
+    prev.sftpShowHiddenFiles === next.sftpShowHiddenFiles &&
+    prev.sftpUseCompressedUpload === next.sftpUseCompressedUpload &&
+    prev.editorWordWrap === next.editorWordWrap &&
+    prev.setEditorWordWrap === next.setEditorWordWrap &&
     prev.onHotkeyAction === next.onHotkeyAction &&
     prev.onUpdateHost === next.onUpdateHost &&
     prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&

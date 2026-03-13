@@ -4,6 +4,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
 import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
+import { setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpPaneActionsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
@@ -134,6 +135,14 @@ export const useSftpPaneActions = ({
           error: null,
           selectedFiles: new Set(),
         }));
+        if (!pane.connection.isLocal) {
+          setSharedRemoteHostCache(pane.connection.hostId, {
+            path,
+            homeDir: pane.connection.homeDir ?? path,
+            files: cached.files,
+            filenameEncoding: pane.filenameEncoding,
+          });
+        }
         return;
       }
 
@@ -258,6 +267,14 @@ export const useSftpPaneActions = ({
           loading: false,
           selectedFiles: new Set(),
         }));
+        if (!pane.connection.isLocal) {
+          setSharedRemoteHostCache(pane.connection.hostId, {
+            path,
+            homeDir: pane.connection.homeDir ?? path,
+            files,
+            filenameEncoding: pane.filenameEncoding,
+          });
+        }
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
           if (tabNavSeqRef.current.get(activeTabId) !== requestId) {

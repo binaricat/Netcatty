@@ -2,10 +2,10 @@ import React from "react";
 import type { Host, SftpFileEntry } from "../../types";
 import type { FileOpenerType, SystemAppInfo } from "../../lib/sftpFileUtils";
 import type { useSftpState } from "../../application/state/useSftpState";
-import { Button } from "../ui/button";
 import FileOpenerDialog from "../FileOpenerDialog";
 import TextEditorModal from "../TextEditorModal";
-import { SftpConflictDialog, SftpHostPicker, SftpPermissionsDialog, SftpTransferItem } from "./index";
+import { SftpConflictDialog, SftpHostPicker, SftpPermissionsDialog } from "./index";
+import { SftpTransferQueue } from "./SftpTransferQueue";
 
 type SftpState = ReturnType<typeof useSftpState>;
 
@@ -13,6 +13,7 @@ interface SftpOverlaysProps {
   hosts: Host[];
   sftp: SftpState;
   visibleTransfers: SftpState["transfers"];
+  showTransferQueue?: boolean;
   showHostPickerLeft: boolean;
   showHostPickerRight: boolean;
   hostSearchLeft: string;
@@ -46,6 +47,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = ({
   hosts,
   sftp,
   visibleTransfers,
+  showTransferQueue = true,
   showHostPickerLeft,
   showHostPickerRight,
   hostSearchLeft,
@@ -98,49 +100,8 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = ({
         onSelectHost={handleHostSelectRight}
       />
 
-      {/* Transfer status area - shows folder uploads and file transfers */}
-      {sftp.transfers.length > 0 && (
-        <div className="border-t border-border/70 bg-secondary/80 backdrop-blur-sm shrink-0">
-          <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground border-b border-border/40">
-            <span className="font-medium">
-              Transfers
-              {sftp.activeTransfersCount > 0 && (
-                <span className="ml-2 text-primary">
-                  ({sftp.activeTransfersCount} active)
-                </span>
-              )}
-            </span>
-            {sftp.transfers.some(
-              (t) => t.status === "completed" || t.status === "cancelled",
-            ) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={sftp.clearCompletedTransfers}
-                >
-                  Clear completed
-                </Button>
-              )}
-          </div>
-          <div className="max-h-40 overflow-auto">
-            {visibleTransfers.map((task) => (
-              <SftpTransferItem
-                key={task.id}
-                task={task}
-                onCancel={() => {
-                  // External uploads use a different cancel mechanism
-                  if (task.sourceConnectionId === "external") {
-                    sftp.cancelExternalUpload();
-                  }
-                  sftp.cancelTransfer(task.id);
-                }}
-                onRetry={() => sftp.retryTransfer(task.id)}
-                onDismiss={() => sftp.dismissTransfer(task.id)}
-              />
-            ))}
-          </div>
-        </div>
+      {showTransferQueue && (
+        <SftpTransferQueue sftp={sftp} visibleTransfers={visibleTransfers} />
       )}
 
       <SftpConflictDialog
