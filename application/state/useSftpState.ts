@@ -174,6 +174,7 @@ export const useSftpState = (
     renameFile,
     changePermissions,
   } = useSftpPaneActions({
+    hosts,
     getActivePane,
     updateTab,
     updateActiveTab,

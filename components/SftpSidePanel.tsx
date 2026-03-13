@@ -225,6 +225,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const tabs = s.leftTabs.tabs;
     const existingTab = tabs.find((tab) => {
       if (!tab.connection || tab.connection.hostId !== activeHost.id) return false;
+      // Don't reuse errored tabs — they need a fresh connection
+      if (tab.connection.status === "error" || tab.connection.status === "disconnected") return false;
       return tabConnectionKeyMapRef.current.get(tab.id) === connectionKey;
     });
     if (existingTab) {
@@ -235,13 +237,21 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     // Connect to the host - connect() handles creating a tab if needed
     connectedHostIdRef.current = connectionKey;
+    // Store the pending key so the effect below can map it once the tab is created
+    pendingConnectionKeyRef.current = connectionKey;
     s.connect("left", activeHost);
-    // Record which connectionKey this tab was created with
-    const activeTabAfterConnect = sftpRef.current.leftTabs.activeTabId;
-    if (activeTabAfterConnect) {
-      tabConnectionKeyMapRef.current.set(activeTabAfterConnect, connectionKey);
-    }
   }, [activeHost]); // Only depend on activeHost, not sftp
+
+  // Track the active tab's connectionKey after connect() creates it.
+  // This runs on every leftTabs change and picks up new tabs that connect() spawned.
+  const pendingConnectionKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const activeTabId = sftp.leftTabs.activeTabId;
+    if (activeTabId && pendingConnectionKeyRef.current) {
+      tabConnectionKeyMapRef.current.set(activeTabId, pendingConnectionKeyRef.current);
+      pendingConnectionKeyRef.current = null;
+    }
+  }, [sftp.leftTabs.activeTabId]);
 
   // Clear the remembered connection key when the pane disconnects or the
   // session is lost, so re-opening SFTP for the same terminal reconnects.

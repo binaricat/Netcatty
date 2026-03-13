@@ -4,9 +4,10 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
 import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
-import { setSharedRemoteHostCache } from "./sharedRemoteHostCache";
+import { buildCacheKey, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpPaneActionsParams {
+  hosts: Host[];
   getActivePane: (side: "left" | "right") => SftpPane | null;
   updateTab: (side: "left" | "right", tabId: string, updater: (pane: SftpPane) => SftpPane) => void;
   updateActiveTab: (side: "left" | "right", updater: (pane: SftpPane) => SftpPane) => void;
@@ -51,6 +52,7 @@ interface UseSftpPaneActionsResult {
 }
 
 export const useSftpPaneActions = ({
+  hosts,
   getActivePane,
   updateTab,
   updateActiveTab,
@@ -69,6 +71,17 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
+  // Build the shared cache key for a given hostId by looking up the full host details
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
+  const getHostCacheKey = useCallback((hostId: string): string => {
+    const host = hostsRef.current.find(h => h.id === hostId);
+    if (host) {
+      return buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
+    }
+    return hostId;
+  }, []);
+
   // Track the latest navigation request ID per tab, so we can distinguish
   // whether a superseded request was superseded by the same tab or a different tab.
   const tabNavSeqRef = useRef(new Map<string, number>());
@@ -141,7 +154,7 @@ export const useSftpPaneActions = ({
           // identifies the connection in the common case. Session-time
           // overrides create separate connections with distinct cache keys
           // at the connect() layer.
-          setSharedRemoteHostCache(pane.connection.hostId, {
+          setSharedRemoteHostCache(getHostCacheKey(pane.connection.hostId), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files: cached.files,
@@ -273,7 +286,7 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          setSharedRemoteHostCache(pane.connection.hostId, {
+          setSharedRemoteHostCache(getHostCacheKey(pane.connection.hostId), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files,
