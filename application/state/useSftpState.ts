@@ -265,6 +265,7 @@ export const useSftpState = (
     getActivePane,
     refresh,
     sftpSessionsRef,
+    connectionCacheKeyMapRef,
     useCompressedUpload: options?.useCompressedUpload,
     addExternalUpload,
     updateExternalUpload,

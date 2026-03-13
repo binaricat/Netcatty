@@ -665,6 +665,9 @@ export interface TransferTask {
   sourceConnectionId: string;
   targetConnectionId: string;
   targetHostId?: string;
+  /** Full endpoint key (hostId:hostname:port:protocol) for distinguishing
+   * same-hostId uploads with different session-time overrides. */
+  targetConnectionKey?: string;
   direction: TransferDirection;
   status: TransferStatus;
   totalBytes: number;

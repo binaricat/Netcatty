@@ -22,6 +22,7 @@ interface UseSftpExternalOperationsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   refresh: (side: "left" | "right") => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
+  connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
   useCompressedUpload?: boolean;
   addExternalUpload?: (task: TransferTask) => void;
   updateExternalUpload?: (taskId: string, updates: Partial<TransferTask>) => void;
@@ -60,6 +61,7 @@ export const useSftpExternalOperations = (
     getActivePane,
     refresh,
     sftpSessionsRef,
+    connectionCacheKeyMapRef,
     useCompressedUpload = false,
     addExternalUpload,
     updateExternalUpload,
@@ -346,6 +348,7 @@ export const useSftpExternalOperations = (
     connectionId: string,
     targetPath: string,
     targetHostId?: string,
+    targetConnectionKey?: string,
   ): UploadCallbacks => {
     return {
       onScanningStart: (taskId: string) => {
@@ -358,6 +361,7 @@ export const useSftpExternalOperations = (
             sourceConnectionId: "external",
             targetConnectionId: connectionId,
             targetHostId,
+            targetConnectionKey,
             direction: "upload",
             status: "pending" as TransferStatus,
             totalBytes: 0,
@@ -384,6 +388,7 @@ export const useSftpExternalOperations = (
             sourceConnectionId: "external",
             targetConnectionId: connectionId,
             targetHostId,
+            targetConnectionKey,
             direction: "upload",
             status: "transferring" as TransferStatus,
             totalBytes: task.totalBytes,
@@ -519,6 +524,7 @@ export const useSftpExternalOperations = (
         pane.connection.id,
         pane.connection.currentPath,
         pane.connection.isLocal ? undefined : pane.connection.hostId,
+        pane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(pane.connection.id),
       );
 
       try {
@@ -587,6 +593,7 @@ export const useSftpExternalOperations = (
         pane.connection.id,
         uploadTargetPath,
         pane.connection.isLocal ? undefined : pane.connection.hostId,
+        pane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(pane.connection.id),
       );
       const directUploadBridge: UploadBridge = {
         ...createUploadBridge,

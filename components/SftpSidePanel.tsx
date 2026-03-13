@@ -196,7 +196,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     () => sftp.transfers.some((t) => t.status === "pending" || t.status === "transferring"),
     [sftp.transfers],
   );
-  const hasActiveWork = hasActiveTransfers || showTextEditor;
+  // Block host-following while any connection-sensitive UI is open:
+  // text editor, permissions dialog, or file-opener dialog.
+  const hasActiveWork = hasActiveTransfers || showTextEditor || !!permissionsState || showFileOpenerDialog;
 
   useEffect(() => {
     if (!activeHost) return;
@@ -395,10 +397,13 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       if (!connection || connection.isLocal) return false;
 
       if (task.targetHostId) {
-        // Match on full endpoint identity so that the same host ID with
-        // different session-time overrides doesn't allow cross-endpoint reveals.
-        return connection.hostId === task.targetHostId
-          && connectedHostIdRef.current === `${task.targetHostId}:${activeHost?.hostname ?? ''}:${activeHost?.port ?? ''}:${activeHost?.protocol ?? ''}`;
+        if (connection.hostId !== task.targetHostId) return false;
+        // If the transfer recorded a full endpoint key, use it to
+        // distinguish same-hostId uploads with different session overrides.
+        if (task.targetConnectionKey) {
+          return connectedHostIdRef.current === task.targetConnectionKey;
+        }
+        return true;
       }
 
       return connection.id === task.targetConnectionId;
