@@ -6,6 +6,7 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import { cn } from '../lib/utils';
+import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, Identity, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
 import { DistroAvatar } from './DistroAvatar';
@@ -338,7 +339,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         next.set(tabId, {
           requestId: crypto.randomUUID(),
           hostId: host.id,
-          connectionKey: `${host.id}:${host.hostname}:${host.port ?? ''}:${host.protocol ?? ''}`,
+          connectionKey: buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username),
           targetPath: initialPath,
           entries: pendingUploadEntries,
         });

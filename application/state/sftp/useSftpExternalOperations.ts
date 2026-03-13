@@ -614,10 +614,11 @@ export const useSftpExternalOperations = (
           controller,
         );
 
-        // Re-read the live pane state (the snapshot `pane` may be stale after
-        // an async upload, e.g. when the panel navigated during the transfer).
+        // Always refresh after upload to ensure directory listings are current.
+        // If the user navigated away during the upload, the target directory's
+        // cached listing would otherwise remain stale until it expires.
         const livePane = getActivePane(side);
-        if (livePane?.connection?.currentPath === uploadTargetPath) {
+        if (livePane?.connection) {
           await refresh(side);
         }
         return results;

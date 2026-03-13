@@ -659,7 +659,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     const width = container.clientWidth;
     const height = container.clientHeight;
-    if (width <= 0 || height <= 0) return;
+    if (width <= 0 || height <= 0) {
+      // Terminal is hidden — invalidate the cached size so that when it
+      // becomes visible again, a non-forced fit won't be suppressed by a
+      // stale size match (e.g. after font metrics changed while hidden).
+      lastFittedSizeRef.current = null;
+      return;
+    }
 
     if (!options?.force) {
       const lastSize = lastFittedSizeRef.current;

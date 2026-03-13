@@ -16,6 +16,7 @@ import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { getParentPath } from "../application/state/sftp/utils";
+import { buildCacheKey } from "../application/state/sftp/sharedRemoteHostCache";
 import { logger } from "../lib/logger";
 import type { DropEntry } from "../lib/sftpFileUtils";
 import { Host, Identity, SSHKey } from "../types";
@@ -219,8 +220,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       return;
     }
     // Build a connection key that accounts for session-time overrides
-    // (same host ID may have different port/protocol in different workspace panes)
-    const connectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
+    // (same host ID may have different port/protocol in different workspace panes).
+    // Uses buildCacheKey to stay consistent with the key recorded on upload tasks.
+    const connectionKey = buildCacheKey(activeHost.id, activeHost.hostname, activeHost.port, activeHost.protocol, activeHost.sftpSudo, activeHost.username);
     if (connectedHostIdRef.current === connectionKey) return;
 
     // Don't switch connections while transfers or editor are active
