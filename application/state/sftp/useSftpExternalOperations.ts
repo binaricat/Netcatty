@@ -590,9 +590,6 @@ export const useSftpExternalOperations = (
       );
       const directUploadBridge: UploadBridge = {
         ...createUploadBridge,
-        // Terminal drop uploads should stay bound to the current SFTP session
-        // instead of hopping through transferBridge's detached stream path.
-        startStreamTransfer: undefined,
       };
 
       try {
@@ -610,7 +607,10 @@ export const useSftpExternalOperations = (
           controller,
         );
 
-        if (pane.connection.currentPath === uploadTargetPath) {
+        // Re-read the live pane state (the snapshot `pane` may be stale after
+        // an async upload, e.g. when the panel navigated during the transfer).
+        const livePane = getActivePane(side);
+        if (livePane?.connection?.currentPath === uploadTargetPath) {
           await refresh(side);
         }
         return results;

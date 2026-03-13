@@ -917,11 +917,57 @@ export async function uploadEntriesDirect(
   config: UploadConfig,
   controller?: UploadController
 ): Promise<UploadResult[]> {
-  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks } = config;
+  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload } = config;
 
   if (controller) {
     controller.reset();
     controller.setBridge(bridge);
+  }
+
+  if (entries.length === 0) {
+    return [];
+  }
+
+  // Support compressed folder uploads (same logic as uploadFromDataTransfer)
+  if (useCompressedUpload && !isLocal && sftpId) {
+    const rootFolders = detectRootFolders(entries);
+    const folderEntries = Array.from(rootFolders.entries()).filter(([key]) => !key.startsWith("__file__"));
+    const standaloneFileEntries = Array.from(rootFolders.entries()).filter(([key]) => key.startsWith("__file__"));
+
+    if (folderEntries.length > 0) {
+      try {
+        const compressedResults = await uploadFoldersCompressed(folderEntries, targetPath, sftpId, callbacks, controller);
+
+        const failedFolders = compressedResults.filter(result =>
+          !result.success && result.error === "Compressed upload not supported - fallback needed"
+        );
+        const successfulFolders = compressedResults.filter(result =>
+          result.success || result.error !== "Compressed upload not supported - fallback needed"
+        );
+
+        let fallbackResults: UploadResult[] = [];
+        if (failedFolders.length > 0) {
+          const failedFolderNames = new Set(failedFolders.map(f => f.fileName));
+          const failedFolderEntries = entries.filter(entry => {
+            const topFolder = entry.relativePath.split('/')[0];
+            return failedFolderNames.has(topFolder);
+          });
+          if (failedFolderEntries.length > 0) {
+            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+          }
+        }
+
+        let standaloneResults: UploadResult[] = [];
+        if (standaloneFileEntries.length > 0) {
+          const standaloneEntries = standaloneFileEntries.flatMap(([, e]) => e);
+          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+        }
+
+        return [...successfulFolders, ...fallbackResults, ...standaloneResults];
+      } catch {
+        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+      }
+    }
   }
 
   return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);

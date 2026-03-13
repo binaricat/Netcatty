@@ -175,11 +175,23 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   const connectedHostIdRef = useRef<string | null>(null);
   const lastAppliedInitialLocationKeyRef = useRef<string | null>(null);
   const handledPendingUploadIdRef = useRef<string | null>(null);
+  const prevIsVisibleRef = useRef(isVisible);
+
+  // Reset location guard when the panel is reopened so the terminal cwd
+  // is re-applied even if it matches the previous session's path.
+  useEffect(() => {
+    if (isVisible && !prevIsVisibleRef.current) {
+      lastAppliedInitialLocationKeyRef.current = null;
+    }
+    prevIsVisibleRef.current = isVisible;
+  }, [isVisible]);
 
   useEffect(() => {
     if (!activeHost) return;
-    // Don't reconnect if same host
-    if (connectedHostIdRef.current === activeHost.id) return;
+    // Build a connection key that accounts for session-time overrides
+    // (same host ID may have different port/protocol in different workspace panes)
+    const connectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
+    if (connectedHostIdRef.current === connectionKey) return;
 
     const s = sftpRef.current;
     logger.info("[SftpSidePanel] Auto-connect triggered", {
@@ -196,12 +208,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     );
     if (existingTab) {
       s.selectTab("left", existingTab.id);
-      connectedHostIdRef.current = activeHost.id;
+      connectedHostIdRef.current = connectionKey;
       return;
     }
 
     // Connect to the host - connect() handles creating a tab if needed
-    connectedHostIdRef.current = activeHost.id;
+    connectedHostIdRef.current = connectionKey;
     s.connect("left", activeHost);
   }, [activeHost]); // Only depend on activeHost, not sftp
 
