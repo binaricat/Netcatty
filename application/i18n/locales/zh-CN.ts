@@ -434,6 +434,7 @@ const zhCN: Messages = {
   'sftp.status.uploading': '上传中...',
   'sftp.status.ready': '就绪',
   'sftp.goUp': '上一级',
+  'sftp.goToTerminalCwd': '定位到终端当前目录',
   'sftp.encoding.label': '文件名编码',
   'sftp.encoding.auto': '自动',
   'sftp.encoding.utf8': 'UTF-8',

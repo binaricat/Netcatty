@@ -58,6 +58,7 @@ interface SftpPaneViewProps {
   showHeader?: boolean;
   showEmptyHeader?: boolean;
   onToggleShowHiddenFiles?: () => void;
+  onGoToTerminalCwd?: () => void;
 }
 
 const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
@@ -66,6 +67,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   showHeader = true,
   showEmptyHeader = true,
   onToggleShowHiddenFiles,
+  onGoToTerminalCwd,
 }) => {
   const isActive = true;
 
@@ -299,7 +301,6 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       <SftpPaneToolbar
         t={t}
         pane={pane}
-        onNavigateUp={callbacks.onNavigateUp}
         onNavigateTo={callbacks.onNavigateTo}
         onSetFilter={callbacks.onSetFilter}
         onSetFilenameEncoding={callbacks.onSetFilenameEncoding}
@@ -335,6 +336,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onDeleteBookmark={deleteBookmark}
         showHiddenFiles={pane.showHiddenFiles}
         onToggleShowHiddenFiles={onToggleShowHiddenFiles}
+        onGoToTerminalCwd={onGoToTerminalCwd}
       />
 
       <SftpPaneFileList

@@ -1,8 +1,9 @@
-import React from "react";
-import { Bookmark, Check, ChevronLeft, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, RefreshCw, Search, Trash2, X } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Dropdown, DropdownContent, DropdownTrigger } from "../ui/dropdown";
 import { cn } from "../../lib/utils";
 import { SftpBreadcrumb } from "./index";
 import type { SftpFilenameEncoding } from "../../types";
@@ -12,7 +13,6 @@ import type { SftpBookmark } from "../../domain/models";
 interface SftpPaneToolbarProps {
   t: (key: string, params?: Record<string, unknown>) => string;
   pane: SftpPane;
-  onNavigateUp: () => void;
   onNavigateTo: (path: string) => void;
   onSetFilter: (value: string) => void;
   onSetFilenameEncoding: (encoding: SftpFilenameEncoding) => void;
@@ -49,12 +49,17 @@ interface SftpPaneToolbarProps {
   onDeleteBookmark: (id: string) => void;
   showHiddenFiles: boolean;
   onToggleShowHiddenFiles?: () => void;
+  onGoToTerminalCwd?: () => void;
 }
+
+// Prioritize breadcrumb path display. 6 action buttons need ~156px,
+// bookmark ~20px, padding ~16px. Collapse early so the breadcrumb
+// always gets at least ~200px of space.
+const COLLAPSE_WIDTH = 400;
 
 export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   t,
   pane,
-  onNavigateUp,
   onNavigateTo,
   onSetFilter,
   onSetFilenameEncoding,
@@ -90,308 +95,446 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   onDeleteBookmark,
   showHiddenFiles,
   onToggleShowHiddenFiles,
-}) => (
-  <>
-    {/* Toolbar - always visible when connected */}
-    <div className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-5 w-5"
-        onClick={onNavigateUp}
-        title={t("sftp.goUp")}
-      >
-        <ChevronLeft size={12} />
-      </Button>
+  onGoToTerminalCwd,
+}) => {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
-      {/* Editable Breadcrumb with autocomplete */}
-      {isEditingPath ? (
-        <div className="relative flex-1">
-          <Input
-            ref={pathInputRef}
-            value={editingPathValue}
-            onChange={(e) => {
-              setEditingPathValue(e.target.value);
-              setShowPathSuggestions(true);
-              setPathSuggestionIndex(-1);
-            }}
-            onBlur={handlePathBlur}
-            onKeyDown={handlePathKeyDown}
-            onFocus={() => setShowPathSuggestions(true)}
-            className="h-5 w-full text-[10px] bg-background"
-            autoFocus
-          />
-          {showPathSuggestions && pathSuggestions.length > 0 && (
-            <div
-              ref={pathDropdownRef}
-              className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 max-h-48 overflow-auto"
-            >
-              {pathSuggestions.map((suggestion, idx) => (
-                <button
-                  key={suggestion.path}
-                  type="button"
-                  className={cn(
-                    "w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-secondary/60 transition-colors",
-                    idx === pathSuggestionIndex && "bg-secondary/80",
-                  )}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handlePathSubmit(suggestion.path);
-                  }}
-                >
-                  {suggestion.type === "folder" ? (
-                    <Folder size={12} className="text-primary shrink-0" />
-                  ) : (
-                    <Home
-                      size={12}
-                      className="text-muted-foreground shrink-0"
-                    />
-                  )}
-                  <span className="truncate font-mono">
-                    {suggestion.path}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div
-          className="flex-1 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
-          onDoubleClick={handlePathDoubleClick}
-          title={t("sftp.path.doubleClickToEdit")}
+  // Observe the overall toolbar width to decide whether to collapse action buttons
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCollapsed(entry.contentRect.width < COLLAPSE_WIDTH);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const handleNewFolder = useCallback(() => {
+    setNewFolderName("");
+    setShowNewFolderDialog(true);
+  }, [setNewFolderName, setShowNewFolderDialog]);
+
+  const handleNewFile = useCallback(() => {
+    const defaultName = getNextUntitledName(pane.files.map(f => f.name));
+    setNewFileName(defaultName);
+    setFileNameError(null);
+    setShowNewFileDialog(true);
+  }, [getNextUntitledName, pane.files, setNewFileName, setFileNameError, setShowNewFileDialog]);
+
+  const handleToggleFilter = useCallback(() => {
+    setShowFilterBar(!showFilterBar);
+    if (!showFilterBar) {
+      setTimeout(() => filterInputRef.current?.focus(), 0);
+    }
+  }, [showFilterBar, setShowFilterBar, filterInputRef]);
+
+  const isRemote = !pane.connection?.isLocal;
+
+  // Buttons that always remain visible (not collapsed)
+  const pinnedButtons = (
+    <>
+      {onGoToTerminalCwd && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={onGoToTerminalCwd}
+          title={t("sftp.goToTerminalCwd")}
         >
-          <SftpBreadcrumb
-            path={pane.connection.currentPath}
-            onNavigate={onNavigateTo}
-            onHome={() =>
-              pane.connection?.homeDir &&
-              onNavigateTo(pane.connection.homeDir)
-            }
-          />
-        </div>
+          <TerminalSquare size={14} />
+        </Button>
       )}
+      <Button
+        variant={showFilterBar || pane.filter ? "secondary" : "ghost"}
+        size="icon"
+        className={cn("h-6 w-6", pane.filter && "text-primary")}
+        onClick={handleToggleFilter}
+        title={t("sftp.filter")}
+      >
+        <Search size={14} />
+      </Button>
+    </>
+  );
 
-      {/* Bookmark button with dropdown */}
-      <Popover>
+  // Collapsible action buttons (shown inline when space allows)
+  const collapsibleButtons = (
+    <>
+      {isRemote && (
+        <Popover>
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className={cn("h-5 w-5 shrink-0", isCurrentPathBookmarked && "text-yellow-500")}
-              title={isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
-              onClick={(e) => {
-                // If not bookmarked, toggle directly instead of opening popover
-                if (!isCurrentPathBookmarked && bookmarks.length === 0) {
-                  e.preventDefault();
-                  onToggleBookmark();
-                }
-              }}
+              className="h-6 w-6"
+              title={t("sftp.encoding.label")}
             >
-              <Bookmark size={12} fill={isCurrentPathBookmarked ? "currentColor" : "none"} />
+              <Languages size={14} />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-64 p-0" align="start">
-            <div className="p-2 border-b border-border/40">
-              <Button
-                variant={isCurrentPathBookmarked ? "secondary" : "ghost"}
-                size="sm"
-                className="w-full justify-start text-xs h-7"
-                onClick={onToggleBookmark}
-              >
-                <Bookmark size={12} fill={isCurrentPathBookmarked ? "currentColor" : "none"} className={cn("mr-2", isCurrentPathBookmarked && "text-yellow-500")} />
-                {isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
-              </Button>
-            </div>
-            {bookmarks.length > 0 ? (
-              <div className="max-h-48 overflow-auto py-1">
-                {bookmarks.map((bm) => (
-                  <div
-                    key={bm.id}
-                    className="flex items-center gap-1 px-2 py-1 hover:bg-secondary/60 group"
-                  >
-                    <button
-                      type="button"
-                      className="flex-1 text-left text-xs truncate font-mono"
-                      onClick={() => onNavigateToBookmark(bm.path)}
-                      title={bm.path}
-                    >
-                      {bm.label}
-                      <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteBookmark(bm.id);
-                      }}
-                    >
-                      <Trash2 size={10} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-3 text-xs text-muted-foreground text-center">
-                {t("sftp.bookmark.empty")}
-              </div>
-            )}
+          <PopoverContent className="w-36 p-1" align="end">
+            {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
+              <PopoverClose asChild key={encoding}>
+                <button
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors",
+                    pane.filenameEncoding === encoding && "bg-secondary"
+                  )}
+                  onClick={() => onSetFilenameEncoding(encoding)}
+                >
+                  <Check
+                    size={12}
+                    className={cn(
+                      "shrink-0",
+                      pane.filenameEncoding === encoding ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  {t(`sftp.encoding.${encoding === "utf-8" ? "utf8" : encoding}`)}
+                </button>
+              </PopoverClose>
+            ))}
           </PopoverContent>
         </Popover>
+      )}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6"
+        onClick={handleNewFolder}
+        title={t("sftp.newFolder")}
+      >
+        <FolderPlus size={14} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6"
+        onClick={handleNewFile}
+        title={t("sftp.newFile")}
+      >
+        <FilePlus size={14} />
+      </Button>
+      <Button
+        variant={showHiddenFiles ? "secondary" : "ghost"}
+        size="icon"
+        className={cn("h-6 w-6", showHiddenFiles && "text-primary")}
+        onClick={onToggleShowHiddenFiles}
+        title={t("settings.sftp.showHiddenFiles")}
+      >
+        {showHiddenFiles ? <EyeOff size={14} /> : <Eye size={14} />}
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6"
+        onClick={onRefresh}
+        title={t("common.refresh")}
+      >
+        <RefreshCw
+          size={14}
+          className={
+            pane.loading || pane.reconnecting ? "animate-spin" : ""
+          }
+        />
+      </Button>
+    </>
+  );
 
-      <div className="ml-auto flex items-center gap-0.5">
-        {!pane.connection?.isLocal && (
-          <Popover>
+  // Overflow dropdown menu items (same collapsible actions as menu items)
+  const overflowMenuItems = (
+    <div className="flex flex-col min-w-[140px]">
+      {isRemote && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left">
+              <Languages size={14} className="shrink-0" />
+              {t("sftp.encoding.label")}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-36 p-1" align="start" side="right">
+            {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
+              <PopoverClose asChild key={encoding}>
+                <button
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors",
+                    pane.filenameEncoding === encoding && "bg-secondary"
+                  )}
+                  onClick={() => onSetFilenameEncoding(encoding)}
+                >
+                  <Check
+                    size={12}
+                    className={cn(
+                      "shrink-0",
+                      pane.filenameEncoding === encoding ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  {t(`sftp.encoding.${encoding === "utf-8" ? "utf8" : encoding}`)}
+                </button>
+              </PopoverClose>
+            ))}
+          </PopoverContent>
+        </Popover>
+      )}
+      <button
+        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left"
+        onClick={handleNewFolder}
+      >
+        <FolderPlus size={14} className="shrink-0" />
+        {t("sftp.newFolder")}
+      </button>
+      <button
+        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left"
+        onClick={handleNewFile}
+      >
+        <FilePlus size={14} className="shrink-0" />
+        {t("sftp.newFile")}
+      </button>
+      <button
+        className={cn(
+          "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
+          showHiddenFiles && "text-primary",
+        )}
+        onClick={onToggleShowHiddenFiles}
+      >
+        {showHiddenFiles ? <EyeOff size={14} className="shrink-0" /> : <Eye size={14} className="shrink-0" />}
+        {t("settings.sftp.showHiddenFiles")}
+      </button>
+      <button
+        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left"
+        onClick={onRefresh}
+      >
+        <RefreshCw
+          size={14}
+          className={cn("shrink-0", (pane.loading || pane.reconnecting) && "animate-spin")}
+        />
+        {t("common.refresh")}
+      </button>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Toolbar - always visible when connected */}
+      <div ref={outerRef} className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20">
+        {/* Editable Breadcrumb with autocomplete */}
+        {isEditingPath ? (
+          <div className="relative flex-1">
+            <Input
+              ref={pathInputRef}
+              value={editingPathValue}
+              onChange={(e) => {
+                setEditingPathValue(e.target.value);
+                setShowPathSuggestions(true);
+                setPathSuggestionIndex(-1);
+              }}
+              onBlur={handlePathBlur}
+              onKeyDown={handlePathKeyDown}
+              onFocus={() => setShowPathSuggestions(true)}
+              className="h-5 w-full text-[10px] bg-background"
+              autoFocus
+            />
+            {showPathSuggestions && pathSuggestions.length > 0 && (
+              <div
+                ref={pathDropdownRef}
+                className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 max-h-48 overflow-auto"
+              >
+                {pathSuggestions.map((suggestion, idx) => (
+                  <button
+                    key={suggestion.path}
+                    type="button"
+                    className={cn(
+                      "w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-secondary/60 transition-colors",
+                      idx === pathSuggestionIndex && "bg-secondary/80",
+                    )}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handlePathSubmit(suggestion.path);
+                    }}
+                  >
+                    {suggestion.type === "folder" ? (
+                      <Folder size={12} className="text-primary shrink-0" />
+                    ) : (
+                      <Home
+                        size={12}
+                        className="text-muted-foreground shrink-0"
+                      />
+                    )}
+                    <span className="truncate font-mono">
+                      {suggestion.path}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            className="flex-1 min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
+            onDoubleClick={handlePathDoubleClick}
+            title={t("sftp.path.doubleClickToEdit")}
+          >
+            <SftpBreadcrumb
+              path={pane.connection.currentPath}
+              onNavigate={onNavigateTo}
+              onHome={() =>
+                pane.connection?.homeDir &&
+                onNavigateTo(pane.connection.homeDir)
+              }
+            />
+          </div>
+        )}
+
+        {/* Bookmark button with dropdown */}
+        <Popover>
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
-                title={t("sftp.encoding.label")}
+                className={cn("h-5 w-5 shrink-0", isCurrentPathBookmarked && "text-yellow-500")}
+                title={isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
+                onClick={(e) => {
+                  // If not bookmarked, toggle directly instead of opening popover
+                  if (!isCurrentPathBookmarked && bookmarks.length === 0) {
+                    e.preventDefault();
+                    onToggleBookmark();
+                  }
+                }}
               >
-                <Languages size={14} />
+                <Bookmark size={12} fill={isCurrentPathBookmarked ? "currentColor" : "none"} />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-36 p-1" align="end">
-              {(["auto", "utf-8", "gb18030"] as const).map((encoding) => (
-                <PopoverClose asChild key={encoding}>
-                  <button
-                    className={cn(
-                      "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors",
-                      pane.filenameEncoding === encoding && "bg-secondary"
-                    )}
-                    onClick={() => onSetFilenameEncoding(encoding)}
-                  >
-                    <Check
-                      size={12}
-                      className={cn(
-                        "shrink-0",
-                        pane.filenameEncoding === encoding ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    {t(`sftp.encoding.${encoding === "utf-8" ? "utf8" : encoding}`)}
-                  </button>
-                </PopoverClose>
-              ))}
+            <PopoverContent className="w-64 p-0" align="start">
+              <div className="p-2 border-b border-border/40">
+                <Button
+                  variant={isCurrentPathBookmarked ? "secondary" : "ghost"}
+                  size="sm"
+                  className="w-full justify-start text-xs h-7"
+                  onClick={onToggleBookmark}
+                >
+                  <Bookmark size={12} fill={isCurrentPathBookmarked ? "currentColor" : "none"} className={cn("mr-2", isCurrentPathBookmarked && "text-yellow-500")} />
+                  {isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
+                </Button>
+              </div>
+              {bookmarks.length > 0 ? (
+                <div className="max-h-48 overflow-auto py-1">
+                  {bookmarks.map((bm) => (
+                    <div
+                      key={bm.id}
+                      className="flex items-center gap-1 px-2 py-1 hover:bg-secondary/60 group"
+                    >
+                      <button
+                        type="button"
+                        className="flex-1 text-left text-xs truncate font-mono"
+                        onClick={() => onNavigateToBookmark(bm.path)}
+                        title={bm.path}
+                      >
+                        {bm.label}
+                        <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 opacity-0 group-hover:opacity-100 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteBookmark(bm.id);
+                        }}
+                      >
+                        <Trash2 size={10} />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 text-xs text-muted-foreground text-center">
+                  {t("sftp.bookmark.empty")}
+                </div>
+              )}
             </PopoverContent>
           </Popover>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={() => {
-            setNewFolderName("");
-            setShowNewFolderDialog(true);
-          }}
-          title={t("sftp.newFolder")}
-        >
-          <FolderPlus size={14} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={() => {
-            const defaultName = getNextUntitledName(pane.files.map(f => f.name));
-            setNewFileName(defaultName);
-            setFileNameError(null);
-            setShowNewFileDialog(true);
-          }}
-          title={t("sftp.newFile")}
-        >
-          <FilePlus size={14} />
-        </Button>
-        <Button
-          variant={showHiddenFiles ? "secondary" : "ghost"}
-          size="icon"
-          className={cn("h-6 w-6", showHiddenFiles && "text-primary")}
-          onClick={onToggleShowHiddenFiles}
-          title={t("settings.sftp.showHiddenFiles")}
-        >
-          {showHiddenFiles ? <EyeOff size={14} /> : <Eye size={14} />}
-        </Button>
-        <Button
-          variant={showFilterBar || pane.filter ? "secondary" : "ghost"}
-          size="icon"
-          className={cn("h-6 w-6", pane.filter && "text-primary")}
-          onClick={() => {
-            setShowFilterBar(!showFilterBar);
-            if (!showFilterBar) {
-              setTimeout(() => filterInputRef.current?.focus(), 0);
-            }
-          }}
-          title={t("sftp.filter")}
-        >
-          <Search size={14} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={onRefresh}
-          title={t("common.refresh")}
-        >
-          <RefreshCw
-            size={14}
-            className={
-              pane.loading || pane.reconnecting ? "animate-spin" : ""
-            }
-          />
-        </Button>
-      </div>
-    </div>
 
-    {/* Inline filter bar - appears below toolbar when search is active */}
-    {showFilterBar && (
-      <div className="h-8 px-3 flex items-center gap-2 border-b border-border/40 bg-secondary/10">
-        <div className="relative flex-1">
-          <Search
-            size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            ref={filterInputRef}
-            value={pane.filter}
-            onChange={(e) =>
-              startTransition(() => onSetFilter(e.target.value))
-            }
-            placeholder={t("sftp.filter.placeholder")}
-            className="h-6 w-full pl-7 pr-7 text-xs bg-background"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                if (pane.filter) {
-                  startTransition(() => onSetFilter(""));
-                } else {
-                  setShowFilterBar(false);
-                }
-              }
-            }}
-          />
-          {pane.filter && (
-            <button
-              onClick={() => startTransition(() => onSetFilter(""))}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X size={12} />
-            </button>
+        {/* Action buttons area - observed for overflow */}
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          {collapsed ? (
+            <>
+              {pinnedButtons}
+              <Dropdown>
+                <DropdownTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    title="More"
+                  >
+                    <MoreHorizontal size={14} />
+                  </Button>
+                </DropdownTrigger>
+                <DropdownContent align="end">
+                  {overflowMenuItems}
+                </DropdownContent>
+              </Dropdown>
+            </>
+          ) : (
+            <>
+              {pinnedButtons}
+              {collapsibleButtons}
+            </>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
-          onClick={() => {
-            startTransition(() => onSetFilter(""));
-            setShowFilterBar(false);
-          }}
-          title={t("common.close")}
-        >
-          <X size={14} />
-        </Button>
       </div>
-    )}
-  </>
-);
+
+      {/* Inline filter bar - appears below toolbar when search is active */}
+      {showFilterBar && (
+        <div className="h-8 px-3 flex items-center gap-2 border-b border-border/40 bg-secondary/10">
+          <div className="relative flex-1">
+            <Search
+              size={12}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              ref={filterInputRef}
+              value={pane.filter}
+              onChange={(e) =>
+                startTransition(() => onSetFilter(e.target.value))
+              }
+              placeholder={t("sftp.filter.placeholder")}
+              className="h-6 w-full pl-7 pr-7 text-xs bg-background"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (pane.filter) {
+                    startTransition(() => onSetFilter(""));
+                  } else {
+                    setShowFilterBar(false);
+                  }
+                }
+              }}
+            />
+            {pane.filter && (
+              <button
+                onClick={() => startTransition(() => onSetFilter(""))}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0"
+            onClick={() => {
+              startTransition(() => onSetFilter(""));
+              setShowFilterBar(false);
+            }}
+            title={t("common.close")}
+          >
+            <X size={14} />
+          </Button>
+        </div>
+      )}
+    </>
+  );
+};

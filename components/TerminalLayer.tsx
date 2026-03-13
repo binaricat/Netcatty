@@ -750,6 +750,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     [sftpHostForTab],
   );
 
+  // Get the focused terminal's current working directory
+  const getTerminalCwd = useCallback(async (): Promise<string | null> => {
+    const sessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id;
+    if (!sessionId) return null;
+    try {
+      const result = await terminalBackend.getSessionPwd(sessionId);
+      return result.success && result.cwd ? result.cwd : null;
+    } catch {
+      return null;
+    }
+  }, [activeWorkspace?.focusedSessionId, activeSession?.id, terminalBackend]);
+
   // Toggle SFTP from activity bar (resolves current host automatically)
   const handleToggleSftpFromBar = useCallback(() => {
     if (!activeTabId) return;
@@ -1062,6 +1074,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                           sftpUseCompressedUpload={sftpUseCompressedUpload}
                           editorWordWrap={editorWordWrap}
                           setEditorWordWrap={setEditorWordWrap}
+                          onGetTerminalCwd={getTerminalCwd}
                         />
                     );
                   })}

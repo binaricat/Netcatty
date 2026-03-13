@@ -1440,67 +1440,56 @@ async function getSessionPwd(event, payload) {
   const { sessionId } = payload;
   const session = sessions.get(sessionId);
 
-  if (!session || !session.stream || !session.conn) {
+  if (!session || !session.conn) {
     return { success: false, error: 'Session not found or not connected' };
   }
 
+  // Completely silent: uses a separate exec channel, nothing is printed
+  // in the interactive terminal. The exec channel and the interactive
+  // shell are both children of the same per-connection sshd process,
+  // so we find the shell as a sibling via $PPID.
   return new Promise((resolve) => {
-    const stream = session.stream;
-    const marker = `__PWD_${Date.now()}__`;
-    const timeout = setTimeout(() => {
-      stream.removeListener('data', onData);
+    const timer = setTimeout(() => {
       resolve({ success: false, error: 'Timeout getting pwd' });
-    }, 3000);
+    }, 5000);
 
-    let buffer = '';
+    // The command:
+    // 1. Find sibling processes of our sshd parent that are shells
+    // 2. Read the cwd of the most recently started one via /proc
+    // 3. Fallback: use lsof (macOS/BSD) or $HOME
+    const cmd = [
+      'p=$(ps --ppid $PPID -o pid=,comm= 2>/dev/null',
+      "|awk '$2~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}')",
+      '&& [ -n "$p" ] && readlink /proc/$p/cwd 2>/dev/null',
+      '&& exit 0;',
+      // macOS/BSD fallback: ps syntax differs, use -o ppid= to filter
+      'p=$(ps -A -o pid=,ppid=,comm= 2>/dev/null',
+      "|awk -v pp=$PPID '$2==pp && $3~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}')",
+      '&& [ -n "$p" ] && lsof -p $p -d cwd -Fn 2>/dev/null',
+      "|awk '/^n/{print substr($0,2);exit}'",
+      '&& exit 0;',
+      'echo ~',
+    ].join(' ');
 
-    const onData = (data) => {
-      const str = data.toString();
-      buffer += str;
-
-      // We need to find the ACTUAL output markers, not the command echo
-      // The command echo looks like: echo '__PWD_xxx__S' && pwd && echo '__PWD_xxx__E'
-      // The actual output looks like: __PWD_xxx__S\n/path/to/dir\n__PWD_xxx__E
-      // 
-      // We look for the marker at the START of a line (after newline) to avoid the echo
-      const startMarkerRegex = new RegExp(`(?:^|[\\r\\n])${marker}S[\\r\\n]+`);
-      const endMarkerRegex = new RegExp(`[\\r\\n]${marker}E(?:[\\r\\n]|$)`);
-
-      const startMatch = buffer.match(startMarkerRegex);
-      const endMatch = buffer.match(endMarkerRegex);
-
-      if (startMatch && endMatch) {
-        const startIdx = buffer.indexOf(startMatch[0]) + startMatch[0].length;
-        const endIdx = buffer.indexOf(endMatch[0]);
-
-        if (startIdx <= endIdx) {
-          clearTimeout(timeout);
-          stream.removeListener('data', onData);
-
-          const pwdOutput = buffer.slice(startIdx, endIdx).trim();
-          console.log('[getSessionPwd] pwdOutput:', JSON.stringify(pwdOutput));
-
-          // The pwd output should be a valid absolute path
-          if (pwdOutput && pwdOutput.startsWith('/')) {
-            console.log('[getSessionPwd] Success, cwd:', pwdOutput);
-            resolve({ success: true, cwd: pwdOutput });
-          } else {
-            console.log('[getSessionPwd] Failed - invalid path:', pwdOutput);
-            resolve({ success: false, error: 'Invalid pwd output' });
-          }
-        }
+    session.conn.exec(cmd, (err, stream) => {
+      if (err) {
+        clearTimeout(timer);
+        resolve({ success: false, error: err.message });
+        return;
       }
-    };
-
-    stream.on('data', onData);
-
-    // Send pwd command with short unique markers
-    // Using 'S' and 'E' as suffixes to make markers shorter
-    // After the command, send ANSI escape sequences to clear the output lines:
-    // \x1b[1A = move cursor up 1 line, \x1b[2K = clear entire line
-    // Clear 4 lines: the command echo, START marker, pwd output, and END marker
-    const clearLines = '\\x1b[1A\\x1b[2K\\x1b[1A\\x1b[2K\\x1b[1A\\x1b[2K\\x1b[1A\\x1b[2K';
-    stream.write(` echo '${marker}S' && pwd && echo '${marker}E' && printf '${clearLines}'\n`);
+      let out = '';
+      stream.on('data', (d) => { out += d.toString(); });
+      stream.stderr?.on('data', () => {}); // ignore stderr
+      stream.on('close', () => {
+        clearTimeout(timer);
+        const path = out.trim();
+        if (path && path.startsWith('/')) {
+          resolve({ success: true, cwd: path });
+        } else {
+          resolve({ success: false, error: 'Could not determine cwd' });
+        }
+      });
+    });
   });
 }
 

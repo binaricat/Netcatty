@@ -596,6 +596,7 @@ const en: Messages = {
   'sftp.status.uploading': 'Uploading...',
   'sftp.status.ready': 'Ready',
   'sftp.goUp': 'Go up',
+  'sftp.goToTerminalCwd': 'Go to terminal directory',
   'sftp.encoding.label': 'Filename Encoding',
   'sftp.encoding.auto': 'Auto',
   'sftp.encoding.utf8': 'UTF-8',

@@ -34,7 +34,7 @@ interface UseSftpConnectionsParams {
 }
 
 interface UseSftpConnectionsResult {
-  connect: (side: "left" | "right", host: Host | "local") => Promise<void>;
+  connect: (side: "left" | "right", host: Host | "local", options?: { forceNewTab?: boolean }) => Promise<void>;
   disconnect: (side: "left" | "right") => Promise<void>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
@@ -69,13 +69,13 @@ export const useSftpConnections = ({
   const { listLocalFiles, listRemoteFiles } = useSftpDirectoryListing();
 
   const connect = useCallback(
-    async (side: "left" | "right", host: Host | "local") => {
+    async (side: "left" | "right", host: Host | "local", options?: { forceNewTab?: boolean }) => {
       const setTabs = side === "left" ? setLeftTabs : setRightTabs;
 
       let activeTabId: string | null = null;
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
 
-      if (!sideTabs.activeTabId) {
+      if (!sideTabs.activeTabId || options?.forceNewTab) {
         const newPane = createEmptyPane();
         activeTabId = newPane.id;
         setTabs((prev) => ({
@@ -109,18 +109,22 @@ export const useSftpConnections = ({
       const filenameEncoding: SftpFilenameEncoding =
         host === "local" ? "auto" : (host.sftpEncoding ?? "auto");
 
-      if (currentPane?.connection) {
-        clearCacheForConnection(currentPane.connection.id);
-      }
-      if (currentPane?.connection && !currentPane.connection.isLocal) {
-        const oldSftpId = sftpSessionsRef.current.get(currentPane.connection.id);
-        if (oldSftpId) {
-          try {
-            await netcattyBridge.get()?.closeSftp(oldSftpId);
-          } catch {
-            // Ignore errors when closing stale SFTP sessions
+      // When forceNewTab is set, we're preserving the old tab for instant switching —
+      // don't close its SFTP session or clear its cache.
+      if (!options?.forceNewTab) {
+        if (currentPane?.connection) {
+          clearCacheForConnection(currentPane.connection.id);
+        }
+        if (currentPane?.connection && !currentPane.connection.isLocal) {
+          const oldSftpId = sftpSessionsRef.current.get(currentPane.connection.id);
+          if (oldSftpId) {
+            try {
+              await netcattyBridge.get()?.closeSftp(oldSftpId);
+            } catch {
+              // Ignore errors when closing stale SFTP sessions
+            }
+            sftpSessionsRef.current.delete(currentPane.connection.id);
           }
-          sftpSessionsRef.current.delete(currentPane.connection.id);
         }
       }
 

@@ -56,6 +56,7 @@ interface SftpSidePanelProps {
   sftpUseCompressedUpload: boolean;
   editorWordWrap: boolean;
   setEditorWordWrap: (value: boolean) => void;
+  onGetTerminalCwd?: () => Promise<string | null>;
 }
 
 const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
@@ -76,6 +77,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   sftpUseCompressedUpload,
   editorWordWrap,
   setEditorWordWrap,
+  onGetTerminalCwd,
 }) => {
   const { t } = useI18n();
 
@@ -194,6 +196,15 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     prevIsVisibleRef.current = isVisible;
   }, [isVisible]);
 
+  // Navigate SFTP to the terminal's current working directory
+  const handleGoToTerminalCwd = useCallback(async () => {
+    if (!onGetTerminalCwd) return;
+    const cwd = await onGetTerminalCwd();
+    if (cwd) {
+      sftpRef.current.navigateTo("left", cwd);
+    }
+  }, [onGetTerminalCwd]);
+
   // Track whether there's active work that should block connection switching.
   // Computed outside the effect so it can be in the dependency array.
   const hasActiveTransfers = useMemo(
@@ -216,12 +227,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // a previous host.
     const proto = activeHost.protocol;
     if (proto === 'serial' || activeHost.id?.startsWith('serial-')) {
-      if (hasActiveWork) return;
-      const leftConn = s.leftPane.connection;
-      if (leftConn) {
-        s.disconnect("left");
-        connectedHostIdRef.current = null;
-      }
+      // Serial terminals don't support SFTP. Just clear the tracked
+      // connection key so switching back to a remote terminal will
+      // trigger auto-connect. Don't disconnect existing tabs — they
+      // may be reused when focus returns.
+      connectedHostIdRef.current = null;
       return;
     }
     // Local terminals connect to the local file browser
@@ -233,8 +243,21 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         connectedHostIdRef.current = "local";
         return;
       }
+      // Check for an existing local tab to reuse
+      const existingLocalTab = s.leftTabs.tabs.find((tab) =>
+        tab.connection?.isLocal && tab.connection.status === "connected",
+      );
+      if (existingLocalTab) {
+        s.selectTab("left", existingLocalTab.id);
+        connectedHostIdRef.current = "local";
+        return;
+      }
       connectedHostIdRef.current = "local";
-      if (leftConn) {
+      // Preserve existing remote tab when switching to local
+      const needsNewTab = !!(leftConn && leftConn.status === "connected");
+      if (needsNewTab) {
+        s.connect("left", "local", { forceNewTab: true });
+      } else if (leftConn) {
         // Await disconnect before connecting locally to avoid the async
         // disconnect wiping out the fresh local connection.
         void s.disconnect("left").then(() => s.connect("left", "local"));
@@ -276,12 +299,16 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       return;
     }
 
-    // Connect to the host - connect() handles creating a tab if needed
+    // Create a new tab when there's already an active connection to a different
+    // host, so the previous tab is preserved for instant switching on focus change.
+    const currentConn = s.leftPane.connection;
+    const needsNewTab = !!(currentConn && currentConn.status === "connected" && currentConn.hostId !== activeHost.id);
+
     connectedHostIdRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
     // Store the pending key so the effect below can map it once the tab is created
     pendingConnectionKeyRef.current = connectionKey;
-    s.connect("left", activeHost);
+    s.connect("left", activeHost, needsNewTab ? { forceNewTab: true } : undefined);
   }, [activeHost, hasActiveWork]); // Re-evaluate when work finishes so deferred switch can proceed
 
   // Track the active tab's connectionKey after connect() creates or reuses it.
@@ -513,6 +540,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
                   showHeader
                   showEmptyHeader
                   onToggleShowHiddenFiles={() => handleToggleHiddenFiles(pane.id)}
+                  onGoToTerminalCwd={onGetTerminalCwd ? handleGoToTerminalCwd : undefined}
                 />
               </div>
             );
@@ -582,6 +610,7 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.sftpUseCompressedUpload === next.sftpUseCompressedUpload &&
   prev.editorWordWrap === next.editorWordWrap &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
+  prev.onGetTerminalCwd === next.onGetTerminalCwd &&
   prev.initialLocation?.hostId === next.initialLocation?.hostId &&
   prev.initialLocation?.path === next.initialLocation?.path;
 
