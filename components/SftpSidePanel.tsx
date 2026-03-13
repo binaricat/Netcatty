@@ -208,17 +208,32 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     const s = sftpRef.current;
 
-    // Don't attempt SFTP for local or serial terminals — disconnect any
-    // existing remote connection so the panel doesn't remain bound to the
-    // wrong host when focus moves to a non-SFTP pane.
+    // Serial terminals don't support SFTP — disconnect any existing remote
+    // connection so the panel doesn't remain bound to the wrong host.
     const proto = activeHost.protocol;
-    if (proto === 'local' || proto === 'serial' || activeHost.id?.startsWith('local-') || activeHost.id?.startsWith('serial-')) {
+    if (proto === 'serial' || activeHost.id?.startsWith('serial-')) {
       if (hasActiveWork) return;
       const leftConn = s.leftPane.connection;
       if (leftConn && !leftConn.isLocal) {
         s.disconnect("left");
         connectedHostIdRef.current = null;
       }
+      return;
+    }
+    // Local terminals connect to the local file browser
+    if (proto === 'local' || activeHost.id?.startsWith('local-')) {
+      if (hasActiveWork) return;
+      const leftConn = s.leftPane.connection;
+      if (leftConn?.isLocal) {
+        // Already connected locally
+        connectedHostIdRef.current = "local";
+        return;
+      }
+      if (leftConn) {
+        s.disconnect("left");
+      }
+      connectedHostIdRef.current = "local";
+      s.connect("left", "local");
       return;
     }
     // Build a connection key that accounts for session-time overrides
@@ -273,12 +288,17 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   // Clear the remembered connection key when the pane disconnects or the
   // session is lost, so re-opening SFTP for the same terminal reconnects.
+  // Also reset the file-watch counter — watches are bound to the SFTP session,
+  // so they stop when the session disconnects.
   useEffect(() => {
     const connection = sftp.leftPane.connection;
     if (!connection || connection.status === "error" || connection.status === "disconnected") {
       connectedHostIdRef.current = null;
+      if (sftp.activeFileWatchCountRef) {
+        sftp.activeFileWatchCountRef.current = 0;
+      }
     }
-  }, [sftp.leftPane.connection?.status]);
+  }, [sftp.leftPane.connection?.status, sftp.activeFileWatchCountRef]);
 
   useEffect(() => {
     if (!activeHost || !initialLocation) return;

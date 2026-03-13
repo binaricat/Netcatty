@@ -274,10 +274,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const tabId = activeTabIdRef.current;
     if (!tabId) return;
 
-    // When a drag-drop upload comes from a non-focused terminal pane in a
-    // workspace, switch focus to that pane first so the SFTP panel binds to
-    // the correct host.
-    if (sourceSessionId && pendingUploadEntries?.length) {
+    // When SFTP is opened from a non-focused workspace pane (toolbar click
+    // or drag-drop), switch focus first so the SFTP panel binds to the
+    // correct host.
+    if (sourceSessionId) {
       const ws = activeWorkspaceRef.current;
       if (ws && ws.focusedSessionId !== sourceSessionId) {
         onSetWorkspaceFocusedSessionRef.current?.(ws.id, sourceSessionId);
