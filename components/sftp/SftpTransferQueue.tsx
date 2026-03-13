@@ -1,5 +1,6 @@
 import React from "react";
 import { Button } from "../ui/button";
+import { useI18n } from "../../application/i18n/I18nProvider";
 import type { useSftpState } from "../../application/state/useSftpState";
 import type { TransferTask } from "../../types";
 import { SftpTransferItem } from "./SftpTransferItem";
@@ -19,6 +20,8 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   canRevealTransferTarget,
   onRevealTransferTarget,
 }) => {
+  const { t } = useI18n();
+
   if (sftp.transfers.length === 0) {
     return null;
   }
@@ -27,15 +30,15 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
     <div className="border-t border-border/70 bg-secondary/80 backdrop-blur-sm shrink-0">
       <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border/40">
         <span className="font-medium">
-          Transfers
+          {t("sftp.transfers")}
           {sftp.activeTransfersCount > 0 && (
             <span className="ml-2 text-primary">
-              ({sftp.activeTransfersCount} active)
+              ({t("sftp.transfers.active", { count: sftp.activeTransfersCount })})
             </span>
           )}
         </span>
         {sftp.transfers.some(
-          (t) => t.status === "completed" || t.status === "cancelled",
+          (tr) => tr.status === "completed" || tr.status === "cancelled",
         ) && (
           <Button
             variant="ghost"
@@ -43,7 +46,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
             className="h-5 px-1.5 text-[11px]"
             onClick={sftp.clearCompletedTransfers}
           >
-            Clear completed
+            {t("sftp.transfers.clearCompleted")}
           </Button>
         )}
       </div>

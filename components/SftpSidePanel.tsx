@@ -139,7 +139,6 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     setTextEditorTarget,
     textEditorContent,
     setTextEditorContent,
-    loadingTextContent: _loadingTextContent,
     showFileOpenerDialog,
     setShowFileOpenerDialog,
     fileOpenerTarget,
@@ -161,7 +160,6 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const {
     leftPanes,
-    leftTabsInfo: _leftTabsInfo,
     showHostPickerLeft,
     showHostPickerRight,
     hostSearchLeft,
@@ -176,7 +174,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   // Auto-connect when activeHost changes.
   // Uses sftpRef to avoid re-triggering on every sftp state change.
-  const connectedHostIdRef = useRef<string | null>(null);
+  const connectedKeyRef = useRef<string | null>(null);
   // Store the Host object used for the current connection so the header
   // can show session-time overrides even during deferred host switches.
   const connectedHostObjRef = useRef<Host | null>(null);
@@ -185,6 +183,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // Maps tab IDs to the connectionKey used to create them, so we can
   // correctly identify tabs when the same host ID has different overrides.
   const tabConnectionKeyMapRef = useRef<Map<string, string>>(new Map());
+  const pendingConnectionKeyRef = useRef<string | null>(null);
   const prevIsVisibleRef = useRef(isVisible);
 
   // Reset location guard when the panel is reopened so the terminal cwd
@@ -231,7 +230,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       // connection key so switching back to a remote terminal will
       // trigger auto-connect. Don't disconnect existing tabs — they
       // may be reused when focus returns.
-      connectedHostIdRef.current = null;
+      connectedKeyRef.current = null;
       return;
     }
     // Local terminals connect to the local file browser
@@ -240,7 +239,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       const leftConn = s.leftPane.connection;
       if (leftConn?.isLocal) {
         // Already connected locally
-        connectedHostIdRef.current = "local";
+        connectedKeyRef.current = "local";
         return;
       }
       // Check for an existing local tab to reuse
@@ -249,10 +248,10 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       );
       if (existingLocalTab) {
         s.selectTab("left", existingLocalTab.id);
-        connectedHostIdRef.current = "local";
+        connectedKeyRef.current = "local";
         return;
       }
-      connectedHostIdRef.current = "local";
+      connectedKeyRef.current = "local";
       // Preserve existing remote tab when switching to local
       const needsNewTab = !!(leftConn && leftConn.status === "connected");
       if (needsNewTab) {
@@ -270,7 +269,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // (same host ID may have different port/protocol in different workspace panes).
     // Uses buildCacheKey to stay consistent with the key recorded on upload tasks.
     const connectionKey = buildCacheKey(activeHost.id, activeHost.hostname, activeHost.port, activeHost.protocol, activeHost.sftpSudo, activeHost.username);
-    if (connectedHostIdRef.current === connectionKey) return;
+    if (connectedKeyRef.current === connectionKey) return;
 
     // Don't switch connections while transfers or editor are active
     if (hasActiveWork) return;
@@ -294,7 +293,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     });
     if (existingTab) {
       s.selectTab("left", existingTab.id);
-      connectedHostIdRef.current = connectionKey;
+      connectedKeyRef.current = connectionKey;
       connectedHostObjRef.current = activeHost;
       return;
     }
@@ -304,7 +303,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const currentConn = s.leftPane.connection;
     const needsNewTab = !!(currentConn && currentConn.status === "connected" && currentConn.hostId !== activeHost.id);
 
-    connectedHostIdRef.current = connectionKey;
+    connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
     // Store the pending key so the effect below can map it once the tab is created
     pendingConnectionKeyRef.current = connectionKey;
@@ -313,7 +312,6 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   // Track the active tab's connectionKey after connect() creates or reuses it.
   // Watches both activeTabId (new tab) and connection status (reused tab reconnecting).
-  const pendingConnectionKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const activeTabId = sftp.leftTabs.activeTabId;
     if (activeTabId && pendingConnectionKeyRef.current) {
@@ -329,7 +327,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   useEffect(() => {
     const connection = sftp.leftPane.connection;
     if (!connection || connection.status === "error" || connection.status === "disconnected") {
-      connectedHostIdRef.current = null;
+      connectedKeyRef.current = null;
       if (sftp.activeFileWatchCountRef) {
         sftp.activeFileWatchCountRef.current = 0;
       }
@@ -347,7 +345,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     // Include full endpoint key so that same-hostId sessions with
     // different overrides each get their initial location applied.
-    const locationKey = `${connectedHostIdRef.current}:${initialLocation.path}`;
+    const locationKey = `${connectedKeyRef.current}:${initialLocation.path}`;
     if (lastAppliedInitialLocationKeyRef.current === locationKey) return;
 
     if (connection.currentPath === initialLocation.path) {
@@ -426,8 +424,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     t,
   ]);
 
+  const MAX_VISIBLE_TRANSFERS = 5;
   const visibleTransfers = useMemo(
-    () => [...sftp.transfers].reverse().slice(0, 5),
+    () => [...sftp.transfers].reverse().slice(0, MAX_VISIBLE_TRANSFERS),
     [sftp.transfers],
   );
 
@@ -455,7 +454,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         // If the transfer recorded a full endpoint key, use it to
         // distinguish same-hostId uploads with different session overrides.
         if (task.targetConnectionKey) {
-          return connectedHostIdRef.current === task.targetConnectionKey;
+          return connectedKeyRef.current === task.targetConnectionKey;
         }
         return true;
       }
@@ -598,6 +597,7 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.hosts === next.hosts &&
   prev.keys === next.keys &&
   prev.identities === next.identities &&
+  prev.updateHosts === next.updateHosts &&
   prev.activeHost === next.activeHost &&
   prev.showWorkspaceHostHeader === next.showWorkspaceHostHeader &&
   prev.isVisible === next.isVisible &&

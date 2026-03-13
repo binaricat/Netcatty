@@ -1461,7 +1461,7 @@ async function getSessionPwd(event, payload) {
     session.conn.exec(cmd, (err, stream) => {
       if (err) {
         clearTimeout(timer);
-        console.log('[getSessionPwd] exec error:', err.message);
+        log('[getSessionPwd] exec error:', err.message);
         resolve({ success: false, error: err.message });
         return;
       }
@@ -1472,7 +1472,7 @@ async function getSessionPwd(event, payload) {
       stream.on('close', (code) => {
         clearTimeout(timer);
         const path = out.trim();
-        console.log('[getSessionPwd] stdout:', JSON.stringify(path), 'stderr:', JSON.stringify(errOut.trim()), 'exitCode:', code);
+        log('[getSessionPwd]', { stdout: path, stderr: errOut.trim(), exitCode: code });
         if (path && path.startsWith('/')) {
           resolve({ success: true, cwd: path });
         } else {

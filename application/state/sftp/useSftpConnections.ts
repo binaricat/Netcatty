@@ -353,7 +353,7 @@ export const useSftpConnections = ({
             });
           }
 
-          let files: SftpFileEntry[];
+          let files: SftpFileEntry[] = [];
           try {
             files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
           } catch {
