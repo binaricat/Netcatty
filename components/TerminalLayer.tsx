@@ -780,6 +780,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.delete(activeTabId);
       return next;
     });
+    setSftpInitialLocationForTab(prev => {
+      const next = new Map(prev);
+      next.delete(activeTabId);
+      return next;
+    });
   }, [activeTabId]);
 
   // Switch side panel to a specific tab (or toggle if already on that tab)
@@ -815,7 +820,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.set(activeTabId, tab);
       return next;
     });
-  }, [activeTabId, activeWorkspace, focusedSessionId, activeSession, sessionHostsMap, handleCloseSidePanel]);
+  }, [activeTabId, activeWorkspace, focusedSessionId, activeSession, sessionHostsMap]);
 
   // Toggle SFTP from activity bar header
   const handleToggleSftpFromBar = useCallback(() => {
@@ -838,6 +843,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!sessionId) return;
     const payload = `${command}\r`;
     terminalBackend.writeToSession(sessionId, payload);
+    // Re-focus the terminal so the user can interact immediately
+    const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
+    const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    textarea?.focus();
   }, [activeWorkspace?.focusedSessionId, activeSession?.id, terminalBackend]);
 
   // Resolve theme change handler for the focused session
@@ -851,46 +860,44 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return null;
   }, [activeWorkspace, focusedSessionId, activeSession, sessionHostsMap]);
 
+  const isFocusedHostLocal = useMemo(() => {
+    return focusedHost?.protocol === 'local' || !!focusedHost?.id?.startsWith('local-');
+  }, [focusedHost]);
+
   const handleThemeChangeForFocusedSession = useCallback((themeId: string) => {
-    const host = focusedHost;
-    const isLocal = host?.protocol === 'local' || host?.id?.startsWith('local-');
-    if (isLocal) {
+    if (isFocusedHostLocal) {
       onUpdateTerminalThemeId?.(themeId);
       return;
     }
-    if (host) {
-      onUpdateHost({ ...host, theme: themeId });
+    if (focusedHost) {
+      onUpdateHost({ ...focusedHost, theme: themeId });
     }
-  }, [focusedHost, onUpdateTerminalThemeId, onUpdateHost]);
+  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalThemeId, onUpdateHost]);
 
   const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
-    const host = focusedHost;
-    const isLocal = host?.protocol === 'local' || host?.id?.startsWith('local-');
-    if (isLocal) {
+    if (isFocusedHostLocal) {
       onUpdateTerminalFontFamilyId?.(fontFamilyId);
       return;
     }
-    if (host) {
-      onUpdateHost({ ...host, fontFamily: fontFamilyId });
+    if (focusedHost) {
+      onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId });
     }
-  }, [focusedHost, onUpdateTerminalFontFamilyId, onUpdateHost]);
+  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontFamilyId, onUpdateHost]);
 
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
-    const host = focusedHost;
-    const isLocal = host?.protocol === 'local' || host?.id?.startsWith('local-');
-    if (isLocal) {
+    if (isFocusedHostLocal) {
       onUpdateTerminalFontSize?.(newFontSize);
       return;
     }
-    if (host) {
-      onUpdateHost({ ...host, fontSize: newFontSize });
+    if (focusedHost) {
+      onUpdateHost({ ...focusedHost, fontSize: newFontSize });
     }
-  }, [focusedHost, onUpdateTerminalFontSize, onUpdateHost]);
+  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontSize, onUpdateHost]);
 
   // Current theme/font/size for the focused session (for ThemeSidePanel)
-  const focusedThemeId = focusedHost?.theme || terminalTheme.id;
-  const focusedFontFamilyId = focusedHost?.fontFamily || terminalFontFamilyId;
-  const focusedFontSize = focusedHost?.fontSize || fontSize;
+  const focusedThemeId = focusedHost?.theme ?? terminalTheme.id;
+  const focusedFontFamilyId = focusedHost?.fontFamily ?? terminalFontFamilyId;
+  const focusedFontSize = focusedHost?.fontSize ?? fontSize;
 
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();

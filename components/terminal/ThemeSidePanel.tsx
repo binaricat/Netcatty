@@ -11,7 +11,7 @@ import { Check, Download, Minus, Palette, Pencil, Plus, Sparkles, Type } from 'l
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useAvailableFonts } from '../../application/state/fontStore';
 import { TERMINAL_THEMES, TerminalThemeConfig } from '../../infrastructure/config/terminalThemes';
-import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, TerminalFont } from '../../infrastructure/config/fonts';
+import { MIN_FONT_SIZE, MAX_FONT_SIZE, TerminalFont } from '../../infrastructure/config/fonts';
 import { useCustomThemes, useCustomThemeActions } from '../../application/state/customThemeStore';
 import { parseItermcolors } from '../../infrastructure/parsers/itermcolorsParser';
 import { CustomThemeModal } from './CustomThemeModal';
@@ -141,9 +141,6 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   const { addTheme, updateTheme, deleteTheme } = useCustomThemeActions();
 
   const [activeTab, setActiveTab] = useState<TabType>('theme');
-  const [selectedTheme, setSelectedTheme] = useState(currentThemeId);
-  const [selectedFont, setSelectedFont] = useState(currentFontFamilyId);
-  const [fontSize, setFontSize] = useState(currentFontSize);
   const [editingTheme, setEditingTheme] = useState<TerminalTheme | null>(null);
   const [isNewTheme, setIsNewTheme] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,38 +150,22 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
     [customThemes]
   );
 
-  // Sync external changes
-  React.useEffect(() => {
-    setSelectedTheme(currentThemeId);
-  }, [currentThemeId]);
-  React.useEffect(() => {
-    setSelectedFont(currentFontFamilyId);
-  }, [currentFontFamilyId]);
-  React.useEffect(() => {
-    setFontSize(currentFontSize);
-  }, [currentFontSize]);
-
   const handleThemeSelect = useCallback((themeId: string) => {
-    setSelectedTheme(themeId);
     setEditingTheme(null);
     onThemeChange(themeId);
   }, [onThemeChange]);
 
   const handleFontSelect = useCallback((fontId: string) => {
-    setSelectedFont(fontId);
     onFontFamilyChange(fontId);
   }, [onFontFamilyChange]);
 
   const handleFontSizeChange = useCallback((delta: number) => {
-    setFontSize(prev => {
-      const newSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, prev + delta));
-      onFontSizeChange(newSize);
-      return newSize;
-    });
-  }, [onFontSizeChange]);
+    const newSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, currentFontSize + delta));
+    onFontSizeChange(newSize);
+  }, [currentFontSize, onFontSizeChange]);
 
   const handleNewTheme = useCallback(() => {
-    const base = allThemes.find(t => t.id === selectedTheme) || TERMINAL_THEMES[0];
+    const base = allThemes.find(t => t.id === currentThemeId) || TERMINAL_THEMES[0];
     const newTheme: TerminalTheme = {
       ...base,
       id: `custom-${Date.now()}`,
@@ -194,7 +175,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
     };
     setEditingTheme(newTheme);
     setIsNewTheme(true);
-  }, [selectedTheme, allThemes]);
+  }, [currentThemeId, allThemes]);
 
   const handleImportFile = useCallback(() => {
     fileInputRef.current?.click();
@@ -210,7 +191,6 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
       const parsed = parseItermcolors(xml, name);
       if (parsed) {
         addTheme(parsed);
-        setSelectedTheme(parsed.id);
         onThemeChange(parsed.id);
         setActiveTab('theme');
       } else {
@@ -231,13 +211,12 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
 
   const handleEditorDelete = useCallback((themeId: string) => {
     deleteTheme(themeId);
-    if (selectedTheme === themeId) {
-      setSelectedTheme(TERMINAL_THEMES[0].id);
+    if (currentThemeId === themeId) {
       onThemeChange(TERMINAL_THEMES[0].id);
     }
     setEditingTheme(null);
     setIsNewTheme(false);
-  }, [deleteTheme, selectedTheme, onThemeChange]);
+  }, [deleteTheme, currentThemeId, onThemeChange]);
 
   if (!isVisible) return null;
 
@@ -295,7 +274,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                   <ThemeItem
                     key={theme.id}
                     theme={theme}
-                    isSelected={selectedTheme === theme.id && !editingTheme}
+                    isSelected={currentThemeId === theme.id && !editingTheme}
                     onSelect={handleThemeSelect}
                   />
                 ))}
@@ -308,7 +287,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                       <ThemeItem
                         key={theme.id}
                         theme={theme}
-                        isSelected={selectedTheme === theme.id && !editingTheme}
+                        isSelected={currentThemeId === theme.id && !editingTheme}
                         onSelect={handleThemeSelect}
                         onEdit={handleEditTheme}
                       />
@@ -323,7 +302,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                   <FontItem
                     key={font.id}
                     font={font}
-                    isSelected={selectedFont === font.id}
+                    isSelected={currentFontFamilyId === font.id}
                     onSelect={handleFontSelect}
                   />
                 ))}
@@ -371,7 +350,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                       <ThemeItem
                         key={theme.id}
                         theme={theme}
-                        isSelected={selectedTheme === theme.id}
+                        isSelected={currentThemeId === theme.id}
                         onSelect={handleThemeSelect}
                         onEdit={handleEditTheme}
                       />
@@ -392,18 +371,18 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
             <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-1.5">
               <button
                 onClick={() => handleFontSizeChange(-1)}
-                disabled={fontSize <= MIN_FONT_SIZE}
+                disabled={currentFontSize <= MIN_FONT_SIZE}
                 className="w-7 h-7 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
               >
                 <Minus size={12} />
               </button>
               <div className="flex items-baseline gap-1">
-                <span className="text-lg font-bold text-foreground tabular-nums">{fontSize}</span>
+                <span className="text-lg font-bold text-foreground tabular-nums">{currentFontSize}</span>
                 <span className="text-[9px] text-muted-foreground">px</span>
               </div>
               <button
                 onClick={() => handleFontSizeChange(1)}
-                disabled={fontSize >= MAX_FONT_SIZE}
+                disabled={currentFontSize >= MAX_FONT_SIZE}
                 className="w-7 h-7 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
               >
                 <Plus size={12} />
@@ -415,7 +394,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
         {/* Current selection info */}
         <div className="px-2.5 py-1.5 border-t border-border/50 shrink-0">
           <div className="text-[9px] text-muted-foreground truncate">
-            {allThemes.find(t => t.id === selectedTheme)?.name ?? selectedTheme} • {availableFonts.find(f => f.id === selectedFont)?.name ?? selectedFont} • {fontSize}px
+            {allThemes.find(t => t.id === currentThemeId)?.name ?? currentThemeId} • {availableFonts.find(f => f.id === currentFontFamilyId)?.name ?? currentFontFamilyId} • {currentFontSize}px
           </div>
         </div>
       </div>
@@ -429,11 +408,10 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
           onSave={(theme) => {
             if (isNewTheme) {
               addTheme(theme);
-              setSelectedTheme(theme.id);
               onThemeChange(theme.id);
             } else {
               updateTheme(theme.id, theme);
-              if (selectedTheme === theme.id) {
+              if (currentThemeId === theme.id) {
                 onThemeChange(theme.id);
               }
             }
