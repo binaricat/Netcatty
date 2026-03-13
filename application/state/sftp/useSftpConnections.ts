@@ -5,7 +5,7 @@ import type { Host, Identity, SftpConnection, SftpFileEntry, SftpFilenameEncodin
 import type { SftpPane } from "./types";
 import { useSftpDirectoryListing } from "./useSftpDirectoryListing";
 import { useSftpHostCredentials } from "./useSftpHostCredentials";
-import { getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
+import { buildCacheKey, getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpConnectionsParams {
   hosts: Host[];
@@ -165,7 +165,8 @@ export const useSftpConnections = ({
           }));
         }
       } else {
-        const sharedHostCacheCandidate = getSharedRemoteHostCache(host.id);
+        const hostCacheKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol);
+        const sharedHostCacheCandidate = getSharedRemoteHostCache(hostCacheKey);
         const sharedHostCache =
           sharedHostCacheCandidate?.filenameEncoding === filenameEncoding
             ? sharedHostCacheCandidate
@@ -184,7 +185,10 @@ export const useSftpConnections = ({
         updateTab(side, activeTabId, (prev) => ({
           ...prev,
           connection,
-          loading: !sharedHostCache,
+          // Always show loading while connecting — even with cached files.
+          // The cached file list is shown as a preview, but the pane stays
+          // non-interactive until the SFTP session is actually established.
+          loading: true,
           reconnecting: prev.reconnecting,
           error: null,
           files: prev.reconnecting ? prev.files : (sharedHostCache?.files ?? []),
@@ -356,7 +360,7 @@ export const useSftpConnections = ({
             files,
             timestamp: Date.now(),
           });
-          setSharedRemoteHostCache(host.id, {
+          setSharedRemoteHostCache(hostCacheKey, {
             path: startPath,
             homeDir,
             files,

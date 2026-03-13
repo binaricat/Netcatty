@@ -175,6 +175,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   const connectedHostIdRef = useRef<string | null>(null);
   const lastAppliedInitialLocationKeyRef = useRef<string | null>(null);
   const handledPendingUploadIdRef = useRef<string | null>(null);
+  // Maps tab IDs to the connectionKey used to create them, so we can
+  // correctly identify tabs when the same host ID has different overrides.
+  const tabConnectionKeyMapRef = useRef<Map<string, string>>(new Map());
   const prevIsVisibleRef = useRef(isVisible);
 
   // Reset location guard when the panel is reopened so the terminal cwd
@@ -201,11 +204,15 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       hostname: activeHost.hostname,
     });
 
-    // Check if already connected to this host in any tab
+    // Check if an existing SFTP tab matches this exact endpoint.
+    // We track which connectionKey was used to create each tab so that
+    // tabs for the same host ID with different session-time overrides
+    // (port/protocol) are not incorrectly reused.
     const tabs = s.leftTabs.tabs;
-    const existingTab = tabs.find(
-      (tab) => tab.connection?.hostId === activeHost.id
-    );
+    const existingTab = tabs.find((tab) => {
+      if (!tab.connection || tab.connection.hostId !== activeHost.id) return false;
+      return tabConnectionKeyMapRef.current.get(tab.id) === connectionKey;
+    });
     if (existingTab) {
       s.selectTab("left", existingTab.id);
       connectedHostIdRef.current = connectionKey;
@@ -215,6 +222,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // Connect to the host - connect() handles creating a tab if needed
     connectedHostIdRef.current = connectionKey;
     s.connect("left", activeHost);
+    // Record which connectionKey this tab was created with
+    const activeTabAfterConnect = sftpRef.current.leftTabs.activeTabId;
+    if (activeTabAfterConnect) {
+      tabConnectionKeyMapRef.current.set(activeTabAfterConnect, connectionKey);
+    }
   }, [activeHost]); // Only depend on activeHost, not sftp
 
   useEffect(() => {

@@ -4,7 +4,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
 import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
-import { setSharedRemoteHostCache } from "./sharedRemoteHostCache";
+import { buildCacheKey, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpPaneActionsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
@@ -136,7 +136,11 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          setSharedRemoteHostCache(pane.connection.hostId, {
+          const connHost = lastConnectedHostRef.current[side];
+          const ck = connHost && connHost !== "local"
+            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol)
+            : pane.connection.hostId;
+          setSharedRemoteHostCache(ck, {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files: cached.files,
@@ -268,7 +272,11 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          setSharedRemoteHostCache(pane.connection.hostId, {
+          const connHost = lastConnectedHostRef.current[side];
+          const ck = connHost && connHost !== "local"
+            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol)
+            : pane.connection.hostId;
+          setSharedRemoteHostCache(ck, {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files,

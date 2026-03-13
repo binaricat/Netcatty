@@ -12,14 +12,27 @@ const SHARED_REMOTE_HOST_CACHE_TTL_MS = 60_000;
 
 const sharedRemoteHostCache = new Map<string, SharedRemoteHostCacheEntry>();
 
-export const getSharedRemoteHostCache = (
+/**
+ * Build a cache key that includes connection details so that the same host ID
+ * with different session-time overrides (port, protocol) uses separate entries.
+ */
+export const buildCacheKey = (
   hostId: string,
+  hostname?: string,
+  port?: number,
+  protocol?: string,
+): string => {
+  return `${hostId}:${hostname ?? ''}:${port ?? ''}:${protocol ?? ''}`;
+};
+
+export const getSharedRemoteHostCache = (
+  cacheKey: string,
 ): SharedRemoteHostCacheEntry | null => {
-  const entry = sharedRemoteHostCache.get(hostId);
+  const entry = sharedRemoteHostCache.get(cacheKey);
   if (!entry) return null;
 
   if (Date.now() - entry.updatedAt > SHARED_REMOTE_HOST_CACHE_TTL_MS) {
-    sharedRemoteHostCache.delete(hostId);
+    sharedRemoteHostCache.delete(cacheKey);
     return null;
   }
 
@@ -27,10 +40,10 @@ export const getSharedRemoteHostCache = (
 };
 
 export const setSharedRemoteHostCache = (
-  hostId: string,
+  cacheKey: string,
   entry: Omit<SharedRemoteHostCacheEntry, "updatedAt">,
 ): void => {
-  sharedRemoteHostCache.set(hostId, {
+  sharedRemoteHostCache.set(cacheKey, {
     ...entry,
     updatedAt: Date.now(),
   });
