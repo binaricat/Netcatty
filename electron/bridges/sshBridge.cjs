@@ -1453,36 +1453,26 @@ async function getSessionPwd(event, payload) {
       resolve({ success: false, error: 'Timeout getting pwd' });
     }, 5000);
 
-    // The command:
-    // 1. Find sibling processes of our sshd parent that are shells
-    // 2. Read the cwd of the most recently started one via /proc
-    // 3. Fallback: use lsof (macOS/BSD) or $HOME
-    const cmd = [
-      'p=$(ps --ppid $PPID -o pid=,comm= 2>/dev/null',
-      "|awk '$2~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}')",
-      '&& [ -n "$p" ] && readlink /proc/$p/cwd 2>/dev/null',
-      '&& exit 0;',
-      // macOS/BSD fallback: ps syntax differs, use -o ppid= to filter
-      'p=$(ps -A -o pid=,ppid=,comm= 2>/dev/null',
-      "|awk -v pp=$PPID '$2==pp && $3~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}')",
-      '&& [ -n "$p" ] && lsof -p $p -d cwd -Fn 2>/dev/null',
-      "|awk '/^n/{print substr($0,2);exit}'",
-      '&& exit 0;',
-      'echo ~',
-    ].join(' ');
+    // Find the interactive shell's cwd silently via a separate exec channel.
+    // Both the exec channel and the interactive shell share the same sshd
+    // parent ($PPID). We exclude our own PID ($$) to avoid reading our own cwd.
+    const cmd = `p=$(ps --ppid $PPID -o pid=,comm= 2>/dev/null | awk -v self=$$ '$1!=self && $2~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}'); [ -n "$p" ] && readlink /proc/$p/cwd 2>/dev/null && exit 0; p=$(ps -e -o pid=,ppid=,comm= 2>/dev/null | awk -v pp=$PPID -v self=$$ '$1!=self && $2==pp && $3~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}'); [ -n "$p" ] && readlink /proc/$p/cwd 2>/dev/null && exit 0; eval echo "~"`;
 
     session.conn.exec(cmd, (err, stream) => {
       if (err) {
         clearTimeout(timer);
+        console.log('[getSessionPwd] exec error:', err.message);
         resolve({ success: false, error: err.message });
         return;
       }
       let out = '';
+      let errOut = '';
       stream.on('data', (d) => { out += d.toString(); });
-      stream.stderr?.on('data', () => {}); // ignore stderr
-      stream.on('close', () => {
+      stream.stderr?.on('data', (d) => { errOut += d.toString(); });
+      stream.on('close', (code) => {
         clearTimeout(timer);
         const path = out.trim();
+        console.log('[getSessionPwd] stdout:', JSON.stringify(path), 'stderr:', JSON.stringify(errOut.trim()), 'exitCode:', code);
         if (path && path.startsWith('/')) {
           resolve({ success: true, cwd: path });
         } else {
