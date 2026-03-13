@@ -22,8 +22,9 @@ export const buildCacheKey = (
   port?: number,
   protocol?: string,
   sftpSudo?: boolean,
+  username?: string,
 ): string => {
-  return `${hostId}:${hostname ?? ''}:${port ?? ''}:${protocol ?? ''}:${sftpSudo ? 'sudo' : ''}`;
+  return `${hostId}:${hostname ?? ''}:${port ?? ''}:${protocol ?? ''}:${sftpSudo ? 'sudo' : ''}:${username ?? ''}`;
 };
 
 export const getSharedRemoteHostCache = (

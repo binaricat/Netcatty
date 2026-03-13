@@ -295,9 +295,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       && currentHost.port === host.port
       && currentHost.protocol === host.protocol;
 
+    const isClosing = !shouldKeepOpen && isOpen && isSameEndpoint;
+
     setSftpOpenTabs(prev => {
       const next = new Set(prev);
-      if (!shouldKeepOpen && isOpen && isSameEndpoint) {
+      if (isClosing) {
         next.delete(tabId);
       } else {
         next.add(tabId);
@@ -305,10 +307,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
 
-    // Store the host for this tab
+    // Store or remove the host for this tab.
+    // Removing on close unmounts the panel so SFTP sessions are cleaned up.
     setSftpHostForTab(prev => {
       const next = new Map(prev);
-      next.set(tabId, host);
+      if (isClosing) {
+        next.delete(tabId);
+      } else {
+        next.set(tabId, host);
+      }
       return next;
     });
 
@@ -742,9 +749,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!activeTabId) return;
 
     if (sftpOpenTabsRef.current.has(activeTabId)) {
-      // Close
+      // Close — also remove from sftpHostForTab so the panel is unmounted
+      // and its SFTP sessions/watchers are cleaned up.
       setSftpOpenTabs(prev => {
         const next = new Set(prev);
+        next.delete(activeTabId);
+        return next;
+      });
+      setSftpHostForTab(prev => {
+        const next = new Map(prev);
         next.delete(activeTabId);
         return next;
       });

@@ -165,7 +165,7 @@ export const useSftpConnections = ({
           }));
         }
       } else {
-        const hostCacheKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo);
+        const hostCacheKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
         const sharedHostCacheCandidate = getSharedRemoteHostCache(hostCacheKey);
         const sharedHostCache =
           sharedHostCacheCandidate?.filenameEncoding === filenameEncoding
