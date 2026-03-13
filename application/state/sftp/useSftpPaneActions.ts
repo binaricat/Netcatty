@@ -138,7 +138,7 @@ export const useSftpPaneActions = ({
         if (!pane.connection.isLocal) {
           const connHost = lastConnectedHostRef.current[side];
           const ck = connHost && connHost !== "local"
-            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol)
+            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo)
             : pane.connection.hostId;
           setSharedRemoteHostCache(ck, {
             path,
@@ -274,7 +274,7 @@ export const useSftpPaneActions = ({
         if (!pane.connection.isLocal) {
           const connHost = lastConnectedHostRef.current[side];
           const ck = connHost && connHost !== "local"
-            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol)
+            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo)
             : pane.connection.hostId;
           setSharedRemoteHostCache(ck, {
             path,

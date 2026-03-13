@@ -192,9 +192,17 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   useEffect(() => {
     if (!activeHost) return;
-    // Don't attempt SFTP for local or serial terminals
+    // Don't attempt SFTP for local or serial terminals — disconnect any
+    // existing remote connection so the panel doesn't remain bound to the
+    // wrong host when focus moves to a non-SFTP pane.
     const proto = activeHost.protocol;
     if (proto === 'local' || proto === 'serial' || activeHost.id?.startsWith('local-') || activeHost.id?.startsWith('serial-')) {
+      const s = sftpRef.current;
+      const leftConn = s.leftPane.connection;
+      if (leftConn && !leftConn.isLocal) {
+        s.disconnect("left");
+        connectedHostIdRef.current = null;
+      }
       return;
     }
     // Build a connection key that accounts for session-time overrides

@@ -715,6 +715,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return sftpHostForTab.get(activeTabId) ?? null;
   }, [isSftpOpenForCurrentTab, activeTabId, activeWorkspace, focusedSessionId, sessionHostsMap, sftpHostForTab]);
 
+  // Keep sftpHostForTab in sync with focus changes in workspace mode
+  // so that the toggle check uses the currently displayed host.
+  useEffect(() => {
+    if (!activeTabId || !sftpActiveHost) return;
+    if (!sftpOpenTabs.has(activeTabId)) return;
+    const stored = sftpHostForTab.get(activeTabId);
+    if (stored?.id === sftpActiveHost.id
+      && stored?.hostname === sftpActiveHost.hostname
+      && stored?.port === sftpActiveHost.port
+      && stored?.protocol === sftpActiveHost.protocol) return;
+    setSftpHostForTab(prev => {
+      const next = new Map(prev);
+      next.set(activeTabId, sftpActiveHost);
+      return next;
+    });
+  }, [activeTabId, sftpActiveHost, sftpOpenTabs, sftpHostForTab]);
+
   const mountedSftpTabIds = useMemo(
     () => Array.from(sftpHostForTab.keys()),
     [sftpHostForTab],
