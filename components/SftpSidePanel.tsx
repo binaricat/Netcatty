@@ -175,6 +175,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // Auto-connect when activeHost changes.
   // Uses sftpRef to avoid re-triggering on every sftp state change.
   const connectedHostIdRef = useRef<string | null>(null);
+  // Store the Host object used for the current connection so the header
+  // can show session-time overrides even during deferred host switches.
+  const connectedHostObjRef = useRef<Host | null>(null);
   const lastAppliedInitialLocationKeyRef = useRef<string | null>(null);
   const handledPendingUploadIdRef = useRef<string | null>(null);
   // Maps tab IDs to the connectionKey used to create them, so we can
@@ -208,13 +211,14 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     const s = sftpRef.current;
 
-    // Serial terminals don't support SFTP — disconnect any existing remote
-    // connection so the panel doesn't remain bound to the wrong host.
+    // Serial terminals don't support SFTP — disconnect any existing
+    // connection (remote or local) so the panel doesn't remain bound to
+    // a previous host.
     const proto = activeHost.protocol;
     if (proto === 'serial' || activeHost.id?.startsWith('serial-')) {
       if (hasActiveWork) return;
       const leftConn = s.leftPane.connection;
-      if (leftConn && !leftConn.isLocal) {
+      if (leftConn) {
         s.disconnect("left");
         connectedHostIdRef.current = null;
       }
@@ -229,11 +233,14 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         connectedHostIdRef.current = "local";
         return;
       }
-      if (leftConn) {
-        s.disconnect("left");
-      }
       connectedHostIdRef.current = "local";
-      s.connect("left", "local");
+      if (leftConn) {
+        // Await disconnect before connecting locally to avoid the async
+        // disconnect wiping out the fresh local connection.
+        void s.disconnect("left").then(() => s.connect("left", "local"));
+      } else {
+        s.connect("left", "local");
+      }
       return;
     }
     // Build a connection key that accounts for session-time overrides
@@ -265,11 +272,13 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     if (existingTab) {
       s.selectTab("left", existingTab.id);
       connectedHostIdRef.current = connectionKey;
+      connectedHostObjRef.current = activeHost;
       return;
     }
 
     // Connect to the host - connect() handles creating a tab if needed
     connectedHostIdRef.current = connectionKey;
+    connectedHostObjRef.current = activeHost;
     // Store the pending key so the effect below can map it once the tab is created
     pendingConnectionKeyRef.current = connectionKey;
     s.connect("left", activeHost);
@@ -444,6 +453,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   const displayHost = useMemo(() => {
     const conn = sftp.leftPane.connection;
     if (conn && !conn.isLocal) {
+      // Prefer the stored Host object from connect time — it preserves
+      // session-time overrides that the vault host may lack.
+      if (connectedHostObjRef.current && connectedHostObjRef.current.id === conn.hostId) {
+        return connectedHostObjRef.current;
+      }
       return hosts.find((h) => h.id === conn.hostId) ?? activeHost;
     }
     return activeHost;
