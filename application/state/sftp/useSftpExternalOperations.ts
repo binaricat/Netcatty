@@ -560,6 +560,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      connectionCacheKeyMapRef,
       getActivePane,
       refresh,
       sftpSessionsRef,
@@ -642,6 +643,8 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      clearDirCacheEntry,
+      connectionCacheKeyMapRef,
       createUploadCallbacks,
       createUploadBridge,
       getActivePane,

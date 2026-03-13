@@ -346,6 +346,7 @@ export const useSftpPaneActions = ({
     },
     [
       getActivePane,
+      getActivePaneCacheKey,
       updateTab,
       leftTabsRef,
       rightTabsRef,

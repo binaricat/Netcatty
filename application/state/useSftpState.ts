@@ -434,7 +434,7 @@ export const useSftpState = (
     resolveConflict: (...args: Parameters<typeof resolveConflict>) => methodsRef.current.resolveConflict(...args),
     getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
     activeFileWatchCountRef,
-  }), []); // Empty deps - these wrappers never change
+  }), [activeFileWatchCountRef]); // activeFileWatchCountRef is a stable ref
 
   // Return object with stable method references but reactive state
   // State changes will cause re-renders, but method references stay stable

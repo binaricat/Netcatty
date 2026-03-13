@@ -334,7 +334,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         sftp.activeFileWatchCountRef.current = 0;
       }
     }
-  }, [sftp.leftPane.connection?.status, sftp.activeFileWatchCountRef]);
+  }, [sftp.leftPane.connection, sftp.leftPane.connection?.status, sftp.activeFileWatchCountRef]);
 
   useEffect(() => {
     if (!activeHost || !initialLocation) return;
@@ -462,7 +462,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
       return connection.id === task.targetConnectionId;
     },
-    [sftp.leftPane.connection, activeHost],
+    [sftp.leftPane.connection],
   );
 
   // When the auto-connect effect defers a switch (active transfers or open
