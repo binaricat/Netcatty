@@ -23,6 +23,7 @@ interface UseSftpExternalOperationsParams {
   refresh: (side: "left" | "right") => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
+  clearDirCacheEntry?: (connectionId: string, path: string) => void;
   useCompressedUpload?: boolean;
   addExternalUpload?: (task: TransferTask) => void;
   updateExternalUpload?: (taskId: string, updates: Partial<TransferTask>) => void;
@@ -41,6 +42,7 @@ interface SftpExternalOperationsResult {
     appPath: string,
     options?: { enableWatch?: boolean }
   ) => Promise<{ localTempPath: string; watchId?: string }>;
+  activeFileWatchCountRef: React.MutableRefObject<number>;
   uploadExternalFiles: (
     side: "left" | "right",
     dataTransfer: DataTransfer
@@ -62,6 +64,7 @@ export const useSftpExternalOperations = (
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
+    clearDirCacheEntry,
     useCompressedUpload = false,
     addExternalUpload,
     updateExternalUpload,
@@ -71,6 +74,9 @@ export const useSftpExternalOperations = (
 
   // Upload controller for cancellation support
   const uploadControllerRef = useRef<UploadController | null>(null);
+
+  // Track active file watches so the side panel can block host-switching
+  const activeFileWatchCountRef = useRef(0);
 
   const readTextFile = useCallback(
     async (side: "left" | "right", filePath: string): Promise<string> => {
@@ -333,6 +339,7 @@ export const useSftpExternalOperations = (
             pane.filenameEncoding,
           );
           watchId = result.watchId;
+          activeFileWatchCountRef.current += 1;
         } catch (err) {
           console.warn("[SFTP] Failed to start file watch:", err);
         }
@@ -614,11 +621,15 @@ export const useSftpExternalOperations = (
           controller,
         );
 
-        // Always refresh after upload to ensure directory listings are current.
-        // If the user navigated away during the upload, the target directory's
-        // cached listing would otherwise remain stale until it expires.
+        // Refresh the current directory and invalidate the upload target's
+        // cache entry.  If the user navigated away during the upload, the
+        // invalidation ensures returning to the target path triggers a fresh
+        // listing instead of serving stale cached data.
         const livePane = getActivePane(side);
         if (livePane?.connection) {
+          if (livePane.connection.currentPath !== uploadTargetPath && clearDirCacheEntry) {
+            clearDirCacheEntry(livePane.connection.id, uploadTargetPath);
+          }
           await refresh(side);
         }
         return results;
@@ -667,5 +678,6 @@ export const useSftpExternalOperations = (
     uploadExternalEntries,
     cancelExternalUpload,
     selectApplication,
+    activeFileWatchCountRef,
   };
 };

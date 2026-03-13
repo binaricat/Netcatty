@@ -294,7 +294,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       && currentHost.id === host.id
       && currentHost.hostname === host.hostname
       && currentHost.port === host.port
-      && currentHost.protocol === host.protocol;
+      && currentHost.protocol === host.protocol
+      && currentHost.username === host.username
+      && currentHost.sftpSudo === host.sftpSudo;
 
     const isClosing = !shouldKeepOpen && isOpen && isSameEndpoint;
 

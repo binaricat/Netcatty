@@ -101,6 +101,15 @@ export const useSftpState = (
     }
   }, []);
 
+  const clearDirCacheEntry = useCallback((connectionId: string, path: string) => {
+    // Remove all encoding variants of this path from the cache
+    for (const key of dirCacheRef.current.keys()) {
+      if (key.startsWith(`${connectionId}::`) && key.endsWith(`::${path}`)) {
+        dirCacheRef.current.delete(key);
+      }
+    }
+  }, []);
+
   // Ref to track pending reconnections to avoid multiple reconnect attempts
   const reconnectingRef = useRef<{ left: boolean; right: boolean }>({
     left: false,
@@ -261,11 +270,13 @@ export const useSftpState = (
     uploadExternalEntries,
     cancelExternalUpload,
     selectApplication,
+    activeFileWatchCountRef,
   } = useSftpExternalOperations({
     getActivePane,
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
+    clearDirCacheEntry,
     useCompressedUpload: options?.useCompressedUpload,
     addExternalUpload,
     updateExternalUpload,
@@ -422,6 +433,7 @@ export const useSftpState = (
     dismissTransfer: (...args: Parameters<typeof dismissTransfer>) => methodsRef.current.dismissTransfer(...args),
     resolveConflict: (...args: Parameters<typeof resolveConflict>) => methodsRef.current.resolveConflict(...args),
     getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
+    activeFileWatchCountRef,
   }), []); // Empty deps - these wrappers never change
 
   // Return object with stable method references but reactive state

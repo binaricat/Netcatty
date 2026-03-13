@@ -197,9 +197,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     () => sftp.transfers.some((t) => t.status === "pending" || t.status === "transferring"),
     [sftp.transfers],
   );
-  // Block host-following while any connection-sensitive UI is open:
-  // text editor, permissions dialog, or file-opener dialog.
-  const hasActiveWork = hasActiveTransfers || showTextEditor || !!permissionsState || showFileOpenerDialog;
+  // Block host-following while any connection-sensitive UI or operation
+  // is active: text editor, permissions dialog, file-opener dialog, or
+  // auto-synced external file watches.
+  const hasActiveWork = hasActiveTransfers || showTextEditor || !!permissionsState || showFileOpenerDialog
+    || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
 
   useEffect(() => {
     if (!activeHost) return;
@@ -287,7 +289,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     if (!connection || connection.isLocal || connection.hostId !== activeHost.id) return;
     if (connection.status !== "connected") return;
 
-    const locationKey = `${initialLocation.hostId}:${initialLocation.path}`;
+    // Include full endpoint key so that same-hostId sessions with
+    // different overrides each get their initial location applied.
+    const locationKey = `${connectedHostIdRef.current}:${initialLocation.path}`;
     if (lastAppliedInitialLocationKeyRef.current === locationKey) return;
 
     if (connection.currentPath === initialLocation.path) {
