@@ -147,6 +147,8 @@ interface TerminalProps {
     pendingUploadEntries?: DropEntry[],
     sourceSessionId?: string,
   ) => void;
+  onOpenScripts?: () => void;
+  onOpenTheme?: () => void;
   isBroadcastEnabled?: boolean;
   onToggleBroadcast?: () => void;
   onToggleComposeBar?: () => void;
@@ -204,6 +206,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onSplitHorizontal,
   onSplitVertical,
   onOpenSftp,
+  onOpenScripts,
+  onOpenTheme,
   isBroadcastEnabled,
   onToggleBroadcast,
   onToggleComposeBar,
@@ -287,7 +291,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
 
 
-  const [isScriptsOpen, setIsScriptsOpen] = useState(false);
+  // isScriptsOpen state removed - scripts now handled by side panel
   const [status, setStatus] = useState<TerminalSession["status"]>("connecting");
   const [error, setError] = useState<string | null>(null);
   const lastToastedErrorRef = useRef<string | null>(null);
@@ -1036,7 +1040,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       const payload = `${cmd}\r`;
       terminalBackend.writeToSession(sessionRef.current, payload);
       scrollToBottomAfterProgrammaticInput(payload);
-      setIsScriptsOpen(false);
       termRef.current?.focus();
       return;
     }
@@ -1229,18 +1232,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const renderControls = (opts?: { showClose?: boolean }) => (
     <TerminalToolbar
       status={status}
-      snippets={snippets}
       host={host}
-      defaultThemeId={terminalTheme.id}
-      defaultFontFamilyId={fontFamilyId}
-      defaultFontSize={fontSize}
-      onUpdateTerminalThemeId={onUpdateTerminalThemeId}
-      onUpdateTerminalFontFamilyId={onUpdateTerminalFontFamilyId}
-      onUpdateTerminalFontSize={onUpdateTerminalFontSize}
-      isScriptsOpen={isScriptsOpen}
-      setIsScriptsOpen={setIsScriptsOpen}
       onOpenSFTP={handleOpenSFTP}
-      onSnippetClick={handleSnippetClick}
+      onOpenScripts={onOpenScripts ?? (() => {})}
+      onOpenTheme={onOpenTheme ?? (() => {})}
       onUpdateHost={onUpdateHost}
       showClose={opts?.showClose}
       onClose={() => onCloseSession?.(sessionId)}

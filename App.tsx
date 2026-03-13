@@ -1281,6 +1281,7 @@ function App({ settings }: { settings: SettingsState }) {
           keys={keys}
           identities={identities}
           snippets={snippets}
+          snippetPackages={snippetPackages}
           sessions={sessions}
           workspaces={workspaces}
           knownHosts={knownHosts}
