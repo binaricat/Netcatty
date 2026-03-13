@@ -282,12 +282,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
 
     const isOpen = sftpOpenTabsRef.current.has(tabId);
-    const currentHostId = sftpHostForTabRef.current.get(tabId)?.id;
+    const currentHost = sftpHostForTabRef.current.get(tabId);
     const shouldKeepOpen = !!pendingUploadEntries?.length;
+    // Compare full endpoint identity so that session-time overrides
+    // (different port/protocol for the same host ID) trigger a switch
+    // instead of toggling the panel closed.
+    const isSameEndpoint = currentHost
+      && currentHost.id === host.id
+      && currentHost.hostname === host.hostname
+      && currentHost.port === host.port
+      && currentHost.protocol === host.protocol;
 
     setSftpOpenTabs(prev => {
       const next = new Set(prev);
-      if (!shouldKeepOpen && isOpen && currentHostId === host.id) {
+      if (!shouldKeepOpen && isOpen && isSameEndpoint) {
         next.delete(tabId);
       } else {
         next.add(tabId);

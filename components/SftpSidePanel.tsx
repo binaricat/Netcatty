@@ -229,6 +229,15 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     }
   }, [activeHost]); // Only depend on activeHost, not sftp
 
+  // Clear the remembered connection key when the pane disconnects or the
+  // session is lost, so re-opening SFTP for the same terminal reconnects.
+  useEffect(() => {
+    const connection = sftp.leftPane.connection;
+    if (!connection || connection.status === "error" || connection.status === "disconnected") {
+      connectedHostIdRef.current = null;
+    }
+  }, [sftp.leftPane.connection?.status]);
+
   useEffect(() => {
     if (!activeHost || !initialLocation) return;
     if (initialLocation.hostId !== activeHost.id || !initialLocation.path) return;
@@ -257,7 +266,10 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   useEffect(() => {
     if (!pendingUpload || !activeHost) return;
     if (handledPendingUploadIdRef.current === pendingUpload.requestId) return;
-    if (pendingUpload.hostId !== activeHost.id) return;
+    // Match by full connection identity so uploads for the same host ID
+    // with different session-time overrides are not sent to the wrong endpoint.
+    const uploadConnectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
+    if (pendingUpload.hostId !== activeHost.id || connectedHostIdRef.current !== uploadConnectionKey) return;
 
     const activePane = sftp.leftPane;
     const connection = activePane.connection;
