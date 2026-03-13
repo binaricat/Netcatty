@@ -71,16 +71,23 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
-  // Build the shared cache key for a given hostId by looking up the full host details
+  // Build the shared cache key for the active pane. Prefer the last connected
+  // host (which includes session-time overrides), fall back to the vault hosts list.
   const hostsRef = useRef(hosts);
   hostsRef.current = hosts;
-  const getHostCacheKey = useCallback((hostId: string): string => {
+  const getActivePaneCacheKey = useCallback((side: "left" | "right", hostId: string): string => {
+    // lastConnectedHostRef has session-time overrides (e.g. different port/protocol)
+    const connHost = lastConnectedHostRef.current[side];
+    if (connHost && connHost !== "local" && connHost.id === hostId) {
+      return buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo, connHost.username);
+    }
+    // Fall back to vault host
     const host = hostsRef.current.find(h => h.id === hostId);
     if (host) {
       return buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
     }
     return hostId;
-  }, []);
+  }, [lastConnectedHostRef]);
 
   // Track the latest navigation request ID per tab, so we can distinguish
   // whether a superseded request was superseded by the same tab or a different tab.
@@ -154,7 +161,7 @@ export const useSftpPaneActions = ({
           // identifies the connection in the common case. Session-time
           // overrides create separate connections with distinct cache keys
           // at the connect() layer.
-          setSharedRemoteHostCache(getHostCacheKey(pane.connection.hostId), {
+          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files: cached.files,
@@ -286,7 +293,7 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          setSharedRemoteHostCache(getHostCacheKey(pane.connection.hostId), {
+          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files,
