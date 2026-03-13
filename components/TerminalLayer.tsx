@@ -236,6 +236,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [isComposeBarOpen, setIsComposeBarOpen] = useState(false);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
+  const activeWorkspaceRef = useRef(activeWorkspace);
+  activeWorkspaceRef.current = activeWorkspace;
+  const onSetWorkspaceFocusedSessionRef = useRef(onSetWorkspaceFocusedSession);
+  onSetWorkspaceFocusedSessionRef.current = onSetWorkspaceFocusedSession;
 
   // SFTP side panel state - per-tab tracking
   // Tracks which tab IDs have the SFTP panel open
@@ -263,9 +267,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setIsComposeBarOpen(prev => !prev);
   }, []);
 
-  const handleOpenSftp = useCallback((host: Host, initialPath?: string, pendingUploadEntries?: DropEntry[]) => {
+  const handleOpenSftp = useCallback((host: Host, initialPath?: string, pendingUploadEntries?: DropEntry[], sourceSessionId?: string) => {
     const tabId = activeTabIdRef.current;
     if (!tabId) return;
+
+    // When a drag-drop upload comes from a non-focused terminal pane in a
+    // workspace, switch focus to that pane first so the SFTP panel binds to
+    // the correct host.
+    if (sourceSessionId && pendingUploadEntries?.length) {
+      const ws = activeWorkspaceRef.current;
+      if (ws && ws.focusedSessionId !== sourceSessionId) {
+        onSetWorkspaceFocusedSessionRef.current?.(ws.id, sourceSessionId);
+      }
+    }
+
     const isOpen = sftpOpenTabsRef.current.has(tabId);
     const currentHostId = sftpHostForTabRef.current.get(tabId)?.id;
     const shouldKeepOpen = !!pendingUploadEntries?.length;

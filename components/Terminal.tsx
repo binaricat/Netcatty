@@ -145,6 +145,7 @@ interface TerminalProps {
     host: Host,
     initialPath?: string,
     pendingUploadEntries?: DropEntry[],
+    sourceSessionId?: string,
   ) => void;
   isBroadcastEnabled?: boolean;
   onToggleBroadcast?: () => void;
@@ -1210,7 +1211,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               // Silently fail
             }
           }
-          onOpenSftp(host, initialPath, dropEntries);
+          onOpenSftp(host, initialPath, dropEntries, sessionId);
         }
       }
     } catch (error) {

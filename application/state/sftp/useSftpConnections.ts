@@ -335,7 +335,22 @@ export const useSftpConnections = ({
             );
           }
 
-          const files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+          let files: SftpFileEntry[];
+          try {
+            files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+          } catch {
+            // Cached path may be stale (deleted, permissions changed).
+            // Fall back to homeDir, then "/".
+            if (sharedHostCache && startPath !== homeDir) {
+              startPath = homeDir;
+              files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+            } else if (startPath !== "/") {
+              startPath = "/";
+              files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+            } else {
+              throw new Error("Cannot list any remote directory");
+            }
+          }
           if (navSeqRef.current[side] !== connectRequestId) return;
           dirCacheRef.current.set(makeCacheKey(connectionId, startPath, filenameEncoding), {
             files,
