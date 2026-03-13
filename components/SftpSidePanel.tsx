@@ -192,6 +192,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   useEffect(() => {
     if (!activeHost) return;
+    // Don't attempt SFTP for local or serial terminals
+    const proto = activeHost.protocol;
+    if (proto === 'local' || proto === 'serial' || activeHost.id?.startsWith('local-') || activeHost.id?.startsWith('serial-')) {
+      return;
+    }
     // Build a connection key that accounts for session-time overrides
     // (same host ID may have different port/protocol in different workspace panes)
     const connectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
@@ -354,12 +359,15 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       if (!connection || connection.isLocal) return false;
 
       if (task.targetHostId) {
-        return connection.hostId === task.targetHostId;
+        // Match on full endpoint identity so that the same host ID with
+        // different session-time overrides doesn't allow cross-endpoint reveals.
+        return connection.hostId === task.targetHostId
+          && connectedHostIdRef.current === `${task.targetHostId}:${activeHost?.hostname ?? ''}:${activeHost?.port ?? ''}:${activeHost?.protocol ?? ''}`;
       }
 
       return connection.id === task.targetConnectionId;
     },
-    [sftp.leftPane.connection],
+    [sftp.leftPane.connection, activeHost],
   );
 
   // Determine the active pane to render (without using global activeTabStore)

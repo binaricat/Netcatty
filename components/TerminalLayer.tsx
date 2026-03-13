@@ -995,30 +995,35 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   </div>
                 )}
                 <div className="flex-1 min-h-0 relative">
-                  {mountedSftpTabIds
-                    .filter((tabId) => activeTabId === tabId && sftpOpenTabs.has(tabId))
-                    .map((tabId) => (
+                  {mountedSftpTabIds.map((tabId) => {
+                    const isVisibleSftpPanel = activeTabId === tabId && sftpOpenTabs.has(tabId);
+                    return (
                         <SftpSidePanel
                           key={tabId}
                           hosts={hosts}
                           keys={keys}
                           identities={identities}
                           updateHosts={updateHosts}
-                          activeHost={sftpActiveHost}
-                          initialLocation={sftpInitialLocationForTab.get(tabId) ?? null}
-                          showWorkspaceHostHeader={!!activeWorkspace}
-                          isVisible
-                          renderOverlays
+                          activeHost={isVisibleSftpPanel ? sftpActiveHost : null}
+                          initialLocation={
+                            isVisibleSftpPanel
+                              ? (sftpInitialLocationForTab.get(tabId) ?? null)
+                              : null
+                          }
+                          showWorkspaceHostHeader={isVisibleSftpPanel && !!activeWorkspace}
+                          isVisible={isVisibleSftpPanel}
+                          renderOverlays={isVisibleSftpPanel}
                           pendingUpload={sftpPendingUploadsForTab.get(tabId) ?? null}
                           onPendingUploadHandled={(requestId) => handlePendingUploadHandled(tabId, requestId)}
                           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
-                          sftpAutoSync={sftpAutoSync}
+                          sftpAutoSync={isVisibleSftpPanel ? sftpAutoSync : false}
                           sftpShowHiddenFiles={sftpShowHiddenFiles}
                           sftpUseCompressedUpload={sftpUseCompressedUpload}
                           editorWordWrap={editorWordWrap}
                           setEditorWordWrap={setEditorWordWrap}
                         />
-                    ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
