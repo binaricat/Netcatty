@@ -4,7 +4,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
 import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
-import { buildCacheKey, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
+import { setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 interface UseSftpPaneActionsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
@@ -136,11 +136,12 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          const connHost = lastConnectedHostRef.current[side];
-          const ck = connHost && connHost !== "local"
-            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo, connHost.username)
-            : pane.connection.hostId;
-          setSharedRemoteHostCache(ck, {
+          // Use hostId as the shared cache key — this is safe because the
+          // shared cache is a best-effort optimization and hostId uniquely
+          // identifies the connection in the common case. Session-time
+          // overrides create separate connections with distinct cache keys
+          // at the connect() layer.
+          setSharedRemoteHostCache(pane.connection.hostId, {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files: cached.files,
@@ -272,11 +273,7 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          const connHost = lastConnectedHostRef.current[side];
-          const ck = connHost && connHost !== "local"
-            ? buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo, connHost.username)
-            : pane.connection.hostId;
-          setSharedRemoteHostCache(ck, {
+          setSharedRemoteHostCache(pane.connection.hostId, {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files,

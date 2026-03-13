@@ -331,7 +331,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     setSftpPendingUploadsForTab(prev => {
       const next = new Map(prev);
-      if (pendingUploadEntries?.length) {
+      if (isClosing || !pendingUploadEntries?.length) {
+        // Clear any stale pending upload on close or when opening without new files
+        next.delete(tabId);
+      } else {
         next.set(tabId, {
           requestId: crypto.randomUUID(),
           hostId: host.id,
@@ -757,6 +760,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         return next;
       });
       setSftpHostForTab(prev => {
+        const next = new Map(prev);
+        next.delete(activeTabId);
+        return next;
+      });
+      setSftpPendingUploadsForTab(prev => {
         const next = new Map(prev);
         next.delete(activeTabId);
         return next;
