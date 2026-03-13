@@ -190,17 +190,18 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     prevIsVisibleRef.current = isVisible;
   }, [isVisible]);
 
+  // Track whether there's active work that should block connection switching.
+  // Computed outside the effect so it can be in the dependency array.
+  const hasActiveTransfers = useMemo(
+    () => sftp.transfers.some((t) => t.status === "pending" || t.status === "transferring"),
+    [sftp.transfers],
+  );
+  const hasActiveWork = hasActiveTransfers || showTextEditor;
+
   useEffect(() => {
     if (!activeHost) return;
 
     const s = sftpRef.current;
-
-    // Don't disconnect or reconnect while transfers are in progress or a
-    // file is open in the text editor — doing so would abort in-flight
-    // uploads/downloads or cause saves to land on the wrong endpoint.
-    const hasActiveWork = s.transfers.some(
-      (t) => t.status === "pending" || t.status === "transferring",
-    ) || showTextEditor;
 
     // Don't attempt SFTP for local or serial terminals — disconnect any
     // existing remote connection so the panel doesn't remain bound to the
@@ -220,8 +221,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const connectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
     if (connectedHostIdRef.current === connectionKey) return;
 
-    // Don't switch connections while transfers are active
-    if (hasActiveTransfers) return;
+    // Don't switch connections while transfers or editor are active
+    if (hasActiveWork) return;
     logger.info("[SftpSidePanel] Auto-connect triggered", {
       hostId: activeHost.id,
       hostLabel: activeHost.label,
@@ -251,7 +252,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // Store the pending key so the effect below can map it once the tab is created
     pendingConnectionKeyRef.current = connectionKey;
     s.connect("left", activeHost);
-  }, [activeHost, showTextEditor]); // Re-evaluate when editor closes so deferred switch can proceed
+  }, [activeHost, hasActiveWork]); // Re-evaluate when work finishes so deferred switch can proceed
 
   // Track the active tab's connectionKey after connect() creates or reuses it.
   // Watches both activeTabId (new tab) and connection status (reused tab reconnecting).
