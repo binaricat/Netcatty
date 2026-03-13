@@ -107,6 +107,11 @@ export const useSftpState = (
     right: false,
   });
 
+  // Map connectionId → cache key, set at connect time so each tab's
+  // navigateTo can use the correct cache key even when multiple tabs
+  // share the same hostId with different session-time overrides.
+  const connectionCacheKeyMapRef = useRef<Map<string, string>>(new Map());
+
   // Store last connected host info for reconnection
   const lastConnectedHostRef = useRef<{
     left: Host | "local" | null;
@@ -149,6 +154,7 @@ export const useSftpState = (
     dirCacheRef,
     sftpSessionsRef,
     lastConnectedHostRef,
+    connectionCacheKeyMapRef,
     reconnectingRef,
     makeCacheKey,
     clearCacheForConnection,
@@ -184,6 +190,7 @@ export const useSftpState = (
     dirCacheRef,
     sftpSessionsRef,
     lastConnectedHostRef,
+    connectionCacheKeyMapRef,
     reconnectingRef,
     makeCacheKey,
     clearCacheForConnection,

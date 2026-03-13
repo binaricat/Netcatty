@@ -25,6 +25,7 @@ interface UseSftpConnectionsParams {
   dirCacheRef: MutableRefObject<Map<string, { files: SftpFileEntry[]; timestamp: number }>>;
   sftpSessionsRef: MutableRefObject<Map<string, string>>;
   lastConnectedHostRef: MutableRefObject<{ left: Host | "local" | null; right: Host | "local" | null }>;
+  connectionCacheKeyMapRef: MutableRefObject<Map<string, string>>;
   reconnectingRef: MutableRefObject<{ left: boolean; right: boolean }>;
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
   clearCacheForConnection: (connectionId: string) => void;
@@ -57,6 +58,7 @@ export const useSftpConnections = ({
   dirCacheRef,
   sftpSessionsRef,
   lastConnectedHostRef,
+  connectionCacheKeyMapRef,
   reconnectingRef,
   makeCacheKey,
   clearCacheForConnection,
@@ -92,6 +94,14 @@ export const useSftpConnections = ({
       const connectRequestId = navSeqRef.current[side];
 
       lastConnectedHostRef.current[side] = host;
+      // Store the cache key for this connection so pane actions can look it up
+      // by connectionId instead of relying on the per-side lastConnectedHostRef.
+      if (host !== "local") {
+        connectionCacheKeyMapRef.current.set(
+          connectionId,
+          buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username),
+        );
+      }
 
       const currentPane = getActivePane(side);
       // Reset encoding to host's configured encoding or "auto" when connecting to a new host

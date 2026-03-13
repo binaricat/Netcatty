@@ -195,18 +195,19 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     const s = sftpRef.current;
 
-    // Don't disconnect or reconnect while transfers are in progress —
-    // doing so would abort in-flight uploads/downloads.
-    const hasActiveTransfers = s.transfers.some(
+    // Don't disconnect or reconnect while transfers are in progress or a
+    // file is open in the text editor — doing so would abort in-flight
+    // uploads/downloads or cause saves to land on the wrong endpoint.
+    const hasActiveWork = s.transfers.some(
       (t) => t.status === "pending" || t.status === "transferring",
-    );
+    ) || showTextEditor;
 
     // Don't attempt SFTP for local or serial terminals — disconnect any
     // existing remote connection so the panel doesn't remain bound to the
     // wrong host when focus moves to a non-SFTP pane.
     const proto = activeHost.protocol;
     if (proto === 'local' || proto === 'serial' || activeHost.id?.startsWith('local-') || activeHost.id?.startsWith('serial-')) {
-      if (hasActiveTransfers) return;
+      if (hasActiveWork) return;
       const leftConn = s.leftPane.connection;
       if (leftConn && !leftConn.isLocal) {
         s.disconnect("left");
@@ -250,7 +251,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // Store the pending key so the effect below can map it once the tab is created
     pendingConnectionKeyRef.current = connectionKey;
     s.connect("left", activeHost);
-  }, [activeHost]); // Only depend on activeHost, not sftp
+  }, [activeHost, showTextEditor]); // Re-evaluate when editor closes so deferred switch can proceed
 
   // Track the active tab's connectionKey after connect() creates or reuses it.
   // Watches both activeTabId (new tab) and connection status (reused tab reconnecting).
@@ -308,6 +309,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const connection = activePane.connection;
     if (!connection || connection.isLocal || connection.hostId !== activeHost.id) return;
     if (connection.status !== "connected") return;
+    // Verify the live pane's tab actually matches the expected endpoint —
+    // connectedHostIdRef is set before selectTab/connect finishes, so the
+    // pane may still be showing the previous endpoint's tab.
+    const activeTabId = sftp.leftTabs.activeTabId;
+    if (activeTabId && tabConnectionKeyMapRef.current.get(activeTabId) !== pendingUpload.connectionKey) return;
 
     handledPendingUploadIdRef.current = pendingUpload.requestId;
 
@@ -359,6 +365,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     onPendingUploadHandled,
     pendingUpload,
     sftp.leftPane,
+    sftp.leftTabs.activeTabId,
     t,
   ]);
 
@@ -398,6 +405,18 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     [sftp.leftPane.connection, activeHost],
   );
 
+  // When the auto-connect effect defers a switch (active transfers or open
+  // editor), the panel still operates on the current connection, not
+  // activeHost.  Use the connected host for the header so the label matches
+  // what browse/edit/delete actions actually target.
+  const displayHost = useMemo(() => {
+    const conn = sftp.leftPane.connection;
+    if (conn && !conn.isLocal) {
+      return hosts.find((h) => h.id === conn.hostId) ?? activeHost;
+    }
+    return activeHost;
+  }, [sftp.leftPane.connection, hosts, activeHost]);
+
   // Determine the active pane to render (without using global activeTabStore)
   const activeLeftPaneId = sftp.leftTabs.activeTabId;
 
@@ -415,25 +434,25 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         style={isVisible ? undefined : { display: "none" }}
         aria-hidden={!isVisible}
       >
-        {showWorkspaceHostHeader && activeHost && (
+        {showWorkspaceHostHeader && displayHost && (
           <div className="shrink-0 border-b border-border/50 bg-muted/20 px-3 py-1.5">
             <div className="flex items-center gap-2 min-w-0">
               <DistroAvatar
-                host={activeHost}
-                fallback={activeHost.label.slice(0, 2).toUpperCase()}
+                host={displayHost}
+                fallback={displayHost.label.slice(0, 2).toUpperCase()}
                 size="sm"
                 className="h-5 w-5 rounded-sm shrink-0"
               />
               <div
                 className="min-w-0 flex-1 max-w-[calc(100%-1.75rem)] text-[11px] leading-5 truncate"
-                title={`${activeHost.label} · ${(activeHost.username || "root")}@${activeHost.hostname}:${activeHost.port || 22}`}
+                title={`${displayHost.label} · ${(displayHost.username || "root")}@${displayHost.hostname}:${displayHost.port || 22}`}
               >
                 <span className="font-medium">
-                  {activeHost.label}
+                  {displayHost.label}
                 </span>
                 <span className="mx-1 text-muted-foreground">·</span>
                 <span className="font-mono text-muted-foreground">
-                  {(activeHost.username || "root")}@{activeHost.hostname}:{activeHost.port || 22}
+                  {(displayHost.username || "root")}@{displayHost.hostname}:{displayHost.port || 22}
                 </span>
               </div>
             </div>

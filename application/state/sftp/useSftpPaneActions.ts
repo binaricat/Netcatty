@@ -17,6 +17,7 @@ interface UseSftpPaneActionsParams {
   dirCacheRef: React.MutableRefObject<Map<string, { files: SftpFileEntry[]; timestamp: number }>>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   lastConnectedHostRef: React.MutableRefObject<{ left: Host | "local" | null; right: Host | "local" | null }>;
+  connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
   reconnectingRef: React.MutableRefObject<{ left: boolean; right: boolean }>;
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
   clearCacheForConnection: (connectionId: string) => void;
@@ -62,6 +63,7 @@ export const useSftpPaneActions = ({
   dirCacheRef,
   sftpSessionsRef,
   lastConnectedHostRef,
+  connectionCacheKeyMapRef,
   reconnectingRef,
   makeCacheKey,
   clearCacheForConnection,
@@ -75,8 +77,15 @@ export const useSftpPaneActions = ({
   // host (which includes session-time overrides), fall back to the vault hosts list.
   const hostsRef = useRef(hosts);
   hostsRef.current = hosts;
-  const getActivePaneCacheKey = useCallback((side: "left" | "right", hostId: string): string => {
-    // lastConnectedHostRef has session-time overrides (e.g. different port/protocol)
+  const getActivePaneCacheKey = useCallback((side: "left" | "right", hostId: string, connectionId?: string): string => {
+    // Prefer the per-connection cache key — it's set at connect time and
+    // correctly identifies the endpoint even when multiple tabs share the
+    // same hostId with different session-time overrides.
+    if (connectionId) {
+      const perConnKey = connectionCacheKeyMapRef.current.get(connectionId);
+      if (perConnKey) return perConnKey;
+    }
+    // Fallback: lastConnectedHostRef (per-side, may be stale for multi-tab)
     const connHost = lastConnectedHostRef.current[side];
     if (connHost && connHost !== "local" && connHost.id === hostId) {
       return buildCacheKey(connHost.id, connHost.hostname, connHost.port, connHost.protocol, connHost.sftpSudo, connHost.username);
@@ -87,7 +96,7 @@ export const useSftpPaneActions = ({
       return buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
     }
     return hostId;
-  }, [lastConnectedHostRef]);
+  }, [connectionCacheKeyMapRef, lastConnectedHostRef]);
 
   // Track the latest navigation request ID per tab, so we can distinguish
   // whether a superseded request was superseded by the same tab or a different tab.
@@ -161,7 +170,7 @@ export const useSftpPaneActions = ({
           // identifies the connection in the common case. Session-time
           // overrides create separate connections with distinct cache keys
           // at the connect() layer.
-          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId), {
+          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId, pane.connection.id), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files: cached.files,
@@ -293,7 +302,7 @@ export const useSftpPaneActions = ({
           selectedFiles: new Set(),
         }));
         if (!pane.connection.isLocal) {
-          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId), {
+          setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId, pane.connection.id), {
             path,
             homeDir: pane.connection.homeDir ?? path,
             files,
