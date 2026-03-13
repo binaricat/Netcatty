@@ -1320,7 +1320,8 @@ const terminalLayerAreEqual = (prev: TerminalLayerProps, next: TerminalLayerProp
     prev.onUpdateHost === next.onUpdateHost &&
     prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
     prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
-    prev.onSplitSession === next.onSplitSession
+    prev.onSplitSession === next.onSplitSession &&
+    prev.identities === next.identities
   );
 };
 
