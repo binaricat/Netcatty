@@ -329,14 +329,14 @@ export const useSftpConnections = ({
             }
           }
 
-          if (sharedHostCache) {
-            dirCacheRef.current.set(
-              makeCacheKey(connectionId, startPath, filenameEncoding),
-              {
-                files: sharedHostCache.files,
-                timestamp: Date.now(),
-              },
-            );
+          const provisionalCacheKey = sharedHostCache
+            ? makeCacheKey(connectionId, startPath, filenameEncoding)
+            : null;
+          if (sharedHostCache && provisionalCacheKey) {
+            dirCacheRef.current.set(provisionalCacheKey, {
+              files: sharedHostCache.files,
+              timestamp: Date.now(),
+            });
           }
 
           let files: SftpFileEntry[];
@@ -344,6 +344,10 @@ export const useSftpConnections = ({
             files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
           } catch {
             // Cached path may be stale (deleted, permissions changed).
+            // Remove the provisional cache entry so phantom files don't resurface.
+            if (provisionalCacheKey) {
+              dirCacheRef.current.delete(provisionalCacheKey);
+            }
             // Fall back to homeDir, then "/".
             if (sharedHostCache && startPath !== homeDir) {
               startPath = homeDir;

@@ -38,6 +38,8 @@ type ResizerHandle = {
 type PendingSftpUpload = {
   requestId: string;
   hostId: string;
+  /** Full connection identity (id:hostname:port:protocol) for session-override awareness */
+  connectionKey: string;
   targetPath?: string;
   entries: DropEntry[];
 };
@@ -326,6 +328,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         next.set(tabId, {
           requestId: crypto.randomUUID(),
           hostId: host.id,
+          connectionKey: `${host.id}:${host.hostname}:${host.port ?? ''}:${host.protocol ?? ''}`,
           targetPath: initialPath,
           entries: pendingUploadEntries,
         });
@@ -992,35 +995,30 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   </div>
                 )}
                 <div className="flex-1 min-h-0 relative">
-                  {mountedSftpTabIds.map((tabId) => {
-                    const isVisibleSftpPanel = activeTabId === tabId && sftpOpenTabs.has(tabId);
-                    return (
+                  {mountedSftpTabIds
+                    .filter((tabId) => activeTabId === tabId && sftpOpenTabs.has(tabId))
+                    .map((tabId) => (
                         <SftpSidePanel
                           key={tabId}
                           hosts={hosts}
                           keys={keys}
-                        identities={identities}
-                        updateHosts={updateHosts}
-                        activeHost={isVisibleSftpPanel ? sftpActiveHost : null}
-                        initialLocation={
-                          isVisibleSftpPanel
-                            ? (sftpInitialLocationForTab.get(tabId) ?? null)
-                            : null
-                          }
-                        showWorkspaceHostHeader={isVisibleSftpPanel && !!activeWorkspace}
-                        isVisible={isVisibleSftpPanel}
-                        renderOverlays={isVisibleSftpPanel}
-                        pendingUpload={sftpPendingUploadsForTab.get(tabId) ?? null}
-                        onPendingUploadHandled={(requestId) => handlePendingUploadHandled(tabId, requestId)}
-                        sftpDoubleClickBehavior={sftpDoubleClickBehavior}
-                        sftpAutoSync={sftpAutoSync}
-                        sftpShowHiddenFiles={sftpShowHiddenFiles}
+                          identities={identities}
+                          updateHosts={updateHosts}
+                          activeHost={sftpActiveHost}
+                          initialLocation={sftpInitialLocationForTab.get(tabId) ?? null}
+                          showWorkspaceHostHeader={!!activeWorkspace}
+                          isVisible
+                          renderOverlays
+                          pendingUpload={sftpPendingUploadsForTab.get(tabId) ?? null}
+                          onPendingUploadHandled={(requestId) => handlePendingUploadHandled(tabId, requestId)}
+                          sftpDoubleClickBehavior={sftpDoubleClickBehavior}
+                          sftpAutoSync={sftpAutoSync}
+                          sftpShowHiddenFiles={sftpShowHiddenFiles}
                           sftpUseCompressedUpload={sftpUseCompressedUpload}
                           editorWordWrap={editorWordWrap}
                           setEditorWordWrap={setEditorWordWrap}
                         />
-                      );
-                    })}
+                    ))}
                 </div>
               </div>
             </div>

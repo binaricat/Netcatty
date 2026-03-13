@@ -44,6 +44,7 @@ interface SftpSidePanelProps {
   pendingUpload?: {
     requestId: string;
     hostId: string;
+    connectionKey: string;
     targetPath?: string;
     entries: DropEntry[];
   } | null;
@@ -268,8 +269,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     if (handledPendingUploadIdRef.current === pendingUpload.requestId) return;
     // Match by full connection identity so uploads for the same host ID
     // with different session-time overrides are not sent to the wrong endpoint.
-    const uploadConnectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
-    if (pendingUpload.hostId !== activeHost.id || connectedHostIdRef.current !== uploadConnectionKey) return;
+    if (connectedHostIdRef.current !== pendingUpload.connectionKey) return;
 
     const activePane = sftp.leftPane;
     const connection = activePane.connection;
