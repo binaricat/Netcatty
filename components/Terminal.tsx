@@ -1058,7 +1058,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // Silently fail
         }
       }
-      onOpenSftp(host, initialPath);
+      onOpenSftp(host, initialPath, undefined, sessionId);
       return;
     }
 

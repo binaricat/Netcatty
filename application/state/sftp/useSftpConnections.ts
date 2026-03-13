@@ -348,14 +348,27 @@ export const useSftpConnections = ({
             if (provisionalCacheKey) {
               dirCacheRef.current.delete(provisionalCacheKey);
             }
-            // Fall back to homeDir, then "/".
+            // Fall back to homeDir, then "/", chaining attempts.
+            let fallbackSucceeded = false;
             if (sharedHostCache && startPath !== homeDir) {
-              startPath = homeDir;
-              files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
-            } else if (startPath !== "/") {
-              startPath = "/";
-              files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
-            } else {
+              try {
+                startPath = homeDir;
+                files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+                fallbackSucceeded = true;
+              } catch {
+                // homeDir also failed, try root
+              }
+            }
+            if (!fallbackSucceeded && startPath !== "/") {
+              try {
+                startPath = "/";
+                files = await listRemoteFiles(sftpId, startPath, filenameEncoding);
+                fallbackSucceeded = true;
+              } catch {
+                // root also failed
+              }
+            }
+            if (!fallbackSucceeded) {
               throw new Error("Cannot list any remote directory");
             }
           }

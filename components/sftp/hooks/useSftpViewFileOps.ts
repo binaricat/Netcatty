@@ -119,6 +119,8 @@ export const useSftpViewFileOps = ({
     file: SftpFileEntry;
     side: "left" | "right";
     fullPath: string;
+    /** Connection ID at the time the file was opened, to prevent saving to wrong host */
+    connectionId?: string;
   } | null>(null);
   const [textEditorContent, setTextEditorContent] = useState("");
   const [loadingTextContent, setLoadingTextContent] = useState(false);
@@ -148,7 +150,7 @@ export const useSftpViewFileOps = ({
 
       try {
         setLoadingTextContent(true);
-        setTextEditorTarget({ file, side, fullPath });
+        setTextEditorTarget({ file, side, fullPath, connectionId: pane.connection.id });
 
         const content = await sftpRef.current.readTextFile(side, fullPath);
 
@@ -241,6 +243,15 @@ export const useSftpViewFileOps = ({
   const handleSaveTextFile = useCallback(
     async (content: string) => {
       if (!textEditorTarget) return;
+
+      // Verify the SFTP connection hasn't switched to a different host
+      // (e.g. due to focus changes in workspace mode).
+      const currentPane = textEditorTarget.side === "left"
+        ? sftpRef.current.leftPane
+        : sftpRef.current.rightPane;
+      if (textEditorTarget.connectionId && currentPane.connection?.id !== textEditorTarget.connectionId) {
+        throw new Error("SFTP connection changed while editing — file not saved to prevent writing to wrong host");
+      }
 
       await sftpRef.current.writeTextFile(
         textEditorTarget.side,
