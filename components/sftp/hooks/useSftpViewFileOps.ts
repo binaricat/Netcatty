@@ -119,8 +119,10 @@ export const useSftpViewFileOps = ({
     file: SftpFileEntry;
     side: "left" | "right";
     fullPath: string;
-    /** Connection ID at the time the file was opened, to prevent saving to wrong host */
-    connectionId?: string;
+    /** Host ID at the time the file was opened, to prevent saving to wrong host.
+     * Uses hostId (not connectionId) because reconnecting to the same host
+     * generates a new connectionId but should still allow saves. */
+    hostId?: string;
   } | null>(null);
   const [textEditorContent, setTextEditorContent] = useState("");
   const [loadingTextContent, setLoadingTextContent] = useState(false);
@@ -150,7 +152,7 @@ export const useSftpViewFileOps = ({
 
       try {
         setLoadingTextContent(true);
-        setTextEditorTarget({ file, side, fullPath, connectionId: pane.connection.id });
+        setTextEditorTarget({ file, side, fullPath, hostId: pane.connection.hostId });
 
         const content = await sftpRef.current.readTextFile(side, fullPath);
 
@@ -245,11 +247,13 @@ export const useSftpViewFileOps = ({
       if (!textEditorTarget) return;
 
       // Verify the SFTP connection hasn't switched to a different host
-      // (e.g. due to focus changes in workspace mode).
+      // (e.g. due to focus changes in workspace mode).  Uses hostId rather
+      // than connectionId because reconnecting to the same host generates a
+      // fresh connectionId but the save should still succeed.
       const currentPane = textEditorTarget.side === "left"
         ? sftpRef.current.leftPane
         : sftpRef.current.rightPane;
-      if (textEditorTarget.connectionId && currentPane.connection?.id !== textEditorTarget.connectionId) {
+      if (textEditorTarget.hostId && currentPane.connection?.hostId !== textEditorTarget.hostId) {
         throw new Error("SFTP connection changed while editing — file not saved to prevent writing to wrong host");
       }
 

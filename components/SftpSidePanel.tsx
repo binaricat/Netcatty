@@ -192,12 +192,21 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   useEffect(() => {
     if (!activeHost) return;
+
+    const s = sftpRef.current;
+
+    // Don't disconnect or reconnect while transfers are in progress —
+    // doing so would abort in-flight uploads/downloads.
+    const hasActiveTransfers = s.transfers.some(
+      (t) => t.status === "pending" || t.status === "transferring",
+    );
+
     // Don't attempt SFTP for local or serial terminals — disconnect any
     // existing remote connection so the panel doesn't remain bound to the
     // wrong host when focus moves to a non-SFTP pane.
     const proto = activeHost.protocol;
     if (proto === 'local' || proto === 'serial' || activeHost.id?.startsWith('local-') || activeHost.id?.startsWith('serial-')) {
-      const s = sftpRef.current;
+      if (hasActiveTransfers) return;
       const leftConn = s.leftPane.connection;
       if (leftConn && !leftConn.isLocal) {
         s.disconnect("left");
@@ -210,7 +219,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const connectionKey = `${activeHost.id}:${activeHost.hostname}:${activeHost.port ?? ''}:${activeHost.protocol ?? ''}`;
     if (connectedHostIdRef.current === connectionKey) return;
 
-    const s = sftpRef.current;
+    // Don't switch connections while transfers are active
+    if (hasActiveTransfers) return;
     logger.info("[SftpSidePanel] Auto-connect triggered", {
       hostId: activeHost.id,
       hostLabel: activeHost.label,
