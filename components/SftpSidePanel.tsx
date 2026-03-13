@@ -339,19 +339,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   useEffect(() => {
     if (!pendingUpload || !activeHost) return;
     if (handledPendingUploadIdRef.current === pendingUpload.requestId) return;
-    // Match by full connection identity so uploads for the same host ID
-    // with different session-time overrides are not sent to the wrong endpoint.
-    if (connectedHostIdRef.current !== pendingUpload.connectionKey) return;
+    if (pendingUpload.hostId !== activeHost.id) return;
 
     const activePane = sftp.leftPane;
     const connection = activePane.connection;
     if (!connection || connection.isLocal || connection.hostId !== activeHost.id) return;
     if (connection.status !== "connected") return;
-    // Verify the live pane's tab actually matches the expected endpoint —
-    // connectedHostIdRef is set before selectTab/connect finishes, so the
-    // pane may still be showing the previous endpoint's tab.
-    const activeTabId = sftp.leftTabs.activeTabId;
-    if (activeTabId && tabConnectionKeyMapRef.current.get(activeTabId) !== pendingUpload.connectionKey) return;
 
     handledPendingUploadIdRef.current = pendingUpload.requestId;
 
@@ -403,7 +396,6 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     onPendingUploadHandled,
     pendingUpload,
     sftp.leftPane,
-    sftp.leftTabs.activeTabId,
     t,
   ]);
 
