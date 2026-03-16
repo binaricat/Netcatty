@@ -35,10 +35,10 @@ export const ModelSelector: React.FC<{
     setIsLoading(true);
     setError(null);
     try {
-      // Sync the current provider config so the backend allowlist includes
-      // the baseURL being edited (avoids "URL host is not in the allowed list")
-      if (bridge.aiSyncProviders && baseURL && providerId) {
-        await bridge.aiSyncProviders([{ id: `settings_preview_${providerId}`, providerId, baseURL, enabled: true }]);
+      // Temporarily allow the provider's host in the backend fetch allowlist
+      // so model listing works for URLs not yet synced from the main window.
+      if (bridge.aiAllowlistAddHost && baseURL) {
+        await bridge.aiAllowlistAddHost(baseURL);
       }
       const url = `${baseURL.replace(/\/+$/, "")}${modelsEndpoint}`;
       const headers: Record<string, string> = {};

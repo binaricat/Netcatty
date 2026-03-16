@@ -1003,6 +1003,9 @@ const api = {
   aiFetch: async (url, method, headers, body, providerId) => {
     return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId });
   },
+  aiAllowlistAddHost: async (baseURL) => {
+    return ipcRenderer.invoke("netcatty:ai:allowlist:add-host", { baseURL });
+  },
   aiExec: async (sessionId, command) => {
     return ipcRenderer.invoke("netcatty:ai:exec", { sessionId, command });
   },
