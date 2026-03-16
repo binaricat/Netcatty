@@ -507,38 +507,9 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "Invalid URL" };
     }
 
-    // Check URL against allowed hosts (server-side allowlist only).
-    // Settings window may fetch models from user-configured custom provider
-    // URLs that haven't been synced to providerFetchHosts yet. For these
-    // requests we skip the static host allowlist but still enforce the same
-    // HTTPS/localhost-port safety rules to prevent SSRF.
+    // Check URL against allowed hosts (server-side allowlist only)
     if (!isAllowedFetchUrl(resolvedUrl)) {
-      const isSettingsSender = (() => {
-        try {
-          const wm = require("./windowManager.cjs");
-          const sw = wm.getSettingsWindow?.();
-          return sw && !sw.isDestroyed?.() && event.sender?.id === sw.webContents?.id;
-        } catch { return false; }
-      })();
-      if (!isSettingsSender) {
-        return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
-      }
-      // Settings sender: still enforce basic URL safety (HTTPS for remote,
-      // known ports for localhost) — only skip the static host allowlist.
-      try {
-        const parsed = new URL(resolvedUrl);
-        const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-        if (isLocalhost) {
-          const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
-          if (!ALLOWED_LOCALHOST_PORTS.has(port)) {
-            return { ok: false, status: 0, data: "", error: "Localhost port is not allowed" };
-          }
-        } else if (parsed.protocol !== "https:") {
-          return { ok: false, status: 0, data: "", error: "Only HTTPS is allowed for remote hosts" };
-        }
-      } catch {
-        return { ok: false, status: 0, data: "", error: "Invalid URL" };
-      }
+      return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
     return new Promise((resolve) => {

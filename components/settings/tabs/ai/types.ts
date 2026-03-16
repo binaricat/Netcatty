@@ -50,6 +50,7 @@ export interface FetchedModel {
 
 export interface FetchBridge {
   aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string) => Promise<{ ok: boolean; data: string; error?: string }>;
+  aiSyncProviders?: (providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>) => Promise<{ ok: boolean }>;
 }
 
 export interface NetcattyAiBridge {
