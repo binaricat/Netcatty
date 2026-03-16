@@ -51,7 +51,7 @@ type SettingsState = ReturnType<typeof useSettingsState> & {
 
 const SettingsSyncTab = React.lazy(() => import("./settings/tabs/SettingsSyncTab"));
 
-const SettingsSyncTabWithVault: React.FC = () => {
+const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = ({ onSettingsApplied }) => {
     const {
         hosts,
         keys,
@@ -90,6 +90,7 @@ const SettingsSyncTabWithVault: React.FC = () => {
             importDataFromString={importDataFromString}
             importPortForwardingRules={importPortForwardingRules}
             clearVaultData={clearVaultData}
+            onSettingsApplied={onSettingsApplied}
         />
     );
 };
@@ -290,7 +291,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
 
                     {mountedTabs.has("sync") && (
                         <React.Suspense fallback={null}>
-                            <SettingsSyncTabWithVault />
+                            <SettingsSyncTabWithVault onSettingsApplied={settings.rehydrateAllFromStorage} />
                         </React.Suspense>
                     )}
 

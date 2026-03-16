@@ -297,6 +297,7 @@ function App({ settings }: { settings: SettingsState }) {
       applySyncPayload(payload, {
         importVaultData: importDataFromString,
         importPortForwardingRules,
+        onSettingsApplied: settings.rehydrateAllFromStorage,
       });
     },
   });

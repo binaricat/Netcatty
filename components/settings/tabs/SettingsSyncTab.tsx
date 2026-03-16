@@ -15,6 +15,7 @@ export default function SettingsSyncTab(props: {
   importDataFromString: (data: string) => void;
   importPortForwardingRules: (rules: PortForwardingRule[]) => void;
   clearVaultData: () => void;
+  onSettingsApplied?: () => void;
 }) {
   const {
     vault,
@@ -22,6 +23,7 @@ export default function SettingsSyncTab(props: {
     importDataFromString,
     importPortForwardingRules,
     clearVaultData,
+    onSettingsApplied,
   } = props;
 
   const onBuildPayload = useCallback((): SyncPayload => {
@@ -56,9 +58,10 @@ export default function SettingsSyncTab(props: {
       applySyncPayload(payload, {
         importVaultData: importDataFromString,
         importPortForwardingRules,
+        onSettingsApplied,
       });
     },
-    [importDataFromString, importPortForwardingRules],
+    [importDataFromString, importPortForwardingRules, onSettingsApplied],
   );
 
   const clearAllLocalData = useCallback(() => {
