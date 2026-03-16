@@ -363,6 +363,11 @@ function registerHandlers(ipcMain) {
     updater.quitAndInstall(false, true);
   });
 
+  // ---- Get auto-update preference -----------------------------------------
+  ipcMain.handle("netcatty:update:getAutoUpdate", () => {
+    return { enabled: readAutoUpdatePreference() };
+  });
+
   // ---- Enable/disable auto-update ----------------------------------------
   let _prevAutoDownloadEnabled = readAutoUpdatePreference();
   ipcMain.handle("netcatty:update:setAutoUpdate", (_event, { enabled }) => {

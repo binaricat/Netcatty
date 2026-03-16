@@ -734,6 +734,7 @@ declare global {
     getGlobalHotkeyStatus?(): Promise<{ enabled: boolean; hotkey: string | null }>;
 
     // Auto-Update toggle
+    getAutoUpdate?(): Promise<{ enabled: boolean }>;
     setAutoUpdate?(enabled: boolean): Promise<{ success: boolean }>;
 
     // System Tray / Close to Tray

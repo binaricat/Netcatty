@@ -808,6 +808,24 @@ export const useSettingsState = () => {
     }
   }, [closeToTray, notifySettingsChanged]);
 
+  // Hydrate auto-update state from the main-process preference file on mount.
+  // This reconciles localStorage (renderer) with auto-update-pref.json (main)
+  // in case localStorage was cleared or is stale.
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    void bridge?.getAutoUpdate?.().then((result) => {
+      if (result && typeof result.enabled === 'boolean') {
+        setAutoUpdateEnabled((prev) => {
+          if (prev === result.enabled) return prev;
+          // Sync localStorage with the main-process truth
+          localStorageAdapter.writeString(STORAGE_KEY_AUTO_UPDATE_ENABLED, result.enabled ? 'true' : 'false');
+          return result.enabled;
+        });
+      }
+    }).catch(() => { /* bridge unavailable */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist auto-update enabled setting.
   // Skip IPC on initial mount to avoid overwriting the main-process preference
   // file when localStorage has been cleared (where the default is true).
