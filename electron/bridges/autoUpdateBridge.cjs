@@ -377,9 +377,10 @@ function registerHandlers(ipcMain) {
     writeAutoUpdatePreference(!!enabled);
     if (!enabled) {
       cancelAutoCheck();
-    } else if (!wasEnabled) {
+    } else if (!wasEnabled && !_isChecking) {
       // Only re-schedule when actually re-enabling (not on every mount sync),
       // to avoid duplicate checks from multiple windows initializing.
+      // Skip if a check is already in flight to prevent concurrent calls.
       startAutoCheck(2000);
     }
     return { success: true };

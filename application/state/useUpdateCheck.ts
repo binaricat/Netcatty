@@ -456,13 +456,18 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
           // in-flight check will resolve via IPC events.
         } else if (nextStatus === 'error' && res?.available) {
           // GitHub API failed but electron-updater found an update.
-          // Clear the error and surface the available update.
-          setUpdateState((prev) => ({
-            ...prev,
-            manualCheckStatus: 'available',
-            hasUpdate: true,
-            error: null,
-          }));
+          // Respect dismissed versions before surfacing.
+          const dismissed = localStorageAdapter.readString(STORAGE_KEY_UPDATE_DISMISSED_VERSION);
+          if (res.version && res.version === dismissed) {
+            // User dismissed this version — don't re-surface
+          } else {
+            setUpdateState((prev) => ({
+              ...prev,
+              manualCheckStatus: 'available',
+              hasUpdate: true,
+              error: null,
+            }));
+          }
         } else if (nextStatus === 'error' && !res?.error && !res?.available) {
           // GitHub API failed but electron-updater says no update available.
           // Clear the error status so Settings doesn't stay stuck in error state.
@@ -568,7 +573,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
           const release = JSON.parse(cachedRelease) as ReleaseInfo;
           const dismissedVersion = localStorageAdapter.readString(STORAGE_KEY_UPDATE_DISMISSED_VERSION);
           const isNewer = updateState.currentVersion.localeCompare(release.version, undefined, { numeric: true, sensitivity: 'base' }) < 0;
-          const showUpdate = autoUpdateEnabled && isNewer && release.version !== dismissedVersion;
+          const showUpdate = isNewer && release.version !== dismissedVersion;
           setUpdateState((prev) => ({
             ...prev,
             latestRelease: prev.latestRelease ?? release,

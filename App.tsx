@@ -320,6 +320,8 @@ function App({ settings }: { settings: SettingsState }) {
   useEffect(() => {
     // Skip "update available" toast if auto-download has already started or completed
     if (updateState.autoDownloadStatus !== 'idle') return;
+    // Don't show automatic notification when auto-update is disabled
+    if (localStorage.getItem('netcatty_auto_update_enabled_v1') === 'false') return;
     if (updateState.hasUpdate && updateState.latestRelease) {
       const version = updateState.latestRelease.version;
       toast.info(
