@@ -17,6 +17,7 @@ import { resolveHostAuth } from './domain/sshAuth';
 import { applySyncPayload } from './domain/syncPayload';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
+import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
 import { TopTabs } from './components/TopTabs';
 import { Button } from './components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
@@ -321,7 +322,7 @@ function App({ settings }: { settings: SettingsState }) {
     // Skip "update available" toast if auto-download has already started or completed
     if (updateState.autoDownloadStatus !== 'idle') return;
     // Don't show automatic notification when auto-update is disabled
-    if (localStorage.getItem('netcatty_auto_update_enabled_v1') === 'false') return;
+    if (localStorageAdapter.readString('netcatty_auto_update_enabled_v1') === 'false') return;
     if (updateState.hasUpdate && updateState.latestRelease) {
       const version = updateState.latestRelease.version;
       toast.info(

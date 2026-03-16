@@ -808,11 +808,18 @@ export const useSettingsState = () => {
     }
   }, [closeToTray, notifySettingsChanged]);
 
-  // Persist auto-update enabled setting
+  // Persist auto-update enabled setting.
+  // Skip IPC on initial mount to avoid overwriting the main-process preference
+  // file when localStorage has been cleared (where the default is true).
+  const autoUpdateMountedRef = useRef(false);
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled ? 'true' : 'false');
     notifySettingsChanged(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled);
-    // Notify main process
+    if (!autoUpdateMountedRef.current) {
+      autoUpdateMountedRef.current = true;
+      return; // Skip IPC on initial mount
+    }
+    // Notify main process on user-initiated changes
     const bridge = netcattyBridge.get();
     bridge?.setAutoUpdate?.(autoUpdateEnabled).catch((err: unknown) => {
       console.warn('[AutoUpdate] Failed to set auto-update:', err);
