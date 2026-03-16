@@ -450,6 +450,9 @@ function registerHandlers(ipcMain) {
     // Reset localhost ports to built-in defaults, then add provider-configured ones
     ALLOWED_LOCALHOST_PORTS.clear();
     for (const port of BUILTIN_LOCALHOST_PORTS) ALLOWED_LOCALHOST_PORTS.add(port);
+    // Re-add any still-active temporary entries so a sync doesn't wipe them
+    for (const host of tempAllowedHosts) providerFetchHosts.add(host);
+    for (const port of tempAllowedPorts) ALLOWED_LOCALHOST_PORTS.add(port);
     for (const config of providerConfigs) {
       if (!config.baseURL) continue;
       try {
