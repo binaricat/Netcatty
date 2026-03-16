@@ -365,7 +365,10 @@ function registerHandlers(ipcMain) {
     return { ok: true };
   });
 
-  // Temporarily add a host to the fetch allowlist (used by settings model listing)
+  // Temporarily add a host to the fetch allowlist (used by settings model listing).
+  // Entries are auto-removed after 30 seconds to avoid permanently expanding the
+  // SSRF boundary, and are also cleared on the next provider sync.
+  const TEMP_ALLOWLIST_TTL = 30_000;
   ipcMain.handle("netcatty:ai:allowlist:add-host", async (event, { baseURL }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     if (typeof baseURL !== "string") return { ok: false, error: "baseURL must be a string" };
@@ -374,9 +377,23 @@ function registerHandlers(ipcMain) {
       const host = parsed.hostname;
       if (host === "localhost" || host === "127.0.0.1") {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
-        ALLOWED_LOCALHOST_PORTS.add(port);
+        if (!ALLOWED_LOCALHOST_PORTS.has(port)) {
+          ALLOWED_LOCALHOST_PORTS.add(port);
+          setTimeout(() => {
+            // Only remove if not in the built-in set (avoid removing permanent entries)
+            if (!BUILTIN_LOCALHOST_PORTS.includes(port)) ALLOWED_LOCALHOST_PORTS.delete(port);
+          }, TEMP_ALLOWLIST_TTL);
+        }
       } else {
-        providerFetchHosts.add(host);
+        if (!providerFetchHosts.has(host)) {
+          providerFetchHosts.add(host);
+          setTimeout(() => {
+            // Only remove if not re-added by a provider sync in the meantime
+            // (rebuildProviderFetchHosts clears and rebuilds, so if still present
+            // it was re-added legitimately)
+            providerFetchHosts.delete(host);
+          }, TEMP_ALLOWLIST_TTL);
+        }
       }
       return { ok: true };
     } catch {
