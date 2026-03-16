@@ -13,6 +13,40 @@
 let _deps = null;
 
 /**
+ * Read the persisted auto-update preference from a JSON file in userData.
+ * Returns true (default) if the file doesn't exist or is unreadable.
+ */
+function readAutoUpdatePreference() {
+  try {
+    const { app } = _deps?.electronModule || {};
+    if (!app) return true;
+    const path = require('path');
+    const fs = require('fs');
+    const prefPath = path.join(app.getPath('userData'), 'auto-update-pref.json');
+    const data = JSON.parse(fs.readFileSync(prefPath, 'utf8'));
+    return data.enabled !== false;
+  } catch {
+    return true; // default to enabled
+  }
+}
+
+/**
+ * Persist the auto-update preference to a JSON file in userData.
+ */
+function writeAutoUpdatePreference(enabled) {
+  try {
+    const { app } = _deps?.electronModule || {};
+    if (!app) return;
+    const path = require('path');
+    const fs = require('fs');
+    const prefPath = path.join(app.getPath('userData'), 'auto-update-pref.json');
+    fs.writeFileSync(prefPath, JSON.stringify({ enabled }), 'utf8');
+  } catch (err) {
+    console.warn('[AutoUpdate] Failed to write preference:', err?.message || err);
+  }
+}
+
+/**
  * Returns true when the current packaging format supports electron-updater
  * (macOS zip/dmg, Windows NSIS, Linux AppImage).
  */
@@ -51,7 +85,7 @@ function getAutoUpdater() {
   if (_autoUpdater) return _autoUpdater;
   try {
     const { autoUpdater } = require("electron-updater");
-    autoUpdater.autoDownload = true;
+    autoUpdater.autoDownload = readAutoUpdatePreference();
     autoUpdater.autoInstallOnAppQuit = false;
     // Silence the default electron-log transport (we log ourselves).
     autoUpdater.logger = null;
@@ -330,7 +364,7 @@ function registerHandlers(ipcMain) {
   });
 
   // ---- Enable/disable auto-update ----------------------------------------
-  let _prevAutoDownloadEnabled = true; // tracks the last known state to detect actual changes
+  let _prevAutoDownloadEnabled = readAutoUpdatePreference();
   ipcMain.handle("netcatty:update:setAutoUpdate", (_event, { enabled }) => {
     const wasEnabled = _prevAutoDownloadEnabled;
     _prevAutoDownloadEnabled = !!enabled;
@@ -339,6 +373,8 @@ function registerHandlers(ipcMain) {
       updater.autoDownload = !!enabled;
       console.log("[AutoUpdate] autoDownload set to:", !!enabled);
     }
+    // Persist so the preference survives app restarts
+    writeAutoUpdatePreference(!!enabled);
     if (!enabled) {
       cancelAutoCheck();
     } else if (!wasEnabled) {
