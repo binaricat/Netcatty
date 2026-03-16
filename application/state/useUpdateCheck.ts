@@ -529,10 +529,10 @@ export function useUpdateCheck(): UseUpdateCheckResult {
       return;
     }
 
-    // Respect auto-update toggle — skip automatic check when disabled
+    // Respect auto-update toggle — skip automatic check when disabled.
+    // Don't set hasCheckedOnStartupRef so re-enabling can trigger a check.
     const autoUpdateEnabled = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
     if (autoUpdateEnabled === 'false') {
-      hasCheckedOnStartupRef.current = true;
       return;
     }
 
@@ -570,6 +570,13 @@ export function useUpdateCheck(): UseUpdateCheckResult {
     debugLog('Starting delayed update check for version:', updateState.currentVersion);
 
     startupCheckTimeoutRef.current = setTimeout(async () => {
+      // Re-check the toggle at fire time — the user may have toggled it
+      // after the timer was scheduled.
+      const stillEnabled = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
+      if (stillEnabled === 'false') {
+        debugLog('Skipping startup check — auto-update disabled after timer was scheduled');
+        return;
+      }
       // If electron-updater's auto-check already started a download, skip the
       // redundant GitHub API check to avoid duplicate toast notifications.
       if (autoDownloadStatusRef.current !== 'idle') {
