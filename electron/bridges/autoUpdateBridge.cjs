@@ -147,6 +147,9 @@ function startAutoCheck(delayMs = 5000) {
     console.log("[AutoUpdate] Platform does not support auto-update, skipping auto-check");
     return;
   }
+  // Cancel any existing timer to avoid duplicate concurrent checks
+  // (e.g. from multiple windows initializing or re-enable toggle).
+  cancelAutoCheck();
   _autoCheckTimer = setTimeout(async () => {
     _autoCheckTimer = null;
     const updater = getAutoUpdater();

@@ -454,6 +454,15 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
         } else if (res?.checking) {
           // Another check is already in flight — don't change status; the
           // in-flight check will resolve via IPC events.
+        } else if (nextStatus === 'error' && res?.available) {
+          // GitHub API failed but electron-updater found an update.
+          // Clear the error and surface the available update.
+          setUpdateState((prev) => ({
+            ...prev,
+            manualCheckStatus: 'available',
+            hasUpdate: true,
+            error: null,
+          }));
         } else if (nextStatus === 'error' && !res?.error && !res?.available) {
           // GitHub API failed but electron-updater says no update available.
           // Clear the error status so Settings doesn't stay stuck in error state.
