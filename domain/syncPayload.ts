@@ -36,6 +36,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_CUSTOM_THEMES,
 } from '../infrastructure/config/storageKeys';
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,15 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
     } catch { /* ignore corrupt data */ }
   }
 
+  // Custom terminal themes
+  const customThemesRaw = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_THEMES);
+  if (customThemesRaw) {
+    try {
+      const parsed = JSON.parse(customThemesRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) settings.customTerminalThemes = parsed;
+    } catch { /* ignore */ }
+  }
+
   // Keyboard
   const kb = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS);
   if (kb) {
@@ -181,6 +191,11 @@ export function applySyncableSettings(settings: NonNullable<SyncPayload['setting
       }
     }
     localStorageAdapter.writeString(STORAGE_KEY_TERM_SETTINGS, JSON.stringify(merged));
+  }
+
+  // Custom terminal themes
+  if (settings.customTerminalThemes != null) {
+    localStorageAdapter.writeString(STORAGE_KEY_CUSTOM_THEMES, JSON.stringify(settings.customTerminalThemes));
   }
 
   // Keyboard

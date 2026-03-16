@@ -186,6 +186,7 @@ export interface SyncPayload {
     terminalFontFamily?: string;
     terminalFontSize?: number;
     terminalSettings?: Record<string, unknown>;
+    customTerminalThemes?: Array<{ id: string; name: string; colors: Record<string, string> }>;
     // Keyboard
     customKeyBindings?: Record<string, { mac?: string; pc?: string }>;
     // Editor
