@@ -16,6 +16,7 @@ import {
   findSyncPayloadEncryptedCredentialPaths,
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
+import { collectSyncableSettings } from '../../domain/syncPayload';
 import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
@@ -97,6 +98,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const buildPayload = useCallback((): SyncPayload => {
     return {
       ...getSyncSnapshot(),
+      settings: collectSyncableSettings(),
       syncedAt: Date.now(),
     };
   }, [getSyncSnapshot]);

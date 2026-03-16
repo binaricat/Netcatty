@@ -99,7 +99,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const lang = localStorageAdapter.readString(STORAGE_KEY_UI_LANGUAGE);
   if (lang) settings.uiLanguage = lang;
   const css = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_CSS);
-  if (css) settings.customCSS = css;
+  if (css != null) settings.customCSS = css;
 
   // Terminal
   const termTheme = localStorageAdapter.readString(STORAGE_KEY_TERM_THEME);
