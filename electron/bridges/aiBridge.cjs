@@ -185,12 +185,10 @@ function _validateSenderImpl(event, allowSettings) {
   try {
     const windowManager = require("./windowManager.cjs");
 
-    // Lazily resolve mainWebContentsId if not yet set
-    if (mainWebContentsId == null) {
-      const mainWin = windowManager.getMainWindow?.();
-      if (mainWin && !mainWin.isDestroyed?.()) {
-        mainWebContentsId = mainWin.webContents?.id ?? null;
-      }
+    // Always resolve the current main window id to handle window recreation
+    const mainWin = windowManager.getMainWindow?.();
+    if (mainWin && !mainWin.isDestroyed?.()) {
+      mainWebContentsId = mainWin.webContents?.id ?? null;
     }
 
     const senderId = event.sender?.id;
@@ -509,8 +507,19 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "Invalid URL" };
     }
 
-    // Check URL against allowed hosts (server-side allowlist only)
-    if (!isAllowedFetchUrl(resolvedUrl)) {
+    // Check URL against allowed hosts (server-side allowlist only).
+    // Settings window may fetch models from user-configured custom provider
+    // URLs that haven't been synced to providerFetchHosts yet, so we skip
+    // the static allowlist check for settings senders (basic URL safety is
+    // already enforced above: only HTTP(S) schemes are allowed).
+    const isSettingsSender = (() => {
+      try {
+        const wm = require("./windowManager.cjs");
+        const sw = wm.getSettingsWindow?.();
+        return sw && !sw.isDestroyed?.() && event.sender?.id === sw.webContents?.id;
+      } catch { return false; }
+    })();
+    if (!isSettingsSender && !isAllowedFetchUrl(resolvedUrl)) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
