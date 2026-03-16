@@ -40,7 +40,7 @@ class CustomThemeStore {
         } catch {
             // ignore corrupt data
         }
-        this.cachedAllThemes = null; // invalidate cache
+        this.notify();
     };
 
     private saveToStorage = () => {
