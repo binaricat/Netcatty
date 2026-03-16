@@ -103,9 +103,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     };
   }, [getSyncSnapshot]);
   
-  // Create a hash of current data for comparison
+  // Create a hash of current data for comparison (includes settings)
   const getDataHash = useCallback(() => {
-    return JSON.stringify(getSyncSnapshot());
+    return JSON.stringify({ ...getSyncSnapshot(), settings: collectSyncableSettings() });
   }, [getSyncSnapshot]);
   
   // Sync now handler - get fresh state directly from manager
