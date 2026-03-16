@@ -557,8 +557,9 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
       return;
     }
 
-    // Always hydrate cached release info regardless of auto-update toggle,
-    // so update status is visible across windows/sessions.
+    // Hydrate cached release info so update status is visible across windows.
+    // When auto-update is disabled, hydrate release data (for the Settings UI)
+    // but don't set hasUpdate (which would trigger the toast in App.tsx).
     const lastCheck = localStorageAdapter.readNumber(STORAGE_KEY_UPDATE_LAST_CHECK);
     if (lastCheck) {
       const cachedRelease = localStorageAdapter.readString(STORAGE_KEY_UPDATE_LATEST_RELEASE);
@@ -567,7 +568,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
           const release = JSON.parse(cachedRelease) as ReleaseInfo;
           const dismissedVersion = localStorageAdapter.readString(STORAGE_KEY_UPDATE_DISMISSED_VERSION);
           const isNewer = updateState.currentVersion.localeCompare(release.version, undefined, { numeric: true, sensitivity: 'base' }) < 0;
-          const showUpdate = isNewer && release.version !== dismissedVersion;
+          const showUpdate = autoUpdateEnabled && isNewer && release.version !== dismissedVersion;
           setUpdateState((prev) => ({
             ...prev,
             latestRelease: prev.latestRelease ?? release,
