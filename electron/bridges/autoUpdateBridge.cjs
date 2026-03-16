@@ -84,9 +84,11 @@ function setupGlobalListeners() {
 
   updater.on("update-available", (info) => {
     _isChecking = false;
-    // autoDownload=true means the download begins immediately after this event
-    _isDownloading = true;
-    _lastStatus = { status: 'downloading', percent: 0, error: null, version: info.version || null, isChecking: false };
+    // Only track as downloading when autoDownload is enabled — otherwise no
+    // download will actually start and the status would be stuck at 0%.
+    const willDownload = updater.autoDownload !== false;
+    _isDownloading = willDownload;
+    _lastStatus = { status: willDownload ? 'downloading' : 'idle', percent: 0, error: null, version: info.version || null, isChecking: false };
     broadcastToAllWindows("netcatty:update:update-available", {
       version: info.version || "",
       releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes : "",

@@ -56,7 +56,13 @@ export interface UseUpdateCheckResult {
  * - Respects dismissed version to avoid nagging
  * - Provides manual check capability
  */
-export function useUpdateCheck(): UseUpdateCheckResult {
+export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUpdateCheckResult {
+  // Accept auto-update toggle from the caller (e.g. useSettingsState) so it
+  // reacts immediately in the same window. Falls back to reading localStorage
+  // when no caller provides the value (e.g. in non-settings contexts).
+  const autoUpdateEnabled = options?.autoUpdateEnabled ??
+    (localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'false');
+
   const [updateState, setUpdateState] = useState<UpdateState>({
     isChecking: false,
     hasUpdate: false,
@@ -69,21 +75,6 @@ export function useUpdateCheck(): UseUpdateCheckResult {
     downloadError: null,
     manualCheckStatus: 'idle',
   });
-
-  // Reactive auto-update toggle — drives the startup check effect so that
-  // re-enabling mid-session can trigger a deferred check.
-  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
-    return localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'false';
-  });
-  useEffect(() => {
-    const handler = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY_AUTO_UPDATE_ENABLED) {
-        setAutoUpdateEnabled(e.newValue !== 'false');
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, []);
 
   const hasCheckedOnStartupRef = useRef(false);
   const isCheckingRef = useRef(false);
