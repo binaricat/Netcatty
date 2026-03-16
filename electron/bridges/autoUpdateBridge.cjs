@@ -154,6 +154,12 @@ function startAutoCheck(delayMs = 5000) {
       console.warn("[AutoUpdate] Auto-check skipped — updater not available");
       return;
     }
+    // Respect autoDownload flag — the renderer may have disabled it via IPC
+    // before this timer fires.
+    if (updater.autoDownload === false) {
+      console.log("[AutoUpdate] Auto-check skipped — autoDownload is disabled");
+      return;
+    }
     _isChecking = true;
     _lastStatus = { ..._lastStatus, isChecking: true };
     try {
@@ -329,6 +335,10 @@ function registerHandlers(ipcMain) {
     }
     if (!enabled) {
       cancelAutoCheck();
+    } else {
+      // Re-schedule auto-check when re-enabling, so the user doesn't have
+      // to restart the app to get automatic checks.
+      startAutoCheck(2000);
     }
     return { success: true };
   });
