@@ -165,25 +165,38 @@ function init(deps) {
 }
 
 /**
- * Validate that an IPC event sender is the main window's webContents.
+ * Validate that an IPC event sender is a trusted window (main or settings).
  * Returns true if valid, false otherwise.
  */
 function validateSender(event) {
-  // Lazily resolve mainWebContentsId if not yet set
-  if (mainWebContentsId == null) {
-    try {
-      const windowManager = require("./windowManager.cjs");
+  try {
+    const windowManager = require("./windowManager.cjs");
+
+    // Lazily resolve mainWebContentsId if not yet set
+    if (mainWebContentsId == null) {
       const mainWin = windowManager.getMainWindow?.();
       if (mainWin && !mainWin.isDestroyed?.()) {
         mainWebContentsId = mainWin.webContents?.id ?? null;
       }
-    } catch {
-      // Cannot resolve — reject for safety
-      return false;
     }
+
+    const senderId = event.sender?.id;
+    if (senderId == null) return false;
+
+    // Allow main window
+    if (mainWebContentsId != null && senderId === mainWebContentsId) return true;
+
+    // Allow settings window
+    const settingsWin = windowManager.getSettingsWindow?.();
+    if (settingsWin && !settingsWin.isDestroyed?.()) {
+      if (senderId === settingsWin.webContents?.id) return true;
+    }
+
+    return false;
+  } catch {
+    // Cannot resolve — reject for safety
+    return false;
   }
-  if (mainWebContentsId == null) return false;
-  return event.sender?.id === mainWebContentsId;
 }
 
 /**
