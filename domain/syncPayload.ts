@@ -128,7 +128,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (customThemesRaw) {
     try {
       const parsed = JSON.parse(customThemesRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) settings.customTerminalThemes = parsed;
+      if (Array.isArray(parsed)) settings.customTerminalThemes = parsed;
     } catch { /* ignore */ }
   }
 

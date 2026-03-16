@@ -32,7 +32,7 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
-import { useCustomThemes } from '../state/customThemeStore';
+import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
 import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
 import { DARK_UI_THEMES, LIGHT_UI_THEMES, UiThemeTokens, getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { UI_FONTS, DEFAULT_UI_FONT_ID } from '../../infrastructure/config/uiFonts';
@@ -393,6 +393,9 @@ export const useSettingsState = () => {
     if (storedHidden === 'true' || storedHidden === 'false') setSftpShowHiddenFiles(storedHidden === 'true');
     const storedCompress = readStoredString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD);
     if (storedCompress === 'true' || storedCompress === 'false') setSftpUseCompressedUpload(storedCompress === 'true');
+
+    // Custom terminal themes
+    customThemeStore.loadFromStorage();
   }, [syncAppearanceFromStorage, syncCustomCssFromStorage]);
 
   useLayoutEffect(() => {
@@ -1051,6 +1054,7 @@ export const useSettingsState = () => {
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload,
+      customThemes,
     ]),
   };
 };

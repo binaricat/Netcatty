@@ -30,7 +30,8 @@ class CustomThemeStore {
         this.setupCrossWindowSync();
     }
 
-    private loadFromStorage = () => {
+    /** Reload themes from localStorage. Called internally and after sync apply. */
+    loadFromStorage = () => {
         try {
             const parsed = localStorageAdapter.read<TerminalTheme[]>(STORAGE_KEY_CUSTOM_THEMES);
             if (Array.isArray(parsed)) {
