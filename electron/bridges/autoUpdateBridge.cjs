@@ -86,9 +86,10 @@ function setupGlobalListeners() {
     _isChecking = false;
     // Only track as downloading when autoDownload is enabled — otherwise no
     // download will actually start and the status would be stuck at 0%.
+    // Use 'available' so late-opening windows can still hydrate the version.
     const willDownload = updater.autoDownload !== false;
     _isDownloading = willDownload;
-    _lastStatus = { status: willDownload ? 'downloading' : 'idle', percent: 0, error: null, version: info.version || null, isChecking: false };
+    _lastStatus = { status: willDownload ? 'downloading' : 'available', percent: 0, error: null, version: info.version || null, isChecking: false };
     broadcastToAllWindows("netcatty:update:update-available", {
       version: info.version || "",
       releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes : "",

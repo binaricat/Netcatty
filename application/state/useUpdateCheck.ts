@@ -142,14 +142,20 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
         return;
       }
 
+      // 'available' means an update was found but auto-download is disabled.
+      // Surface the version info (hasUpdate + latestRelease) but keep
+      // autoDownloadStatus at 'idle' so the manual download path shows.
+      const isAvailableOnly = snapshot.status === 'available';
+
       setUpdateState((prev) => {
         // Don't overwrite if the renderer already has a newer state
         if (prev.autoDownloadStatus !== 'idle') return prev;
         return {
           ...prev,
-          autoDownloadStatus: snapshot.status,
-          downloadPercent: snapshot.percent,
-          downloadError: snapshot.error,
+          hasUpdate: isAvailableOnly ? true : prev.hasUpdate,
+          autoDownloadStatus: isAvailableOnly ? 'idle' : snapshot.status,
+          downloadPercent: isAvailableOnly ? 0 : snapshot.percent,
+          downloadError: isAvailableOnly ? null : snapshot.error,
           // Use snapshot version if no release data or if versions differ
           latestRelease: (!prev.latestRelease || (snapshot.version && prev.latestRelease.version !== snapshot.version)) ? (snapshot.version ? {
             version: snapshot.version,
