@@ -70,6 +70,21 @@ export function useUpdateCheck(): UseUpdateCheckResult {
     manualCheckStatus: 'idle',
   });
 
+  // Reactive auto-update toggle — drives the startup check effect so that
+  // re-enabling mid-session can trigger a deferred check.
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
+    return localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'false';
+  });
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_AUTO_UPDATE_ENABLED) {
+        setAutoUpdateEnabled(e.newValue !== 'false');
+      }
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, []);
+
   const hasCheckedOnStartupRef = useRef(false);
   const isCheckingRef = useRef(false);
   const startupCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -186,15 +201,18 @@ export function useUpdateCheck(): UseUpdateCheckResult {
       if (isDismissed) {
         dismissedAutoDownloadRef.current = true;
       }
+      // When auto-update is disabled, autoDownload=false in the main process
+      // so no download will start. Don't transition to 'downloading' or the
+      // UI will be stuck at 0%. Keep status idle and let the manual download
+      // link surface instead.
+      const isAutoUpdateOff = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) === 'false';
+      const shouldTrackDownload = !isDismissed && !isAutoUpdateOff;
       setUpdateState((prev) => ({
         ...prev,
         hasUpdate: !isDismissed,
-        // Only transition to 'downloading' if the user hasn't dismissed this
-        // version — otherwise leave the status at 'idle' so no download
-        // progress/ready toast appears for a release they don't want.
-        autoDownloadStatus: isDismissed ? prev.autoDownloadStatus : 'downloading',
-        downloadPercent: isDismissed ? prev.downloadPercent : 0,
-        downloadError: isDismissed ? prev.downloadError : null,
+        autoDownloadStatus: shouldTrackDownload ? 'downloading' : prev.autoDownloadStatus,
+        downloadPercent: shouldTrackDownload ? 0 : prev.downloadPercent,
+        downloadError: shouldTrackDownload ? null : prev.downloadError,
         // Use electron-updater's version if GitHub API hasn't resolved yet or
         // if the updater reports a different version than the cached release.
         latestRelease: (!prev.latestRelease || prev.latestRelease.version !== info.version) ? {
@@ -530,9 +548,9 @@ export function useUpdateCheck(): UseUpdateCheckResult {
     }
 
     // Respect auto-update toggle — skip automatic check when disabled.
-    // Don't set hasCheckedOnStartupRef so re-enabling can trigger a check.
-    const autoUpdateEnabled = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
-    if (autoUpdateEnabled === 'false') {
+    // Don't set hasCheckedOnStartupRef so re-enabling (which changes the
+    // autoUpdateEnabled dependency) can re-trigger this effect.
+    if (!autoUpdateEnabled) {
       return;
     }
 
@@ -615,7 +633,7 @@ export function useUpdateCheck(): UseUpdateCheckResult {
         clearTimeout(startupCheckTimeoutRef.current);
       }
     };
-  }, [updateState.currentVersion, performCheck]);
+  }, [updateState.currentVersion, autoUpdateEnabled, performCheck]);
 
   return {
     updateState,
