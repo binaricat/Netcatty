@@ -57,6 +57,8 @@ interface SettingsSystemTabProps {
   hotkeyRegistrationError: string | null;
   globalHotkeyEnabled: boolean;
   setGlobalHotkeyEnabled: (enabled: boolean) => void;
+  autoUpdateEnabled: boolean;
+  setAutoUpdateEnabled: (enabled: boolean) => void;
   // Unified update state — from useUpdateCheck hook in SettingsPageContent
   updateState: UpdateState;
   checkNow: () => Promise<unknown>;
@@ -78,6 +80,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   hotkeyRegistrationError,
   globalHotkeyEnabled,
   setGlobalHotkeyEnabled,
+  autoUpdateEnabled,
+  setAutoUpdateEnabled,
   updateState,
   checkNow,
   installUpdate,
@@ -371,6 +375,15 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 )}
               </div>
             </div>
+            <SettingRow
+              label={t('settings.update.autoUpdateEnabled')}
+              description={t('settings.update.autoUpdateEnabledDesc')}
+            >
+              <Toggle
+                checked={autoUpdateEnabled}
+                onChange={setAutoUpdateEnabled}
+              />
+            </SettingRow>
             <p className="text-xs text-muted-foreground">
               {updateState.lastCheckedAt && (
                 <span>

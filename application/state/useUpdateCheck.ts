@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkForUpdates, getReleaseUrl, type ReleaseInfo, type UpdateCheckResult } from '../../infrastructure/services/updateService';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
-import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE } from '../../infrastructure/config/storageKeys';
+import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE, STORAGE_KEY_AUTO_UPDATE_ENABLED } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 // Check for updates at most once per hour
@@ -519,13 +519,20 @@ export function useUpdateCheck(): UseUpdateCheckResult {
     if (IS_UPDATE_DEMO_MODE) {
       return;
     }
-    
-    debugLog('Version check effect', { 
-      hasChecked: hasCheckedOnStartupRef.current, 
+
+    debugLog('Version check effect', {
+      hasChecked: hasCheckedOnStartupRef.current,
       currentVersion: updateState.currentVersion
     });
-    
+
     if (hasCheckedOnStartupRef.current) {
+      return;
+    }
+
+    // Respect auto-update toggle — skip automatic check when disabled
+    const autoUpdateEnabled = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
+    if (autoUpdateEnabled === 'false') {
+      hasCheckedOnStartupRef.current = true;
       return;
     }
 

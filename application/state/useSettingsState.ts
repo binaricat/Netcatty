@@ -28,6 +28,7 @@ import {
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
+  STORAGE_KEY_AUTO_UPDATE_ENABLED,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
@@ -265,6 +266,11 @@ export const useSettingsState = () => {
     if (stored === null) return true;
     return stored === 'true';
   });
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
+    if (stored === null) return true; // Default to enabled
+    return stored === 'true';
+  });
   const [hotkeyRegistrationError, setHotkeyRegistrationError] = useState<string | null>(null);
   const [globalHotkeyEnabled, setGlobalHotkeyEnabled] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_GLOBAL_HOTKEY_ENABLED);
@@ -466,6 +472,9 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && typeof value === 'boolean') {
         setGlobalHotkeyEnabled((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
+        setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
+      }
     });
     return () => {
       try {
@@ -638,11 +647,18 @@ export const useSettingsState = () => {
           setGlobalHotkeyEnabled(newValue);
         }
       }
+      // Sync auto-update enabled setting from other windows
+      if (e.key === STORAGE_KEY_AUTO_UPDATE_ENABLED && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== autoUpdateEnabled) {
+          setAutoUpdateEnabled(newValue);
+        }
+      }
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, mergeIncomingTerminalSettings]);
+  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, autoUpdateEnabled, mergeIncomingTerminalSettings]);
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
@@ -792,6 +808,17 @@ export const useSettingsState = () => {
     }
   }, [closeToTray, notifySettingsChanged]);
 
+  // Persist auto-update enabled setting
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled ? 'true' : 'false');
+    notifySettingsChanged(STORAGE_KEY_AUTO_UPDATE_ENABLED, autoUpdateEnabled);
+    // Notify main process
+    const bridge = netcattyBridge.get();
+    bridge?.setAutoUpdate?.(autoUpdateEnabled).catch((err: unknown) => {
+      console.warn('[AutoUpdate] Failed to set auto-update:', err);
+    });
+  }, [autoUpdateEnabled, notifySettingsChanged]);
+
   // Get merged key bindings (defaults + custom overrides)
   const keyBindings = useMemo((): KeyBinding[] => {
     return DEFAULT_KEY_BINDINGS.map(binding => {
@@ -934,6 +961,8 @@ export const useSettingsState = () => {
     setToggleWindowHotkey,
     closeToTray,
     setCloseToTray,
+    autoUpdateEnabled,
+    setAutoUpdateEnabled,
     hotkeyRegistrationError,
     globalHotkeyEnabled,
     setGlobalHotkeyEnabled,

@@ -115,6 +115,8 @@ const en: Messages = {
   'settings.update.lastCheckedMinutesAgo': '{n} min ago',
   'settings.update.lastCheckedHoursAgo': '{n} hr ago',
   'settings.update.lastCheckedPrefix': 'Last checked: ',
+  'settings.update.autoUpdateEnabled': 'Automatic Updates',
+  'settings.update.autoUpdateEnabledDesc': 'Automatically check and download updates when available.',
 
   // Settings > Session Logs
   'settings.sessionLogs.title': 'Session Logs',

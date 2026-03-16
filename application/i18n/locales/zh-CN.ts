@@ -99,6 +99,8 @@ const zhCN: Messages = {
   'settings.update.lastCheckedMinutesAgo': '{n} 分钟前',
   'settings.update.lastCheckedHoursAgo': '{n} 小时前',
   'settings.update.lastCheckedPrefix': '上次检查：',
+  'settings.update.autoUpdateEnabled': '自动更新',
+  'settings.update.autoUpdateEnabledDesc': '有新版本时自动检查并下载更新。',
 
   // Settings > Session Logs
   'settings.sessionLogs.title': '会话日志',

@@ -317,6 +317,19 @@ function registerHandlers(ipcMain) {
     updater.quitAndInstall(false, true);
   });
 
+  // ---- Enable/disable auto-update ----------------------------------------
+  ipcMain.handle("netcatty:update:setAutoUpdate", (_event, { enabled }) => {
+    const updater = getAutoUpdater();
+    if (updater) {
+      updater.autoDownload = !!enabled;
+      console.log("[AutoUpdate] autoDownload set to:", !!enabled);
+    }
+    if (!enabled) {
+      cancelAutoCheck();
+    }
+    return { success: true };
+  });
+
   console.log("[AutoUpdate] Handlers registered");
 }
 

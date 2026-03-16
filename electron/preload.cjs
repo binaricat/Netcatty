@@ -967,6 +967,7 @@ const api = {
   downloadUpdate: () => ipcRenderer.invoke("netcatty:update:download"),
   installUpdate: () => ipcRenderer.invoke("netcatty:update:install"),
   getUpdateStatus: () => ipcRenderer.invoke("netcatty:update:getStatus"),
+  setAutoUpdate: (enabled) => ipcRenderer.invoke("netcatty:update:setAutoUpdate", { enabled }),
   onUpdateAvailable: (cb) => {
     updateAvailableListeners.add(cb);
     return () => updateAvailableListeners.delete(cb);
