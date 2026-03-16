@@ -553,23 +553,14 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
       return;
     }
 
-    // Respect auto-update toggle — skip automatic check when disabled.
-    // Don't set hasCheckedOnStartupRef so re-enabling (which changes the
-    // autoUpdateEnabled dependency) can re-trigger this effect.
-    if (!autoUpdateEnabled) {
-      return;
-    }
-
     if (!updateState.currentVersion || updateState.currentVersion === '0.0.0') {
       return;
     }
 
-    // Check if we've checked recently
+    // Always hydrate cached release info regardless of auto-update toggle,
+    // so update status is visible across windows/sessions.
     const lastCheck = localStorageAdapter.readNumber(STORAGE_KEY_UPDATE_LAST_CHECK);
-    const now = Date.now();
-    if (lastCheck && now - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
-      hasCheckedOnStartupRef.current = true;
-      // Hydrate cached release info so late-opening windows show the result
+    if (lastCheck) {
       const cachedRelease = localStorageAdapter.readString(STORAGE_KEY_UPDATE_LATEST_RELEASE);
       if (cachedRelease) {
         try {
@@ -587,6 +578,19 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
           // Ignore corrupted cache
         }
       }
+    }
+
+    // Respect auto-update toggle — skip automatic check when disabled.
+    // Don't set hasCheckedOnStartupRef so re-enabling (which changes the
+    // autoUpdateEnabled dependency) can re-trigger this effect.
+    if (!autoUpdateEnabled) {
+      return;
+    }
+
+    // Check if we've checked recently
+    const now = Date.now();
+    if (lastCheck && now - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
+      hasCheckedOnStartupRef.current = true;
       return;
     }
 

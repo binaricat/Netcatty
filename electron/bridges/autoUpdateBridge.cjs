@@ -330,7 +330,10 @@ function registerHandlers(ipcMain) {
   });
 
   // ---- Enable/disable auto-update ----------------------------------------
+  let _prevAutoDownloadEnabled = true; // tracks the last known state to detect actual changes
   ipcMain.handle("netcatty:update:setAutoUpdate", (_event, { enabled }) => {
+    const wasEnabled = _prevAutoDownloadEnabled;
+    _prevAutoDownloadEnabled = !!enabled;
     const updater = getAutoUpdater();
     if (updater) {
       updater.autoDownload = !!enabled;
@@ -338,9 +341,9 @@ function registerHandlers(ipcMain) {
     }
     if (!enabled) {
       cancelAutoCheck();
-    } else {
-      // Re-schedule auto-check when re-enabling, so the user doesn't have
-      // to restart the app to get automatic checks.
+    } else if (!wasEnabled) {
+      // Only re-schedule when actually re-enabling (not on every mount sync),
+      // to avoid duplicate checks from multiple windows initializing.
       startAutoCheck(2000);
     }
     return { success: true };
