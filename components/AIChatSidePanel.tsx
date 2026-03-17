@@ -484,9 +484,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;
+    const bridge = getNetcattyBridge();
     const controller = abortControllersRef.current.get(activeSessionId);
     controller?.abort();
     abortControllersRef.current.delete(activeSessionId);
+    void bridge?.aiAcpCleanup?.(activeSessionId).catch(() => {});
     setStreamingForScope(activeSessionId, false);
     // Clear statusText on the last message so stale status indicators disappear
     updateLastMessage(activeSessionId, msg => ({

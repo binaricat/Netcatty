@@ -536,6 +536,7 @@ export function useAIChatStreaming({
         trimmed,
         {
           onTextDelta: (text: string) => {
+            if (abortController.signal.aborted) return;
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({
               ...msg,
@@ -546,17 +547,20 @@ export function useAIChatStreaming({
             }));
           },
           onThinkingDelta: (text: string) => {
+            if (abortController.signal.aborted) return;
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({
               ...msg, thinking: (msg.thinking || '') + text,
             }));
           },
           onThinkingDone: () => {
+            if (abortController.signal.aborted) return;
             updateLastMessage(sessionId, msg => ({
               ...msg, thinkingDurationMs: msg.thinkingDurationMs || (Date.now() - msg.timestamp),
             }));
           },
           onToolCall: (toolName: string, args: Record<string, unknown>) => {
+            if (abortController.signal.aborted) return;
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({
               ...msg,
@@ -566,6 +570,7 @@ export function useAIChatStreaming({
             }));
           },
           onToolResult: (toolCallId: string, result: string) => {
+            if (abortController.signal.aborted) return;
             updateLastMessage(sessionId, msg =>
               msg.role === 'assistant' && msg.executionStatus === 'running'
                 ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
@@ -578,6 +583,7 @@ export function useAIChatStreaming({
             needsNewAssistantMsg = true;
           },
           onStatus: (message: string) => {
+            if (abortController.signal.aborted) return;
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({ ...msg, statusText: message }));
           },

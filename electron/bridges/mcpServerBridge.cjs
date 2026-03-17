@@ -55,8 +55,9 @@ let permissionMode = "confirm";
 
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
+const activeChannelExecs = new Map(); // marker → { cleanup }
 
-function cancelAllPtyExecs() {
+function cancelAllRemoteExecs() {
   for (const [marker, entry] of activePtyExecs) {
     try {
       entry.cleanup();
@@ -67,6 +68,17 @@ function cancelAllPtyExecs() {
     } catch { /* ignore */ }
   }
   activePtyExecs.clear();
+
+  for (const [marker, entry] of activeChannelExecs) {
+    try {
+      entry.cleanup();
+    } catch { /* ignore */ }
+  }
+  activeChannelExecs.clear();
+}
+
+function cancelAllPtyExecs() {
+  cancelAllRemoteExecs();
 }
 
 function init(deps) {
@@ -458,7 +470,10 @@ function handleExec(params) {
 
   // If no PTY stream, fall back to exec channel (invisible to terminal)
   if (!ptyStream || typeof ptyStream.write !== "function") {
-    return execViaChannel(sshClient, command, { timeoutMs: commandTimeoutMs });
+    return execViaChannel(sshClient, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activeChannelExecs,
+    });
   }
 
   // Execute via PTY stream so user sees the command in the terminal
@@ -807,6 +822,7 @@ module.exports = {
   getScopedSessionIds,
   getOrCreateHost,
   buildMcpServerConfig,
+  cancelAllRemoteExecs,
   cancelAllPtyExecs,
   cleanupScopedMetadata,
   cleanup,

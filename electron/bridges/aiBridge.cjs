@@ -56,6 +56,7 @@ const MAX_CONCURRENT_AGENTS = 5;
 // ACP providers (module-level so cleanup() can access them)
 const acpProviders = new Map();
 const acpActiveStreams = new Map();
+const acpRequestSessions = new Map();
 
 // ── Provider registry (synced from renderer, keys stay encrypted) ──
 const ENC_PREFIX = "enc:v1:";
@@ -1651,6 +1652,7 @@ function registerHandlers(ipcMain) {
 
       const abortController = new AbortController();
       acpActiveStreams.set(requestId, abortController);
+      acpRequestSessions.set(requestId, chatSessionId);
 
       // Prepend context hint so the agent uses MCP tools for remote hosts
       const contextualPrompt =
@@ -1761,6 +1763,7 @@ function registerHandlers(ipcMain) {
       });
     } finally {
       acpActiveStreams.delete(requestId);
+      acpRequestSessions.delete(requestId);
     }
 
     return { ok: true };
@@ -1768,14 +1771,20 @@ function registerHandlers(ipcMain) {
 
   ipcMain.handle("netcatty:ai:acp:cancel", async (event, { requestId }) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
-    // Cancel any active PTY executions (send Ctrl+C)
-    mcpServerBridge.cancelAllPtyExecs();
+    const chatSessionId = acpRequestSessions.get(requestId);
+    // Cancel any active remote executions spawned by MCP tools.
+    mcpServerBridge.cancelAllRemoteExecs();
     const controller = acpActiveStreams.get(requestId);
     if (controller) {
       controller.abort();
       acpActiveStreams.delete(requestId);
-      return { ok: true };
     }
+    if (chatSessionId) {
+      cleanupAcpProvider(chatSessionId);
+      mcpServerBridge.cleanupScopedMetadata(chatSessionId);
+      acpRequestSessions.delete(requestId);
+    }
+    if (controller || chatSessionId) return { ok: true };
     return { ok: false, error: "Stream not found" };
   });
 
