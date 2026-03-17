@@ -523,7 +523,8 @@ async function startMoshSession(event, options) {
     proc.onExit((evt) => {
       sessions.delete(sessionId);
       const contents = electronModule.webContents.fromId(session.webContentsId);
-      contents?.send("netcatty:exit", { sessionId, ...evt, reason: "exited" });
+      // Mosh non-zero exit typically means connection/auth failure — show error UI
+      contents?.send("netcatty:exit", { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
     });
 
     return { sessionId };
