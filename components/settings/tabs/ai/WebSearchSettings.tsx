@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Globe, Eye, EyeOff } from "lucide-react";
 import type { WebSearchConfig, WebSearchProviderId } from "../../../../infrastructure/ai/types";
 import { WEB_SEARCH_PROVIDER_PRESETS } from "../../../../infrastructure/ai/types";
@@ -45,6 +45,10 @@ export const WebSearchSettings: React.FC<{
     maxResults: 5,
   }, [webSearchConfig]);
 
+  // Ref to always read the latest config in async callbacks (avoids stale closure)
+  const configRef = useRef(config);
+  configRef.current = config;
+
   const preset = WEB_SEARCH_PROVIDER_PRESETS[config.providerId];
 
   // Decrypt API key on mount or when provider changes
@@ -62,9 +66,9 @@ export const WebSearchSettings: React.FC<{
 
   const updateConfig = useCallback(
     (updates: Partial<WebSearchConfig>) => {
-      setWebSearchConfig({ ...config, ...updates });
+      setWebSearchConfig({ ...configRef.current, ...updates });
     },
-    [config, setWebSearchConfig],
+    [setWebSearchConfig],
   );
 
   const handleProviderChange = useCallback(
@@ -72,14 +76,14 @@ export const WebSearchSettings: React.FC<{
       const providerId = val as WebSearchProviderId;
       const newPreset = WEB_SEARCH_PROVIDER_PRESETS[providerId];
       setWebSearchConfig({
-        ...config,
+        ...configRef.current,
         providerId,
         apiKey: undefined,
         apiHost: newPreset.defaultApiHost || undefined,
       });
       setApiKeyInput("");
     },
-    [config, setWebSearchConfig],
+    [setWebSearchConfig],
   );
 
   const handleApiKeyBlur = useCallback(async () => {

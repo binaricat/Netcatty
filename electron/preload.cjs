@@ -994,8 +994,11 @@ const api = {
   aiSyncProviders: async (providers) => {
     return ipcRenderer.invoke("netcatty:ai:sync-providers", { providers });
   },
-  aiSyncWebSearch: async (apiHost) => {
-    return ipcRenderer.invoke("netcatty:ai:sync-web-search", { apiHost });
+  aiSyncWebSearch: async (apiHost, apiKey) => {
+    return ipcRenderer.invoke("netcatty:ai:sync-web-search", { apiHost, apiKey });
+  },
+  aiWebSearchDecryptKey: async () => {
+    return ipcRenderer.invoke("netcatty:ai:web-search-decrypt-key");
   },
   aiChatStream: async (requestId, url, headers, body, providerId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:stream", { requestId, url, headers, body, providerId });

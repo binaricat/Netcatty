@@ -192,13 +192,17 @@ const PROVIDER_SEARCH_FNS: Record<string, typeof searchTavily> = {
   searxng: searchSearxng,
 };
 
-async function decryptApiKey(bridge: NetcattyBridge, encryptedKey?: string): Promise<string> {
-  if (!encryptedKey) return '';
-  if (!encryptedKey.startsWith('enc:v1:')) return encryptedKey;
-  const decrypt = (bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).credentialsDecrypt;
-  if (!decrypt) return encryptedKey;
+/**
+ * Decrypt the web search API key via main process IPC.
+ * Keys are stored encrypted (enc:v1:) and synced to the main process,
+ * which decrypts them server-side to avoid plaintext exposure in the renderer.
+ */
+async function decryptApiKey(bridge: NetcattyBridge): Promise<string> {
+  const decryptFn = (bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).aiWebSearchDecryptKey;
+  if (!decryptFn) return '';
   try {
-    return (await decrypt(encryptedKey)) as string || '';
+    const result = await decryptFn() as { ok: boolean; key: string };
+    return result.ok ? result.key : '';
   } catch {
     return '';
   }
@@ -212,7 +216,7 @@ export async function executeWebSearchProvider(
 ): Promise<WebSearchResult[]> {
   const fn = PROVIDER_SEARCH_FNS[config.providerId];
   if (!fn) throw new Error(`Unsupported web search provider: ${config.providerId}`);
-  // Decrypt the API key before passing to provider functions
-  const decryptedKey = await decryptApiKey(bridge, config.apiKey);
+  // Decrypt the API key via main process (keys never leave main process in plaintext)
+  const decryptedKey = await decryptApiKey(bridge);
   return fn(bridge, { ...config, apiKey: decryptedKey }, query, maxResults);
 }

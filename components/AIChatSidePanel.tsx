@@ -232,13 +232,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [providers]);
 
-  // Sync web search apiHost to main process so it's added to the fetch allowlist.
+  // Sync web search config to main process (allowlist + encrypted API key for server-side decryption).
   useEffect(() => {
     const bridge = getNetcattyBridge();
     if (bridge?.aiSyncWebSearch) {
-      void bridge.aiSyncWebSearch(webSearchConfig?.apiHost || null);
+      void bridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
     }
-  }, [webSearchConfig?.apiHost]);
+  }, [webSearchConfig?.apiHost, webSearchConfig?.apiKey]);
 
   // Abort all active streams and clean up on unmount
   useEffect(() => {

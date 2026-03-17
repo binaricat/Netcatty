@@ -60,8 +60,9 @@ const acpActiveStreams = new Map();
 // ── Provider registry (synced from renderer, keys stay encrypted) ──
 const ENC_PREFIX = "enc:v1:";
 let providerConfigs = [];
-// Web search config apiHost (synced from renderer for fetch allowlist)
+// Web search config (synced from renderer — apiKey stays encrypted, decrypted on use)
 let webSearchApiHost = null;
+let webSearchApiKeyEncrypted = null;
 
 /**
  * Decrypt an API key using Electron's safeStorage.
@@ -367,12 +368,20 @@ function registerHandlers(ipcMain) {
     return { ok: true };
   });
 
-  // ── Web search config sync (renderer → main, for fetch allowlist) ──
-  ipcMain.handle("netcatty:ai:sync-web-search", async (event, { apiHost }) => {
+  // ── Web search config sync (renderer → main, for fetch allowlist + key decryption) ──
+  ipcMain.handle("netcatty:ai:sync-web-search", async (event, { apiHost, apiKey }) => {
     if (!validateSenderOrSettings(event)) return { ok: false };
     webSearchApiHost = typeof apiHost === "string" ? apiHost : null;
+    webSearchApiKeyEncrypted = typeof apiKey === "string" ? apiKey : null;
     rebuildProviderFetchHosts();
     return { ok: true };
+  });
+
+  // Decrypt the web search API key (called by renderer via IPC)
+  ipcMain.handle("netcatty:ai:web-search-decrypt-key", async (event) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, key: "" };
+    if (!webSearchApiKeyEncrypted) return { ok: true, key: "" };
+    return { ok: true, key: decryptApiKeyValue(webSearchApiKeyEncrypted) };
   });
 
   // Temporarily add a host to the fetch allowlist (used by settings model listing).
@@ -512,7 +521,25 @@ function registerHandlers(ipcMain) {
     8888,   // Common local dev
   ];
   const ALLOWED_LOCALHOST_PORTS = new Set(BUILTIN_LOCALHOST_PORTS);
-  function isAllowedFetchUrl(urlString) {
+  // RFC1918 / link-local / loopback ranges — used by SSRF guard
+  function isPrivateHost(hostname) {
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+    // metadata endpoints (AWS, GCP, Azure)
+    if (hostname === "169.254.169.254" || hostname === "metadata.google.internal") return true;
+    // Simple IPv4 private range check
+    const parts = hostname.split(".");
+    if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
+      const [a, b] = parts.map(Number);
+      if (a === 10) return true;                           // 10.0.0.0/8
+      if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+      if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+      if (a === 127) return true;                          // 127.0.0.0/8
+      if (a === 0) return true;                            // 0.0.0.0/8
+    }
+    return false;
+  }
+
+  function isAllowedFetchUrl(urlString, skipHostCheck) {
     try {
       const parsed = new URL(urlString);
       // Allow localhost/127.0.0.1 only on known ports (e.g. Ollama)
@@ -522,6 +549,10 @@ function registerHandlers(ipcMain) {
       }
       // Require HTTPS for remote hosts
       if (parsed.protocol !== "https:") return false;
+      // Always block private/internal hosts (SSRF protection)
+      if (isPrivateHost(parsed.hostname)) return false;
+      // skipHostCheck: allow any public HTTPS host (used by AI web search/url_fetch tools)
+      if (skipHostCheck) return true;
       // Check built-in + provider-configured host allowlist
       if (BUILTIN_FETCH_HOSTS.has(parsed.hostname)) return true;
       if (providerFetchHosts.has(parsed.hostname)) return true;
@@ -604,9 +635,8 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "Invalid URL" };
     }
 
-    // Check URL against allowed hosts (server-side allowlist only)
-    // skipHostCheck is used by AI tools (web_search, url_fetch) that need to access arbitrary URLs
-    if (!skipHostCheck && !isAllowedFetchUrl(resolvedUrl)) {
+    // Check URL against allowed hosts; skipHostCheck allows public HTTPS but still blocks private/internal
+    if (!isAllowedFetchUrl(resolvedUrl, !!skipHostCheck)) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
