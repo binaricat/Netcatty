@@ -87,9 +87,17 @@ function extractHeaders(headers?: HeadersInit): Record<string, string> {
 export const API_KEY_PLACEHOLDER = '__IPC_SECURED__';
 
 function toSafeStatusText(message: string, fallback: string): string {
-  const normalized = message.replace(/\s+/g, ' ').trim();
+  const normalized = message
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized) return fallback;
-  return normalized.slice(0, 120);
+  const byteStringSafe = Array.from(normalized, (char) => {
+    const code = char.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f || code > 0xff) return '?';
+    return char;
+  }).join('');
+  return byteStringSafe.slice(0, 120) || fallback;
 }
 
 export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.fetch {
