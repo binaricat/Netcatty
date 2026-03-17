@@ -86,6 +86,12 @@ function extractHeaders(headers?: HeadersInit): Record<string, string> {
 /** Placeholder API key used by the renderer; main process replaces it with the real key. */
 export const API_KEY_PLACEHOLDER = '__IPC_SECURED__';
 
+function toSafeStatusText(message: string, fallback: string): string {
+  const normalized = message.replace(/\s+/g, ' ').trim();
+  if (!normalized) return fallback;
+  return normalized.slice(0, 120);
+}
+
 export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.fetch {
   return async (
     input: string | URL | Request,
@@ -182,7 +188,7 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
         const jsonBody = JSON.stringify({ error: { message: errorMessage } });
         return new Response(jsonBody, {
           status: 502,
-          statusText: 'Bad Gateway',
+          statusText: toSafeStatusText(errorMessage, 'Bad Gateway'),
           headers: { 'content-type': 'application/json' },
         });
       }
@@ -198,7 +204,7 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
         const jsonBody = JSON.stringify({ error: { message: errorDetail } });
         return new Response(jsonBody, {
           status: statusCode,
-          statusText: `Error ${statusCode}`,
+          statusText: toSafeStatusText(errorDetail, `Error ${statusCode}`),
           headers: { 'content-type': 'application/json' },
         });
       }
