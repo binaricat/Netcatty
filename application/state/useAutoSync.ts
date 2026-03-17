@@ -56,6 +56,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const lastSyncedDataRef = useRef<string>('');
   const hasCheckedRemoteRef = useRef(false);
   const isInitializedRef = useRef(false);
+  const isSyncRunningRef = useRef(false);
 
   const getSyncSnapshot = useCallback(() => {
     let effectivePFRules = config.portForwardingRules;
@@ -114,6 +115,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const syncNow = useCallback(async (options?: SyncNowOptions) => {
     const trigger: SyncTrigger = options?.trigger ?? 'auto';
 
+    isSyncRunningRef.current = true;
     try {
       // Get fresh state directly from CloudSyncManager singleton
       let state = manager.getState();
@@ -179,6 +181,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         error instanceof Error ? error.message : t('common.unknownError'),
         t('sync.autoSync.failedTitle'),
       );
+    } finally {
+      isSyncRunningRef.current = false;
     }
   }, [sync, buildPayload, getDataHash, t]);
   
@@ -239,7 +243,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
     // Wait for the current sync to finish, then this effect will re-run
     // because sync.isSyncing changed.
-    if (sync.isSyncing) {
+    if (sync.isSyncing || isSyncRunningRef.current) {
       return;
     }
     
