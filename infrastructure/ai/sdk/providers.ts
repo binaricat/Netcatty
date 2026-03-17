@@ -178,9 +178,10 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
 
       if (!result.ok) {
         cleanup();
-        return new Response(result.error || 'Stream request failed', {
+        const errorMessage = result.error || 'Stream request failed';
+        return new Response(errorMessage, {
           status: 502,
-          statusText: 'Bad Gateway',
+          statusText: errorMessage,
         });
       }
 

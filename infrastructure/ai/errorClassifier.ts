@@ -28,7 +28,7 @@ export function classifyError(error: string): NonNullable<ChatMessage['errorInfo
 
   // Provider errors (5xx)
   if (/\b5\d{2}\b/.test(error) || lower.includes('server error') || lower.includes('internal error')) {
-    return { type: 'provider', message: 'The AI provider returned a server error. Please try again later.', retryable: true };
+    return { type: 'provider', message: sanitizeErrorMessage(error), retryable: true };
   }
 
   // Model not found
