@@ -229,10 +229,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
         console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
         config.onApplyPayload(mergeResult.payload);
-        // Don't save base here — let the follow-up auto-sync upload the merged
-        // payload and save base on success. Mark skip so the data-change effect
-        // doesn't immediately re-sync with the same data.
-        skipNextSyncRef.current = true;
+        // Don't save base or skip auto-sync — let the data-change effect
+        // naturally trigger an upload of the merged payload (which will
+        // go through syncAllProviders and save base on success).
         toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {

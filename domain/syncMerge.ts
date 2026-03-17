@@ -213,6 +213,11 @@ function mergeStringArrays(
 
 type SettingsObj = NonNullable<SyncPayload['settings']>;
 
+/** Check if an array contains objects with `id` fields (for entity merge). */
+function isIdArray(arr: unknown[]): boolean {
+  return arr.length > 0 && typeof arr[0] === 'object' && arr[0] !== null && 'id' in arr[0];
+}
+
 /** Recursively merge two plain objects against a base using three-way logic. */
 function mergeSettingsDeep(
   base: Record<string, unknown>,
@@ -304,8 +309,7 @@ function mergeSettings(
         );
       } else if (
         Array.isArray(lVal) && Array.isArray(rVal) &&
-        lVal.length > 0 && rVal.length > 0 &&
-        typeof lVal[0] === 'object' && lVal[0] !== null && 'id' in lVal[0]
+        (isIdArray(lVal) || isIdArray(rVal) || isIdArray(Array.isArray(bVal) ? bVal as unknown[] : []))
       ) {
         // Array of objects with `id` (e.g. customTerminalThemes) — entity merge
         const bArr = Array.isArray(bVal) ? bVal as Array<{ id: string }> : [];

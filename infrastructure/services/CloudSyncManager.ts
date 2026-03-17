@@ -758,6 +758,8 @@ export class CloudSyncManager {
       }
 
       await this.saveProviderConnection('github', this.state.providers.github);
+      // Clear merge base when (re)authenticating to a potentially different account
+      try { localStorage.removeItem(this.syncBaseKey('github')); } catch { /* ignore */ }
       this.emit({
         type: 'AUTH_COMPLETED',
         provider: 'github',
@@ -811,6 +813,8 @@ export class CloudSyncManager {
       }
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
+      // Clear merge base when (re)authenticating to a potentially different account
+      try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
