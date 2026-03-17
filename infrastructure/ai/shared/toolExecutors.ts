@@ -343,7 +343,8 @@ export async function executeWebSearch(
   try {
     const maxResults = Math.max(1, Math.min(20, args.maxResults ?? webSearchConfig.maxResults ?? 5));
     const results = await executeWebSearchProvider(bridge, webSearchConfig, args.query, maxResults);
-    return { ok: true, data: { results } };
+    // Enforce maxResults after provider normalization (some providers ignore the limit)
+    return { ok: true, data: { results: results.slice(0, maxResults) } };
   } catch (err) {
     return { ok: false, error: `Web search failed: ${err instanceof Error ? err.message : String(err)}` };
   }

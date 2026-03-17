@@ -7,6 +7,7 @@
 
 const https = require("node:https");
 const http = require("node:http");
+const dns = require("node:dns");
 const { URL } = require("node:url");
 const { spawn, execFileSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
@@ -522,19 +523,39 @@ function registerHandlers(ipcMain) {
   ];
   const ALLOWED_LOCALHOST_PORTS = new Set(BUILTIN_LOCALHOST_PORTS);
   // RFC1918 / link-local / loopback ranges — used by SSRF guard
-  function isPrivateHost(hostname) {
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
-    // metadata endpoints (AWS, GCP, Azure)
-    if (hostname === "169.254.169.254" || hostname === "metadata.google.internal") return true;
-    // Simple IPv4 private range check
-    const parts = hostname.split(".");
+  function isPrivateIp(ip) {
+    if (ip === "::1" || ip === "0.0.0.0") return true;
+    const parts = ip.split(".");
     if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
       const [a, b] = parts.map(Number);
       if (a === 10) return true;                           // 10.0.0.0/8
       if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
       if (a === 192 && b === 168) return true;             // 192.168.0.0/16
       if (a === 127) return true;                          // 127.0.0.0/8
+      if (a === 169 && b === 254) return true;             // 169.254.0.0/16 link-local
       if (a === 0) return true;                            // 0.0.0.0/8
+    }
+    return false;
+  }
+
+  function isPrivateHost(hostname) {
+    if (hostname === "localhost" || hostname === "::1") return true;
+    // metadata endpoints (AWS, GCP, Azure)
+    if (hostname === "metadata.google.internal") return true;
+    return isPrivateIp(hostname);
+  }
+
+  /** Resolve hostname and check all IPs against private ranges (anti DNS-rebinding). */
+  async function hasPrivateResolution(hostname) {
+    if (isPrivateHost(hostname)) return true;
+    try {
+      const addresses = await dns.promises.resolve4(hostname).catch(() => []);
+      const addresses6 = await dns.promises.resolve6(hostname).catch(() => []);
+      for (const ip of [...addresses, ...addresses6]) {
+        if (isPrivateIp(ip)) return true;
+      }
+    } catch {
+      // DNS resolution failed — allow (will fail at connection time anyway)
     }
     return false;
   }
@@ -638,6 +659,16 @@ function registerHandlers(ipcMain) {
     // Check URL against allowed hosts; skipHostCheck allows public HTTPS but still blocks private/internal
     if (!isAllowedFetchUrl(resolvedUrl, !!skipHostCheck)) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
+    }
+
+    // When skipHostCheck is set, also verify DNS resolution doesn't point to private IPs (anti DNS-rebinding)
+    if (skipHostCheck) {
+      try {
+        const parsed = new URL(resolvedUrl);
+        if (await hasPrivateResolution(parsed.hostname)) {
+          return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
+        }
+      } catch {}
     }
 
     return new Promise((resolve) => {
