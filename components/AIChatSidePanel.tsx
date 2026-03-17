@@ -117,6 +117,35 @@ function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildAcpHistoryMessages(messages: ChatMessage[]): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return messages.flatMap((message) => {
+    if (message.role === 'system') return [];
+
+    if (message.role === 'user') {
+      return message.content ? [{ role: 'user' as const, content: message.content }] : [];
+    }
+
+    if (message.role === 'assistant') {
+      const parts: string[] = [];
+      if (message.content) parts.push(message.content);
+      if (message.toolCalls?.length) {
+        parts.push(...message.toolCalls.map((tc) => `Tool call: ${tc.name}(${JSON.stringify(tc.arguments ?? {})})`));
+      }
+      if (!parts.length) return [];
+      return [{ role: 'assistant' as const, content: parts.join('\n\n') }];
+    }
+
+    if (message.role === 'tool' && message.toolResults?.length) {
+      return message.toolResults.map((tr) => ({
+        role: 'assistant' as const,
+        content: `Tool result:\n${tr.content}`,
+      }));
+    }
+
+    return [];
+  });
+}
+
 // -------------------------------------------------------------------
 // Component
 // -------------------------------------------------------------------
@@ -461,6 +490,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachedImages, {
           existingSessionId: currentSession?.externalSessionId,
           updateExternalSessionId: updateSessionExternalSessionId,
+          historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
           terminalSessions,
           providers,
           selectedAgentModel,

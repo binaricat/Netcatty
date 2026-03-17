@@ -160,6 +160,11 @@ function isActiveAcpRun(chatSessionId, requestId) {
   return Boolean(activeRun && activeRun.requestId === requestId);
 }
 
+function isUnsupportedLoadSessionError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return message.includes("method not found") && message.includes("session/load");
+}
+
 function getChildProcessTreePids(rootPid) {
   if (!Number.isInteger(rootPid) || rootPid <= 0) return [];
   if (process.platform === "win32") return [];
@@ -1611,7 +1616,7 @@ function registerHandlers(ipcMain) {
 
   // ── ACP (Agent Client Protocol) streaming ──
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, images }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -1728,13 +1733,52 @@ function registerHandlers(ipcMain) {
           authFingerprint,
           mcpFingerprint: mcpSnapshot.fingerprint,
           permissionMode: currentPermissionMode,
+          historyReplayFallback: false,
         };
         acpProviders.set(chatSessionId, providerEntry);
       }
       acpForceProviderReset.delete(chatSessionId);
 
-      const modelInstance = providerEntry.provider.languageModel(model || undefined);
-      await providerEntry.provider.initSession(providerEntry.provider.tools);
+      let modelInstance = providerEntry.provider.languageModel(model || undefined);
+      try {
+        await providerEntry.provider.initSession(providerEntry.provider.tools);
+      } catch (err) {
+        const attemptedResumeSessionId = providerEntry.provider?.getSessionId?.() || existingSessionId;
+        if (!attemptedResumeSessionId || !isUnsupportedLoadSessionError(err)) {
+          throw err;
+        }
+
+        cleanupAcpProvider(chatSessionId);
+
+        const fallbackProvider = createACPProvider({
+          command: isCodexAgent
+            ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
+            : acpCommand,
+          args: acpArgs || [],
+          env: apiKey ? { ...shellEnv, CODEX_API_KEY: apiKey } : { ...shellEnv },
+          session: {
+            cwd: sessionCwd,
+            mcpServers: mcpSnapshot.mcpServers,
+          },
+          ...(isCodexAgent
+            ? { authMethodId: apiKey ? "codex-api-key" : "chatgpt" }
+            : {}),
+          persistSession: true,
+        });
+
+        providerEntry = {
+          provider: fallbackProvider,
+          acpCommand,
+          cwd: sessionCwd,
+          authFingerprint,
+          mcpFingerprint: mcpSnapshot.fingerprint,
+          permissionMode: currentPermissionMode,
+          historyReplayFallback: Array.isArray(historyMessages) && historyMessages.length > 0,
+        };
+        acpProviders.set(chatSessionId, providerEntry);
+        modelInstance = providerEntry.provider.languageModel(model || undefined);
+        await providerEntry.provider.initSession(providerEntry.provider.tools);
+      }
       const activeProviderSessionId = providerEntry.provider.getSessionId?.() || null;
       if (activeProviderSessionId) {
         safeSend(event.sender, "netcatty:ai:acp:event", {
@@ -1775,12 +1819,21 @@ function registerHandlers(ipcMain) {
         return content;
       }
 
+      const latestPromptMessage = {
+        role: "user",
+        content: buildMessageContent(contextualPrompt, images),
+      };
+
       const result = streamText({
         model: modelInstance,
-        messages: [{
-          role: "user",
-          content: buildMessageContent(contextualPrompt, images),
-        }],
+        messages: providerEntry.historyReplayFallback
+          ? [
+              ...(Array.isArray(historyMessages)
+                ? historyMessages.map((msg) => ({ role: msg.role, content: msg.content }))
+                : []),
+              latestPromptMessage,
+            ]
+          : [latestPromptMessage],
         tools: providerEntry.provider.tools,
         stopWhen: stepCountIs(mcpServerBridge.getMaxIterations ? mcpServerBridge.getMaxIterations() : 20),
         abortSignal: abortController.signal,

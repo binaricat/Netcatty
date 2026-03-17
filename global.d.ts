@@ -689,7 +689,7 @@ declare global {
     aiWriteToAgent?(agentId: string, data: string): Promise<{ ok: boolean; error?: string }>;
     aiCloseAgentStdin?(agentId: string): Promise<{ ok: boolean; error?: string }>;
     aiKillAgent?(agentId: string): Promise<{ ok: boolean; error?: string }>;
-    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>): Promise<{ ok: boolean; error?: string }>;
+    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>): Promise<{ ok: boolean; error?: string }>;
     aiAcpCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiAcpCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
     onAiAcpEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;

@@ -230,6 +230,7 @@ export interface SendToCattyContext {
 export interface SendToExternalContext {
   existingSessionId?: string;
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
+  historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   terminalSessions: TerminalSessionInfo[];
   providers: ProviderConfig[];
   selectedAgentModel?: string;
@@ -628,6 +629,7 @@ export function useAIChatStreaming({
         agentProviderId,
         context.selectedAgentModel,
         context.existingSessionId,
+        context.historyMessages,
         attachedImages.length > 0 ? attachedImages : undefined,
       );
     } else {

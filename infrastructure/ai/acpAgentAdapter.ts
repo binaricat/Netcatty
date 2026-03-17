@@ -31,6 +31,7 @@ interface AcpBridge {
     providerId?: string,
     model?: string,
     existingSessionId?: string,
+    historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
     images?: ImageAttachment[],
   ): Promise<{ ok: boolean; error?: string }>;
   aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
@@ -66,6 +67,7 @@ export async function runAcpAgentTurn(
   providerId?: string,
   model?: string,
   existingSessionId?: string,
+  historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
   images?: ImageAttachment[],
 ): Promise<void> {
   const acpBridge = bridge as unknown as AcpBridge;
@@ -121,6 +123,7 @@ export async function runAcpAgentTurn(
     providerId,
     model,
     existingSessionId,
+    historyMessages,
     images?.length ? images : undefined,
   ).catch((err: Error) => {
     callbacks.onError(err.message);
