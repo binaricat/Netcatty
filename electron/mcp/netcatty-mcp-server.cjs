@@ -168,8 +168,13 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Scope params shared by all tool calls (includes chatSessionId for metadata isolation)
-const scopeParams = { scopedSessionIds: SCOPED_SESSION_IDS, chatSessionId: CHAT_SESSION_ID };
+// Scope params shared by all tool calls.
+// When chatSessionId is present, let the main process resolve the current
+// workspace membership dynamically so mid-session workspace changes are visible
+// without restarting the MCP subprocess.
+const scopeParams = CHAT_SESSION_ID
+  ? { chatSessionId: CHAT_SESSION_ID }
+  : { scopedSessionIds: SCOPED_SESSION_IDS, chatSessionId: CHAT_SESSION_ID };
 
 // Resource: environment context
 server.resource(
@@ -194,7 +199,7 @@ server.tool(
   "Get information about the current Netcatty workspace: all connected remote hosts, their session IDs, OS, and connection status. Call this first to discover available hosts before executing commands.",
   {},
   async () => {
-    process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}\n`);
+    process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
     const ctx = await rpcCall("netcatty/getContext", scopeParams);
     process.stderr.write(`[netcatty-mcp] get_environment result: hostCount=${ctx.hostCount}, hosts=${JSON.stringify(ctx.hosts?.map(h => h.sessionId))}\n`);
     return { content: [{ type: "text", text: JSON.stringify(ctx, null, 2) }] };

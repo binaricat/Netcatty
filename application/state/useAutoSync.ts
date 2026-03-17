@@ -52,6 +52,7 @@ interface SyncNowOptions {
 export const useAutoSync = (config: AutoSyncConfig) => {
   const { t } = useI18n();
   const sync = useCloudSync();
+  const { onApplyPayload } = config;
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSyncedDataRef = useRef<string>('');
   const hasCheckedRemoteRef = useRef(false);
@@ -167,7 +168,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // state gets updated even when some providers failed
       for (const result of results.values()) {
         if (result.mergedPayload) {
-          config.onApplyPayload(result.mergedPayload);
+          onApplyPayload(result.mergedPayload);
           skipNextSyncRef.current = true;
           break; // All providers share the same merged payload
         }
@@ -195,7 +196,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     } finally {
       isSyncRunningRef.current = false;
     }
-  }, [sync, buildPayload, getDataHash, t]);
+  }, [sync, buildPayload, getDataHash, onApplyPayload, t]);
   
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {

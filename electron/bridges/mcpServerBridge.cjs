@@ -400,20 +400,19 @@ async function dispatch(method, params) {
 function handleGetContext(params) {
   if (!sessions) return { hosts: [], instructions: "No sessions available." };
 
-  // Scope resolution: use explicit scopedSessionIds from MCP server env var (per-process, set at spawn).
-  // If scopedSessionIds is provided but empty, that means "no access" (not "all access").
-  // Only fall back to unscoped (show all) when scopedSessionIds is not provided at all.
-  const hasScopeParam = params?.scopedSessionIds != null;
-  const scopedIds = hasScopeParam
-    ? new Set(params.scopedSessionIds)
-    : null;
-
   // chatSessionId may be passed via env for per-scope metadata lookup
   const chatSessionId = params?.chatSessionId || null;
+  const explicitScopedIds = Array.isArray(params?.scopedSessionIds)
+    ? params.scopedSessionIds
+    : null;
+  const resolvedScopedIds = explicitScopedIds ?? (chatSessionId ? getScopedSessionIds(chatSessionId) : null);
+  const hasScopedContext = explicitScopedIds !== null || chatSessionId !== null;
+  const scopedIds = resolvedScopedIds ? new Set(resolvedScopedIds) : null;
 
   const hosts = [];
-  // When scope param is provided (even if empty Set), enforce it strictly
-  if (hasScopeParam && scopedIds.size === 0) {
+  // When a scoped context exists but currently resolves to zero sessions, treat
+  // it as "no access" rather than falling back to all sessions.
+  if (hasScopedContext && (!resolvedScopedIds || resolvedScopedIds.length === 0)) {
     return {
       environment: "netcatty-terminal",
       description: "No hosts are available in the current scope.",
@@ -776,7 +775,9 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
     env.push({ name: "NETCATTY_MCP_TOKEN", value: authToken });
   }
 
-  if (effectiveIds && effectiveIds.length > 0) {
+  // When chatSessionId is present, the MCP subprocess resolves scope dynamically
+  // through main-process metadata, so avoid freezing session IDs at spawn time.
+  if (!chatSessionId && effectiveIds && effectiveIds.length > 0) {
     env.push({ name: "NETCATTY_MCP_SESSION_IDS", value: effectiveIds.join(",") });
   }
 

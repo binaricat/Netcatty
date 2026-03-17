@@ -257,6 +257,15 @@ export class CloudSyncManager {
     }
   }
 
+  private removeFromStorage(key: string): void {
+    try {
+      // eslint-disable-next-line no-restricted-globals
+      localStorage.removeItem(key);
+    } catch {
+      // ignore storage removal failures
+    }
+  }
+
   // ==========================================================================
   // Cross-window sync (Electron settings window, etc.)
   // ==========================================================================
@@ -759,7 +768,7 @@ export class CloudSyncManager {
 
       await this.saveProviderConnection('github', this.state.providers.github);
       // Clear merge base when (re)authenticating to a potentially different account
-      try { localStorage.removeItem(this.syncBaseKey('github')); } catch { /* ignore */ }
+      this.removeFromStorage(this.syncBaseKey('github'));
       this.emit({
         type: 'AUTH_COMPLETED',
         provider: 'github',
@@ -814,7 +823,7 @@ export class CloudSyncManager {
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       // Clear merge base when (re)authenticating to a potentially different account
-      try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
+      this.removeFromStorage(this.syncBaseKey(provider));
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -852,7 +861,7 @@ export class CloudSyncManager {
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       // Clear merge base when (re)configuring to a different endpoint/bucket
-      try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
+      this.removeFromStorage(this.syncBaseKey(provider));
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -883,7 +892,7 @@ export class CloudSyncManager {
     await this.saveProviderConnection(provider, this.state.providers[provider]);
     // Clear the merge base for this provider so reconnecting to a different
     // account/resource doesn't reuse an unrelated snapshot
-    try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
+    this.removeFromStorage(this.syncBaseKey(provider));
     this.notifyStateChange(); // Ensure UI updates immediately after disconnect
   }
 
@@ -1659,12 +1668,10 @@ export class CloudSyncManager {
   }
 
   private clearSyncBase(): void {
-    try {
-      localStorage.removeItem(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
-      for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
-        localStorage.removeItem(this.syncBaseKey(p));
-      }
-    } catch { /* ignore */ }
+    this.removeFromStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+    for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
+      this.removeFromStorage(this.syncBaseKey(p));
+    }
   }
 
   private addSyncHistoryEntry(entry: Omit<SyncHistoryEntry, 'id'>): void {
