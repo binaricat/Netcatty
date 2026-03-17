@@ -20,6 +20,7 @@ import type {
   ProviderConfig,
   WebSearchConfig,
 } from '../../../infrastructure/ai/types';
+import { isWebSearchReady } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
@@ -633,7 +634,7 @@ export function useAIChatStreaming({
         os: s.os, username: s.username, connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,
-      webSearchEnabled: context.webSearchConfig?.enabled,
+      webSearchEnabled: isWebSearchReady(context.webSearchConfig),
     });
 
     // Guard: activeProvider must exist for Catty agent path

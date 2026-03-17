@@ -696,28 +696,35 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
-    // When skipHostCheck is set, also verify DNS resolution doesn't point to private IPs (anti DNS-rebinding)
+    // When skipHostCheck is set, resolve DNS and pin the IP to prevent TOCTOU/rebinding attacks
+    let pinnedLookup = null;
     if (skipHostCheck) {
       try {
         const parsed = new URL(resolvedUrl);
         if (await hasPrivateResolution(parsed.hostname)) {
           return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
         }
+        // Pin the resolved address so doFetch() reuses it instead of re-resolving
+        const { address, family } = await dns.promises.lookup(parsed.hostname);
+        pinnedLookup = { address, family };
       } catch {}
     }
 
     const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB safety limit
     const MAX_REDIRECTS = followRedirects ? 5 : 0;
 
-    function doFetch(fetchUrl, redirectsLeft) {
+    function doFetch(fetchUrl, redirectsLeft, lookup) {
       return new Promise((resolve) => {
         const parsedUrl = new URL(fetchUrl);
         const isHttps = parsedUrl.protocol === "https:";
         const lib = isHttps ? https : http;
 
-        const req = lib.request(
-          parsedUrl,
-          { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
+        // Pin DNS result to prevent TOCTOU/rebinding between validation and connection
+        const reqOpts = { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 };
+        if (lookup) {
+          reqOpts.lookup = (hostname, opts, cb) => cb(null, lookup.address, lookup.family);
+        }
+        const req = lib.request(parsedUrl, reqOpts,
           (res) => {
             // Handle redirects — revalidate each hop against SSRF guards
             if (redirectsLeft > 0 && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -777,7 +784,7 @@ function registerHandlers(ipcMain) {
       });
     }
 
-    return doFetch(resolvedUrl, MAX_REDIRECTS);
+    return doFetch(resolvedUrl, MAX_REDIRECTS, pinnedLookup);
   });
 
   // Execute a command on a terminal session (for Catty Agent)

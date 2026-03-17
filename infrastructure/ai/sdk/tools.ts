@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
 import type { AIPermissionMode } from '../types';
 import type { WebSearchConfig } from '../types';
-import { WEB_SEARCH_PROVIDER_PRESETS } from '../types';
+import { isWebSearchReady } from '../types';
 import {
   executeTerminalExecute,
   executeTerminalSendInput,
@@ -181,11 +181,7 @@ export function createCattyTools(
     }),
 
     // -- Web Search (conditional on fully configured webSearchConfig) --
-    ...(webSearchConfig?.enabled && (
-      !WEB_SEARCH_PROVIDER_PRESETS[webSearchConfig.providerId]?.requiresApiKey || webSearchConfig.apiKey
-    ) && (
-      webSearchConfig.providerId !== 'searxng' || webSearchConfig.apiHost
-    ) ? {
+    ...(isWebSearchReady(webSearchConfig) ? {
       web_search: tool({
         description:
           'Search the web for current information. Use this when the user asks about recent events, ' +

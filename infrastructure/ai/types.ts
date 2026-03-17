@@ -181,6 +181,15 @@ export const WEB_SEARCH_PROVIDER_PRESETS: Record<WebSearchProviderId, { name: st
   searxng: { name: 'SearXNG', defaultApiHost: '', requiresApiKey: false },
 };
 
+/** Check if a WebSearchConfig is fully configured and ready to use. */
+export function isWebSearchReady(config?: WebSearchConfig | null): boolean {
+  if (!config?.enabled) return false;
+  const preset = WEB_SEARCH_PROVIDER_PRESETS[config.providerId];
+  if (preset?.requiresApiKey && !config.apiKey) return false;
+  if (config.providerId === 'searxng' && !config.apiHost) return false;
+  return true;
+}
+
 // AI Settings (stored in localStorage)
 export interface AISettings {
   providers: ProviderConfig[];
