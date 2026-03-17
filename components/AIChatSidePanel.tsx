@@ -233,12 +233,14 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   }, [providers]);
 
   // Sync web search config to main process (allowlist + encrypted API key for server-side decryption).
+  // Note: This is fire-and-forget; if the first search fires before sync completes, it will fail
+  // with a clear error and succeed on retry. Making this blocking would require async tool creation.
   useEffect(() => {
     const bridge = getNetcattyBridge();
     if (bridge?.aiSyncWebSearch) {
       void bridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
     }
-  }, [webSearchConfig?.apiHost, webSearchConfig?.apiKey]);
+  }, [webSearchConfig?.apiHost, webSearchConfig?.apiKey, webSearchConfig?.enabled]);
 
   // Abort all active streams and clean up on unmount
   useEffect(() => {

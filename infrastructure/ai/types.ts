@@ -187,6 +187,10 @@ export function isWebSearchReady(config?: WebSearchConfig | null): boolean {
   const preset = WEB_SEARCH_PROVIDER_PRESETS[config.providerId];
   if (preset?.requiresApiKey && !config.apiKey) return false;
   if (config.providerId === 'searxng' && !config.apiHost) return false;
+  // Validate apiHost is a well-formed URL if provided
+  if (config.apiHost) {
+    try { new URL(config.apiHost); } catch { return false; }
+  }
   return true;
 }
 
