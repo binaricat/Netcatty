@@ -163,21 +163,22 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       const results = await sync.syncNow(payload);
 
+      // Apply merged payloads first (before checking for failures) so local
+      // state gets updated even when some providers failed
+      for (const result of results.values()) {
+        if (result.mergedPayload) {
+          config.onApplyPayload(result.mergedPayload);
+          skipNextSyncRef.current = true;
+          break; // All providers share the same merged payload
+        }
+      }
+
       for (const result of results.values()) {
         if (!result.success) {
           if (result.conflictDetected) {
             throw new Error(t('sync.autoSync.conflictDetected'));
           }
           throw new Error(result.error || t('sync.autoSync.syncFailed'));
-        }
-        // Apply merged data if a three-way merge happened (contains remote additions)
-        if (result.mergedPayload) {
-          config.onApplyPayload(result.mergedPayload);
-          // Skip the next data-change-triggered sync: onApplyPayload schedules
-          // async React state updates, so getDataHash() can't capture the new
-          // state synchronously. Instead, invalidate the ref so the next
-          // data-change effect sees a stale hash and re-captures it without syncing.
-          skipNextSyncRef.current = true;
         }
       }
 
@@ -216,28 +217,16 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (!connectedProvider) return;
     
     try {
-      console.log('[AutoSync] Checking remote version...');
-      // Load base BEFORE downloading (downloadFromProvider overwrites the base)
-      const base = await manager.loadSyncBase(connectedProvider);
-      const remotePayload = await sync.downloadFromProvider(connectedProvider);
-
-      if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
-        // Three-way merge: merge remote changes with local data instead of overwriting
-        const { mergeSyncPayloads } = await import('../../domain/syncMerge');
-        const localPayload = buildPayload();
-        const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
-
-        console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
-        config.onApplyPayload(mergeResult.payload);
-        // Don't save base here — the merged payload hasn't been uploaded yet.
-        // The follow-up auto-sync will upload it and save base on success.
-        toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
-      }
+      console.log('[AutoSync] Checking remote version, triggering sync...');
+      // Trigger a full sync cycle which handles merge+upload+base-save
+      // atomically via syncAllProviders. This avoids the issue where
+      // downloadFromProvider advances metadata before the merged payload
+      // has been uploaded.
+      await syncNow('auto');
     } catch (error) {
-      console.error('[AutoSync] Failed to check remote version:', error);
-      // Don't show error toast for initial check - it's not critical
+      console.error('[AutoSync] Startup sync failed:', error);
     }
-  }, [sync, config, buildPayload, t]);
+  }, [syncNow]);
   
   // Debounced auto-sync when data changes
   useEffect(() => {

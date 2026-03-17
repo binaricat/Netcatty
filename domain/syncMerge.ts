@@ -361,7 +361,19 @@ export function mergeSyncPayloads(
   const keys = mergeEntityArrays(b.keys ?? [], local.keys ?? [], remote.keys ?? []);
   const identities = mergeEntityArrays(b.identities ?? [], local.identities ?? [], remote.identities ?? []);
   const snippets = mergeEntityArrays(b.snippets ?? [], local.snippets ?? [], remote.snippets ?? []);
-  const knownHosts = mergeEntityArrays(b.knownHosts ?? [], local.knownHosts ?? [], remote.knownHosts ?? []);
+  const knownHostsRaw = mergeEntityArrays(b.knownHosts ?? [], local.knownHosts ?? [], remote.knownHosts ?? []);
+  // Deduplicate known hosts by (hostname, port, keyType) since IDs are random per device
+  const knownHostSeen = new Set<string>();
+  const knownHosts = {
+    ...knownHostsRaw,
+    merged: knownHostsRaw.merged.filter((kh) => {
+      const entry = kh as unknown as { hostname: string; port: number; keyType: string };
+      const fp = `${entry.hostname}:${entry.port}:${entry.keyType}`;
+      if (knownHostSeen.has(fp)) return false;
+      knownHostSeen.add(fp);
+      return true;
+    }),
+  };
   const portForwardingRules = mergeEntityArrays(
     b.portForwardingRules ?? [],
     local.portForwardingRules ?? [],
