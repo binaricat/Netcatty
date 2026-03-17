@@ -90,7 +90,7 @@ export const useTerminalBackend = () => {
     return bridge.onSessionData(sessionId, cb);
   }, []);
 
-  const onSessionExit = useCallback((sessionId: string, cb: (evt: { exitCode?: number; signal?: number }) => void) => {
+  const onSessionExit = useCallback((sessionId: string, cb: (evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.onSessionExit) throw new Error("onSessionExit unavailable");
     return bridge.onSessionExit(sessionId, cb);

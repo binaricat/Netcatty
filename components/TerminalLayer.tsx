@@ -171,9 +171,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onUpdateSessionStatus(sessionId, status);
   }, [onUpdateSessionStatus]);
 
-  const handleSessionExit = useCallback((sessionId: string) => {
-    onUpdateSessionStatus(sessionId, 'disconnected');
-  }, [onUpdateSessionStatus]);
+  const handleSessionExit = useCallback((sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => {
+    // Auto-close the tab/session when the user actively exited (e.g. typed `exit`)
+    // reason === "exited" means the remote process/shell exited normally (stream-level close),
+    // as opposed to network errors, timeouts, or connection-level drops
+    if (evt.reason === "exited") {
+      onCloseSession(sessionId);
+    } else {
+      onUpdateSessionStatus(sessionId, 'disconnected');
+    }
+  }, [onUpdateSessionStatus, onCloseSession]);
 
   const handleOsDetected = useCallback((hostId: string, distro: string) => {
     onUpdateHostDistro(hostId, distro);

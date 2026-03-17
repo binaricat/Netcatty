@@ -244,7 +244,7 @@ declare global {
     onSessionData(sessionId: string, cb: (data: string) => void): () => void;
     onSessionExit(
       sessionId: string,
-      cb: (evt: { exitCode?: number; signal?: number }) => void
+      cb: (evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void
     ): () => void;
     onAuthFailed?(
       sessionId: string,

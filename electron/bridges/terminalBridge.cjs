@@ -222,9 +222,9 @@ function startLocalSession(event, payload) {
   proc.onExit((evt) => {
     sessions.delete(sessionId);
     const contents = electronModule.webContents.fromId(session.webContentsId);
-    contents?.send("netcatty:exit", { sessionId, ...evt });
+    contents?.send("netcatty:exit", { sessionId, ...evt, reason: "exited" });
   });
-  
+
   return { sessionId };
 }
 
@@ -426,7 +426,7 @@ async function startTelnetSession(event, options) {
         const session = sessions.get(sessionId);
         if (session) {
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
         }
         sessions.delete(sessionId);
       }
@@ -435,11 +435,11 @@ async function startTelnetSession(event, options) {
     socket.on('close', (hadError) => {
       console.log(`[Telnet] Connection closed${hadError ? ' with error' : ''}`);
       clearTimeout(connectTimeout);
-      
+
       const session = sessions.get(sessionId);
       if (session) {
         const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0 });
+        contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "exited" });
       }
       sessions.delete(sessionId);
     });
@@ -523,7 +523,7 @@ async function startMoshSession(event, options) {
     proc.onExit((evt) => {
       sessions.delete(sessionId);
       const contents = electronModule.webContents.fromId(session.webContentsId);
-      contents?.send("netcatty:exit", { sessionId, ...evt });
+      contents?.send("netcatty:exit", { sessionId, ...evt, reason: "exited" });
     });
 
     return { sessionId };
@@ -615,14 +615,14 @@ async function startSerialSession(event, options) {
         serialPort.on('error', (err) => {
           console.error(`[Serial] Port error: ${err.message}`);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+          contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
           sessions.delete(sessionId);
         });
 
         serialPort.on('close', () => {
           console.log(`[Serial] Port closed`);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 0 });
+          contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "exited" });
           sessions.delete(sessionId);
         });
 

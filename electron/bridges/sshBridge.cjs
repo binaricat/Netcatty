@@ -1017,6 +1017,12 @@ async function startSSHSession(event, options) {
               bufferData(decoder.write(data));
             });
 
+            // Capture the real exit code from the remote process
+            let streamExitCode = 0;
+            stream.on("exit", (code) => {
+              streamExitCode = typeof code === "number" ? code : 0;
+            });
+
             stream.on("close", () => {
               // Flush any remaining data before close
               if (flushTimeout) {
@@ -1024,7 +1030,7 @@ async function startSSHSession(event, options) {
               }
               flushBuffer();
               const contents = event.sender;
-              safeSend(contents, "netcatty:exit", { sessionId, exitCode: 0 });
+              safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason: "exited" });
               sessions.delete(sessionId);
               sessionEncodings.delete(sessionId);
               sessionDecoders.delete(sessionId);
@@ -1072,7 +1078,7 @@ async function startSSHSession(event, options) {
           console.error(`${logPrefix} ${options.hostname} error:`, err.message);
         }
 
-        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);
@@ -1086,7 +1092,7 @@ async function startSSHSession(event, options) {
         console.error(`${logPrefix} ${options.hostname} connection timeout`);
         const err = new Error(`Connection timeout to ${options.hostname}`);
         const contents = event.sender;
-        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message });
+        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "timeout" });
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);
@@ -1098,7 +1104,7 @@ async function startSSHSession(event, options) {
 
       conn.once("close", () => {
         const contents = event.sender;
-        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 0 });
+        safeSend(contents, "netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);
