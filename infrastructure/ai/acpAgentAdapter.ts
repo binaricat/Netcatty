@@ -7,6 +7,7 @@
  */
 
 import type { ExternalAgentConfig } from './types';
+import type { ModelMessage } from 'ai';
 
 export interface AcpAgentCallbacks {
   onTextDelta: (text: string) => void;
@@ -25,11 +26,10 @@ interface AcpBridge {
     chatSessionId: string,
     acpCommand: string,
     acpArgs: string[],
-    prompt: string,
+    messages: ModelMessage[],
     cwd?: string,
     providerId?: string,
     model?: string,
-    images?: ImageAttachment[],
   ): Promise<{ ok: boolean; error?: string }>;
   aiAcpCancel(requestId: string): Promise<{ ok: boolean }>;
   aiAcpCleanup(chatSessionId: string): Promise<{ ok: boolean }>;
@@ -45,26 +45,20 @@ interface StreamEvent {
 
 /**
  * Run an ACP agent turn.
- * Sends the prompt to the main process which runs streamText() with the ACP provider.
- * Stream events are forwarded back via IPC.
+ * Sends the structured conversation messages to the main process, which runs
+ * `streamText()` with the ACP provider and forwards stream events back via IPC.
  */
-export interface ImageAttachment {
-  base64Data: string;
-  mediaType: string;
-  filename?: string;
-}
 
 export async function runAcpAgentTurn(
   bridge: Record<string, (...args: unknown[]) => unknown>,
   requestId: string,
   chatSessionId: string,
   config: ExternalAgentConfig,
-  prompt: string,
+  messages: ModelMessage[],
   callbacks: AcpAgentCallbacks,
   signal?: AbortSignal,
   providerId?: string,
   model?: string,
-  images?: ImageAttachment[],
 ): Promise<void> {
   const acpBridge = bridge as unknown as AcpBridge;
 
@@ -117,11 +111,10 @@ export async function runAcpAgentTurn(
     chatSessionId,
     config.acpCommand,
     config.acpArgs || [],
-    prompt,
+    messages,
     undefined, // cwd
     providerId,
     model,
-    images?.length ? images : undefined,
   ).catch((err: Error) => {
     callbacks.onError(err.message);
   });

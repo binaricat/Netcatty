@@ -141,6 +141,105 @@ function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+type UserMessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'file'; mediaType: string; data: string; filename?: string };
+
+type AssistantMessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown };
+
+function buildUserMessageContent(
+  content: string,
+  images?: ChatMessage['images'],
+): string | UserMessageContentPart[] {
+  const parts: UserMessageContentPart[] = [];
+  if (content) {
+    parts.push({ type: 'text', text: content });
+  }
+  if (Array.isArray(images)) {
+    for (const image of images) {
+      if (!image.base64Data || !image.mediaType) continue;
+      parts.push({
+        type: 'file',
+        mediaType: image.mediaType,
+        data: image.base64Data,
+        ...(image.filename ? { filename: image.filename } : {}),
+      });
+    }
+  }
+  if (parts.length === 0) return '';
+  return parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts;
+}
+
+function buildSdkMessagesFromChatHistory(allMessages: ChatMessage[]): Array<ModelMessage> {
+  const resolvedToolCallIds = new Set<string>();
+  for (const message of allMessages) {
+    if (message.role === 'tool' && message.toolResults) {
+      for (const toolResult of message.toolResults) {
+        resolvedToolCallIds.add(toolResult.toolCallId);
+      }
+    }
+  }
+
+  const findToolName = (toolCallId: string): string => {
+    for (const prev of allMessages) {
+      if (prev.role === 'assistant' && prev.toolCalls) {
+        const toolCall = prev.toolCalls.find(t => t.id === toolCallId);
+        if (toolCall) return toolCall.name;
+      }
+    }
+    return 'unknown';
+  };
+
+  const sdkMessages: Array<ModelMessage> = [];
+  for (const message of allMessages) {
+    if (message.role === 'user') {
+      sdkMessages.push({
+        role: 'user',
+        content: buildUserMessageContent(message.content, message.images),
+      });
+    } else if (message.role === 'assistant') {
+      if (message.toolCalls?.length) {
+        const resolvedCalls = message.toolCalls.filter(toolCall => resolvedToolCallIds.has(toolCall.id));
+        const contentParts: AssistantMessageContentPart[] = [];
+        if (message.content) {
+          contentParts.push({ type: 'text', text: message.content });
+        }
+        for (const toolCall of resolvedCalls) {
+          contentParts.push({
+            type: 'tool-call',
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            input: toolCall.arguments ?? {},
+          });
+        }
+        if (contentParts.length > 0) {
+          sdkMessages.push({
+            role: 'assistant',
+            content: contentParts.length === 1 && contentParts[0].type === 'text'
+              ? contentParts[0].text
+              : contentParts,
+          });
+        }
+      } else if (message.content) {
+        sdkMessages.push({ role: 'assistant', content: message.content });
+      }
+    } else if (message.role === 'tool' && message.toolResults?.length) {
+      sdkMessages.push({
+        role: 'tool',
+        content: message.toolResults.map(toolResult => ({
+          type: 'tool-result' as const,
+          toolCallId: toolResult.toolCallId,
+          toolName: findToolName(toolResult.toolCallId),
+          output: { type: 'text' as const, value: toolResult.content },
+        })),
+      });
+    }
+  }
+  return sdkMessages;
+}
+
 // -------------------------------------------------------------------
 // Hook parameters
 // -------------------------------------------------------------------
@@ -189,6 +288,7 @@ export interface UseAIChatStreamingReturn {
     trimmed: string,
     agentConfig: ExternalAgentConfig,
     abortController: AbortController,
+    currentSession: AISession | undefined,
     attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string }>,
     context: SendToExternalContext,
   ) => Promise<void>;
@@ -498,6 +598,7 @@ export function useAIChatStreaming({
     trimmed: string,
     agentConfig: ExternalAgentConfig,
     abortController: AbortController,
+    currentSession: AISession | undefined,
     attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string }>,
     context: SendToExternalContext,
   ) => {
@@ -515,6 +616,11 @@ export function useAIChatStreaming({
       // avoiding plaintext key transit across the IPC boundary.
       const openaiProvider = context.providers.find(p => p.providerId === 'openai' && p.enabled && p.apiKey);
       const agentProviderId = openaiProvider?.id;
+      const sdkMessages = buildSdkMessagesFromChatHistory(currentSession?.messages ?? []);
+      sdkMessages.push({
+        role: 'user',
+        content: buildUserMessageContent(trimmed, attachedImages),
+      });
 
       // Mutable flag: set after tool-result, cleared when new assistant msg is created
       let needsNewAssistantMsg = false;
@@ -533,7 +639,7 @@ export function useAIChatStreaming({
         requestId,
         sessionId,
         agentConfig,
-        trimmed,
+        sdkMessages,
         {
           onTextDelta: (text: string) => {
             if (abortController.signal.aborted) return;
@@ -596,7 +702,6 @@ export function useAIChatStreaming({
         abortController.signal,
         agentProviderId,
         context.selectedAgentModel,
-        attachedImages.length > 0 ? attachedImages : undefined,
       );
     } else {
       // Fallback: spawn as raw process
@@ -673,71 +778,7 @@ export function useAIChatStreaming({
     }
 
     try {
-      // Issue #5: Build SDK messages including tool-call and tool-result messages
-      // so the LLM maintains full conversation context
-      const allMessages = currentSession?.messages ?? [];
-
-      // Collect all tool call IDs that have a corresponding tool result,
-      // so we can skip orphaned tool calls (e.g. from user stopping mid-execution)
-      const resolvedToolCallIds = new Set<string>();
-      for (const m of allMessages) {
-        if (m.role === 'tool' && m.toolResults) {
-          for (const tr of m.toolResults) resolvedToolCallIds.add(tr.toolCallId);
-        }
-      }
-
-      const findToolName = (toolCallId: string): string => {
-        for (const prev of allMessages) {
-          if (prev.role === 'assistant' && prev.toolCalls) {
-            const tc = prev.toolCalls.find(t => t.id === toolCallId);
-            if (tc) return tc.name;
-          }
-        }
-        return 'unknown';
-      };
-
-      const sdkMessages: Array<ModelMessage> = [];
-      for (const m of allMessages) {
-        if (m.role === 'user') {
-          sdkMessages.push({ role: 'user', content: m.content });
-        } else if (m.role === 'assistant') {
-          if (m.toolCalls?.length) {
-            // Only include tool calls that have matching results
-            const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
-            const contentParts: Array<
-              { type: 'text'; text: string } |
-              { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
-            > = [];
-            if (m.content) {
-              contentParts.push({ type: 'text' as const, text: m.content });
-            }
-            for (const tc of resolvedCalls) {
-              contentParts.push({
-                type: 'tool-call' as const,
-                toolCallId: tc.id,
-                toolName: tc.name,
-                input: tc.arguments ?? {},
-              });
-            }
-            // If all tool calls were orphaned, just include the text content
-            if (contentParts.length > 0) {
-              sdkMessages.push({ role: 'assistant', content: contentParts.length === 1 && contentParts[0].type === 'text' ? (contentParts[0] as { type: 'text'; text: string }).text : contentParts });
-            }
-          } else if (m.content) {
-            sdkMessages.push({ role: 'assistant', content: m.content });
-          }
-        } else if (m.role === 'tool' && m.toolResults?.length) {
-          sdkMessages.push({
-            role: 'tool',
-            content: m.toolResults.map(tr => ({
-              type: 'tool-result' as const,
-              toolCallId: tr.toolCallId,
-              toolName: findToolName(tr.toolCallId),
-              output: { type: 'text' as const, value: tr.content },
-            })),
-          });
-        }
-      }
+      const sdkMessages = buildSdkMessagesFromChatHistory(currentSession?.messages ?? []);
       sdkMessages.push({ role: 'user', content: trimmed });
 
       const approvalInfo = await processCattyStream(sessionId, model, systemPrompt, tools, sdkMessages, abortController.signal, assistantMsgId);

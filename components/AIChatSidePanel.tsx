@@ -444,7 +444,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         return;
       }
       try {
-        await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachedImages, {
+        await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, currentSession ?? undefined, attachedImages, {
           terminalSessions,
           providers,
           selectedAgentModel,

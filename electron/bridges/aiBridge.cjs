@@ -1546,7 +1546,7 @@ function registerHandlers(ipcMain) {
 
   // ── ACP (Agent Client Protocol) streaming ──
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, messages, prompt, cwd, providerId, model }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -1655,38 +1655,41 @@ function registerHandlers(ipcMain) {
       acpRequestSessions.set(requestId, chatSessionId);
 
       // Prepend context hint so the agent uses MCP tools for remote hosts
-      const contextualPrompt =
+      const contextualPromptPrefix =
         `[Context: You are inside Netcatty, a multi-host SSH terminal manager. ` +
         `The user is managing REMOTE servers, not the local machine. ` +
         `Use the "netcatty-remote-hosts" MCP tools to operate on the remote hosts. ` +
         `Call get_environment first to discover available hosts and their session IDs. ` +
         `For normal shell commands, use terminal_execute so you receive command output. ` +
         `Use terminal_send_input only to respond to an interactive prompt that is already running; it does not read back the updated terminal output. ` +
-        `Do NOT use local shell execution.]\n\n${prompt}`;
+        `Do NOT use local shell execution.]\n\n`;
 
-      // Build message content: text + optional images
-      function buildMessageContent(text, imgs) {
-        const content = [{ type: "text", text }];
-        if (Array.isArray(imgs)) {
-          for (const img of imgs) {
-            if (!img.base64Data || !img.mediaType) continue;
-            content.push({
-              type: "file",
-              mediaType: img.mediaType,
-              data: img.base64Data,
-              ...(img.filename ? { filename: img.filename } : {}),
-            });
-          }
+      const streamMessages = Array.isArray(messages) && messages.length > 0
+        ? messages
+        : [{
+          role: "user",
+          content: prompt || "",
+        }];
+      const contextualizedMessages = streamMessages.map((message, index) => {
+        if (index !== streamMessages.length - 1 || message.role !== "user") {
+          return message;
         }
-        return content;
-      }
+        const originalContent = message.content;
+        const contentParts = [{ type: "text", text: contextualPromptPrefix }];
+        if (Array.isArray(originalContent)) {
+          contentParts.push(...originalContent);
+        } else if (originalContent) {
+          contentParts.push({ type: "text", text: originalContent });
+        }
+        return {
+          ...message,
+          content: contentParts,
+        };
+      });
 
       const result = streamText({
         model: providerEntry.provider.languageModel(model || undefined),
-        messages: [{
-          role: "user",
-          content: buildMessageContent(contextualPrompt, images),
-        }],
+        messages: contextualizedMessages,
         tools: providerEntry.provider.tools,
         stopWhen: stepCountIs(mcpServerBridge.getMaxIterations ? mcpServerBridge.getMaxIterations() : 20),
         abortSignal: abortController.signal,
