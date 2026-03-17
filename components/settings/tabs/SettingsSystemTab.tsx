@@ -597,7 +597,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   value={sessionLogsFormat}
                   options={formatOptions}
                   onChange={(val) => setSessionLogsFormat(val as SessionLogFormat)}
-                  className="w-32"
+                  className="w-44"
                   disabled={!sessionLogsEnabled}
                 />
               </SettingRow>
