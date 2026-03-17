@@ -27,7 +27,7 @@ export type ToolExecResult<T = unknown> =
 
 export interface ToolDeps {
   bridge: NetcattyBridge;
-  context: ExecutorContext;
+  context: ExecutorContext | (() => ExecutorContext);
   commandBlocklist?: string[];
   permissionMode: AIPermissionMode;
   webSearchConfig?: WebSearchConfig;
@@ -37,11 +37,16 @@ export interface ToolDeps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function validSessionIds(ctx: ExecutorContext): Set<string> {
-  return new Set(ctx.sessions.map(s => s.sessionId));
+function resolveContext(ctx: ToolDeps['context']): ExecutorContext {
+  return typeof ctx === 'function' ? ctx() : ctx;
 }
 
-function validateSessionScope(ctx: ExecutorContext, sessionId: string): string | null {
+function validSessionIds(ctx: ToolDeps['context']): Set<string> {
+  const resolved = resolveContext(ctx);
+  return new Set(resolved.sessions.map(s => s.sessionId));
+}
+
+function validateSessionScope(ctx: ToolDeps['context'], sessionId: string): string | null {
   const ids = validSessionIds(ctx);
   if (!ids.has(sessionId)) {
     return `Session "${sessionId}" is not in the current scope. Available sessions: ${[...ids].join(', ')}`;
@@ -110,7 +115,7 @@ export function executeWorkspaceGetInfo(
     connected: boolean;
   }>;
 }> {
-  const { context } = deps;
+  const context = resolveContext(deps.context);
   return {
     ok: true,
     data: {
@@ -132,7 +137,7 @@ export function executeWorkspaceGetSessionInfo(
   deps: ToolDeps,
   args: { sessionId: string },
 ): ToolExecResult<ExecutorContext['sessions'][number]> {
-  const { context } = deps;
+  const context = resolveContext(deps.context);
   const session = context.sessions.find(s => s.sessionId === args.sessionId);
   if (!session) {
     return { ok: false, error: `Session not found: ${args.sessionId}` };

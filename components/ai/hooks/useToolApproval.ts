@@ -219,8 +219,8 @@ export function useToolApproval({
       const bridge = getNetcattyBridge();
       const freshTools = createCattyTools(bridge, {
         sessions: approvalContext.terminalSessions,
-        workspaceId: approvalContext.scopeTargetId,
-        workspaceName: approvalContext.scopeLabel,
+        workspaceId: approvalContext.scopeType === 'workspace' ? approvalContext.scopeTargetId : undefined,
+        workspaceName: approvalContext.scopeType === 'workspace' ? approvalContext.scopeLabel : undefined,
       }, approvalContext.commandBlocklist, approvalContext.globalPermissionMode, approvalContext.webSearchConfig ?? undefined);
       const freshSystemPrompt = buildSystemPrompt({
         scopeType: approvalContext.scopeType, scopeLabel: approvalContext.scopeLabel,

@@ -1,6 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
+import type { NetcattyBridge } from '../cattyAgent/executor';
 import type { AIPermissionMode } from '../types';
 import type { WebSearchConfig } from '../types';
 import { isWebSearchReady } from '../types';
@@ -30,7 +30,7 @@ function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
  */
 export function createCattyTools(
   bridge: NetcattyBridge,
-  context: ExecutorContext,
+  context: ToolDeps['context'],
   commandBlocklist?: string[],
   permissionMode: AIPermissionMode = 'confirm',
   webSearchConfig?: WebSearchConfig,

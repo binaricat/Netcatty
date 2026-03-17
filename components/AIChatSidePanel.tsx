@@ -42,6 +42,7 @@ import ConversationExport from './ai/ConversationExport';
 import { useAIChatStreaming, getNetcattyBridge } from './ai/hooks/useAIChatStreaming';
 import { useToolApproval } from './ai/hooks/useToolApproval';
 import { useConversationExport } from './ai/hooks/useConversationExport';
+import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 
 // -------------------------------------------------------------------
 // Props
@@ -166,6 +167,14 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   const { images, addImages, removeImage, clearImages } = useImageUpload();
   const { openSettingsWindow } = useWindowControls();
+  const terminalSessionsRef = useRef(terminalSessions);
+  terminalSessionsRef.current = terminalSessions;
+  const scopeTypeRef = useRef(scopeType);
+  scopeTypeRef.current = scopeType;
+  const scopeTargetIdRef = useRef(scopeTargetId);
+  scopeTargetIdRef.current = scopeTargetId;
+  const scopeLabelRef = useRef(scopeLabel);
+  scopeLabelRef.current = scopeLabel;
 
   // ── Streaming hook ──
   const {
@@ -379,6 +388,12 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [updateSessionTitle]);
 
+  const getExecutorContext = useCallback((): ExecutorContext => ({
+    sessions: terminalSessionsRef.current,
+    workspaceId: scopeTypeRef.current === 'workspace' ? scopeTargetIdRef.current : undefined,
+    workspaceName: scopeTypeRef.current === 'workspace' ? scopeLabelRef.current : undefined,
+  }), []);
+
   /** Ensure a session exists for the current scope and return its ID. */
   const ensureSession = useCallback((): string => {
     if (activeSessionId) return activeSessionId;
@@ -468,6 +483,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         commandBlocklist,
         terminalSessions,
         webSearchConfig,
+        getExecutorContext,
         setPendingApproval,
         autoTitleSession,
       });
@@ -479,7 +495,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setStreamingForScope, setInputValue, clearImages,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, providers, selectedAgentModel,
-    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, setPendingApproval,
+    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, getExecutorContext, setPendingApproval,
   ]);
 
   const handleStop = useCallback(() => {

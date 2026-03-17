@@ -24,7 +24,7 @@ import { isWebSearchReady } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
-import type { NetcattyBridge } from '../../../infrastructure/ai/cattyAgent/executor';
+import type { NetcattyBridge, ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
 import { runExternalAgentTurn } from '../../../infrastructure/ai/externalAgentAdapter';
 import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError, sanitizeErrorMessage } from '../../../infrastructure/ai/errorClassifier';
@@ -207,6 +207,7 @@ export interface SendToCattyContext {
   commandBlocklist?: string[];
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
+  getExecutorContext?: () => ExecutorContext;
   setPendingApproval: (ctx: PendingApprovalContext | null) => void;
   autoTitleSession: (sessionId: string, text: string) => void;
 }
@@ -629,11 +630,18 @@ export function useAIChatStreaming({
     context: SendToCattyContext,
   ) => {
     const bridge = getNetcattyBridge();
-    const tools = createCattyTools(bridge, {
+    const toolContext = context.getExecutorContext ?? (() => ({
       sessions: context.terminalSessions,
-      workspaceId: context.scopeTargetId,
-      workspaceName: context.scopeLabel,
-    }, context.commandBlocklist, context.globalPermissionMode, context.webSearchConfig ?? undefined);
+      workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
+      workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
+    }));
+    const tools = createCattyTools(
+      bridge,
+      toolContext,
+      context.commandBlocklist,
+      context.globalPermissionMode,
+      context.webSearchConfig ?? undefined,
+    );
 
     const systemPrompt = buildSystemPrompt({
       scopeType: context.scopeType, scopeLabel: context.scopeLabel,

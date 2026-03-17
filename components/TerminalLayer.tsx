@@ -1357,7 +1357,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                             }).filter((id): id is string => !!id)
                           : activeSession?.hostId ? [activeSession.hostId] : []
                         }
-                        scopeLabel={activeWorkspace?.name ?? activeSession?.label ?? ''}
+                        scopeLabel={activeWorkspace?.title ?? activeSession?.hostLabel ?? ''}
                         terminalSessions={aiTerminalSessions}
                       />
                     </div>
