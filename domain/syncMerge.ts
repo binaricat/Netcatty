@@ -281,13 +281,12 @@ function mergeSettings(
     } else {
       // Both changed — deep merge if both are plain objects, else prefer local
       if (
-        lVal && rVal && bVal &&
+        lVal && rVal &&
         typeof lVal === 'object' && !Array.isArray(lVal) &&
-        typeof rVal === 'object' && !Array.isArray(rVal) &&
-        typeof bVal === 'object' && !Array.isArray(bVal)
+        typeof rVal === 'object' && !Array.isArray(rVal)
       ) {
         merged[key] = mergeSettingsDeep(
-          bVal as Record<string, unknown>,
+          (bVal && typeof bVal === 'object' && !Array.isArray(bVal) ? bVal : {}) as Record<string, unknown>,
           lVal as Record<string, unknown>,
           rVal as Record<string, unknown>,
         );

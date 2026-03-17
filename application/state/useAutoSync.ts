@@ -57,6 +57,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const hasCheckedRemoteRef = useRef(false);
   const isInitializedRef = useRef(false);
   const isSyncRunningRef = useRef(false);
+  const skipNextSyncRef = useRef(false);
 
   const getSyncSnapshot = useCallback(() => {
     let effectivePFRules = config.portForwardingRules;
@@ -152,7 +153,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.autoSync.vaultLocked'));
       }
 
-      let dataHash = getDataHash();
+      const dataHash = getDataHash();
       const payload = buildPayload();
       const encryptedCredentialPaths = findSyncPayloadEncryptedCredentialPaths(payload);
       if (encryptedCredentialPaths.length > 0) {
@@ -172,9 +173,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // Apply merged data if a three-way merge happened (contains remote additions)
         if (result.mergedPayload) {
           config.onApplyPayload(result.mergedPayload);
-          // Refresh hash after apply so the data-change effect doesn't
-          // re-trigger an immediate sync with the same merged payload
-          dataHash = getDataHash();
+          // Skip the next data-change-triggered sync: onApplyPayload schedules
+          // async React state updates, so getDataHash() can't capture the new
+          // state synchronously. Instead, invalidate the ref so the next
+          // data-change effect sees a stale hash and re-captures it without syncing.
+          skipNextSyncRef.current = true;
         }
       }
 
@@ -250,7 +253,15 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
     
     const currentHash = getDataHash();
-    
+
+    // After a merge, onApplyPayload changes local state which triggers
+    // this effect. Skip that cycle and just update the hash baseline.
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      lastSyncedDataRef.current = currentHash;
+      return;
+    }
+
     // Skip if data hasn't changed
     if (currentHash === lastSyncedDataRef.current) {
       return;
