@@ -1126,6 +1126,9 @@ export class CloudSyncManager {
             };
           }
 
+          // Upload after merge failed — set ERROR so sync isn't stuck in SYNCING
+          this.state.syncState = 'ERROR';
+          this.state.lastError = uploadResult.error || 'Upload failed after merge';
           return uploadResult;
         } catch (mergeError) {
           // Merge failed — fall back to conflict UI
@@ -1346,18 +1349,23 @@ export class CloudSyncManager {
 
     const checkResults = await Promise.all(checkTasks);
 
-    // 2. Analyze Results & Handle Conflicts
-    const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
+    // 2. Analyze Results & Handle Conflicts — merge ALL conflicting providers
+    const conflicts = checkResults.filter((r) => !r.error && r.check?.conflict && r.check?.remoteFile);
 
-    if (conflict && conflict.check?.remoteFile) {
-      // Three-way merge instead of blocking
+    if (conflicts.length > 0) {
+      // Three-way merge: incorporate remote data from every conflicting provider
       try {
-        const remotePayload = await EncryptionService.decryptPayload(
-          conflict.check.remoteFile,
-          this.masterPassword,
-        );
         const base = await this.loadSyncBase();
-        const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
+        let merged = payload;
+        for (const c of conflicts) {
+          const remotePayload = await EncryptionService.decryptPayload(
+            c.check!.remoteFile!,
+            this.masterPassword,
+          );
+          const result = mergeSyncPayloads(base, merged, remotePayload);
+          merged = result.payload;
+        }
+        const mergeResult = { payload: merged };
 
         console.log('[CloudSyncManager] syncAll: three-way merge completed', mergeResult.summary);
 
@@ -1373,8 +1381,8 @@ export class CloudSyncManager {
       } catch (mergeError) {
         // Merge failed — fall back to conflict UI
         console.error('[CloudSyncManager] syncAll: merge failed', mergeError);
-        const { provider, check } = conflict;
-        const remoteFile = check.remoteFile!;
+        const { provider, check } = conflicts[0];
+        const remoteFile = check!.remoteFile!;
 
         this.state.syncState = 'CONFLICT';
         this.state.currentConflict = {
@@ -1402,7 +1410,7 @@ export class CloudSyncManager {
             });
             this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
             this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
-          } else if (r.provider === conflict.provider) {
+          } else if (r.provider === conflicts[0].provider) {
             results.set(r.provider as CloudProvider, {
               success: false,
               provider: r.provider as CloudProvider,
