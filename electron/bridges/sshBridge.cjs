@@ -1020,12 +1020,14 @@ async function startSSHSession(event, options) {
             // Capture the real exit code from the remote process.
             // "exit" fires when the remote shell/process exits normally;
             // "close" fires whenever the channel closes (could be network drop).
-            // Only treat it as user-initiated exit if "exit" actually fired.
+            // Only treat it as user-initiated exit if "exit" fired with a numeric
+            // code and no signal. Signal terminations (e.g. server kill, idle
+            // timeout) have code=null and signal set — those are not user exits.
             let streamExitCode = 0;
             let streamExited = false;
-            stream.on("exit", (code) => {
+            stream.on("exit", (code, signal) => {
               streamExitCode = typeof code === "number" ? code : 0;
-              streamExited = true;
+              streamExited = typeof code === "number" && !signal;
             });
 
             stream.on("close", () => {
