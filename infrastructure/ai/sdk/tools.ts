@@ -6,10 +6,6 @@ import type { WebSearchConfig } from '../types';
 import { isWebSearchReady } from '../types';
 import {
   executeTerminalExecute,
-  executeTerminalSendInput,
-  executeSftpListDirectory,
-  executeSftpReadFile,
-  executeSftpWriteFile,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
@@ -54,73 +50,6 @@ export function createCattyTools(
       needsApproval: writeToolNeedsApproval,
       execute: async ({ sessionId, command }) => {
         return unwrap(await executeTerminalExecute(deps, { sessionId, command }));
-      },
-    }),
-
-    terminal_send_input: tool({
-      description:
-        'Send raw input to a terminal session. Use this for interactive programs that ' +
-        'require input such as y/n prompts, passwords, ctrl+c (\\x03), ctrl+d (\\x04), ' +
-        'or any other keyboard input. This tool only sends input; it does not return ' +
-        'the updated terminal output. For normal shell commands, use terminal_execute instead.',
-      inputSchema: z.object({
-        sessionId: z.string().describe('The terminal session ID to send input to.'),
-        input: z
-          .string()
-          .describe(
-            'The raw input string to send. Use escape sequences for special keys ' +
-              '(e.g. "\\x03" for ctrl+c, "\\n" for enter).',
-          ),
-      }),
-      needsApproval: writeToolNeedsApproval,
-      execute: async ({ sessionId, input }) => {
-        return unwrap(await executeTerminalSendInput(deps, { sessionId, input }));
-      },
-    }),
-
-    sftp_list_directory: tool({
-      description:
-        'List the contents of a directory on the remote host via SFTP. Returns file names, ' +
-        'sizes, types, and modification timestamps.',
-      inputSchema: z.object({
-        sessionId: z.string().describe('The session ID for the SFTP connection.'),
-        path: z.string().describe('The absolute path of the remote directory to list.'),
-      }),
-      execute: async ({ sessionId, path }) => {
-        return unwrap(await executeSftpListDirectory(deps, { sessionId, path }));
-      },
-    }),
-
-    sftp_read_file: tool({
-      description:
-        'Read the content of a file on the remote host via SFTP. Returns the file content ' +
-        'as text, truncated to maxBytes if the file is large.',
-      inputSchema: z.object({
-        sessionId: z.string().describe('The session ID for the SFTP connection.'),
-        path: z.string().describe('The absolute path of the remote file to read.'),
-        maxBytes: z
-          .number()
-          .optional()
-          .default(10000)
-          .describe('Maximum number of bytes to read from the file. Defaults to 10000.'),
-      }),
-      execute: async ({ sessionId, path, maxBytes }) => {
-        return unwrap(await executeSftpReadFile(deps, { sessionId, path, maxBytes }));
-      },
-    }),
-
-    sftp_write_file: tool({
-      description:
-        'Write content to a file on the remote host via SFTP. Creates the file if it does ' +
-        'not exist, or overwrites it if it does.',
-      inputSchema: z.object({
-        sessionId: z.string().describe('The session ID for the SFTP connection.'),
-        path: z.string().describe('The absolute path of the remote file to write.'),
-        content: z.string().describe('The text content to write to the file.'),
-      }),
-      needsApproval: writeToolNeedsApproval,
-      execute: async ({ sessionId, path, content }) => {
-        return unwrap(await executeSftpWriteFile(deps, { sessionId, path, content }));
       },
     }),
 
