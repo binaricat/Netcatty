@@ -71,6 +71,7 @@ export type TerminalSessionStartersContext = {
   resolvedChainHosts: Host[];
   sessionId: string;
   startupCommand?: string;
+  noAutoRun?: boolean;
   terminalSettings?: TerminalSettings;
   terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
@@ -539,8 +540,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // Guard against stale timers: if the session changed (e.g. user
           // clicked Start Over quickly), skip to avoid double execution
           if (!ctx.sessionRef.current || ctx.sessionRef.current !== scheduledSessionId) return;
-          ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}\r`);
-          if (ctx.onCommandExecuted) {
+          const suffix = ctx.noAutoRun ? '' : '\r';
+          ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}${suffix}`);
+          if (!ctx.noAutoRun && ctx.onCommandExecuted) {
             ctx.onCommandExecuted(commandToRun, ctx.host.id, ctx.host.label, ctx.sessionId);
           }
         }, 600);
@@ -661,8 +663,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         const scheduledSessionId = id;
         setTimeout(() => {
           if (!ctx.sessionRef.current || ctx.sessionRef.current !== scheduledSessionId) return;
-          ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}\r`);
-          if (ctx.onCommandExecuted) {
+          const suffix = ctx.noAutoRun ? '' : '\r';
+          ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}${suffix}`);
+          if (!ctx.noAutoRun && ctx.onCommandExecuted) {
             ctx.onCommandExecuted(commandToRun, ctx.host.id, ctx.host.label, ctx.sessionId);
           }
         }, 600);

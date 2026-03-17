@@ -1418,6 +1418,7 @@ const en: Messages = {
   'snippets.renameDialog.error.duplicate': 'A package with this name already exists',
   'snippets.renameDialog.error.invalidChars': 'Package name can only contain letters, numbers, hyphens, and underscores',
 
+  'snippets.field.noAutoRun': 'Paste only (do not auto-execute)',
   // Snippet Shortkey
   'snippets.field.shortkey': 'Keyboard Shortcut',
   'snippets.shortkey.placeholder': 'Click to set shortcut',

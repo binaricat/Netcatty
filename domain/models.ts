@@ -149,6 +149,7 @@ export interface Snippet {
   package?: string; // package path
   targets?: string[]; // host ids
   shortkey?: string; // Keyboard shortcut to send this snippet in terminal (e.g., "F1", "Ctrl + F1")
+  noAutoRun?: boolean; // If true, paste command without executing (no trailing Enter)
 }
 
 export interface TerminalLine {
@@ -586,6 +587,7 @@ export interface TerminalSession {
   status: 'connecting' | 'connected' | 'disconnected';
   workspaceId?: string;
   startupCommand?: string; // Command to run after connection (for snippet runner)
+  noAutoRun?: boolean;     // If true, paste command without auto-executing
   // Connection-time protocol overrides (used instead of looking up from hosts)
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial';
   port?: number;

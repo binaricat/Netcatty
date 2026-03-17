@@ -118,6 +118,7 @@ interface TerminalProps {
   terminalSettings?: TerminalSettings;
   sessionId: string;
   startupCommand?: string;
+  noAutoRun?: boolean;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
   keyBindings?: KeyBinding[];
@@ -184,6 +185,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   terminalSettings,
   sessionId,
   startupCommand,
+  noAutoRun,
   serialConfig,
   hotkeyScheme = "disabled",
   keyBindings = [],
@@ -448,6 +450,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     resolvedChainHosts,
     sessionId,
     startupCommand,
+    noAutoRun,
     terminalSettings,
     terminalSettingsRef,
     terminalBackend,

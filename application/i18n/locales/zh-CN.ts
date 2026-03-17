@@ -1433,6 +1433,7 @@ const zhCN: Messages = {
   'snippets.renameDialog.error.duplicate': '已存在同名的代码包',
   'snippets.renameDialog.error.invalidChars': '代码包名称只能包含字母、数字、连字符和下划线',
 
+  'snippets.field.noAutoRun': '仅上屏（不自动执行）',
   // Snippet Shortkey
   'snippets.field.shortkey': '快捷键',
   'snippets.shortkey.placeholder': '点击设置快捷键',

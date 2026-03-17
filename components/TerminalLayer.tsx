@@ -1488,6 +1488,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   terminalSettings={terminalSettings}
                   sessionId={session.id}
                   startupCommand={session.startupCommand}
+                  noAutoRun={session.noAutoRun}
                   serialConfig={session.serialConfig}
                   hotkeyScheme={hotkeyScheme}
                   keyBindings={keyBindings}
