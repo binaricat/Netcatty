@@ -847,6 +847,8 @@ export class CloudSyncManager {
       };
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
+      // Clear merge base when (re)configuring to a different endpoint/bucket
+      try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -1456,6 +1458,15 @@ export class CloudSyncManager {
       return results;
     }
 
+    // Use the highest version as base: either local or any remote that was merged
+    let baseVersion = this.state.localVersion;
+    if (wasMerged) {
+      for (const c of conflicts) {
+        const rv = c.check?.remoteFile?.meta?.version ?? 0;
+        if (rv > baseVersion) baseVersion = rv;
+      }
+    }
+
     let syncedFile: SyncedFile;
     try {
       syncedFile = await EncryptionService.encryptPayload(
@@ -1464,7 +1475,7 @@ export class CloudSyncManager {
         this.state.deviceId,
         this.state.deviceName,
         packageJson.version,
-        this.state.localVersion
+        baseVersion
       );
     } catch (error) {
       const msg = String(error);
