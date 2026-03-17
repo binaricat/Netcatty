@@ -254,7 +254,7 @@ export function useAIChatStreaming({
     const errorStr = err instanceof Error ? err.message
       : (typeof err === 'object' && err !== null && 'message' in err) ? String((err as { message: unknown }).message)
       : (typeof err === 'string') ? err
-      : JSON.stringify(err);
+      : String(JSON.stringify(err) ?? 'Unknown error');
     // Log the full unsanitized error for debugging
     console.error('[AIChatSidePanel] Stream error (full):', errorStr);
     const errorInfo = classifyError(errorStr);
@@ -470,7 +470,7 @@ export function useAIChatStreaming({
             errorInfo: classifyError(
               typedChunk.error instanceof Error ? typedChunk.error.message
                 : typeof typedChunk.error === 'string' ? typedChunk.error
-                : JSON.stringify(typedChunk.error),
+                : String(JSON.stringify(typedChunk.error) ?? 'Unknown error'),
             ),
             timestamp: Date.now(),
           });
