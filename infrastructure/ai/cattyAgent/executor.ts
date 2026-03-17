@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult, AIPermissionMode } from '../types';
+import type { ToolCall, ToolResult, AIPermissionMode, WebSearchConfig } from '../types';
 import {
   executeTerminalExecute,
   executeTerminalSendInput,
@@ -8,6 +8,8 @@ import {
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
   executeMultiHostExecute,
+  executeWebSearch,
+  executeUrlFetch,
   type ToolDeps,
   type ToolExecResult,
 } from '../shared/toolExecutors';
@@ -119,6 +121,7 @@ export function createToolExecutor(
   context: ExecutorContext,
   commandBlocklist?: string[],
   permissionMode: AIPermissionMode = 'confirm',
+  webSearchConfig?: WebSearchConfig,
 ): (toolCall: ToolCall) => Promise<ToolResult> {
   return async (toolCall: ToolCall): Promise<ToolResult> => {
     if (!bridge) {
@@ -129,7 +132,7 @@ export function createToolExecutor(
       };
     }
 
-    const deps: ToolDeps = { bridge, context, commandBlocklist, permissionMode };
+    const deps: ToolDeps = { bridge, context, commandBlocklist, permissionMode, webSearchConfig };
     const args = toolCall.arguments;
 
     try {
@@ -194,6 +197,22 @@ export function createToolExecutor(
             command: String(args.command || ''),
             mode: String(args.mode || 'parallel'),
             stopOnError: Boolean(args.stopOnError),
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'web_search': {
+          const r = await executeWebSearch(deps, {
+            query: String(args.query || ''),
+            maxResults: Number(args.maxResults) || 5,
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'url_fetch': {
+          const r = await executeUrlFetch(deps, {
+            url: String(args.url || ''),
+            maxLength: Number(args.maxLength) || 50000,
           });
           return toToolResult(toolCall.id, r);
         }

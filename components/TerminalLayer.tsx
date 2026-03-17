@@ -1348,6 +1348,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         setGlobalPermissionMode={aiState.setGlobalPermissionMode}
                         commandBlocklist={aiState.commandBlocklist}
                         maxIterations={aiState.maxIterations}
+                        webSearchConfig={aiState.webSearchConfig}
                         scopeType={activeWorkspace ? 'workspace' : 'terminal'}
                         scopeTargetId={activeWorkspace?.id ?? activeSession?.id}
                         scopeHostIds={activeWorkspace?.root

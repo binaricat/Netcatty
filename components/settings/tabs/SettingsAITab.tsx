@@ -14,6 +14,7 @@ import type {
   AIProviderId,
   ExternalAgentConfig,
   ProviderConfig,
+  WebSearchConfig,
 } from "../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useAgentDiscovery } from "../../../application/state/useAgentDiscovery";
@@ -38,6 +39,7 @@ import { AddProviderDropdown } from "./ai/AddProviderDropdown";
 import { CodexConnectionCard } from "./ai/CodexConnectionCard";
 import { ClaudeCodeCard } from "./ai/ClaudeCodeCard";
 import { SafetySettings } from "./ai/SafetySettings";
+import { WebSearchSettings } from "./ai/WebSearchSettings";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -64,6 +66,8 @@ interface SettingsAITabProps {
   setCommandTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  webSearchConfig: WebSearchConfig | null;
+  setWebSearchConfig: (config: WebSearchConfig | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +95,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setCommandTimeout,
   maxIterations,
   setMaxIterations,
+  webSearchConfig,
+  setWebSearchConfig,
 }) => {
   const { t } = useI18n();
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
@@ -507,6 +513,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               </div>
             </div>
           )}
+
+          {/* -- Web Search Section -- */}
+          <WebSearchSettings
+            webSearchConfig={webSearchConfig}
+            setWebSearchConfig={setWebSearchConfig}
+          />
 
           {/* -- Safety Section -- */}
           <SafetySettings

@@ -60,6 +60,8 @@ const acpActiveStreams = new Map();
 // ── Provider registry (synced from renderer, keys stay encrypted) ──
 const ENC_PREFIX = "enc:v1:";
 let providerConfigs = [];
+// Web search config apiHost (synced from renderer for fetch allowlist)
+let webSearchApiHost = null;
 
 /**
  * Decrypt an API key using Electron's safeStorage.
@@ -365,6 +367,14 @@ function registerHandlers(ipcMain) {
     return { ok: true };
   });
 
+  // ── Web search config sync (renderer → main, for fetch allowlist) ──
+  ipcMain.handle("netcatty:ai:sync-web-search", async (event, { apiHost }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false };
+    webSearchApiHost = typeof apiHost === "string" ? apiHost : null;
+    rebuildProviderFetchHosts();
+    return { ok: true };
+  });
+
   // Temporarily add a host to the fetch allowlist (used by settings model listing).
   // Entries are auto-removed after 30 seconds unless they belong to a synced provider.
   const TEMP_ALLOWLIST_TTL = 30_000;
@@ -437,6 +447,11 @@ function registerHandlers(ipcMain) {
     "api.anthropic.com",
     "generativelanguage.googleapis.com",
     "openrouter.ai",
+    // Web search providers
+    "api.tavily.com",
+    "api.exa.ai",
+    "api.bochaai.com",
+    "open.bigmodel.cn",
   ]);
   // Dynamically populated from configured provider baseURLs
   const providerFetchHosts = new Set();
@@ -468,6 +483,19 @@ function registerHandlers(ipcMain) {
       } catch {
         // Invalid URL in config — skip
       }
+    }
+    // Add web search apiHost if configured (e.g. SearXNG self-hosted instance)
+    if (webSearchApiHost) {
+      try {
+        const parsed = new URL(webSearchApiHost);
+        const host = parsed.hostname;
+        if (host === "localhost" || host === "127.0.0.1") {
+          const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
+          ALLOWED_LOCALHOST_PORTS.add(port);
+        } else {
+          providerFetchHosts.add(host);
+        }
+      } catch {}
     }
   }
 
@@ -554,7 +582,7 @@ function registerHandlers(ipcMain) {
   });
 
   // Non-streaming request (for model listing, validation, etc.)
-  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId }) => {
+  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck }) => {
     // Validate IPC sender — settings window needs this for model listing
     if (!validateSenderOrSettings(event)) {
       return { ok: false, status: 0, data: "", error: "Unauthorized IPC sender" };
@@ -577,7 +605,8 @@ function registerHandlers(ipcMain) {
     }
 
     // Check URL against allowed hosts (server-side allowlist only)
-    if (!isAllowedFetchUrl(resolvedUrl)) {
+    // skipHostCheck is used by AI tools (web_search, url_fetch) that need to access arbitrary URLs
+    if (!skipHostCheck && !isAllowedFetchUrl(resolvedUrl)) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 

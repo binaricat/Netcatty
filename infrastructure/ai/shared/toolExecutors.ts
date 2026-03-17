@@ -8,10 +8,11 @@
  */
 
 import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
-import type { AIPermissionMode } from '../types';
+import type { AIPermissionMode, WebSearchConfig } from '../types';
 import { checkCommandSafety } from '../cattyAgent/safety';
 import { shellQuote } from '../shellQuote';
 import { limitConcurrency } from '../concurrency';
+import { executeWebSearchProvider } from './webSearchProviders';
 
 // ---------------------------------------------------------------------------
 // Shared result types
@@ -31,6 +32,7 @@ export interface ToolDeps {
   context: ExecutorContext;
   commandBlocklist?: string[];
   permissionMode: AIPermissionMode;
+  webSearchConfig?: WebSearchConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,4 +321,76 @@ export async function executeMultiHostExecute(
   }
 
   return { ok: true, data: { results } };
+}
+
+// ---------------------------------------------------------------------------
+// Web Search & URL Fetch (read-only, no permission check needed)
+// ---------------------------------------------------------------------------
+
+export async function executeWebSearch(
+  deps: ToolDeps,
+  args: { query: string; maxResults?: number },
+): Promise<ToolExecResult<{ results: Array<{ title: string; url: string; content: string }> }>> {
+  const { bridge, webSearchConfig } = deps;
+
+  if (!webSearchConfig?.enabled) {
+    return { ok: false, error: 'Web search is not enabled. Please configure a search provider in Settings → AI.' };
+  }
+  if (!args.query) {
+    return { ok: false, error: 'Missing search query' };
+  }
+
+  try {
+    const maxResults = Math.max(1, Math.min(20, args.maxResults ?? webSearchConfig.maxResults ?? 5));
+    const results = await executeWebSearchProvider(bridge, webSearchConfig, args.query, maxResults);
+    return { ok: true, data: { results } };
+  } catch (err) {
+    return { ok: false, error: `Web search failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+interface BridgeFetchResponse {
+  ok: boolean;
+  status?: number;
+  data?: string;
+  error?: string;
+}
+
+export async function executeUrlFetch(
+  deps: ToolDeps,
+  args: { url: string; maxLength?: number },
+): Promise<ToolExecResult<{ url: string; content: string; status: number }>> {
+  const { bridge } = deps;
+  const { url } = args;
+
+  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+    return { ok: false, error: 'Invalid URL. Must start with http:// or https://' };
+  }
+
+  const aiFetch = (bridge as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>).aiFetch;
+  if (!aiFetch) {
+    return { ok: false, error: 'aiFetch is not available on the bridge' };
+  }
+
+  try {
+    // skipHostCheck=true: url_fetch targets user-provided URLs from search results
+    const resp = await aiFetch(url, 'GET', {
+      'User-Agent': 'Netcatty-AI/1.0',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+    }, undefined, undefined, true) as BridgeFetchResponse;
+
+    if (!resp.ok) {
+      return { ok: false, error: resp.error || `HTTP ${resp.status}` };
+    }
+
+    const maxLength = Math.max(1, Math.min(200000, args.maxLength ?? 50000));
+    let content = resp.data || '';
+    if (content.length > maxLength) {
+      content = content.slice(0, maxLength) + '\n\n[Content truncated]';
+    }
+
+    return { ok: true, data: { url, content, status: resp.status || 200 } };
+  } catch (err) {
+    return { ok: false, error: `URL fetch failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }

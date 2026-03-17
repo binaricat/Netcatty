@@ -994,14 +994,17 @@ const api = {
   aiSyncProviders: async (providers) => {
     return ipcRenderer.invoke("netcatty:ai:sync-providers", { providers });
   },
+  aiSyncWebSearch: async (apiHost) => {
+    return ipcRenderer.invoke("netcatty:ai:sync-web-search", { apiHost });
+  },
   aiChatStream: async (requestId, url, headers, body, providerId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:stream", { requestId, url, headers, body, providerId });
   },
   aiChatCancel: async (requestId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:cancel", { requestId });
   },
-  aiFetch: async (url, method, headers, body, providerId) => {
-    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId });
+  aiFetch: async (url, method, headers, body, providerId, skipHostCheck) => {
+    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck });
   },
   aiAllowlistAddHost: async (baseURL) => {
     return ipcRenderer.invoke("netcatty:ai:allowlist:add-host", { baseURL });

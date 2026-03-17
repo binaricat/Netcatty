@@ -284,6 +284,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             setCommandTimeout={aiState.setCommandTimeout}
                             maxIterations={aiState.maxIterations}
                             setMaxIterations={aiState.setMaxIterations}
+                            webSearchConfig={aiState.webSearchConfig}
+                            setWebSearchConfig={aiState.setWebSearchConfig}
                         />
                         </React.Suspense>
                         </AITabErrorBoundary>

@@ -1,0 +1,198 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Globe, Eye, EyeOff } from "lucide-react";
+import type { WebSearchConfig, WebSearchProviderId } from "../../../../infrastructure/ai/types";
+import { WEB_SEARCH_PROVIDER_PRESETS } from "../../../../infrastructure/ai/types";
+import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
+import { useI18n } from "../../../../application/i18n/I18nProvider";
+import { Select, SettingRow } from "../../settings-ui";
+
+const SEARCH_ICON_PATHS: Record<WebSearchProviderId, string> = {
+  tavily: "/ai/search/tavily.svg",
+  exa: "/ai/search/exa.png",
+  bocha: "/ai/search/bocha.webp",
+  zhipu: "/ai/search/zhipu.png",
+  searxng: "/ai/search/searxng.svg",
+};
+
+const SearchProviderIcon: React.FC<{ providerId: WebSearchProviderId }> = ({ providerId }) => (
+  <img
+    src={SEARCH_ICON_PATHS[providerId]}
+    alt=""
+    className="w-4 h-4 shrink-0"
+  />
+);
+
+const PROVIDER_OPTIONS: Array<{ value: WebSearchProviderId; label: string; icon: React.ReactNode }> = Object.entries(
+  WEB_SEARCH_PROVIDER_PRESETS,
+).map(([id, preset]) => ({
+  value: id as WebSearchProviderId,
+  label: preset.name,
+  icon: <SearchProviderIcon providerId={id as WebSearchProviderId} />,
+}));
+
+export const WebSearchSettings: React.FC<{
+  webSearchConfig: WebSearchConfig | null;
+  setWebSearchConfig: (config: WebSearchConfig | null) => void;
+}> = ({ webSearchConfig, setWebSearchConfig }) => {
+  const { t } = useI18n();
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+
+  const config = useMemo(() => webSearchConfig ?? {
+    providerId: "tavily" as WebSearchProviderId,
+    enabled: false,
+    maxResults: 5,
+  }, [webSearchConfig]);
+
+  const preset = WEB_SEARCH_PROVIDER_PRESETS[config.providerId];
+
+  // Decrypt API key on mount or when provider changes
+  useEffect(() => {
+    if (config.apiKey) {
+      setIsDecrypting(true);
+      decryptField(config.apiKey)
+        .then((decrypted) => setApiKeyInput(decrypted ?? ""))
+        .catch(() => setApiKeyInput(config.apiKey ?? ""))
+        .finally(() => setIsDecrypting(false));
+    } else {
+      setApiKeyInput("");
+    }
+  }, [config.apiKey, config.providerId]);
+
+  const updateConfig = useCallback(
+    (updates: Partial<WebSearchConfig>) => {
+      setWebSearchConfig({ ...config, ...updates });
+    },
+    [config, setWebSearchConfig],
+  );
+
+  const handleProviderChange = useCallback(
+    (val: string) => {
+      const providerId = val as WebSearchProviderId;
+      const newPreset = WEB_SEARCH_PROVIDER_PRESETS[providerId];
+      setWebSearchConfig({
+        ...config,
+        providerId,
+        apiKey: undefined,
+        apiHost: newPreset.defaultApiHost || undefined,
+      });
+      setApiKeyInput("");
+    },
+    [config, setWebSearchConfig],
+  );
+
+  const handleApiKeyBlur = useCallback(async () => {
+    if (!apiKeyInput.trim()) {
+      updateConfig({ apiKey: undefined });
+      return;
+    }
+    const encrypted = await encryptField(apiKeyInput.trim());
+    updateConfig({ apiKey: encrypted });
+  }, [apiKeyInput, updateConfig]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Globe size={18} className="text-muted-foreground" />
+        <h3 className="text-base font-medium">{t("ai.webSearch.title")}</h3>
+      </div>
+
+      <div className="bg-muted/30 rounded-lg p-4 space-y-1">
+        {/* Enable/Disable */}
+        <SettingRow
+          label={t("ai.webSearch.enable")}
+          description={t("ai.webSearch.enable.description")}
+        >
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.enabled}
+              onChange={(e) => updateConfig({ enabled: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-muted-foreground/20 peer-focus-visible:ring-2 peer-focus-visible:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-gray-300 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary" />
+          </label>
+        </SettingRow>
+
+        {/* Provider */}
+        <SettingRow
+          label={t("ai.webSearch.provider")}
+          description={t("ai.webSearch.provider.description")}
+        >
+          <Select
+            value={config.providerId}
+            options={PROVIDER_OPTIONS}
+            onChange={handleProviderChange}
+            className="w-48"
+          />
+        </SettingRow>
+
+        {/* API Key (hidden for SearXNG) */}
+        {preset.requiresApiKey && (
+          <SettingRow
+            label={t("ai.webSearch.apiKey")}
+            description={t("ai.webSearch.apiKey.description")}
+          >
+            <div className="flex items-center gap-1.5">
+              <input
+                type={showApiKey ? "text" : "password"}
+                value={isDecrypting ? "" : apiKeyInput}
+                placeholder={isDecrypting ? t("ai.providers.apiKey.decrypting") : t("ai.webSearch.apiKey.placeholder")}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                onBlur={() => void handleApiKeyBlur()}
+                className="w-64 h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                disabled={isDecrypting}
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground"
+              >
+                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </SettingRow>
+        )}
+
+        {/* API Host */}
+        <SettingRow
+          label={t("ai.webSearch.apiHost")}
+          description={
+            config.providerId === "searxng"
+              ? t("ai.webSearch.apiHost.searxngDescription")
+              : t("ai.webSearch.apiHost.description")
+          }
+        >
+          <input
+            type="text"
+            value={config.apiHost ?? preset.defaultApiHost}
+            onChange={(e) => updateConfig({ apiHost: e.target.value || undefined })}
+            placeholder={preset.defaultApiHost || "https://..."}
+            className="w-64 h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+
+        {/* Max Results */}
+        <SettingRow
+          label={t("ai.webSearch.maxResults")}
+          description={t("ai.webSearch.maxResults.description")}
+        >
+          <input
+            type="number"
+            value={config.maxResults ?? 5}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val) && val >= 1 && val <= 20) {
+                updateConfig({ maxResults: val });
+              }
+            }}
+            min={1}
+            max={20}
+            className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </SettingRow>
+      </div>
+    </div>
+  );
+};

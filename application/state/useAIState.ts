@@ -13,6 +13,7 @@ import {
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
+  STORAGE_KEY_AI_WEB_SEARCH,
 } from '../../infrastructure/config/storageKeys';
 import type {
   AISession,
@@ -22,6 +23,7 @@ import type {
   ExternalAgentConfig,
   ChatMessage,
   AISessionScope,
+  WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
 
@@ -114,6 +116,11 @@ export function useAIState() {
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {}
   );
 
+  // ── Web Search Config ──
+  const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
+    localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null
+  );
+
   const setActiveSessionId = useCallback((scopeKey: string, id: string | null) => {
     setActiveSessionIdMapRaw(prev => ({ ...prev, [scopeKey]: id }));
   }, []);
@@ -124,6 +131,15 @@ export function useAIState() {
       localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, next);
       return next;
     });
+  }, []);
+
+  const setWebSearchConfig = useCallback((config: WebSearchConfig | null) => {
+    setWebSearchConfigRaw(config);
+    if (config) {
+      localStorageAdapter.write(STORAGE_KEY_AI_WEB_SEARCH, config);
+    } else {
+      localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
+    }
   }, []);
 
   // ── Persist helpers ──
@@ -281,6 +297,9 @@ export function useAIState() {
           }
           case STORAGE_KEY_AI_AGENT_MODEL_MAP:
             setAgentModelMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {});
+            break;
+          case STORAGE_KEY_AI_WEB_SEARCH:
+            setWebSearchConfigRaw(localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null);
             break;
         }
       } catch (err) {
@@ -540,6 +559,10 @@ export function useAIState() {
     // Per-agent model memory
     agentModelMap,
     setAgentModel,
+
+    // Web search
+    webSearchConfig,
+    setWebSearchConfig,
 
     // Sessions (per-scope active session)
     sessions,

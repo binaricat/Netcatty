@@ -10,10 +10,11 @@ export interface SystemPromptContext {
     connected: boolean;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
+  webSearchEnabled?: boolean;
 }
 
 export function buildSystemPrompt(context: SystemPromptContext): string {
-  const { scopeType, scopeLabel, hosts, permissionMode } = context;
+  const { scopeType, scopeLabel, hosts, permissionMode, webSearchEnabled } = context;
 
   const scopeDescription = buildScopeDescription(scopeType, scopeLabel);
   const hostList = buildHostList(hosts);
@@ -49,7 +50,11 @@ ${permissionRules}
 
 7. **Respect connection status.** Only attempt operations on hosts that are currently connected. If a host is disconnected, inform the user and suggest reconnecting.
 
-8. **Be careful with file operations.** When writing files via SFTP, confirm the target path with the user if there is any ambiguity. Always prefer appending or targeted edits over full file overwrites when possible.`;
+8. **Be careful with file operations.** When writing files via SFTP, confirm the target path with the user if there is any ambiguity. Always prefer appending or targeted edits over full file overwrites when possible.
+
+9. **Fetch URLs when provided.** When the user shares a URL or asks you to read a webpage, use \`url_fetch\` to retrieve its content.${webSearchEnabled ? `
+
+10. **Search when needed.** When the user asks about current events, recent news, or facts you are uncertain about, use \`web_search\` to find up-to-date information. Cite sources when presenting search results.` : ''}`;
 }
 
 function buildScopeDescription(
@@ -101,6 +106,8 @@ function buildPermissionRules(
         '- Listing directories (`sftp_list_directory`)',
         '- Reading files (`sftp_read_file`)',
         '- Getting workspace and session info (`workspace_get_info`, `workspace_get_session_info`)',
+        '- Fetching URLs (`url_fetch`)',
+        '- Searching the web (`web_search`)',
         '',
         'All write and execute operations are denied. If the user asks you to run a command or modify a file, explain that observer mode does not allow it and suggest switching to confirm or autonomous mode.',
       ].join('\n');

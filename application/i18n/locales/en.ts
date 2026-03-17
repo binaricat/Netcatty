@@ -1618,6 +1618,21 @@ const en: Messages = {
   // AI Error
   'ai.codex.bridgeError': 'Codex main-process handlers are not loaded yet. Fully restart Netcatty, or restart the Electron dev process, then try again.',
 
+  // AI Web Search
+  'ai.webSearch.title': 'Web Search',
+  'ai.webSearch.enable': 'Enable Web Search',
+  'ai.webSearch.enable.description': 'Allow the AI agent to search the web for current information.',
+  'ai.webSearch.provider': 'Search Provider',
+  'ai.webSearch.provider.description': 'Choose a web search API provider.',
+  'ai.webSearch.apiKey': 'API Key',
+  'ai.webSearch.apiKey.description': 'API key for the selected search provider.',
+  'ai.webSearch.apiKey.placeholder': 'Enter API key...',
+  'ai.webSearch.apiHost': 'API Host',
+  'ai.webSearch.apiHost.description': 'Custom API endpoint. Leave default unless you use a proxy.',
+  'ai.webSearch.apiHost.searxngDescription': 'URL of your SearXNG instance (required).',
+  'ai.webSearch.maxResults': 'Max Results',
+  'ai.webSearch.maxResults.description': 'Maximum number of search results to return (1-20).',
+
   // AI Safety Settings
   'ai.safety.title': 'Safety',
   'ai.safety.permissionMode': 'Permission Mode',

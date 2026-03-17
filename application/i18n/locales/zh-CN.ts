@@ -1633,6 +1633,21 @@ const zhCN: Messages = {
   // AI Error
   'ai.codex.bridgeError': 'Codex 主进程处理器尚未加载。请完全重启 Netcatty 或重启 Electron 开发进程，然后重试。',
 
+  // AI Web Search
+  'ai.webSearch.title': '网络搜索',
+  'ai.webSearch.enable': '启用网络搜索',
+  'ai.webSearch.enable.description': '允许 AI 代理搜索互联网获取最新信息。',
+  'ai.webSearch.provider': '搜索供应商',
+  'ai.webSearch.provider.description': '选择一个网络搜索 API 供应商。',
+  'ai.webSearch.apiKey': 'API 密钥',
+  'ai.webSearch.apiKey.description': '所选搜索供应商的 API 密钥。',
+  'ai.webSearch.apiKey.placeholder': '输入 API 密钥...',
+  'ai.webSearch.apiHost': 'API 地址',
+  'ai.webSearch.apiHost.description': '自定义 API 端点。除非使用代理，否则保持默认值。',
+  'ai.webSearch.apiHost.searxngDescription': 'SearXNG 实例的 URL（必填）。',
+  'ai.webSearch.maxResults': '最大结果数',
+  'ai.webSearch.maxResults.description': '搜索返回的最大结果数（1-20）。',
+
   // AI Safety Settings
   'ai.safety.title': '安全',
   'ai.safety.permissionMode': '权限模式',

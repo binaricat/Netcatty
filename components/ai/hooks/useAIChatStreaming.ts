@@ -18,6 +18,7 @@ import type {
   ChatMessage,
   ExternalAgentConfig,
   ProviderConfig,
+  WebSearchConfig,
 } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
@@ -93,6 +94,7 @@ type StreamChunk =
 export interface PanelBridge extends NetcattyBridge {
   credentialsDecrypt?: (value: string) => Promise<string>;
   aiSyncProviders?: (providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>) => Promise<{ ok: boolean }>;
+  aiSyncWebSearch?: (apiHost: string | null) => Promise<{ ok: boolean }>;
   aiMcpUpdateSessions?: (sessions: TerminalSessionInfo[], chatSessionId?: string) => Promise<unknown>;
   aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
   [key: string]: ((...args: unknown[]) => unknown) | undefined;
@@ -203,6 +205,7 @@ export interface SendToCattyContext {
   globalPermissionMode: AIPermissionMode;
   commandBlocklist?: string[];
   terminalSessions: TerminalSessionInfo[];
+  webSearchConfig?: WebSearchConfig | null;
   setPendingApproval: (ctx: PendingApprovalContext | null) => void;
   autoTitleSession: (sessionId: string, text: string) => void;
 }
@@ -621,7 +624,7 @@ export function useAIChatStreaming({
       sessions: context.terminalSessions,
       workspaceId: context.scopeTargetId,
       workspaceName: context.scopeLabel,
-    }, context.commandBlocklist, context.globalPermissionMode);
+    }, context.commandBlocklist, context.globalPermissionMode, context.webSearchConfig ?? undefined);
 
     const systemPrompt = buildSystemPrompt({
       scopeType: context.scopeType, scopeLabel: context.scopeLabel,
@@ -630,6 +633,7 @@ export function useAIChatStreaming({
         os: s.os, username: s.username, connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,
+      webSearchEnabled: context.webSearchConfig?.enabled,
     });
 
     // Guard: activeProvider must exist for Catty agent path

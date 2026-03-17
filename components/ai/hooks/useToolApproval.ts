@@ -13,6 +13,7 @@ import type { ModelMessage } from 'ai';
 import type {
   AIPermissionMode,
   ChatMessage,
+  WebSearchConfig,
 } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
@@ -76,6 +77,7 @@ export interface ToolApprovalContext {
   scopeLabel?: string;
   globalPermissionMode: AIPermissionMode;
   commandBlocklist?: string[];
+  webSearchConfig?: WebSearchConfig | null;
 }
 
 // -------------------------------------------------------------------
@@ -218,7 +220,7 @@ export function useToolApproval({
         sessions: approvalContext.terminalSessions,
         workspaceId: approvalContext.scopeTargetId,
         workspaceName: approvalContext.scopeLabel,
-      }, approvalContext.commandBlocklist, approvalContext.globalPermissionMode);
+      }, approvalContext.commandBlocklist, approvalContext.globalPermissionMode, approvalContext.webSearchConfig ?? undefined);
       const freshSystemPrompt = buildSystemPrompt({
         scopeType: approvalContext.scopeType, scopeLabel: approvalContext.scopeLabel,
         hosts: approvalContext.terminalSessions.map(s => ({
@@ -226,6 +228,7 @@ export function useToolApproval({
           os: s.os, username: s.username, connected: s.connected,
         })),
         permissionMode: approvalContext.globalPermissionMode,
+        webSearchEnabled: approvalContext.webSearchConfig?.enabled,
       });
       const newApprovalInfo = await processCattyStream(sid, ctxModel, freshSystemPrompt, freshTools, resumeMessages as unknown as ModelMessage[], abortController.signal, newAssistantMsgId);
 
