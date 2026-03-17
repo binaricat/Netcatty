@@ -185,6 +185,18 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
         });
       }
 
+      // If the server returned a non-2xx status, return the error details
+      // instead of an empty stream so the AI SDK sees the real error
+      const statusCode = result.statusCode ?? 200;
+      if (statusCode < 200 || statusCode >= 300) {
+        cleanup();
+        const errorDetail = result.statusText || `HTTP ${statusCode}`;
+        return new Response(errorDetail, {
+          status: statusCode,
+          statusText: errorDetail,
+        });
+      }
+
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           streamController = controller;
@@ -192,7 +204,7 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
       });
 
       return new Response(stream, {
-        status: result.statusCode ?? 200,
+        status: statusCode,
         statusText: result.statusText ?? 'OK',
         headers: { 'content-type': 'text/event-stream' },
       });

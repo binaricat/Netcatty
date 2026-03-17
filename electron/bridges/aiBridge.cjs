@@ -265,17 +265,24 @@ function streamRequest(url, options, event, requestId, skipTLS) {
         const statusText = res.statusMessage || "";
 
         if (statusCode < 200 || statusCode >= 300) {
-          // Resolve immediately with error status so the renderer sees it
-          resolve({ statusCode, statusText });
-
+          // Read the error body before resolving so we can include it in the response
           let errorBody = "";
           res.on("data", (chunk) => { errorBody += chunk.toString(); });
           res.on("end", () => {
+            // Try to extract error message from JSON response (OpenAI-compatible format)
+            let errorDetail = statusText;
+            try {
+              const parsed = JSON.parse(errorBody);
+              errorDetail = parsed?.error?.message || parsed?.message || parsed?.detail || errorBody.slice(0, 500);
+            } catch {
+              if (errorBody.trim()) errorDetail = errorBody.slice(0, 500);
+            }
             safeSend(event.sender, "netcatty:ai:stream:error", {
               requestId,
-              error: `HTTP ${statusCode}: ${errorBody}`,
+              error: `HTTP ${statusCode}: ${errorDetail}`,
             });
             activeStreams.delete(requestId);
+            resolve({ statusCode, statusText: `${statusCode} ${errorDetail}` });
           });
           return;
         }
