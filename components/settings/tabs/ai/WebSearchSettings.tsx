@@ -70,6 +70,7 @@ export const WebSearchSettings: React.FC<{
     } else {
       decryptSeqRef.current++;
       setApiKeyInput("");
+      setIsDecrypting(false);
     }
   }, [config.apiKey, config.providerId]);
 
@@ -95,16 +96,19 @@ export const WebSearchSettings: React.FC<{
     [setWebSearchConfig],
   );
 
+  // Sequence counter for blur saves — prevents out-of-order encryption results
+  const blurSeqRef = useRef(0);
   const handleApiKeyBlur = useCallback(async () => {
     if (!apiKeyInput.trim()) {
+      blurSeqRef.current++;
       updateConfig({ apiKey: undefined });
       return;
     }
-    // Capture current provider before async encryption
+    const seq = ++blurSeqRef.current;
     const providerAtBlur = configRef.current.providerId;
     const encrypted = await encryptField(apiKeyInput.trim());
-    // Only apply if the provider hasn't changed during encryption
-    if (configRef.current.providerId === providerAtBlur) {
+    // Only apply if this is still the latest blur and provider hasn't changed
+    if (blurSeqRef.current === seq && configRef.current.providerId === providerAtBlur) {
       updateConfig({ apiKey: encrypted });
     }
   }, [apiKeyInput, updateConfig]);
