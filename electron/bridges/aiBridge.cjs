@@ -8,7 +8,7 @@
 const https = require("node:https");
 const http = require("node:http");
 const { URL } = require("node:url");
-const { spawn, execFileSync } = require("node:child_process");
+const { spawn, execSync, execFileSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 
@@ -134,18 +134,56 @@ function injectApiKeyIntoRequest(url, headers, providerId) {
   return { url: patchedUrl, headers: patchedHeaders };
 }
 
+/**
+ * Kill a process and all its descendants.
+ * Uses pkill -P on macOS/Linux, taskkill /T on Windows.
+ */
+function killProcessTree(pid) {
+  try {
+    process.kill(pid, 0); // throws if already dead
+  } catch {
+    return; // process already exited
+  }
+  try {
+    if (process.platform === "win32") {
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" });
+    } else {
+      // SIGKILL the entire process group / descendants
+      execSync(`pkill -9 -P ${pid}`, { stdio: "ignore" });
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  } catch {
+    // Best-effort: pkill may fail if children already exited
+    try { process.kill(pid, "SIGKILL"); } catch {}
+  }
+}
+
 function cleanupAcpProvider(chatSessionId) {
   const entry = acpProviders.get(chatSessionId);
   if (!entry) return;
+
+  // Grab the agent process PID before cleanup nulls the reference.
+  // The agent (e.g. claude-code-acp) may have spawned its own child processes;
+  // the provider's forceCleanup() only sends SIGTERM to the top-level process,
+  // so we need to kill the entire process tree ourselves.
+  const agentProc = entry.provider?.model?.agentProcess;
+  const pid = agentProc?.pid;
+
   try {
-    if (typeof entry.provider.forceCleanup === "function") {
-      entry.provider.forceCleanup();
-    } else if (typeof entry.provider.cleanup === "function") {
+    if (typeof entry.provider.cleanup === "function") {
       entry.provider.cleanup();
     }
   } catch (err) {
     console.warn("[ACP] Provider cleanup failed for session", chatSessionId, err?.message || err);
   }
+
+  // Kill the entire process tree if the process is still alive.
+  // The provider's forceCleanup() only sends SIGTERM to the top-level process,
+  // but the agent may have spawned children (e.g. shell commands) that survive.
+  if (pid) {
+    killProcessTree(pid);
+  }
+
   acpProviders.delete(chatSessionId);
 }
 
