@@ -1545,7 +1545,7 @@ function registerHandlers(ipcMain) {
 
   // ── ACP (Agent Client Protocol) streaming ──
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images, history }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -1650,7 +1650,7 @@ function registerHandlers(ipcMain) {
       }
 
       const abortController = new AbortController();
-      acpActiveStreams.set(requestId, abortController);
+      acpActiveStreams.set(requestId, { controller: abortController, chatSessionId });
 
       // Prepend context hint so the agent uses MCP tools for remote hosts
       const contextualPrompt =
@@ -1679,12 +1679,21 @@ function registerHandlers(ipcMain) {
         return content;
       }
 
+      // Build messages: if this is a fresh provider and we have conversation history,
+      // include it so the agent has context from previous turns.
+      // If reusing an existing provider, it already has internal session memory —
+      // only send the current prompt to avoid duplication.
+      const currentUserMessage = {
+        role: "user",
+        content: buildMessageContent(contextualPrompt, images),
+      };
+      const messages = (!shouldReuseProvider && Array.isArray(history) && history.length > 0)
+        ? [...history, currentUserMessage]
+        : [currentUserMessage];
+
       const result = streamText({
         model: providerEntry.provider.languageModel(model || undefined),
-        messages: [{
-          role: "user",
-          content: buildMessageContent(contextualPrompt, images),
-        }],
+        messages,
         tools: providerEntry.provider.tools,
         stopWhen: stepCountIs(mcpServerBridge.getMaxIterations ? mcpServerBridge.getMaxIterations() : 20),
         abortSignal: abortController.signal,
@@ -1770,10 +1779,14 @@ function registerHandlers(ipcMain) {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
     // Cancel any active PTY executions (send Ctrl+C)
     mcpServerBridge.cancelAllPtyExecs();
-    const controller = acpActiveStreams.get(requestId);
-    if (controller) {
-      controller.abort();
+    const entry = acpActiveStreams.get(requestId);
+    if (entry) {
+      entry.controller.abort();
       acpActiveStreams.delete(requestId);
+      // Kill the ACP provider subprocess so the agent stops executing
+      if (entry.chatSessionId) {
+        cleanupAcpProvider(entry.chatSessionId);
+      }
       return { ok: true };
     }
     return { ok: false, error: "Stream not found" };
@@ -1833,8 +1846,8 @@ function cleanup() {
   activeStreams.clear();
 
   // Abort active ACP streams
-  for (const [id, controller] of acpActiveStreams) {
-    try { controller.abort(); } catch {}
+  for (const [id, entry] of acpActiveStreams) {
+    try { entry.controller.abort(); } catch {}
   }
   acpActiveStreams.clear();
 

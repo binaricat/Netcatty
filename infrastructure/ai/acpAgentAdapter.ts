@@ -19,6 +19,11 @@ export interface AcpAgentCallbacks {
   onDone: () => void;
 }
 
+export interface AcpHistoryMessage {
+  role: string;
+  content: unknown;
+}
+
 interface AcpBridge {
   aiAcpStream(
     requestId: string,
@@ -30,6 +35,7 @@ interface AcpBridge {
     providerId?: string,
     model?: string,
     images?: ImageAttachment[],
+    history?: AcpHistoryMessage[],
   ): Promise<{ ok: boolean; error?: string }>;
   aiAcpCancel(requestId: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
@@ -64,6 +70,7 @@ export async function runAcpAgentTurn(
   providerId?: string,
   model?: string,
   images?: ImageAttachment[],
+  history?: AcpHistoryMessage[],
 ): Promise<void> {
   const acpBridge = bridge as unknown as AcpBridge;
 
@@ -118,6 +125,7 @@ export async function runAcpAgentTurn(
     providerId,
     model,
     images?.length ? images : undefined,
+    history?.length ? history : undefined,
   ).catch((err: Error) => {
     callbacks.onError(err.message);
   });

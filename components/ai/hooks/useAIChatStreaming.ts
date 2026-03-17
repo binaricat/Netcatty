@@ -26,7 +26,7 @@ import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers'
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { NetcattyBridge } from '../../../infrastructure/ai/cattyAgent/executor';
 import { runExternalAgentTurn } from '../../../infrastructure/ai/externalAgentAdapter';
-import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
+import { runAcpAgentTurn, type AcpHistoryMessage } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError, sanitizeErrorMessage } from '../../../infrastructure/ai/errorClassifier';
 
 // -------------------------------------------------------------------
@@ -216,6 +216,8 @@ export interface SendToExternalContext {
   terminalSessions: TerminalSessionInfo[];
   providers: ProviderConfig[];
   selectedAgentModel?: string;
+  /** Current session messages — used to pass conversation history when ACP provider is recreated. */
+  sessionMessages?: ChatMessage[];
 }
 
 // -------------------------------------------------------------------
@@ -528,6 +530,9 @@ export function useAIChatStreaming({
         }
       };
 
+      // Build conversation history for session recovery when ACP provider is recreated
+      const acpHistory = buildAcpHistory(context.sessionMessages);
+
       await runAcpAgentTurn(
         bridge,
         requestId,
@@ -591,6 +596,7 @@ export function useAIChatStreaming({
         agentProviderId,
         context.selectedAgentModel,
         attachedImages.length > 0 ? attachedImages : undefined,
+        acpHistory,
       );
     } else {
       // Fallback: spawn as raw process
@@ -766,4 +772,78 @@ export function useAIChatStreaming({
     sendToExternalAgent,
     reportStreamError,
   };
+}
+
+/**
+ * Convert ChatMessage[] to AcpHistoryMessage[] for passing conversation
+ * history to the main process when an ACP provider needs to be recreated.
+ * Mirrors the SDK message building logic used by the Catty agent.
+ */
+function buildAcpHistory(messages?: ChatMessage[]): AcpHistoryMessage[] {
+  if (!messages?.length) return [];
+
+  // Collect resolved tool call IDs (those with a matching tool result)
+  const resolvedToolCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === 'tool' && m.toolResults) {
+      for (const tr of m.toolResults) resolvedToolCallIds.add(tr.toolCallId);
+    }
+  }
+
+  const findToolName = (toolCallId: string): string => {
+    for (const prev of messages) {
+      if (prev.role === 'assistant' && prev.toolCalls) {
+        const tc = prev.toolCalls.find(t => t.id === toolCallId);
+        if (tc) return tc.name;
+      }
+    }
+    return 'unknown';
+  };
+
+  const history: AcpHistoryMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'user') {
+      history.push({ role: 'user', content: m.content });
+    } else if (m.role === 'assistant') {
+      if (m.toolCalls?.length) {
+        const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
+        const contentParts: Array<
+          { type: 'text'; text: string } |
+          { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+        > = [];
+        if (m.content) {
+          contentParts.push({ type: 'text' as const, text: m.content });
+        }
+        for (const tc of resolvedCalls) {
+          contentParts.push({
+            type: 'tool-call' as const,
+            toolCallId: tc.id,
+            toolName: tc.name,
+            input: tc.arguments ?? {},
+          });
+        }
+        if (contentParts.length > 0) {
+          history.push({
+            role: 'assistant',
+            content: contentParts.length === 1 && contentParts[0].type === 'text'
+              ? (contentParts[0] as { type: 'text'; text: string }).text
+              : contentParts,
+          });
+        }
+      } else if (m.content) {
+        history.push({ role: 'assistant', content: m.content });
+      }
+    } else if (m.role === 'tool' && m.toolResults?.length) {
+      history.push({
+        role: 'tool',
+        content: m.toolResults.map(tr => ({
+          type: 'tool-result' as const,
+          toolCallId: tr.toolCallId,
+          toolName: findToolName(tr.toolCallId),
+          output: { type: 'text' as const, value: tr.content },
+        })),
+      });
+    }
+  }
+  return history;
 }

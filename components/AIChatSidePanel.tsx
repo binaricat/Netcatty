@@ -448,6 +448,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           terminalSessions,
           providers,
           selectedAgentModel,
+          sessionMessages: currentSession?.messages,
         });
       } catch (err) {
         reportStreamError(sessionId, abortController.signal, err);
