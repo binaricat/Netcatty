@@ -598,10 +598,8 @@ function registerHandlers(ipcMain) {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
-      // Require HTTPS for remote hosts
-      if (parsed.protocol !== "https:") return false;
-      // Block private/internal hosts
-      if (isPrivateHost(parsed.hostname)) return false;
+      // Require HTTPS for remote hosts (unless explicitly allowlisted, e.g. private LAN providers)
+      if (parsed.protocol !== "https:" && !providerFetchHosts.has(parsed.hostname)) return false;
       // Check built-in + provider-configured host allowlist
       if (BUILTIN_FETCH_HOSTS.has(parsed.hostname)) return true;
       if (providerFetchHosts.has(parsed.hostname)) return true;

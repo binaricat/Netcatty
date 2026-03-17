@@ -190,8 +190,7 @@ export function createCattyTools(
           maxResults: z
             .number()
             .optional()
-            .default(5)
-            .describe('Maximum number of results to return. Defaults to 5.'),
+            .describe('Maximum number of search results to return. If omitted, uses the configured default.'),
         }),
         execute: async ({ query, maxResults }) => {
           return unwrap(await executeWebSearch(deps, { query, maxResults }));
