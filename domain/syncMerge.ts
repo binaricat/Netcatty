@@ -213,6 +213,39 @@ function mergeStringArrays(
 
 type SettingsObj = NonNullable<SyncPayload['settings']>;
 
+/** Recursively merge two plain objects against a base using three-way logic. */
+function mergeSettingsDeep(
+  base: Record<string, unknown>,
+  local: Record<string, unknown>,
+  remote: Record<string, unknown>,
+): Record<string, unknown> {
+  const allKeys = new Set([
+    ...Object.keys(base),
+    ...Object.keys(local),
+    ...Object.keys(remote),
+  ]);
+  const merged: Record<string, unknown> = {};
+  for (const key of allKeys) {
+    const bVal = base[key];
+    const lVal = local[key];
+    const rVal = remote[key];
+    const lChanged = fingerprint(lVal) !== fingerprint(bVal);
+    const rChanged = fingerprint(rVal) !== fingerprint(bVal);
+
+    if (!lChanged && !rChanged) {
+      if (bVal !== undefined) merged[key] = bVal;
+    } else if (lChanged && !rChanged) {
+      if (lVal !== undefined) merged[key] = lVal;
+    } else if (!lChanged && rChanged) {
+      if (rVal !== undefined) merged[key] = rVal;
+    } else {
+      // Both changed — prefer local for leaf values
+      if (lVal !== undefined) merged[key] = lVal;
+    }
+  }
+  return merged;
+}
+
 function mergeSettings(
   base: SettingsObj | undefined,
   local: SettingsObj | undefined,
@@ -246,8 +279,21 @@ function mergeSettings(
     } else if (!lChanged && rChanged) {
       if (rVal !== undefined) merged[key] = rVal;
     } else {
-      // Both changed — prefer local
-      if (lVal !== undefined) merged[key] = lVal;
+      // Both changed — deep merge if both are plain objects, else prefer local
+      if (
+        lVal && rVal && bVal &&
+        typeof lVal === 'object' && !Array.isArray(lVal) &&
+        typeof rVal === 'object' && !Array.isArray(rVal) &&
+        typeof bVal === 'object' && !Array.isArray(bVal)
+      ) {
+        merged[key] = mergeSettingsDeep(
+          bVal as Record<string, unknown>,
+          lVal as Record<string, unknown>,
+          rVal as Record<string, unknown>,
+        );
+      } else if (lVal !== undefined) {
+        merged[key] = lVal;
+      }
     }
   }
 

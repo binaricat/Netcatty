@@ -152,7 +152,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.autoSync.vaultLocked'));
       }
 
-      const dataHash = getDataHash();
+      let dataHash = getDataHash();
       const payload = buildPayload();
       const encryptedCredentialPaths = findSyncPayloadEncryptedCredentialPaths(payload);
       if (encryptedCredentialPaths.length > 0) {
@@ -172,6 +172,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // Apply merged data if a three-way merge happened (contains remote additions)
         if (result.mergedPayload) {
           config.onApplyPayload(result.mergedPayload);
+          // Refresh hash after apply so the data-change effect doesn't
+          // re-trigger an immediate sync with the same merged payload
+          dataHash = getDataHash();
         }
       }
 

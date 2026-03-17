@@ -1594,7 +1594,13 @@ export class CloudSyncManager {
       const combined = new Uint8Array(iv.length + encrypted.byteLength);
       combined.set(iv);
       combined.set(new Uint8Array(encrypted), iv.length);
-      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, btoa(String.fromCharCode(...combined)));
+      // Encode in chunks to avoid stack overflow with large buffers
+      let binary = '';
+      const CHUNK = 8192;
+      for (let i = 0; i < combined.length; i += CHUNK) {
+        binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
+      }
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, btoa(binary));
     } catch {
       console.warn('[CloudSyncManager] Failed to save sync base');
     }
