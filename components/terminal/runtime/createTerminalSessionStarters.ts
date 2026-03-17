@@ -754,7 +754,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           }
         }
 
-        ctx.onSessionExit?.(ctx.sessionId);
+        ctx.onSessionExit?.(ctx.sessionId, evt);
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

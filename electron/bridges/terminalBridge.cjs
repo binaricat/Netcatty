@@ -439,7 +439,7 @@ async function startTelnetSession(event, options) {
       const session = sessions.get(sessionId);
       if (session) {
         const contents = electronModule.webContents.fromId(session.webContentsId);
-        contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "exited" });
+        contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
       }
       sessions.delete(sessionId);
     });
@@ -622,7 +622,7 @@ async function startSerialSession(event, options) {
         serialPort.on('close', () => {
           console.log(`[Serial] Port closed`);
           const contents = electronModule.webContents.fromId(session.webContentsId);
-          contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "exited" });
+          contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
           sessions.delete(sessionId);
         });
 
