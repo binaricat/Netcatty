@@ -1088,7 +1088,7 @@ export class CloudSyncManager {
             checkResult.remoteFile,
             this.masterPassword,
           );
-          const base = await this.loadSyncBase();
+          const base = await this.loadSyncBase(provider);
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
           console.log('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
@@ -1106,7 +1106,7 @@ export class CloudSyncManager {
           const uploadResult = await this.uploadToProvider(provider, adapter, mergedSyncedFile);
 
           if (uploadResult.success) {
-            await this.saveSyncBase(mergeResult.payload);
+            await this.saveSyncBase(mergeResult.payload, provider);
             this.state.syncState = 'IDLE';
 
             this.addSyncHistoryEntry({
@@ -1173,7 +1173,7 @@ export class CloudSyncManager {
       const result = await this.uploadToProvider(provider, adapter, syncedFile);
 
       if (result.success) {
-        await this.saveSyncBase(payload);
+        await this.saveSyncBase(payload, provider);
         this.state.syncState = 'IDLE';
       } else {
         this.state.syncState = 'ERROR';
@@ -1235,7 +1235,7 @@ export class CloudSyncManager {
       this.state.remoteVersion = remoteFile.meta.version;
       this.state.remoteUpdatedAt = remoteFile.meta.updatedAt;
       this.saveSyncConfig();
-      await this.saveSyncBase(payload);
+      await this.saveSyncBase(payload, provider);
       this.notifyStateChange(); // Notify UI of state change
 
       // Add to sync history
@@ -1355,19 +1355,19 @@ export class CloudSyncManager {
     if (conflicts.length > 0) {
       // Three-way merge: incorporate remote data from every conflicting provider
       try {
-        const base = await this.loadSyncBase();
         let merged = payload;
         for (const c of conflicts) {
+          const providerBase = await this.loadSyncBase(c.provider as CloudProvider);
           const remotePayload = await EncryptionService.decryptPayload(
             c.check!.remoteFile!,
             this.masterPassword,
           );
-          const result = mergeSyncPayloads(base, merged, remotePayload);
+          const result = mergeSyncPayloads(providerBase, merged, remotePayload);
           merged = result.payload;
         }
         const mergeResult = { payload: merged };
 
-        console.log('[CloudSyncManager] syncAll: three-way merge completed', mergeResult.summary);
+        console.log('[CloudSyncManager] syncAll: three-way merge completed');
 
         // Replace payload with merged payload for upload to all providers
         payload = mergeResult.payload;
@@ -1494,7 +1494,12 @@ export class CloudSyncManager {
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
       this.state.syncState = 'IDLE';
-      if (payload) await this.saveSyncBase(payload);
+      // Save base per provider that successfully uploaded
+      if (payload) {
+        for (const [p, r] of results) {
+          if (r.success) await this.saveSyncBase(payload, p);
+        }
+      }
 
       // If a merge happened, attach the merged payload to successful results
       // so callers can apply remote additions to local state
@@ -1592,7 +1597,12 @@ export class CloudSyncManager {
   // Sync Base (three-way merge snapshot)
   // ==========================================================================
 
-  async saveSyncBase(payload: SyncPayload): Promise<void> {
+  private syncBaseKey(provider?: CloudProvider): string {
+    const suffix = provider ? `_${provider}` : '';
+    return `${SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD}${suffix}`;
+  }
+
+  async saveSyncBase(payload: SyncPayload, provider?: CloudProvider): Promise<void> {
     const key = this.state.unlockedKey?.derivedKey;
     if (!key) return;
     try {
@@ -1608,17 +1618,17 @@ export class CloudSyncManager {
       for (let i = 0; i < combined.length; i += CHUNK) {
         binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
       }
-      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, btoa(binary));
+      this.saveToStorage(this.syncBaseKey(provider), btoa(binary));
     } catch {
       console.warn('[CloudSyncManager] Failed to save sync base');
     }
   }
 
-  async loadSyncBase(): Promise<SyncPayload | null> {
+  async loadSyncBase(provider?: CloudProvider): Promise<SyncPayload | null> {
     const key = this.state.unlockedKey?.derivedKey;
     if (!key) return null;
     try {
-      const encoded = this.loadFromStorage<string>(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+      const encoded = this.loadFromStorage<string>(this.syncBaseKey(provider));
       if (!encoded || typeof encoded !== 'string') return null;
       const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
       const iv = combined.slice(0, 12);
@@ -1633,6 +1643,9 @@ export class CloudSyncManager {
   private clearSyncBase(): void {
     try {
       localStorage.removeItem(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+      for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
+        localStorage.removeItem(this.syncBaseKey(p));
+      }
     } catch { /* ignore */ }
   }
 

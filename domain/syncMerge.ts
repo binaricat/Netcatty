@@ -239,8 +239,20 @@ function mergeSettingsDeep(
     } else if (!lChanged && rChanged) {
       if (rVal !== undefined) merged[key] = rVal;
     } else {
-      // Both changed — prefer local for leaf values
-      if (lVal !== undefined) merged[key] = lVal;
+      // Both changed — recurse if both are plain objects, else prefer local
+      if (
+        lVal && rVal &&
+        typeof lVal === 'object' && !Array.isArray(lVal) &&
+        typeof rVal === 'object' && !Array.isArray(rVal)
+      ) {
+        merged[key] = mergeSettingsDeep(
+          (bVal && typeof bVal === 'object' && !Array.isArray(bVal) ? bVal : {}) as Record<string, unknown>,
+          lVal as Record<string, unknown>,
+          rVal as Record<string, unknown>,
+        );
+      } else if (lVal !== undefined) {
+        merged[key] = lVal;
+      }
     }
   }
   return merged;
