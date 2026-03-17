@@ -598,8 +598,14 @@ function registerHandlers(ipcMain) {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
-      // Require HTTPS for remote hosts (unless explicitly allowlisted, e.g. private LAN providers)
-      if (parsed.protocol !== "https:" && !providerFetchHosts.has(parsed.hostname)) return false;
+      // Require HTTPS for remote hosts; allow HTTP only for private/LAN addresses in the allowlist
+      if (parsed.protocol !== "https:") {
+        if (isPrivateIp(parsed.hostname) && providerFetchHosts.has(parsed.hostname)) {
+          // Private LAN provider explicitly configured — allow HTTP
+        } else {
+          return false;
+        }
+      }
       // Check built-in + provider-configured host allowlist
       if (BUILTIN_FETCH_HOSTS.has(parsed.hostname)) return true;
       if (providerFetchHosts.has(parsed.hostname)) return true;
@@ -660,7 +666,7 @@ function registerHandlers(ipcMain) {
   });
 
   // Non-streaming request (for model listing, validation, etc.)
-  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck }) => {
+  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck, followRedirects }) => {
     // Validate IPC sender — settings window needs this for model listing
     if (!validateSenderOrSettings(event)) {
       return { ok: false, status: 0, data: "", error: "Unauthorized IPC sender" };
@@ -698,48 +704,61 @@ function registerHandlers(ipcMain) {
       } catch {}
     }
 
-    return new Promise((resolve) => {
-      const parsedUrl = new URL(resolvedUrl);
-      const isHttps = parsedUrl.protocol === "https:";
-      const lib = isHttps ? https : http;
-      const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB safety limit
+    const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB safety limit
+    const MAX_REDIRECTS = followRedirects ? 5 : 0;
 
-      const req = lib.request(
-        parsedUrl,
-        { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
-        (res) => {
-          let data = "";
-          let totalSize = 0;
-          res.on("data", (chunk) => {
-            totalSize += chunk.length;
-            if (totalSize > MAX_RESPONSE_SIZE) {
-              req.destroy();
-              resolve({ ok: false, status: 0, data: "", error: "Response body exceeded maximum size (10MB)" });
+    function doFetch(fetchUrl, redirectsLeft) {
+      return new Promise((resolve) => {
+        const parsedUrl = new URL(fetchUrl);
+        const isHttps = parsedUrl.protocol === "https:";
+        const lib = isHttps ? https : http;
+
+        const req = lib.request(
+          parsedUrl,
+          { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
+          (res) => {
+            // Handle redirects
+            if (redirectsLeft > 0 && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              const location = new URL(res.headers.location, fetchUrl).href;
+              res.resume(); // drain the response
+              resolve(doFetch(location, redirectsLeft - 1));
               return;
             }
-            data += chunk.toString();
-          });
-          res.on("end", () => {
-            resolve({
-              ok: res.statusCode >= 200 && res.statusCode < 300,
-              status: res.statusCode,
-              data,
+            let data = "";
+            let totalSize = 0;
+            res.on("data", (chunk) => {
+              totalSize += chunk.length;
+              if (totalSize > MAX_RESPONSE_SIZE) {
+                req.destroy();
+                resolve({ ok: false, status: 0, data: "", error: "Response body exceeded maximum size (10MB)" });
+                return;
+              }
+              data += chunk.toString();
             });
-          });
-        }
-      );
+            res.on("end", () => {
+              resolve({
+                ok: res.statusCode >= 200 && res.statusCode < 300,
+                status: res.statusCode,
+                data,
+              });
+            });
+          }
+        );
 
-      req.on("error", (err) => {
-        resolve({ ok: false, status: 0, data: "", error: err.message });
-      });
-      req.on("timeout", () => {
-        req.destroy();
-        resolve({ ok: false, status: 0, data: "", error: "Request timeout" });
-      });
+        req.on("error", (err) => {
+          resolve({ ok: false, status: 0, data: "", error: err.message });
+        });
+        req.on("timeout", () => {
+          req.destroy();
+          resolve({ ok: false, status: 0, data: "", error: "Request timeout" });
+        });
 
-      if (body) req.write(body);
-      req.end();
-    });
+        if (body) req.write(body);
+        req.end();
+      });
+    }
+
+    return doFetch(resolvedUrl, MAX_REDIRECTS);
   });
 
   // Execute a command on a terminal session (for Catty Agent)

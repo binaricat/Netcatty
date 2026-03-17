@@ -374,11 +374,11 @@ export async function executeUrlFetch(
   }
 
   try {
-    // skipHostCheck=true: url_fetch targets user-provided URLs from search results
+    // skipHostCheck=true, followRedirects=true: url_fetch targets user-provided URLs
     const resp = await aiFetch(url, 'GET', {
       'User-Agent': 'Netcatty-AI/1.0',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-    }, undefined, undefined, true) as BridgeFetchResponse;
+    }, undefined, undefined, true, true) as BridgeFetchResponse;
 
     if (!resp.ok) {
       return { ok: false, error: resp.error || `HTTP ${resp.status}` };
