@@ -156,7 +156,10 @@ function execViaPty(ptyStream, command, options) {
  * @param {number} [options.timeoutMs=60000] - Command timeout in milliseconds
  */
 function execViaChannel(sshClient, command, options) {
-  const { timeoutMs = 60000 } = options || {};
+  const {
+    timeoutMs = 60000,
+    trackForCancellation = null,
+  } = options || {};
 
   return new Promise((resolve) => {
     sshClient.exec(command, (err, execStream) => {
@@ -168,27 +171,40 @@ function execViaChannel(sshClient, command, options) {
         resolve({ ok: false, error: 'Failed to create exec stream', exitCode: 1 });
         return;
       }
+      const marker = `__NCMCP_CH_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
       let stdout = "";
       let stderr = "";
       let finished = false;
-      const timeoutId = setTimeout(() => {
-        if (finished) return;
-        finished = true;
-        try { execStream.close(); } catch { /* ignore */ }
-        const timeoutSec = Math.round(timeoutMs / 1000);
-        resolve({ ok: false, stdout, stderr, exitCode: -1, error: `Command timed out (${timeoutSec}s)` });
-      }, timeoutMs);
-      execStream.on("data", (data) => { stdout += data.toString(); });
-      execStream.stderr.on("data", (data) => { stderr += data.toString(); });
-      execStream.on("close", (code) => {
+      const finish = (result) => {
         if (finished) return;
         finished = true;
         clearTimeout(timeoutId);
+        if (trackForCancellation) {
+          trackForCancellation.delete(marker);
+        }
+        resolve(result);
+      };
+      const timeoutId = setTimeout(() => {
+        try { execStream.close(); } catch { /* ignore */ }
+        const timeoutSec = Math.round(timeoutMs / 1000);
+        finish({ ok: false, stdout, stderr, exitCode: -1, error: `Command timed out (${timeoutSec}s)` });
+      }, timeoutMs);
+      if (trackForCancellation) {
+        trackForCancellation.set(marker, {
+          cleanup: () => {
+            clearTimeout(timeoutId);
+            try { execStream.close(); } catch { /* ignore */ }
+          },
+        });
+      }
+      execStream.on("data", (data) => { stdout += data.toString(); });
+      execStream.stderr.on("data", (data) => { stderr += data.toString(); });
+      execStream.on("close", (code) => {
         // code is null when SSH disconnects or process is signal-terminated
         if (code == null) {
-          resolve({ ok: false, stdout, stderr, exitCode: -1, error: "Command terminated unexpectedly (connection lost or signal)" });
+          finish({ ok: false, stdout, stderr, exitCode: -1, error: "Command terminated unexpectedly (connection lost or signal)" });
         } else {
-          resolve({ ok: code === 0, stdout, stderr, exitCode: code });
+          finish({ ok: code === 0, stdout, stderr, exitCode: code });
         }
       });
     });

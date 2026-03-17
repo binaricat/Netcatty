@@ -214,7 +214,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/exec", { sessionId, command });
+    const result = await rpcCall("netcatty/exec", { ...scopeParams, sessionId, command });
     if (!result.ok) {
       return { content: [{ type: "text", text: `Error: ${result.error || "Command failed"}` }], isError: true };
     }
@@ -239,7 +239,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/terminalWrite", { sessionId, input });
+    const result = await rpcCall("netcatty/terminalWrite", { ...scopeParams, sessionId, input });
     if (!result.ok) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -256,7 +256,7 @@ server.tool(
     path: z.string().describe("The absolute path of the remote directory to list."),
   },
   async ({ sessionId, path }) => {
-    const result = await rpcCall("netcatty/sftpList", { sessionId, path });
+    const result = await rpcCall("netcatty/sftpList", { ...scopeParams, sessionId, path });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -275,7 +275,7 @@ server.tool(
   },
   async ({ sessionId, path, maxBytes }) => {
     const safeMaxBytes = Math.max(1, Math.min(10 * 1024 * 1024, Number(maxBytes) || 10000));
-    const result = await rpcCall("netcatty/sftpRead", { sessionId, path, maxBytes: safeMaxBytes });
+    const result = await rpcCall("netcatty/sftpRead", { ...scopeParams, sessionId, path, maxBytes: safeMaxBytes });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -297,7 +297,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/sftpWrite", { sessionId, path, content });
+    const result = await rpcCall("netcatty/sftpWrite", { ...scopeParams, sessionId, path, content });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -318,7 +318,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/sftpMkdir", { sessionId, path });
+    const result = await rpcCall("netcatty/sftpMkdir", { ...scopeParams, sessionId, path });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -339,7 +339,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/sftpRemove", { sessionId, path });
+    const result = await rpcCall("netcatty/sftpRemove", { ...scopeParams, sessionId, path });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -361,7 +361,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/sftpRename", { sessionId, oldPath, newPath });
+    const result = await rpcCall("netcatty/sftpRename", { ...scopeParams, sessionId, oldPath, newPath });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -378,7 +378,7 @@ server.tool(
     path: z.string().describe("The absolute path to stat."),
   },
   async ({ sessionId, path }) => {
-    const result = await rpcCall("netcatty/sftpStat", { sessionId, path });
+    const result = await rpcCall("netcatty/sftpStat", { ...scopeParams, sessionId, path });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }
@@ -401,7 +401,7 @@ server.tool(
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
-    const result = await rpcCall("netcatty/multiExec", { sessionIds, command, mode, stopOnError });
+    const result = await rpcCall("netcatty/multiExec", { ...scopeParams, sessionIds, command, mode, stopOnError });
     if (result.error) {
       return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
     }

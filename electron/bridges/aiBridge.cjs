@@ -1552,6 +1552,7 @@ function registerHandlers(ipcMain) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
     try {
+      mcpServerBridge.setChatSessionCancelled?.(chatSessionId, false);
       const { createACPProvider } = require("@mcpc-tech/acp-ai-provider");
       const { streamText, stepCountIs } = require("ai");
 
@@ -1774,6 +1775,7 @@ function registerHandlers(ipcMain) {
     // Cancel any active PTY executions (send Ctrl+C)
     mcpServerBridge.cancelAllPtyExecs();
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
+    mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
     const controller = acpActiveStreams.get(requestId);
     let cancelled = false;
     if (controller) {
@@ -1792,6 +1794,7 @@ function registerHandlers(ipcMain) {
   // Cleanup a specific ACP session (when chat session is deleted)
   ipcMain.handle("netcatty:ai:acp:cleanup", async (event, { chatSessionId }) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
     cleanupAcpProvider(chatSessionId);
     mcpServerBridge.cleanupScopedMetadata(chatSessionId);
     return { ok: true };

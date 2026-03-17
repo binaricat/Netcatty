@@ -55,6 +55,7 @@ let permissionMode = "confirm";
 
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
+const cancelledChatSessions = new Set();
 
 function cancelAllPtyExecs() {
   for (const [marker, entry] of activePtyExecs) {
@@ -114,6 +115,19 @@ function setPermissionMode(mode) {
 
 function getPermissionMode() {
   return permissionMode;
+}
+
+function setChatSessionCancelled(chatSessionId, cancelled) {
+  if (!chatSessionId) return;
+  if (cancelled) {
+    cancelledChatSessions.add(chatSessionId);
+  } else {
+    cancelledChatSessions.delete(chatSessionId);
+  }
+}
+
+function isChatSessionCancelled(chatSessionId) {
+  return Boolean(chatSessionId && cancelledChatSessions.has(chatSessionId));
 }
 
 /**
@@ -336,6 +350,10 @@ async function dispatch(method, params) {
     return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
   }
 
+  if (WRITE_METHODS.has(method) && isChatSessionCancelled(params?.chatSessionId)) {
+    return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
+  }
+
   // Scope validation for session-targeted operations
   if (method !== "netcatty/getContext" && params?.sessionId) {
     const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
@@ -458,7 +476,10 @@ function handleExec(params) {
 
   // If no PTY stream, fall back to exec channel (invisible to terminal)
   if (!ptyStream || typeof ptyStream.write !== "function") {
-    return execViaChannel(sshClient, command, { timeoutMs: commandTimeoutMs });
+    return execViaChannel(sshClient, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activePtyExecs,
+    });
   }
 
   // Execute via PTY stream so user sees the command in the terminal
@@ -781,6 +802,7 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
 function cleanupScopedMetadata(chatSessionId) {
   if (chatSessionId) {
     scopedMetadata.delete(chatSessionId);
+    cancelledChatSessions.delete(chatSessionId);
   }
 }
 
@@ -802,6 +824,7 @@ module.exports = {
   getMaxIterations,
   setPermissionMode,
   getPermissionMode,
+  setChatSessionCancelled,
   checkCommandSafety,
   updateSessionMetadata,
   getScopedSessionIds,
