@@ -100,6 +100,8 @@ function resolveProviderApiKey(providerId) {
 
 /** Placeholder token used by the renderer to avoid sending real API keys over IPC. */
 const API_KEY_PLACEHOLDER = "__IPC_SECURED__";
+/** Placeholder for web search API key — replaced in main process before HTTP request. */
+const WEB_SEARCH_KEY_PLACEHOLDER = "__WEB_SEARCH_KEY__";
 
 /**
  * Replace the API key placeholder in HTTP headers and URL with the real decrypted key.
@@ -378,12 +380,20 @@ function registerHandlers(ipcMain) {
     return { ok: true };
   });
 
-  // Decrypt the web search API key (called by renderer via IPC)
-  ipcMain.handle("netcatty:ai:web-search-decrypt-key", async (event) => {
-    if (!validateSenderOrSettings(event)) return { ok: false, key: "" };
-    if (!webSearchApiKeyEncrypted) return { ok: true, key: "" };
-    return { ok: true, key: decryptApiKeyValue(webSearchApiKeyEncrypted) };
-  });
+  /**
+   * Inject the decrypted web search API key into request headers.
+   * Replaces __WEB_SEARCH_KEY__ placeholder, similar to __IPC_SECURED__ for providers.
+   */
+  function injectWebSearchKeyIntoHeaders(headers) {
+    if (!webSearchApiKeyEncrypted || !headers) return headers;
+    const realKey = decryptApiKeyValue(webSearchApiKeyEncrypted);
+    if (!realKey) return headers;
+    const patched = {};
+    for (const [k, v] of Object.entries(headers)) {
+      patched[k] = typeof v === "string" ? v.replace(WEB_SEARCH_KEY_PLACEHOLDER, realKey) : v;
+    }
+    return patched;
+  }
 
   // Temporarily add a host to the fetch allowlist (used by settings model listing).
   // Entries are auto-removed after 30 seconds unless they belong to a synced provider.
@@ -661,7 +671,8 @@ function registerHandlers(ipcMain) {
     // Inject real API key if providerId is given (replaces placeholder in headers/URL)
     const patched = injectApiKeyIntoRequest(url, headers, providerId);
     const resolvedUrl = patched.url;
-    const resolvedHeaders = patched.headers;
+    // Also inject web search API key if placeholder is present
+    const resolvedHeaders = injectWebSearchKeyIntoHeaders(patched.headers);
 
     // Validate URL: block non-HTTP(S) schemes and internal network access
     try {

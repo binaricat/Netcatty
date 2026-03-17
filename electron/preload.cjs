@@ -997,9 +997,6 @@ const api = {
   aiSyncWebSearch: async (apiHost, apiKey) => {
     return ipcRenderer.invoke("netcatty:ai:sync-web-search", { apiHost, apiKey });
   },
-  aiWebSearchDecryptKey: async () => {
-    return ipcRenderer.invoke("netcatty:ai:web-search-decrypt-key");
-  },
   aiChatStream: async (requestId, url, headers, body, providerId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:stream", { requestId, url, headers, body, providerId });
   },

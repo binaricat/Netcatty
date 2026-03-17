@@ -199,7 +199,7 @@ export function createCattyTools(
       }),
     } : {}),
 
-    // -- URL Fetch (always available, requires approval in confirm mode) --
+    // -- URL Fetch (always available, read-only like sftp_read_file) --
     url_fetch: tool({
       description:
         'Fetch and read the content of a web URL. Use this when the user provides a URL and wants ' +
@@ -212,7 +212,6 @@ export function createCattyTools(
           .default(50000)
           .describe('Maximum number of characters to return. Defaults to 50000.'),
       }),
-      needsApproval: writeToolNeedsApproval,
       execute: async ({ url, maxLength }) => {
         return unwrap(await executeUrlFetch(deps, { url, maxLength }));
       },

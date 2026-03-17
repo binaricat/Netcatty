@@ -43,8 +43,8 @@ async function fetchJson(
 ): Promise<unknown> {
   const aiFetch = (bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).aiFetch;
   if (!aiFetch) throw new Error('aiFetch is not available on the bridge');
-  // skipHostCheck=true: search provider hosts are known-safe API endpoints
-  const resp = await aiFetch(url, method, headers, body, undefined, true) as BridgeFetchResponse;
+  // Search API hosts are added to the allowlist via aiSyncWebSearch, no skipHostCheck needed
+  const resp = await aiFetch(url, method, headers, body) as BridgeFetchResponse;
   if (!resp.ok) throw new Error(resp.error || `HTTP ${resp.status}`);
   return JSON.parse(resp.data || '{}');
 }
@@ -193,20 +193,12 @@ const PROVIDER_SEARCH_FNS: Record<string, typeof searchTavily> = {
 };
 
 /**
- * Decrypt the web search API key via main process IPC.
- * Keys are stored encrypted (enc:v1:) and synced to the main process,
- * which decrypts them server-side to avoid plaintext exposure in the renderer.
+ * Placeholder token for the web search API key.
+ * The renderer sends this in HTTP headers; the main process replaces it
+ * with the real decrypted key before the request is sent, so plaintext
+ * keys never enter the renderer.
  */
-async function decryptApiKey(bridge: NetcattyBridge): Promise<string> {
-  const decryptFn = (bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).aiWebSearchDecryptKey;
-  if (!decryptFn) return '';
-  try {
-    const result = await decryptFn() as { ok: boolean; key: string };
-    return result.ok ? result.key : '';
-  } catch {
-    return '';
-  }
-}
+const WEB_SEARCH_KEY_PLACEHOLDER = '__WEB_SEARCH_KEY__';
 
 export async function executeWebSearchProvider(
   bridge: NetcattyBridge,
@@ -216,7 +208,7 @@ export async function executeWebSearchProvider(
 ): Promise<WebSearchResult[]> {
   const fn = PROVIDER_SEARCH_FNS[config.providerId];
   if (!fn) throw new Error(`Unsupported web search provider: ${config.providerId}`);
-  // Decrypt the API key via main process (keys never leave main process in plaintext)
-  const decryptedKey = await decryptApiKey(bridge);
-  return fn(bridge, { ...config, apiKey: decryptedKey }, query, maxResults);
+  // Use placeholder — main process replaces with real decrypted key before HTTP request
+  const safeConfig = { ...config, apiKey: WEB_SEARCH_KEY_PLACEHOLDER };
+  return fn(bridge, safeConfig, query, maxResults);
 }
