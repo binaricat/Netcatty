@@ -43,6 +43,7 @@ import {
   decryptProviderSecrets,
   encryptProviderSecrets,
 } from '../persistence/secureFieldAdapter';
+import { mergeSyncPayloads } from '../../domain/syncMerge';
 
 const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
 
@@ -1081,30 +1082,78 @@ export class CloudSyncManager {
       }
 
       if (checkResult.conflict && checkResult.remoteFile) {
-        const remoteFile = checkResult.remoteFile;
-        // Remote is newer - conflict
-        this.state.syncState = 'CONFLICT';
-        this.state.currentConflict = {
-          provider,
-          localVersion: this.state.localVersion,
-          localUpdatedAt: this.state.localUpdatedAt,
-          localDeviceName: this.state.deviceName,
-          remoteVersion: remoteFile.meta.version,
-          remoteUpdatedAt: remoteFile.meta.updatedAt,
-          remoteDeviceName: remoteFile.meta.deviceName,
-        };
+        // Remote is newer — attempt three-way merge instead of blocking
+        try {
+          const remotePayload = await EncryptionService.decryptPayload(
+            checkResult.remoteFile,
+            this.masterPassword,
+          );
+          const base = this.loadSyncBase();
+          const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
-        this.emit({
-          type: 'CONFLICT_DETECTED',
-          conflict: this.state.currentConflict,
-        });
+          console.log('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
 
-        return {
-          success: false,
-          provider,
-          action: 'none',
-          conflictDetected: true,
-        };
+          // Encrypt and upload merged payload
+          const mergedSyncedFile = await EncryptionService.encryptPayload(
+            mergeResult.payload,
+            this.masterPassword,
+            this.state.deviceId,
+            this.state.deviceName,
+            packageJson.version,
+            checkResult.remoteFile.meta.version, // base on remote version
+          );
+
+          const uploadResult = await this.uploadToProvider(provider, adapter, mergedSyncedFile);
+
+          if (uploadResult.success) {
+            this.saveSyncBase(mergeResult.payload);
+            this.state.syncState = 'IDLE';
+
+            this.addSyncHistoryEntry({
+              timestamp: Date.now(),
+              provider,
+              action: 'merge',
+              success: true,
+              localVersion: mergedSyncedFile.meta.version,
+              remoteVersion: checkResult.remoteFile.meta.version,
+              deviceName: this.state.deviceName,
+            });
+
+            return {
+              ...uploadResult,
+              action: 'merge',
+              mergedPayload: mergeResult.payload,
+            };
+          }
+
+          return uploadResult;
+        } catch (mergeError) {
+          // Merge failed — fall back to conflict UI
+          console.error('[CloudSyncManager] Merge failed, falling back to conflict UI', mergeError);
+          const remoteFile = checkResult.remoteFile;
+          this.state.syncState = 'CONFLICT';
+          this.state.currentConflict = {
+            provider,
+            localVersion: this.state.localVersion,
+            localUpdatedAt: this.state.localUpdatedAt,
+            localDeviceName: this.state.deviceName,
+            remoteVersion: remoteFile.meta.version,
+            remoteUpdatedAt: remoteFile.meta.updatedAt,
+            remoteDeviceName: remoteFile.meta.deviceName,
+          };
+
+          this.emit({
+            type: 'CONFLICT_DETECTED',
+            conflict: this.state.currentConflict,
+          });
+
+          return {
+            success: false,
+            provider,
+            action: 'none',
+            conflictDetected: true,
+          };
+        }
       }
 
       // 2. Encrypt
@@ -1121,6 +1170,7 @@ export class CloudSyncManager {
       const result = await this.uploadToProvider(provider, adapter, syncedFile);
 
       if (result.success) {
+        this.saveSyncBase(payload);
         this.state.syncState = 'IDLE';
       } else {
         this.state.syncState = 'ERROR';
@@ -1182,6 +1232,7 @@ export class CloudSyncManager {
       this.state.remoteVersion = remoteFile.meta.version;
       this.state.remoteUpdatedAt = remoteFile.meta.updatedAt;
       this.saveSyncConfig();
+      this.saveSyncBase(payload);
       this.notifyStateChange(); // Notify UI of state change
 
       // Add to sync history
@@ -1240,8 +1291,10 @@ export class CloudSyncManager {
   /**
    * Sync to all connected providers
    */
-  async syncAllProviders(payload?: SyncPayload): Promise<Map<CloudProvider, SyncResult>> {
+  async syncAllProviders(inputPayload?: SyncPayload): Promise<Map<CloudProvider, SyncResult>> {
     const results = new Map<CloudProvider, SyncResult>();
+    let payload = inputPayload;
+    let wasMerged = false;
 
     if (!payload) {
       // Caller should provide payload from app state
@@ -1297,54 +1350,76 @@ export class CloudSyncManager {
     const conflict = checkResults.find((r) => !r.error && r.check?.conflict);
 
     if (conflict && conflict.check?.remoteFile) {
-      const { provider, check } = conflict;
-      const remoteFile = check.remoteFile!;
+      // Three-way merge instead of blocking
+      try {
+        const remotePayload = await EncryptionService.decryptPayload(
+          conflict.check.remoteFile,
+          this.masterPassword,
+        );
+        const base = this.loadSyncBase();
+        const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
-      this.state.syncState = 'CONFLICT';
-      this.state.currentConflict = {
-        provider: provider as CloudProvider,
-        localVersion: this.state.localVersion,
-        localUpdatedAt: this.state.localUpdatedAt,
-        localDeviceName: this.state.deviceName,
-        remoteVersion: remoteFile.meta.version,
-        remoteUpdatedAt: remoteFile.meta.updatedAt,
-        remoteDeviceName: remoteFile.meta.deviceName,
-      };
+        console.log('[CloudSyncManager] syncAll: three-way merge completed', mergeResult.summary);
 
-      this.emit({
-        type: 'CONFLICT_DETECTED',
-        conflict: this.state.currentConflict,
-      });
+        // Replace payload with merged payload for upload to all providers
+        payload = mergeResult.payload;
+        wasMerged = true;
 
-      // Populate results
-      for (const r of checkResults) {
-        if (r.error) {
-          results.set(r.provider as CloudProvider, {
-            success: false,
-            provider: r.provider as CloudProvider,
-            action: 'none',
-            error: r.error,
-          });
-          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
-          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
-        } else if (r.provider === provider) {
-          results.set(provider as CloudProvider, {
-            success: false,
-            provider: provider as CloudProvider,
-            action: 'none',
-            conflictDetected: true,
-          });
-        } else {
-          // Others are reset to connected
-          this.updateProviderStatus(r.provider as CloudProvider, 'connected');
-          results.set(r.provider as CloudProvider, {
-            success: true, // Should we mark as success if skipped?
-            provider: r.provider as CloudProvider,
-            action: 'none',
-          });
+        // Re-classify: all providers (including the conflicting one) should now upload
+        // Clear the conflict check result so all go through the upload path
+        for (const r of checkResults) {
+          if (r.check) r.check.conflict = false;
         }
+      } catch (mergeError) {
+        // Merge failed — fall back to conflict UI
+        console.error('[CloudSyncManager] syncAll: merge failed', mergeError);
+        const { provider, check } = conflict;
+        const remoteFile = check.remoteFile!;
+
+        this.state.syncState = 'CONFLICT';
+        this.state.currentConflict = {
+          provider: provider as CloudProvider,
+          localVersion: this.state.localVersion,
+          localUpdatedAt: this.state.localUpdatedAt,
+          localDeviceName: this.state.deviceName,
+          remoteVersion: remoteFile.meta.version,
+          remoteUpdatedAt: remoteFile.meta.updatedAt,
+          remoteDeviceName: remoteFile.meta.deviceName,
+        };
+
+        this.emit({
+          type: 'CONFLICT_DETECTED',
+          conflict: this.state.currentConflict,
+        });
+
+        for (const r of checkResults) {
+          if (r.error) {
+            results.set(r.provider as CloudProvider, {
+              success: false,
+              provider: r.provider as CloudProvider,
+              action: 'none',
+              error: r.error,
+            });
+            this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
+            this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+          } else if (r.provider === conflict.provider) {
+            results.set(r.provider as CloudProvider, {
+              success: false,
+              provider: r.provider as CloudProvider,
+              action: 'none',
+              conflictDetected: true,
+            });
+          } else {
+            this.updateProviderStatus(r.provider as CloudProvider, 'connected');
+            results.set(r.provider as CloudProvider, {
+              success: true,
+              provider: r.provider as CloudProvider,
+              action: 'none',
+            });
+          }
+        }
+        return results;
       }
-      return results;
     }
 
     // 3. Encrypt Once
@@ -1411,6 +1486,17 @@ export class CloudSyncManager {
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
       this.state.syncState = 'IDLE';
+      if (payload) this.saveSyncBase(payload);
+
+      // If a merge happened, attach the merged payload to successful results
+      // so callers can apply remote additions to local state
+      if (wasMerged && payload) {
+        for (const [p, r] of results) {
+          if (r.success) {
+            results.set(p, { ...r, action: 'merge', mergedPayload: payload });
+          }
+        }
+      }
     } else {
       this.state.syncState = 'ERROR';
       // lastError is set by uploadToProvider
@@ -1494,6 +1580,29 @@ export class CloudSyncManager {
     });
   }
 
+  // ==========================================================================
+  // Sync Base (three-way merge snapshot)
+  // ==========================================================================
+
+  saveSyncBase(payload: SyncPayload): void {
+    try {
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, payload);
+    } catch {
+      // Quota exceeded or other storage error — non-fatal
+      console.warn('[CloudSyncManager] Failed to save sync base');
+    }
+  }
+
+  loadSyncBase(): SyncPayload | null {
+    return this.loadFromStorage<SyncPayload>(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD) ?? null;
+  }
+
+  private clearSyncBase(): void {
+    try {
+      localStorage.removeItem(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+    } catch { /* ignore */ }
+  }
+
   private addSyncHistoryEntry(entry: Omit<SyncHistoryEntry, 'id'>): void {
     const newEntry: SyncHistoryEntry = {
       ...entry,
@@ -1521,6 +1630,7 @@ export class CloudSyncManager {
     this.state.syncHistory = [];
     this.saveSyncConfig();
     this.saveToStorage(SYNC_HISTORY_STORAGE_KEY, []);
+    this.clearSyncBase();
     this.notifyStateChange();
   }
 

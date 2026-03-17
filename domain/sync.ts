@@ -31,9 +31,10 @@ export type SyncState =
 /**
  * Conflict Resolution Strategy
  */
-export type ConflictResolution = 
-  | 'USE_REMOTE' // Download cloud data, overwrite local
-  | 'USE_LOCAL'; // Upload local data, overwrite cloud
+export type ConflictResolution =
+  | 'USE_REMOTE'   // Download cloud data, overwrite local
+  | 'USE_LOCAL'    // Upload local data, overwrite cloud
+  | 'AUTO_MERGED'; // Three-way merge was applied automatically
 
 // ============================================================================
 // Cloud Provider Types
@@ -275,10 +276,12 @@ export interface UnlockedMasterKey {
 export interface SyncResult {
   success: boolean;
   provider: CloudProvider;
-  action: 'upload' | 'download' | 'none';
+  action: 'upload' | 'download' | 'merge' | 'none';
   version?: number;
   error?: string;
   conflictDetected?: boolean;
+  /** Present when action === 'merge'; caller should apply this to update local state */
+  mergedPayload?: import('./sync').SyncPayload;
 }
 
 /**
@@ -312,7 +315,7 @@ export interface SyncHistoryEntry {
   id: string;
   timestamp: number;
   provider: CloudProvider;
-  action: 'upload' | 'download' | 'conflict_resolved';
+  action: 'upload' | 'download' | 'merge' | 'conflict_resolved';
   success: boolean;
   localVersion: number;
   remoteVersion?: number;
@@ -405,6 +408,7 @@ export const SYNC_STORAGE_KEYS = {
   PROVIDER_S3: 'netcatty_provider_s3_v1',
   PROVIDER_SMB: 'netcatty_provider_smb_v1',
   LOCAL_SYNC_META: 'netcatty_local_sync_meta_v1',
+  SYNC_BASE_PAYLOAD: 'netcatty_sync_base_payload_v1',
 } as const;
 
 // ============================================================================

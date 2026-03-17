@@ -169,6 +169,10 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           }
           throw new Error(result.error || t('sync.autoSync.syncFailed'));
         }
+        // Apply merged data if a three-way merge happened (contains remote additions)
+        if (result.mergedPayload) {
+          config.onApplyPayload(result.mergedPayload);
+        }
       }
 
       lastSyncedDataRef.current = dataHash;
@@ -208,17 +212,24 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     try {
       console.log('[AutoSync] Checking remote version...');
       const remotePayload = await sync.downloadFromProvider(connectedProvider);
-      
+
       if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
-        console.log('[AutoSync] Remote is newer, applying...');
-        config.onApplyPayload(remotePayload);
+        // Three-way merge: merge remote changes with local data instead of overwriting
+        const { mergeSyncPayloads } = await import('../../domain/syncMerge');
+        const base = manager.loadSyncBase();
+        const localPayload = buildPayload();
+        const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
+
+        console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
+        config.onApplyPayload(mergeResult.payload);
+        manager.saveSyncBase(mergeResult.payload);
         toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);
       // Don't show error toast for initial check - it's not critical
     }
-  }, [sync, config, t]);
+  }, [sync, config, buildPayload, t]);
   
   // Debounced auto-sync when data changes
   useEffect(() => {
