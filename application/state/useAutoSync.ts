@@ -211,18 +211,19 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     
     try {
       console.log('[AutoSync] Checking remote version...');
+      // Load base BEFORE downloading (downloadFromProvider overwrites the base)
+      const base = await manager.loadSyncBase();
       const remotePayload = await sync.downloadFromProvider(connectedProvider);
 
       if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
         // Three-way merge: merge remote changes with local data instead of overwriting
         const { mergeSyncPayloads } = await import('../../domain/syncMerge');
-        const base = manager.loadSyncBase();
         const localPayload = buildPayload();
         const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
 
         console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
         config.onApplyPayload(mergeResult.payload);
-        manager.saveSyncBase(mergeResult.payload);
+        await manager.saveSyncBase(mergeResult.payload);
         toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {

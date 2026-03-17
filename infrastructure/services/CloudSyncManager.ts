@@ -1088,7 +1088,7 @@ export class CloudSyncManager {
             checkResult.remoteFile,
             this.masterPassword,
           );
-          const base = this.loadSyncBase();
+          const base = await this.loadSyncBase();
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
           console.log('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
@@ -1106,7 +1106,7 @@ export class CloudSyncManager {
           const uploadResult = await this.uploadToProvider(provider, adapter, mergedSyncedFile);
 
           if (uploadResult.success) {
-            this.saveSyncBase(mergeResult.payload);
+            await this.saveSyncBase(mergeResult.payload);
             this.state.syncState = 'IDLE';
 
             this.addSyncHistoryEntry({
@@ -1170,7 +1170,7 @@ export class CloudSyncManager {
       const result = await this.uploadToProvider(provider, adapter, syncedFile);
 
       if (result.success) {
-        this.saveSyncBase(payload);
+        await this.saveSyncBase(payload);
         this.state.syncState = 'IDLE';
       } else {
         this.state.syncState = 'ERROR';
@@ -1232,7 +1232,7 @@ export class CloudSyncManager {
       this.state.remoteVersion = remoteFile.meta.version;
       this.state.remoteUpdatedAt = remoteFile.meta.updatedAt;
       this.saveSyncConfig();
-      this.saveSyncBase(payload);
+      await this.saveSyncBase(payload);
       this.notifyStateChange(); // Notify UI of state change
 
       // Add to sync history
@@ -1356,7 +1356,7 @@ export class CloudSyncManager {
           conflict.check.remoteFile,
           this.masterPassword,
         );
-        const base = this.loadSyncBase();
+        const base = await this.loadSyncBase();
         const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
         console.log('[CloudSyncManager] syncAll: three-way merge completed', mergeResult.summary);
@@ -1486,7 +1486,7 @@ export class CloudSyncManager {
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
       this.state.syncState = 'IDLE';
-      if (payload) this.saveSyncBase(payload);
+      if (payload) await this.saveSyncBase(payload);
 
       // If a merge happened, attach the merged payload to successful results
       // so callers can apply remote additions to local state
@@ -1584,17 +1584,36 @@ export class CloudSyncManager {
   // Sync Base (three-way merge snapshot)
   // ==========================================================================
 
-  saveSyncBase(payload: SyncPayload): void {
+  async saveSyncBase(payload: SyncPayload): Promise<void> {
+    const key = this.state.unlockedKey?.derivedKey;
+    if (!key) return;
     try {
-      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, payload);
+      const data = new TextEncoder().encode(JSON.stringify(payload));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+      const combined = new Uint8Array(iv.length + encrypted.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(encrypted), iv.length);
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD, btoa(String.fromCharCode(...combined)));
     } catch {
-      // Quota exceeded or other storage error — non-fatal
       console.warn('[CloudSyncManager] Failed to save sync base');
     }
   }
 
-  loadSyncBase(): SyncPayload | null {
-    return this.loadFromStorage<SyncPayload>(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD) ?? null;
+  async loadSyncBase(): Promise<SyncPayload | null> {
+    const key = this.state.unlockedKey?.derivedKey;
+    if (!key) return null;
+    try {
+      const encoded = this.loadFromStorage<string>(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+      if (!encoded || typeof encoded !== 'string') return null;
+      const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+      const iv = combined.slice(0, 12);
+      const ciphertext = combined.slice(12);
+      const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+      return JSON.parse(new TextDecoder().decode(decrypted));
+    } catch {
+      return null;
+    }
   }
 
   private clearSyncBase(): void {

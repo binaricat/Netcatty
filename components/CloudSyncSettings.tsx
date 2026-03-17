@@ -978,6 +978,10 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
             const result = await sync.syncToProvider(provider, payload);
 
             if (result.success) {
+                // Apply merged data if a three-way merge happened
+                if (result.mergedPayload && onApplyPayload) {
+                    onApplyPayload(result.mergedPayload);
+                }
                 toast.success(t('cloudSync.sync.success', { provider }));
             } else if (result.conflictDetected) {
                 // Conflict modal will show automatically
