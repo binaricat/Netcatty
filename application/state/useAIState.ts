@@ -433,6 +433,18 @@ export function useAIState() {
     });
   }, [persistSessions]);
 
+  const updateSessionExternalSessionId = useCallback((sessionId: string, externalSessionId: string | undefined) => {
+    setSessionsRaw(prev => {
+      const next = prev.map(s => (
+        s.id === sessionId
+          ? { ...s, externalSessionId, updatedAt: Date.now() }
+          : s
+      ));
+      debouncedPersistSessions();
+      return next;
+    });
+  }, [debouncedPersistSessions]);
+
   // Maximum messages per session to prevent unbounded memory growth
   const MAX_MESSAGES_PER_SESSION = 500;
 
@@ -589,6 +601,7 @@ export function useAIState() {
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,
+    updateSessionExternalSessionId,
     addMessageToSession,
     updateLastMessage,
     updateMessageById,

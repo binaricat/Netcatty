@@ -30,6 +30,11 @@ interface ChatMessageListProps {
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
+  const resolvedToolCallIds = new Set(
+    visibleMessages
+      .filter((m) => m.role === 'tool')
+      .flatMap((m) => m.toolResults?.map((tr) => tr.toolCallId) ?? []),
+  );
 
   if (visibleMessages.length === 0 && !isStreaming) {
     return (
@@ -107,6 +112,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                     name={tc.name}
                     args={tc.arguments}
                     isLoading={isThisStreaming && message.executionStatus === 'running'}
+                    isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
                   />
                 ))}
 

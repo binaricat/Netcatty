@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils';
-import { ChevronDown, ChevronRight, CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, CheckCircle2, Loader2, XCircle, Slash } from 'lucide-react';
 import type { HTMLAttributes } from 'react';
 import { useState } from 'react';
 
@@ -9,13 +9,16 @@ export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
   result?: unknown;
   isError?: boolean;
   isLoading?: boolean;
+  isInterrupted?: boolean;
 }
 
-export const ToolCall = ({ name, args, result, isError, isLoading, className, ...props }: ToolCallProps) => {
+export const ToolCall = ({ name, args, result, isError, isLoading, isInterrupted, className, ...props }: ToolCallProps) => {
   const [expanded, setExpanded] = useState(false);
 
   const statusIcon = isLoading ? (
     <Loader2 size={12} className="animate-spin text-blue-400/70" />
+  ) : isInterrupted ? (
+    <Slash size={12} className="text-muted-foreground/55" />
   ) : isError ? (
     <XCircle size={12} className="text-red-400/70" />
   ) : result !== undefined ? (
@@ -56,6 +59,14 @@ export const ToolCall = ({ name, args, result, isError, isLoading, className, ..
               )}>
                 {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
               </pre>
+            </div>
+          )}
+          {isInterrupted && result === undefined && (
+            <div className="px-3 py-2 border-t border-border/20">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/30 mb-1">Status</div>
+              <div className="text-[11px] text-muted-foreground/50">
+                Interrupted
+              </div>
             </div>
           )}
         </div>

@@ -56,6 +56,7 @@ interface AIChatSidePanelProps {
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
+  updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
   updateLastMessage: (
     sessionId: string,
@@ -127,6 +128,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   createSession,
   deleteSession,
   updateSessionTitle,
+  updateSessionExternalSessionId,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
@@ -457,6 +459,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       }
       try {
         await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachedImages, {
+          existingSessionId: currentSession?.externalSessionId,
+          updateExternalSessionId: updateSessionExternalSessionId,
           terminalSessions,
           providers,
           selectedAgentModel,
@@ -491,7 +495,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     ensureSession, addMessageToSession, updateMessageById, updateLastMessage,
     setStreamingForScope, setInputValue, clearImages,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
-    abortControllersRef, terminalSessions, providers, selectedAgentModel,
+    abortControllersRef, terminalSessions, providers, selectedAgentModel, updateSessionExternalSessionId,
     scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, getExecutorContext, setPendingApproval,
   ]);
 

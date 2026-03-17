@@ -100,6 +100,7 @@ export interface AISession {
   agentId: string;
   scope: AISessionScope;
   messages: ChatMessage[];
+  externalSessionId?: string;
   createdAt: number;
   updatedAt: number;
 }

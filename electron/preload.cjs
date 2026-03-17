@@ -1065,8 +1065,8 @@ const api = {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-permission-mode", { mode });
   },
   // ACP streaming
-  aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images) => {
-    return ipcRenderer.invoke("netcatty:ai:acp:stream", { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images });
+  aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, images) => {
+    return ipcRenderer.invoke("netcatty:ai:acp:stream", { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, images });
   },
   aiAcpCancel: async (requestId, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:acp:cancel", { requestId, chatSessionId });

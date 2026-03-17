@@ -57,6 +57,8 @@ const MAX_CONCURRENT_AGENTS = 5;
 const acpProviders = new Map();
 const acpActiveStreams = new Map();
 const acpRequestSessions = new Map();
+const acpForceProviderReset = new Set();
+const acpChatRuns = new Map();
 
 // ── Provider registry (synced from renderer, keys stay encrypted) ──
 const ENC_PREFIX = "enc:v1:";
@@ -151,6 +153,11 @@ function cleanupAcpProvider(chatSessionId) {
   }
   killTrackedProcessTree(rootPid, childPids);
   acpProviders.delete(chatSessionId);
+}
+
+function isActiveAcpRun(chatSessionId, requestId) {
+  const activeRun = acpChatRuns.get(chatSessionId);
+  return Boolean(activeRun && activeRun.requestId === requestId);
 }
 
 function getChildProcessTreePids(rootPid) {
@@ -1604,11 +1611,12 @@ function registerHandlers(ipcMain) {
 
   // ── ACP (Agent Client Protocol) streaming ──
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, images }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, images }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
+    let abortController = null;
     try {
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, false);
       const { createACPProvider } = require("@mcpc-tech/acp-ai-provider");
@@ -1661,9 +1669,22 @@ function registerHandlers(ipcMain) {
       mcpSnapshot.fingerprint = getCodexMcpFingerprint(mcpSnapshot.mcpServers);
 
       const currentPermissionMode = mcpServerBridge.getPermissionMode();
+      const existingRun = acpChatRuns.get(chatSessionId);
+      if (existingRun && existingRun.requestId !== requestId) {
+        existingRun.cancelRequested = true;
+        const existingController = acpActiveStreams.get(existingRun.requestId);
+        if (existingController) {
+          existingController.abort();
+          acpActiveStreams.delete(existingRun.requestId);
+        }
+        acpRequestSessions.delete(existingRun.requestId);
+        cleanupAcpProvider(chatSessionId);
+      }
 
       let providerEntry = acpProviders.get(chatSessionId);
+      const shouldForceProviderReset = acpForceProviderReset.has(chatSessionId);
       const shouldReuseProvider = Boolean(
+        !shouldForceProviderReset &&
         providerEntry &&
         providerEntry.acpCommand === acpCommand &&
         providerEntry.cwd === sessionCwd &&
@@ -1673,6 +1694,7 @@ function registerHandlers(ipcMain) {
       );
 
       if (!shouldReuseProvider) {
+        const resumeSessionId = providerEntry?.provider?.getSessionId?.() || existingSessionId || undefined;
         cleanupAcpProvider(chatSessionId);
 
         const agentEnv = { ...shellEnv };
@@ -1692,6 +1714,7 @@ function registerHandlers(ipcMain) {
             cwd: sessionCwd,
             mcpServers: mcpSnapshot.mcpServers,
           },
+          ...(resumeSessionId ? { existingSessionId: resumeSessionId } : {}),
           ...(isCodexAgent
             ? { authMethodId: apiKey ? "codex-api-key" : "chatgpt" }
             : {}),
@@ -1708,10 +1731,22 @@ function registerHandlers(ipcMain) {
         };
         acpProviders.set(chatSessionId, providerEntry);
       }
+      acpForceProviderReset.delete(chatSessionId);
 
-      const abortController = new AbortController();
+      const modelInstance = providerEntry.provider.languageModel(model || undefined);
+      await providerEntry.provider.initSession(providerEntry.provider.tools);
+      const activeProviderSessionId = providerEntry.provider.getSessionId?.() || null;
+      if (activeProviderSessionId) {
+        safeSend(event.sender, "netcatty:ai:acp:event", {
+          requestId,
+          event: { type: "session-id", sessionId: activeProviderSessionId },
+        });
+      }
+
+      abortController = new AbortController();
       acpActiveStreams.set(requestId, abortController);
       acpRequestSessions.set(requestId, chatSessionId);
+      acpChatRuns.set(chatSessionId, { requestId, cancelRequested: false });
 
       // Prepend context hint so the agent uses MCP tools for remote hosts
       const contextualPrompt =
@@ -1741,7 +1776,7 @@ function registerHandlers(ipcMain) {
       }
 
       const result = streamText({
-        model: providerEntry.provider.languageModel(model || undefined),
+        model: modelInstance,
         messages: [{
           role: "user",
           content: buildMessageContent(contextualPrompt, images),
@@ -1759,6 +1794,7 @@ function registerHandlers(ipcMain) {
         if (stallTimer) clearTimeout(stallTimer);
         stallTimer = setTimeout(() => {
           if (!abortController.signal.aborted) {
+            if (!isActiveAcpRun(chatSessionId, requestId)) return;
             safeSend(event.sender, "netcatty:ai:acp:event", {
               requestId,
               event: { type: "status", message: "Waiting for response from agent..." },
@@ -1771,6 +1807,7 @@ function registerHandlers(ipcMain) {
         while (true) {
           const { done, value: chunk } = await reader.read();
           if (done || abortController.signal.aborted) break;
+          if (!isActiveAcpRun(chatSessionId, requestId)) break;
           resetStallTimer();
           try {
             const serialized = serializeStreamChunk(chunk);
@@ -1794,6 +1831,9 @@ function registerHandlers(ipcMain) {
 
       // If stream completed with zero content, likely an auth or connection issue
       if (!hasContent && !abortController.signal.aborted) {
+        if (!isActiveAcpRun(chatSessionId, requestId)) {
+          return { ok: true };
+        }
         safeSend(event.sender, "netcatty:ai:acp:error", {
           requestId,
           error: isCodexAgent
@@ -1801,6 +1841,9 @@ function registerHandlers(ipcMain) {
             : "Agent returned an empty response.",
         });
       } else {
+        if (!isActiveAcpRun(chatSessionId, requestId)) {
+          return { ok: true };
+        }
         safeSend(event.sender, "netcatty:ai:acp:done", { requestId });
       }
     } catch (err) {
@@ -1823,6 +1866,13 @@ function registerHandlers(ipcMain) {
     } finally {
       acpActiveStreams.delete(requestId);
       acpRequestSessions.delete(requestId);
+      const activeRun = acpChatRuns.get(chatSessionId);
+      if (activeRun?.requestId === requestId) {
+        if (abortController?.signal?.aborted || activeRun.cancelRequested) {
+          cleanupAcpProvider(chatSessionId);
+        }
+        acpChatRuns.delete(chatSessionId);
+      }
     }
 
     return { ok: true };
@@ -1834,6 +1884,10 @@ function registerHandlers(ipcMain) {
     mcpServerBridge.cancelAllPtyExecs();
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
     mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
+    const activeRun = effectiveChatSessionId ? acpChatRuns.get(effectiveChatSessionId) : null;
+    if (activeRun && activeRun.requestId === requestId) {
+      activeRun.cancelRequested = true;
+    }
     const controller = acpActiveStreams.get(requestId);
     let cancelled = false;
     if (controller) {
@@ -1842,9 +1896,13 @@ function registerHandlers(ipcMain) {
       cancelled = true;
     }
     if (effectiveChatSessionId) {
+      acpForceProviderReset.add(effectiveChatSessionId);
       cleanupAcpProvider(effectiveChatSessionId);
-      cancelled = true;
     }
+    // Preserve the ACP provider session on stop so the next user message can
+    // continue within the same persisted conversation context. Full provider
+    // cleanup is handled by netcatty:ai:acp:cleanup when the chat is deleted.
+    if (effectiveChatSessionId) cancelled = true;
     acpRequestSessions.delete(requestId);
     return cancelled ? { ok: true } : { ok: false, error: "Stream not found" };
   });
@@ -1853,6 +1911,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:ai:acp:cleanup", async (event, { chatSessionId }) => {
     if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
     mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
+    acpForceProviderReset.delete(chatSessionId);
     cleanupAcpProvider(chatSessionId);
     mcpServerBridge.cleanupScopedMetadata(chatSessionId);
     return { ok: true };

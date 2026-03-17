@@ -228,6 +228,8 @@ export interface SendToCattyContext {
 
 /** Context values needed by sendToExternalAgent that change frequently. */
 export interface SendToExternalContext {
+  existingSessionId?: string;
+  updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
   terminalSessions: TerminalSessionInfo[];
   providers: ProviderConfig[];
   selectedAgentModel?: string;
@@ -613,6 +615,9 @@ export function useAIChatStreaming({
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({ ...msg, statusText: message }));
           },
+          onSessionId: (externalSessionId: string) => {
+            context.updateExternalSessionId?.(sessionId, externalSessionId);
+          },
           onError: (error: string) => {
             reportStreamError(sessionId, abortController.signal, error);
             setStreamingForScope(sessionId, false);
@@ -622,6 +627,7 @@ export function useAIChatStreaming({
         abortController.signal,
         agentProviderId,
         context.selectedAgentModel,
+        context.existingSessionId,
         attachedImages.length > 0 ? attachedImages : undefined,
       );
     } else {
