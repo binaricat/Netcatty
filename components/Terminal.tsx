@@ -543,7 +543,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const hostRules = host?.keywordHighlightRules ?? [];
         const globalEnabled = terminalSettingsRef.current?.keywordHighlightEnabled ?? false;
         const hostEnabled = host?.keywordHighlightEnabled;
-        const effectiveGlobalEnabled = hostEnabled === false ? false : globalEnabled;
+        const effectiveGlobalEnabled = globalEnabled;
         const effectiveHostEnabled = hostEnabled ?? false;
         const mergedRules = [
           ...(effectiveGlobalEnabled ? globalRules : []),
