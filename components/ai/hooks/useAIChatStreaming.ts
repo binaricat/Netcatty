@@ -10,7 +10,7 @@
  * - Error reporting
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import type {
   AIPermissionMode,
@@ -141,6 +141,20 @@ function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const sharedStreamingSessionIds = new Set<string>();
+const sharedAbortControllers = new Map<string, AbortController>();
+const streamingSubscribers = new Set<() => void>();
+
+function emitStreamingStoreChange(): void {
+  streamingSubscribers.forEach(listener => {
+    try {
+      listener();
+    } catch (err) {
+      console.error('[AIChatStreaming] Failed to notify streaming subscriber:', err);
+    }
+  });
+}
+
 // -------------------------------------------------------------------
 // Hook parameters
 // -------------------------------------------------------------------
@@ -230,17 +244,34 @@ export function useAIChatStreaming({
   updateMessageById,
 }: UseAIChatStreamingParams): UseAIChatStreamingReturn {
   // Per-session streaming state (keyed by sessionId)
-  const [streamingSessionIds, setStreamingSessions] = useState<Set<string>>(new Set());
+  const [streamingSessionIds, setStreamingSessions] = useState<Set<string>>(
+    () => new Set(sharedStreamingSessionIds),
+  );
+  useEffect(() => {
+    const syncFromStore = () => {
+      setStreamingSessions(new Set(sharedStreamingSessionIds));
+    };
+    streamingSubscribers.add(syncFromStore);
+    syncFromStore();
+    return () => {
+      streamingSubscribers.delete(syncFromStore);
+    };
+  }, []);
+
   const setStreamingForScope = useCallback((key: string, val: boolean) => {
-    setStreamingSessions(prev => {
-      const next = new Set(prev);
-      if (val) next.add(key); else next.delete(key);
-      return next;
-    });
+    const hadKey = sharedStreamingSessionIds.has(key);
+    if (val) {
+      sharedStreamingSessionIds.add(key);
+    } else {
+      sharedStreamingSessionIds.delete(key);
+    }
+    if (hadKey !== val) {
+      emitStreamingStoreChange();
+    }
   }, []);
 
   // Per-scope abort controllers
-  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const abortControllersRef = useRef<Map<string, AbortController>>(sharedAbortControllers);
 
   // -------------------------------------------------------------------
   // reportStreamError

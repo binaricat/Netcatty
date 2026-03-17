@@ -251,16 +251,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [webSearchConfig?.apiHost, webSearchConfig?.apiKey, webSearchConfig?.enabled]);
 
-  // Abort all active streams and clean up on unmount
+  // Preserve active streams across tab switches. The panel is conditionally
+  // mounted per tab, so unmounting here should not cancel in-flight work.
   useEffect(() => {
-    const controllers = abortControllersRef.current;
     return () => {
-      controllers.forEach(c => c.abort());
-      controllers.clear();
-      // Clear pending approval (clears timeout too via setPendingApproval)
-      setPendingApproval(null);
+      // no-op: stream lifecycle is managed by explicit stop/delete actions
     };
-  }, [abortControllersRef, setPendingApproval]);
+  }, []);
 
   // Agent discovery
   const {

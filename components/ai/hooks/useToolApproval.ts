@@ -31,6 +31,9 @@ function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+let sharedPendingApprovalContext: PendingApprovalContext | null = null;
+let sharedPendingApprovalTimeout: ReturnType<typeof setTimeout> | null = null;
+
 // -------------------------------------------------------------------
 // Hook parameters
 // -------------------------------------------------------------------
@@ -95,23 +98,23 @@ export function useToolApproval({
   t,
 }: UseToolApprovalParams): UseToolApprovalReturn {
   // Pending approval context — stores SDK state needed to resume after user approves/rejects
-  const pendingApprovalContextRef = useRef<PendingApprovalContext | null>(null);
-
-  // Timeout ID for auto-clearing stale pending approval (Issue #14)
-  const pendingApprovalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingApprovalContextRef = useRef<PendingApprovalContext | null>(sharedPendingApprovalContext);
+  pendingApprovalContextRef.current = sharedPendingApprovalContext;
 
   /** Set pending approval context with a 5-minute auto-clear timeout. */
   const setPendingApproval = useCallback((ctx: PendingApprovalContext | null) => {
     // Clear any existing timeout
-    if (pendingApprovalTimeoutRef.current) {
-      clearTimeout(pendingApprovalTimeoutRef.current);
-      pendingApprovalTimeoutRef.current = null;
+    if (sharedPendingApprovalTimeout) {
+      clearTimeout(sharedPendingApprovalTimeout);
+      sharedPendingApprovalTimeout = null;
     }
+    sharedPendingApprovalContext = ctx;
     pendingApprovalContextRef.current = ctx;
     if (ctx) {
-      pendingApprovalTimeoutRef.current = setTimeout(() => {
+      sharedPendingApprovalTimeout = setTimeout(() => {
         // Auto-clear after 5 minutes if user never responds
-        if (pendingApprovalContextRef.current?.sessionId === ctx.sessionId) {
+        if (sharedPendingApprovalContext?.sessionId === ctx.sessionId) {
+          sharedPendingApprovalContext = null;
           pendingApprovalContextRef.current = null;
           setStreamingForScope(ctx.sessionId, false);
           abortControllersRef.current.get(ctx.sessionId)?.abort();
@@ -129,7 +132,7 @@ export function useToolApproval({
             timestamp: Date.now(),
           });
         }
-        pendingApprovalTimeoutRef.current = null;
+        sharedPendingApprovalTimeout = null;
       }, 5 * 60 * 1000); // 5 minutes
     }
   }, [setStreamingForScope, abortControllersRef, updateLastMessage, addMessageToSession, t]);
