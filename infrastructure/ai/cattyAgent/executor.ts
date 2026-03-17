@@ -7,7 +7,6 @@ import {
   executeSftpWriteFile,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
-  executeMultiHostExecute,
   executeWebSearch,
   executeUrlFetch,
   type ToolDeps,
@@ -187,16 +186,6 @@ export function createToolExecutor(
         case 'workspace_get_session_info': {
           const r = executeWorkspaceGetSessionInfo(deps, {
             sessionId: String(args.sessionId || ''),
-          });
-          return toToolResult(toolCall.id, r);
-        }
-
-        case 'multi_host_execute': {
-          const r = await executeMultiHostExecute(deps, {
-            sessionIds: (args.sessionIds as string[]) || [],
-            command: String(args.command || ''),
-            mode: String(args.mode || 'parallel'),
-            stopOnError: Boolean(args.stopOnError),
           });
           return toToolResult(toolCall.id, r);
         }

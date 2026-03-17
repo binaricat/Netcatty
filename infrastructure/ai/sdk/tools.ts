@@ -12,7 +12,6 @@ import {
   executeSftpWriteFile,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
-  executeMultiHostExecute,
   executeWebSearch,
   executeUrlFetch,
   type ToolDeps,
@@ -144,39 +143,6 @@ export function createCattyTools(
       }),
       execute: async ({ sessionId }) => {
         return unwrap(executeWorkspaceGetSessionInfo(deps, { sessionId }));
-      },
-    }),
-
-    multi_host_execute: tool({
-      description:
-        'Execute a command on multiple hosts simultaneously or sequentially. ' +
-        'Use this for batch operations such as checking status across a fleet, ' +
-        'deploying updates, or running maintenance tasks on multiple servers.',
-      inputSchema: z.object({
-        sessionIds: z
-          .array(z.string())
-          .describe('Array of session IDs to execute the command on.'),
-        command: z.string().describe('The shell command to execute on each host.'),
-        mode: z
-          .enum(['parallel', 'sequential'])
-          .optional()
-          .default('parallel')
-          .describe(
-            'Execution mode. "parallel" runs on all hosts at once, ' +
-              '"sequential" runs one at a time. Defaults to "parallel".',
-          ),
-        stopOnError: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            'If true and mode is "sequential", stop executing on remaining hosts ' +
-              'when a command fails. Defaults to false.',
-          ),
-      }),
-      needsApproval: writeToolNeedsApproval,
-      execute: async ({ sessionIds, command, mode, stopOnError }) => {
-        return unwrap(await executeMultiHostExecute(deps, { sessionIds, command, mode, stopOnError }));
       },
     }),
 

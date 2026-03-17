@@ -661,13 +661,35 @@ export function useAIChatStreaming({
     try {
       // Issue #5: Build SDK messages including tool-call and tool-result messages
       // so the LLM maintains full conversation context
+      const allMessages = currentSession?.messages ?? [];
+
+      // Collect all tool call IDs that have a corresponding tool result,
+      // so we can skip orphaned tool calls (e.g. from user stopping mid-execution)
+      const resolvedToolCallIds = new Set<string>();
+      for (const m of allMessages) {
+        if (m.role === 'tool' && m.toolResults) {
+          for (const tr of m.toolResults) resolvedToolCallIds.add(tr.toolCallId);
+        }
+      }
+
+      const findToolName = (toolCallId: string): string => {
+        for (const prev of allMessages) {
+          if (prev.role === 'assistant' && prev.toolCalls) {
+            const tc = prev.toolCalls.find(t => t.id === toolCallId);
+            if (tc) return tc.name;
+          }
+        }
+        return 'unknown';
+      };
+
       const sdkMessages: Array<ModelMessage> = [];
-      for (const m of (currentSession?.messages ?? [])) {
+      for (const m of allMessages) {
         if (m.role === 'user') {
           sdkMessages.push({ role: 'user', content: m.content });
         } else if (m.role === 'assistant') {
           if (m.toolCalls?.length) {
-            // Build assistant content parts: text + tool calls
+            // Only include tool calls that have matching results
+            const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
             const contentParts: Array<
               { type: 'text'; text: string } |
               { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
@@ -675,7 +697,7 @@ export function useAIChatStreaming({
             if (m.content) {
               contentParts.push({ type: 'text' as const, text: m.content });
             }
-            for (const tc of m.toolCalls) {
+            for (const tc of resolvedCalls) {
               contentParts.push({
                 type: 'tool-call' as const,
                 toolCallId: tc.id,
@@ -683,23 +705,14 @@ export function useAIChatStreaming({
                 input: tc.arguments ?? {},
               });
             }
-            sdkMessages.push({ role: 'assistant', content: contentParts });
+            // If all tool calls were orphaned, just include the text content
+            if (contentParts.length > 0) {
+              sdkMessages.push({ role: 'assistant', content: contentParts.length === 1 && contentParts[0].type === 'text' ? (contentParts[0] as { type: 'text'; text: string }).text : contentParts });
+            }
           } else if (m.content) {
             sdkMessages.push({ role: 'assistant', content: m.content });
           }
         } else if (m.role === 'tool' && m.toolResults?.length) {
-          // Map tool results to SDK tool message format
-          // Gemini requires functionResponse.name to be non-empty,
-          // so we look up the toolName from the preceding assistant tool calls.
-          const findToolName = (toolCallId: string): string => {
-            for (const prev of currentSession?.messages ?? []) {
-              if (prev.role === 'assistant' && prev.toolCalls) {
-                const tc = prev.toolCalls.find(t => t.id === toolCallId);
-                if (tc) return tc.name;
-              }
-            }
-            return 'unknown';
-          };
           sdkMessages.push({
             role: 'tool',
             content: m.toolResults.map(tr => ({
