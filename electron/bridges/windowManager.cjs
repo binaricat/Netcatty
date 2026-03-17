@@ -907,9 +907,23 @@ async function openSettingsWindow(electronModule, options) {
   const backgroundColor = frontendBackground || "#1a1a1a";
   const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
 
+  // Center the settings window on the same display as the main window
+  const settingsWidth = 980;
+  const settingsHeight = 720;
+  let settingsX, settingsY;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const { screen } = electronModule;
+    const mainBounds = mainWindow.getBounds();
+    const display = screen.getDisplayMatching(mainBounds);
+    const { x: dx, y: dy, width: dw, height: dh } = display.workArea;
+    settingsX = Math.round(dx + (dw - settingsWidth) / 2);
+    settingsY = Math.round(dy + (dh - settingsHeight) / 2);
+  }
+
   const win = new BrowserWindow({
-    width: 980,
-    height: 720,
+    width: settingsWidth,
+    height: settingsHeight,
+    ...(settingsX !== undefined && settingsY !== undefined ? { x: settingsX, y: settingsY } : {}),
     minWidth: 820,
     minHeight: 600,
     backgroundColor,
