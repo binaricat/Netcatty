@@ -647,7 +647,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           try {
             const bridge = netcattyBridge.get();
             if (bridge?.readClipboardText) return await bridge.readClipboardText();
-          } catch {}
+          } catch { /* fall through to navigator.clipboard */ }
           return navigator.clipboard.readText();
         };
         const doRead = async () => {
