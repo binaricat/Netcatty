@@ -48,7 +48,7 @@ export interface ChatMessage {
   };
   /** Transient status text shown with shimmer effect (e.g. "Waiting for response...") */
   statusText?: string;
-  executionStatus?: 'pending' | 'approved' | 'rejected' | 'running' | 'completed' | 'failed';
+  executionStatus?: 'pending' | 'approved' | 'rejected' | 'running' | 'completed' | 'failed' | 'cancelled';
   pendingApproval?: {
     approvalId: string;
     toolCallId: string;

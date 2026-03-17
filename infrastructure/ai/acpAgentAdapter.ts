@@ -31,7 +31,7 @@ interface AcpBridge {
     model?: string,
     images?: ImageAttachment[],
   ): Promise<{ ok: boolean; error?: string }>;
-  aiAcpCancel(requestId: string): Promise<{ ok: boolean }>;
+  aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
   onAiAcpDone(requestId: string, cb: () => void): () => void;
   onAiAcpError(requestId: string, cb: (error: string) => void): () => void;
@@ -101,7 +101,7 @@ export async function runAcpAgentTurn(
       return;
     }
     const onAbort = () => {
-      acpBridge.aiAcpCancel(requestId).catch(() => {});
+      acpBridge.aiAcpCancel(requestId, chatSessionId).catch(() => {});
     };
     signal.addEventListener('abort', onAbort, { once: true });
     cleanupFns.push(() => signal.removeEventListener('abort', onAbort));

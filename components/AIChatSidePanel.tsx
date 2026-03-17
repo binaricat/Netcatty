@@ -492,7 +492,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     updateLastMessage(activeSessionId, msg => ({
       ...msg,
       statusText: '',
-      executionStatus: msg.executionStatus === 'running' ? 'completed' : msg.executionStatus,
+      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
     // Also clear any pending approval (clears timeout too via setPendingApproval)
     if (pendingApprovalContextRef.current?.sessionId === activeSessionId) {
