@@ -24,26 +24,6 @@ export interface NetcattyBridge {
     exitCode?: number;
     error?: string;
   }>;
-  aiTerminalWrite(
-    sessionId: string,
-    data: string,
-  ): Promise<{ ok: boolean; error?: string }>;
-  listSftp(
-    sftpId: string,
-    path: string,
-    encoding?: string,
-  ): Promise<unknown>;
-  readSftp(
-    sftpId: string,
-    path: string,
-    encoding?: string,
-  ): Promise<string>;
-  writeSftp(
-    sftpId: string,
-    path: string,
-    content: string,
-    encoding?: string,
-  ): Promise<void>;
 }
 
 // Workspace context provided to the executor
@@ -57,7 +37,6 @@ export interface ExecutorContext {
     os?: string;
     username?: string;
     connected: boolean;
-    sftpId?: string; // If SFTP is open for this session
   }>;
   // Workspace info
   workspaceId?: string;

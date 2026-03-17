@@ -10,8 +10,6 @@
 import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
 import type { AIPermissionMode, WebSearchConfig } from '../types';
 import { checkCommandSafety } from '../cattyAgent/safety';
-import { shellQuote } from '../shellQuote';
-import { limitConcurrency } from '../concurrency';
 import { executeWebSearchProvider } from './webSearchProviders';
 
 // ---------------------------------------------------------------------------
@@ -80,13 +78,14 @@ export async function executeTerminalExecute(
   }
 
   const result = await bridge.aiExec(sessionId, command);
-  if (!result.ok) {
-    // Include any partial output so the user/LLM can see what happened before failure
-    const parts = [result.error || 'Command failed'];
-    if (result.stdout) parts.push(`Output:\n${result.stdout}`);
+  // Real execution failures (timeout, disconnect, no stream) have an `error` field
+  if (!result.ok && result.error) {
+    const parts = [result.error];
+    if (result.stdout) parts.push(`Partial output:\n${result.stdout}`);
     if (result.stderr) parts.push(`Stderr:\n${result.stderr}`);
     return { ok: false, error: parts.join('\n\n') };
   }
+  // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge
   return {
     ok: true,
     data: {
@@ -95,124 +94,6 @@ export async function executeTerminalExecute(
       exitCode: result.exitCode ?? -1,
     },
   };
-}
-
-export async function executeTerminalSendInput(
-  deps: ToolDeps,
-  args: { sessionId: string; input: string },
-): Promise<ToolExecResult<{ sent: string }>> {
-  const { bridge, context, commandBlocklist, permissionMode } = deps;
-  const { sessionId, input } = args;
-
-  if (!sessionId || !input) {
-    return { ok: false, error: 'Missing sessionId or input' };
-  }
-  const scopeErr = validateSessionScope(context, sessionId);
-  if (scopeErr) return { ok: false, error: scopeErr };
-  if (isObserver(permissionMode)) {
-    return { ok: false, error: 'Observer mode: terminal input is disabled. Switch to Confirm or Auto mode.' };
-  }
-  const safety = checkCommandSafety(input, commandBlocklist);
-  if (safety.blocked) {
-    return { ok: false, error: `Input blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
-  }
-
-  const result = await bridge.aiTerminalWrite(sessionId, input);
-  if (!result.ok) {
-    return { ok: false, error: result.error || 'Failed to send input' };
-  }
-  return { ok: true, data: { sent: input } };
-}
-
-export async function executeSftpListDirectory(
-  deps: ToolDeps,
-  args: { sessionId: string; path: string },
-): Promise<ToolExecResult<{ files?: unknown; output?: string }>> {
-  const { bridge, context } = deps;
-  const { sessionId, path } = args;
-
-  const scopeErr = validateSessionScope(context, sessionId);
-  if (scopeErr) return { ok: false, error: scopeErr };
-
-  const session = context.sessions.find(s => s.sessionId === sessionId);
-  if (!session?.sftpId) {
-    // Fallback: use terminal exec with ls
-    const result = await bridge.aiExec(sessionId, `ls -la ${shellQuote(path)}`);
-    if (!result.ok) {
-      return { ok: false, error: result.error || 'Failed to list directory' };
-    }
-    return { ok: true, data: { output: result.stdout || '(empty directory)' } };
-  }
-
-  const files = await bridge.listSftp(session.sftpId, path);
-  return { ok: true, data: { files } };
-}
-
-export async function executeSftpReadFile(
-  deps: ToolDeps,
-  args: { sessionId: string; path: string; maxBytes?: number },
-): Promise<ToolExecResult<{ content: string }>> {
-  const { bridge, context } = deps;
-  const { sessionId, path } = args;
-
-  if (!sessionId || !path) {
-    return { ok: false, error: 'Missing sessionId or path' };
-  }
-  const scopeErr = validateSessionScope(context, sessionId);
-  if (scopeErr) return { ok: false, error: scopeErr };
-
-  const session = context.sessions.find(s => s.sessionId === sessionId);
-  if (!session?.sftpId) {
-    const clampedMaxBytes = Math.max(1, Math.min(10 * 1024 * 1024, Number(args.maxBytes) || 10000));
-    const result = await bridge.aiExec(sessionId, `head -c ${clampedMaxBytes} ${shellQuote(path)}`);
-    if (!result.ok) {
-      return { ok: false, error: result.error || 'Failed to read file' };
-    }
-    return { ok: true, data: { content: result.stdout || '(empty file)' } };
-  }
-
-  let content = await bridge.readSftp(session.sftpId, path);
-  const maxBytes = Math.max(1, Math.min(10 * 1024 * 1024, Number(args.maxBytes) || 10000));
-  if (content && content.length > maxBytes) {
-    content = content.slice(0, maxBytes);
-  }
-  return { ok: true, data: { content: content || '(empty file)' } };
-}
-
-export async function executeSftpWriteFile(
-  deps: ToolDeps,
-  args: { sessionId: string; path: string; content: string },
-): Promise<ToolExecResult<{ written: string }>> {
-  const { bridge, context, permissionMode } = deps;
-  const { sessionId, path, content } = args;
-
-  if (!sessionId || !path) {
-    return { ok: false, error: 'Missing sessionId or path' };
-  }
-  const scopeErr = validateSessionScope(context, sessionId);
-  if (scopeErr) return { ok: false, error: scopeErr };
-  if (isObserver(permissionMode)) {
-    return { ok: false, error: 'Observer mode: file writing is disabled. Switch to Confirm or Auto mode.' };
-  }
-
-  const session = context.sessions.find(s => s.sessionId === sessionId);
-  if (!session?.sftpId) {
-    // Fallback: base64 encoding to avoid heredoc injection
-    const b64 = typeof btoa === 'function'
-      ? btoa(unescape(encodeURIComponent(content)))
-      : Buffer.from(content, 'utf-8').toString('base64');
-    const result = await bridge.aiExec(
-      sessionId,
-      `echo ${shellQuote(b64)} | base64 -d > ${shellQuote(path)}`,
-    );
-    if (!result.ok) {
-      return { ok: false, error: result.error || 'Failed to write file' };
-    }
-    return { ok: true, data: { written: path } };
-  }
-
-  await bridge.writeSftp(session.sftpId, path, content);
-  return { ok: true, data: { written: path } };
 }
 
 export function executeWorkspaceGetInfo(
@@ -257,74 +138,6 @@ export function executeWorkspaceGetSessionInfo(
     return { ok: false, error: `Session not found: ${args.sessionId}` };
   }
   return { ok: true, data: session };
-}
-
-export async function executeMultiHostExecute(
-  deps: ToolDeps,
-  args: {
-    sessionIds: string[];
-    command: string;
-    mode?: string;
-    stopOnError?: boolean;
-  },
-): Promise<ToolExecResult<{ results: Record<string, { ok: boolean; output: string }> }>> {
-  const { bridge, context, commandBlocklist, permissionMode } = deps;
-  const { sessionIds, command, mode = 'parallel', stopOnError = false } = args;
-
-  if (sessionIds.length === 0 || !command) {
-    return { ok: false, error: 'Missing sessionIds or command' };
-  }
-
-  const currentValidIds = validSessionIds(context);
-  const outOfScope = sessionIds.filter(sid => !currentValidIds.has(sid));
-  if (outOfScope.length > 0) {
-    return {
-      ok: false,
-      error: `Sessions not in current scope: ${outOfScope.join(', ')}. Available sessions: ${[...currentValidIds].join(', ')}`,
-    };
-  }
-  if (isObserver(permissionMode)) {
-    return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode.' };
-  }
-  const safety = checkCommandSafety(command, commandBlocklist);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
-  }
-
-  const results: Record<string, { ok: boolean; output: string }> = {};
-
-  if (mode === 'sequential') {
-    for (const sid of sessionIds) {
-      const session = context.sessions.find(s => s.sessionId === sid);
-      const label = session?.label || sid;
-      const result = await bridge.aiExec(sid, command);
-      results[label] = {
-        ok: result.ok,
-        output: result.ok
-          ? result.stdout || '(no output)'
-          : `Error: ${result.error || result.stderr || 'Failed'}`,
-      };
-      if (!result.ok && stopOnError) break;
-    }
-  } else {
-    const tasks = sessionIds.map((sid) => () => {
-      const session = context.sessions.find(s => s.sessionId === sid);
-      const label = session?.label || sid;
-      return bridge.aiExec(sid, command).then(result => ({
-        label,
-        ok: result.ok,
-        output: result.ok
-          ? result.stdout || '(no output)'
-          : `Error: ${result.error || result.stderr || 'Failed'}`,
-      }));
-    });
-    const resolved = await limitConcurrency(tasks, 10);
-    for (const r of resolved) {
-      results[r.label] = { ok: r.ok, output: r.output };
-    }
-  }
-
-  return { ok: true, data: { results } };
 }
 
 // ---------------------------------------------------------------------------
