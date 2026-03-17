@@ -302,6 +302,15 @@ function mergeSettings(
           lVal as Record<string, unknown>,
           rVal as Record<string, unknown>,
         );
+      } else if (
+        Array.isArray(lVal) && Array.isArray(rVal) &&
+        lVal.length > 0 && rVal.length > 0 &&
+        typeof lVal[0] === 'object' && lVal[0] !== null && 'id' in lVal[0]
+      ) {
+        // Array of objects with `id` (e.g. customTerminalThemes) — entity merge
+        const bArr = Array.isArray(bVal) ? bVal as Array<{ id: string }> : [];
+        const result = mergeEntityArrays(bArr, lVal as Array<{ id: string }>, rVal as Array<{ id: string }>);
+        merged[key] = result.merged;
       } else if (lVal !== undefined) {
         merged[key] = lVal;
       }

@@ -875,6 +875,9 @@ export class CloudSyncManager {
     };
 
     await this.saveProviderConnection(provider, this.state.providers[provider]);
+    // Clear the merge base for this provider so reconnecting to a different
+    // account/resource doesn't reuse an unrelated snapshot
+    try { localStorage.removeItem(this.syncBaseKey(provider)); } catch { /* ignore */ }
     this.notifyStateChange(); // Ensure UI updates immediately after disconnect
   }
 

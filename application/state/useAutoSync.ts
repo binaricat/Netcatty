@@ -229,7 +229,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
         console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
         config.onApplyPayload(mergeResult.payload);
-        await manager.saveSyncBase(mergeResult.payload, connectedProvider);
+        // Don't save base here — the merged payload hasn't been uploaded yet.
+        // The follow-up auto-sync will upload it and save base on success.
         toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {
