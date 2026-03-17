@@ -556,6 +556,7 @@ function registerHandlers(ipcMain) {
       if (a === 192 && b === 168) return true;             // 192.168.0.0/16
       if (a === 127) return true;                          // 127.0.0.0/8
       if (a === 169 && b === 254) return true;             // 169.254.0.0/16 link-local
+      if (a === 100 && b >= 64 && b <= 127) return true;   // 100.64.0.0/10 CGNAT (Tailscale etc.)
       if (a === 0) return true;                            // 0.0.0.0/8
     }
     return false;
@@ -566,20 +567,6 @@ function registerHandlers(ipcMain) {
     // metadata endpoints (AWS, GCP, Azure)
     if (hostname === "metadata.google.internal") return true;
     return isPrivateIp(hostname);
-  }
-
-  /** Resolve hostname and check all IPs against private ranges (anti DNS-rebinding). */
-  async function hasPrivateResolution(hostname) {
-    if (isPrivateHost(hostname)) return true;
-    try {
-      // Use dns.lookup (OS resolver — respects /etc/hosts, mDNS, etc.)
-      // to match what http.request() actually connects to
-      const { address } = await dns.promises.lookup(hostname);
-      if (isPrivateIp(address)) return true;
-    } catch {
-      // DNS resolution failed — allow (will fail at connection time anyway)
-    }
-    return false;
   }
 
   function isAllowedFetchUrl(urlString, skipHostCheck) {
@@ -696,16 +683,19 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
-    // When skipHostCheck is set, resolve DNS and pin the IP to prevent TOCTOU/rebinding attacks
+    // When skipHostCheck is set, resolve DNS once, validate, and pin the result
     let pinnedLookup = null;
     if (skipHostCheck) {
       try {
         const parsed = new URL(resolvedUrl);
-        if (await hasPrivateResolution(parsed.hostname)) {
+        if (isPrivateHost(parsed.hostname)) {
           return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
         }
-        // Pin the resolved address so doFetch() reuses it instead of re-resolving
+        // Single DNS lookup: validate and pin in one step to prevent TOCTOU
         const { address, family } = await dns.promises.lookup(parsed.hostname);
+        if (isPrivateIp(address)) {
+          return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
+        }
         pinnedLookup = { address, family };
       } catch {}
     }
@@ -735,14 +725,18 @@ function registerHandlers(ipcMain) {
                 resolve({ ok: false, status: 0, data: "", error: "Redirect target is not allowed" });
                 return;
               }
-              // Async DNS rebinding check for redirect target
+              // Resolve, validate, and pin DNS for redirect target (single lookup)
               if (skipHostCheck) {
                 const redirectParsed = new URL(location);
-                hasPrivateResolution(redirectParsed.hostname).then((isPrivate) => {
-                  if (isPrivate) {
+                if (isPrivateHost(redirectParsed.hostname)) {
+                  resolve({ ok: false, status: 0, data: "", error: "Redirect target resolves to a private/internal address" });
+                  return;
+                }
+                dns.promises.lookup(redirectParsed.hostname).then(({ address, family }) => {
+                  if (isPrivateIp(address)) {
                     resolve({ ok: false, status: 0, data: "", error: "Redirect target resolves to a private/internal address" });
                   } else {
-                    resolve(doFetch(location, redirectsLeft - 1));
+                    resolve(doFetch(location, redirectsLeft - 1, { address, family }));
                   }
                 }).catch(() => resolve(doFetch(location, redirectsLeft - 1)));
               } else {
