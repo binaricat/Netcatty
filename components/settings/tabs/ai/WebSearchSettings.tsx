@@ -51,15 +51,24 @@ export const WebSearchSettings: React.FC<{
 
   const preset = WEB_SEARCH_PROVIDER_PRESETS[config.providerId];
 
-  // Decrypt API key on mount or when provider changes
+  // Decrypt API key on mount or when provider changes (with cancellation guard)
+  const decryptSeqRef = useRef(0);
   useEffect(() => {
     if (config.apiKey) {
+      const seq = ++decryptSeqRef.current;
       setIsDecrypting(true);
       decryptField(config.apiKey)
-        .then((decrypted) => setApiKeyInput(decrypted ?? ""))
-        .catch(() => setApiKeyInput(config.apiKey ?? ""))
-        .finally(() => setIsDecrypting(false));
+        .then((decrypted) => {
+          if (decryptSeqRef.current === seq) setApiKeyInput(decrypted ?? "");
+        })
+        .catch(() => {
+          if (decryptSeqRef.current === seq) setApiKeyInput(config.apiKey ?? "");
+        })
+        .finally(() => {
+          if (decryptSeqRef.current === seq) setIsDecrypting(false);
+        });
     } else {
+      decryptSeqRef.current++;
       setApiKeyInput("");
     }
   }, [config.apiKey, config.providerId]);

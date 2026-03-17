@@ -717,11 +717,28 @@ function registerHandlers(ipcMain) {
           parsedUrl,
           { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
           (res) => {
-            // Handle redirects
+            // Handle redirects — revalidate each hop against SSRF guards
             if (redirectsLeft > 0 && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               const location = new URL(res.headers.location, fetchUrl).href;
               res.resume(); // drain the response
-              resolve(doFetch(location, redirectsLeft - 1));
+              // Revalidate the redirect target with the same guards as the initial URL
+              if (!isAllowedFetchUrl(location, !!skipHostCheck)) {
+                resolve({ ok: false, status: 0, data: "", error: "Redirect target is not allowed" });
+                return;
+              }
+              // Async DNS rebinding check for redirect target
+              if (skipHostCheck) {
+                const redirectParsed = new URL(location);
+                hasPrivateResolution(redirectParsed.hostname).then((isPrivate) => {
+                  if (isPrivate) {
+                    resolve({ ok: false, status: 0, data: "", error: "Redirect target resolves to a private/internal address" });
+                  } else {
+                    resolve(doFetch(location, redirectsLeft - 1));
+                  }
+                }).catch(() => resolve(doFetch(location, redirectsLeft - 1)));
+              } else {
+                resolve(doFetch(location, redirectsLeft - 1));
+              }
               return;
             }
             let data = "";

@@ -364,8 +364,8 @@ export async function executeUrlFetch(
   const { bridge } = deps;
   const { url } = args;
 
-  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
-    return { ok: false, error: 'Invalid URL. Must start with http:// or https://' };
+  if (!url || !url.startsWith('https://')) {
+    return { ok: false, error: 'Invalid URL. Must start with https://' };
   }
 
   const aiFetch = (bridge as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>).aiFetch;

@@ -209,7 +209,7 @@ export function createCattyTools(
         'Fetch and read the content of a web URL. Use this when the user provides a URL and wants ' +
         'you to read or summarize its content. Returns the page content as text.',
       inputSchema: z.object({
-        url: z.string().describe('The URL to fetch. Must start with http:// or https://.'),
+        url: z.string().describe('The HTTPS URL to fetch. Must start with https://.'),
         maxLength: z
           .number()
           .optional()
