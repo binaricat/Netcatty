@@ -15,7 +15,8 @@ export const ModelSelector: React.FC<{
   placeholder?: string;
   apiKey?: string;
   providerId?: AIProviderId;
-}> = ({ value, onChange, baseURL, modelsEndpoint, placeholder, apiKey, providerId }) => {
+  skipTLSVerify?: boolean;
+}> = ({ value, onChange, baseURL, modelsEndpoint, placeholder, apiKey, providerId, skipTLSVerify }) => {
   const { t } = useI18n();
   const [models, setModels] = useState<FetchedModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -50,7 +51,7 @@ export const ModelSelector: React.FC<{
           headers["Authorization"] = `Bearer ${apiKey}`;
         }
       }
-      const result = await bridge.aiFetch(url, "GET", headers);
+      const result = await bridge.aiFetch(url, "GET", headers, undefined, undefined, undefined, undefined, skipTLSVerify);
       if (!result.ok) {
         setError(`Failed to fetch models (${result.error || "unknown error"})`);
         return;
@@ -68,7 +69,7 @@ export const ModelSelector: React.FC<{
     } finally {
       setIsLoading(false);
     }
-  }, [baseURL, modelsEndpoint, apiKey, providerId]);
+  }, [baseURL, modelsEndpoint, apiKey, providerId, skipTLSVerify]);
 
   // Auto-fetch when dropdown first opens
   useEffect(() => {

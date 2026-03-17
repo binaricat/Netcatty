@@ -670,7 +670,7 @@ function registerHandlers(ipcMain) {
   });
 
   // Non-streaming request (for model listing, validation, etc.)
-  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck, followRedirects }) => {
+  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify }) => {
     // Validate IPC sender — settings window needs this for model listing
     if (!validateSenderOrSettings(event)) {
       return { ok: false, status: 0, data: "", error: "Unauthorized IPC sender" };
@@ -708,7 +708,7 @@ function registerHandlers(ipcMain) {
         const lib = isHttps ? https : http;
 
         const fetchOpts = { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 };
-        if (shouldSkipTLSVerify(providerId) && isHttps) fetchOpts.rejectUnauthorized = false;
+        if ((skipTLSVerify || shouldSkipTLSVerify(providerId)) && isHttps) fetchOpts.rejectUnauthorized = false;
         const req = lib.request(parsedUrl, fetchOpts,
           (res) => {
             // Handle redirects

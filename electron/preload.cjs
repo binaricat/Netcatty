@@ -1003,8 +1003,8 @@ const api = {
   aiChatCancel: async (requestId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:cancel", { requestId });
   },
-  aiFetch: async (url, method, headers, body, providerId, skipHostCheck, followRedirects) => {
-    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck, followRedirects });
+  aiFetch: async (url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify) => {
+    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify });
   },
   aiAllowlistAddHost: async (baseURL) => {
     return ipcRenderer.invoke("netcatty:ai:allowlist:add-host", { baseURL });
