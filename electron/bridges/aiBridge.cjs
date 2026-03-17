@@ -138,6 +138,8 @@ function injectApiKeyIntoRequest(url, headers, providerId) {
 function cleanupAcpProvider(chatSessionId) {
   const entry = acpProviders.get(chatSessionId);
   if (!entry) return;
+  const rootPid = entry.provider?.model?.agentProcess?.pid;
+  const childPids = getChildProcessTreePids(rootPid);
   try {
     if (typeof entry.provider.forceCleanup === "function") {
       entry.provider.forceCleanup();
@@ -147,7 +149,63 @@ function cleanupAcpProvider(chatSessionId) {
   } catch (err) {
     console.warn("[ACP] Provider cleanup failed for session", chatSessionId, err?.message || err);
   }
+  killTrackedProcessTree(rootPid, childPids);
   acpProviders.delete(chatSessionId);
+}
+
+function getChildProcessTreePids(rootPid) {
+  if (!Number.isInteger(rootPid) || rootPid <= 0) return [];
+  if (process.platform === "win32") return [];
+
+  const discovered = new Set();
+  const queue = [rootPid];
+
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      const output = execFileSync("pgrep", ["-P", String(pid)], { encoding: "utf8" }).trim();
+      if (!output) continue;
+      for (const line of output.split(/\s+/)) {
+        const childPid = Number(line);
+        if (!Number.isInteger(childPid) || childPid <= 0 || discovered.has(childPid)) continue;
+        discovered.add(childPid);
+        queue.push(childPid);
+      }
+    } catch {
+      // No child processes or pgrep unavailable.
+    }
+  }
+
+  return Array.from(discovered);
+}
+
+function killTrackedProcessTree(rootPid, childPids) {
+  if (process.platform === "win32") {
+    if (Number.isInteger(rootPid) && rootPid > 0) {
+      try {
+        execFileSync("taskkill", ["/PID", String(rootPid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+        // Ignore kill failures; the process may have already exited.
+      }
+    }
+    return;
+  }
+
+  const pids = [...(Array.isArray(childPids) ? childPids : [])];
+  if (Number.isInteger(rootPid) && rootPid > 0) {
+    pids.push(rootPid);
+  }
+
+  // Kill children before the wrapper so orphaned grandchildren do not survive.
+  for (const pid of pids.reverse()) {
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Ignore kill failures; the process may have already exited.
+    }
+  }
 }
 
 /**
