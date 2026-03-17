@@ -7,7 +7,6 @@
 
 const https = require("node:https");
 const http = require("node:http");
-const dns = require("node:dns");
 const { URL } = require("node:url");
 const { spawn, execFileSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
@@ -683,65 +682,29 @@ function registerHandlers(ipcMain) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
-    // When skipHostCheck is set, resolve DNS once, validate, and pin the result
-    let pinnedLookup = null;
-    if (skipHostCheck) {
-      try {
-        const parsed = new URL(resolvedUrl);
-        if (isPrivateHost(parsed.hostname)) {
-          return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
-        }
-        // Single DNS lookup: validate and pin in one step to prevent TOCTOU
-        const { address, family } = await dns.promises.lookup(parsed.hostname);
-        if (isPrivateIp(address)) {
-          return { ok: false, status: 0, data: "", error: "URL resolves to a private/internal address" };
-        }
-        pinnedLookup = { address, family };
-      } catch {}
-    }
-
     const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB safety limit
     const MAX_REDIRECTS = followRedirects ? 5 : 0;
 
-    function doFetch(fetchUrl, redirectsLeft, lookup) {
+    function doFetch(fetchUrl, redirectsLeft) {
       return new Promise((resolve) => {
         const parsedUrl = new URL(fetchUrl);
         const isHttps = parsedUrl.protocol === "https:";
         const lib = isHttps ? https : http;
 
-        // Pin DNS result to prevent TOCTOU/rebinding between validation and connection
-        const reqOpts = { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 };
-        if (lookup) {
-          reqOpts.lookup = (hostname, opts, cb) => cb(null, lookup.address, lookup.family);
-        }
-        const req = lib.request(parsedUrl, reqOpts,
+        const req = lib.request(
+          parsedUrl,
+          { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
           (res) => {
-            // Handle redirects — revalidate each hop against SSRF guards
+            // Handle redirects
             if (redirectsLeft > 0 && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               const location = new URL(res.headers.location, fetchUrl).href;
               res.resume(); // drain the response
-              // Revalidate the redirect target with the same guards as the initial URL
+              // Revalidate the redirect target hostname (blocks localhost/metadata etc.)
               if (!isAllowedFetchUrl(location, !!skipHostCheck)) {
                 resolve({ ok: false, status: 0, data: "", error: "Redirect target is not allowed" });
                 return;
               }
-              // Resolve, validate, and pin DNS for redirect target (single lookup)
-              if (skipHostCheck) {
-                const redirectParsed = new URL(location);
-                if (isPrivateHost(redirectParsed.hostname)) {
-                  resolve({ ok: false, status: 0, data: "", error: "Redirect target resolves to a private/internal address" });
-                  return;
-                }
-                dns.promises.lookup(redirectParsed.hostname).then(({ address, family }) => {
-                  if (isPrivateIp(address)) {
-                    resolve({ ok: false, status: 0, data: "", error: "Redirect target resolves to a private/internal address" });
-                  } else {
-                    resolve(doFetch(location, redirectsLeft - 1, { address, family }));
-                  }
-                }).catch(() => resolve(doFetch(location, redirectsLeft - 1)));
-              } else {
-                resolve(doFetch(location, redirectsLeft - 1));
-              }
+              resolve(doFetch(location, redirectsLeft - 1));
               return;
             }
             let data = "";
@@ -778,7 +741,7 @@ function registerHandlers(ipcMain) {
       });
     }
 
-    return doFetch(resolvedUrl, MAX_REDIRECTS, pinnedLookup);
+    return doFetch(resolvedUrl, MAX_REDIRECTS);
   });
 
   // Execute a command on a terminal session (for Catty Agent)
