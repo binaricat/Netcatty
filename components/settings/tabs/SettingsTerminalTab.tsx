@@ -633,7 +633,7 @@ export default function SettingsTerminalTab(props: {
               { value: "meta", label: t("settings.terminal.behavior.linkModifier.meta") },
             ]}
             onChange={(v) => updateTerminalSetting("linkModifier", v as LinkModifier)}
-            className="w-48"
+            className="w-40"
           />
         </SettingRow>
       </div>
