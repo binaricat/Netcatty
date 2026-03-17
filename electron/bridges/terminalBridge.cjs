@@ -222,7 +222,10 @@ function startLocalSession(event, payload) {
   proc.onExit((evt) => {
     sessions.delete(sessionId);
     const contents = electronModule.webContents.fromId(session.webContentsId);
-    contents?.send("netcatty:exit", { sessionId, ...evt, reason: "exited" });
+    // Only treat as user exit if shell exited normally (code 0, no signal).
+    // Signal kills or crashes should show the disconnected UI.
+    const reason = evt.exitCode === 0 && !evt.signal ? "exited" : "error";
+    contents?.send("netcatty:exit", { sessionId, ...evt, reason });
   });
 
   return { sessionId };
