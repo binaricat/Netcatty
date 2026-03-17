@@ -107,7 +107,7 @@ function execViaPty(ptyStream, command, options) {
         cleaned = cleaned.replace(/__NCMCP_[^\r\n]*[\r\n]*/g, "").trim();
       }
       resolve({
-        ok: exitCode === 0 || exitCode === null,
+        ok: true,
         stdout: cleaned,
         stderr: "",
         exitCode: exitCode ?? 0,
@@ -184,7 +184,7 @@ function execViaChannel(sshClient, command, options) {
         if (finished) return;
         finished = true;
         clearTimeout(timeoutId);
-        resolve({ ok: code === 0, stdout, stderr, exitCode: code });
+        resolve({ ok: true, stdout, stderr, exitCode: code });
       });
     });
   });

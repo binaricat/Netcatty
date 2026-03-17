@@ -81,7 +81,11 @@ export async function executeTerminalExecute(
 
   const result = await bridge.aiExec(sessionId, command);
   if (!result.ok) {
-    return { ok: false, error: result.error || 'Command failed' };
+    // Include any partial output so the user/LLM can see what happened before failure
+    const parts = [result.error || 'Command failed'];
+    if (result.stdout) parts.push(`Output:\n${result.stdout}`);
+    if (result.stderr) parts.push(`Stderr:\n${result.stderr}`);
+    return { ok: false, error: parts.join('\n\n') };
   }
   return {
     ok: true,
