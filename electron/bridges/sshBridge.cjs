@@ -1017,10 +1017,15 @@ async function startSSHSession(event, options) {
               bufferData(decoder.write(data));
             });
 
-            // Capture the real exit code from the remote process
+            // Capture the real exit code from the remote process.
+            // "exit" fires when the remote shell/process exits normally;
+            // "close" fires whenever the channel closes (could be network drop).
+            // Only treat it as user-initiated exit if "exit" actually fired.
             let streamExitCode = 0;
+            let streamExited = false;
             stream.on("exit", (code) => {
               streamExitCode = typeof code === "number" ? code : 0;
+              streamExited = true;
             });
 
             stream.on("close", () => {
@@ -1030,7 +1035,7 @@ async function startSSHSession(event, options) {
               }
               flushBuffer();
               const contents = event.sender;
-              safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason: "exited" });
+              safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason: streamExited ? "exited" : "closed" });
               sessions.delete(sessionId);
               sessionEncodings.delete(sessionId);
               sessionDecoders.delete(sessionId);
