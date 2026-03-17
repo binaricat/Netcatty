@@ -516,8 +516,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const handleDeleteSession = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
-      const bridge = getNetcattyBridge();
-      void bridge?.aiAcpCleanup?.(sessionId).catch(() => {});
       deleteSession(sessionId, scopeKey);
       // Active session clearing is handled by deleteSession with scopeKey
     },

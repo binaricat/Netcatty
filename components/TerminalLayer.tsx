@@ -936,15 +936,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const aiState = useAIState();
   const { cleanupOrphanedSessions } = aiState;
 
-  // On mount: clean up orphaned AI sessions after a short delay
-  // (allows sessions/workspaces to fully initialize)
-  const hasCleanedUpRef = useRef(false);
   useEffect(() => {
-    if (hasCleanedUpRef.current) return;
-    // Guard: wait until both sessions AND workspaces have loaded to avoid
-    // racing with partial state (e.g. sessions loaded but workspaces not yet).
-    if (sessions.length === 0 || workspaces.length === 0) return;
-    hasCleanedUpRef.current = true;
     const activeIds = new Set<string>();
     for (const s of sessions) activeIds.add(s.id);
     for (const w of workspaces) activeIds.add(w.id);

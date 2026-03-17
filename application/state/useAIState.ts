@@ -32,6 +32,14 @@ function getAIBridge() {
   return (window as unknown as { netcatty?: Record<string, (...args: unknown[]) => unknown> }).netcatty;
 }
 
+function cleanupAcpSessions(sessionIds: string[]) {
+  const bridge = getAIBridge();
+  if (!bridge?.aiAcpCleanup || sessionIds.length === 0) return;
+  for (const sessionId of sessionIds) {
+    void bridge.aiAcpCleanup(sessionId).catch(() => {});
+  }
+}
+
 
 /** Maximum number of sessions to keep in localStorage. */
 const MAX_STORED_SESSIONS = 50;
@@ -376,6 +384,7 @@ export function useAIState() {
   }, [defaultAgentId, persistSessions, setActiveSessionId]);
 
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
+    cleanupAcpSessions([sessionId]);
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
@@ -394,6 +403,10 @@ export function useAIState() {
   }, [persistSessions]);
 
   const deleteSessionsByTarget = useCallback((scopeType: 'terminal' | 'workspace', targetId: string) => {
+    const removedSessionIds = sessionsRef.current
+      .filter(s => s.scope.type === scopeType && s.scope.targetId === targetId)
+      .map(s => s.id);
+    cleanupAcpSessions(removedSessionIds);
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
@@ -484,6 +497,10 @@ export function useAIState() {
   }, [persistSessions]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
+    const removedSessionIds = sessionsRef.current
+      .filter(s => s.scope.targetId && !activeTargetIds.has(s.scope.targetId))
+      .map(s => s.id);
+    cleanupAcpSessions(removedSessionIds);
     setSessionsRaw(prev => {
       const next = prev.filter(s => {
         // Keep sessions without a targetId (global scope)
