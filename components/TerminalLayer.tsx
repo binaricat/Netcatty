@@ -864,10 +864,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [handleOpenAI]);
 
   // Execute snippet on the focused terminal session
-  const handleSnippetClickForFocusedSession = useCallback((command: string) => {
+  const handleSnippetClickForFocusedSession = useCallback((command: string, noAutoRun?: boolean) => {
     const sessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id;
     if (!sessionId) return;
-    const payload = `${command}\r`;
+    const payload = noAutoRun ? command : `${command}\r`;
     terminalBackend.writeToSession(sessionId, payload);
     // Re-focus the terminal so the user can interact immediately
     const pane = document.querySelector(`[data-session-id="${sessionId}"]`);

@@ -302,6 +302,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         package: editingSnippet.package || '',
         targets: targetSelection,
         shortkey: editingSnippet.shortkey,
+        noAutoRun: editingSnippet.noAutoRun,
       });
       setRightPanelMode('none');
     }

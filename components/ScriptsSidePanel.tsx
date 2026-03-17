@@ -16,7 +16,7 @@ import { ScrollArea } from './ui/scroll-area';
 interface ScriptsSidePanelProps {
   snippets: Snippet[];
   packages: string[];
-  onSnippetClick: (command: string) => void;
+  onSnippetClick: (command: string, noAutoRun?: boolean) => void;
   isVisible?: boolean;
 }
 
@@ -115,8 +115,8 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     });
   }, [selectedPackage]);
 
-  const handleSnippetClick = useCallback((command: string) => {
-    onSnippetClick(command);
+  const handleSnippetClick = useCallback((command: string, noAutoRun?: boolean) => {
+    onSnippetClick(command, noAutoRun);
   }, [onSnippetClick]);
 
   if (!isVisible) return null;
@@ -196,7 +196,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
           {displayedSnippets.map((s) => (
             <button
               key={s.id}
-              onClick={() => handleSnippetClick(s.command)}
+              onClick={() => handleSnippetClick(s.command, s.noAutoRun)}
               className="w-full text-left px-3 py-2 hover:bg-accent/50 transition-colors flex flex-col gap-0.5"
             >
               <span className="text-xs font-medium truncate">{s.label}</span>
