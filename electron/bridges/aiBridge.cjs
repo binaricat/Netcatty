@@ -522,10 +522,23 @@ function registerHandlers(ipcMain) {
     8888,   // Common local dev
   ];
   const ALLOWED_LOCALHOST_PORTS = new Set(BUILTIN_LOCALHOST_PORTS);
-  // RFC1918 / link-local / loopback ranges — used by SSRF guard
+  // RFC1918 / link-local / loopback / IPv6 private ranges — used by SSRF guard
   function isPrivateIp(ip) {
-    if (ip === "::1" || ip === "0.0.0.0") return true;
-    const parts = ip.split(".");
+    if (!ip) return false;
+    // Strip IPv6 brackets that URL.hostname may include
+    const cleaned = ip.replace(/^\[|\]$/g, "");
+    if (cleaned === "::1" || cleaned === "0.0.0.0" || cleaned === "::") return true;
+    // IPv6 private ranges: fc00::/7 (unique local), fe80::/10 (link-local), ::ffff:127.x (mapped loopback)
+    const lower = cleaned.toLowerCase();
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;   // fc00::/7
+    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true; // fe80::/10
+    if (lower.startsWith("::ffff:")) {
+      // IPv4-mapped IPv6 — extract IPv4 portion and check
+      const v4 = lower.slice(7);
+      return isPrivateIp(v4);
+    }
+    // IPv4
+    const parts = cleaned.split(".");
     if (parts.length === 4 && parts.every(p => /^\d+$/.test(p))) {
       const [a, b] = parts.map(Number);
       if (a === 10) return true;                           // 10.0.0.0/8
@@ -539,7 +552,7 @@ function registerHandlers(ipcMain) {
   }
 
   function isPrivateHost(hostname) {
-    if (hostname === "localhost" || hostname === "::1") return true;
+    if (hostname === "localhost") return true;
     // metadata endpoints (AWS, GCP, Azure)
     if (hostname === "metadata.google.internal") return true;
     return isPrivateIp(hostname);
@@ -563,17 +576,22 @@ function registerHandlers(ipcMain) {
   function isAllowedFetchUrl(urlString, skipHostCheck) {
     try {
       const parsed = new URL(urlString);
-      // Allow localhost/127.0.0.1 only on known ports (e.g. Ollama)
+      // Always block private/internal hosts when skipHostCheck is set (SSRF protection)
+      if (skipHostCheck) {
+        if (isPrivateHost(parsed.hostname)) return false;
+        // Require HTTPS for skipHostCheck requests
+        if (parsed.protocol !== "https:") return false;
+        return true;
+      }
+      // Allow localhost/127.0.0.1 only on known ports (e.g. Ollama) — normal fetch path only
       if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
       // Require HTTPS for remote hosts
       if (parsed.protocol !== "https:") return false;
-      // Always block private/internal hosts (SSRF protection)
+      // Block private/internal hosts
       if (isPrivateHost(parsed.hostname)) return false;
-      // skipHostCheck: allow any public HTTPS host (used by AI web search/url_fetch tools)
-      if (skipHostCheck) return true;
       // Check built-in + provider-configured host allowlist
       if (BUILTIN_FETCH_HOSTS.has(parsed.hostname)) return true;
       if (providerFetchHosts.has(parsed.hostname)) return true;

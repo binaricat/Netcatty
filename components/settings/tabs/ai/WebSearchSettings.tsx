@@ -91,8 +91,13 @@ export const WebSearchSettings: React.FC<{
       updateConfig({ apiKey: undefined });
       return;
     }
+    // Capture current provider before async encryption
+    const providerAtBlur = configRef.current.providerId;
     const encrypted = await encryptField(apiKeyInput.trim());
-    updateConfig({ apiKey: encrypted });
+    // Only apply if the provider hasn't changed during encryption
+    if (configRef.current.providerId === providerAtBlur) {
+      updateConfig({ apiKey: encrypted });
+    }
   }, [apiKeyInput, updateConfig]);
 
   return (
