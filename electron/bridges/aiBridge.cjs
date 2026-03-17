@@ -572,11 +572,10 @@ function registerHandlers(ipcMain) {
   async function hasPrivateResolution(hostname) {
     if (isPrivateHost(hostname)) return true;
     try {
-      const addresses = await dns.promises.resolve4(hostname).catch(() => []);
-      const addresses6 = await dns.promises.resolve6(hostname).catch(() => []);
-      for (const ip of [...addresses, ...addresses6]) {
-        if (isPrivateIp(ip)) return true;
-      }
+      // Use dns.lookup (OS resolver — respects /etc/hosts, mDNS, etc.)
+      // to match what http.request() actually connects to
+      const { address } = await dns.promises.lookup(hostname);
+      if (isPrivateIp(address)) return true;
     } catch {
       // DNS resolution failed — allow (will fail at connection time anyway)
     }
@@ -598,11 +597,10 @@ function registerHandlers(ipcMain) {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
-      // Require HTTPS for remote hosts; allow HTTP only for private/LAN addresses in the allowlist
+      // Require HTTPS for remote hosts; allow HTTP only for explicitly allowlisted hosts
+      // (e.g. self-hosted SearXNG at http://searxng.lan:8080 or http://192.168.x.x)
       if (parsed.protocol !== "https:") {
-        if (isPrivateIp(parsed.hostname) && providerFetchHosts.has(parsed.hostname)) {
-          // Private LAN provider explicitly configured — allow HTTP
-        } else {
+        if (!providerFetchHosts.has(parsed.hostname)) {
           return false;
         }
       }
