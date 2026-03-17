@@ -181,19 +181,19 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
         const errorMessage = result.error || 'Stream request failed';
         return new Response(errorMessage, {
           status: 502,
-          statusText: errorMessage,
+          statusText: 'Bad Gateway',
         });
       }
 
       // If the server returned a non-2xx status, return the error details
-      // instead of an empty stream so the AI SDK sees the real error
+      // in the body so the AI SDK sees the real error.
+      // statusText must be single-line ASCII, so keep it as the HTTP reason phrase.
       const statusCode = result.statusCode ?? 200;
       if (statusCode < 200 || statusCode >= 300) {
         cleanup();
         const errorDetail = result.statusText || `HTTP ${statusCode}`;
         return new Response(errorDetail, {
           status: statusCode,
-          statusText: errorDetail,
         });
       }
 
