@@ -19,6 +19,7 @@ export const ProviderConfigForm: React.FC<{
     apiKey: "",
     baseURL: provider.baseURL ?? PROVIDER_PRESETS[provider.providerId]?.defaultBaseURL ?? "",
     defaultModel: provider.defaultModel ?? "",
+    skipTLSVerify: provider.skipTLSVerify ?? false,
   });
   const isCustom = provider.providerId === "custom";
   const [showApiKey, setShowApiKey] = useState(false);
@@ -46,6 +47,7 @@ export const ProviderConfigForm: React.FC<{
     const updates: Partial<ProviderConfig> = {
       baseURL: form.baseURL || undefined,
       defaultModel: form.defaultModel || undefined,
+      skipTLSVerify: form.skipTLSVerify || undefined,
       ...(isCustom && form.name.trim() ? { name: form.name.trim() } : {}),
     };
 
@@ -122,6 +124,17 @@ export const ProviderConfigForm: React.FC<{
           providerId={provider.providerId}
         />
       </div>
+
+      {/* Skip TLS Verification */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={form.skipTLSVerify}
+          onChange={(e) => setForm((prev) => ({ ...prev, skipTLSVerify: e.target.checked }))}
+          className="rounded border-input"
+        />
+        <span className="text-xs text-muted-foreground">{t('ai.providers.skipTLSVerify')}</span>
+      </label>
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-1">

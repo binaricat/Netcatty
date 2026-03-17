@@ -1513,6 +1513,7 @@ const en: Messages = {
   'ai.providers.apiKey.placeholder': 'Enter API key',
   'ai.providers.apiKey.decrypting': 'Decrypting...',
   'ai.providers.baseUrl': 'Base URL',
+  'ai.providers.skipTLSVerify': 'Skip TLS certificate verification (for self-signed certs)',
   'ai.providers.defaultModel': 'Default Model',
   'ai.providers.defaultModel.placeholder': 'e.g. gpt-4o, claude-sonnet-4-20250514',
   'ai.providers.refreshModels': 'Refresh models',

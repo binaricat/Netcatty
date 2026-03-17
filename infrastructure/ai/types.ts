@@ -10,6 +10,7 @@ export interface ProviderConfig {
   defaultModel?: string;
   customHeaders?: Record<string, string>;
   enabled: boolean;
+  skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)
 }
 
 export interface ModelInfo {

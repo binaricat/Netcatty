@@ -97,6 +97,13 @@ function resolveProviderApiKey(providerId) {
   };
 }
 
+/** Check if TLS verification should be skipped for a given provider. */
+function shouldSkipTLSVerify(providerId) {
+  if (!providerId) return false;
+  const config = providerConfigs.find(p => p.id === providerId);
+  return config?.skipTLSVerify === true;
+}
+
 /** Placeholder token used by the renderer to avoid sending real API keys over IPC. */
 const API_KEY_PLACEHOLDER = "__IPC_SECURED__";
 /** Placeholder for web search API key — replaced in main process before HTTP request. */
@@ -226,7 +233,7 @@ function _validateSenderImpl(event, allowSettings) {
  * renderer can construct a Response with the real status. Data continues to
  * flow via stream:data / stream:end / stream:error IPC events.
  */
-function streamRequest(url, options, event, requestId) {
+function streamRequest(url, options, event, requestId, skipTLS) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const isHttps = parsedUrl.protocol === "https:";
@@ -245,13 +252,14 @@ function streamRequest(url, options, event, requestId) {
       return;
     }
 
-    const req = lib.request(
-      parsedUrl,
-      {
+    const reqOpts = {
         method: options.method || "POST",
         headers: options.headers || {},
         timeout: 120000, // 2 min connection timeout
-      },
+    };
+    if (skipTLS && isHttps) reqOpts.rejectUnauthorized = false;
+
+    const req = lib.request(parsedUrl, reqOpts,
       (res) => {
         const statusCode = res.statusCode || 0;
         const statusText = res.statusMessage || "";
@@ -634,7 +642,8 @@ function registerHandlers(ipcMain) {
         return { ok: false, error: "URL host is not in the allowed list" };
       }
 
-      const { statusCode, statusText } = await streamRequest(resolvedUrl, { method: "POST", headers: resolvedHeaders, body }, event, requestId);
+      const skipTLS = shouldSkipTLSVerify(providerId);
+      const { statusCode, statusText } = await streamRequest(resolvedUrl, { method: "POST", headers: resolvedHeaders, body }, event, requestId, skipTLS);
       return { ok: true, statusCode, statusText };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
@@ -691,9 +700,9 @@ function registerHandlers(ipcMain) {
         const isHttps = parsedUrl.protocol === "https:";
         const lib = isHttps ? https : http;
 
-        const req = lib.request(
-          parsedUrl,
-          { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 },
+        const fetchOpts = { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 };
+        if (shouldSkipTLSVerify(providerId) && isHttps) fetchOpts.rejectUnauthorized = false;
+        const req = lib.request(parsedUrl, fetchOpts,
           (res) => {
             // Handle redirects
             if (redirectsLeft > 0 && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {

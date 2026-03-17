@@ -41,6 +41,7 @@ export interface ProviderFormState {
   apiKey: string;
   baseURL: string;
   defaultModel: string;
+  skipTLSVerify: boolean;
 }
 
 export interface FetchedModel {

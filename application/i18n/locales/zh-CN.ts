@@ -1528,6 +1528,7 @@ const zhCN: Messages = {
   'ai.providers.apiKey.placeholder': '输入 API Key',
   'ai.providers.apiKey.decrypting': '解密中...',
   'ai.providers.baseUrl': 'Base URL',
+  'ai.providers.skipTLSVerify': '跳过 TLS 证书验证（用于自签名证书）',
   'ai.providers.defaultModel': '默认模型',
   'ai.providers.defaultModel.placeholder': '例如 gpt-4o, claude-sonnet-4-20250514',
   'ai.providers.refreshModels': '刷新模型列表',
