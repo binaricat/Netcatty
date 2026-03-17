@@ -238,22 +238,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     if (xtermRuntimeRef.current) {
       // Merge global rules with host-level rules
-      // Host-level rules are appended to global rules, allowing hosts to add custom highlighting
       const globalRules = terminalSettings?.keywordHighlightRules ?? [];
       const hostRules = host?.keywordHighlightRules ?? [];
 
-      // Check if highlighting is enabled at either global or host level
       const globalEnabled = terminalSettings?.keywordHighlightEnabled ?? false;
-      const hostEnabled = host?.keywordHighlightEnabled ?? false;
+      // Host-level toggle: undefined = inherit global, true/false = explicit override
+      const hostEnabled = host?.keywordHighlightEnabled;
 
-      // Merge rules: include only rules from enabled sources
+      // If host explicitly disabled highlighting, disable everything for this terminal
+      const effectiveGlobalEnabled = hostEnabled === false ? false : globalEnabled;
+      const effectiveHostEnabled = hostEnabled ?? false;
+
       const mergedRules = [
-        ...(globalEnabled ? globalRules : []),
-        ...(hostEnabled ? hostRules : [])
+        ...(effectiveGlobalEnabled ? globalRules : []),
+        ...(effectiveHostEnabled ? hostRules : [])
       ];
-
-      // Enable highlighting if either global or host-level is enabled
-      const isEnabled = globalEnabled || hostEnabled;
+      const isEnabled = effectiveGlobalEnabled || effectiveHostEnabled;
 
       xtermRuntimeRef.current.keywordHighlighter.setRules(mergedRules, isEnabled);
     }
@@ -538,12 +538,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const globalRules = terminalSettingsRef.current?.keywordHighlightRules ?? [];
         const hostRules = host?.keywordHighlightRules ?? [];
         const globalEnabled = terminalSettingsRef.current?.keywordHighlightEnabled ?? false;
-        const hostEnabled = host?.keywordHighlightEnabled ?? false;
+        const hostEnabled = host?.keywordHighlightEnabled;
+        const effectiveGlobalEnabled = hostEnabled === false ? false : globalEnabled;
+        const effectiveHostEnabled = hostEnabled ?? false;
         const mergedRules = [
-          ...(globalEnabled ? globalRules : []),
-          ...(hostEnabled ? hostRules : [])
+          ...(effectiveGlobalEnabled ? globalRules : []),
+          ...(effectiveHostEnabled ? hostRules : [])
         ];
-        const isEnabled = globalEnabled || hostEnabled;
+        const isEnabled = effectiveGlobalEnabled || effectiveHostEnabled;
         runtime.keywordHighlighter.setRules(mergedRules, isEnabled);
 
         const term = runtime.term;
