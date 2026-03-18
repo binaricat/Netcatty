@@ -206,6 +206,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const { openSettingsWindow } = useWindowControls();
   const terminalSessionsRef = useRef(terminalSessions);
   terminalSessionsRef.current = terminalSessions;
+  const resolveExecutorContextRef = useRef(resolveExecutorContext);
+  resolveExecutorContextRef.current = resolveExecutorContext;
 
   // ── Streaming hook ──
   const {
@@ -421,14 +423,14 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     targetId?: string;
     label?: string;
   }): ExecutorContext => {
-    const resolved = resolveExecutorContext?.(scope);
+    const resolved = resolveExecutorContextRef.current?.(scope);
     if (resolved) return resolved;
     return {
       sessions: terminalSessionsRef.current,
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
       workspaceName: scope.type === 'workspace' ? scope.label : undefined,
     };
-  }, [resolveExecutorContext]);
+  }, []);
 
   /** Ensure a session exists for the current scope and return its ID. */
   const ensureSession = useCallback((): string => {

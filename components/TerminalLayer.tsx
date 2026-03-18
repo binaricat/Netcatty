@@ -244,6 +244,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   activeTabIdRef.current = activeTabId;
   const activeWorkspaceRef = useRef(activeWorkspace);
   activeWorkspaceRef.current = activeWorkspace;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
   const onSetWorkspaceFocusedSessionRef = useRef(onSetWorkspaceFocusedSession);
   onSetWorkspaceFocusedSessionRef.current = onSetWorkspaceFocusedSession;
 
@@ -970,17 +976,24 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     targetId?: string;
     label?: string;
   }) => {
+    const latestWorkspaces = workspacesRef.current;
+    const latestSessions = sessionsRef.current;
+    const latestHosts = hostsRef.current;
     const sessionIds = scope.type === 'workspace'
       ? (() => {
-          const workspace = scope.targetId ? workspaces.find((w) => w.id === scope.targetId) : undefined;
+          const workspace = scope.targetId ? latestWorkspaces.find((w) => w.id === scope.targetId) : undefined;
           return workspace?.root ? collectSessionIds(workspace.root) : [];
         })()
       : scope.targetId ? [scope.targetId] : [];
 
+    const workspaceName = scope.type === 'workspace'
+      ? latestWorkspaces.find((w) => w.id === scope.targetId)?.title ?? scope.label
+      : undefined;
+
     return {
       sessions: sessionIds.map((sid) => {
-        const session = sessions.find((s) => s.id === sid);
-        const host = session?.hostId ? hosts.find((h) => h.id === session.hostId) : undefined;
+        const session = latestSessions.find((s) => s.id === sid);
+        const host = session?.hostId ? latestHosts.find((h) => h.id === session.hostId) : undefined;
         return {
           sessionId: sid,
           hostId: session?.hostId || '',
@@ -992,9 +1005,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         };
       }),
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
-      workspaceName: scope.type === 'workspace' ? scope.label : undefined,
+      workspaceName,
     };
-  }, [workspaces, sessions, hosts]);
+  }, []);
 
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();
