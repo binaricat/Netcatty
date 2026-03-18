@@ -531,6 +531,10 @@ function registerHandlers(ipcMain) {
         if (!providerFetchHosts.has(host)) {
           providerFetchHosts.add(host);
           tempAllowedHosts.add(host);
+        }
+        if (parsed.protocol === "http:") providerHttpHosts.add(host);
+        // Set up expiry for temporary entries (always refresh timeout for HTTP flag)
+        if (tempAllowedHosts.has(host)) {
           setTimeout(() => {
             // Only remove if not owned by a synced provider config
             if (!isHostInProviderConfigs(host)) {
@@ -540,7 +544,6 @@ function registerHandlers(ipcMain) {
             tempAllowedHosts.delete(host);
           }, TEMP_ALLOWLIST_TTL);
         }
-        if (parsed.protocol === "http:") providerHttpHosts.add(host);
       }
       return { ok: true };
     } catch {
@@ -675,10 +678,10 @@ function registerHandlers(ipcMain) {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
-      // Require HTTPS for remote hosts; allow HTTP for:
-      // - providers explicitly configured with an http:// base URL
-      // - the configured web search apiHost (e.g. self-hosted SearXNG)
-      if (parsed.protocol !== "https:") {
+      // Only allow http: and https: schemes for remote hosts
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+      // For HTTP, only allow providers explicitly configured with http:// or the web search apiHost
+      if (parsed.protocol === "http:") {
         const isProviderHost = providerHttpHosts.has(parsed.hostname);
         let isWebSearchHost = false;
         if (webSearchApiHost) {
