@@ -486,6 +486,10 @@ function registerHandlers(ipcMain) {
   // Track temporarily added entries so cleanup can distinguish them from synced ones
   const tempAllowedHosts = new Set();
   const tempAllowedPorts = new Set();
+  // Track temporarily added HTTP hosts (for rebuild restoration)
+  const tempHttpHosts = new Set();
+  // Track active expiry timers per host to avoid duplicate/premature expiry
+  const hostExpiryTimers = new Map();
 
   /** Check if a host is owned by a currently synced provider config */
   function isHostInProviderConfigs(host) {
@@ -544,20 +548,26 @@ function registerHandlers(ipcMain) {
           providerFetchHosts.add(host);
           tempAllowedHosts.add(host);
         }
-        const isHttpTemp = parsed.protocol === "http:" && !isHttpHostInProviderConfigs(host);
-        if (parsed.protocol === "http:") providerHttpHosts.add(host);
-        // Set up expiry for temporary entries
-        if (isNewHost || isHttpTemp) {
-          setTimeout(() => {
+        if (parsed.protocol === "http:") {
+          providerHttpHosts.add(host);
+          if (!isHttpHostInProviderConfigs(host)) tempHttpHosts.add(host);
+        }
+        // Cancel any existing expiry timer for this host, then schedule a new one
+        if (isNewHost || tempHttpHosts.has(host)) {
+          const existing = hostExpiryTimers.get(host);
+          if (existing) clearTimeout(existing);
+          const timer = setTimeout(() => {
+            hostExpiryTimers.delete(host);
             if (!isHostInProviderConfigs(host)) {
               providerFetchHosts.delete(host);
               providerHttpHosts.delete(host);
             } else if (!isHttpHostInProviderConfigs(host)) {
-              // Host is still configured but not as HTTP — only remove HTTP permission
               providerHttpHosts.delete(host);
             }
             tempAllowedHosts.delete(host);
+            tempHttpHosts.delete(host);
           }, TEMP_ALLOWLIST_TTL);
+          hostExpiryTimers.set(host, timer);
         }
       }
       return { ok: true };
@@ -595,6 +605,7 @@ function registerHandlers(ipcMain) {
     for (const port of BUILTIN_LOCALHOST_PORTS) ALLOWED_LOCALHOST_PORTS.add(port);
     // Re-add any still-active temporary entries so a sync doesn't wipe them
     for (const host of tempAllowedHosts) providerFetchHosts.add(host);
+    for (const host of tempHttpHosts) providerHttpHosts.add(host);
     for (const port of tempAllowedPorts) ALLOWED_LOCALHOST_PORTS.add(port);
     for (const config of providerConfigs) {
       if (!config.baseURL) continue;
