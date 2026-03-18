@@ -546,8 +546,10 @@ function registerHandlers(ipcMain) {
         const isNewHost = !providerFetchHosts.has(host);
         if (isNewHost) {
           providerFetchHosts.add(host);
-          tempAllowedHosts.add(host);
         }
+        // Always track in tempAllowedHosts so rebuild can restore to providerFetchHosts
+        // even if the original persistent source (e.g. HTTPS provider) is removed mid-TTL
+        tempAllowedHosts.add(host);
         if (parsed.protocol === "http:") {
           providerHttpHosts.add(host);
           if (!isHttpHostInProviderConfigs(host)) tempHttpHosts.add(host);
