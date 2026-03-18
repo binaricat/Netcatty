@@ -495,6 +495,17 @@ function registerHandlers(ipcMain) {
     }
     return false;
   }
+  /** Check if a host is owned by a provider config that uses http:// */
+  function isHttpHostInProviderConfigs(host) {
+    for (const config of providerConfigs) {
+      if (!config.baseURL) continue;
+      try {
+        const p = new URL(config.baseURL);
+        if (p.hostname === host && p.protocol === "http:") return true;
+      } catch {}
+    }
+    return false;
+  }
   /** Check if a localhost port is owned by a currently synced provider config */
   function isPortInProviderConfigs(port) {
     for (const config of providerConfigs) {
@@ -528,17 +539,21 @@ function registerHandlers(ipcMain) {
           }, TEMP_ALLOWLIST_TTL);
         }
       } else {
-        if (!providerFetchHosts.has(host)) {
+        const isNewHost = !providerFetchHosts.has(host);
+        if (isNewHost) {
           providerFetchHosts.add(host);
           tempAllowedHosts.add(host);
         }
+        const isHttpTemp = parsed.protocol === "http:" && !isHttpHostInProviderConfigs(host);
         if (parsed.protocol === "http:") providerHttpHosts.add(host);
-        // Set up expiry for temporary entries (always refresh timeout for HTTP flag)
-        if (tempAllowedHosts.has(host)) {
+        // Set up expiry for temporary entries
+        if (isNewHost || isHttpTemp) {
           setTimeout(() => {
-            // Only remove if not owned by a synced provider config
             if (!isHostInProviderConfigs(host)) {
               providerFetchHosts.delete(host);
+              providerHttpHosts.delete(host);
+            } else if (!isHttpHostInProviderConfigs(host)) {
+              // Host is still configured but not as HTTP — only remove HTTP permission
               providerHttpHosts.delete(host);
             }
             tempAllowedHosts.delete(host);
