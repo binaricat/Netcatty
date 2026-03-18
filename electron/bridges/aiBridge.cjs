@@ -560,6 +560,8 @@ function registerHandlers(ipcMain) {
   ]);
   // Dynamically populated from configured provider baseURLs
   const providerFetchHosts = new Set();
+  // Subset of providerFetchHosts where the provider baseURL explicitly uses http://
+  const providerHttpHosts = new Set();
 
   /**
    * Rebuild the dynamic host allowlist from the current providerConfigs.
@@ -567,6 +569,7 @@ function registerHandlers(ipcMain) {
    */
   function rebuildProviderFetchHosts() {
     providerFetchHosts.clear();
+    providerHttpHosts.clear();
     // Reset localhost ports to built-in defaults, then add provider-configured ones
     ALLOWED_LOCALHOST_PORTS.clear();
     for (const port of BUILTIN_LOCALHOST_PORTS) ALLOWED_LOCALHOST_PORTS.add(port);
@@ -584,6 +587,7 @@ function registerHandlers(ipcMain) {
           ALLOWED_LOCALHOST_PORTS.add(port);
         } else {
           providerFetchHosts.add(host);
+          if (parsed.protocol === "http:") providerHttpHosts.add(host);
         }
       } catch {
         // Invalid URL in config — skip
@@ -670,10 +674,10 @@ function registerHandlers(ipcMain) {
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
       // Require HTTPS for remote hosts; allow HTTP for:
-      // - provider-configured hosts (user explicitly set an http:// base URL)
+      // - providers explicitly configured with an http:// base URL
       // - the configured web search apiHost (e.g. self-hosted SearXNG)
       if (parsed.protocol !== "https:") {
-        const isProviderHost = providerFetchHosts.has(parsed.hostname);
+        const isProviderHost = providerHttpHosts.has(parsed.hostname);
         let isWebSearchHost = false;
         if (webSearchApiHost) {
           try { isWebSearchHost = new URL(webSearchApiHost).hostname === parsed.hostname; } catch { }
