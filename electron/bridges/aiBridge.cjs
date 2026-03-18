@@ -554,23 +554,21 @@ function registerHandlers(ipcMain) {
           providerHttpHosts.add(host);
           if (!isHttpHostInProviderConfigs(host)) tempHttpHosts.add(host);
         }
-        // Cancel any existing expiry timer for this host, then schedule a new one
-        if (isNewHost || tempHttpHosts.has(host)) {
-          const existing = hostExpiryTimers.get(host);
-          if (existing) clearTimeout(existing);
-          const timer = setTimeout(() => {
-            hostExpiryTimers.delete(host);
-            if (!isHostInProviderConfigs(host)) {
-              providerFetchHosts.delete(host);
-              providerHttpHosts.delete(host);
-            } else if (!isHttpHostInProviderConfigs(host)) {
-              providerHttpHosts.delete(host);
-            }
-            tempAllowedHosts.delete(host);
-            tempHttpHosts.delete(host);
-          }, TEMP_ALLOWLIST_TTL);
-          hostExpiryTimers.set(host, timer);
-        }
+        // Always (re-)schedule expiry timer to clean up temp entries
+        const existing = hostExpiryTimers.get(host);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+          hostExpiryTimers.delete(host);
+          if (!isHostInProviderConfigs(host)) {
+            providerFetchHosts.delete(host);
+            providerHttpHosts.delete(host);
+          } else if (!isHttpHostInProviderConfigs(host)) {
+            providerHttpHosts.delete(host);
+          }
+          tempAllowedHosts.delete(host);
+          tempHttpHosts.delete(host);
+        }, TEMP_ALLOWLIST_TTL);
+        hostExpiryTimers.set(host, timer);
       }
       return { ok: true };
     } catch {
