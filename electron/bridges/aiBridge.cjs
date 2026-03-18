@@ -559,7 +559,11 @@ function registerHandlers(ipcMain) {
         if (existing) clearTimeout(existing);
         const timer = setTimeout(() => {
           hostExpiryTimers.delete(host);
-          if (!isHostInProviderConfigs(host)) {
+          // Check if host is still needed by a provider config or web search
+          const isWebSearchHost = webSearchApiHost && (() => {
+            try { return new URL(webSearchApiHost).hostname === host; } catch { return false; }
+          })();
+          if (!isHostInProviderConfigs(host) && !isWebSearchHost) {
             providerFetchHosts.delete(host);
             providerHttpHosts.delete(host);
           } else if (!isHttpHostInProviderConfigs(host)) {
