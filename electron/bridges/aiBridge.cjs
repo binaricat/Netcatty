@@ -669,16 +669,16 @@ function registerHandlers(ipcMain) {
         const port = parsed.port ? Number(parsed.port) : (parsed.protocol === "https:" ? 443 : 80);
         return ALLOWED_LOCALHOST_PORTS.has(port);
       }
-      // Require HTTPS for remote hosts; allow HTTP only for the configured web search apiHost
-      // (e.g. self-hosted SearXNG at http://searxng.lan:8080 or http://192.168.x.x)
+      // Require HTTPS for remote hosts; allow HTTP for:
+      // - provider-configured hosts (user explicitly set an http:// base URL)
+      // - the configured web search apiHost (e.g. self-hosted SearXNG)
       if (parsed.protocol !== "https:") {
-        if (!webSearchApiHost) return false;
-        try {
-          const wsHost = new URL(webSearchApiHost).hostname;
-          if (parsed.hostname !== wsHost) return false;
-        } catch {
-          return false;
+        const isProviderHost = providerFetchHosts.has(parsed.hostname);
+        let isWebSearchHost = false;
+        if (webSearchApiHost) {
+          try { isWebSearchHost = new URL(webSearchApiHost).hostname === parsed.hostname; } catch { }
         }
+        if (!isProviderHost && !isWebSearchHost) return false;
       }
       // Check built-in + provider-configured host allowlist
       if (BUILTIN_FETCH_HOSTS.has(parsed.hostname)) return true;
