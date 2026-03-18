@@ -621,7 +621,7 @@ echo $3 >> "$FILE"`);
                   </Button>
                 </DropdownTrigger>
               </div>
-              <DropdownContent className="w-44" align="start" alignToParent>
+              <DropdownContent className="w-48" align="start" alignToParent>
                 <Button
                   variant="ghost"
                   className="w-full justify-start gap-2"
