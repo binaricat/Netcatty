@@ -22,7 +22,6 @@ import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import type {
   ApprovalInfo,
   PendingApprovalContext,
-  TerminalSessionInfo,
 } from './useAIChatStreaming';
 import { getNetcattyBridge } from './useAIChatStreaming';
 import type { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
@@ -75,10 +74,6 @@ export interface UseToolApprovalReturn {
 
 /** Context values needed by handleApprovalResponse that change frequently. */
 export interface ToolApprovalContext {
-  terminalSessions: TerminalSessionInfo[];
-  scopeType: 'terminal' | 'workspace';
-  scopeTargetId?: string;
-  scopeLabel?: string;
   globalPermissionMode: AIPermissionMode;
   commandBlocklist?: string[];
   webSearchConfig?: WebSearchConfig | null;
@@ -146,7 +141,16 @@ export function useToolApproval({
     const ctx = pendingApprovalContextRef.current;
     if (!ctx) return;
     // Destructure all needed values BEFORE clearing the ref to avoid race conditions
-    const { sessionId: sid, scopeKey: sk, sdkMessages, approvalInfo, model: ctxModel } = ctx;
+    const {
+      sessionId: sid,
+      scopeKey: sk,
+      sdkMessages,
+      approvalInfo,
+      model: ctxModel,
+      scopeType,
+      scopeLabel,
+      getExecutorContext,
+    } = ctx;
     // Clear pending approval (and its timeout) via setPendingApproval
     setPendingApproval(null);
 
@@ -218,16 +222,20 @@ export function useToolApproval({
 
     try {
       // Rebuild tools and system prompt with the latest permission mode to prevent
-      // stale closure issues (e.g. user changed permission mode during approval wait)
+      // stale settings, while keeping the original AI scope pinned to its workspace/session.
       const bridge = getNetcattyBridge();
-      const freshTools = createCattyTools(bridge, {
-        sessions: approvalContext.terminalSessions,
-        workspaceId: approvalContext.scopeType === 'workspace' ? approvalContext.scopeTargetId : undefined,
-        workspaceName: approvalContext.scopeType === 'workspace' ? approvalContext.scopeLabel : undefined,
-      }, approvalContext.commandBlocklist, approvalContext.globalPermissionMode, approvalContext.webSearchConfig ?? undefined);
+      const freshExecutorContext = getExecutorContext();
+      const freshTools = createCattyTools(
+        bridge,
+        getExecutorContext,
+        approvalContext.commandBlocklist,
+        approvalContext.globalPermissionMode,
+        approvalContext.webSearchConfig ?? undefined,
+      );
       const freshSystemPrompt = buildSystemPrompt({
-        scopeType: approvalContext.scopeType, scopeLabel: approvalContext.scopeLabel,
-        hosts: approvalContext.terminalSessions.map(s => ({
+        scopeType,
+        scopeLabel,
+        hosts: freshExecutorContext.sessions.map(s => ({
           sessionId: s.sessionId, hostname: s.hostname, label: s.label,
           os: s.os, username: s.username, connected: s.connected,
         })),
@@ -246,6 +254,9 @@ export function useToolApproval({
           model: ctxModel,
           systemPrompt: freshSystemPrompt,
           tools: freshTools,
+          scopeType,
+          scopeLabel,
+          getExecutorContext,
         });
         return;
       }

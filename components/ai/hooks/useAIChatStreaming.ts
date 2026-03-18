@@ -135,6 +135,9 @@ export interface PendingApprovalContext {
   model: ReturnType<typeof createModelFromConfig>;
   systemPrompt: string;
   tools: ReturnType<typeof createCattyTools>;
+  scopeType: 'terminal' | 'workspace';
+  scopeLabel?: string;
+  getExecutorContext: () => ExecutorContext;
 }
 
 function generateId(): string {
@@ -669,14 +672,14 @@ export function useAIChatStreaming({
     context: SendToCattyContext,
   ) => {
     const bridge = getNetcattyBridge();
-    const toolContext = context.getExecutorContext ?? (() => ({
+    const getExecutorContext = context.getExecutorContext ?? (() => ({
       sessions: context.terminalSessions,
       workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
       workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
     }));
     const tools = createCattyTools(
       bridge,
-      toolContext,
+      getExecutorContext,
       context.commandBlocklist,
       context.globalPermissionMode,
       context.webSearchConfig ?? undefined,
@@ -785,7 +788,16 @@ export function useAIChatStreaming({
 
       if (approvalInfo) {
         context.setPendingApproval({
-          sessionId, scopeKey: sendScopeKey, sdkMessages, approvalInfo, model, systemPrompt, tools,
+          sessionId,
+          scopeKey: sendScopeKey,
+          sdkMessages,
+          approvalInfo,
+          model,
+          systemPrompt,
+          tools,
+          scopeType: context.scopeType,
+          scopeLabel: context.scopeLabel,
+          getExecutorContext,
         });
         return; // Keep streaming flag — waiting for user approval
       }

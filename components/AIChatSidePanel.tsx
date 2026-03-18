@@ -104,6 +104,11 @@ interface AIChatSidePanelProps {
     username?: string;
     connected: boolean;
   }>;
+  resolveExecutorContext?: (scope: {
+    type: 'terminal' | 'workspace';
+    targetId?: string;
+    label?: string;
+  }) => ExecutorContext;
 
   // Visibility
   isVisible?: boolean;
@@ -179,6 +184,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   scopeHostIds,
   scopeLabel,
   terminalSessions = [],
+  resolveExecutorContext,
   isVisible = true,
 }) => {
   const { t } = useI18n();
@@ -200,12 +206,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const { openSettingsWindow } = useWindowControls();
   const terminalSessionsRef = useRef(terminalSessions);
   terminalSessionsRef.current = terminalSessions;
-  const scopeTypeRef = useRef(scopeType);
-  scopeTypeRef.current = scopeType;
-  const scopeTargetIdRef = useRef(scopeTargetId);
-  scopeTargetIdRef.current = scopeTargetId;
-  const scopeLabelRef = useRef(scopeLabel);
-  scopeLabelRef.current = scopeLabel;
 
   // ── Streaming hook ──
   const {
@@ -416,11 +416,19 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [updateSessionTitle]);
 
-  const getExecutorContext = useCallback((): ExecutorContext => ({
-    sessions: terminalSessionsRef.current,
-    workspaceId: scopeTypeRef.current === 'workspace' ? scopeTargetIdRef.current : undefined,
-    workspaceName: scopeTypeRef.current === 'workspace' ? scopeLabelRef.current : undefined,
-  }), []);
+  const buildExecutorContextForScope = useCallback((scope: {
+    type: 'terminal' | 'workspace';
+    targetId?: string;
+    label?: string;
+  }): ExecutorContext => {
+    const resolved = resolveExecutorContext?.(scope);
+    if (resolved) return resolved;
+    return {
+      sessions: terminalSessionsRef.current,
+      workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
+      workspaceName: scope.type === 'workspace' ? scope.label : undefined,
+    };
+  }, [resolveExecutorContext]);
 
   /** Ensure a session exists for the current scope and return its ID. */
   const ensureSession = useCallback((): string => {
@@ -504,6 +512,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       abortControllersRef.current.delete(sessionId);
       autoTitleSession(sessionId, trimmed);
     } else {
+      const toolScope = {
+        type: scopeType,
+        targetId: scopeTargetId,
+        label: scopeLabel,
+      } as const;
       await sendToCattyAgent(sessionId, sendScopeKey, trimmed, abortController, currentSession ?? undefined, assistantMsgId, {
         activeProvider,
         activeModelId,
@@ -514,7 +527,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         commandBlocklist,
         terminalSessions,
         webSearchConfig,
-        getExecutorContext,
+        getExecutorContext: () => buildExecutorContextForScope(toolScope),
         setPendingApproval,
         autoTitleSession,
       });
@@ -526,7 +539,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setStreamingForScope, setInputValue, clearImages,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, providers, selectedAgentModel, updateSessionExternalSessionId,
-    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, getExecutorContext, setPendingApproval,
+    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope, setPendingApproval,
   ]);
 
   const handleStop = useCallback(() => {
@@ -639,19 +652,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             messages={messages}
             isStreaming={isStreaming}
             onApprove={(messageId) => void handleApprovalResponse(messageId, true, {
-              terminalSessions,
-              scopeType,
-              scopeTargetId,
-              scopeLabel,
               globalPermissionMode,
               commandBlocklist,
               webSearchConfig,
             })}
             onReject={(messageId) => void handleApprovalResponse(messageId, false, {
-              terminalSessions,
-              scopeType,
-              scopeTargetId,
-              scopeLabel,
               globalPermissionMode,
               commandBlocklist,
               webSearchConfig,

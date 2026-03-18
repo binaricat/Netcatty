@@ -965,6 +965,37 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return result;
   }, [sessions, hosts, activeWorkspace, activeSession]);
 
+  const resolveAIExecutorContext = useCallback((scope: {
+    type: 'terminal' | 'workspace';
+    targetId?: string;
+    label?: string;
+  }) => {
+    const sessionIds = scope.type === 'workspace'
+      ? (() => {
+          const workspace = scope.targetId ? workspaces.find((w) => w.id === scope.targetId) : undefined;
+          return workspace?.root ? collectSessionIds(workspace.root) : [];
+        })()
+      : scope.targetId ? [scope.targetId] : [];
+
+    return {
+      sessions: sessionIds.map((sid) => {
+        const session = sessions.find((s) => s.id === sid);
+        const host = session?.hostId ? hosts.find((h) => h.id === session.hostId) : undefined;
+        return {
+          sessionId: sid,
+          hostId: session?.hostId || '',
+          hostname: host?.hostname || '',
+          label: host?.label || session?.hostLabel || '',
+          os: host?.os,
+          username: host?.username,
+          connected: session?.status === 'connected',
+        };
+      }),
+      workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
+      workspaceName: scope.type === 'workspace' ? scope.label : undefined,
+    };
+  }, [workspaces, sessions, hosts]);
+
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();
 
@@ -1360,6 +1391,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         }
                         scopeLabel={activeWorkspace?.title ?? activeSession?.hostLabel ?? ''}
                         terminalSessions={aiTerminalSessions}
+                        resolveExecutorContext={resolveAIExecutorContext}
                       />
                     </div>
                   )}
