@@ -701,15 +701,11 @@ function registerHandlers(ipcMain) {
       const resolvedUrl = patched.url;
       const resolvedHeaders = patched.headers;
 
-      // Validate URL: only allow HTTP(S) schemes; require HTTPS for non-localhost
+      // Validate URL: only allow HTTP(S) schemes
       try {
         const parsed = new URL(resolvedUrl);
         if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
           return { ok: false, error: "Only HTTP(S) URLs are allowed" };
-        }
-        const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-        if (parsed.protocol === "http:" && !isLocalhost) {
-          return { ok: false, error: "HTTP is only allowed for localhost" };
         }
       } catch {
         return { ok: false, error: "Invalid URL" };
