@@ -535,10 +535,12 @@ function registerHandlers(ipcMain) {
             // Only remove if not owned by a synced provider config
             if (!isHostInProviderConfigs(host)) {
               providerFetchHosts.delete(host);
+              providerHttpHosts.delete(host);
             }
             tempAllowedHosts.delete(host);
           }, TEMP_ALLOWLIST_TTL);
         }
+        if (parsed.protocol === "http:") providerHttpHosts.add(host);
       }
       return { ok: true };
     } catch {
