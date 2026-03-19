@@ -1228,13 +1228,29 @@ function registerHandlers(ipcMain) {
       // If the base command is not on PATH, check whether the bundled ACP
       // binary is available — the agent can still work via ACP without the
       // standalone CLI installed.
+      // resolveClaudeAcpBinaryPath returns { command, prependArgs },
+      // resolveCodexAcpBinaryPath returns a plain string.
+      let versionCommand = null;
+      let versionPrependArgs = [];
       if (!resolvedPath && agent.resolveAcp) {
         const result = agent.resolveAcp(shellEnv, electronModule);
-        // resolveClaudeAcpBinaryPath returns { command, prependArgs },
-        // resolveCodexAcpBinaryPath returns a plain string.
-        const acpPath = typeof result === "string" ? result : result?.command;
-        if (acpPath && acpPath !== agent.acpCommand && existsSync(acpPath)) {
-          resolvedPath = acpPath;
+        if (typeof result === "string") {
+          if (result && result !== agent.acpCommand && existsSync(result)) {
+            resolvedPath = result;
+          }
+        } else if (result?.command) {
+          // On Windows the command may be `node` with the script in prependArgs.
+          // Use the script path for display/dedup so the UI shows the actual
+          // agent rather than the Node binary.
+          const scriptPath = result.prependArgs?.[0];
+          const displayPath = scriptPath || result.command;
+          if (displayPath !== agent.acpCommand && existsSync(displayPath)) {
+            resolvedPath = displayPath;
+            if (scriptPath) {
+              versionCommand = result.command;
+              versionPrependArgs = result.prependArgs;
+            }
+          }
         }
       }
 
@@ -1244,7 +1260,11 @@ function registerHandlers(ipcMain) {
 
       let version = "";
       try {
-        const result = await runCommand(resolvedPath, ["--version"], { env: shellEnv });
+        // When the agent is invoked via Node (Windows), probe version with
+        // the full command (e.g. `node /path/to/dist/index.js --version`).
+        const probeCmd = versionCommand || resolvedPath;
+        const probeArgs = [...versionPrependArgs, "--version"];
+        const result = await runCommand(probeCmd, probeArgs, { env: shellEnv });
         version = (result.stdout || result.stderr || "").trim().split("\n")[0];
       } catch {
         version = "";
