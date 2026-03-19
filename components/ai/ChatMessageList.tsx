@@ -10,7 +10,7 @@ import { AlertCircle, FileText } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
-import { Dialog, DialogContent } from '../ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import {
   Conversation,
   ConversationContent,
@@ -29,7 +29,7 @@ interface ChatMessageListProps {
 }
 
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
   const resolvedToolCallIds = new Set(
@@ -106,7 +106,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                           src={`data:${att.mediaType};base64,${att.base64Data}`}
                           alt={att.filename || 'image'}
                           className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-border/20 cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => setPreviewSrc(`data:${att.mediaType};base64,${att.base64Data}`)}
+                          onClick={() => setPreview({ src: `data:${att.mediaType};base64,${att.base64Data}`, name: att.filename || 'image' })}
                         />
                       ) : (
                         <div
@@ -190,16 +190,22 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     </Conversation>
 
     {/* Image preview lightbox */}
-    <Dialog open={!!previewSrc} onOpenChange={(open) => { if (!open) setPreviewSrc(null); }}>
+    <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
       <DialogContent
-        className="max-w-[90vw] max-h-[90vh] w-fit p-2 gap-0 focus:outline-none"
+        className="max-w-[90vw] max-h-[90vh] w-fit p-0 gap-0 focus:outline-none"
+        overlayClassName="bg-black/50 backdrop-blur-sm"
       >
-        {previewSrc && (
-          <img
-            src={previewSrc}
-            alt="preview"
-            className="max-w-[calc(90vw-16px)] max-h-[calc(90vh-48px)] object-contain rounded"
-          />
+        <DialogHeader className="px-4 py-3 border-b border-border/40">
+          <DialogTitle className="text-sm font-medium truncate pr-6">{preview?.name}</DialogTitle>
+        </DialogHeader>
+        {preview && (
+          <div className="p-2">
+            <img
+              src={preview.src}
+              alt={preview.name}
+              className="max-w-[calc(90vw-16px)] max-h-[calc(90vh-80px)] object-contain rounded"
+            />
+          </div>
         )}
       </DialogContent>
     </Dialog>
