@@ -222,8 +222,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
       <DialogContent
         hideCloseButton
-        className="max-w-[min(90vw,800px)] max-h-[min(90vh,700px)] min-w-[280px] min-h-[200px] w-fit p-0 gap-0 focus:outline-none"
-        overlayClassName="bg-black/50 backdrop-blur-sm"
+        className="max-w-[min(90vw,800px)] max-h-[min(90vh,700px)] min-w-[280px] min-h-[200px] w-fit p-0 gap-0 focus:outline-none shadow-2xl"
       >
         {/* Title bar: filename | zoom controls | close — all in one flex row */}
         <div className="flex items-center h-10 px-3 border-b border-border/40 gap-2 shrink-0">
