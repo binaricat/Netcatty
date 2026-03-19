@@ -6,7 +6,7 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, FileText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, FileText, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
@@ -42,12 +42,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     setPreview({ src, name });
   }, []);
 
+  const resetPreview = useCallback(() => { setZoom(100); setDrag({ x: 0, y: 0 }); }, []);
+
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (zoom <= 100) return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = { startX: e.clientX, startY: e.clientY, origX: drag.x, origY: drag.y };
-  }, [zoom, drag]);
+  }, [drag]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragRef.current) return;
@@ -229,6 +230,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           <DialogTitle className="text-sm font-medium truncate flex-1">{preview?.name}</DialogTitle>
           <div className="flex items-center gap-1 shrink-0">
             <button
+              onClick={resetPreview}
+              disabled={zoom === 100 && drag.x === 0 && drag.y === 0}
+              className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+              title="Reset"
+            >
+              <RotateCcw size={14} />
+            </button>
+            <div className="w-px h-3.5 bg-border/40 mx-0.5" />
+            <button
               onClick={zoomOut}
               disabled={zoom <= 25}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
@@ -257,7 +267,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             className="overflow-hidden flex items-center justify-center"
             style={{
               height: 'calc(min(90vh, 700px) - 40px)',
-              cursor: zoom > 100 ? 'grab' : 'default',
+              cursor: 'grab',
               // Clamp aspect ratio: if image is extremely tall/wide, the container
               // constrains it; object-contain handles the rest.
               aspectRatio: 'auto',
