@@ -197,8 +197,9 @@ export interface SyncPayload {
     sftpAutoSync?: boolean;
     sftpShowHiddenFiles?: boolean;
     sftpUseCompressedUpload?: boolean;
+    sftpAutoOpenSidebar?: boolean;
   };
-  
+
   // Sync metadata
   syncedAt: number;         // When this payload was created
 }

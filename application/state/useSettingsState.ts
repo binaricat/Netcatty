@@ -21,6 +21,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_EDITOR_WORD_WRAP,
   STORAGE_KEY_SESSION_LOGS_ENABLED,
   STORAGE_KEY_SESSION_LOGS_DIR,
@@ -63,6 +64,7 @@ const DEFAULT_SFTP_DOUBLE_CLICK_BEHAVIOR: 'open' | 'transfer' = 'open';
 const DEFAULT_SFTP_AUTO_SYNC = false;
 const DEFAULT_SFTP_SHOW_HIDDEN_FILES = false;
 const DEFAULT_SFTP_USE_COMPRESSED_UPLOAD = true;
+const DEFAULT_SFTP_AUTO_OPEN_SIDEBAR = false;
 
 // Editor defaults
 const DEFAULT_EDITOR_WORD_WRAP = false;
@@ -231,6 +233,10 @@ export const useSettingsState = () => {
     if (stored === 'false' || stored === 'disabled') return false;
     return DEFAULT_SFTP_USE_COMPRESSED_UPLOAD;
   });
+  const [sftpAutoOpenSidebar, setSftpAutoOpenSidebar] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
+    return stored === 'true' ? true : DEFAULT_SFTP_AUTO_OPEN_SIDEBAR;
+  });
 
   // Editor Settings
   const [editorWordWrap, setEditorWordWrapState] = useState<boolean>(() => {
@@ -393,6 +399,8 @@ export const useSettingsState = () => {
     if (storedHidden === 'true' || storedHidden === 'false') setSftpShowHiddenFiles(storedHidden === 'true');
     const storedCompress = readStoredString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD);
     if (storedCompress === 'true' || storedCompress === 'false') setSftpUseCompressedUpload(storedCompress === 'true');
+    const storedAutoOpenSidebar = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
+    if (storedAutoOpenSidebar === 'true' || storedAutoOpenSidebar === 'false') setSftpAutoOpenSidebar(storedAutoOpenSidebar === 'true');
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
@@ -694,6 +702,13 @@ export const useSettingsState = () => {
           setSftpUseCompressedUpload(newValue);
         }
       }
+      // Sync SFTP auto-open sidebar setting from other windows
+      if (e.key === STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== sftpAutoOpenSidebar) {
+          setSftpAutoOpenSidebar(newValue);
+        }
+      }
       // Sync global hotkey enabled setting from other windows
       if (e.key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && e.newValue !== null) {
         const newValue = e.newValue === 'true';
@@ -712,7 +727,7 @@ export const useSettingsState = () => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, autoUpdateEnabled, mergeIncomingTerminalSettings]);
+  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, autoUpdateEnabled, mergeIncomingTerminalSettings]);
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
@@ -796,6 +811,12 @@ export const useSettingsState = () => {
     localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, sftpUseCompressedUpload ? 'true' : 'false');
     notifySettingsChanged(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, sftpUseCompressedUpload);
   }, [sftpUseCompressedUpload, notifySettingsChanged]);
+
+  // Persist SFTP auto-open sidebar setting
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, sftpAutoOpenSidebar ? 'true' : 'false');
+    notifySettingsChanged(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, sftpAutoOpenSidebar);
+  }, [sftpAutoOpenSidebar, notifySettingsChanged]);
 
   // Persist Session Logs settings
   useEffect(() => {
@@ -1019,6 +1040,8 @@ export const useSettingsState = () => {
     setSftpShowHiddenFiles,
     sftpUseCompressedUpload,
     setSftpUseCompressedUpload,
+    sftpAutoOpenSidebar,
+    setSftpAutoOpenSidebar,
     // Editor Settings
     editorWordWrap,
     setEditorWordWrap: useCallback((enabled: boolean) => {
@@ -1052,7 +1075,7 @@ export const useSettingsState = () => {
       uiFontFamilyId, uiLanguage, customCSS,
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
-      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload,
+      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar,
       customThemes,
     ]),
   };

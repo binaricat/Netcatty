@@ -1060,6 +1060,13 @@ const zhCN: Messages = {
   'settings.sftp.autoSync.desc': '使用外部应用程序打开文件时，自动将文件更改同步回远程服务器',
   'settings.sftp.autoSync.enable': '启用自动同步',
   'settings.sftp.autoSync.enableDesc': '在外部应用程序中保存文件时，更改将自动上传到远程服务器',
+
+  // Settings > SFTP 自动打开侧栏
+  'settings.sftp.autoOpenSidebar': '连接时自动打开侧栏',
+  'settings.sftp.autoOpenSidebar.desc': '连接到主机时自动打开 SFTP 文件浏览器侧栏',
+  'settings.sftp.autoOpenSidebar.enable': '启用自动打开侧栏',
+  'settings.sftp.autoOpenSidebar.enableDesc': '当终端会话连接到远程主机时，SFTP 侧栏将自动打开',
+
   'sftp.autoSync.success': '文件已同步到远程：{fileName}',
   'sftp.autoSync.error': '同步文件失败：{error}',
 

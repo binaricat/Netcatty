@@ -29,7 +29,7 @@ const getOpenerLabel = (
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
   const { getAllAssociations, removeAssociation, setOpenerForExtension } = useSftpFileAssociations();
-  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload } = useSettingsState();
+  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar } = useSettingsState();
   const associations = getAllAssociations();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
 
@@ -247,6 +247,46 @@ export default function SettingsFileAssociationsTab() {
                 </Label>
                 <p className="text-sm text-muted-foreground">
                   {t('settings.sftp.compressedUpload.enableDesc')}
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Auto-open sidebar section */}
+        <div className="space-y-4">
+          <SectionHeader title={t('settings.sftp.autoOpenSidebar')} />
+          <p className="text-sm text-muted-foreground">
+            {t('settings.sftp.autoOpenSidebar.desc')}
+          </p>
+          <button
+            onClick={() => setSftpAutoOpenSidebar(!sftpAutoOpenSidebar)}
+            className={cn(
+              "w-full text-left p-4 rounded-lg border-2 transition-colors",
+              sftpAutoOpenSidebar
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-primary/50 hover:bg-secondary/50"
+            )}
+          >
+            <div className="flex items-start gap-3">
+              <div className={cn(
+                "h-5 w-5 rounded border-2 flex items-center justify-center mt-0.5 shrink-0",
+                sftpAutoOpenSidebar
+                  ? "border-primary bg-primary"
+                  : "border-muted-foreground/30"
+              )}>
+                {sftpAutoOpenSidebar && (
+                  <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label className="font-medium cursor-pointer">
+                  {t('settings.sftp.autoOpenSidebar.enable')}
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  {t('settings.sftp.autoOpenSidebar.enableDesc')}
                 </p>
               </div>
             </div>
