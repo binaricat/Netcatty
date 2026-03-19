@@ -199,11 +199,11 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           <DialogTitle className="text-sm font-medium truncate">{preview?.name}</DialogTitle>
         </div>
         {preview && (
-          <div className="p-2">
+          <div>
             <img
               src={preview.src}
               alt={preview.name}
-              className="max-w-[calc(90vw-16px)] max-h-[calc(90vh-80px)] object-contain rounded"
+              className="max-w-[90vw] max-h-[calc(90vh-44px)] object-contain"
             />
           </div>
         )}
