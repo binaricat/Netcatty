@@ -1864,14 +1864,12 @@ function registerHandlers(ipcMain) {
             // Non-image files with a known local path: tell the agent to read it
             fileHints.push(`[Attached file "${att.filename || "file"}" is on the LOCAL machine (not a remote server), path: ${att.filePath} — read it locally]`);
           } else {
-            // Pasted/virtual files without a path: save to temp so the agent can read them
+            // Pasted/virtual files without a path: save to managed temp dir so the agent can read them
             try {
-              const os = require("node:os");
               const fs = require("node:fs");
-              const tempDir = path.join(os.tmpdir(), "Netcatty", "ai-uploads");
-              fs.mkdirSync(tempDir, { recursive: true });
-              const safeName = (att.filename || `file-${Date.now()}`).replace(/[<>:"/\\|?*]/g, "_");
-              const tempPath = path.join(tempDir, `${Date.now()}_${safeName}`);
+              const tempDirBridge = require("./tempDirBridge.cjs");
+              const safeName = att.filename || `file-${Date.now()}`;
+              const tempPath = tempDirBridge.getTempFilePath(safeName);
               fs.writeFileSync(tempPath, Buffer.from(att.base64Data, "base64"));
               fileHints.push(`[Attached file "${att.filename || safeName}" is on the LOCAL machine (not a remote server), path: ${tempPath} — read it locally]`);
             } catch (err) {
