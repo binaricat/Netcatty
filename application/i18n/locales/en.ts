@@ -117,6 +117,8 @@ const en: Messages = {
   'settings.update.lastCheckedPrefix': 'Last checked: ',
   'settings.update.autoUpdateEnabled': 'Automatic Updates',
   'settings.update.autoUpdateEnabledDesc': 'Automatically check and download updates when available.',
+  'settings.update.toastEnabled': 'Show Update Notification',
+  'settings.update.toastEnabledDesc': 'Show a toast notification when a new version is available on startup.',
 
   // Settings > Session Logs
   'settings.sessionLogs.title': 'Session Logs',

@@ -101,6 +101,8 @@ const zhCN: Messages = {
   'settings.update.lastCheckedPrefix': '上次检查：',
   'settings.update.autoUpdateEnabled': '自动更新',
   'settings.update.autoUpdateEnabledDesc': '有新版本时自动检查并下载更新。',
+  'settings.update.toastEnabled': '显示更新通知',
+  'settings.update.toastEnabledDesc': '启动时如有新版本可用，在右下角显示提示通知。',
 
   // Settings > Session Logs
   'settings.sessionLogs.title': '会话日志',

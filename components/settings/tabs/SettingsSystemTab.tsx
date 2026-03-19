@@ -59,6 +59,8 @@ interface SettingsSystemTabProps {
   setGlobalHotkeyEnabled: (enabled: boolean) => void;
   autoUpdateEnabled: boolean;
   setAutoUpdateEnabled: (enabled: boolean) => void;
+  updateToastEnabled: boolean;
+  setUpdateToastEnabled: (enabled: boolean) => void;
   // Unified update state — from useUpdateCheck hook in SettingsPageContent
   updateState: UpdateState;
   checkNow: () => Promise<unknown>;
@@ -82,6 +84,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setGlobalHotkeyEnabled,
   autoUpdateEnabled,
   setAutoUpdateEnabled,
+  updateToastEnabled,
+  setUpdateToastEnabled,
   updateState,
   checkNow,
   installUpdate,
@@ -382,6 +386,15 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               <Toggle
                 checked={autoUpdateEnabled}
                 onChange={setAutoUpdateEnabled}
+              />
+            </SettingRow>
+            <SettingRow
+              label={t('settings.update.toastEnabled')}
+              description={t('settings.update.toastEnabledDesc')}
+            >
+              <Toggle
+                checked={updateToastEnabled}
+                onChange={setUpdateToastEnabled}
               />
             </SettingRow>
             <p className="text-xs text-muted-foreground">

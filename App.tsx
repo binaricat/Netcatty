@@ -325,6 +325,8 @@ function App({ settings }: { settings: SettingsState }) {
     if (updateState.autoDownloadStatus !== 'idle') return;
     // Don't show automatic notification when auto-update is disabled
     if (localStorageAdapter.readString('netcatty_auto_update_enabled_v1') === 'false') return;
+    // Don't show toast when update notification is disabled (#398)
+    if (localStorageAdapter.readString('netcatty_update_toast_enabled_v1') === 'false') return;
     if (updateState.hasUpdate && updateState.latestRelease) {
       const version = updateState.latestRelease.version;
       toast.info(

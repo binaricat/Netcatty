@@ -29,6 +29,7 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
+  STORAGE_KEY_UPDATE_TOAST_ENABLED,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
@@ -268,6 +269,11 @@ export const useSettingsState = () => {
   });
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
+    if (stored === null) return true; // Default to enabled
+    return stored === 'true';
+  });
+  const [updateToastEnabled, setUpdateToastEnabled] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_UPDATE_TOAST_ENABLED);
     if (stored === null) return true; // Default to enabled
     return stored === 'true';
   });
@@ -529,6 +535,9 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_UPDATE_TOAST_ENABLED && typeof value === 'boolean') {
+        setUpdateToastEnabled((prev) => (prev === value ? prev : value));
+      }
     });
     return () => {
       try {
@@ -708,11 +717,18 @@ export const useSettingsState = () => {
           setAutoUpdateEnabled(newValue);
         }
       }
+      // Sync update toast enabled setting from other windows
+      if (e.key === STORAGE_KEY_UPDATE_TOAST_ENABLED && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== updateToastEnabled) {
+          setUpdateToastEnabled(newValue);
+        }
+      }
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, autoUpdateEnabled, mergeIncomingTerminalSettings]);
+  }, [theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage, terminalThemeId, terminalFontFamilyId, terminalFontSize, sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, globalHotkeyEnabled, autoUpdateEnabled, updateToastEnabled, mergeIncomingTerminalSettings]);
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
@@ -897,6 +913,12 @@ export const useSettingsState = () => {
     });
   }, [autoUpdateEnabled, notifySettingsChanged]);
 
+  // Persist update toast enabled setting
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_UPDATE_TOAST_ENABLED, updateToastEnabled ? 'true' : 'false');
+    notifySettingsChanged(STORAGE_KEY_UPDATE_TOAST_ENABLED, updateToastEnabled);
+  }, [updateToastEnabled, notifySettingsChanged]);
+
   // Get merged key bindings (defaults + custom overrides)
   const keyBindings = useMemo((): KeyBinding[] => {
     return DEFAULT_KEY_BINDINGS.map(binding => {
@@ -1041,6 +1063,8 @@ export const useSettingsState = () => {
     setCloseToTray,
     autoUpdateEnabled,
     setAutoUpdateEnabled,
+    updateToastEnabled,
+    setUpdateToastEnabled,
     hotkeyRegistrationError,
     globalHotkeyEnabled,
     setGlobalHotkeyEnabled,
