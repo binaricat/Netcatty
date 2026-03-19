@@ -254,25 +254,25 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   const RENDER_LIMIT = 100; // Limit rendered items for performance
 
   // Define handleScanSystem before useEffect that depends on it
-  const handleScanSystem = useCallback(async () => {
+  const handleScanSystem = useCallback(async (silent = false) => {
     setIsScanning(true);
     try {
       const content = await readKnownHosts();
       if (content === undefined) {
-        toast.error(
+        if (!silent) toast.error(
           t("knownHosts.toast.scanUnavailable"),
           t("vault.nav.knownHosts"),
         );
         return;
       }
       if (!content) {
-        toast.info(t("knownHosts.toast.scanNoFile"), t("vault.nav.knownHosts"));
+        if (!silent) toast.info(t("knownHosts.toast.scanNoFile"), t("vault.nav.knownHosts"));
         return;
       }
 
       const parsed = parseKnownHostsFile(content);
       if (parsed.length === 0) {
-        toast.info(
+        if (!silent) toast.info(
           t("knownHosts.toast.scanNoEntries"),
           t("vault.nav.knownHosts"),
         );
@@ -288,16 +288,16 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
 
       if (newHosts.length > 0) {
         onImportFromFile(newHosts);
-        toast.success(
+        if (!silent) toast.success(
           t("knownHosts.toast.scanImported", { count: newHosts.length }),
           t("vault.nav.knownHosts"),
         );
       } else {
-        toast.info(t("knownHosts.toast.scanNoNew"), t("vault.nav.knownHosts"));
+        if (!silent) toast.info(t("knownHosts.toast.scanNoNew"), t("vault.nav.knownHosts"));
       }
     } catch (err) {
       logger.error("Failed to scan system known_hosts:", err);
-      toast.error(
+      if (!silent) toast.error(
         err instanceof Error ? err.message : t("knownHosts.toast.scanFailed"),
         t("vault.nav.knownHosts"),
       );
@@ -307,13 +307,12 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     }
   }, [knownHosts, onRefresh, onImportFromFile, readKnownHosts, t]);
 
-  // Auto-scan on first mount
+  // Auto-scan on first mount (silent — don't show toasts for missing known_hosts)
   useEffect(() => {
     if (!hasScannedRef.current) {
       hasScannedRef.current = true;
-      // Delay scan slightly to not block initial render
       const timer = setTimeout(() => {
-        handleScanSystem();
+        handleScanSystem(true);
       }, 100);
       return () => clearTimeout(timer);
     }
