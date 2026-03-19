@@ -514,7 +514,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
             variant="ghost"
             size="sm"
             className="h-9 px-3 text-xs"
-            onClick={handleScanSystem}
+            onClick={() => handleScanSystem()}
             disabled={isScanning}
           >
             <RefreshCw
@@ -571,7 +571,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
               <div className="flex gap-2">
                 <Button
                   variant="secondary"
-                  onClick={handleScanSystem}
+                  onClick={() => handleScanSystem()}
                   disabled={isScanning}
                 >
                   <RefreshCw
