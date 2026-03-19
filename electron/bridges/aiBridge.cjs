@@ -1837,20 +1837,40 @@ function registerHandlers(ipcMain) {
         `Use terminal_send_input only to respond to an interactive prompt that is already running; it does not read back the updated terminal output. ` +
         `Do NOT use local shell execution.]\n\n${prompt}`;
 
-      // Build message content: text + optional images
-      function buildMessageContent(text, imgs) {
-        const content = [{ type: "text", text }];
-        if (Array.isArray(imgs)) {
-          for (const img of imgs) {
-            if (!img.base64Data || !img.mediaType) continue;
+      // Build message content: text + optional attachments
+      // ACP provider only supports image/* and audio/* inline via `type: "file"`.
+      // For other file types (PDF, text, etc.), tell the agent the original file
+      // path so it can read it directly — ACP agents have local file access.
+      function buildMessageContent(text, attachments) {
+        if (!Array.isArray(attachments) || attachments.length === 0) {
+          return text;
+        }
+
+        const content = [];
+        const fileHints = [];
+
+        for (const att of attachments) {
+          if (!att.base64Data || !att.mediaType) continue;
+
+          if (att.mediaType.startsWith("image/")) {
+            // Images: pass inline as ACP-compatible file parts
             content.push({
               type: "file",
-              mediaType: img.mediaType,
-              data: img.base64Data,
-              ...(img.filename ? { filename: img.filename } : {}),
+              mediaType: att.mediaType,
+              data: att.base64Data,
+              ...(att.filename ? { filename: att.filename } : {}),
             });
+          } else if (att.filePath) {
+            // Non-image files with a known local path: tell the agent to read it
+            fileHints.push(`[Attached file "${att.filename || "file"}" is on the LOCAL machine (not a remote server), path: ${att.filePath} — read it locally]`);
           }
         }
+
+        const fullText = fileHints.length > 0
+          ? fileHints.join("\n") + "\n\n" + text
+          : text;
+
+        content.unshift({ type: "text", text: fullText });
         return content;
       }
 

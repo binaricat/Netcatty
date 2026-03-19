@@ -50,11 +50,15 @@ interface StreamEvent {
  * Sends the prompt to the main process which runs streamText() with the ACP provider.
  * Stream events are forwarded back via IPC.
  */
-export interface ImageAttachment {
+export interface FileAttachment {
   base64Data: string;
   mediaType: string;
   filename?: string;
+  filePath?: string;
 }
+
+/** @deprecated Use FileAttachment instead */
+export type ImageAttachment = FileAttachment;
 
 export async function runAcpAgentTurn(
   bridge: Record<string, (...args: unknown[]) => unknown>,

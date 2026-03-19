@@ -6,7 +6,7 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, FileText } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
@@ -83,16 +83,26 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                   />
                 )}
 
-                {/* User images */}
-                {isUser && message.images && message.images.length > 0 && (
+                {/* User attachments (images, files) */}
+                {isUser && message.attachments && message.attachments.length > 0 && (
                   <div className="flex gap-1.5 flex-wrap mb-1">
-                    {message.images.map((img, i) => (
-                      <img
-                        key={img.filename ? `${img.filename}-${i}` : `img-${message.id}-${i}`}
-                        src={`data:${img.mediaType};base64,${img.base64Data}`}
-                        alt={img.filename || 'image'}
-                        className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-border/20"
-                      />
+                    {message.attachments.map((att, i) => (
+                      att.mediaType.startsWith('image/') ? (
+                        <img
+                          key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
+                          src={`data:${att.mediaType};base64,${att.base64Data}`}
+                          alt={att.filename || 'image'}
+                          className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-border/20"
+                        />
+                      ) : (
+                        <div
+                          key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
+                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                        >
+                          <FileText size={12} className="text-muted-foreground/60 shrink-0" />
+                          <span className="truncate max-w-[120px]">{att.filename || 'file'}</span>
+                        </div>
+                      )
                     ))}
                   </div>
                 )}

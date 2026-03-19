@@ -11,7 +11,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { createPortal } from 'react-dom';
 import type { FormEvent } from 'react';
-import type { UploadedImage } from '../../application/state/useImageUpload';
+import type { UploadedFile } from '../../application/state/useFileUpload';
 import {
   PromptInput,
   PromptInputFooter,
@@ -40,12 +40,12 @@ interface ChatInputProps {
   selectedModelId?: string;
   /** Callback when user selects a model */
   onModelSelect?: (modelId: string) => void;
-  /** Attached images */
-  images?: UploadedImage[];
-  /** Callback to add images (paste/drop) */
-  onAddImages?: (files: File[]) => void;
-  /** Callback to remove an image */
-  onRemoveImage?: (id: string) => void;
+  /** Attached files (images, PDFs, etc.) */
+  files?: UploadedFile[];
+  /** Callback to add files (paste/drop) */
+  onAddFiles?: (files: File[]) => void;
+  /** Callback to remove a file */
+  onRemoveFile?: (id: string) => void;
   /** Available hosts for @ mention */
   hosts?: Array<{ sessionId: string; hostname: string; label: string; connected: boolean }>;
   /** Permission mode (only shown for Catty Agent) */
@@ -68,9 +68,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   modelPresets = [],
   selectedModelId,
   onModelSelect,
-  images = [],
-  onAddImages,
-  onRemoveImage,
+  files = [],
+  onAddFiles,
+  onRemoveFile,
   hosts = [],
   permissionMode,
   onPermissionModeChange,
@@ -134,23 +134,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, [value, onChange, closeAllMenus]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.items)
-      .filter((item) => item.type.startsWith('image/'))
+    const pastedFiles = Array.from(e.clipboardData.items)
       .map((item) => item.getAsFile())
       .filter(Boolean) as File[];
-    if (files.length > 0) {
+    if (pastedFiles.length > 0) {
       e.preventDefault();
-      onAddImages?.(files);
+      onAddFiles?.(pastedFiles);
     }
-  }, [onAddImages]);
+  }, [onAddFiles]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
-    if (files.length > 0) {
-      onAddImages?.(files);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      onAddFiles?.(droppedFiles);
     }
-  }, [onAddImages]);
+  }, [onAddFiles]);
 
   const defaultPlaceholder = agentName
     ? t('ai.chat.placeholder').replace('{agent}', agentName)
@@ -183,19 +182,23 @@ const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <div className="shrink-0 px-4 pb-4">
       <PromptInput onSubmit={handleSubmit}>
-        {/* Image attachment chips */}
-        {images.length > 0 && (
+        {/* File attachment chips */}
+        {files.length > 0 && (
           <div className="flex gap-1.5 px-3 pt-2 pb-0.5 flex-wrap">
-            {images.map((img) => (
+            {files.map((file) => (
               <div
-                key={img.id}
+                key={file.id}
                 className="inline-flex items-center gap-1 h-6 pl-1.5 pr-1 rounded-md bg-muted/30 border border-border/30 text-[11px] text-foreground/70 group"
               >
-                <ImageIcon size={11} className="text-muted-foreground/60 shrink-0" />
-                <span className="truncate max-w-[80px]">{img.filename}</span>
+                {file.mediaType.startsWith('image/') ? (
+                  <ImageIcon size={11} className="text-muted-foreground/60 shrink-0" />
+                ) : (
+                  <FileText size={11} className="text-muted-foreground/60 shrink-0" />
+                )}
+                <span className="truncate max-w-[80px]">{file.filename}</span>
                 <button
                   type="button"
-                  onClick={() => onRemoveImage?.(img.id)}
+                  onClick={() => onRemoveFile?.(file.id)}
                   className="h-3.5 w-3.5 rounded-sm flex items-center justify-center opacity-50 hover:opacity-100 hover:bg-muted/50 transition-opacity cursor-pointer"
                 >
                   <X size={8} />
@@ -213,7 +216,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           className="hidden"
           onChange={(e) => {
             if (e.target.files?.length) {
-              onAddImages?.(Array.from(e.target.files));
+              onAddFiles?.(Array.from(e.target.files));
               e.target.value = '';
             }
           }}

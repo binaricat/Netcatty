@@ -20,7 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '../lib/utils';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useWindowControls } from '../application/state/useWindowControls';
-import { useImageUpload } from '../application/state/useImageUpload';
+import { useFileUpload } from '../application/state/useFileUpload';
 import type {
   AIPermissionMode,
   AISession,
@@ -202,7 +202,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [currentAgentId, setCurrentAgentId] = useState(defaultAgentId);
 
-  const { images, addImages, removeImage, clearImages } = useImageUpload();
+  const { files, addFiles, removeFile, clearFiles } = useFileUpload();
   const { openSettingsWindow } = useWindowControls();
   const terminalSessionsRef = useRef(terminalSessions);
   terminalSessionsRef.current = terminalSessions;
@@ -407,8 +407,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   /** Refs to avoid re-creating handleSend on every keystroke / image change. */
   const inputValueRef = useRef(inputValue);
   inputValueRef.current = inputValue;
-  const imagesRef = useRef(images);
-  imagesRef.current = images;
+  const filesRef = useRef(files);
+  filesRef.current = files;
 
   /** Auto-title a session from the first user message if untitled. */
   const autoTitleSession = useCallback((sessionId: string, text: string) => {
@@ -465,16 +465,16 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     const sessionId = ensureSession();
 
     // Capture images before clearing
-    const attachedImages = imagesRef.current.map(img => ({ base64Data: img.base64Data, mediaType: img.mediaType, filename: img.filename }));
+    const attachments = filesRef.current.map(f => ({ base64Data: f.base64Data, mediaType: f.mediaType, filename: f.filename, filePath: f.filePath }));
 
     // Add user message
     addMessageToSession(sessionId, {
       id: generateId(), role: 'user', content: trimmed,
-      ...(attachedImages.length > 0 ? { images: attachedImages } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
       timestamp: Date.now(),
     });
     setInputValue('');
-    clearImages();
+    clearFiles();
     setStreamingForScope(sessionId, true);
 
     // Create assistant message placeholder with a tracked ID
@@ -497,7 +497,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         return;
       }
       try {
-        await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachedImages, {
+        await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachments, {
           existingSessionId: currentSession?.externalSessionId,
           updateExternalSessionId: updateSessionExternalSessionId,
           historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
@@ -532,13 +532,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         getExecutorContext: () => buildExecutorContextForScope(toolScope),
         setPendingApproval,
         autoTitleSession,
-      });
+      }, attachments.length > 0 ? attachments : undefined);
     }
   }, [
     isStreaming, activeProvider, scopeKey, currentAgentId,
     activeModelId, externalAgents,
     ensureSession, addMessageToSession, updateMessageById, updateLastMessage,
-    setStreamingForScope, setInputValue, clearImages,
+    setStreamingForScope, setInputValue, clearFiles,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, providers, selectedAgentModel, updateSessionExternalSessionId,
     scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope, setPendingApproval,
@@ -707,9 +707,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             modelPresets={agentModelPresets}
             selectedModelId={selectedAgentModel}
             onModelSelect={handleAgentModelSelect}
-            images={images}
-            onAddImages={addImages}
-            onRemoveImage={removeImage}
+            files={files}
+            onAddFiles={addFiles}
+            onRemoveFile={removeFile}
             hosts={terminalSessions.map(s => ({ sessionId: s.sessionId, hostname: s.hostname, label: s.label, connected: s.connected }))}
             permissionMode={globalPermissionMode}
             onPermissionModeChange={setGlobalPermissionMode}
