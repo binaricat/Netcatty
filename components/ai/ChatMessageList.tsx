@@ -243,7 +243,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
               onClick={resetPreview}
               disabled={zoom === 100}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
-              title="Reset"
+              aria-label={t('common.reset')}
             >
               <RotateCcw size={14} />
             </button>
@@ -252,6 +252,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
               onClick={zoomOut}
               disabled={zoom <= 25}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+              aria-label={t('common.zoomOut')}
             >
               <ZoomOut size={14} />
             </button>
@@ -260,6 +261,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
               onClick={zoomIn}
               disabled={zoom >= 200}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+              aria-label={t('common.zoomIn')}
             >
               <ZoomIn size={14} />
             </button>
@@ -267,6 +269,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           <button
             onClick={() => setPreview(null)}
             className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground shrink-0"
+            aria-label={t('common.close')}
           >
             <X size={14} />
           </button>
