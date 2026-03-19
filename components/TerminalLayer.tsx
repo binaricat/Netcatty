@@ -181,9 +181,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (!session) return;
       const host = hostsRef.current.find(h => h.id === session.hostId);
       if (!host) return;
-      // Skip local and serial connections
+      // Only auto-open for SSH/Mosh (SFTP requires SSH)
       const proto = session.protocol ?? host.protocol;
-      if (proto === 'local' || proto === 'serial' || host.id?.startsWith('local-') || host.id?.startsWith('serial-')) return;
+      if (proto !== 'ssh' && proto !== 'mosh') return;
 
       // Determine the tab ID (workspace or solo session)
       const tabId = session.workspaceId || sessionId;
