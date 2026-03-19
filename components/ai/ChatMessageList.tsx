@@ -31,34 +31,45 @@ interface ChatMessageListProps {
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
-  const [drag, setDrag] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const dragPos = useRef({ x: 0, y: 0 });
+  const dragStart = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
-  const zoomIn = useCallback(() => setZoom(z => Math.min(z + 25, 200)), []);
-  const zoomOut = useCallback(() => setZoom(z => Math.max(z - 25, 25)), []);
+  const applyTransform = useCallback((z: number, x: number, y: number, animate: boolean) => {
+    if (!imgRef.current) return;
+    imgRef.current.style.transition = animate ? 'transform 0.25s ease' : 'none';
+    imgRef.current.style.transform = `scale(${z / 100}) translate(${x / (z / 100)}px, ${y / (z / 100)}px)`;
+  }, []);
+
+  const zoomIn = useCallback(() => setZoom(z => { const nz = Math.min(z + 25, 200); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform]);
+  const zoomOut = useCallback(() => setZoom(z => { const nz = Math.max(z - 25, 25); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform]);
   const openPreview = useCallback((src: string, name: string) => {
     setZoom(100);
-    setDrag({ x: 0, y: 0 });
+    dragPos.current = { x: 0, y: 0 };
     setPreview({ src, name });
   }, []);
 
-  const resetPreview = useCallback(() => { setZoom(100); setDrag({ x: 0, y: 0 }); }, []);
+  const resetPreview = useCallback(() => {
+    setZoom(100);
+    dragPos.current = { x: 0, y: 0 };
+    applyTransform(100, 0, 0, true);
+  }, [applyTransform]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: drag.x, origY: drag.y };
-  }, [drag]);
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    setDrag({
-      x: dragRef.current.origX + (e.clientX - dragRef.current.startX),
-      y: dragRef.current.origY + (e.clientY - dragRef.current.startY),
-    });
+    dragStart.current = { startX: e.clientX, startY: e.clientY, origX: dragPos.current.x, origY: dragPos.current.y };
   }, []);
 
-  const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragStart.current) return;
+    const x = dragStart.current.origX + (e.clientX - dragStart.current.startX);
+    const y = dragStart.current.origY + (e.clientY - dragStart.current.startY);
+    dragPos.current = { x, y };
+    applyTransform(zoom, x, y, false);
+  }, [zoom, applyTransform]);
+
+  const onPointerUp = useCallback(() => { dragStart.current = null; }, []);
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
   const resolvedToolCallIds = new Set(
@@ -230,7 +241,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={resetPreview}
-              disabled={zoom === 100 && drag.x === 0 && drag.y === 0}
+              disabled={zoom === 100}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
               title="Reset"
             >
@@ -276,14 +287,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             onPointerUp={onPointerUp}
           >
             <img
+              ref={imgRef}
               src={preview.src}
               alt={preview.name}
               draggable={false}
               className="select-none max-w-full max-h-full object-contain"
-              style={{
-                transform: `scale(${zoom / 100}) translate(${drag.x / (zoom / 100)}px, ${drag.y / (zoom / 100)}px)`,
-                transition: dragRef.current ? 'none' : 'transform 0.25s ease',
-              }}
+              style={{ transition: 'transform 0.25s ease' }}
             />
           </div>
         )}
