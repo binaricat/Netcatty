@@ -594,20 +594,25 @@ export function useAIChatStreaming({
               ...msg, thinkingDurationMs: msg.thinkingDurationMs || (Date.now() - msg.timestamp),
             }));
           },
-          onToolCall: (toolName: string, args: Record<string, unknown>) => {
+          onToolCall: (toolName: string, args: Record<string, unknown>, toolCallId?: string) => {
             maybeCreateAssistantMsg();
             updateLastMessage(sessionId, msg => ({
               ...msg,
-              toolCalls: [...(msg.toolCalls || []), { id: `tc_${Date.now()}`, name: toolName, arguments: args }],
+              toolCalls: [...(msg.toolCalls || []), { id: toolCallId || `tc_${Date.now()}`, name: toolName, arguments: args }],
               executionStatus: 'running',
               statusText: undefined,
             }));
           },
-          onToolResult: (toolCallId: string, result: string) => {
-            updateLastMessage(sessionId, msg =>
-              msg.role === 'assistant' && msg.executionStatus === 'running'
-                ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
-            );
+          onToolResult: (toolCallId: string, result: string, toolName?: string) => {
+            updateLastMessage(sessionId, msg => {
+              if (msg.role !== 'assistant' || msg.executionStatus !== 'running') return msg;
+              // Only patch tool call name if the existing name is missing/generic
+              // (don't overwrite a good name from onToolCall with a wrapper name from tool-result)
+              const updatedToolCalls = toolName && !toolName.includes('acp_provider_agent_dynamic_tool') && msg.toolCalls
+                ? msg.toolCalls.map(tc => tc.id === toolCallId && !tc.name ? { ...tc, name: toolName } : tc)
+                : msg.toolCalls;
+              return { ...msg, toolCalls: updatedToolCalls, executionStatus: 'completed', statusText: undefined };
+            });
             addMessageToSession(sessionId, {
               id: generateId(), role: 'tool', content: '',
               toolResults: [{ toolCallId, content: result, isError: false }],

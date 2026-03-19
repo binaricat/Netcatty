@@ -13,8 +13,8 @@ export interface AcpAgentCallbacks {
   onTextDelta: (text: string) => void;
   onThinkingDelta: (text: string) => void;
   onThinkingDone: () => void;
-  onToolCall: (toolName: string, args: Record<string, unknown>) => void;
-  onToolResult: (toolCallId: string, result: string) => void;
+  onToolCall: (toolName: string, args: Record<string, unknown>, toolCallId?: string) => void;
+  onToolResult: (toolCallId: string, result: string, toolName?: string) => void;
   onStatus?: (message: string) => void;
   onError: (error: string) => void;
   onDone: () => void;
@@ -171,16 +171,18 @@ function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks) {
     case 'tool-call': {
       const toolName = (event.toolName as string) || 'unknown';
       const input = (event.input as Record<string, unknown>) || {};
-      callbacks.onToolCall(toolName, input);
+      const toolCallId = (event.toolCallId as string) || undefined;
+      callbacks.onToolCall(toolName, input, toolCallId);
       break;
     }
     case 'tool-result': {
       const toolCallId = (event.toolCallId as string) || '';
+      const toolName = (event.toolName as string) || undefined;
       const output = event.output ?? event.result;
       const result = typeof output === 'string'
         ? output
         : JSON.stringify(output);
-      callbacks.onToolResult(toolCallId, result);
+      callbacks.onToolResult(toolCallId, result, toolName);
       break;
     }
     case 'status': {

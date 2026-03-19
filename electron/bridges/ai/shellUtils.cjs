@@ -154,13 +154,25 @@ function serializeStreamChunk(chunk) {
       return { type: "reasoning-start", id: chunk.id ?? undefined };
     case "reasoning-end":
       return { type: "reasoning-end", id: chunk.id ?? undefined };
-    case "tool-call":
+    case "tool-call": {
+      // ACP wraps all tools as "acp.acp_provider_agent_dynamic_tool" —
+      // the real tool name and args are inside chunk.args
+      const isAcpWrapper = chunk.toolName === "acp.acp_provider_agent_dynamic_tool";
+      const acpInput = isAcpWrapper ? chunk.input : null;
+      let realToolName = isAcpWrapper ? (acpInput?.toolName || chunk.toolName) : chunk.toolName;
+      const realArgs = isAcpWrapper ? (acpInput?.args || chunk.args) : chunk.args;
+      const realToolCallId = isAcpWrapper ? (acpInput?.toolCallId || chunk.toolCallId) : chunk.toolCallId;
+      // Simplify MCP tool names: "mcp__netcatty-remote-hosts__get_environment" → "get_environment"
+      if (realToolName && realToolName.includes("__")) {
+        realToolName = realToolName.split("__").pop();
+      }
       return {
         type: "tool-call",
-        toolCallId: chunk.toolCallId,
-        toolName: chunk.toolName,
-        args: chunk.args,
+        toolCallId: realToolCallId,
+        toolName: realToolName,
+        args: realArgs,
       };
+    }
     case "tool-result":
       return {
         type: "tool-result",
