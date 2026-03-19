@@ -270,16 +270,10 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
               src={preview.src}
               alt={preview.name}
               draggable={false}
-              className="select-none"
+              className="select-none max-w-full max-h-full object-contain"
               style={{
-                maxWidth: zoom <= 100 ? '100%' : 'none',
-                maxHeight: zoom <= 100 ? '100%' : 'none',
-                width: zoom !== 100 ? `${zoom}%` : undefined,
-                transform: zoom > 100 ? `translate(${drag.x}px, ${drag.y}px)` : undefined,
-                transition: dragRef.current ? 'none' : 'transform 0.15s ease, width 0.2s ease',
-                // Clamp extreme aspect ratios: a 1:10+ or 10:1+ image gets
-                // contained inside a box no narrower/shorter than these limits.
-                objectFit: 'contain',
+                transform: `scale(${zoom / 100}) translate(${drag.x / (zoom / 100)}px, ${drag.y / (zoom / 100)}px)`,
+                transition: dragRef.current ? 'none' : 'transform 0.25s ease',
               }}
             />
           </div>
