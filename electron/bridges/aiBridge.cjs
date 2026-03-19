@@ -1229,7 +1229,10 @@ function registerHandlers(ipcMain) {
       // binary is available — the agent can still work via ACP without the
       // standalone CLI installed.
       if (!resolvedPath && agent.resolveAcp) {
-        const acpPath = agent.resolveAcp(shellEnv, electronModule);
+        const result = agent.resolveAcp(shellEnv, electronModule);
+        // resolveClaudeAcpBinaryPath returns { command, prependArgs },
+        // resolveCodexAcpBinaryPath returns a plain string.
+        const acpPath = typeof result === "string" ? result : result?.command;
         if (acpPath && acpPath !== agent.acpCommand && existsSync(acpPath)) {
           resolvedPath = acpPath;
         }
@@ -1757,15 +1760,19 @@ function registerHandlers(ipcMain) {
           agentEnv.CODEX_API_KEY = apiKey;
         }
 
+        const claudeAcp = isClaudeAgent ? resolveClaudeAcpBinaryPath(shellEnv, electronModule) : null;
         const resolvedCommand = isCodexAgent
           ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
-          : isClaudeAgent
-            ? resolveClaudeAcpBinaryPath(shellEnv, electronModule)
+          : claudeAcp
+            ? claudeAcp.command
             : acpCommand;
+        const resolvedArgs = claudeAcp
+          ? [...claudeAcp.prependArgs, ...(acpArgs || [])]
+          : acpArgs || [];
 
         const provider = createACPProvider({
           command: resolvedCommand,
-          args: acpArgs || [],
+          args: resolvedArgs,
           env: agentEnv,
           session: {
             cwd: sessionCwd,
@@ -1802,13 +1809,16 @@ function registerHandlers(ipcMain) {
 
         cleanupAcpProvider(chatSessionId);
 
+        const fallbackClaudeAcp = isClaudeAgent ? resolveClaudeAcpBinaryPath(shellEnv, electronModule) : null;
         const fallbackProvider = createACPProvider({
           command: isCodexAgent
             ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
-            : isClaudeAgent
-              ? resolveClaudeAcpBinaryPath(shellEnv, electronModule)
+            : fallbackClaudeAcp
+              ? fallbackClaudeAcp.command
               : acpCommand,
-          args: acpArgs || [],
+          args: fallbackClaudeAcp
+            ? [...fallbackClaudeAcp.prependArgs, ...(acpArgs || [])]
+            : acpArgs || [],
           env: apiKey ? { ...shellEnv, CODEX_API_KEY: apiKey } : { ...shellEnv },
           session: {
             cwd: sessionCwd,

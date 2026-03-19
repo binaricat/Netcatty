@@ -143,22 +143,35 @@ async function getShellEnv() {
 
 // ── Claude Code ACP binary resolution ──
 
+/**
+ * Resolve the Claude ACP binary, returning { command, prependArgs }.
+ *
+ * On macOS/Linux a shebang-based .js script can be spawned directly, but on
+ * Windows `child_process.spawn` does not interpret shebangs — so when the
+ * resolved path is a JS file we must invoke it via Node (`process.execPath`).
+ */
 function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
   const binaryName = "claude-agent-acp";
 
-  // Dev mode: prefer system PATH
+  // Dev mode: prefer system PATH (npm creates platform-appropriate wrappers)
   const isPackaged = electronModule?.app?.isPackaged;
   if (!isPackaged && shellEnv) {
     const systemPath = resolveCliFromPath(binaryName, shellEnv);
-    if (systemPath) return systemPath;
+    if (systemPath) return { command: systemPath, prependArgs: [] };
   }
 
   // Packaged build (or dev fallback): use npm-bundled binary
   try {
     const resolved = require.resolve("@zed-industries/claude-agent-acp/dist/index.js");
-    return toUnpackedAsarPath(resolved);
+    const scriptPath = toUnpackedAsarPath(resolved);
+
+    // On Windows, .js files cannot be spawned directly — use Node to run them.
+    if (process.platform === "win32") {
+      return { command: process.execPath, prependArgs: [scriptPath] };
+    }
+    return { command: scriptPath, prependArgs: [] };
   } catch {
-    return binaryName;
+    return { command: binaryName, prependArgs: [] };
   }
 }
 
