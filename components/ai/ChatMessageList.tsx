@@ -42,17 +42,31 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     imgRef.current.style.transform = `scale(${z / 100}) translate(${x / (z / 100)}px, ${y / (z / 100)}px)`;
   }, []);
 
-  const zoomIn = useCallback(() => setZoom(z => { const nz = Math.min(z + 25, 200); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform]);
-  const zoomOut = useCallback(() => setZoom(z => { const nz = Math.max(z - 25, 25); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform]);
+  const zoomRef = useRef(100);
+  const setZoomAndRef = useCallback((fn: (z: number) => number) => {
+    setZoom(z => { const nz = fn(z); zoomRef.current = nz; return nz; });
+  }, []);
+  const zoomIn = useCallback(() => setZoomAndRef(z => { const nz = Math.min(z + 25, 200); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform, setZoomAndRef]);
+  const zoomOut = useCallback(() => setZoomAndRef(z => { const nz = Math.max(z - 25, 25); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform, setZoomAndRef]);
+
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -10 : 10;
+    setZoomAndRef(z => {
+      const nz = Math.max(25, Math.min(200, z + delta));
+      applyTransform(nz, dragPos.current.x, dragPos.current.y, false);
+      return nz;
+    });
+  }, [applyTransform, setZoomAndRef]);
   const openPreview = useCallback((src: string, name: string) => {
-    setZoom(100);
+    setZoom(100); zoomRef.current = 100;
     setDragged(false);
     dragPos.current = { x: 0, y: 0 };
     setPreview({ src, name });
   }, []);
 
   const resetPreview = useCallback(() => {
-    setZoom(100);
+    setZoom(100); zoomRef.current = 100;
     setDragged(false);
     dragPos.current = { x: 0, y: 0 };
     applyTransform(100, 0, 0, true);
@@ -66,13 +80,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragStart.current) return;
-    // Bail out if primary button is no longer pressed (e.g. released outside window)
     if ((e.buttons & 1) === 0) { dragStart.current = null; return; }
     const x = dragStart.current.origX + (e.clientX - dragStart.current.startX);
     const y = dragStart.current.origY + (e.clientY - dragStart.current.startY);
     dragPos.current = { x, y };
-    applyTransform(zoom, x, y, false);
-  }, [zoom, applyTransform]);
+    applyTransform(zoomRef.current, x, y, false);
+  }, [applyTransform]);
 
   const endDrag = useCallback(() => {
     if (dragStart.current && (dragPos.current.x !== 0 || dragPos.current.y !== 0)) {
@@ -299,6 +312,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
+            onWheel={onWheel}
             onLostPointerCapture={endDrag}
           >
             <img
