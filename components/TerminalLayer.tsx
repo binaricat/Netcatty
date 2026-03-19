@@ -179,8 +179,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (status === 'connected' && sftpAutoOpenSidebarRef.current) {
       const session = sessionsRef.current.find(s => s.id === sessionId);
       if (!session) return;
-      // Only auto-open for SSH/Mosh (SFTP requires SSH)
-      const proto = session.protocol ?? 'ssh';
+      // Only auto-open for SSH/Mosh (SFTP requires SSH); skip local/unset protocol
+      const proto = session.protocol;
       if (proto !== 'ssh' && proto !== 'mosh') return;
 
       const host = hostsRef.current.find(h => h.id === session.hostId);
@@ -202,6 +202,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             // Quick Connect / temporary session — build minimal host from session data
             id: session.hostId || sessionId,
             hostname: session.hostname,
+            username: session.username,
             port: session.port ?? 22,
             protocol: proto,
             label: session.label || session.hostname,
