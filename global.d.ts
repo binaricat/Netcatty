@@ -76,6 +76,8 @@ declare global {
     legacyAlgorithms?: boolean;
     // Use sudo for SFTP server
     sudo?: boolean;
+    // Session log configuration for real-time streaming
+    sessionLog?: { enabled: boolean; directory: string; format: string };
   }
 
   interface SftpStatResult {
@@ -143,6 +145,7 @@ declare global {
       rows?: number;
       charset?: string;
       env?: Record<string, string>;
+      sessionLog?: { enabled: boolean; directory: string; format: string };
     }): Promise<string>;
     startMoshSession?(options: {
       sessionId?: string;
@@ -155,8 +158,9 @@ declare global {
       rows?: number;
       charset?: string;
       env?: Record<string, string>;
+      sessionLog?: { enabled: boolean; directory: string; format: string };
     }): Promise<string>;
-    startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; cwd?: string; env?: Record<string, string> }): Promise<string>;
+    startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; cwd?: string; env?: Record<string, string>; sessionLog?: { enabled: boolean; directory: string; format: string } }): Promise<string>;
     startSerialSession?(options: {
       sessionId?: string;
       path: string;
@@ -165,6 +169,7 @@ declare global {
       stopBits?: 1 | 1.5 | 2;
       parity?: 'none' | 'even' | 'odd' | 'mark' | 'space';
       flowControl?: 'none' | 'xon/xoff' | 'rts/cts';
+      sessionLog?: { enabled: boolean; directory: string; format: string };
     }): Promise<string>;
     listSerialPorts?(): Promise<Array<{
       path: string;

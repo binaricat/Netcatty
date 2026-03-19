@@ -64,6 +64,12 @@ type ChainProgressState = {
   currentHostLabel: string;
 } | null;
 
+export type SessionLogConfig = {
+  enabled: boolean;
+  directory: string;
+  format: string;
+};
+
 export type TerminalSessionStartersContext = {
   host: Host;
   keys: SSHKey[];
@@ -76,6 +82,7 @@ export type TerminalSessionStartersContext = {
   terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
   serialConfig?: SerialConfig;
+  sessionLog?: SessionLogConfig;
   isVisibleRef?: RefObject<boolean>;
   pendingOutputScrollRef?: RefObject<boolean>;
 
@@ -456,6 +463,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
           keepaliveInterval: ctx.terminalSettings?.keepaliveInterval,
+          sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
         });
       };
 
@@ -609,6 +617,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         rows: term.rows,
         charset: ctx.host.charset,
         env: telnetEnv,
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
       attachSessionToTerminal(ctx, term, id, {
@@ -650,6 +659,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         rows: term.rows,
         charset: ctx.host.charset,
         env: moshEnv,
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
       attachSessionToTerminal(ctx, term, id, {
@@ -708,6 +718,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         env: {
           TERM: ctx.terminalSettings?.terminalEmulationType ?? "xterm-256color",
         },
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
       ctx.sessionRef.current = id;
@@ -787,6 +798,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         stopBits: ctx.serialConfig.stopBits,
         parity: ctx.serialConfig.parity,
         flowControl: ctx.serialConfig.flowControl,
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 
       // Serial connection is established immediately when session starts

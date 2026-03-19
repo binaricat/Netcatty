@@ -1069,7 +1069,11 @@ function App({ settings }: { settings: SettingsState }) {
       if (IS_DEV) console.log('[handleTerminalDataCapture] Updated log with terminalData');
 
       // Auto-save session log if enabled
-      if (sessionLogsEnabled && sessionLogsDir && data) {
+      // Skip when real-time streaming is active (sessionLogsEnabled=true)
+      // because the main process already wrote the log file in real-time
+      // via sessionLogStreamManager. Only fall back to the old renderer-side
+      // auto-save when streaming is disabled.
+      if (!sessionLogsEnabled && sessionLogsDir && data) {
         import('./infrastructure/services/netcattyBridge').then(({ netcattyBridge }) => {
           const bridge = netcattyBridge.get();
           if (bridge?.autoSaveSessionLog) {
@@ -1328,6 +1332,9 @@ function App({ settings }: { settings: SettingsState }) {
           sftpAutoOpenSidebar={sftpAutoOpenSidebar}
           editorWordWrap={editorWordWrap}
           setEditorWordWrap={setEditorWordWrap}
+          sessionLogsEnabled={sessionLogsEnabled}
+          sessionLogsDir={sessionLogsDir}
+          sessionLogsFormat={sessionLogsFormat}
         />
 
         {/* Log Views - readonly terminal replays */}

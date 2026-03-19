@@ -11,6 +11,8 @@ const { StringDecoder } = require("node:string_decoder");
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
 
+const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+
 // Shared references
 let sessions = null;
 let electronModule = null;
@@ -213,13 +215,26 @@ function startLocalSession(event, payload) {
     webContentsId: event.sender.id,
   };
   sessions.set(sessionId, session);
-  
+
+  // Start real-time session log stream if configured
+  if (payload?.sessionLog?.enabled && payload?.sessionLog?.directory) {
+    sessionLogStreamManager.startStream(sessionId, {
+      hostLabel: "Local",
+      hostname: "localhost",
+      directory: payload.sessionLog.directory,
+      format: payload.sessionLog.format || "txt",
+      startTime: Date.now(),
+    });
+  }
+
   proc.onData((data) => {
     const contents = electronModule.webContents.fromId(session.webContentsId);
     contents?.send("netcatty:data", { sessionId, data });
+    sessionLogStreamManager.appendData(sessionId, data);
   });
-  
+
   proc.onExit((evt) => {
+    sessionLogStreamManager.stopStream(sessionId);
     sessions.delete(sessionId);
     const contents = electronModule.webContents.fromId(session.webContentsId);
     // Signal present = killed externally (show disconnected UI).
@@ -390,6 +405,17 @@ async function startTelnetSession(event, options) {
       };
       sessions.set(sessionId, session);
 
+      // Start real-time session log stream if configured
+      if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+        sessionLogStreamManager.startStream(sessionId, {
+          hostLabel: options.label || hostname,
+          hostname,
+          directory: options.sessionLog.directory,
+          format: options.sessionLog.format || "txt",
+          startTime: Date.now(),
+        });
+      }
+
       resolve({ sessionId });
     });
 
@@ -416,6 +442,7 @@ async function startTelnetSession(event, options) {
         if (decoded) {
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:data", { sessionId, data: decoded });
+          sessionLogStreamManager.appendData(sessionId, decoded);
         }
       }
     });
@@ -423,10 +450,11 @@ async function startTelnetSession(event, options) {
     socket.on('error', (err) => {
       console.error(`[Telnet] Socket error: ${err.message}`);
       clearTimeout(connectTimeout);
-      
+
       if (!connected) {
         reject(new Error(`Failed to connect: ${err.message}`));
       } else {
+        sessionLogStreamManager.stopStream(sessionId);
         const session = sessions.get(sessionId);
         if (session) {
           const contents = electronModule.webContents.fromId(session.webContentsId);
@@ -440,6 +468,7 @@ async function startTelnetSession(event, options) {
       console.log(`[Telnet] Connection closed${hadError ? ' with error' : ''}`);
       clearTimeout(connectTimeout);
 
+      sessionLogStreamManager.stopStream(sessionId);
       const session = sessions.get(sessionId);
       if (session) {
         const contents = electronModule.webContents.fromId(session.webContentsId);
@@ -519,12 +548,25 @@ async function startMoshSession(event, options) {
     };
     sessions.set(sessionId, session);
 
+    // Start real-time session log stream if configured
+    if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+      sessionLogStreamManager.startStream(sessionId, {
+        hostLabel: options.label || options.hostname,
+        hostname: options.hostname,
+        directory: options.sessionLog.directory,
+        format: options.sessionLog.format || "txt",
+        startTime: Date.now(),
+      });
+    }
+
     proc.onData((data) => {
       const contents = electronModule.webContents.fromId(session.webContentsId);
       contents?.send("netcatty:data", { sessionId, data });
+      sessionLogStreamManager.appendData(sessionId, data);
     });
 
     proc.onExit((evt) => {
+      sessionLogStreamManager.stopStream(sessionId);
       sessions.delete(sessionId);
       const contents = electronModule.webContents.fromId(session.webContentsId);
       // Mosh non-zero exit typically means connection/auth failure — show error UI
@@ -607,6 +649,17 @@ async function startSerialSession(event, options) {
         };
         sessions.set(sessionId, session);
 
+        // Start real-time session log stream if configured
+        if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+          sessionLogStreamManager.startStream(sessionId, {
+            hostLabel: options.label || portPath,
+            hostname: portPath,
+            directory: options.sessionLog.directory,
+            format: options.sessionLog.format || "txt",
+            startTime: Date.now(),
+          });
+        }
+
         const serialDecoder = new StringDecoder('latin1');
 
         serialPort.on('data', (data) => {
@@ -614,11 +667,13 @@ async function startSerialSession(event, options) {
           if (decoded) {
             const contents = electronModule.webContents.fromId(session.webContentsId);
             contents?.send("netcatty:data", { sessionId, data: decoded });
+            sessionLogStreamManager.appendData(sessionId, decoded);
           }
         });
 
         serialPort.on('error', (err) => {
           console.error(`[Serial] Port error: ${err.message}`);
+          sessionLogStreamManager.stopStream(sessionId);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
           sessions.delete(sessionId);
@@ -626,6 +681,7 @@ async function startSerialSession(event, options) {
 
         serialPort.on('close', () => {
           console.log(`[Serial] Port closed`);
+          sessionLogStreamManager.stopStream(sessionId);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
           sessions.delete(sessionId);

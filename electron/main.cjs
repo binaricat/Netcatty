@@ -79,6 +79,7 @@ const cloudSyncBridge = require("./bridges/cloudSyncBridge.cjs");
 const fileWatcherBridge = require("./bridges/fileWatcherBridge.cjs");
 const tempDirBridge = require("./bridges/tempDirBridge.cjs");
 const sessionLogsBridge = require("./bridges/sessionLogsBridge.cjs");
+const sessionLogStreamManager = require("./bridges/sessionLogStreamManager.cjs");
 const compressUploadBridge = require("./bridges/compressUploadBridge.cjs");
 const globalShortcutBridge = require("./bridges/globalShortcutBridge.cjs");
 const credentialBridge = require("./bridges/credentialBridge.cjs");
@@ -849,6 +850,11 @@ if (!gotLock) {
 
   // Cleanup all PTY sessions and port forwarding tunnels before quitting
   app.on("will-quit", () => {
+    try {
+      sessionLogStreamManager.cleanupAll();
+    } catch (err) {
+      console.warn("Error during session log stream cleanup:", err);
+    }
     try {
       terminalBridge.cleanupAllSessions();
     } catch (err) {

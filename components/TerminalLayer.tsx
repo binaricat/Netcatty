@@ -111,6 +111,10 @@ interface TerminalLayerProps {
   sftpAutoOpenSidebar: boolean;
   editorWordWrap: boolean;
   setEditorWordWrap: (value: boolean) => void;
+  // Session log settings for real-time streaming
+  sessionLogsEnabled?: boolean;
+  sessionLogsDir?: string;
+  sessionLogsFormat?: string;
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
@@ -157,6 +161,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sftpAutoOpenSidebar,
   editorWordWrap,
   setEditorWordWrap,
+  sessionLogsEnabled,
+  sessionLogsDir,
+  sessionLogsFormat,
 }) => {
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
@@ -1607,6 +1614,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   onToggleComposeBar={inActiveWorkspace ? handleToggleWorkspaceComposeBar : undefined}
                   isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
                   onBroadcastInput={inActiveWorkspace && activeWorkspace && isBroadcastEnabled?.(activeWorkspace.id) ? handleBroadcastInput : undefined}
+                  sessionLog={sessionLogsEnabled && sessionLogsDir ? { enabled: true, directory: sessionLogsDir, format: sessionLogsFormat || 'txt' } : undefined}
                 />
               </div>
             );

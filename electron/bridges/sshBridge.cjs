@@ -22,6 +22,7 @@ const {
   findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
   getSshAgentSocket,
 } = require("./sshAuthHelper.cjs");
+const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 
 // Default SSH key names in priority order
 const DEFAULT_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -977,6 +978,17 @@ async function startSSHSession(event, options) {
             };
             sessions.set(sessionId, session);
 
+            // Start real-time session log stream if configured
+            if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+              sessionLogStreamManager.startStream(sessionId, {
+                hostLabel: options.label || options.hostname || '',
+                hostname: options.hostname || '',
+                directory: options.sessionLog.directory,
+                format: options.sessionLog.format || 'txt',
+                startTime: Date.now(),
+              });
+            }
+
             // Data buffering for reduced IPC overhead
             let dataBuffer = '';
             let flushTimeout = null;
@@ -1009,12 +1021,16 @@ async function startSSHSession(event, options) {
 
             stream.on("data", (data) => {
               const decoder = getSessionDecoder(sessionId, "stdout");
-              bufferData(decoder.write(data));
+              const decoded = decoder.write(data);
+              bufferData(decoded);
+              sessionLogStreamManager.appendData(sessionId, decoded);
             });
 
             stream.stderr?.on("data", (data) => {
               const decoder = getSessionDecoder(sessionId, "stderr");
-              bufferData(decoder.write(data));
+              const decoded = decoder.write(data);
+              bufferData(decoded);
+              sessionLogStreamManager.appendData(sessionId, decoded);
             });
 
             // Capture the real exit code from the remote process.
@@ -1036,6 +1052,7 @@ async function startSSHSession(event, options) {
                 clearTimeout(flushTimeout);
               }
               flushBuffer();
+              sessionLogStreamManager.stopStream(sessionId);
               const contents = event.sender;
               safeSend(contents, "netcatty:exit", { sessionId, exitCode: streamExitCode, reason: streamExited ? "exited" : "closed" });
               sessions.delete(sessionId);
@@ -1086,6 +1103,7 @@ async function startSSHSession(event, options) {
         }
 
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+        sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);
@@ -1100,6 +1118,7 @@ async function startSSHSession(event, options) {
         const err = new Error(`Connection timeout to ${options.hostname}`);
         const contents = event.sender;
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "timeout" });
+        sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);
@@ -1112,6 +1131,7 @@ async function startSSHSession(event, options) {
       conn.once("close", () => {
         const contents = event.sender;
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
+        sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
         sessionEncodings.delete(sessionId);
         sessionDecoders.delete(sessionId);

@@ -152,6 +152,8 @@ interface TerminalProps {
   onToggleComposeBar?: () => void;
   isWorkspaceComposeBarOpen?: boolean;
   onBroadcastInput?: (data: string, sourceSessionId: string) => void;
+  // Session log configuration for real-time streaming
+  sessionLog?: { enabled: boolean; directory: string; format: string };
 }
 
 // Helper function to format network speed (bytes/sec) to human-readable format
@@ -209,6 +211,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onToggleComposeBar,
   isWorkspaceComposeBarOpen,
   onBroadcastInput,
+  sessionLog,
 }) => {
   // Timeout for connection - increased to 120s to allow time for keyboard-interactive (2FA) authentication
   const CONNECTION_TIMEOUT = 120000;
@@ -487,6 +490,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onTerminalDataCapture,
     onOsDetected,
     onCommandExecuted,
+    sessionLog,
   });
   sessionStartersRef.current = sessionStarters;
 
