@@ -133,11 +133,12 @@ function appendData(sessionId, dataChunk) {
  * Stop the log stream for a session.
  * Flushes remaining data, closes the write stream, and finalizes the file.
  * @param {string} sessionId
- * @returns {string|null} The final file path, or null if no stream was active
+ * @returns {Promise<string|null>} The final file path, or null if no stream was active
  */
-function stopStream(sessionId) {
+async function stopStream(sessionId) {
   const entry = activeStreams.get(sessionId);
   if (!entry) return null;
+  activeStreams.delete(sessionId);
 
   // Stop periodic flush
   if (entry.flushTimer) {
@@ -148,25 +149,23 @@ function stopStream(sessionId) {
   // Flush remaining buffer
   flushBuffer(entry);
 
-  // Close the write stream
-  try {
-    entry.writeStream.end();
-  } catch (err) {
-    console.error(`[SessionLogStream] Error closing stream for ${sessionId}:`, err.message);
-  }
+  // Close the write stream and wait for it to finish
+  await new Promise((resolve) => {
+    entry.writeStream.end(resolve);
+  });
 
   let finalPath = entry.filePath;
 
   // For HTML format: read the temp raw file and convert to HTML
   if (entry.isHtml && !entry.disabled) {
     try {
-      const rawData = fs.readFileSync(entry.filePath, "utf8");
+      const rawData = await fs.promises.readFile(entry.filePath, "utf8");
       const htmlContent = terminalDataToHtml(rawData, entry.hostLabel, entry.startTime);
       const htmlPath = entry.filePath.replace(/\.log\.tmp$/, ".html");
-      fs.writeFileSync(htmlPath, htmlContent, "utf8");
+      await fs.promises.writeFile(htmlPath, htmlContent, "utf8");
       // Remove temp file
       try {
-        fs.unlinkSync(entry.filePath);
+        await fs.promises.unlink(entry.filePath);
       } catch {
         // Ignore cleanup errors
       }
@@ -177,7 +176,6 @@ function stopStream(sessionId) {
     }
   }
 
-  activeStreams.delete(sessionId);
   console.log(`[SessionLogStream] Stopped stream for ${sessionId} -> ${finalPath}`);
   return finalPath;
 }
@@ -194,11 +192,10 @@ function hasStream(sessionId) {
 /**
  * Cleanup all active streams (called on app quit).
  */
-function cleanupAll() {
+async function cleanupAll() {
   console.log(`[SessionLogStream] Cleaning up ${activeStreams.size} active streams`);
-  for (const sessionId of activeStreams.keys()) {
-    stopStream(sessionId);
-  }
+  const ids = [...activeStreams.keys()];
+  await Promise.allSettled(ids.map(id => stopStream(id)));
 }
 
 module.exports = {

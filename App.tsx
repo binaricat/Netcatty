@@ -1068,31 +1068,8 @@ function App({ settings }: { settings: SettingsState }) {
       });
       if (IS_DEV) console.log('[handleTerminalDataCapture] Updated log with terminalData');
 
-      // Auto-save session log if enabled
-      // Skip when real-time streaming is active (sessionLogsEnabled=true)
-      // because the main process already wrote the log file in real-time
-      // via sessionLogStreamManager. Only fall back to the old renderer-side
-      // auto-save when streaming is disabled.
-      if (!sessionLogsEnabled && sessionLogsDir && data) {
-        import('./infrastructure/services/netcattyBridge').then(({ netcattyBridge }) => {
-          const bridge = netcattyBridge.get();
-          if (bridge?.autoSaveSessionLog) {
-            bridge.autoSaveSessionLog({
-              terminalData: data,
-              hostLabel: matchingLog.hostLabel,
-              hostname: matchingLog.hostname,
-              hostId: matchingLog.hostId,
-              startTime: matchingLog.startTime,
-              format: sessionLogsFormat,
-              directory: sessionLogsDir,
-            }).then(result => {
-              if (IS_DEV) console.log('[handleTerminalDataCapture] Auto-save result:', result);
-            }).catch(err => {
-              console.error('[handleTerminalDataCapture] Auto-save failed:', err);
-            });
-          }
-        });
-      }
+      // Auto-save is now handled by real-time streaming in the main process
+      // via sessionLogStreamManager. No renderer-side fallback needed.
     } else {
       if (IS_DEV) console.log('[handleTerminalDataCapture] No matching log found!');
     }
