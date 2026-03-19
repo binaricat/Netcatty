@@ -18,6 +18,7 @@ const mcpServerBridge = require("./mcpServerBridge.cjs");
 const {
   stripAnsi,
   resolveCliFromPath,
+  resolveClaudeAcpBinaryPath,
   getShellEnv,
   serializeStreamChunk,
 } = require("./ai/shellUtils.cjs");
@@ -1176,7 +1177,7 @@ function registerHandlers(ipcMain) {
     }
   }
 
-  // Discover external agents from PATH, plus the bundled Codex CLI if present.
+  // Discover external agents from PATH, plus bundled ACP binaries if present.
   ipcMain.handle("netcatty:ai:agents:discover", async (event) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const agents = [];
@@ -1189,6 +1190,7 @@ function registerHandlers(ipcMain) {
         acpCommand: "claude-code-acp",
         acpArgs: [],
         args: ["-p", "--output-format", "text", "{prompt}"],
+        resolveAcp: resolveClaudeAcpBinaryPath,
       },
       {
         command: "codex",
@@ -1198,6 +1200,7 @@ function registerHandlers(ipcMain) {
         acpCommand: "codex-acp",
         acpArgs: [],
         args: ["exec", "--full-auto", "--json", "{prompt}"],
+        resolveAcp: resolveCodexAcpBinaryPath,
       },
     ];
 
@@ -1222,6 +1225,16 @@ function registerHandlers(ipcMain) {
         resolvedPath = null;
       }
 
+      // If the base command is not on PATH, check whether the bundled ACP
+      // binary is available — the agent can still work via ACP without the
+      // standalone CLI installed.
+      if (!resolvedPath && agent.resolveAcp) {
+        const acpPath = agent.resolveAcp(shellEnv, electronModule);
+        if (acpPath && acpPath !== agent.acpCommand && existsSync(acpPath)) {
+          resolvedPath = acpPath;
+        }
+      }
+
       if (!resolvedPath || seenPaths.has(resolvedPath)) {
         continue;
       }
@@ -1234,8 +1247,9 @@ function registerHandlers(ipcMain) {
         version = "";
       }
 
+      const { resolveAcp: _unused, ...agentInfo } = agent;
       agents.push({
-        ...agent,
+        ...agentInfo,
         path: resolvedPath,
         version,
         available: true,
@@ -1665,6 +1679,7 @@ function registerHandlers(ipcMain) {
       const shellEnv = await getShellEnv();
       const sessionCwd = cwd || process.cwd();
       const isCodexAgent = acpCommand === "codex-acp";
+      const isClaudeAgent = acpCommand === "claude-code-acp";
 
       // Resolve API key from providerId (decrypted in main process only)
       const resolvedProvider = providerId ? resolveProviderApiKey(providerId) : null;
@@ -1744,7 +1759,9 @@ function registerHandlers(ipcMain) {
 
         const resolvedCommand = isCodexAgent
           ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
-          : acpCommand;
+          : isClaudeAgent
+            ? resolveClaudeAcpBinaryPath(shellEnv, electronModule)
+            : acpCommand;
 
         const provider = createACPProvider({
           command: resolvedCommand,
@@ -1788,7 +1805,9 @@ function registerHandlers(ipcMain) {
         const fallbackProvider = createACPProvider({
           command: isCodexAgent
             ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
-            : acpCommand,
+            : isClaudeAgent
+              ? resolveClaudeAcpBinaryPath(shellEnv, electronModule)
+              : acpCommand,
           args: acpArgs || [],
           env: apiKey ? { ...shellEnv, CODEX_API_KEY: apiKey } : { ...shellEnv },
           session: {

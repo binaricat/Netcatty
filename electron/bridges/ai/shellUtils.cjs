@@ -141,6 +141,27 @@ async function getShellEnv() {
   return _cachedShellEnv;
 }
 
+// ── Claude Code ACP binary resolution ──
+
+function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
+  const binaryName = "claude-code-acp";
+
+  // Dev mode: prefer system PATH
+  const isPackaged = electronModule?.app?.isPackaged;
+  if (!isPackaged && shellEnv) {
+    const systemPath = resolveCliFromPath(binaryName, shellEnv);
+    if (systemPath) return systemPath;
+  }
+
+  // Packaged build (or dev fallback): use npm-bundled binary
+  try {
+    const resolved = require.resolve("@zed-industries/claude-code-acp/dist/index.js");
+    return toUnpackedAsarPath(resolved);
+  } catch {
+    return binaryName;
+  }
+}
+
 // ── Stream chunk serialization ──
 
 function serializeStreamChunk(chunk) {
@@ -197,6 +218,7 @@ module.exports = {
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,
   resolveCliFromPath,
+  resolveClaudeAcpBinaryPath,
   toUnpackedAsarPath,
   getShellEnv,
   serializeStreamChunk,
