@@ -93,10 +93,10 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                   />
                 )}
 
-                {/* User attachments (images, files) */}
-                {isUser && message.attachments && message.attachments.length > 0 && (
+                {/* User attachments (images, files) — fallback to legacy `images` field */}
+                {isUser && (message.attachments ?? message.images)?.length && (
                   <div className="flex gap-1.5 flex-wrap mb-1">
-                    {message.attachments.map((att, i) => (
+                    {(message.attachments ?? message.images)!.map((att, i) => (
                       att.mediaType.startsWith('image/') ? (
                         <img
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}

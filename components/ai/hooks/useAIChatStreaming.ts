@@ -749,11 +749,12 @@ export function useAIChatStreaming({
       const sdkMessages: Array<ModelMessage> = [];
       for (const m of allMessages) {
         if (m.role === 'user') {
-          // Build multimodal content when attachments are present
-          if (m.attachments?.length) {
+          // Build multimodal content when attachments are present (fallback to legacy `images` field)
+          const messageAttachments = m.attachments ?? m.images;
+          if (messageAttachments?.length) {
             const parts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mediaType?: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
             parts.push({ type: 'text', text: m.content });
-            for (const att of m.attachments) {
+            for (const att of messageAttachments) {
               if (att.mediaType.startsWith('image/')) {
                 parts.push({ type: 'image', image: att.base64Data, mediaType: att.mediaType });
               } else {

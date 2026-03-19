@@ -38,6 +38,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   attachments?: ChatMessageAttachment[];
+  /** @deprecated Use attachments instead. Kept for backward compatibility with persisted sessions. */
+  images?: ChatMessageAttachment[];
   thinking?: string;
   thinkingDurationMs?: number;
   toolCalls?: ToolCall[];
