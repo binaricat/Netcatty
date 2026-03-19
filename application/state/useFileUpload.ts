@@ -16,11 +16,13 @@ export interface UploadedFile {
   filePath?: string;    // original filesystem path (Electron only)
 }
 
-/** MIME types accepted for file upload */
-const SUPPORTED_MIME_PREFIXES = ['image/', 'application/pdf', 'text/'];
+/** Reject only known binary blobs that AI models can't process */
+const REJECTED_MIME_PREFIXES = ['video/', 'audio/'];
 
 function isSupportedFile(file: File): boolean {
-  return SUPPORTED_MIME_PREFIXES.some(prefix => file.type.startsWith(prefix));
+  // Allow files with empty MIME (common in Electron for .sh, .yaml, etc.)
+  if (!file.type) return true;
+  return !REJECTED_MIME_PREFIXES.some(prefix => file.type.startsWith(prefix));
 }
 
 async function fileToDataUrl(file: File): Promise<{ dataUrl: string; base64: string }> {
