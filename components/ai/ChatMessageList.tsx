@@ -6,11 +6,11 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, FileText, ZoomIn, ZoomOut } from 'lucide-react';
-import React, { useCallback, useState } from 'react';
+import { AlertCircle, FileText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import {
   Conversation,
   ConversationContent,
@@ -31,12 +31,33 @@ interface ChatMessageListProps {
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
   const zoomIn = useCallback(() => setZoom(z => Math.min(z + 25, 200)), []);
   const zoomOut = useCallback(() => setZoom(z => Math.max(z - 25, 25)), []);
   const openPreview = useCallback((src: string, name: string) => {
     setZoom(100);
+    setDrag({ x: 0, y: 0 });
     setPreview({ src, name });
   }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (zoom <= 100) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: drag.x, origY: drag.y };
+  }, [zoom, drag]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    setDrag({
+      x: dragRef.current.origX + (e.clientX - dragRef.current.startX),
+      y: dragRef.current.origY + (e.clientY - dragRef.current.startY),
+    });
+  }, []);
+
+  const onPointerUp = useCallback(() => { dragRef.current = null; }, []);
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
   const resolvedToolCallIds = new Set(
@@ -199,38 +220,67 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     {/* Image preview lightbox */}
     <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
       <DialogContent
-        className="max-w-[min(90vw,800px)] max-h-[min(90vh,700px)] w-fit p-0 gap-0 focus:outline-none [&>button]:top-2 [&>button]:right-2"
+        hideCloseButton
+        className="max-w-[min(90vw,800px)] max-h-[min(90vh,700px)] min-w-[280px] min-h-[200px] w-fit p-0 gap-0 focus:outline-none"
         overlayClassName="bg-black/50 backdrop-blur-sm"
       >
-        {/* Title bar with zoom controls */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-          <DialogTitle className="text-sm font-medium truncate mr-2">{preview?.name}</DialogTitle>
-          <div className="flex items-center gap-1.5 mr-7 shrink-0">
+        {/* Title bar: filename | zoom controls | close — all in one flex row */}
+        <div className="flex items-center h-10 px-3 border-b border-border/40 gap-2 shrink-0">
+          <DialogTitle className="text-sm font-medium truncate flex-1">{preview?.name}</DialogTitle>
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={zoomOut}
               disabled={zoom <= 25}
-              className="p-0.5 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+              className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
             >
               <ZoomOut size={14} />
             </button>
-            <span className="text-xs text-muted-foreground tabular-nums w-9 text-center">{zoom}%</span>
+            <span className="text-xs text-muted-foreground tabular-nums w-9 text-center select-none">{zoom}%</span>
             <button
               onClick={zoomIn}
               disabled={zoom >= 200}
-              className="p-0.5 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+              className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
             >
               <ZoomIn size={14} />
             </button>
           </div>
+          <button
+            onClick={() => setPreview(null)}
+            className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground shrink-0"
+          >
+            <X size={14} />
+          </button>
         </div>
-        {/* Image area */}
+        {/* Image area with drag support */}
         {preview && (
-          <div className="overflow-auto flex items-center justify-center" style={{ maxHeight: 'calc(min(90vh, 700px) - 40px)' }}>
+          <div
+            className="overflow-hidden flex items-center justify-center"
+            style={{
+              height: 'calc(min(90vh, 700px) - 40px)',
+              cursor: zoom > 100 ? 'grab' : 'default',
+              // Clamp aspect ratio: if image is extremely tall/wide, the container
+              // constrains it; object-contain handles the rest.
+              aspectRatio: 'auto',
+            }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+          >
             <img
               src={preview.src}
               alt={preview.name}
-              className="object-contain transition-transform duration-150"
-              style={{ width: `${zoom}%`, maxWidth: 'none' }}
+              draggable={false}
+              className="select-none"
+              style={{
+                maxWidth: zoom <= 100 ? '100%' : 'none',
+                maxHeight: zoom <= 100 ? '100%' : 'none',
+                width: zoom !== 100 ? `${zoom}%` : undefined,
+                transform: zoom > 100 ? `translate(${drag.x}px, ${drag.y}px)` : undefined,
+                transition: dragRef.current ? 'none' : 'transform 0.15s ease, width 0.2s ease',
+                // Clamp extreme aspect ratios: a 1:10+ or 10:1+ image gets
+                // contained inside a box no narrower/shorter than these limits.
+                objectFit: 'contain',
+              }}
             />
           </div>
         )}
