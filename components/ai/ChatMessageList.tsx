@@ -192,12 +192,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     {/* Image preview lightbox */}
     <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
       <DialogContent
-        className="max-w-[90vw] max-h-[90vh] w-fit p-0 gap-0 focus:outline-none"
+        className="max-w-[90vw] max-h-[90vh] w-fit p-0 gap-0 focus:outline-none [&>button]:top-2.5 [&>button]:right-3"
         overlayClassName="bg-black/50 backdrop-blur-sm"
       >
-        <DialogHeader className="px-4 py-3 border-b border-border/40">
-          <DialogTitle className="text-sm font-medium truncate pr-6">{preview?.name}</DialogTitle>
-        </DialogHeader>
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
+          <DialogTitle className="text-sm font-medium truncate">{preview?.name}</DialogTitle>
+        </div>
         {preview && (
           <div className="p-2">
             <img
