@@ -66,13 +66,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragStart.current) return;
+    // Bail out if primary button is no longer pressed (e.g. released outside window)
+    if ((e.buttons & 1) === 0) { dragStart.current = null; return; }
     const x = dragStart.current.origX + (e.clientX - dragStart.current.startX);
     const y = dragStart.current.origY + (e.clientY - dragStart.current.startY);
     dragPos.current = { x, y };
     applyTransform(zoom, x, y, false);
   }, [zoom, applyTransform]);
 
-  const onPointerUp = useCallback(() => {
+  const endDrag = useCallback(() => {
     if (dragStart.current && (dragPos.current.x !== 0 || dragPos.current.y !== 0)) {
       setDragged(true);
     }
@@ -295,7 +297,9 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
             }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onLostPointerCapture={endDrag}
           >
             <img
               ref={imgRef}
