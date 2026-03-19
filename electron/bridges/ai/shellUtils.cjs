@@ -144,7 +144,7 @@ async function getShellEnv() {
 // ── Claude Code ACP binary resolution ──
 
 function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
-  const binaryName = "claude-code-acp";
+  const binaryName = "claude-agent-acp";
 
   // Dev mode: prefer system PATH
   const isPackaged = electronModule?.app?.isPackaged;
@@ -155,7 +155,7 @@ function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
 
   // Packaged build (or dev fallback): use npm-bundled binary
   try {
-    const resolved = require.resolve("@zed-industries/claude-code-acp/dist/index.js");
+    const resolved = require.resolve("@zed-industries/claude-agent-acp/dist/index.js");
     return toUnpackedAsarPath(resolved);
   } catch {
     return binaryName;

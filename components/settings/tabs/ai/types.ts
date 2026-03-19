@@ -77,7 +77,7 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     name: "Claude Code",
     args: ["-p", "--output-format", "text", "{prompt}"],
     icon: "claude",
-    acpCommand: "claude-code-acp",
+    acpCommand: "claude-agent-acp",
     acpArgs: [],
   },
 };

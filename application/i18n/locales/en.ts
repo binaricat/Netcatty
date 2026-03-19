@@ -1555,7 +1555,7 @@ const en: Messages = {
 
   // AI Claude Code
   'ai.claude.title': 'Claude Code',
-  'ai.claude.description': "Anthropic's agentic coding assistant. Uses claude-code-acp for ACP protocol streaming.",
+  'ai.claude.description': "Anthropic's agentic coding assistant. Uses claude-agent-acp for ACP protocol streaming.",
   'ai.claude.detecting': 'Detecting...',
   'ai.claude.detected': 'Detected',
   'ai.claude.notFound': 'Not found',

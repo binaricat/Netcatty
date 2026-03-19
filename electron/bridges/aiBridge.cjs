@@ -1187,7 +1187,7 @@ function registerHandlers(ipcMain) {
         name: "Claude Code",
         icon: "claude",
         description: "Anthropic's agentic coding assistant",
-        acpCommand: "claude-code-acp",
+        acpCommand: "claude-agent-acp",
         acpArgs: [],
         args: ["-p", "--output-format", "text", "{prompt}"],
         resolveAcp: resolveClaudeAcpBinaryPath,
@@ -1461,7 +1461,7 @@ function registerHandlers(ipcMain) {
 
   // Known agent command names (must match knownAgents in discover handler)
   const ALLOWED_AGENT_COMMANDS = new Set([
-    "claude", "claude-code-acp",
+    "claude", "claude-agent-acp",
     "codex", "codex-acp",
   ]);
 
@@ -1679,7 +1679,7 @@ function registerHandlers(ipcMain) {
       const shellEnv = await getShellEnv();
       const sessionCwd = cwd || process.cwd();
       const isCodexAgent = acpCommand === "codex-acp";
-      const isClaudeAgent = acpCommand === "claude-code-acp";
+      const isClaudeAgent = acpCommand === "claude-agent-acp";
 
       // Resolve API key from providerId (decrypted in main process only)
       const resolvedProvider = providerId ? resolveProviderApiKey(providerId) : null;

@@ -150,7 +150,7 @@ export interface ExternalAgentConfig {
   env?: Record<string, string>;
   icon?: string;
   enabled: boolean;
-  /** ACP command (e.g. 'codex-acp', 'claude-code-acp', 'gemini --experimental-acp') */
+  /** ACP command (e.g. 'codex-acp', 'claude-agent-acp', 'gemini --experimental-acp') */
   acpCommand?: string;
   acpArgs?: string[];
 }
