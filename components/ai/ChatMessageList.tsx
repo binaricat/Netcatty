@@ -6,8 +6,8 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, FileText } from 'lucide-react';
-import React, { useState } from 'react';
+import { AlertCircle, FileText, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -30,6 +30,13 @@ interface ChatMessageListProps {
 
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
+  const [zoom, setZoom] = useState(100);
+  const zoomIn = useCallback(() => setZoom(z => Math.min(z + 25, 200)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z - 25, 25)), []);
+  const openPreview = useCallback((src: string, name: string) => {
+    setZoom(100);
+    setPreview({ src, name });
+  }, []);
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
   const resolvedToolCallIds = new Set(
@@ -106,7 +113,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                           src={`data:${att.mediaType};base64,${att.base64Data}`}
                           alt={att.filename || 'image'}
                           className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-border/20 cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => setPreview({ src: `data:${att.mediaType};base64,${att.base64Data}`, name: att.filename || 'image' })}
+                          onClick={() => openPreview(`data:${att.mediaType};base64,${att.base64Data}`, att.filename || 'image')}
                         />
                       ) : (
                         <div
@@ -192,18 +199,38 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     {/* Image preview lightbox */}
     <Dialog open={!!preview} onOpenChange={(open) => { if (!open) setPreview(null); }}>
       <DialogContent
-        className="max-w-[90vw] max-h-[90vh] w-fit p-0 gap-0 focus:outline-none [&>button]:top-2.5 [&>button]:right-3"
+        className="max-w-[min(90vw,800px)] max-h-[min(90vh,700px)] w-fit p-0 gap-0 focus:outline-none [&>button]:top-2 [&>button]:right-2"
         overlayClassName="bg-black/50 backdrop-blur-sm"
       >
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
-          <DialogTitle className="text-sm font-medium truncate">{preview?.name}</DialogTitle>
+        {/* Title bar with zoom controls */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
+          <DialogTitle className="text-sm font-medium truncate mr-2">{preview?.name}</DialogTitle>
+          <div className="flex items-center gap-1.5 mr-7 shrink-0">
+            <button
+              onClick={zoomOut}
+              disabled={zoom <= 25}
+              className="p-0.5 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+            >
+              <ZoomOut size={14} />
+            </button>
+            <span className="text-xs text-muted-foreground tabular-nums w-9 text-center">{zoom}%</span>
+            <button
+              onClick={zoomIn}
+              disabled={zoom >= 200}
+              className="p-0.5 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
+            >
+              <ZoomIn size={14} />
+            </button>
+          </div>
         </div>
+        {/* Image area */}
         {preview && (
-          <div>
+          <div className="overflow-auto flex items-center justify-center" style={{ maxHeight: 'calc(min(90vh, 700px) - 40px)' }}>
             <img
               src={preview.src}
               alt={preview.name}
-              className="max-w-[90vw] max-h-[calc(90vh-44px)] object-contain"
+              className="object-contain transition-transform duration-150"
+              style={{ width: `${zoom}%`, maxWidth: 'none' }}
             />
           </div>
         )}
