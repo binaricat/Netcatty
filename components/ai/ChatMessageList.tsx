@@ -192,15 +192,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     {/* Image preview lightbox */}
     <Dialog open={!!previewSrc} onOpenChange={(open) => { if (!open) setPreviewSrc(null); }}>
       <DialogContent
-        hideCloseButton
-        className="max-w-[90vw] max-h-[90vh] w-fit p-0 border-none bg-transparent overflow-hidden"
-        onClick={() => setPreviewSrc(null)}
+        className="max-w-[90vw] max-h-[90vh] w-fit p-2 gap-0 focus:outline-none"
       >
         {previewSrc && (
           <img
             src={previewSrc}
             alt="preview"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+            className="max-w-[calc(90vw-16px)] max-h-[calc(90vh-48px)] object-contain rounded"
           />
         )}
       </DialogContent>
