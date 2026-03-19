@@ -537,6 +537,9 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR && typeof value === 'boolean') {
+        setSftpAutoOpenSidebar((prev) => (prev === value ? prev : value));
+      }
     });
     return () => {
       try {
