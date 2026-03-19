@@ -199,6 +199,7 @@ Netcatty 会自动识别并在主机列表中展示对应的系统图标：
   <img src="public/distro/opensuse.svg" width="48" alt="openSUSE" title="openSUSE">
   <img src="public/distro/oracle.svg" width="48" alt="Oracle Linux" title="Oracle Linux">
   <img src="public/distro/kali.svg" width="48" alt="Kali Linux" title="Kali Linux">
+  <img src="public/distro/almalinux.svg" width="48" alt="AlmaLinux" title="AlmaLinux">
 </p>
 
 <a name="快速开始"></a>
