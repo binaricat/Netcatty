@@ -31,6 +31,7 @@ interface ChatMessageListProps {
 const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
+  const [dragged, setDragged] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragPos = useRef({ x: 0, y: 0 });
   const dragStart = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -45,12 +46,14 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
   const zoomOut = useCallback(() => setZoom(z => { const nz = Math.max(z - 25, 25); applyTransform(nz, dragPos.current.x, dragPos.current.y, true); return nz; }), [applyTransform]);
   const openPreview = useCallback((src: string, name: string) => {
     setZoom(100);
+    setDragged(false);
     dragPos.current = { x: 0, y: 0 };
     setPreview({ src, name });
   }, []);
 
   const resetPreview = useCallback(() => {
     setZoom(100);
+    setDragged(false);
     dragPos.current = { x: 0, y: 0 };
     applyTransform(100, 0, 0, true);
   }, [applyTransform]);
@@ -69,7 +72,12 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     applyTransform(zoom, x, y, false);
   }, [zoom, applyTransform]);
 
-  const onPointerUp = useCallback(() => { dragStart.current = null; }, []);
+  const onPointerUp = useCallback(() => {
+    if (dragStart.current && (dragPos.current.x !== 0 || dragPos.current.y !== 0)) {
+      setDragged(true);
+    }
+    dragStart.current = null;
+  }, []);
   const { t } = useI18n();
   const visibleMessages = messages.filter(m => m.role !== 'system');
   const resolvedToolCallIds = new Set(
@@ -241,7 +249,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={resetPreview}
-              disabled={zoom === 100}
+              disabled={zoom === 100 && !dragged}
               className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors text-muted-foreground"
               aria-label={t('common.reset')}
             >
