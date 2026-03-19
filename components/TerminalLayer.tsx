@@ -179,11 +179,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (status === 'connected' && sftpAutoOpenSidebarRef.current) {
       const session = sessionsRef.current.find(s => s.id === sessionId);
       if (!session) return;
-      const host = hostsRef.current.find(h => h.id === session.hostId);
-      if (!host) return;
       // Only auto-open for SSH/Mosh (SFTP requires SSH)
-      const proto = session.protocol ?? host.protocol;
+      const proto = session.protocol ?? 'ssh';
       if (proto !== 'ssh' && proto !== 'mosh') return;
+
+      const host = hostsRef.current.find(h => h.id === session.hostId);
 
       // Determine the tab ID (workspace or solo session)
       const tabId = session.workspaceId || sessionId;
@@ -191,12 +191,21 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       // Only open if the sidebar is not already open for this tab
       if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-      const hostWithOverrides: Host = {
-        ...host,
-        protocol: session.protocol ?? host.protocol,
-        port: session.port ?? host.port,
-        moshEnabled: session.moshEnabled ?? host.moshEnabled,
-      };
+      const hostWithOverrides: Host = host
+        ? {
+            ...host,
+            protocol: session.protocol ?? host.protocol,
+            port: session.port ?? host.port,
+            moshEnabled: session.moshEnabled ?? host.moshEnabled,
+          }
+        : {
+            // Quick Connect / temporary session — build minimal host from session data
+            id: session.hostId || sessionId,
+            hostname: session.hostname,
+            port: session.port ?? 22,
+            protocol: proto,
+            label: session.label || session.hostname,
+          } as Host;
 
       setSidePanelOpenTabs(prev => {
         const next = new Map(prev);
