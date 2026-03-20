@@ -1648,6 +1648,7 @@ const zhCN: Messages = {
   'ai.chat.clearConnections': '清空',
   'ai.chat.noAdditionalConnections': '当前没有其他可供加入的已打开终端连接。',
   'ai.chat.contextSummary': 'AI 当前可操作这些连接',
+  'ai.chat.toolRunning': '执行中',
   'ai.chat.executingOn': 'AI 当前正在处理',
   'ai.chat.lastActionOn': 'AI 最近一次操作执行于',
   'ai.chat.additionalTag': '附加',

@@ -1633,6 +1633,7 @@ const en: Messages = {
   'ai.chat.clearConnections': 'Clear',
   'ai.chat.noAdditionalConnections': 'No other open terminal connections available.',
   'ai.chat.contextSummary': 'AI can act on these connections',
+  'ai.chat.toolRunning': 'Running',
   'ai.chat.executingOn': 'AI is currently working on',
   'ai.chat.lastActionOn': 'Last AI action ran on',
   'ai.chat.additionalTag': 'Additional',

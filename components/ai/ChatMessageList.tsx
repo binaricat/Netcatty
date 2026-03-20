@@ -23,12 +23,13 @@ import ThinkingBlock from './ThinkingBlock';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  hosts?: Array<{ sessionId: string; hostname: string; label: string; connected: boolean }>;
   isStreaming?: boolean;
   onApprove?: (messageId: string) => void;
   onReject?: (messageId: string) => void;
 }
 
-const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
+const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, hosts = [], isStreaming, onApprove, onReject }) => {
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
   const [dragged, setDragged] = useState(false);
@@ -111,6 +112,30 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     }
   }
 
+  const hostLookup = new Map(hosts.map((host) => [host.sessionId, host]));
+  const normalizeToolName = (name: string) => name.split('/').pop() || name;
+  const isTerminalExecute = (name: string) => normalizeToolName(name) === 'terminal_execute';
+  const buildToolSubtitle = (args?: Record<string, unknown>) => {
+    const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : null;
+    const command = typeof args?.command === 'string' ? args.command.trim() : '';
+    const host = sessionId ? hostLookup.get(sessionId) : null;
+    const hostLabel = host?.label || host?.hostname || sessionId || '';
+    const commandPreview = command ? command.replace(/\s+/g, ' ').slice(0, 48) : '';
+    if (hostLabel && commandPreview) return `${hostLabel} · ${commandPreview}`;
+    if (hostLabel) return hostLabel;
+    return commandPreview || undefined;
+  };
+  const toolCallMeta = new Map<string, { name: string; subtitle?: string }>();
+  for (const m of visibleMessages) {
+    if (m.role !== 'assistant' || !m.toolCalls) continue;
+    for (const tc of m.toolCalls) {
+      toolCallMeta.set(tc.id, {
+        name: normalizeToolName(tc.name),
+        subtitle: isTerminalExecute(tc.name) ? buildToolSubtitle(tc.arguments) : undefined,
+      });
+    }
+  }
+
   if (visibleMessages.length === 0 && !isStreaming) {
     return (
       <div className="flex-1 flex items-center justify-center px-6">
@@ -134,7 +159,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                 {message.toolResults?.map((tr) => (
                   <ToolCall
                     key={tr.toolCallId}
-                    name={toolCallNames.get(tr.toolCallId) || tr.toolCallId}
+                    name={toolCallMeta.get(tr.toolCallId)?.name || toolCallNames.get(tr.toolCallId) || tr.toolCallId}
+                    subtitle={toolCallMeta.get(tr.toolCallId)?.subtitle}
                     result={tr.content}
                     isError={tr.isError}
                   />
@@ -193,15 +219,21 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                 )}
 
                 {/* Tool calls */}
-                {message.toolCalls?.map((tc) => (
-                  <ToolCall
-                    key={tc.id}
-                    name={tc.name}
-                    args={tc.arguments}
-                    isLoading={isThisStreaming && message.executionStatus === 'running'}
-                    isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
-                  />
-                ))}
+                {message.toolCalls?.map((tc) => {
+                  const isRunning = isThisStreaming && message.executionStatus === 'running';
+                  const normalizedName = normalizeToolName(tc.name);
+                  return (
+                    <ToolCall
+                      key={tc.id}
+                      name={normalizedName}
+                      subtitle={isTerminalExecute(tc.name) ? buildToolSubtitle(tc.arguments) : undefined}
+                      statusLabel={isRunning && isTerminalExecute(tc.name) ? t('ai.chat.toolRunning') : undefined}
+                      args={tc.arguments}
+                      isLoading={isRunning}
+                      isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
+                    />
+                  );
+                })}
 
                 {/* Inline approval card */}
                 {message.pendingApproval && (

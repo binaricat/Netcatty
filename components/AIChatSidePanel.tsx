@@ -948,6 +948,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           {/* Chat messages */}
           <ChatMessageList
             messages={messages}
+            hosts={terminalSessions.map(s => ({ sessionId: s.sessionId, hostname: s.hostname, label: s.label, connected: s.connected }))}
             isStreaming={isStreaming}
             onApprove={(messageId) => void handleApprovalResponse(messageId, true, {
               globalPermissionMode,
