@@ -28,6 +28,7 @@ import { VaultView, VaultSection } from './components/VaultView';
 import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
+import localShellUtils from './lib/localShell.cjs';
 import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalTheme } from './types';
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
@@ -108,22 +109,8 @@ const LazyTerminalLayer = lazy(() =>
   import('./components/TerminalLayer').then((m) => ({ default: m.TerminalLayer })),
 );
 
-type LocalShellType = 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
-
-const detectConfiguredLocalShellType = (shellPath: string | undefined): LocalShellType => {
-  const shellName = shellPath?.split(/[\\/]/).pop()?.toLowerCase() || '';
-  if (shellName === 'fish') return 'fish';
-  if (shellName === 'cmd' || shellName === 'cmd.exe') return 'cmd';
-  if (shellName === 'powershell' || shellName === 'powershell.exe' || shellName === 'pwsh' || shellName === 'pwsh.exe') {
-    return 'powershell';
-  }
-  if (shellName === 'sh' || shellName === 'bash' || shellName === 'zsh' || shellName === 'ksh' || shellName === 'dash' || shellName === 'ash') {
-    return 'posix';
-  }
-  if (!shellName) {
-    return /win/i.test(navigator.platform || navigator.userAgent || '') ? 'powershell' : 'posix';
-  }
-  return 'unknown';
+const { classifyLocalShellType } = localShellUtils as {
+  classifyLocalShellType: (shellPath: string | undefined, platformLike?: string) => 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
 };
 
 type SettingsState = ReturnType<typeof useSettingsState>;
@@ -677,19 +664,19 @@ function App({ settings }: { settings: SettingsState }) {
 
   const createLocalTerminalWithCurrentShell = useCallback(() => {
     return createLocalTerminal({
-      shellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+      shellType: classifyLocalShellType(terminalSettings.localShell, navigator.userAgent),
     });
   }, [createLocalTerminal, terminalSettings.localShell]);
 
   const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => {
     return splitSession(sessionId, direction, {
-      localShellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+      localShellType: classifyLocalShellType(terminalSettings.localShell, navigator.userAgent),
     });
   }, [splitSession, terminalSettings.localShell]);
 
   const copySessionWithCurrentShell = useCallback((sessionId: string) => {
     return copySession(sessionId, {
-      localShellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+      localShellType: classifyLocalShellType(terminalSettings.localShell, navigator.userAgent),
     });
   }, [copySession, terminalSettings.localShell]);
 

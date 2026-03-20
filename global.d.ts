@@ -1,6 +1,11 @@
 import type { RemoteFile, SftpFilenameEncoding } from "./types";
 import type { S3Config, SMBConfig, SyncedFile, WebDAVConfig } from "./domain/sync";
 
+declare module "*.cjs" {
+  const value: Record<string, unknown>;
+  export default value;
+}
+
 declare global {
   // Extend HTMLInputElement to support webkitdirectory attribute
   namespace JSX {

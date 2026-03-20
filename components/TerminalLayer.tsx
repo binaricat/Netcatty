@@ -6,6 +6,7 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import { cn } from '../lib/utils';
+import localShellUtils from '../lib/localShell.cjs';
 import { useStoredString } from '../application/state/useStoredString';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
@@ -65,11 +66,40 @@ const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<s
   return changed ? next : source;
 };
 
-const detectLocalOs = (): 'linux' | 'macos' | 'windows' => {
-  const platform = navigator.platform || navigator.userAgent || '';
-  if (/mac/i.test(platform)) return 'macos';
-  if (/win/i.test(platform)) return 'windows';
-  return 'linux';
+const { detectLocalOs } = localShellUtils as {
+  detectLocalOs: (platformLike?: string) => 'linux' | 'macos' | 'windows';
+};
+
+type AITerminalSessionInfo = {
+  sessionId: string;
+  hostId: string;
+  hostname: string;
+  label: string;
+  os?: string;
+  username?: string;
+  protocol?: string;
+  shellType?: string;
+  connected: boolean;
+};
+
+const buildAITerminalSessionInfo = (
+  session: TerminalSession | undefined,
+  host: Host | undefined,
+  localOs: 'linux' | 'macos' | 'windows',
+): AITerminalSessionInfo => {
+  const protocol = session?.protocol || host?.protocol;
+  const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
+  return {
+    sessionId: session?.id || '',
+    hostId: session?.hostId || '',
+    hostname: host?.hostname || session?.hostname || '',
+    label: host?.label || session?.hostLabel || '',
+    os: host?.os || (isLocalSession ? localOs : undefined),
+    username: host?.username || session?.username,
+    protocol,
+    shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
+    connected: session?.status === 'connected',
+  };
 };
 
 interface TerminalLayerProps {
@@ -1023,19 +1053,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const result = sessionIds.map(sid => {
       const s = sessions.find(s => s.id === sid);
       const host = s?.hostId ? hosts.find(h => h.id === s.hostId) : undefined;
-      const protocol = s?.protocol || host?.protocol;
-      const isLocalSession = protocol === 'local' || s?.hostId?.startsWith('local-');
-      return {
-        sessionId: sid,
-        hostId: s?.hostId || '',
-        hostname: host?.hostname || s?.hostname || '',
-        label: host?.label || s?.hostLabel || '',
-        os: host?.os || (isLocalSession ? localOs : undefined),
-        username: host?.username || s?.username,
-        protocol,
-        shellType: s?.shellType && s.shellType !== 'unknown' ? s.shellType : undefined,
-        connected: s?.status === 'connected',
-      };
+      return buildAITerminalSessionInfo(s, host, localOs);
     });
     return result;
   }, [sessions, hosts, activeWorkspace, activeSession]);
@@ -1064,19 +1082,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       sessions: sessionIds.map((sid) => {
         const session = latestSessions.find((s) => s.id === sid);
         const host = session?.hostId ? latestHosts.find((h) => h.id === session.hostId) : undefined;
-        const protocol = session?.protocol || host?.protocol;
-        const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
-        return {
-          sessionId: sid,
-          hostId: session?.hostId || '',
-          hostname: host?.hostname || session?.hostname || '',
-          label: host?.label || session?.hostLabel || '',
-          os: host?.os || (isLocalSession ? localOs : undefined),
-          username: host?.username || session?.username,
-          protocol,
-          shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
-          connected: session?.status === 'connected',
-        };
+        return buildAITerminalSessionInfo(session, host, localOs);
       }),
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
       workspaceName,

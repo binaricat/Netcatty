@@ -10,24 +10,11 @@
 "use strict";
 
 const crypto = require("crypto");
-const path = require("node:path");
 const { stripAnsi } = require("./shellUtils.cjs");
-
-const POWERSHELL_SHELLS = new Set(["powershell", "powershell.exe", "pwsh", "pwsh.exe"]);
-const CMD_SHELLS = new Set(["cmd", "cmd.exe"]);
-const FISH_SHELLS = new Set(["fish"]);
-const POSIX_SHELLS = new Set(["sh", "bash", "zsh", "ksh", "dash", "ash"]);
+const { classifyLocalShellType } = require("../../lib/localShell.cjs");
 
 function detectShellKind(shellPath, platform = process.platform) {
-  const shellName = path.basename(String(shellPath || "")).toLowerCase();
-  if (POWERSHELL_SHELLS.has(shellName)) return "powershell";
-  if (CMD_SHELLS.has(shellName)) return "cmd";
-  if (FISH_SHELLS.has(shellName)) return "fish";
-  if (POSIX_SHELLS.has(shellName)) return "posix";
-  if (!shellName) {
-    return platform === "win32" ? "powershell" : "posix";
-  }
-  return "unknown";
+  return classifyLocalShellType(shellPath, platform);
 }
 
 function subscribeToPtyData(ptyStream, onData) {
