@@ -80,10 +80,10 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
     return (
         <>
             {/* Auth method tabs */}
-            <div className="flex gap-1 rounded-md border border-border/60 bg-secondary/60 p-0.5">
+            <div className="flex gap-1 p-1 bg-secondary/80 rounded-lg border border-border/60">
                 <button
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-2 rounded-sm py-2 text-sm font-medium transition-all",
+                        "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
                         authMethod === 'password'
                             ? "bg-primary text-primary-foreground shadow-sm"
                             : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -95,7 +95,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                 </button>
                 <button
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-2 rounded-sm py-2 text-sm font-medium transition-all",
+                        "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
                         authMethod === 'key' || authMethod === 'certificate'
                             ? "bg-primary text-primary-foreground shadow-sm"
                             : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -109,7 +109,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
 
             {/* Auth retry error message */}
             {authRetryMessage && (
-                <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
                     <AlertCircle size={16} />
                     {authRetryMessage}
                 </div>
@@ -154,7 +154,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                         <div className="space-y-2">
                             <Label>{t("terminal.auth.selectKey")}</Label>
                             {selectableKeys.length === 0 ? (
-                                <div className="rounded-md border border-dashed border-border/60 p-3 text-center text-sm text-muted-foreground">
+                                <div className="text-sm text-muted-foreground p-3 border border-dashed border-border/60 rounded-lg text-center">
                                     {t("terminal.auth.noKeysHint")}
                                 </div>
                             ) : (
@@ -162,7 +162,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                     <PopoverTrigger asChild>
                                         <button
                                             className={cn(
-                                                "w-full flex items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors",
+                                                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors text-left",
                                                 selectedKey
                                                     ? "border-primary bg-primary/5"
                                                     : "border-border/50 hover:bg-secondary/50"
@@ -171,7 +171,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                             {selectedKey ? (
                                                 <>
                                                     <div className={cn(
-                                                        "h-8 w-8 rounded-md flex items-center justify-center shrink-0",
+                                                        "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
                                                         selectedKey.certificate?.trim()
                                                             ? "bg-emerald-500/20 text-emerald-500"
                                                             : "bg-primary/20 text-primary"

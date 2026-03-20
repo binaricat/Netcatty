@@ -2,7 +2,7 @@
  * Terminal Connection Dialog
  * Full connection overlay with host info, progress indicator, and auth/progress content
  */
-import { Loader2, TerminalSquare, User, X } from 'lucide-react';
+import { Loader2, Plug, TerminalSquare, X } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
@@ -76,141 +76,129 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     const hasError = Boolean(error);
     const isConnecting = status === 'connecting';
     const canDismissDisconnected = status === 'disconnected' && !needsAuth && !!onDismissDisconnected;
-    const statusLabel = needsAuth
-        ? t('terminal.connection.status.authentication')
-        : status === 'connecting'
-            ? t('terminal.connection.status.connecting')
-            : t('terminal.connection.status.disconnected');
     const protocolInfo = getProtocolInfo(host);
 
     return (
         <div className={cn(
-            "absolute inset-0 z-20 flex items-center justify-center px-6 py-8",
-            needsAuth ? "bg-black/70 backdrop-blur-[1.5px]" : "bg-black/45 backdrop-blur-[1px]"
+            "absolute inset-0 z-20 flex items-center justify-center",
+            needsAuth ? "bg-black" : "bg-black/30"
         )}>
-            <div className="w-[620px] max-w-[92vw] overflow-hidden rounded-xl border border-border/70 bg-background/95 shadow-[0_32px_90px_-40px_rgba(0,0,0,0.88)]">
-                <div className="border-b border-border/60 px-6 py-5">
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="flex min-w-0 items-center gap-4">
-                            <DistroAvatar
-                                host={host}
-                                fallback={host.label.slice(0, 2).toUpperCase()}
-                                className="h-11 w-11 rounded-lg ring-1 ring-white/10"
-                            />
-                            <div className="min-w-0">
-                                <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">
-                                    <span
-                                        className={cn(
-                                            "inline-block h-1.5 w-1.5 rounded-full",
-                                            needsAuth
-                                                ? "bg-primary"
-                                                : hasError
-                                                    ? "bg-destructive"
-                                                    : isConnecting
-                                                        ? "bg-amber-400"
-                                                        : "bg-muted-foreground"
-                                        )}
-                                    />
-                                    <span>{statusLabel}</span>
-                                </div>
-                                <div className="truncate text-[28px] font-semibold leading-none tracking-tight text-foreground">
-                                    {host.label}
-                                </div>
-                                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span className="text-foreground/70">{t(protocolInfo.i18nKey)}</span>
-                                    <span className="text-border/80">/</span>
-                                    <span className="truncate font-mono text-[13px]">
-                                        {protocolInfo.showPort ? `${host.hostname}:${protocolInfo.port}` : host.hostname}
-                                    </span>
-                                </div>
-                                {chainProgress && (
-                                    <div className="mt-2 text-[12px] text-muted-foreground">
-                                        {t('terminal.connection.chainOf', {
-                                            current: chainProgress.currentHop,
-                                            total: chainProgress.totalHops,
-                                        })}
-                                        {': '}
-                                        <span className="text-foreground/80">{chainProgress.currentHostLabel}</span>
+            <div className="w-[560px] max-w-[90vw] bg-background/95 border border-border/60 rounded-xl shadow-xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10 rounded-lg" />
+                        <div>
+                            {chainProgress ? (
+                                <>
+                                    <div className="text-sm font-semibold">
+                                        <span className="text-muted-foreground">
+                                            {t('terminal.connection.chainOf', {
+                                                current: chainProgress.currentHop,
+                                                total: chainProgress.totalHops,
+                                            })}
+                                            {': '}
+                                        </span>
+                                        <span>{chainProgress.currentHostLabel}</span>
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                            {!needsAuth && (
-                                <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-8 rounded-md border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground"
-                                    onClick={() => setShowLogs(!showLogs)}
-                                >
-                                    {showLogs ? t('terminal.connection.hideLogs') : t('terminal.connection.showLogs')}
-                                </Button>
-                            )}
-                            {canDismissDisconnected && (
-                                <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground"
-                                    aria-label={t('terminal.connection.dismissDisconnectedDialog')}
-                                    title={t('terminal.connection.dismissDisconnectedDialog')}
-                                    onClick={onDismissDisconnected}
-                                >
-                                    <X size={14} />
-                                </Button>
+                                    <div className="text-[11px] text-muted-foreground font-mono">
+                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? `${host.hostname}:${protocolInfo.port}` : host.hostname}
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="text-lg font-semibold">{host.label}</div>
+                                    <div className="text-[11px] text-muted-foreground font-mono">
+                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? `${host.hostname}:${protocolInfo.port}` : host.hostname}
+                                    </div>
+                                </>
                             )}
                         </div>
                     </div>
+                    <div className="flex items-center gap-2">
+                        {!needsAuth && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs"
+                                onClick={() => setShowLogs(!showLogs)}
+                            >
+                                {showLogs ? t('terminal.connection.hideLogs') : t('terminal.connection.showLogs')}
+                            </Button>
+                        )}
+                        {status === 'connecting' && !needsAuth && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs"
+                                onClick={progressProps.onCancelConnect}
+                                disabled={progressProps.isCancelling}
+                            >
+                                {progressProps.isCancelling ? t('terminal.progress.cancelling') : t('common.close')}
+                            </Button>
+                        )}
+                        {canDismissDisconnected && (
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                aria-label={t('terminal.connection.dismissDisconnectedDialog')}
+                                title={t('terminal.connection.dismissDisconnectedDialog')}
+                                onClick={onDismissDisconnected}
+                            >
+                                <X size={14} />
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
-                <div className="border-b border-border/60 px-6 py-4">
-                    <div className="grid grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-4">
+                <div className="space-y-2">
+                    <div className="flex items-center gap-3">
                         <div className={cn(
-                            "flex h-10 w-10 items-center justify-center rounded-md border border-border/70 bg-muted/15",
+                            "h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0",
                             needsAuth
-                                ? "text-primary"
+                                ? "bg-primary text-primary-foreground"
                                 : hasError
-                                    ? "text-destructive"
-                                    : isConnecting
-                                        ? "text-primary"
-                                        : "text-muted-foreground"
+                                    ? "bg-destructive/20 text-destructive"
+                                : isConnecting
+                                        ? "bg-primary/15 text-primary"
+                                        : "bg-muted text-muted-foreground"
                         )}>
-                            <User size={15} />
+                            <Plug size={14} />
                         </div>
-                        <div className={cn(
-                            "relative h-[2px] overflow-hidden bg-border/60",
-                            hasError && "bg-destructive/20"
-                        )}>
+                        <div className="flex-1 h-1.5 rounded-full bg-border/60 overflow-hidden relative">
                             <div
                                 className={cn(
-                                    "absolute inset-y-0 left-0 transition-all duration-300",
+                                    "absolute inset-y-0 left-0 rounded-full transition-all duration-300",
                                     error ? "bg-destructive" : "bg-primary"
                                 )}
                                 style={{
-                                    width: needsAuth ? '0%' : status === 'connecting' ? `${progressValue}%` : '100%',
+                                    width: needsAuth ? '0%' : status === 'connecting' ? `${progressValue}%` : error ? '100%' : '100%',
                                 }}
                             />
                         </div>
                         <div className={cn(
-                            "flex h-10 w-10 items-center justify-center rounded-md border border-border/70 bg-muted/15",
-                            hasError ? "text-destructive" : "text-muted-foreground"
+                            "h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                            hasError ? "bg-destructive/20 text-destructive" : "bg-muted text-muted-foreground"
                         )}>
-                            {isConnecting ? <Loader2 size={15} className="animate-spin" /> : <TerminalSquare size={15} />}
+                            {isConnecting ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <TerminalSquare size={14} />
+                            )}
                         </div>
                     </div>
                 </div>
 
-                <div className="px-6 py-5">
-                    {needsAuth ? (
-                        <TerminalAuthDialog {...authProps} keys={keys} />
-                    ) : (
-                        <TerminalConnectionProgress
-                            status={status}
-                            error={error}
-                            showLogs={showLogs}
-                            {...progressProps}
-                        />
-                    )}
-                </div>
+                {needsAuth ? (
+                    <TerminalAuthDialog {...authProps} keys={keys} />
+                ) : (
+                    <TerminalConnectionProgress
+                        status={status}
+                        error={error}
+                        showLogs={showLogs}
+                        {...progressProps}
+                    />
+                )}
             </div>
         </div>
     );
