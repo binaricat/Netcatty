@@ -6,7 +6,7 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import { cn } from '../lib/utils';
-import * as localShellUtils from '../lib/localShell.cjs';
+import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
@@ -64,10 +64,6 @@ const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<s
     }
   }
   return changed ? next : source;
-};
-
-const { detectLocalOs } = localShellUtils as {
-  detectLocalOs: (platformLike?: string) => 'linux' | 'macos' | 'windows';
 };
 
 type AITerminalSessionInfo = {

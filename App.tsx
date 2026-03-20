@@ -28,7 +28,7 @@ import { VaultView, VaultSection } from './components/VaultView';
 import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
-import * as localShellUtils from './lib/localShell.cjs';
+import { classifyLocalShellType } from './lib/localShell';
 import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalTheme } from './types';
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
@@ -108,10 +108,6 @@ const LazySftpView = lazy(() =>
 const LazyTerminalLayer = lazy(() =>
   import('./components/TerminalLayer').then((m) => ({ default: m.TerminalLayer })),
 );
-
-const { classifyLocalShellType } = localShellUtils as {
-  classifyLocalShellType: (shellPath: string | undefined, platformLike?: string) => 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
-};
 
 type SettingsState = ReturnType<typeof useSettingsState>;
 type SftpViewProps = React.ComponentProps<typeof SftpViewComponent>;
