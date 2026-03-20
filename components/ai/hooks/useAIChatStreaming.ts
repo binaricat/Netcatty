@@ -641,6 +641,7 @@ export function useAIChatStreaming({
       context.commandBlocklist,
       context.globalPermissionMode,
       context.webSearchConfig ?? undefined,
+      sessionId,
     );
 
     const systemPrompt = buildSystemPrompt({

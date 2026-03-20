@@ -75,8 +75,8 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
     if (!mainWin || mainWin.isDestroyed()) {
-      // No renderer available — auto-approve to avoid hanging
-      resolve(true);
+      // No renderer available — deny to preserve confirm mode safety guarantee
+      resolve(false);
       return;
     }
     const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;

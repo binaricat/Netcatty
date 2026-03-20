@@ -35,6 +35,7 @@ export function createCattyTools(
   commandBlocklist?: string[],
   permissionMode: AIPermissionMode = 'confirm',
   webSearchConfig?: WebSearchConfig,
+  chatSessionId?: string,
 ) {
   const deps: ToolDeps = { bridge, context, commandBlocklist, permissionMode, webSearchConfig };
 
@@ -51,7 +52,7 @@ export function createCattyTools(
       execute: async ({ sessionId, command }, { toolCallId }) => {
         // In confirm mode, await user approval before executing
         if (permissionMode === 'confirm') {
-          const approved = await requestApproval(toolCallId, 'terminal_execute', { sessionId, command });
+          const approved = await requestApproval(toolCallId, 'terminal_execute', { sessionId, command }, chatSessionId);
           if (!approved) {
             return { error: 'User denied command execution.' };
           }
