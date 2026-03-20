@@ -32,29 +32,28 @@ function cleanupTransferListeners(transferId) {
 // `data.includes("__NCMCP_")` catches every chunk containing wrapper noise.
 function filterMcpMarkers(data) {
   return data
-    // ── Marker output lines (printf / Write-Output / echo output) ──
-    .replace(/^__NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // ── Posix: echoed combined line 1 ──
-    // printf '%s\n' '__NCMCP_..._S'; PAGER=... command
-    // → strip the printf prefix, keep the command visible, also strip PAGER env
+    // ── Any line containing __NCMCP_ is an internal wrapper line — delete entirely ──
+    // This single rule covers:
+    //   • Actual marker output:  __NCMCP_..._S / __NCMCP_..._E:0
+    //   • PowerShell input echo: PS C:\...> Write-Output '__NCMCP_..._S'; $env:PAGER=...  (line 1)
+    //                            PS C:\...> $__NCMCP_rc = if ($LASTEXITCODE ...) ...        (line 2)
+    //   • Cmd echo:              echo __NCMCP_...
+    //   • Fish echo:             printf '%s\n' '__NCMCP_...'
+    .replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "")
+    // ── Posix: echoed combined line 1 — strip internal prefix, keep user command visible ──
+    // printf '%s\n' '__NCMCP_..._S'; PAGER=cat ... <user-command>
+    // The __NCMCP_ prefix is already gone above, but strip the PAGER prefix too:
     .replace(/printf '%s\\n' '__NCMCP_[^']*';/g, "")
     // ── Posix: echoed combined line 2 ──
-    // __NCMCP_rc=$?;printf ... (exit $__NCMCP_rc)
+    // __NCMCP_rc=$?;printf '%s\n' '__NCMCP_..._E:'"$__NCMCP_rc"  (already caught above)
     .replace(/[^\r\n]*__NCMCP_rc=\$\?;printf [^\r\n]*[\r\n]*/g, "")
     // ── Pager env var prefixes (inline on the command line) ──
     .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
-    // ── Fish: pager + marker lines ──
+    // ── Fish: pager env lines (no __NCMCP_ marker, need explicit filter) ──
     .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
     .replace(/^set __NCMCP_rc \$status[\r\n]*/gm, "")
-    // ── Cmd: pager + marker lines ──
-    .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "")
-    .replace(/^echo __NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // ── PowerShell: echoed combined line 1 prefix parts ──
-    .replace(/Write-Output '__NCMCP_[^']*'; ?/g, "")
-    .replace(/\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'; ?/g, "")
-    .replace(/\$global:LASTEXITCODE = 0; ?/g, "")
-    // ── PowerShell: echoed combined line 2 (entire line) ──
-    .replace(/[^\r\n]*\$__NCMCP_rc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/g, "");
+    // ── Cmd: pager env lines ──
+    .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "");
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {
