@@ -735,6 +735,7 @@ const zhCN: Messages = {
   'terminal.themeModal.tab.theme': '主题',
   'terminal.themeModal.tab.font': '字体',
   'terminal.themeModal.tab.custom': '自定义',
+  'terminal.themeModal.globalTheme': '全局主题',
   'terminal.themeModal.fontSize': '字体大小',
   'terminal.themeModal.livePreview': '实时预览',
   'terminal.themeModal.themeType': '{type} 主题',

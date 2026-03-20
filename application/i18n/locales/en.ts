@@ -1071,6 +1071,7 @@ const en: Messages = {
   'terminal.themeModal.tab.theme': 'Theme',
   'terminal.themeModal.tab.font': 'Font',
   'terminal.themeModal.tab.custom': 'Custom',
+  'terminal.themeModal.globalTheme': 'Global Theme',
   'terminal.themeModal.fontSize': 'Font Size',
   'terminal.themeModal.livePreview': 'Live Preview',
   'terminal.themeModal.themeType': '{type} theme',

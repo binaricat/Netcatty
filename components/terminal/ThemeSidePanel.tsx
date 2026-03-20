@@ -142,6 +142,7 @@ ResetListItem.displayName = 'ResetListItem';
 
 interface ThemeSidePanelProps {
   currentThemeId: string;
+  globalThemeId: string;
   currentFontFamilyId: string;
   currentFontSize: number;
   canResetTheme?: boolean;
@@ -158,6 +159,7 @@ interface ThemeSidePanelProps {
 
 const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   currentThemeId,
+  globalThemeId,
   currentFontFamilyId,
   currentFontSize,
   canResetTheme = false,
@@ -184,6 +186,10 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   const allThemes = useMemo(
     () => [...TERMINAL_THEMES, ...customThemes],
     [customThemes]
+  );
+  const globalTheme = useMemo(
+    () => allThemes.find((theme) => theme.id === globalThemeId) || TERMINAL_THEMES[0],
+    [allThemes, globalThemeId],
   );
 
   const handleThemeSelect = useCallback((themeId: string) => {
@@ -332,11 +338,13 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 )}
                 {canResetTheme && (
                   <>
-                    <div className="mx-3 my-1 border-t border-border/50" />
-                    <ResetListItem
-                      title={t('common.useGlobal')}
-                      description={t('common.reset')}
-                      onSelect={onThemeReset}
+                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                      {t('terminal.themeModal.globalTheme')}
+                    </div>
+                    <ThemeItem
+                      theme={globalTheme}
+                      isSelected={!canResetTheme}
+                      onSelect={() => onThemeReset?.()}
                     />
                   </>
                 )}

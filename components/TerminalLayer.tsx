@@ -1470,6 +1470,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <div className="absolute inset-0 z-10">
                       <ThemeSidePanel
                         currentThemeId={focusedThemeId}
+                        globalThemeId={terminalTheme.id}
                         currentFontFamilyId={focusedFontFamilyId}
                         currentFontSize={focusedFontSize}
                         canResetTheme={focusedThemeOverridden}
