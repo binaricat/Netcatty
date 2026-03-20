@@ -425,24 +425,23 @@ export const useSftpViewFileOps = ({
           const transferId = `download-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           let completedBytes = 0;
           const MAX_SYMLINK_DEPTH = 32;
-          const DIRECTORY_DOWNLOAD_CONCURRENCY = 6;
+          const DIRECTORY_DOWNLOAD_MAX_CONCURRENCY = 10;
           const activeChildTransferIds = new Set<string>();
           const activeFileProgress = new Map<string, { transferred: number; speed: number }>();
+          const activeFileSizes = new Map<string, number>();
           const visitedPaths = new Set<string>();
-          const taskQueue: Array<
-            | {
-                type: "directory";
-                remotePath: string;
-                localPath: string;
-                symlinkDepth: number;
-              }
-            | {
-                type: "file";
-                remotePath: string;
-                localPath: string;
-                size: number;
-              }
-          > = [];
+          const directoryTaskQueue: Array<{
+            type: "directory";
+            remotePath: string;
+            localPath: string;
+            symlinkDepth: number;
+          }> = [];
+          const fileTaskQueue: Array<{
+            type: "file";
+            remotePath: string;
+            localPath: string;
+            size: number;
+          }> = [];
           let pendingDirectoryTasks = 0;
           let discoveredTotalBytes = 0;
           let estimatedTotalBytes = 0;
@@ -485,22 +484,48 @@ export const useSftpViewFileOps = ({
             }
           };
 
-          const enqueueTask = (
-            task:
-              | {
-                  type: "directory";
-                  remotePath: string;
-                  localPath: string;
-                  symlinkDepth: number;
-                }
-              | {
-                  type: "file";
-                  remotePath: string;
-                  localPath: string;
-                  size: number;
-                },
-          ) => {
-            taskQueue.push(task);
+          const getDynamicConcurrencyLimit = () => {
+            let largeFiles = 0;
+            let mediumFiles = 0;
+
+            for (const size of activeFileSizes.values()) {
+              if (size >= 32 * 1024 * 1024) largeFiles += 1;
+              else if (size >= 1 * 1024 * 1024) mediumFiles += 1;
+            }
+
+            if (largeFiles > 0) return 2;
+            if (mediumFiles >= 2) return 4;
+            if (mediumFiles === 1) return 5;
+            return DIRECTORY_DOWNLOAD_MAX_CONCURRENCY;
+          };
+
+          const enqueueDirectoryTask = (task: {
+            type: "directory";
+            remotePath: string;
+            localPath: string;
+            symlinkDepth: number;
+          }) => {
+            directoryTaskQueue.push(task);
+          };
+
+          const enqueueFileTask = (task: {
+            type: "file";
+            remotePath: string;
+            localPath: string;
+            size: number;
+          }) => {
+            const insertIndex = fileTaskQueue.findIndex((queuedTask) => queuedTask.size > task.size);
+            if (insertIndex === -1) {
+              fileTaskQueue.push(task);
+            } else {
+              fileTaskQueue.splice(insertIndex, 0, task);
+            }
+          };
+
+          const dequeueTask = () => {
+            if (fileTaskQueue.length > 0) return fileTaskQueue.shift() ?? null;
+            if (directoryTaskQueue.length > 0) return directoryTaskQueue.shift() ?? null;
+            return null;
           };
 
           const processFileTask = async (task: {
@@ -511,6 +536,7 @@ export const useSftpViewFileOps = ({
           }) => {
             const childTransferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             activeChildTransferIds.add(childTransferId);
+             activeFileSizes.set(childTransferId, task.size);
             activeFileProgress.set(childTransferId, { transferred: 0, speed: 0 });
             updateAggregateProgress();
 
@@ -542,12 +568,14 @@ export const useSftpViewFileOps = ({
                   () => {
                     completedBytes += task.size;
                     activeChildTransferIds.delete(childTransferId);
+                    activeFileSizes.delete(childTransferId);
                     activeFileProgress.delete(childTransferId);
                     updateAggregateProgress();
                     resolve();
                   },
                   (error) => {
                     activeChildTransferIds.delete(childTransferId);
+                    activeFileSizes.delete(childTransferId);
                     activeFileProgress.delete(childTransferId);
                     updateAggregateProgress();
                     reject(new Error(error));
@@ -556,11 +584,13 @@ export const useSftpViewFileOps = ({
                   .then((result) => {
                     if (result === undefined) {
                       activeChildTransferIds.delete(childTransferId);
+                      activeFileSizes.delete(childTransferId);
                       activeFileProgress.delete(childTransferId);
                       updateAggregateProgress();
                       reject(new Error("Stream transfer unavailable"));
                     } else if (result.error) {
                       activeChildTransferIds.delete(childTransferId);
+                      activeFileSizes.delete(childTransferId);
                       activeFileProgress.delete(childTransferId);
                       updateAggregateProgress();
                       reject(new Error(result.error));
@@ -570,6 +600,7 @@ export const useSftpViewFileOps = ({
               });
             } finally {
               activeChildTransferIds.delete(childTransferId);
+              activeFileSizes.delete(childTransferId);
               activeFileProgress.delete(childTransferId);
             }
           };
@@ -624,7 +655,7 @@ export const useSftpViewFileOps = ({
                 }
 
                 pendingDirectoryTasks += 1;
-                enqueueTask({
+                enqueueDirectoryTask({
                   type: "directory",
                   remotePath: remoteEntryPath,
                   localPath: localEntryPath,
@@ -638,7 +669,7 @@ export const useSftpViewFileOps = ({
                   ? parseInt(String(entry.size), 10) || 0
                   : entry.size || 0;
               discoveredTotalBytes += entrySize;
-              enqueueTask({
+              enqueueFileTask({
                 type: "file",
                 remotePath: remoteEntryPath,
                 localPath: localEntryPath,
@@ -665,11 +696,11 @@ export const useSftpViewFileOps = ({
                   return;
                 }
 
+                const concurrencyLimit = getDynamicConcurrencyLimit();
                 while (
-                  activeQueueTasks < DIRECTORY_DOWNLOAD_CONCURRENCY &&
-                  taskQueue.length > 0
+                  activeQueueTasks < concurrencyLimit
                 ) {
-                  const nextTask = taskQueue.shift();
+                  const nextTask = dequeueTask();
                   if (!nextTask) break;
 
                   activeQueueTasks += 1;
@@ -682,7 +713,8 @@ export const useSftpViewFileOps = ({
                       activeQueueTasks -= 1;
                       if (
                         !settled &&
-                        taskQueue.length === 0 &&
+                        fileTaskQueue.length === 0 &&
+                        directoryTaskQueue.length === 0 &&
                         activeQueueTasks === 0 &&
                         pendingDirectoryTasks === 0
                       ) {
@@ -701,7 +733,8 @@ export const useSftpViewFileOps = ({
 
                 if (
                   !settled &&
-                  taskQueue.length === 0 &&
+                  fileTaskQueue.length === 0 &&
+                  directoryTaskQueue.length === 0 &&
                   activeQueueTasks === 0 &&
                   pendingDirectoryTasks === 0
                 ) {
@@ -745,7 +778,7 @@ export const useSftpViewFileOps = ({
             }
 
             pendingDirectoryTasks = 1;
-            enqueueTask({
+            enqueueDirectoryTask({
               type: "directory",
               remotePath: fullPath,
               localPath: targetPath,
