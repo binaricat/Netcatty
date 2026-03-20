@@ -190,7 +190,7 @@ function execViaPty(ptyStream, command, options) {
 
       let cleaned = stripAnsi(stdout || "").trim();
       if (stripMarkers) {
-        cleaned = cleaned.replace(/__NCMCP_[^\r\n]*[\r\n]*/g, "").trim();
+        cleaned = cleaned.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "").trim();
       }
       resolve({
         ok: exitCode === 0 || exitCode === null,
