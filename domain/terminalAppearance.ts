@@ -15,6 +15,24 @@ export const hasHostFontFamilyOverride = (host?: Pick<Host, 'fontFamilyOverride'
 export const hasHostFontSizeOverride = (host?: Pick<Host, 'fontSizeOverride'> | null): boolean =>
   host?.fontSizeOverride === true;
 
+export const clearHostThemeOverride = (host: Host): Host => ({
+  ...host,
+  theme: undefined,
+  themeOverride: false,
+});
+
+export const clearHostFontFamilyOverride = (host: Host): Host => ({
+  ...host,
+  fontFamily: undefined,
+  fontFamilyOverride: false,
+});
+
+export const clearHostFontSizeOverride = (host: Host): Host => ({
+  ...host,
+  fontSize: undefined,
+  fontSizeOverride: false,
+});
+
 export const resolveHostTerminalThemeId = (host: Host | null | undefined, defaultThemeId: string): string =>
   hasHostThemeOverride(host) && host?.theme ? host.theme : defaultThemeId;
 

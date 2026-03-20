@@ -6,6 +6,12 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import {
+  clearHostFontFamilyOverride,
+  clearHostFontSizeOverride,
+  clearHostThemeOverride,
+  hasHostFontFamilyOverride,
+  hasHostFontSizeOverride,
+  hasHostThemeOverride,
   resolveHostTerminalFontFamilyId,
   resolveHostTerminalFontSize,
   resolveHostTerminalThemeId,
@@ -1009,6 +1015,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
   }, [focusedHost, isFocusedHostLocal, onUpdateTerminalThemeId, onUpdateHost]);
 
+  const handleThemeResetForFocusedSession = useCallback(() => {
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostThemeOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+
   const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
     if (isFocusedHostLocal) {
       onUpdateTerminalFontFamilyId?.(fontFamilyId);
@@ -1018,6 +1029,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
     }
   }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontFamilyId, onUpdateHost]);
+
+  const handleFontFamilyResetForFocusedSession = useCallback(() => {
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostFontFamilyOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
 
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
     if (isFocusedHostLocal) {
@@ -1029,10 +1045,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
   }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontSize, onUpdateHost]);
 
+  const handleFontSizeResetForFocusedSession = useCallback(() => {
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostFontSizeOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+
   // Current theme/font/size for the focused session (for ThemeSidePanel)
   const focusedThemeId = resolveHostTerminalThemeId(focusedHost, terminalTheme.id);
   const focusedFontFamilyId = resolveHostTerminalFontFamilyId(focusedHost, terminalFontFamilyId);
   const focusedFontSize = resolveHostTerminalFontSize(focusedHost, fontSize);
+  const focusedThemeOverridden = hasHostThemeOverride(focusedHost);
+  const focusedFontFamilyOverridden = hasHostFontFamilyOverride(focusedHost);
+  const focusedFontSizeOverridden = hasHostFontSizeOverride(focusedHost);
 
   // AI Chat state
   const aiState = useAIState();
@@ -1448,9 +1472,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         currentThemeId={focusedThemeId}
                         currentFontFamilyId={focusedFontFamilyId}
                         currentFontSize={focusedFontSize}
+                        canResetTheme={focusedThemeOverridden}
+                        canResetFontFamily={focusedFontFamilyOverridden}
+                        canResetFontSize={focusedFontSizeOverridden}
                         onThemeChange={handleThemeChangeForFocusedSession}
+                        onThemeReset={handleThemeResetForFocusedSession}
                         onFontFamilyChange={handleFontFamilyChangeForFocusedSession}
+                        onFontFamilyReset={handleFontFamilyResetForFocusedSession}
                         onFontSizeChange={handleFontSizeChangeForFocusedSession}
+                        onFontSizeReset={handleFontSizeResetForFocusedSession}
                       />
                     </div>
                   )}

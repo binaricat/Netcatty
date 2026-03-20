@@ -33,6 +33,7 @@ const en: Messages = {
   'common.back': 'Back',
   'common.apply': 'Apply',
   'common.use': 'Use',
+  'common.useGlobal': 'Use global',
   'common.saveChanges': 'Save Changes',
   'common.advanced': 'Advanced',
   'common.left': 'Left',

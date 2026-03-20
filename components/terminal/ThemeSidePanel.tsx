@@ -120,9 +120,15 @@ interface ThemeSidePanelProps {
   currentThemeId: string;
   currentFontFamilyId: string;
   currentFontSize: number;
+  canResetTheme?: boolean;
+  canResetFontFamily?: boolean;
+  canResetFontSize?: boolean;
   onThemeChange: (themeId: string) => void;
+  onThemeReset?: () => void;
   onFontFamilyChange: (fontFamilyId: string) => void;
+  onFontFamilyReset?: () => void;
   onFontSizeChange: (fontSize: number) => void;
+  onFontSizeReset?: () => void;
   isVisible?: boolean;
 }
 
@@ -130,9 +136,15 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   currentThemeId,
   currentFontFamilyId,
   currentFontSize,
+  canResetTheme = false,
+  canResetFontFamily = false,
+  canResetFontSize = false,
   onThemeChange,
+  onThemeReset,
   onFontFamilyChange,
+  onFontFamilyReset,
   onFontSizeChange,
+  onFontSizeReset,
   isVisible = true,
 }) => {
   const { t } = useI18n();
@@ -270,6 +282,20 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
           <div className="py-1">
             {activeTab === 'theme' && (
               <div>
+                {canResetTheme && (
+                  <button
+                    onClick={onThemeReset}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-primary hover:bg-accent/50 transition-colors border-b border-border/50"
+                  >
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center bg-primary/10 shrink-0">
+                      <Check size={12} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium">{t('common.useGlobal')}</div>
+                      <div className="text-[10px] text-muted-foreground">{t('common.reset')}</div>
+                    </div>
+                  </button>
+                )}
                 {builtinThemes.map(theme => (
                   <ThemeItem
                     key={theme.id}
@@ -298,6 +324,20 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
             )}
             {activeTab === 'font' && (
               <div>
+                {canResetFontFamily && (
+                  <button
+                    onClick={onFontFamilyReset}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-primary hover:bg-accent/50 transition-colors border-b border-border/50"
+                  >
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center bg-primary/10 shrink-0">
+                      <Check size={12} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium">{t('common.useGlobal')}</div>
+                      <div className="text-[10px] text-muted-foreground">{t('common.reset')}</div>
+                    </div>
+                  </button>
+                )}
                 {availableFonts.map(font => (
                   <FontItem
                     key={font.id}
@@ -365,8 +405,18 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
         {/* Font Size Control (only in font tab) */}
         {activeTab === 'font' && (
           <div className="p-2.5 border-t border-border/50 shrink-0">
-            <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5 font-semibold">
-              {t('terminal.themeModal.fontSize')}
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">
+                {t('terminal.themeModal.fontSize')}
+              </div>
+              {canResetFontSize && (
+                <button
+                  onClick={onFontSizeReset}
+                  className="text-[10px] font-medium text-primary hover:opacity-80 transition-opacity"
+                >
+                  {t('common.useGlobal')}
+                </button>
+              )}
             </div>
             <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-1.5">
               <button

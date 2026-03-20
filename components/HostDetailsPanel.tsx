@@ -30,6 +30,8 @@ import { useApplicationBackend } from "../application/state/useApplicationBacken
 import { useSettingsState } from "../application/state/useSettingsState";
 import { customThemeStore } from "../application/state/customThemeStore";
 import {
+  clearHostFontSizeOverride,
+  clearHostThemeOverride,
   resolveHostTerminalFontSize,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
@@ -1150,6 +1152,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
             </span>
           </button>
+          {form.themeOverride && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-primary"
+              onClick={() => setForm((prev) => clearHostThemeOverride(prev))}
+            >
+              {t("common.useGlobal")}
+            </Button>
+          )}
 
           {/* Font Size */}
           <div className="flex items-center gap-2">
@@ -1189,6 +1201,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               className="w-16 text-center h-8"
             />
             <span className="text-sm text-muted-foreground">pt</span>
+            {form.fontSizeOverride && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-8 text-primary"
+                onClick={() => setForm((prev) => clearHostFontSizeOverride(prev))}
+              >
+                {t("common.useGlobal")}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

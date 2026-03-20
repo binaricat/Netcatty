@@ -23,6 +23,7 @@ const zhCN: Messages = {
   'common.back': '返回',
   'common.apply': '应用',
   'common.use': '使用',
+  'common.useGlobal': '跟随全局',
   'common.left': '左侧',
   'common.right': '右侧',
   'common.more': '更多',
