@@ -15,6 +15,10 @@ checksum() {
   fi
 }
 
+electron_bin() {
+  echo "./node_modules/.bin/electron"
+}
+
 log_file_info() {
   local file="$1"
   echo "[node-pty] file: ${file}"
@@ -22,10 +26,16 @@ log_file_info() {
   checksum "${file}"
 }
 
+log_electron_runtime_info() {
+  ELECTRON_RUN_AS_NODE=1 "$(electron_bin)" -e '
+    console.log(`[node-pty] electron=${process.versions.electron || "unknown"} node=${process.versions.node} modules=${process.versions.modules}`);
+  '
+}
+
 assert_loadable_native_module() {
   local file="$1"
-  echo "[node-pty] loading native module: ${file}"
-  node -e '
+  echo "[node-pty] loading native module with Electron runtime: ${file}"
+  ELECTRON_RUN_AS_NODE=1 "$(electron_bin)" -e '
     require(process.argv[1]);
     console.log("[node-pty] native module loaded successfully");
   ' "${file}"
@@ -37,8 +47,9 @@ prepare() {
   local release_dir="${root}/build/Release"
   local prebuild_dir="${root}/prebuilds/linux-${arch}"
 
-  echo "[node-pty] rebuilding native module for linux-${arch}"
-  npm rebuild node-pty --build-from-source
+  echo "[node-pty] rebuilding native modules for Electron on linux-${arch}"
+  log_electron_runtime_info
+  npm run rebuild
 
   test -f "${release_dir}/pty.node"
   test -f "${release_dir}/spawn-helper"
@@ -62,6 +73,8 @@ verify() {
   local arch="$1"
   local release_dir
   local prebuild_dir
+
+  log_electron_runtime_info
 
   release_dir="$(find release -type d -path "*/resources/app.asar.unpacked/node_modules/node-pty/build/Release" -print -quit)"
   prebuild_dir="$(find release -type d -path "*/resources/app.asar.unpacked/node_modules/node-pty/prebuilds/linux-${arch}" -print -quit)"
