@@ -51,8 +51,8 @@ function buildWrappedCommand(command, shellKind, marker) {
       //   Line 2: capture exit code + end marker
       const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
       return (
-        `Write-Output '${marker}_S'; ${psPager}$global:LASTEXITCODE = 0; ${command}\r\n` +
-        `$__NCMCP_rc = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($?) { 0 } else { 1 }; Write-Output "${marker}_E:$__NCMCP_rc"\r\n`
+        `Write-Output '${marker}_S'; ${psPager}${command}\r\n` +
+        `$__NCMCP_rc = if($LASTEXITCODE){$LASTEXITCODE}elseif(-not $?){1}else{0}; Write-Output "${marker}_E:$__NCMCP_rc"\r\n`
       );
     }
 
