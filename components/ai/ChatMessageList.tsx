@@ -18,8 +18,18 @@ import {
 } from '../ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '../ai-elements/message';
 import { ToolCall } from '../ai-elements/tool-call';
+import { TerminalToolCall } from '../ai-elements/terminal-tool-call';
 import { InlineApprovalCard } from './InlineApprovalCard';
 import ThinkingBlock from './ThinkingBlock';
+
+interface ToolCallMetaEntry {
+  name: string;
+  subtitle?: string;
+  isTerminal?: boolean;
+  sessionId?: string;
+  hostLabel?: string;
+  command?: string;
+}
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -115,24 +125,26 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, hosts = [],
   const hostLookup = new Map(hosts.map((host) => [host.sessionId, host]));
   const normalizeToolName = (name: string) => name.split('/').pop() || name;
   const isTerminalExecute = (name: string) => normalizeToolName(name) === 'terminal_execute';
-  const buildTerminalExecuteMeta = (name: string, args?: Record<string, unknown>) => {
-    const sessionId = typeof args?.sessionId === 'string' ? args.sessionId : null;
-    const command = typeof args?.command === 'string' ? args.command.trim() : '';
-    const host = sessionId ? hostLookup.get(sessionId) : null;
-    const hostLabel = host?.label || host?.hostname || sessionId || '';
-    const commandPreview = command ? command.replace(/\s+/g, ' ').slice(0, 56) : '';
-    return {
-      name: commandPreview || normalizeToolName(name),
-      subtitle: hostLabel ? `${hostLabel} · ${normalizeToolName(name)}` : normalizeToolName(name),
-    };
-  };
-  const toolCallMeta = new Map<string, { name: string; subtitle?: string }>();
+
+  const toolCallMeta = new Map<string, ToolCallMetaEntry>();
   for (const m of visibleMessages) {
     if (m.role !== 'assistant' || !m.toolCalls) continue;
     for (const tc of m.toolCalls) {
-      toolCallMeta.set(tc.id, isTerminalExecute(tc.name)
-        ? buildTerminalExecuteMeta(tc.name, tc.arguments)
-        : { name: normalizeToolName(tc.name) });
+      if (isTerminalExecute(tc.name)) {
+        const sessionId = typeof tc.arguments?.sessionId === 'string' ? tc.arguments.sessionId : '';
+        const command = typeof tc.arguments?.command === 'string' ? tc.arguments.command.trim() : '';
+        const host = sessionId ? hostLookup.get(sessionId) : null;
+        const hostLabel = host?.label || host?.hostname || sessionId || '';
+        toolCallMeta.set(tc.id, {
+          name: command.replace(/\s+/g, ' ').slice(0, 56) || 'terminal_execute',
+          isTerminal: true,
+          sessionId,
+          hostLabel,
+          command,
+        });
+      } else {
+        toolCallMeta.set(tc.id, { name: normalizeToolName(tc.name) });
+      }
     }
   }
 
@@ -156,15 +168,31 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, hosts = [],
           if (message.role === 'tool') {
             return (
               <React.Fragment key={message.id}>
-                {message.toolResults?.map((tr) => (
-                  <ToolCall
-                    key={tr.toolCallId}
-                    name={toolCallMeta.get(tr.toolCallId)?.name || toolCallNames.get(tr.toolCallId) || tr.toolCallId}
-                    subtitle={toolCallMeta.get(tr.toolCallId)?.subtitle}
-                    result={tr.content}
-                    isError={tr.isError}
-                  />
-                ))}
+                {message.toolResults?.map((tr) => {
+                  const meta = toolCallMeta.get(tr.toolCallId);
+                  if (meta?.isTerminal) {
+                    return (
+                      <TerminalToolCall
+                        key={tr.toolCallId}
+                        command={meta.name}
+                        fullCommand={meta.command !== meta.name ? meta.command : undefined}
+                        hostLabel={meta.hostLabel || ''}
+                        hostSessionId={meta.sessionId || ''}
+                        result={tr.content}
+                        isError={tr.isError}
+                      />
+                    );
+                  }
+                  return (
+                    <ToolCall
+                      key={tr.toolCallId}
+                      name={meta?.name || toolCallNames.get(tr.toolCallId) || tr.toolCallId}
+                      subtitle={meta?.subtitle}
+                      result={tr.content}
+                      isError={tr.isError}
+                    />
+                  );
+                })}
               </React.Fragment>
             );
           }
@@ -221,18 +249,33 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, hosts = [],
                 {/* Tool calls */}
                 {message.toolCalls?.map((tc) => {
                   const isRunning = isThisStreaming && message.executionStatus === 'running';
-                  const displayMeta = isTerminalExecute(tc.name)
-                    ? buildTerminalExecuteMeta(tc.name, tc.arguments)
-                    : { name: normalizeToolName(tc.name), subtitle: undefined };
+                  const isCancelled = message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id);
+                  if (isTerminalExecute(tc.name)) {
+                    const sessionId = typeof tc.arguments?.sessionId === 'string' ? tc.arguments.sessionId : '';
+                    const command = typeof tc.arguments?.command === 'string' ? tc.arguments.command.trim() : '';
+                    const host = sessionId ? hostLookup.get(sessionId) : null;
+                    const hostLabel = host?.label || host?.hostname || sessionId || '';
+                    return (
+                      <TerminalToolCall
+                        key={tc.id}
+                        command={command.replace(/\s+/g, ' ').slice(0, 56) || '—'}
+                        fullCommand={command}
+                        hostLabel={hostLabel}
+                        hostSessionId={sessionId}
+                        statusLabel={isRunning ? t('ai.chat.toolRunning') : undefined}
+                        isLoading={isRunning}
+                        isInterrupted={isCancelled}
+                      />
+                    );
+                  }
                   return (
                     <ToolCall
                       key={tc.id}
-                      name={displayMeta.name}
-                      subtitle={displayMeta.subtitle}
-                      statusLabel={isRunning && isTerminalExecute(tc.name) ? t('ai.chat.toolRunning') : undefined}
+                      name={normalizeToolName(tc.name)}
+                      statusLabel={isRunning ? t('ai.chat.toolRunning') : undefined}
                       args={tc.arguments}
                       isLoading={isRunning}
-                      isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
+                      isInterrupted={isCancelled}
                     />
                   );
                 })}
@@ -369,6 +412,14 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.onApprove !== next.onApprove) return false;
   if (prev.onReject !== next.onReject) return false;
+  // Re-render when hosts change so toolCallMeta gets rebuilt with latest host labels
+  if (prev.hosts !== next.hosts) {
+    const ph = prev.hosts ?? [], nh = next.hosts ?? [];
+    if (ph.length !== nh.length) return false;
+    for (let i = 0; i < ph.length; i++) {
+      if (ph[i].sessionId !== nh[i].sessionId || ph[i].label !== nh[i].label) return false;
+    }
+  }
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 
@@ -389,7 +440,9 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
         p.pendingApproval !== n.pendingApproval ||
         p.errorInfo !== n.errorInfo ||
         p.toolCalls !== n.toolCalls ||
-        p.toolResults !== n.toolResults
+        p.toolResults !== n.toolResults ||
+        p.attachments !== n.attachments ||
+        p.images !== n.images
       ) {
         return false;
       }
