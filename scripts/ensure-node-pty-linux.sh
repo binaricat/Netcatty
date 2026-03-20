@@ -22,6 +22,15 @@ log_file_info() {
   checksum "${file}"
 }
 
+assert_loadable_native_module() {
+  local file="$1"
+  echo "[node-pty] loading native module: ${file}"
+  node -e '
+    require(process.argv[1]);
+    console.log("[node-pty] native module loaded successfully");
+  ' "${file}"
+}
+
 prepare() {
   local arch="$1"
   local root="node_modules/node-pty"
@@ -33,10 +42,12 @@ prepare() {
 
   test -f "${release_dir}/pty.node"
   test -f "${release_dir}/spawn-helper"
+  test -x "${release_dir}/spawn-helper"
 
   echo "[node-pty] built Linux runtime artifacts:"
   log_file_info "${release_dir}/pty.node"
   log_file_info "${release_dir}/spawn-helper"
+  assert_loadable_native_module "${release_dir}/pty.node"
 
   mkdir -p "${prebuild_dir}"
   cp "${release_dir}/pty.node" "${prebuild_dir}/pty.node"
@@ -69,14 +80,18 @@ verify() {
   test -f "${release_dir}/spawn-helper"
   test -f "${prebuild_dir}/pty.node"
   test -f "${prebuild_dir}/spawn-helper"
+  test -x "${release_dir}/spawn-helper"
+  test -x "${prebuild_dir}/spawn-helper"
 
   echo "[node-pty] packaged build/Release artifacts:"
   log_file_info "${release_dir}/pty.node"
   log_file_info "${release_dir}/spawn-helper"
+  assert_loadable_native_module "${release_dir}/pty.node"
 
   echo "[node-pty] packaged prebuild artifacts:"
   log_file_info "${prebuild_dir}/pty.node"
   log_file_info "${prebuild_dir}/spawn-helper"
+  assert_loadable_native_module "${prebuild_dir}/pty.node"
 
   echo "[node-pty] packaged artifact locations:"
   find release -path "*/resources/app.asar.unpacked/node_modules/node-pty/*" \
