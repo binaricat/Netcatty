@@ -32,6 +32,8 @@ import { customThemeStore } from "../application/state/customThemeStore";
 import {
   clearHostFontSizeOverride,
   clearHostThemeOverride,
+  hasHostFontSizeOverride,
+  hasHostThemeOverride,
   resolveHostTerminalFontSize,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
@@ -190,6 +192,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   const effectiveFontSize = useMemo(
     () => resolveHostTerminalFontSize(form, terminalFontSize),
     [form, terminalFontSize],
+  );
+  const hasEffectiveThemeOverride = useMemo(
+    () => hasHostThemeOverride(form),
+    [form],
+  );
+  const hasEffectiveFontSizeOverride = useMemo(
+    () => hasHostFontSizeOverride(form),
+    [form],
   );
   const effectiveTelnetThemeId =
     form.protocols?.find((p) => p.protocol === "telnet")?.theme || effectiveThemeId;
@@ -1164,7 +1174,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
             </span>
           </button>
-          {form.themeOverride && (
+          {hasEffectiveThemeOverride && (
             <Button
               variant="ghost"
               size="sm"
@@ -1213,7 +1223,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               className="w-16 text-center h-8"
             />
             <span className="text-sm text-muted-foreground">pt</span>
-            {form.fontSizeOverride && (
+            {hasEffectiveFontSizeOverride && (
               <Button
                 variant="ghost"
                 size="sm"
