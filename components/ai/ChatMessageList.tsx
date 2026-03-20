@@ -21,9 +21,9 @@ import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import {
   onApprovalRequest,
+  onApprovalCleared,
   replayPendingApprovals,
   resolveApproval,
-  setupMcpApprovalBridge,
   type ApprovalRequest,
 } from '../../infrastructure/ai/shared/approvalGate';
 
@@ -39,7 +39,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
   const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
 
-  // Subscribe to approval gate events (SDK tool calls)
+  // Subscribe to approval gate events (SDK + MCP tool calls)
   useEffect(() => {
     const handler = (request: ApprovalRequest) => {
       setPendingApprovals(prev => new Map(prev).set(request.toolCallId, request));
@@ -50,9 +50,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
     return unsub;
   }, []);
 
-  // Subscribe to MCP/ACP approval requests from main process
+  // Subscribe to approval cleared/removed events (fired on session stop or timeout)
   useEffect(() => {
-    return setupMcpApprovalBridge();
+    return onApprovalCleared((clearedIds) => {
+      setPendingApprovals(prev => {
+        const m = new Map(prev);
+        for (const id of clearedIds) m.delete(id);
+        return m;
+      });
+    });
   }, []);
 
   const handleApprove = useCallback((toolCallId: string) => {

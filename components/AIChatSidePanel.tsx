@@ -39,7 +39,7 @@ import ChatInput from './ai/ChatInput';
 import ChatMessageList from './ai/ChatMessageList';
 import ConversationExport from './ai/ConversationExport';
 import { useAIChatStreaming, getNetcattyBridge } from './ai/hooks/useAIChatStreaming';
-import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
+import { clearAllPendingApprovals, setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 
@@ -225,6 +225,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     updateMessageById,
   });
 
+  // Keep MCP/ACP approval IPC listener alive for the lifetime of the AI panel.
+  // This must NOT be in ChatMessageList (which unmounts on tab switches).
+  useEffect(() => {
+    return setupMcpApprovalBridge();
+  }, []);
 
 
   // Per-scope active session ID

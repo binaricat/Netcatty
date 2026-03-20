@@ -1,11 +1,9 @@
 /**
  * approvalGate — Promise-based approval system for tool execution.
  *
- * Instead of interrupting the SDK stream (needsApproval), tools call
- * `requestApproval()` inside their `execute` function. This returns
- * a Promise that resolves when the user approves/rejects from the UI.
- * The SDK stream stays alive — from the SDK's perspective, the tool
- * execution just takes longer.
+ * Tools call `requestApproval()` inside their `execute` function. This returns
+ * a Promise that resolves when the user approves/rejects from the UI, or after
+ * a timeout (default 5 minutes) to prevent indefinite hangs.
  *
  * Also supports MCP/ACP tool calls from the Electron main process:
  * the main process sends an IPC approval request, and we route it
@@ -16,6 +14,9 @@
  * Approvals are scoped by optional chatSessionId to prevent cross-session
  * interference when stopping or cancelling sessions.
  */
+
+/** Default timeout for unanswered approval prompts (5 minutes). */
+const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface ApprovalRequest {
   toolCallId: string;
@@ -37,21 +38,49 @@ const pendingApprovals = new Map<string, {
 type ApprovalRequestListener = (request: ApprovalRequest) => void;
 const listeners = new Set<ApprovalRequestListener>();
 
+// Subscribers for approval cleared/removed events (UI listens to clean up cards)
+type ApprovalClearedListener = (toolCallIds: string[]) => void;
+const clearedListeners = new Set<ApprovalClearedListener>();
+
 /**
  * Called from a tool's `execute` function when it needs user approval.
  * Returns a Promise<boolean> that resolves to `true` (approved) or `false` (denied).
  * The UI is notified via the listener system to render approval buttons.
+ *
+ * If the user does not respond within `timeoutMs` (default 5 minutes), the
+ * approval is auto-denied to prevent the session from hanging indefinitely.
  */
 export function requestApproval(
   toolCallId: string,
   toolName: string,
   args: Record<string, unknown>,
   chatSessionId?: string,
+  timeoutMs: number = APPROVAL_TIMEOUT_MS,
 ): Promise<boolean> {
   const request: ApprovalRequest = { toolCallId, toolName, args, chatSessionId };
 
   return new Promise<boolean>((resolve) => {
-    pendingApprovals.set(toolCallId, { resolve, request });
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const wrappedResolve = (approved: boolean) => {
+      if (timerId) { clearTimeout(timerId); timerId = null; }
+      resolve(approved);
+    };
+
+    pendingApprovals.set(toolCallId, { resolve: wrappedResolve, request });
+
+    // Auto-deny after timeout so the session doesn't hang indefinitely
+    timerId = setTimeout(() => {
+      if (pendingApprovals.has(toolCallId)) {
+        pendingApprovals.delete(toolCallId);
+        wrappedResolve(false);
+        // Notify UI to remove the stale card
+        for (const cl of clearedListeners) {
+          try { cl([toolCallId]); } catch { /* ignore */ }
+        }
+      }
+    }, timeoutMs);
+
     // Notify all UI listeners
     for (const listener of listeners) {
       try { listener(request); } catch { /* ignore listener errors */ }
@@ -87,6 +116,16 @@ export function onApprovalRequest(listener: ApprovalRequestListener): () => void
 }
 
 /**
+ * Subscribe to approval cleared/removed events. Returns an unsubscribe function.
+ * Fired when approvals are cleared (e.g. on session stop) or timed out,
+ * so the UI can remove stale approval cards.
+ */
+export function onApprovalCleared(listener: ApprovalClearedListener): () => void {
+  clearedListeners.add(listener);
+  return () => { clearedListeners.delete(listener); };
+}
+
+/**
  * Replay all currently pending approval requests to a listener.
  * Useful when ChatMessageList remounts after being unmounted — without this,
  * approvals that fired while unmounted would be silently missed and the
@@ -110,26 +149,37 @@ export function hasPendingApproval(toolCallId: string): boolean {
 /**
  * Clear pending approvals, optionally scoped to a specific chatSessionId.
  * Resolves matching entries with `false` (denied) so execute functions don't hang.
+ * Also notifies cleared-listeners so the UI can remove stale approval cards.
  *
  * When chatSessionId is provided, only approvals belonging to that session
  * are cleared — preventing cross-session interference in concurrent chats.
  * When omitted, all pending approvals are cleared (backward-compatible).
  */
 export function clearAllPendingApprovals(chatSessionId?: string): void {
+  const clearedIds: string[] = [];
+
   if (!chatSessionId) {
     // Clear everything (legacy / global stop)
-    for (const [, entry] of pendingApprovals) {
+    for (const [id, entry] of pendingApprovals) {
       entry.resolve(false);
+      clearedIds.push(id);
     }
     pendingApprovals.clear();
-    return;
+  } else {
+    // Scoped clear: only remove approvals for this chatSessionId
+    for (const [id, entry] of pendingApprovals) {
+      if (entry.request.chatSessionId === chatSessionId) {
+        pendingApprovals.delete(id);
+        entry.resolve(false);
+        clearedIds.push(id);
+      }
+    }
   }
 
-  // Scoped clear: only remove approvals for this chatSessionId
-  for (const [id, entry] of pendingApprovals) {
-    if (entry.request.chatSessionId === chatSessionId) {
-      pendingApprovals.delete(id);
-      entry.resolve(false);
+  // Notify UI listeners to remove the cards
+  if (clearedIds.length > 0) {
+    for (const cl of clearedListeners) {
+      try { cl(clearedIds); } catch { /* ignore */ }
     }
   }
 }
@@ -139,6 +189,11 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
  * Subscribes to IPC events and stores them in the same pendingApprovals map,
  * so the same ToolCall UI handles both SDK and MCP approvals, and approvals
  * survive ChatMessageList unmount/remount cycles via replayPendingApprovals().
+ *
+ * IMPORTANT: Call this from a component that stays mounted for the lifetime of
+ * the AI panel (e.g. AIChatSidePanel), NOT from ChatMessageList which unmounts
+ * on tab switches.
+ *
  * Returns an unsubscribe function.
  */
 export function setupMcpApprovalBridge(): () => void {
