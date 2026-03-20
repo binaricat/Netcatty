@@ -47,6 +47,7 @@ declare global {
 
   interface NetcattySSHOptions {
     sessionId?: string;
+    hostLabel?: string;
     hostname: string;
     username: string;
     port?: number;

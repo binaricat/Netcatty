@@ -7,6 +7,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { stripAnsi, terminalDataToHtml } = require("./sessionLogsBridge.cjs");
+const { toLocalISOString } = require("../../lib/utils.ts");
 
 // Active log streams keyed by sessionId
 const activeStreams = new Map();
@@ -41,7 +42,7 @@ function startStream(sessionId, opts) {
     fs.mkdirSync(hostDir, { recursive: true });
 
     const date = new Date(startTime || Date.now());
-    const dateStr = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dateStr = toLocalISOString(date);
     // For html format, write raw data to a temp file during streaming,
     // then convert on stopStream.
     const isHtml = format === "html";

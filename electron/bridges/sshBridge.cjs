@@ -981,7 +981,7 @@ async function startSSHSession(event, options) {
             // Start real-time session log stream if configured
             if (options.sessionLog?.enabled && options.sessionLog?.directory) {
               sessionLogStreamManager.startStream(sessionId, {
-                hostLabel: options.label || options.hostname || '',
+                hostLabel: options.hostLabel || options.hostname || '',
                 hostname: options.hostname || '',
                 directory: options.sessionLog.directory,
                 format: options.sessionLog.format || 'txt',

@@ -442,6 +442,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }): Promise<string> => {
         return ctx.terminalBackend.startSSHSession({
           sessionId: ctx.sessionId,
+          hostLabel: ctx.host.label,
           hostname: ctx.host.hostname,
           username: effectiveUsername,
           port: ctx.host.port || 22,

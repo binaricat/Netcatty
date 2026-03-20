@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { dialog } = require("electron");
+const { toLocalISOString } = require("../../lib/utils.ts");
 
 /**
  * Strip ANSI escape codes from text
@@ -148,7 +149,7 @@ async function exportSessionLog(event, payload) {
 
   // Generate default filename
   const date = new Date(startTime);
-  const dateStr = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dateStr = toLocalISOString(date);
   const safeHostLabel = (hostLabel || hostname || "session").replace(/[^a-zA-Z0-9-_]/g, "_");
   const ext = format === "html" ? "html" : format === "raw" ? "log" : "txt";
   const defaultPath = `${safeHostLabel}_${dateStr}.${ext}`;
@@ -223,7 +224,7 @@ async function autoSaveSessionLog(event, payload) {
 
     // Generate filename with timestamp
     const date = new Date(startTime);
-    const dateStr = date.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dateStr = toLocalISOString(date);
     const ext = format === "html" ? "html" : format === "raw" ? "log" : "txt";
     const fileName = `${dateStr}.${ext}`;
     const filePath = path.join(hostDir, fileName);
