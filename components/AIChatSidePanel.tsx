@@ -380,6 +380,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     () => new Map(terminalSessions.map((session) => [session.sessionId, session])),
     [terminalSessions],
   );
+  const selectedExtraSessions = useMemo(
+    () => extraTerminalSessionIds
+      .map((sessionId) => terminalSessionLookup.get(sessionId))
+      .filter((session): session is NonNullable<typeof session> => !!session),
+    [extraTerminalSessionIds, terminalSessionLookup],
+  );
+
   const latestExecutionTargets = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -847,6 +854,43 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           </Button>
         </div>
       </div>
+
+      {(currentScopeTerminalSessions.length > 0 || selectedExtraSessions.length > 0) && (
+        <div className="border-b border-border/40 bg-background/70 px-3 py-2">
+          <div className="text-[11px] font-medium text-foreground/78">
+            {t('ai.chat.contextSummary')}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {currentScopeTerminalSessions.map((session) => (
+              <div
+                key={session.sessionId}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/50 bg-muted/25 px-2 py-1 text-[10.5px] text-foreground/78"
+              >
+                <span className={cn(
+                  'h-2 w-2 shrink-0 rounded-full',
+                  session.connected ? 'bg-green-500' : 'bg-muted-foreground/35',
+                )} />
+                <span className="truncate">{session.label || session.hostname}</span>
+              </div>
+            ))}
+            {selectedExtraSessions.map((session) => (
+              <div
+                key={session.sessionId}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-[10.5px] text-primary"
+              >
+                <span className={cn(
+                  'h-2 w-2 shrink-0 rounded-full',
+                  session.connected ? 'bg-green-500' : 'bg-muted-foreground/35',
+                )} />
+                <span className="truncate">{session.label || session.hostname}</span>
+                <span className="rounded-full bg-primary/12 px-1 py-0.5 text-[9px] uppercase tracking-wide">
+                  {t('ai.chat.additionalTag')}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {latestExecutionTargets && (
         <div className="border-b border-border/40 bg-muted/[0.14] px-3 py-2">
