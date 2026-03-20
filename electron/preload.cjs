@@ -49,11 +49,12 @@ function filterMcpMarkers(data) {
     // ── Cmd: pager + marker lines ──
     .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "")
     .replace(/^echo __NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // ── PowerShell: pager + marker lines ──
-    .replace(/^\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'[\r\n]*/gm, "")
-    .replace(/^Write-Output '__NCMCP_[^']*'[\r\n]*/gm, "")
-    .replace(/^\$global:LASTEXITCODE = 0[\r\n]*/gm, "")
-    .replace(/^\$__NCMCP_rc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/gm, "");
+    // ── PowerShell: echoed combined line 1 prefix parts ──
+    .replace(/Write-Output '__NCMCP_[^']*'; ?/g, "")
+    .replace(/\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'; ?/g, "")
+    .replace(/\$global:LASTEXITCODE = 0; ?/g, "")
+    // ── PowerShell: echoed combined line 2 (entire line) ──
+    .replace(/[^\r\n]*\$__NCMCP_rc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/g, "");
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {

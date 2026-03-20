@@ -45,19 +45,16 @@ function subscribeToPtyData(ptyStream, onData) {
 
 function buildWrappedCommand(command, shellKind, marker) {
   switch (shellKind) {
-    case "powershell":
-      return [
-        "$env:PAGER='cat'",
-        "$env:SYSTEMD_PAGER=''",
-        "$env:GIT_PAGER='cat'",
-        "$env:LESS=''",
-        `Write-Output '${marker}_S'`,
-        "$global:LASTEXITCODE = 0",
-        command,
-        "$__NCMCP_rc = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($?) { 0 } else { 1 }",
-        `Write-Output ("${marker}_E:{0}" -f $__NCMCP_rc)`,
-        "",
-      ].join("\r\n");
+    case "powershell": {
+      // Combine into 2 PTY lines (like posix) to minimise prompt echo duplication:
+      //   Line 1: start marker + pager env + user command
+      //   Line 2: capture exit code + end marker
+      const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
+      return (
+        `Write-Output '${marker}_S'; ${psPager}$global:LASTEXITCODE = 0; ${command}\r\n` +
+        `$__NCMCP_rc = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($?) { 0 } else { 1 }; Write-Output "${marker}_E:$__NCMCP_rc"\r\n`
+      );
+    }
 
     case "cmd":
       return [
