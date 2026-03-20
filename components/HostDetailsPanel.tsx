@@ -29,6 +29,10 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
 import { useSettingsState } from "../application/state/useSettingsState";
 import { customThemeStore } from "../application/state/customThemeStore";
+import {
+  resolveHostTerminalFontSize,
+  resolveHostTerminalThemeId,
+} from "../domain/terminalAppearance";
 import { MIN_FONT_SIZE, MAX_FONT_SIZE } from "../infrastructure/config/fonts";
 import { cn } from "../lib/utils";
 import { EnvVar, Host, Identity, ManagedSource, ProxyConfig, SSHKey } from "../types";
@@ -115,8 +119,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         os: "linux",
         authMethod: "password",
         charset: "UTF-8",
-        theme: terminalThemeId,
-        fontSize: terminalFontSize,
         createdAt: Date.now(),
         group: defaultGroup || undefined, // Pre-fill with current navigation group
       } as Host),
@@ -178,6 +180,17 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   const update = <K extends keyof Host>(key: K, value: Host[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  const effectiveThemeId = useMemo(
+    () => resolveHostTerminalThemeId(form, terminalThemeId),
+    [form, terminalThemeId],
+  );
+  const effectiveFontSize = useMemo(
+    () => resolveHostTerminalFontSize(form, terminalFontSize),
+    [form, terminalFontSize],
+  );
+  const effectiveTelnetThemeId =
+    form.protocols?.find((p) => p.protocol === "telnet")?.theme || effectiveThemeId;
 
   const updateProxyConfig = useCallback(
     (field: keyof ProxyConfig, value: string | number) => {
@@ -298,6 +311,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       password: form.savePassword === false ? undefined : form.password,
       managedSourceId: finalManagedSourceId,
     };
+    if (!cleaned.themeOverride) {
+      delete cleaned.theme;
+    }
+    if (!cleaned.fontFamilyOverride) {
+      delete cleaned.fontFamily;
+    }
+    if (!cleaned.fontSizeOverride) {
+      delete cleaned.fontSize;
+    }
     onSave(cleaned);
   };
 
@@ -478,9 +500,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     return (
       <ThemeSelectPanel
         open={true}
-        selectedThemeId={form.theme || "flexoki-dark"}
+        selectedThemeId={effectiveThemeId}
         onSelect={(themeId) => {
-          update("theme", themeId);
+          setForm((prev) => ({ ...prev, theme: themeId, themeOverride: true }));
           setActiveSubPanel("none");
         }}
         onClose={onCancel}
@@ -495,11 +517,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     return (
       <ThemeSelectPanel
         open={true}
-        selectedThemeId={
-          form.protocols?.find((p) => p.protocol === "telnet")?.theme ||
-          form.theme ||
-          "flexoki-dark"
-        }
+        selectedThemeId={effectiveTelnetThemeId}
         onSelect={(themeId) => {
           // Update telnet protocol theme
           const telnetConfig = form.protocols?.find(
@@ -1113,15 +1131,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
               style={{
                 backgroundColor:
-                  customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.background || "#100F0F",
+                  customThemeStore.getThemeById(effectiveThemeId)?.colors.background || "#100F0F",
                 color:
-                  customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.foreground || "#CECDC3",
+                  customThemeStore.getThemeById(effectiveThemeId)?.colors.foreground || "#CECDC3",
               }}
             >
               <div className="p-0.5">
                 <div
                   style={{
-                    color: customThemeStore.getThemeById(form.theme || "flexoki-dark")?.colors.green,
+                    color: customThemeStore.getThemeById(effectiveThemeId)?.colors.green,
                   }}
                 >
                   $
@@ -1129,7 +1147,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               </div>
             </div>
             <span className="text-sm flex-1">
-              {customThemeStore.getThemeById(form.theme || "flexoki-dark")?.name || "Flexoki Dark"}
+              {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
             </span>
           </button>
 
@@ -1140,11 +1158,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               variant="outline"
               size="sm"
               onClick={() => {
-                if ((form.fontSize || 14) > MIN_FONT_SIZE) {
-                  update("fontSize", (form.fontSize || 14) - 1);
+                if (effectiveFontSize > MIN_FONT_SIZE) {
+                  setForm((prev) => ({
+                    ...prev,
+                    fontSize: effectiveFontSize - 1,
+                    fontSizeOverride: true,
+                  }));
                 }
               }}
-              disabled={(form.fontSize || 14) <= MIN_FONT_SIZE}
+              disabled={effectiveFontSize <= MIN_FONT_SIZE}
               className="px-2 h-8"
             >
               -
@@ -1153,11 +1175,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               type="number"
               min={MIN_FONT_SIZE}
               max={MAX_FONT_SIZE}
-              value={form.fontSize || 14}
+              value={effectiveFontSize}
               onChange={(e) => {
                 const val = parseInt(e.target.value);
                 if (val >= MIN_FONT_SIZE && val <= MAX_FONT_SIZE) {
-                  update("fontSize", val);
+                  setForm((prev) => ({
+                    ...prev,
+                    fontSize: val,
+                    fontSizeOverride: true,
+                  }));
                 }
               }}
               className="w-16 text-center h-8"
@@ -1167,11 +1193,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               variant="outline"
               size="sm"
               onClick={() => {
-                if ((form.fontSize || 14) < MAX_FONT_SIZE) {
-                  update("fontSize", (form.fontSize || 14) + 1);
+                if (effectiveFontSize < MAX_FONT_SIZE) {
+                  setForm((prev) => ({
+                    ...prev,
+                    fontSize: effectiveFontSize + 1,
+                    fontSizeOverride: true,
+                  }));
                 }
               }}
-              disabled={(form.fontSize || 14) >= MAX_FONT_SIZE}
+              disabled={effectiveFontSize >= MAX_FONT_SIZE}
               className="px-2 h-8"
             >
               +
@@ -1494,21 +1524,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
                 style={{
                   backgroundColor:
-                    customThemeStore.getThemeById(
-                      form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
-                    )?.colors.background || "#100F0F",
+                    customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.background || "#100F0F",
                   color:
-                    customThemeStore.getThemeById(
-                      form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
-                    )?.colors.foreground || "#CECDC3",
+                    customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.foreground || "#CECDC3",
                 }}
               >
                 <div className="p-0.5">
                   <div
                     style={{
-                      color: customThemeStore.getThemeById(
-                        form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
-                      )?.colors.green,
+                      color: customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.green,
                     }}
                   >
                     $
@@ -1516,9 +1540,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 </div>
               </div>
               <span className="text-sm flex-1">
-                {customThemeStore.getThemeById(
-                  form.protocols?.find((p) => p.protocol === "telnet")?.theme || form.theme || "flexoki-dark"
-                )?.name || "Flexoki Dark"}
+                {customThemeStore.getThemeById(effectiveTelnetThemeId)?.name || "Flexoki Dark"}
               </span>
             </button>
           </Card>

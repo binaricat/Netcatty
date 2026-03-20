@@ -25,6 +25,11 @@ import {
   shouldEnableNativeUserInputAutoScroll,
   shouldScrollOnTerminalInput,
 } from "../domain/terminalScroll";
+import {
+  resolveHostTerminalFontFamilyId,
+  resolveHostTerminalFontSize,
+  resolveHostTerminalThemeId,
+} from "../domain/terminalAppearance";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
@@ -402,13 +407,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const customThemes = useCustomThemes();
 
   const effectiveTheme = useMemo(() => {
-    if (host.theme) {
-      const hostTheme = TERMINAL_THEMES.find((t) => t.id === host.theme)
-        || customThemes.find((t) => t.id === host.theme);
+    const themeId = resolveHostTerminalThemeId(host, terminalTheme.id);
+    if (themeId) {
+      const hostTheme = TERMINAL_THEMES.find((t) => t.id === themeId)
+        || customThemes.find((t) => t.id === themeId);
       if (hostTheme) return hostTheme;
     }
     return terminalTheme;
-  }, [host.theme, terminalTheme, customThemes]);
+  }, [host, terminalTheme, customThemes]);
 
   const resolvedChainHosts =
     (host.hostChain?.hostIds
@@ -725,7 +731,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   useEffect(() => {
     if (termRef.current) {
-      const effectiveFontSize = host.fontSize || fontSize;
+      const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
       termRef.current.options.fontSize = effectiveFontSize;
 
       termRef.current.options.theme = {
@@ -782,14 +788,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
       setTimeout(() => safeFit({ force: true }), 50);
     }
-  }, [fontSize, effectiveTheme, terminalSettings, host.fontSize]);
+  }, [fontSize, effectiveTheme, terminalSettings, host]);
 
   useEffect(() => {
     if (termRef.current) {
-      const effectiveFontSize = host.fontSize || fontSize;
+      const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
       termRef.current.options.fontSize = effectiveFontSize;
 
-      const hostFontId = host.fontFamily || fontFamilyId || "menlo";
+      const hostFontId = resolveHostTerminalFontFamilyId(host, fontFamilyId) || "menlo";
       const fontObj = availableFonts.find((f) => f.id === hostFontId) || availableFonts[0];
       termRef.current.options.fontFamily = fontObj.family;
 
@@ -800,7 +806,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
       setTimeout(() => safeFit({ force: true }), 50);
     }
-  }, [host.fontSize, host.fontFamily, host.theme, fontFamilyId, fontSize, effectiveTheme, availableFonts]);
+  }, [host, fontFamilyId, fontSize, effectiveTheme, availableFonts]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -848,7 +854,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
         if (terminalSettings && termRef.current) {
           const fontFamily = termRef.current.options?.fontFamily || "";
-          const effectiveFontSize = host.fontSize || fontSize;
+          const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
           if (typeof document !== "undefined" && document.fonts?.check) {
             const weightSpec = `${terminalSettings.fontWeightBold} ${effectiveFontSize}px ${fontFamily}`;
             const resolvedBold = document.fonts.check(weightSpec)
@@ -884,7 +890,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [host.id, host.fontFamily, host.fontSize, fontFamilyId, fontSize, resizeSession, sessionId, terminalSettings]);
+  }, [host, fontFamilyId, fontSize, resizeSession, sessionId, terminalSettings]);
 
   useEffect(() => {
     if (!isVisible || !containerRef.current || !fitAddonRef.current) return;

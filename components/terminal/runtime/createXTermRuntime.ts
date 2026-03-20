@@ -22,6 +22,10 @@ import {
   shouldScrollOnTerminalInput,
   shouldScrollOnTerminalPaste,
 } from "../../../domain/terminalScroll";
+import {
+  resolveHostTerminalFontFamilyId,
+  resolveHostTerminalFontSize,
+} from "../../../domain/terminalAppearance";
 import { logger } from "../../../lib/logger";
 import { isMacPlatform, normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
@@ -141,12 +145,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     rendererType,
   });
 
-  const hostFontId = ctx.host.fontFamily || ctx.fontFamilyId || "menlo";
+  const hostFontId = resolveHostTerminalFontFamilyId(ctx.host, ctx.fontFamilyId) || "menlo";
   // Use fontStore for font lookup - guarantees non-empty result
   const fontObj = fontStore.getFontById(hostFontId);
   const fontFamily = fontObj.family;
 
-  const effectiveFontSize = ctx.host.fontSize || ctx.fontSize;
+  const effectiveFontSize = resolveHostTerminalFontSize(ctx.host, ctx.fontSize);
 
   const cursorStyle = settings?.cursorShape ?? "block";
   const cursorBlink = settings?.cursorBlink ?? true;
