@@ -21,6 +21,7 @@ import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import {
   onApprovalRequest,
+  replayPendingApprovals,
   resolveApproval,
   setupMcpApprovalBridge,
   type ApprovalRequest,
@@ -38,9 +39,13 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
   // Subscribe to approval gate events (SDK tool calls)
   useEffect(() => {
-    return onApprovalRequest((request) => {
+    const handler = (request: ApprovalRequest) => {
       setPendingApprovals(prev => new Map(prev).set(request.toolCallId, request));
-    });
+    };
+    const unsub = onApprovalRequest(handler);
+    // Replay any approvals that fired while this component was unmounted
+    replayPendingApprovals(handler);
+    return unsub;
   }, []);
 
   // Subscribe to MCP/ACP approval requests from main process

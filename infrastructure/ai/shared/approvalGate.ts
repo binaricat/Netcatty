@@ -10,12 +10,17 @@
  * Also supports MCP/ACP tool calls from the Electron main process:
  * the main process sends an IPC approval request, and we route it
  * through the same listener/UI system.
+ *
+ * Approvals are scoped by optional chatSessionId to prevent cross-session
+ * interference when stopping or cancelling sessions.
  */
 
 export interface ApprovalRequest {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+  /** Optional chat session scope — used to clear only relevant approvals on stop */
+  chatSessionId?: string;
 }
 
 // Pending approval promises keyed by toolCallId (for SDK tool calls)
@@ -37,8 +42,9 @@ export function requestApproval(
   toolCallId: string,
   toolName: string,
   args: Record<string, unknown>,
+  chatSessionId?: string,
 ): Promise<boolean> {
-  const request: ApprovalRequest = { toolCallId, toolName, args };
+  const request: ApprovalRequest = { toolCallId, toolName, args, chatSessionId };
 
   return new Promise<boolean>((resolve) => {
     pendingApprovals.set(toolCallId, { resolve, request });
@@ -78,6 +84,18 @@ export function onApprovalRequest(listener: ApprovalRequestListener): () => void
 }
 
 /**
+ * Replay all currently pending approval requests to a listener.
+ * Useful when ChatMessageList remounts after being unmounted — without this,
+ * approvals that fired while unmounted would be silently missed and the
+ * corresponding execute Promises would hang indefinitely.
+ */
+export function replayPendingApprovals(listener: ApprovalRequestListener): void {
+  for (const [, entry] of pendingApprovals) {
+    try { listener(entry.request); } catch { /* ignore */ }
+  }
+}
+
+/**
  * Check if a specific toolCallId has a pending approval.
  */
 export function hasPendingApproval(toolCallId: string): boolean {
@@ -85,14 +103,30 @@ export function hasPendingApproval(toolCallId: string): boolean {
 }
 
 /**
- * Clear all pending approvals (e.g. when aborting a stream).
- * Resolves all with `false` (denied) so the execute functions don't hang.
+ * Clear pending approvals, optionally scoped to a specific chatSessionId.
+ * Resolves matching entries with `false` (denied) so execute functions don't hang.
+ *
+ * When chatSessionId is provided, only approvals belonging to that session
+ * are cleared — preventing cross-session interference in concurrent chats.
+ * When omitted, all pending approvals are cleared (backward-compatible).
  */
-export function clearAllPendingApprovals(): void {
-  for (const [, entry] of pendingApprovals) {
-    entry.resolve(false);
+export function clearAllPendingApprovals(chatSessionId?: string): void {
+  if (!chatSessionId) {
+    // Clear everything (legacy / global stop)
+    for (const [, entry] of pendingApprovals) {
+      entry.resolve(false);
+    }
+    pendingApprovals.clear();
+    return;
   }
-  pendingApprovals.clear();
+
+  // Scoped clear: only remove approvals for this chatSessionId
+  for (const [id, entry] of pendingApprovals) {
+    if (entry.request.chatSessionId === chatSessionId) {
+      pendingApprovals.delete(id);
+      entry.resolve(false);
+    }
+  }
 }
 
 /**
@@ -108,6 +142,7 @@ export function setupMcpApprovalBridge(): () => void {
         approvalId: string;
         toolName: string;
         args: Record<string, unknown>;
+        chatSessionId?: string;
       }) => void) => () => void;
     };
   }).netcatty;
@@ -118,6 +153,7 @@ export function setupMcpApprovalBridge(): () => void {
       toolCallId: payload.approvalId,
       toolName: payload.toolName,
       args: payload.args,
+      chatSessionId: payload.chatSessionId,
     };
     // Notify all UI listeners (same as SDK approval flow)
     for (const listener of listeners) {

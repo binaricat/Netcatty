@@ -2073,7 +2073,7 @@ function registerHandlers(ipcMain) {
     mcpServerBridge.cancelAllPtyExecs();
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
     mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
-    mcpServerBridge.clearPendingApprovals();
+    mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
     const activeRun = effectiveChatSessionId ? acpChatRuns.get(effectiveChatSessionId) : null;
     if (activeRun && activeRun.requestId === requestId) {
       activeRun.cancelRequested = true;

@@ -59,7 +59,7 @@ const cancelledChatSessions = new Set();
 
 // ── Approval gate (for confirm mode with ACP/MCP agents) ──
 let getMainWindowFn = null; // () => BrowserWindow | null
-const pendingApprovals = new Map(); // approvalId → { resolve }
+const pendingApprovals = new Map(); // approvalId → { resolve, chatSessionId }
 let approvalIdCounter = 0;
 
 function setMainWindowGetter(fn) {
@@ -71,7 +71,7 @@ function setMainWindowGetter(fn) {
  * Sends an IPC event and returns a Promise<boolean> that resolves
  * when the user approves/rejects in the UI.
  */
-function requestApprovalFromRenderer(toolName, args) {
+function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
     if (!mainWin || mainWin.isDestroyed()) {
@@ -80,11 +80,12 @@ function requestApprovalFromRenderer(toolName, args) {
       return;
     }
     const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;
-    pendingApprovals.set(approvalId, { resolve });
+    pendingApprovals.set(approvalId, { resolve, chatSessionId: chatSessionId || null });
     mainWin.webContents.send('netcatty:ai:mcp:approval-request', {
       approvalId,
       toolName,
       args,
+      chatSessionId: chatSessionId || undefined,
     });
   });
 }
@@ -97,11 +98,24 @@ function resolveApprovalFromRenderer(approvalId, approved) {
   }
 }
 
-function clearPendingApprovals() {
-  for (const [, entry] of pendingApprovals) {
-    entry.resolve(false);
+/**
+ * Clear pending MCP approvals, optionally scoped to a specific chatSessionId.
+ * Resolves matched entries with false (denied) to unblock hanging promises.
+ */
+function clearPendingApprovals(chatSessionId) {
+  if (!chatSessionId) {
+    for (const [, entry] of pendingApprovals) {
+      entry.resolve(false);
+    }
+    pendingApprovals.clear();
+    return;
   }
-  pendingApprovals.clear();
+  for (const [id, entry] of pendingApprovals) {
+    if (entry.chatSessionId === chatSessionId) {
+      pendingApprovals.delete(id);
+      entry.resolve(false);
+    }
+  }
 }
 
 function cancelAllPtyExecs() {
@@ -423,7 +437,7 @@ async function dispatch(method, params) {
       sessionId: params?.sessionId,
       command: params?.command || params?.input || params?.path,
       ...(params?.sessionIds ? { sessionIds: params.sessionIds } : {}),
-    });
+    }, params?.chatSessionId);
     if (!approved) {
       return { ok: false, error: "Operation denied by user." };
     }
