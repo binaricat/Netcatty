@@ -14,6 +14,7 @@ import {
   History,
   Plus,
   Server,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -342,7 +343,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     [sessions, activeSessionId],
   );
 
-  const messages = activeSession?.messages ?? [];
+  const messages = useMemo(
+    () => activeSession?.messages ?? [],
+    [activeSession?.messages],
+  );
 
   // ── Export hook ──
   const { handleExport } = useConversationExport(activeSession);
@@ -371,6 +375,38 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       )),
     [availableTerminalSessions, currentScopeSessionIdSet, extraSessionIdSet],
   );
+
+  const terminalSessionLookup = useMemo(
+    () => new Map(terminalSessions.map((session) => [session.sessionId, session])),
+    [terminalSessions],
+  );
+  const latestExecutionTargets = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
+
+      const sessionIds = [...new Set(
+        message.toolCalls
+          .map((toolCall) => typeof toolCall.arguments?.sessionId === 'string' ? toolCall.arguments.sessionId : null)
+          .filter((sessionId): sessionId is string => !!sessionId),
+      )];
+
+      if (sessionIds.length === 0) continue;
+
+      const sessions = sessionIds
+        .map((sessionId) => terminalSessionLookup.get(sessionId))
+        .filter((session): session is NonNullable<typeof session> => !!session);
+
+      if (sessions.length === 0) continue;
+
+      return {
+        sessions,
+        isRunning: message.executionStatus === 'running',
+      };
+    }
+
+    return null;
+  }, [messages, terminalSessionLookup]);
 
   // Agent model presets for the current external agent
   const currentAgentConfig = useMemo(
@@ -811,6 +847,48 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           </Button>
         </div>
       </div>
+
+      {latestExecutionTargets && (
+        <div className="border-b border-border/40 bg-muted/[0.14] px-3 py-2">
+          <div className="flex items-start gap-2">
+            <div className="mt-0.5 rounded-md bg-primary/10 p-1 text-primary">
+              <Sparkles size={12} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium text-foreground/82">
+                {latestExecutionTargets.isRunning ? t('ai.chat.executingOn') : t('ai.chat.lastActionOn')}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {latestExecutionTargets.sessions.map((session) => {
+                  const isInCurrentScope = currentScopeSessionIdSet.has(session.sessionId);
+                  return (
+                    <div
+                      key={session.sessionId}
+                      className={cn(
+                        'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-1 text-[10.5px]',
+                        isInCurrentScope
+                          ? 'border-border/50 bg-background/70 text-foreground/80'
+                          : 'border-primary/25 bg-primary/10 text-primary',
+                      )}
+                    >
+                      <span className={cn(
+                        'h-2 w-2 shrink-0 rounded-full',
+                        session.connected ? 'bg-green-500' : 'bg-muted-foreground/35',
+                      )} />
+                      <span className="truncate">{session.label || session.hostname}</span>
+                      {!isInCurrentScope && (
+                        <span className="rounded-full bg-primary/12 px-1 py-0.5 text-[9px] uppercase tracking-wide">
+                          {t('ai.chat.additionalTag')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Main content ── */}
       {showHistory ? (
