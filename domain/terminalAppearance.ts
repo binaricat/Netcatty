@@ -6,14 +6,25 @@ type TerminalAppearanceDefaults = {
   fontSize: number;
 };
 
-export const hasHostThemeOverride = (host?: Pick<Host, 'themeOverride'> | null): boolean =>
-  host?.themeOverride === true;
+const hasLegacyStringValue = (value: string | undefined): boolean =>
+  typeof value === 'string' && value.trim().length > 0;
 
-export const hasHostFontFamilyOverride = (host?: Pick<Host, 'fontFamilyOverride'> | null): boolean =>
-  host?.fontFamilyOverride === true;
+const hasLegacyNumberValue = (value: number | undefined): boolean =>
+  typeof value === 'number' && !Number.isNaN(value);
 
-export const hasHostFontSizeOverride = (host?: Pick<Host, 'fontSizeOverride'> | null): boolean =>
-  host?.fontSizeOverride === true;
+const hasEffectiveOverride = (
+  explicitOverride: boolean | undefined,
+  legacyValuePresent: boolean,
+): boolean => explicitOverride === true || (explicitOverride === undefined && legacyValuePresent);
+
+export const hasHostThemeOverride = (host?: Pick<Host, 'themeOverride' | 'theme'> | null): boolean =>
+  hasEffectiveOverride(host?.themeOverride, hasLegacyStringValue(host?.theme));
+
+export const hasHostFontFamilyOverride = (host?: Pick<Host, 'fontFamilyOverride' | 'fontFamily'> | null): boolean =>
+  hasEffectiveOverride(host?.fontFamilyOverride, hasLegacyStringValue(host?.fontFamily));
+
+export const hasHostFontSizeOverride = (host?: Pick<Host, 'fontSizeOverride' | 'fontSize'> | null): boolean =>
+  hasEffectiveOverride(host?.fontSizeOverride, hasLegacyNumberValue(host?.fontSize));
 
 export const clearHostThemeOverride = (host: Host): Host => ({
   ...host,

@@ -313,14 +313,26 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       password: form.savePassword === false ? undefined : form.password,
       managedSourceId: finalManagedSourceId,
     };
-    if (!cleaned.themeOverride) {
+    const preserveLegacyTheme = initialData?.theme != null && cleaned.themeOverride !== false;
+    const preserveLegacyFontFamily = initialData?.fontFamily != null && cleaned.fontFamilyOverride !== false;
+    const preserveLegacyFontSize = initialData?.fontSize != null && cleaned.fontSizeOverride !== false;
+
+    if (cleaned.themeOverride === false) {
       delete cleaned.theme;
+    } else if (preserveLegacyTheme && cleaned.theme == null) {
+      cleaned.theme = initialData?.theme;
     }
-    if (!cleaned.fontFamilyOverride) {
+
+    if (cleaned.fontFamilyOverride === false) {
       delete cleaned.fontFamily;
+    } else if (preserveLegacyFontFamily && cleaned.fontFamily == null) {
+      cleaned.fontFamily = initialData?.fontFamily;
     }
-    if (!cleaned.fontSizeOverride) {
+
+    if (cleaned.fontSizeOverride === false) {
       delete cleaned.fontSize;
+    } else if (preserveLegacyFontSize && cleaned.fontSize == null) {
+      cleaned.fontSize = initialData?.fontSize;
     }
     onSave(cleaned);
   };
