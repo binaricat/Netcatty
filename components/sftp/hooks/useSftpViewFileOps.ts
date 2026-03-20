@@ -25,6 +25,7 @@ interface UseSftpViewFileOpsParams {
   mkdirLocal?: (path: string) => Promise<unknown>;
   deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
+  selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   startStreamTransfer?: (
     options: {
       transferId: string;
@@ -115,6 +116,7 @@ export const useSftpViewFileOps = ({
   mkdirLocal,
   deleteLocalFile,
   showSaveDialog,
+  selectDirectory,
   startStreamTransfer,
   getSftpIdForConnection,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
@@ -410,13 +412,15 @@ export const useSftpViewFileOps = ({
         }
 
         if (isDirectory) {
-          if (!listSftp || !mkdirLocal) {
+          if (!listSftp || !mkdirLocal || !selectDirectory) {
             toast.error(t("sftp.error.downloadFailed"), "SFTP");
             return;
           }
 
-          const targetPath = await showSaveDialog(file.name);
-          if (!targetPath) return;
+          const selectedDirectory = await selectDirectory(t("sftp.context.download"));
+          if (!selectedDirectory) return;
+
+          const targetPath = joinFsPath(selectedDirectory, file.name);
 
           const transferId = `download-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           let activeChildTransferId: string | null = null;
@@ -712,6 +716,7 @@ export const useSftpViewFileOps = ({
       mkdirLocal,
       deleteLocalFile,
       showSaveDialog,
+      selectDirectory,
       startStreamTransfer,
       getSftpIdForConnection,
     ],

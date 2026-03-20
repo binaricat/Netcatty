@@ -24,6 +24,7 @@ interface UseSftpViewPaneCallbacksParams {
   mkdirLocal?: (path: string) => Promise<unknown>;
   deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
+  selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   startStreamTransfer?: (
     options: {
       transferId: string;
@@ -55,6 +56,7 @@ export const useSftpViewPaneCallbacks = ({
   mkdirLocal,
   deleteLocalFile,
   showSaveDialog,
+  selectDirectory,
   startStreamTransfer,
   getSftpIdForConnection,
 }: UseSftpViewPaneCallbacksParams) => {
@@ -70,6 +72,7 @@ export const useSftpViewPaneCallbacks = ({
     mkdirLocal,
     deleteLocalFile,
     showSaveDialog,
+    selectDirectory,
     startStreamTransfer,
     getSftpIdForConnection,
   });

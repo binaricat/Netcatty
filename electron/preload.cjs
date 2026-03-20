@@ -841,6 +841,8 @@ const api = {
   // Save dialog for file downloads
   showSaveDialog: (defaultPath, filters) =>
     ipcRenderer.invoke("netcatty:showSaveDialog", { defaultPath, filters }),
+  selectDirectory: (title, defaultPath) =>
+    ipcRenderer.invoke("netcatty:selectDirectory", { title, defaultPath }),
 
   // File watcher for auto-sync feature
   startFileWatch: (localPath, remotePath, sftpId, encoding) =>

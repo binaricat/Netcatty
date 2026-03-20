@@ -606,6 +606,23 @@ const registerBridges = (win) => {
     return result.filePath;
   });
 
+  // Select a directory and return the selected path
+  ipcMain.handle("netcatty:selectDirectory", async (_event, { title, defaultPath }) => {
+    const { dialog } = electronModule;
+
+    const result = await dialog.showOpenDialog({
+      title: title || "Select Directory",
+      defaultPath,
+      properties: ["openDirectory", "createDirectory"],
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+      return null;
+    }
+
+    return result.filePaths[0];
+  });
+
   // Download SFTP file to temp and return local path
   ipcMain.handle("netcatty:sftp:downloadToTemp", async (_event, { sftpId, remotePath, fileName, encoding }) => {
     console.log(`[Main] Downloading SFTP file to temp:`);

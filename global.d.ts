@@ -576,6 +576,7 @@ declare global {
 
     // Save dialog for file downloads
     showSaveDialog?(defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null>;
+    selectDirectory?(title?: string, defaultPath?: string): Promise<string | null>;
 
     // File watcher for auto-sync feature
     startFileWatch?(localPath: string, remotePath: string, sftpId: string, encoding?: SftpFilenameEncoding): Promise<{ watchId: string }>;

@@ -89,6 +89,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
   // Get backend helpers for file downloads and local filesystem writes.
   const {
     showSaveDialog,
+    selectDirectory,
     startStreamTransfer,
     listSftp,
     mkdirLocal,
@@ -186,6 +187,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     mkdirLocal,
     deleteLocalFile,
     showSaveDialog,
+    selectDirectory,
     startStreamTransfer,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
   });
