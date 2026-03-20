@@ -40,7 +40,8 @@ import ChatInput from './ai/ChatInput';
 import ChatMessageList from './ai/ChatMessageList';
 import ConversationExport from './ai/ConversationExport';
 import { useAIChatStreaming, getNetcattyBridge } from './ai/hooks/useAIChatStreaming';
-import { useToolApproval } from './ai/hooks/useToolApproval';
+// import { useToolApproval } from './ai/hooks/useToolApproval'; // Removed: approval now handled by approvalGate
+import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 
@@ -216,7 +217,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     streamingSessionIds,
     setStreamingForScope,
     abortControllersRef,
-    processCattyStream,
     sendToCattyAgent,
     sendToExternalAgent,
     reportStreamError,
@@ -227,20 +227,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     updateMessageById,
   });
 
-  // ── Tool approval hook ──
-  const {
-    pendingApprovalContextRef,
-    setPendingApproval,
-    handleApprovalResponse,
-  } = useToolApproval({
-    addMessageToSession,
-    updateLastMessage,
-    updateMessageById,
-    setStreamingForScope,
-    abortControllersRef,
-    processCattyStream,
-    t,
-  });
+  // Tool approval is now handled by the approval gate + ToolCall component.
+  // No useToolApproval hook needed — approval happens inside the tool's
+  // execute function via requestApproval/resolveApproval.
 
   // Per-scope active session ID
   const activeSessionId = activeSessionIdMap[scopeKey] ?? null;
@@ -532,7 +521,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         terminalSessions,
         webSearchConfig,
         getExecutorContext: () => buildExecutorContextForScope(toolScope),
-        setPendingApproval,
         autoTitleSession,
       }, attachments.length > 0 ? attachments : undefined);
     }
@@ -543,7 +531,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setStreamingForScope, setInputValue, clearFiles,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, providers, selectedAgentModel, updateSessionExternalSessionId,
-    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope, setPendingApproval,
+    scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope,
   ]);
 
   const handleStop = useCallback(() => {
@@ -558,11 +546,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    // Also clear any pending approval (clears timeout too via setPendingApproval)
-    if (pendingApprovalContextRef.current?.sessionId === activeSessionId) {
-      setPendingApproval(null);
-    }
-  }, [activeSessionId, setStreamingForScope, updateLastMessage, setPendingApproval, abortControllersRef, pendingApprovalContextRef]);
+    // Clear any pending approvals from the approval gate (so tool execute functions don't hang)
+    clearAllPendingApprovals();
+  }, [activeSessionId, setStreamingForScope, updateLastMessage, abortControllersRef]);
 
   const handleSelectSession = useCallback(
     (sessionId: string) => {
@@ -655,16 +641,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           <ChatMessageList
             messages={messages}
             isStreaming={isStreaming}
-            onApprove={(messageId) => void handleApprovalResponse(messageId, true, {
-              globalPermissionMode,
-              commandBlocklist,
-              webSearchConfig,
-            })}
-            onReject={(messageId) => void handleApprovalResponse(messageId, false, {
-              globalPermissionMode,
-              commandBlocklist,
-              webSearchConfig,
-            })}
           />
 
           {/* Recent sessions (Zed-style, shown when no messages) */}

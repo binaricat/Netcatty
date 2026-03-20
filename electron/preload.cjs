@@ -39,7 +39,15 @@ function filterMcpMarkers(data) {
     // Remove end marker command echo lines
     .replace(/[^\r\n]*__nc=\$\?;printf '[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/g, "")
     // Remove start marker printf prefix from combined command lines
-    .replace(/printf '__NCMCP_[^']*\\n';/g, "");
+    .replace(/printf '__NCMCP_[^']*\\n';/g, "")
+    // Remove posix pager env var inline prefix (PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= )
+    .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
+    // Remove fish pager env var lines (set -gx PAGER cat, etc.)
+    .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
+    // Remove cmd pager env var lines (set "PAGER=cat", etc.)
+    .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "")
+    // Remove powershell pager env var lines
+    .replace(/^\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'[\r\n]*/gm, "");
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {
@@ -1063,6 +1071,15 @@ const api = {
   },
   aiMcpSetPermissionMode: async (mode) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-permission-mode", { mode });
+  },
+  // MCP approval gate: renderer receives approval requests from main process
+  onMcpApprovalRequest: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:mcp:approval-request", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-request", handler);
+  },
+  respondMcpApproval: async (approvalId, approved) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:approval-response", { approvalId, approved });
   },
   // ACP streaming
   aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images) => {

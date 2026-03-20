@@ -7,7 +7,7 @@
  */
 
 import { AlertCircle, FileText, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage } from '../../infrastructure/ai/types';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
@@ -18,17 +18,47 @@ import {
 } from '../ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '../ai-elements/message';
 import { ToolCall } from '../ai-elements/tool-call';
-import { InlineApprovalCard } from './InlineApprovalCard';
 import ThinkingBlock from './ThinkingBlock';
+import {
+  onApprovalRequest,
+  resolveApproval,
+  setupMcpApprovalBridge,
+  type ApprovalRequest,
+} from '../../infrastructure/ai/shared/approvalGate';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
-  onApprove?: (messageId: string) => void;
-  onReject?: (messageId: string) => void;
 }
 
-const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, onApprove, onReject }) => {
+const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming }) => {
+  // Track pending approvals from the approval gate
+  const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
+  const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
+
+  // Subscribe to approval gate events (SDK tool calls)
+  useEffect(() => {
+    return onApprovalRequest((request) => {
+      setPendingApprovals(prev => new Map(prev).set(request.toolCallId, request));
+    });
+  }, []);
+
+  // Subscribe to MCP/ACP approval requests from main process
+  useEffect(() => {
+    return setupMcpApprovalBridge();
+  }, []);
+
+  const handleApprove = useCallback((toolCallId: string) => {
+    resolveApproval(toolCallId, true);
+    setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
+    setResolvedApprovals(prev => new Map(prev).set(toolCallId, true));
+  }, []);
+
+  const handleReject = useCallback((toolCallId: string) => {
+    resolveApproval(toolCallId, false);
+    setPendingApprovals(prev => { const m = new Map(prev); m.delete(toolCallId); return m; });
+    setResolvedApprovals(prev => new Map(prev).set(toolCallId, false));
+  }, []);
   const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
   const [zoom, setZoom] = useState(100);
   const [dragged, setDragged] = useState(false);
@@ -193,26 +223,30 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
                 )}
 
                 {/* Tool calls */}
-                {message.toolCalls?.map((tc) => (
-                  <ToolCall
-                    key={tc.id}
-                    name={tc.name}
-                    args={tc.arguments}
-                    isLoading={isThisStreaming && message.executionStatus === 'running'}
-                    isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
-                  />
-                ))}
+                {message.toolCalls?.map((tc) => {
+                  const isPending = pendingApprovals.has(tc.id);
+                  const resolved = resolvedApprovals.get(tc.id);
+                  const approvalStatus = isPending
+                    ? 'pending' as const
+                    : resolved === true
+                      ? 'approved' as const
+                      : resolved === false
+                        ? 'denied' as const
+                        : undefined;
 
-                {/* Inline approval card */}
-                {message.pendingApproval && (
-                  <InlineApprovalCard
-                    toolName={message.pendingApproval.toolName}
-                    toolArgs={message.pendingApproval.toolArgs}
-                    status={message.pendingApproval.status}
-                    onApprove={() => onApprove?.(message.id)}
-                    onReject={() => onReject?.(message.id)}
-                  />
-                )}
+                  return (
+                    <ToolCall
+                      key={tc.id}
+                      name={tc.name}
+                      args={tc.arguments}
+                      isLoading={isThisStreaming && message.executionStatus === 'running' && !isPending}
+                      isInterrupted={message.executionStatus === 'cancelled' && !resolvedToolCallIds.has(tc.id)}
+                      approvalStatus={approvalStatus}
+                      onApprove={() => handleApprove(tc.id)}
+                      onReject={() => handleReject(tc.id)}
+                    />
+                  );
+                })}
 
                 {/* Status text with shimmer */}
                 {message.statusText && (
@@ -240,6 +274,21 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
           );
         })}
 
+        {/* Standalone MCP/ACP approval requests (not tied to SDK tool calls) */}
+        {Array.from(pendingApprovals.entries())
+          .filter(([id]) => id.startsWith('mcp_approval_'))
+          .map(([id, req]) => (
+            <ToolCall
+              key={id}
+              name={req.toolName}
+              args={req.args}
+              isLoading={false}
+              isInterrupted={false}
+              approvalStatus={'pending'}
+              onApprove={() => handleApprove(id)}
+              onReject={() => handleReject(id)}
+            />
+          ))}
         {/* Streaming indicator — only when no content and no thinking yet */}
         {isStreaming && !lastAssistantMessage?.content && !lastAssistantMessage?.thinking && (
           <div className="flex items-center gap-1 py-2">
@@ -333,8 +382,6 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
 function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
-  if (prev.onApprove !== next.onApprove) return false;
-  if (prev.onReject !== next.onReject) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 
@@ -352,7 +399,6 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
         p.role !== n.role ||
         p.statusText !== n.statusText ||
         p.executionStatus !== n.executionStatus ||
-        p.pendingApproval !== n.pendingApproval ||
         p.errorInfo !== n.errorInfo ||
         p.toolCalls !== n.toolCalls ||
         p.toolResults !== n.toolResults

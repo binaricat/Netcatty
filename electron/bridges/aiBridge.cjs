@@ -238,6 +238,17 @@ function init(deps) {
   electronModule = deps.electronModule;
   mcpServerBridge.init({ sessions, sftpClients });
 
+  // Wire up main window getter for MCP approval IPC
+  mcpServerBridge.setMainWindowGetter(() => {
+    try {
+      const windowManager = require("./windowManager.cjs");
+      const mainWin = windowManager.getMainWindow?.();
+      return (mainWin && !mainWin.isDestroyed()) ? mainWin : null;
+    } catch {
+      return null;
+    }
+  });
+
   // Store main window webContents ID for IPC sender validation (Issue #17)
   try {
     const windowManager = require("./windowManager.cjs");
@@ -1688,6 +1699,13 @@ function registerHandlers(ipcMain) {
     return { ok: true };
   });
 
+  // ── MCP Approval response (renderer → main) ──
+  ipcMain.handle("netcatty:ai:mcp:approval-response", async (event, { approvalId, approved }) => {
+    if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    mcpServerBridge.resolveApprovalFromRenderer(approvalId, approved);
+    return { ok: true };
+  });
+
   // ── ACP (Agent Client Protocol) streaming ──
 
   ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images }) => {
@@ -2055,6 +2073,7 @@ function registerHandlers(ipcMain) {
     mcpServerBridge.cancelAllPtyExecs();
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
     mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
+    mcpServerBridge.clearPendingApprovals();
     const activeRun = effectiveChatSessionId ? acpChatRuns.get(effectiveChatSessionId) : null;
     if (activeRun && activeRun.requestId === requestId) {
       activeRun.cancelRequested = true;

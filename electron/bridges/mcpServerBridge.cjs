@@ -57,6 +57,53 @@ let permissionMode = "confirm";
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
 
+// ── Approval gate (for confirm mode with ACP/MCP agents) ──
+let getMainWindowFn = null; // () => BrowserWindow | null
+const pendingApprovals = new Map(); // approvalId → { resolve }
+let approvalIdCounter = 0;
+
+function setMainWindowGetter(fn) {
+  getMainWindowFn = fn;
+}
+
+/**
+ * Request approval from the renderer process.
+ * Sends an IPC event and returns a Promise<boolean> that resolves
+ * when the user approves/rejects in the UI.
+ */
+function requestApprovalFromRenderer(toolName, args) {
+  return new Promise((resolve) => {
+    const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
+    if (!mainWin || mainWin.isDestroyed()) {
+      // No renderer available — auto-approve to avoid hanging
+      resolve(true);
+      return;
+    }
+    const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;
+    pendingApprovals.set(approvalId, { resolve });
+    mainWin.webContents.send('netcatty:ai:mcp:approval-request', {
+      approvalId,
+      toolName,
+      args,
+    });
+  });
+}
+
+function resolveApprovalFromRenderer(approvalId, approved) {
+  const entry = pendingApprovals.get(approvalId);
+  if (entry) {
+    pendingApprovals.delete(approvalId);
+    entry.resolve(approved);
+  }
+}
+
+function clearPendingApprovals() {
+  for (const [, entry] of pendingApprovals) {
+    entry.resolve(false);
+  }
+  pendingApprovals.clear();
+}
+
 function cancelAllPtyExecs() {
   for (const [marker, entry] of activePtyExecs) {
     try {
@@ -368,6 +415,18 @@ async function dispatch(method, params) {
 
   if (WRITE_METHODS.has(method) && isChatSessionCancelled(params?.chatSessionId)) {
     return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
+  }
+
+  // Confirm mode: request user approval for write operations
+  if (permissionMode === "confirm" && WRITE_METHODS.has(method)) {
+    const approved = await requestApprovalFromRenderer(method, {
+      sessionId: params?.sessionId,
+      command: params?.command || params?.input || params?.path,
+      ...(params?.sessionIds ? { sessionIds: params.sessionIds } : {}),
+    });
+    if (!approved) {
+      return { ok: false, error: "Operation denied by user." };
+    }
   }
 
   // Scope validation for session-targeted operations
@@ -875,4 +934,7 @@ module.exports = {
   cancelAllPtyExecs,
   cleanupScopedMetadata,
   cleanup,
+  setMainWindowGetter,
+  resolveApprovalFromRenderer,
+  clearPendingApprovals,
 };
