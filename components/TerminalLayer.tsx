@@ -1041,7 +1041,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Build terminal session context for the AI chat panel
   const aiTerminalSessions = useMemo(() => {
-    const localOs = detectLocalOs();
+    const localOs = detectLocalOs(navigator.userAgent || navigator.platform);
     const sessionIds = activeWorkspace?.root
       ? collectSessionIds(activeWorkspace.root)
       : activeSession ? [activeSession.id] : [];
@@ -1062,7 +1062,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const latestWorkspaces = workspacesRef.current;
     const latestSessions = sessionsRef.current;
     const latestHosts = hostsRef.current;
-    const localOs = detectLocalOs();
+    const localOs = detectLocalOs(navigator.userAgent || navigator.platform);
     const sessionIds = scope.type === 'workspace'
       ? (() => {
           const workspace = scope.targetId ? latestWorkspaces.find((w) => w.id === scope.targetId) : undefined;

@@ -22,6 +22,22 @@ const DEFAULT_UTF8_LOCALE = "en_US.UTF-8";
 const LOGIN_SHELLS = new Set(["bash", "zsh", "fish", "ksh"]);
 const POWERSHELL_SHELLS = new Set(["powershell", "powershell.exe", "pwsh", "pwsh.exe"]);
 
+function expandHomePath(targetPath) {
+  if (!targetPath) return targetPath;
+  if (targetPath === "~") return os.homedir();
+  if (targetPath.startsWith("~/")) return path.join(os.homedir(), targetPath.slice(2));
+  return targetPath;
+}
+
+function normalizeExecutablePath(targetPath) {
+  const expanded = expandHomePath(targetPath);
+  if (!expanded) return expanded;
+  if (expanded.includes(path.sep) || expanded.startsWith(".")) {
+    return path.resolve(expanded);
+  }
+  return expanded;
+}
+
 const getLoginShellArgs = (shellPath) => {
   if (!shellPath || process.platform === "win32") return [];
   const shellName = path.basename(shellPath);
@@ -175,7 +191,7 @@ function startLocalSession(event, payload) {
     payload?.sessionId ||
     `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const defaultShell = getDefaultLocalShell();
-  const shell = payload?.shell || defaultShell;
+  const shell = normalizeExecutablePath(payload?.shell) || defaultShell;
   const shellArgs = getLocalShellArgs(shell);
   const shellKind = detectShellKind(shell);
   const env = applyLocaleDefaults({
@@ -193,7 +209,7 @@ function startLocalSession(event, payload) {
   if (payload?.cwd) {
     try {
       // Resolve to absolute path and check if it exists and is a directory
-      const resolvedPath = path.resolve(payload.cwd);
+      const resolvedPath = path.resolve(expandHomePath(payload.cwd));
       if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
         cwd = resolvedPath;
       } else {
@@ -841,12 +857,7 @@ function validatePath(event, payload) {
   
   try {
     // Resolve path (handle ~, etc.)
-    let resolvedPath = targetPath;
-    if (resolvedPath === "~") {
-      resolvedPath = os.homedir();
-    } else if (resolvedPath.startsWith("~/")) {
-      resolvedPath = path.join(os.homedir(), resolvedPath.slice(2));
-    }
+    let resolvedPath = expandHomePath(targetPath);
     resolvedPath = path.resolve(resolvedPath);
     
     if (fs.existsSync(resolvedPath)) {
