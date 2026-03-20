@@ -65,7 +65,7 @@ ipcRenderer.on("netcatty:data", (_event, payload) => {
   if (!set) return;
   // Filter MCP marker artifacts before they reach xterm.js
   let data = payload.data;
-  if (data.includes("__NCMCP_") || data.includes("__nc") || data.includes("PAGER=cat")) {
+  if (data.includes("__NCMCP_")) {
     data = filterMcpMarkers(data);
     if (!data) return;
   }

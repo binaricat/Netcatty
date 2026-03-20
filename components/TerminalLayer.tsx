@@ -23,6 +23,7 @@ import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
 import { useCustomThemes } from '../application/state/customThemeStore';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
+import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
 
@@ -1038,6 +1039,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     for (const w of workspaces) activeIds.add(w.id);
     cleanupOrphanedSessions(activeIds);
   }, [sessions, workspaces, cleanupOrphanedSessions]);
+
+  // Keep MCP/ACP approval IPC listener alive for the entire terminal lifecycle.
+  // Must live here (TerminalLayer), NOT in AIChatSidePanel (unmounts on tab switch)
+  // or ChatMessageList (unmounts on panel hide).
+  useEffect(() => {
+    return setupMcpApprovalBridge();
+  }, []);
 
   // Build terminal session context for the AI chat panel
   const aiTerminalSessions = useMemo(() => {
