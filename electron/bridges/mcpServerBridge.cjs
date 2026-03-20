@@ -69,8 +69,10 @@ function setMainWindowGetter(fn) {
 /**
  * Request approval from the renderer process.
  * Sends an IPC event and returns a Promise<boolean> that resolves
- * when the user approves/rejects in the UI.
+ * when the user approves/rejects in the UI, or auto-denies after timeout.
  */
+const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
@@ -80,7 +82,22 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
       return;
     }
     const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;
-    pendingApprovals.set(approvalId, { resolve, chatSessionId: chatSessionId || null });
+
+    // Auto-deny after timeout so ACP/MCP tool calls don't hang indefinitely
+    const timerId = setTimeout(() => {
+      if (pendingApprovals.has(approvalId)) {
+        pendingApprovals.delete(approvalId);
+        resolve(false);
+      }
+    }, APPROVAL_TIMEOUT_MS);
+
+    pendingApprovals.set(approvalId, {
+      resolve: (approved) => {
+        clearTimeout(timerId);
+        resolve(approved);
+      },
+      chatSessionId: chatSessionId || null,
+    });
     mainWin.webContents.send('netcatty:ai:mcp:approval-request', {
       approvalId,
       toolName,
@@ -433,11 +450,8 @@ async function dispatch(method, params) {
 
   // Confirm mode: request user approval for write operations
   if (permissionMode === "confirm" && WRITE_METHODS.has(method)) {
-    const approved = await requestApprovalFromRenderer(method, {
-      sessionId: params?.sessionId,
-      command: params?.command || params?.input || params?.path,
-      ...(params?.sessionIds ? { sessionIds: params.sessionIds } : {}),
-    }, params?.chatSessionId);
+    const { chatSessionId, ...toolArgs } = params || {};
+    const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
     if (!approved) {
       return { ok: false, error: "Operation denied by user." };
     }
