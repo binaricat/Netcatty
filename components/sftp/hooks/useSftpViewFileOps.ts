@@ -523,6 +523,9 @@ export const useSftpViewFileOps = ({
           };
 
           const dequeueTask = () => {
+            if (pendingDirectoryTasks > 0 && directoryTaskQueue.length > 0) {
+              return directoryTaskQueue.shift() ?? null;
+            }
             if (fileTaskQueue.length > 0) return fileTaskQueue.shift() ?? null;
             if (directoryTaskQueue.length > 0) return directoryTaskQueue.shift() ?? null;
             return null;
@@ -536,7 +539,7 @@ export const useSftpViewFileOps = ({
           }) => {
             const childTransferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             activeChildTransferIds.add(childTransferId);
-             activeFileSizes.set(childTransferId, task.size);
+            activeFileSizes.set(childTransferId, task.size);
             activeFileProgress.set(childTransferId, { transferred: 0, speed: 0 });
             updateAggregateProgress();
 

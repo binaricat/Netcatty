@@ -92,9 +92,25 @@ function isIsolatedChannelOpenFailure(err) {
   );
 }
 
-function waitForIsolatedDownloadChannel(pool) {
+function waitForIsolatedDownloadChannel(pool, transfer) {
   return new Promise((resolve) => {
-    pool.waiters.push(resolve);
+    let settled = false;
+    const waiter = () => {
+      if (settled) return;
+      settled = true;
+      const index = pool.waiters.indexOf(waiter);
+      if (index !== -1) {
+        pool.waiters.splice(index, 1);
+      }
+      if (transfer?.wakeWaiter === waiter) {
+        transfer.wakeWaiter = null;
+      }
+      resolve();
+    };
+    if (transfer) {
+      transfer.wakeWaiter = waiter;
+    }
+    pool.waiters.push(waiter);
   });
 }
 
@@ -155,10 +171,12 @@ function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   notifyIsolatedDownloadWaiter(pool);
 }
 
-async function acquireIsolatedDownloadChannel(client) {
+async function acquireIsolatedDownloadChannel(client, transfer) {
   const pool = getIsolatedDownloadChannelPool(client);
 
   while (true) {
+    if (transfer?.cancelled) return null;
+
     const cached = pool.idle.pop();
     if (cached) {
       clearIdleIsolatedDownloadTimer(pool, cached);
@@ -170,13 +188,15 @@ async function acquireIsolatedDownloadChannel(client) {
     const currentChannelCount = pool.idle.length + pool.busy.size + pool.opening;
     if (knownCapacity !== null && currentChannelCount >= knownCapacity) {
       if (pool.opening > 0) {
-        await waitForIsolatedDownloadChannel(pool);
+        await waitForIsolatedDownloadChannel(pool, transfer);
+        if (transfer?.cancelled) return null;
         continue;
       }
       if (pool.busy.size === 0) {
         return null;
       }
-      await waitForIsolatedDownloadChannel(pool);
+      await waitForIsolatedDownloadChannel(pool, transfer);
+      if (transfer?.cancelled) return null;
       continue;
     }
 
@@ -184,17 +204,24 @@ async function acquireIsolatedDownloadChannel(client) {
     try {
       const opened = await openIsolatedSftpChannel(client);
       pool.opening -= 1;
+      notifyIsolatedDownloadWaiter(pool);
       if (!opened) return null;
       pool.busy.add(opened);
-      const knownCapacity = pool.idle.length + pool.busy.size + pool.opening;
+      const knownCapacity = pool.idle.length + pool.busy.size;
       if (pool.maxChannels !== null) {
         pool.maxChannels = Math.max(pool.maxChannels, knownCapacity);
       }
       return opened;
     } catch (err) {
       pool.opening -= 1;
+      notifyIsolatedDownloadWaiter(pool);
       if (isIsolatedChannelOpenFailure(err)) {
-        const detectedCapacity = pool.idle.length + pool.busy.size + pool.opening;
+        if (pool.opening > 0) {
+          await waitForIsolatedDownloadChannel(pool, transfer);
+          if (transfer?.cancelled) return null;
+          continue;
+        }
+        const detectedCapacity = pool.idle.length + pool.busy.size;
         pool.maxChannels = detectedCapacity;
         if (!pool.warnedCapacity) {
           pool.warnedCapacity = true;
@@ -203,7 +230,8 @@ async function acquireIsolatedDownloadChannel(client) {
           );
         }
         if (detectedCapacity > 0) {
-          await waitForIsolatedDownloadChannel(pool);
+          await waitForIsolatedDownloadChannel(pool, transfer);
+          if (transfer?.cancelled) return null;
           continue;
         }
         return null;
@@ -337,7 +365,7 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
 
   // Prefer fastGet on an isolated SFTP channel so cancellation can abort just this transfer.
   if (!client.__netcattySudoMode) {
-    const fastSftp = await acquireIsolatedDownloadChannel(client);
+      const fastSftp = await acquireIsolatedDownloadChannel(client, transfer);
 
     if (fastSftp && typeof fastSftp.fastGet === "function") {
       return new Promise((resolve, reject) => {
@@ -447,7 +475,7 @@ async function startTransfer(event, payload, onProgress) {
   } = payload;
   const sender = event.sender;
 
-  const transfer = { cancelled: false, readStream: null, writeStream: null, abort: null };
+  const transfer = { cancelled: false, readStream: null, writeStream: null, abort: null, wakeWaiter: null };
   activeTransfers.set(transferId, transfer);
   const transferCreatedAt = Date.now();
 
@@ -699,6 +727,9 @@ async function cancelTransfer(event, payload) {
   const transfer = activeTransfers.get(transferId);
   if (transfer) {
     transfer.cancelled = true;
+    if (typeof transfer.wakeWaiter === "function") {
+      try { transfer.wakeWaiter(); } catch { }
+    }
 
     if (typeof transfer.abort === "function") {
       try { transfer.abort(); } catch { }
