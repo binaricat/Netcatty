@@ -169,10 +169,14 @@ async function acquireIsolatedDownloadChannel(client) {
     const knownCapacity = pool.maxChannels;
     const currentChannelCount = pool.idle.length + pool.busy.size + pool.opening;
     if (knownCapacity !== null && currentChannelCount >= knownCapacity) {
+      if (pool.opening > 0) {
+        await waitForIsolatedDownloadChannel(pool);
+        continue;
+      }
       if (pool.busy.size === 0) {
         return null;
       }
-      const awaited = await waitForIsolatedDownloadChannel(pool);
+      await waitForIsolatedDownloadChannel(pool);
       continue;
     }
 
