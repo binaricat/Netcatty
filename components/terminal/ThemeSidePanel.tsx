@@ -116,34 +116,11 @@ const FontItem = memo(({
 ));
 FontItem.displayName = 'FontItem';
 
-const ResetListItem = memo(({
-  title,
-  description,
-  onSelect,
-}: {
-  title: string;
-  description: string;
-  onSelect?: () => void;
-}) => (
-  <button
-    onClick={onSelect}
-    className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-accent/50"
-  >
-    <div className="flex-1 min-w-0">
-      <div className="text-xs font-medium truncate text-primary">
-        {title}
-      </div>
-      <div className="text-[10px] text-muted-foreground truncate">{description}</div>
-    </div>
-    <Check size={12} className="text-primary flex-shrink-0" />
-  </button>
-));
-ResetListItem.displayName = 'ResetListItem';
-
 interface ThemeSidePanelProps {
   currentThemeId: string;
   globalThemeId: string;
   currentFontFamilyId: string;
+  globalFontFamilyId: string;
   currentFontSize: number;
   canResetTheme?: boolean;
   canResetFontFamily?: boolean;
@@ -161,6 +138,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   currentThemeId,
   globalThemeId,
   currentFontFamilyId,
+  globalFontFamilyId,
   currentFontSize,
   canResetTheme = false,
   canResetFontFamily = false,
@@ -190,6 +168,10 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   const globalTheme = useMemo(
     () => allThemes.find((theme) => theme.id === globalThemeId) || TERMINAL_THEMES[0],
     [allThemes, globalThemeId],
+  );
+  const globalFont = useMemo(
+    () => availableFonts.find((font) => font.id === globalFontFamilyId) || availableFonts[0],
+    [availableFonts, globalFontFamilyId],
   );
 
   const handleThemeSelect = useCallback((themeId: string) => {
@@ -362,11 +344,13 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 ))}
                 {canResetFontFamily && (
                   <>
-                    <div className="mx-3 my-1 border-t border-border/50" />
-                    <ResetListItem
-                      title={t('common.useGlobal')}
-                      description={t('common.reset')}
-                      onSelect={onFontFamilyReset}
+                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                      {t('terminal.themeModal.globalFont')}
+                    </div>
+                    <FontItem
+                      font={globalFont}
+                      isSelected={!canResetFontFamily}
+                      onSelect={() => onFontFamilyReset?.()}
                     />
                   </>
                 )}

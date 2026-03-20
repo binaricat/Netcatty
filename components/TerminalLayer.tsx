@@ -1472,6 +1472,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         currentThemeId={focusedThemeId}
                         globalThemeId={terminalTheme.id}
                         currentFontFamilyId={focusedFontFamilyId}
+                        globalFontFamilyId={terminalFontFamilyId}
                         currentFontSize={focusedFontSize}
                         canResetTheme={focusedThemeOverridden}
                         canResetFontFamily={focusedFontFamilyOverridden}
