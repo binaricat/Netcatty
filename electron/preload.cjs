@@ -27,44 +27,75 @@ function cleanupTransferListeners(transferId) {
   transferCancelledListeners.delete(transferId);
 }
 
-// Filter MCP marker artifacts from terminal output.
-// All internal wrapper vars use the __NCMCP_ prefix so the guard
-// `data.includes("__NCMCP_")` catches every chunk containing wrapper noise.
-function filterMcpMarkers(data) {
-  return data
-    // ── Any line containing __NCMCP_ is an internal wrapper line — delete entirely ──
-    // This single rule covers:
-    //   • Actual marker output:  __NCMCP_..._S / __NCMCP_..._E:0
-    //   • PowerShell input echo: PS C:\...> Write-Output '__NCMCP_..._S'; $env:PAGER=...  (line 1)
-    //                            PS C:\...> $__NCMCP_rc = if ($LASTEXITCODE ...) ...        (line 2)
-    //   • Cmd echo:              echo __NCMCP_...
-    //   • Fish echo:             printf '%s\n' '__NCMCP_...'
-    .replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // ── Posix: echoed combined line 1 — strip internal prefix, keep user command visible ──
-    // printf '%s\n' '__NCMCP_..._S'; PAGER=cat ... <user-command>
-    // The __NCMCP_ prefix is already gone above, but strip the PAGER prefix too:
-    .replace(/printf '%s\\n' '__NCMCP_[^']*';/g, "")
-    // ── Posix: echoed combined line 2 ──
-    // __NCMCP_rc=$?;printf '%s\n' '__NCMCP_..._E:'"$__NCMCP_rc"  (already caught above)
-    .replace(/[^\r\n]*__NCMCP_rc=\$\?;printf [^\r\n]*[\r\n]*/g, "")
-    // ── Pager env var prefixes (inline on the command line) ──
-    .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
-    // ── Fish: pager env lines (no __NCMCP_ marker, need explicit filter) ──
-    .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
-    .replace(/^set __NCMCP_rc \$status[\r\n]*/gm, "")
-    // ── Cmd: pager env lines ──
-    .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "");
+// ── MCP marker filter with per-session line buffering ──
+// PTY data arrives in arbitrary chunks; the marker string (__NCMCP_) can be
+// split across chunk boundaries so a simple data.includes() guard misses it.
+// We buffer the trailing fragment of each chunk and prepend it to the next
+// chunk, then filter complete lines that contain the marker.
+
+const _mcpLineBufs = new Map(); // sessionId -> trailing fragment string
+
+// Returns true if `s` ends with a non-empty prefix of "__NCMCP_"
+// (i.e. the next chunk might complete it into a marker-containing line).
+function _endsWithMarkerPrefix(s) {
+  const p = "__NCMCP_";
+  for (let i = 1; i < p.length; i++) {
+    if (s.endsWith(p.slice(0, i))) return true;
+  }
+  return false;
+}
+
+function filterMcpChunk(sessionId, chunk) {
+  // Prepend any buffered fragment from the previous chunk
+  const held = _mcpLineBufs.get(sessionId) || "";
+  const data = held + chunk;
+  _mcpLineBufs.delete(sessionId);
+
+  // Fast path: nothing suspicious in the combined data
+  if (!data.includes("__NCMCP_") && !_endsWithMarkerPrefix(data)) {
+    return data;
+  }
+
+  // Slow path: scan line by line
+  let result = "";
+  let pos = 0;
+  while (pos < data.length) {
+    const nlIdx = data.indexOf("\n", pos);
+    if (nlIdx === -1) {
+      // Incomplete trailing line — no newline yet
+      const tail = data.slice(pos);
+      if (tail.includes("__NCMCP_") || _endsWithMarkerPrefix(tail)) {
+        // Hold it; next chunk might complete or confirm the marker
+        _mcpLineBufs.set(sessionId, tail);
+      } else {
+        result += tail; // safe to display immediately
+      }
+      break;
+    }
+    const line = data.slice(pos, nlIdx + 1); // includes the \n
+    if (!line.includes("__NCMCP_")) {
+      result += line;
+    }
+    // else: drop it — it's a wrapper marker line (or echo of one)
+    pos = nlIdx + 1;
+  }
+
+  // Also strip Posix pager prefix and Fish env lines that have no __NCMCP_
+  if (result) {
+    result = result
+      .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
+      .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
+      .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "");
+  }
+
+  return result;
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {
   const set = dataListeners.get(payload.sessionId);
   if (!set) return;
-  // Filter MCP marker artifacts before they reach xterm.js
-  let data = payload.data;
-  if (data.includes("__NCMCP_")) {
-    data = filterMcpMarkers(data);
-    if (!data) return;
-  }
+  const data = filterMcpChunk(payload.sessionId, payload.data);
+  if (!data) return;
   set.forEach((cb) => {
     try {
       cb(data);
@@ -87,6 +118,7 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
   }
   dataListeners.delete(payload.sessionId);
   exitListeners.delete(payload.sessionId);
+  _mcpLineBufs.delete(payload.sessionId); // clean up any held fragment
 });
 
 // Chain progress events (for jump host connections)

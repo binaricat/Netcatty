@@ -52,7 +52,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
       return (
         `Write-Output '${marker}_S'; ${psPager}${command}\r\n` +
-        `$__NCMCP_rc = if($LASTEXITCODE){$LASTEXITCODE}elseif(-not $?){1}else{0}; Write-Output "${marker}_E:$__NCMCP_rc"\r\n`
+        `$__NCMCP_ec = [int](-not $?) -bor [Math]::Abs([int]$LASTEXITCODE); Write-Output "${marker}_E:$__NCMCP_ec"\r\n`
       );
     }
 
