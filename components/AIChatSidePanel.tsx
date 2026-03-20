@@ -6,7 +6,6 @@
  *
  * Core logic is decomposed into focused hooks:
  * - useAIChatStreaming: stream processing, abort management, agent sub-flows
- * - useToolApproval: tool approval workflow, timeouts, resume logic
  * - useConversationExport: export formats & object URL lifecycle
  */
 
@@ -40,7 +39,6 @@ import ChatInput from './ai/ChatInput';
 import ChatMessageList from './ai/ChatMessageList';
 import ConversationExport from './ai/ConversationExport';
 import { useAIChatStreaming, getNetcattyBridge } from './ai/hooks/useAIChatStreaming';
-// import { useToolApproval } from './ai/hooks/useToolApproval'; // Removed: approval now handled by approvalGate
 import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
@@ -227,9 +225,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     updateMessageById,
   });
 
-  // Tool approval is now handled by the approval gate + ToolCall component.
-  // No useToolApproval hook needed — approval happens inside the tool's
-  // execute function via requestApproval/resolveApproval.
+
 
   // Per-scope active session ID
   const activeSessionId = activeSessionIdMap[scopeKey] ?? null;

@@ -1590,7 +1590,6 @@ const zhCN: Messages = {
   // AI Chat
   'ai.chat.noProvider': '尚未配置 AI 提供商。请前往 **设置 → AI → 提供商** 添加并启用一个提供商。',
   'ai.chat.toolDenied': '操作已被用户拒绝。',
-  'ai.chat.toolApprovalTitle': '需要权限确认',
   'ai.chat.toolApproved': '已批准',
   'ai.chat.toolApprovalHint': '按回车批准，按 Esc 拒绝',
   'ai.chat.approve': '批准',
