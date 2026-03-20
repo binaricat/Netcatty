@@ -14,7 +14,14 @@ const { toLocalISOString } = require("../../lib/utils.ts");
  */
 function stripAnsi(str) {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+  return str
+    // OSC: ESC ] ... BEL or ESC ] ... ESC \
+    .replace(/\x1B\][\s\S]*?(?:\x07|\x1B\\)/g, '')
+    // ANSI CSI / ESC sequences
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
+    // Remove remaining control chars except \n \r \t
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 /**
