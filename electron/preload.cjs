@@ -34,20 +34,30 @@ function cleanupTransferListeners(transferId) {
 // We keep the actual command part visible.
 function filterMcpMarkers(data) {
   return data
-    // Remove standalone marker output lines (printf output)
+    // ── Marker output lines (printf output) ──
     .replace(/^__NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // Remove end marker command echo lines
-    .replace(/[^\r\n]*__nc=\$\?;printf '[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/g, "")
-    // Remove start marker printf prefix from combined command lines
+    // ── Posix: echoed command lines ──
+    // printf '%s\n' '__NCMCP_..._S'  (start marker echo)
+    .replace(/[^\r\n]*printf '%s\\n' '__NCMCP_[^']*'[\r\n]*/g, "")
+    // __nc=$?;printf '%s\n' '__NCMCP_..._E:'...  (end marker echo)
+    .replace(/[^\r\n]*__nc=\$\?;printf [^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/g, "")
+    // (exit $__nc)  (exit code restoration echo)
+    .replace(/[^\r\n]*\(exit \$__nc\)[\r\n]*/g, "")
+    // printf prefix from combined single-line commands (semicolon form)
     .replace(/printf '__NCMCP_[^']*\\n';/g, "")
-    // Remove posix pager env var inline prefix (PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= )
+    // ── Pager env var prefixes ──
     .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
-    // Remove fish pager env var lines (set -gx PAGER cat, etc.)
+    // ── Fish: pager + marker lines ──
     .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
-    // Remove cmd pager env var lines (set "PAGER=cat", etc.)
+    .replace(/^set __nc \$status[\r\n]*/gm, "")
+    // ── Cmd: pager + marker lines ──
     .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "")
-    // Remove powershell pager env var lines
-    .replace(/^\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'[\r\n]*/gm, "");
+    .replace(/^echo __NCMCP_[^\r\n]*[\r\n]*/gm, "")
+    // ── PowerShell: pager + marker lines ──
+    .replace(/^\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'[\r\n]*/gm, "")
+    .replace(/^Write-Output '__NCMCP_[^']*'[\r\n]*/gm, "")
+    .replace(/^\$global:LASTEXITCODE = 0[\r\n]*/gm, "")
+    .replace(/^\$__nc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/gm, "");
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {
@@ -55,7 +65,7 @@ ipcRenderer.on("netcatty:data", (_event, payload) => {
   if (!set) return;
   // Filter MCP marker artifacts before they reach xterm.js
   let data = payload.data;
-  if (data.includes("__NCMCP_")) {
+  if (data.includes("__NCMCP_") || data.includes("__nc") || data.includes("PAGER=cat")) {
     data = filterMcpMarkers(data);
     if (!data) return;
   }
