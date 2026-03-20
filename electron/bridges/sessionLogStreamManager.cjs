@@ -6,8 +6,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { stripAnsi, terminalDataToHtml } = require("./sessionLogsBridge.cjs");
-const { toLocalISOString } = require("../../lib/utils.ts");
+const { toLocalISOString, stripAnsi, terminalDataToHtml } = require("./sessionLogsBridge.cjs");
 
 // Active log streams keyed by sessionId
 const activeStreams = new Map();

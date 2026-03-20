@@ -6,7 +6,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { dialog } = require("electron");
-const { toLocalISOString } = require("../../lib/utils.ts");
+
+/**
+ * Get current Date to a local ISO-like string (YYYY-MM-DDTHH-MM-SS)
+ */
+function toLocalISOString(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+
+  return `${year}-${month}-${day}T${hours}-${minutes}-${seconds}`;
+}
 
 /**
  * Strip ANSI escape codes from text
@@ -293,5 +308,6 @@ module.exports = {
   autoSaveSessionLog,
   openSessionLogsDir,
   stripAnsi,
+  toLocalISOString,
   terminalDataToHtml,
 };
