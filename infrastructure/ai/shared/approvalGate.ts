@@ -9,7 +9,9 @@
  *
  * Also supports MCP/ACP tool calls from the Electron main process:
  * the main process sends an IPC approval request, and we route it
- * through the same listener/UI system.
+ * through the same listener/UI system. MCP approvals are stored in
+ * the same pendingApprovals map so they survive ChatMessageList
+ * unmount/remount cycles via replayPendingApprovals().
  *
  * Approvals are scoped by optional chatSessionId to prevent cross-session
  * interference when stopping or cancelling sessions.
@@ -23,7 +25,9 @@ export interface ApprovalRequest {
   chatSessionId?: string;
 }
 
-// Pending approval promises keyed by toolCallId (for SDK tool calls)
+// Pending approval entries keyed by toolCallId.
+// SDK approvals have a real `resolve` callback; MCP approvals use a no-op
+// (the real resolution goes via IPC in resolveApproval).
 const pendingApprovals = new Map<string, {
   resolve: (approved: boolean) => void;
   request: ApprovalRequest;
@@ -60,15 +64,14 @@ export function requestApproval(
  * Handles both SDK tool calls (local Promise) and MCP tool calls (IPC to main process).
  */
 export function resolveApproval(toolCallId: string, approved: boolean): void {
-  // SDK tool call: resolve the local Promise
   const entry = pendingApprovals.get(toolCallId);
   if (entry) {
     pendingApprovals.delete(toolCallId);
+    // SDK tool calls have a real resolve; MCP tool calls have a no-op resolve
     entry.resolve(approved);
-    return;
   }
 
-  // MCP tool call: forward response to main process via IPC
+  // MCP tool call: also forward response to main process via IPC
   if (toolCallId.startsWith('mcp_approval_')) {
     const bridge = (window as unknown as { netcatty?: { respondMcpApproval?: (id: string, approved: boolean) => Promise<unknown> } }).netcatty;
     bridge?.respondMcpApproval?.(toolCallId, approved);
@@ -88,6 +91,8 @@ export function onApprovalRequest(listener: ApprovalRequestListener): () => void
  * Useful when ChatMessageList remounts after being unmounted — without this,
  * approvals that fired while unmounted would be silently missed and the
  * corresponding execute Promises would hang indefinitely.
+ *
+ * This covers both SDK and MCP approvals since both are stored in the same map.
  */
 export function replayPendingApprovals(listener: ApprovalRequestListener): void {
   for (const [, entry] of pendingApprovals) {
@@ -131,8 +136,9 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
 
 /**
  * Set up a bridge to receive MCP/ACP approval requests from the Electron main process.
- * Subscribes to IPC events and routes them through the same listener system,
- * so the same ToolCall UI handles both SDK and MCP approvals.
+ * Subscribes to IPC events and stores them in the same pendingApprovals map,
+ * so the same ToolCall UI handles both SDK and MCP approvals, and approvals
+ * survive ChatMessageList unmount/remount cycles via replayPendingApprovals().
  * Returns an unsubscribe function.
  */
 export function setupMcpApprovalBridge(): () => void {
@@ -155,7 +161,18 @@ export function setupMcpApprovalBridge(): () => void {
       args: payload.args,
       chatSessionId: payload.chatSessionId,
     };
-    // Notify all UI listeners (same as SDK approval flow)
+
+    // Store in pendingApprovals so it survives unmount/remount
+    // The resolve is a no-op because MCP approval resolution goes through IPC
+    // (handled in resolveApproval when toolCallId starts with 'mcp_approval_')
+    if (!pendingApprovals.has(payload.approvalId)) {
+      pendingApprovals.set(payload.approvalId, {
+        resolve: () => {}, // no-op; real resolution is via IPC
+        request,
+      });
+    }
+
+    // Notify all UI listeners
     for (const listener of listeners) {
       try { listener(request); } catch { /* ignore listener errors */ }
     }

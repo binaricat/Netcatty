@@ -542,8 +542,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    // Clear any pending approvals from the approval gate (so tool execute functions don't hang)
-    clearAllPendingApprovals();
+    // Clear pending approvals for this session (so tool execute functions don't hang)
+    clearAllPendingApprovals(activeSessionId);
   }, [activeSessionId, setStreamingForScope, updateLastMessage, abortControllersRef]);
 
   const handleSelectSession = useCallback(
@@ -637,6 +637,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           <ChatMessageList
             messages={messages}
             isStreaming={isStreaming}
+            activeSessionId={activeSessionId}
           />
 
           {/* Recent sessions (Zed-style, shown when no messages) */}

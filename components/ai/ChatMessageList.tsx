@@ -30,9 +30,11 @@ import {
 interface ChatMessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
+  /** Active chat session ID — used to filter standalone MCP approval blocks */
+  activeSessionId?: string | null;
 }
 
-const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming }) => {
+const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming, activeSessionId }) => {
   // Track pending approvals from the approval gate
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
   const [resolvedApprovals, setResolvedApprovals] = useState<Map<string, boolean>>(new Map());
@@ -281,19 +283,22 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
         {/* Standalone MCP/ACP approval requests (not tied to SDK tool calls) */}
         {Array.from(pendingApprovals.entries())
-          .filter(([id]) => id.startsWith('mcp_approval_'))
-          .map(([id, req]) => (
-            <ToolCall
-              key={id}
-              name={req.toolName}
-              args={req.args}
-              isLoading={false}
-              isInterrupted={false}
-              approvalStatus={'pending'}
-              onApprove={() => handleApprove(id)}
-              onReject={() => handleReject(id)}
-            />
-          ))}
+          .filter((entry) => entry[0].startsWith('mcp_approval_') && (!activeSessionId || entry[1].chatSessionId === activeSessionId))
+          .map((entry) => {
+            const [id, req] = entry;
+            return (
+              <ToolCall
+                key={id}
+                name={req.toolName}
+                args={req.args}
+                isLoading={false}
+                isInterrupted={false}
+                approvalStatus={'pending'}
+                onApprove={() => handleApprove(id)}
+                onReject={() => handleReject(id)}
+              />
+            );
+          })}
         {/* Streaming indicator — only when no content and no thinking yet */}
         {isStreaming && !lastAssistantMessage?.content && !lastAssistantMessage?.thinking && (
           <div className="flex items-center gap-1 py-2">
