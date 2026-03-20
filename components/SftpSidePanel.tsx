@@ -101,7 +101,14 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles]);
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
-  const { showSaveDialog, startStreamTransfer } = useSftpBackend();
+  const {
+    showSaveDialog,
+    selectDirectory,
+    startStreamTransfer,
+    listSftp,
+    mkdirLocal,
+    deleteLocalFile,
+  } = useSftpBackend();
 
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
@@ -153,7 +160,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
+    listSftp,
+    mkdirLocal,
+    deleteLocalFile,
     showSaveDialog,
+    selectDirectory,
     startStreamTransfer,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
   });

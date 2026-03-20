@@ -197,11 +197,11 @@ export const useSftpBackend = () => {
     return bridge.showSaveDialog(defaultPath, filters);
   }, []);
 
-  const selectDirectory = useCallback(async (title?: string, defaultPath?: string) => {
+  const selectDirectory = async (title?: string, defaultPath?: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.selectDirectory) return null;
     return bridge.selectDirectory(title, defaultPath);
-  }, []);
+  };
 
   const downloadSftpToTempAndOpen = useCallback(async (
     sftpId: string,
