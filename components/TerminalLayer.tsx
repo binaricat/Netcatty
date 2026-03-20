@@ -609,6 +609,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     ));
   }, [activeTabId, aiExtraSessionIdsForTab, sessions, baseAiSessionIds]);
 
+  const baseAiTerminalSessions = useMemo(() => {
+    return baseAiSessionIds.map((sid) => {
+      const session = sessions.find((s) => s.id === sid);
+      const host = session?.hostId ? hosts.find((h) => h.id === session.hostId) : undefined;
+      return {
+        sessionId: sid,
+        hostId: session?.hostId || '',
+        hostname: host?.hostname || session?.hostname || '',
+        label: host?.label || session?.hostLabel || '',
+        os: host?.os,
+        username: host?.username ?? session?.username,
+        connected: session?.status === 'connected',
+      };
+    });
+  }, [baseAiSessionIds, sessions, hosts]);
+
   const aiTerminalSessions = useMemo(() => {
     const selectedSessionIds = [...baseAiSessionIds];
     for (const sessionId of selectedExtraAiSessionIds) {
@@ -1538,6 +1554,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                           : activeSession?.hostId ? [activeSession.hostId] : []
                         }
                         scopeLabel={activeWorkspace?.title ?? activeSession?.hostLabel ?? ''}
+                        currentScopeTerminalSessions={baseAiTerminalSessions}
                         terminalSessions={aiTerminalSessions}
                         availableTerminalSessions={availableAiTerminalSessions}
                         extraTerminalSessionIds={selectedExtraAiSessionIds}

@@ -96,6 +96,15 @@ interface AIChatSidePanelProps {
   scopeLabel?: string;
 
   // Terminal session context (from parent)
+  currentScopeTerminalSessions?: Array<{
+    sessionId: string;
+    hostId: string;
+    hostname: string;
+    label: string;
+    os?: string;
+    username?: string;
+    connected: boolean;
+  }>;
   terminalSessions?: Array<{
     sessionId: string;
     hostId: string;
@@ -196,6 +205,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   scopeTargetId,
   scopeHostIds,
   scopeLabel,
+  currentScopeTerminalSessions = [],
   terminalSessions = [],
   availableTerminalSessions = [],
   extraTerminalSessionIds = [],
@@ -350,14 +360,16 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     () => new Set(extraTerminalSessionIds),
     [extraTerminalSessionIds],
   );
-  const baseSessionIdSet = useMemo(
-    () => new Set(terminalSessions.map((session) => session.sessionId)),
-    [terminalSessions],
+  const currentScopeSessionIdSet = useMemo(
+    () => new Set(currentScopeTerminalSessions.map((session) => session.sessionId)),
+    [currentScopeTerminalSessions],
   );
   const availableExtraSessions = useMemo(
     () =>
-      availableTerminalSessions.filter((session) => !baseSessionIdSet.has(session.sessionId)),
-    [availableTerminalSessions, baseSessionIdSet],
+      availableTerminalSessions.filter((session) => (
+        extraSessionIdSet.has(session.sessionId) || !currentScopeSessionIdSet.has(session.sessionId)
+      )),
+    [availableTerminalSessions, currentScopeSessionIdSet, extraSessionIdSet],
   );
 
   // Agent model presets for the current external agent
@@ -668,7 +680,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             >
               <Server size={13} />
               <span className="max-w-[74px] truncate text-[11px]">
-                {terminalSessions.length}
+                {currentScopeTerminalSessions.length}
                 {extraTerminalSessionIds.length > 0 ? ` +${extraTerminalSessionIds.length}` : ''}
               </span>
             </Button>
@@ -692,7 +704,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
                     {t('ai.chat.currentScope')}
                   </div>
                   <div className="space-y-1 px-1 pb-2">
-                    {terminalSessions.map((session) => (
+                    {currentScopeTerminalSessions.map((session) => (
                       <div
                         key={session.sessionId}
                         className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-2 py-1.5"
