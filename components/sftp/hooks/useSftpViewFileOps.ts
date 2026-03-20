@@ -425,7 +425,6 @@ export const useSftpViewFileOps = ({
           const transferId = `download-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           let activeChildTransferId: string | null = null;
           let completedBytes = 0;
-          const visitedPaths = new Set<string>();
           const MAX_SYMLINK_DEPTH = 32;
 
           const isTaskCancelled = () =>
@@ -433,9 +432,61 @@ export const useSftpViewFileOps = ({
               (task) => task.id === transferId && task.status === "cancelled",
             );
 
+          const estimateDirectoryBytes = async (
+            remotePath: string,
+            visitedPaths: Set<string>,
+            symlinkDepth = 0,
+          ): Promise<number> => {
+            if (visitedPaths.has(remotePath)) return 0;
+            visitedPaths.add(remotePath);
+
+            if (isTaskCancelled()) {
+              throw new Error("Transfer cancelled");
+            }
+
+            const entries = await listSftp(sftpId, remotePath, pane.filenameEncoding);
+            let totalBytes = 0;
+
+            for (const entry of entries) {
+              if (entry.name === ".." || entry.name === ".") continue;
+
+              if (isTaskCancelled()) {
+                throw new Error("Transfer cancelled");
+              }
+
+              const remoteEntryPath = sftpRef.current.joinPath(remotePath, entry.name);
+              const isRealDir = entry.type === "directory";
+              const isSymlinkDir =
+                entry.type === "symlink" && entry.linkTarget === "directory";
+
+              if (isRealDir || isSymlinkDir) {
+                if (isSymlinkDir && symlinkDepth >= MAX_SYMLINK_DEPTH) {
+                  throw new Error(
+                    "Maximum symlink directory depth exceeded (possible symlink cycle)",
+                  );
+                }
+
+                totalBytes += await estimateDirectoryBytes(
+                  remoteEntryPath,
+                  visitedPaths,
+                  isSymlinkDir ? symlinkDepth + 1 : symlinkDepth,
+                );
+                continue;
+              }
+
+              totalBytes +=
+                typeof entry.size === "string"
+                  ? parseInt(String(entry.size), 10) || 0
+                  : entry.size || 0;
+            }
+
+            return totalBytes;
+          };
+
           const downloadDir = async (
             remotePath: string,
             localPath: string,
+            visitedPaths: Set<string>,
             symlinkDepth = 0,
           ): Promise<void> => {
             if (visitedPaths.has(remotePath)) return;
@@ -481,6 +532,7 @@ export const useSftpViewFileOps = ({
                 await downloadDir(
                   remoteEntryPath,
                   localEntryPath,
+                  visitedPaths,
                   isSymlinkDir ? symlinkDepth + 1 : symlinkDepth,
                 );
                 continue;
@@ -515,7 +567,10 @@ export const useSftpViewFileOps = ({
                     const totalProgress = completedBytes + transferred;
                     sftpRef.current.updateExternalUpload(transferId, {
                       transferredBytes: totalProgress,
-                      totalBytes: Math.max(totalProgress, completedBytes + total),
+                      totalBytes:
+                        estimatedTotalBytes > 0
+                          ? estimatedTotalBytes
+                          : Math.max(totalProgress, completedBytes + total),
                       speed: Number.isFinite(speed) && speed > 0 ? speed : 0,
                     });
                   },
@@ -545,13 +600,13 @@ export const useSftpViewFileOps = ({
 
           sftpRef.current.addExternalUpload({
             id: transferId,
-            fileName: file.name,
+            fileName: `${file.name} (${t("sftp.upload.scanning")})`,
             sourcePath: fullPath,
             targetPath,
             sourceConnectionId: pane.connection.id,
             targetConnectionId: "local",
             direction: "download",
-            status: "transferring",
+            status: "pending",
             totalBytes: 0,
             transferredBytes: 0,
             speed: 0,
@@ -561,6 +616,18 @@ export const useSftpViewFileOps = ({
           });
 
           try {
+            const estimatedTotalBytes = await estimateDirectoryBytes(
+              fullPath,
+              new Set<string>(),
+            );
+
+            sftpRef.current.updateExternalUpload(transferId, {
+              fileName: file.name,
+              status: "transferring",
+              totalBytes: estimatedTotalBytes,
+              transferredBytes: 0,
+            });
+
             try {
               await mkdirLocal(targetPath);
             } catch (mkdirErr: unknown) {
@@ -574,12 +641,12 @@ export const useSftpViewFileOps = ({
               }
             }
 
-            await downloadDir(fullPath, targetPath);
+            await downloadDir(fullPath, targetPath, new Set<string>());
 
             sftpRef.current.updateExternalUpload(transferId, {
               status: "completed",
               transferredBytes: completedBytes,
-              totalBytes: completedBytes,
+              totalBytes: estimatedTotalBytes,
               speed: 0,
               endTime: Date.now(),
             });
