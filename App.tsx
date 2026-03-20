@@ -28,7 +28,7 @@ import { VaultView, VaultSection } from './components/VaultView';
 import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
-import localShellUtils from './lib/localShell.cjs';
+import * as localShellUtils from './lib/localShell.cjs';
 import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalTheme } from './types';
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';

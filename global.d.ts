@@ -3,7 +3,7 @@ import type { S3Config, SMBConfig, SyncedFile, WebDAVConfig } from "./domain/syn
 
 declare module "*.cjs" {
   const value: Record<string, unknown>;
-  export default value;
+  export = value;
 }
 
 declare global {

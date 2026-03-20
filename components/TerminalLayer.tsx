@@ -6,7 +6,7 @@ import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import { cn } from '../lib/utils';
-import localShellUtils from '../lib/localShell.cjs';
+import * as localShellUtils from '../lib/localShell.cjs';
 import { useStoredString } from '../application/state/useStoredString';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
