@@ -110,6 +110,9 @@ export interface TerminalSessionInfo {
   label: string;
   os?: string;
   username?: string;
+  protocol?: string;
+  shellType?: string;
+  shellExecutable?: string;
   connected: boolean;
 }
 
@@ -695,7 +698,12 @@ export function useAIChatStreaming({
       scopeType: context.scopeType, scopeLabel: context.scopeLabel,
       hosts: context.terminalSessions.map(s => ({
         sessionId: s.sessionId, hostname: s.hostname, label: s.label,
-        os: s.os, username: s.username, connected: s.connected,
+        os: s.os,
+        username: s.username,
+        protocol: s.protocol,
+        shellType: s.shellType,
+        shellExecutable: s.shellExecutable,
+        connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,
       webSearchEnabled: isWebSearchReady(context.webSearchConfig),

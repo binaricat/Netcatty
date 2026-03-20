@@ -15,7 +15,7 @@ const { existsSync } = require("node:fs");
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
 const { execViaPty, execViaChannel } = require("./ai/ptyExec.cjs");
 
-let sessions = null;   // Map<sessionId, { sshClient, stream, pty, conn, ... }>
+let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
 let sftpClients = null; // Map<sftpId, SFTPWrapper>
 let tcpServer = null;
 let tcpPort = null;
@@ -134,7 +134,7 @@ function isChatSessionCancelled(chatSessionId) {
  * Register metadata for terminal sessions (called from renderer via IPC).
  * Metadata is stored per-scope (chatSessionId) so different AI chat sessions
  * only see their own hosts.
- * @param {Array<{sessionId, hostname, label, os, username, connected}>} sessionList
+ * @param {Array<{sessionId, hostname, label, os, username, connected, protocol?, shellType?, shellExecutable?}>} sessionList
  * @param {string} [chatSessionId] - AI chat session ID for per-scope isolation
  */
 function updateSessionMetadata(sessionList, chatSessionId) {
@@ -146,6 +146,9 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       label: s.label || "",
       os: s.os || "",
       username: s.username || "",
+      protocol: s.protocol || "",
+      shellType: s.shellType || "",
+      shellExecutable: s.shellExecutable || "",
       connected: s.connected !== false,
     });
   }
@@ -422,9 +425,11 @@ function handleGetContext(params) {
   }
   for (const [sessionId, session] of sessions.entries()) {
     if (scopedIds && !scopedIds.has(sessionId)) continue;
-    // Only include SSH sessions (skip local terminal sessions)
+    const ptyStream = session.stream || session.pty || session.proc;
     const sshClient = session.conn || session.sshClient;
-    if (!sshClient || typeof sshClient.exec !== "function") continue;
+    const hasCommandablePty = ptyStream && typeof ptyStream.write === "function";
+    const hasSshExec = sshClient && typeof sshClient.exec === "function";
+    if (!hasCommandablePty && !hasSshExec) continue;
 
     // Look up metadata scoped to this chat session
     const meta = getSessionMeta(sessionId, chatSessionId) || {};
@@ -434,15 +439,19 @@ function handleGetContext(params) {
       label: meta.label || session.label || "",
       os: meta.os || "",
       username: meta.username || session.username || "",
-      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn),
+      protocol: meta.protocol || session.protocol || session.type || "",
+      shellType: meta.shellType || session.shellKind || "",
+      shellExecutable: meta.shellExecutable || session.shellExecutable || "",
+      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream),
     });
   }
 
   return {
     environment: "netcatty-terminal",
-    description: "You are operating inside Netcatty, a multi-host SSH terminal manager. " +
-      "The user is managing remote servers. Use the provided tools to execute commands, " +
-      "read/write files, and manage hosts on the remote machines. " +
+    description: "You are operating inside Netcatty, a multi-session terminal manager. " +
+      "The available sessions may be remote hosts, local terminals, or Mosh-backed shells. " +
+      "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
+      "SFTP tools only work for remote SSH sessions. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
     hostCount: hosts.length,
@@ -467,25 +476,28 @@ function handleExec(params) {
   if (!session) return { ok: false, error: "Session not found" };
 
   const sshClient = session.conn || session.sshClient;
-  if (!sshClient || typeof sshClient.exec !== "function") {
-    return { ok: false, error: "Not an SSH session" };
+  const ptyStream = session.stream || session.pty || session.proc;
+
+  // Prefer the interactive PTY so the user sees command/output in-session.
+  if (ptyStream && typeof ptyStream.write === "function") {
+    return execViaPty(ptyStream, command, {
+      trackForCancellation: activePtyExecs,
+      timeoutMs: commandTimeoutMs,
+      shellKind: session.shellKind,
+    });
   }
 
-  const ptyStream = session.stream;
+  // If no PTY stream, fall back to exec channel for SSH sessions only.
+  if (!sshClient || typeof sshClient.exec !== "function") {
+    return { ok: false, error: "Session does not support command execution" };
+  }
 
-  // If no PTY stream, fall back to exec channel (invisible to terminal)
   if (!ptyStream || typeof ptyStream.write !== "function") {
     return execViaChannel(sshClient, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
     });
   }
-
-  // Execute via PTY stream so user sees the command in the terminal
-  return execViaPty(ptyStream, command, {
-    trackForCancellation: activePtyExecs,
-    timeoutMs: commandTimeoutMs,
-  });
 }
 
 // ── Handler: terminalWrite ──
@@ -509,6 +521,10 @@ function handleTerminalWrite(params) {
   }
   if (session.pty) {
     session.pty.write(input);
+    return { ok: true };
+  }
+  if (session.proc) {
+    session.proc.write(input);
     return { ok: true };
   }
   return { ok: false, error: "No writable stream" };

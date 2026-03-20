@@ -41,11 +41,11 @@ export function createCattyTools(
   return {
     terminal_execute: tool({
       description:
-        'Execute a shell command on a remote host via the specified terminal session. ' +
+        'Execute a shell command on the specified terminal session. ' +
         "The command runs in the session's shell and output is returned when complete.",
       inputSchema: z.object({
         sessionId: z.string().describe('The terminal session ID to execute the command on.'),
-        command: z.string().describe('The shell command to execute on the remote host.'),
+        command: z.string().describe('The shell command to execute in the target session.'),
       }),
       needsApproval: writeToolNeedsApproval,
       execute: async ({ sessionId, command }) => {
@@ -55,7 +55,7 @@ export function createCattyTools(
 
     workspace_get_info: tool({
       description:
-        'Get information about the current workspace, including all configured hosts ' +
+        'Get information about the current workspace, including all terminal sessions ' +
         'and their connection status. No parameters required.',
       inputSchema: z.object({}),
       execute: async () => {
@@ -66,7 +66,7 @@ export function createCattyTools(
     workspace_get_session_info: tool({
       description:
         'Get detailed information about a specific terminal or SFTP session, including ' +
-        'the host it is connected to, connection status, and session metadata.',
+        'its connection status, protocol, shell hints, and session metadata.',
       inputSchema: z.object({
         sessionId: z.string().describe('The session ID to get information about.'),
       }),

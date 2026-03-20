@@ -3,7 +3,7 @@
  *
  * Spawned by codex-acp (or other ACP agents) as a child process.
  * Communicates with the Netcatty main process via TCP (JSON-RPC over newline-delimited JSON).
- * Exposes SSH terminal and SFTP tools so ACP agents can operate on remote hosts.
+ * Exposes Netcatty terminal and SFTP tools so ACP agents can operate on scoped sessions.
  */
 "use strict";
 
@@ -196,7 +196,7 @@ server.resource(
 // Tool: get_environment
 server.tool(
   "get_environment",
-  "Get information about the current Netcatty workspace: all connected remote hosts, their session IDs, OS, and connection status. Call this first to discover available hosts before executing commands.",
+  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, or Mosh-backed shells. Call this first before executing commands.",
   {},
   async () => {
     process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
@@ -209,10 +209,10 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a shell command on a remote host via SSH. The command runs in the host's shell and output (stdout/stderr) is returned when complete.",
+  "Execute a shell command on a Netcatty terminal session. The command runs in that session's shell and output (stdout/stderr) is returned when complete.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The shell command to execute on the remote host."),
+    command: z.string().describe("The shell command to execute in the target session."),
   },
   async ({ sessionId, command }) => {
     const guardErr = guardWriteOperation(command);
@@ -234,7 +234,7 @@ server.tool(
 // Tool: terminal_send_input
 server.tool(
   "terminal_send_input",
-  "Send raw input to a terminal session on a remote host. Use only for interactive programs that are already running: y/n prompts, passwords, ctrl+c (\\x03), ctrl+d (\\x04), or pressing enter (\\n). This tool does not return the updated terminal output. For normal commands, use terminal_execute.",
+  "Send raw input to a Netcatty terminal session. Use only for interactive programs that are already running: y/n prompts, passwords, ctrl+c (\\x03), ctrl+d (\\x04), or pressing enter (\\n). This tool does not return the updated terminal output. For normal commands, use terminal_execute.",
   {
     sessionId: z.string().describe("The terminal session ID to send input to."),
     input: z.string().describe("The raw input string. Use escape sequences for special keys (e.g. \\x03 for ctrl+c, \\n for enter)."),
@@ -394,7 +394,7 @@ server.tool(
 // Tool: multi_host_execute
 server.tool(
   "multi_host_execute",
-  "Execute a command on multiple remote hosts simultaneously or sequentially. Useful for fleet-wide operations like checking status, deploying updates, or maintenance.",
+  "Execute a command on multiple Netcatty terminal sessions simultaneously or sequentially. Useful for fleet-wide operations, or to compare local and remote environments.",
   {
     sessionIds: z.array(z.string()).describe("Array of session IDs to execute on."),
     command: z.string().describe("The shell command to execute on each host."),

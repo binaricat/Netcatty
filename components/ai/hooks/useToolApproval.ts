@@ -237,7 +237,12 @@ export function useToolApproval({
         scopeLabel,
         hosts: freshExecutorContext.sessions.map(s => ({
           sessionId: s.sessionId, hostname: s.hostname, label: s.label,
-          os: s.os, username: s.username, connected: s.connected,
+          os: s.os,
+          username: s.username,
+          protocol: s.protocol,
+          shellType: s.shellType,
+          shellExecutable: s.shellExecutable,
+          connected: s.connected,
         })),
         permissionMode: approvalContext.globalPermissionMode,
         webSearchEnabled: isWebSearchReady(approvalContext.webSearchConfig),

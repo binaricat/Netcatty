@@ -12,6 +12,7 @@ const pty = require("node-pty");
 const { SerialPort } = require("serialport");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+const { detectShellKind } = require("./ai/ptyExec.cjs");
 
 // Shared references
 let sessions = null;
@@ -176,6 +177,7 @@ function startLocalSession(event, payload) {
   const defaultShell = getDefaultLocalShell();
   const shell = payload?.shell || defaultShell;
   const shellArgs = getLocalShellArgs(shell);
+  const shellKind = detectShellKind(shell);
   const env = applyLocaleDefaults({
     ...process.env,
     ...(payload?.env || {}),
@@ -212,7 +214,21 @@ function startLocalSession(event, payload) {
   
   const session = {
     proc,
+    pty: proc,
+    type: "local",
+    protocol: "local",
     webContentsId: event.sender.id,
+    hostname: "localhost",
+    username: (() => {
+      try {
+        return os.userInfo().username || "local";
+      } catch {
+        return "local";
+      }
+    })(),
+    label: "Local Terminal",
+    shellExecutable: shell,
+    shellKind,
   };
   sessions.set(sessionId, session);
 
@@ -543,8 +559,15 @@ async function startMoshSession(event, options) {
 
     const session = {
       proc,
+      pty: proc,
       type: 'mosh',
+      protocol: 'mosh',
       webContentsId: event.sender.id,
+      hostname: options.hostname || '',
+      username: options.username || '',
+      label: options.label || options.hostname || 'Mosh Session',
+      shellKind: 'posix',
+      shellExecutable: 'remote-shell',
     };
     sessions.set(sessionId, session);
 

@@ -7,6 +7,9 @@ export interface SystemPromptContext {
     label: string;
     os?: string;
     username?: string;
+    protocol?: string;
+    shellType?: string;
+    shellExecutable?: string;
     connected: boolean;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
@@ -20,13 +23,13 @@ export function buildSystemPrompt(context: SystemPromptContext): string {
   const hostList = buildHostList(hosts);
   const permissionRules = buildPermissionRules(permissionMode);
 
-  return `You are **Catty Agent**, a terminal automation assistant built into netcatty. You help users manage remote servers by executing commands, reading files, and performing batch operations across multiple hosts.
+  return `You are **Catty Agent**, a terminal automation assistant built into netcatty. You help users operate terminal sessions managed by Netcatty, including remote hosts and the user's local terminal.
 
 ## Current Scope
 
 ${scopeDescription}
 
-## Available Hosts
+## Available Sessions
 
 ${hostList}
 
@@ -38,7 +41,7 @@ ${permissionRules}
 
 1. **Plan before acting.** When a task involves multiple steps, present a brief numbered plan to the user before executing. Wait for acknowledgment on complex or risky operations.
 
-2. **Use the right tool.** For normal shell commands, use \`terminal_execute\` so you receive the command output. When operating on multiple hosts, call \`terminal_execute\` for each host.
+2. **Use the right tool.** For normal shell commands, use \`terminal_execute\` so you receive the command output. When operating on multiple sessions, call \`terminal_execute\` for each target session.
 
 3. **Never execute dangerous commands.** Commands matching the blocklist (e.g. \`rm -rf /\`, \`mkfs\`, \`dd\` to disk devices, \`shutdown\`, fork bombs, recursive chmod 777 on root) are strictly forbidden and will be automatically denied. Do not attempt to bypass these restrictions.
 
@@ -48,7 +51,7 @@ ${permissionRules}
 
 6. **Stay focused.** Keep responses concise and relevant to terminal and server operations. Avoid unrelated commentary.
 
-7. **Respect connection status.** Only attempt operations on hosts that are currently connected. If a host is disconnected, inform the user and suggest reconnecting.
+7. **Respect connection status.** Only attempt operations on sessions that are currently connected. If a session is disconnected, inform the user and suggest reconnecting or reopening it.
 
 8. **Be careful with file operations.** When writing files via shell commands, confirm the target path with the user if there is any ambiguity. Always prefer appending or targeted edits over full file overwrites when possible.
 
@@ -63,11 +66,11 @@ function buildScopeDescription(
 ): string {
   switch (scopeType) {
     case 'terminal':
-      return `You are scoped to a single terminal session${scopeLabel ? `: **${scopeLabel}**` : ''}. Focus operations on this specific host.`;
+      return `You are scoped to a single terminal session${scopeLabel ? `: **${scopeLabel}**` : ''}. Focus operations on this specific session.`;
     case 'workspace':
-      return `You are scoped to workspace${scopeLabel ? ` **${scopeLabel}**` : ''}. You can operate on any host within this workspace.`;
+      return `You are scoped to workspace${scopeLabel ? ` **${scopeLabel}**` : ''}. You can operate on any session within this workspace.`;
     case 'global':
-      return `You have global scope and can operate on any connected host across all workspaces.`;
+      return `You have global scope and can operate on any connected session across all workspaces.`;
   }
 }
 
@@ -75,7 +78,7 @@ function buildHostList(
   hosts: SystemPromptContext['hosts'],
 ): string {
   if (hosts.length === 0) {
-    return '_No hosts are currently available. The user needs to connect to a host first._';
+    return '_No terminal sessions are currently available. The user needs to open or connect a terminal first._';
   }
 
   const lines = hosts.map(host => {
@@ -83,8 +86,11 @@ function buildHostList(
     const details = [
       `hostname: ${host.hostname}`,
       `label: ${host.label}`,
+      host.protocol ? `protocol: ${host.protocol}` : null,
       host.os ? `os: ${host.os}` : null,
       host.username ? `user: ${host.username}` : null,
+      host.shellType ? `shell: ${host.shellType}` : null,
+      host.shellExecutable ? `shell executable: ${host.shellExecutable}` : null,
       `status: ${status}`,
     ]
       .filter(Boolean)

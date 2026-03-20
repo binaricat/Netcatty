@@ -890,10 +890,14 @@ function registerHandlers(ipcMain) {
 
     try {
       // Prefer PTY stream (visible in terminal)
-      const ptyStream = session.stream || session.pty;
+      const ptyStream = session.stream || session.pty || session.proc;
       if (ptyStream && typeof ptyStream.write === "function") {
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaPty(ptyStream, command, { stripMarkers: true, timeoutMs });
+        return execViaPty(ptyStream, command, {
+          stripMarkers: true,
+          timeoutMs,
+          shellKind: session.shellKind,
+        });
       }
 
       // Fallback: SSH exec channel (invisible to terminal)
@@ -937,6 +941,10 @@ function registerHandlers(ipcMain) {
       }
       if (session.pty) {
         session.pty.write(data);
+        return { ok: true };
+      }
+      if (session.proc) {
+        session.proc.write(data);
         return { ok: true };
       }
       return { ok: false, error: "No writable stream for session" };
@@ -1733,7 +1741,7 @@ function registerHandlers(ipcMain) {
         ? await resolveCodexMcpSnapshot(sessionCwd)
         : { mcpServers: [], fingerprint: getCodexMcpFingerprint([]) };
 
-      // Inject Netcatty MCP server for remote host access (scoped to this chat session)
+      // Inject Netcatty MCP server for scoped terminal-session access
       try {
         const mcpPort = await mcpServerBridge.getOrCreateHost();
         const scopedIds = mcpServerBridge.getScopedSessionIds(chatSessionId);
@@ -1876,15 +1884,15 @@ function registerHandlers(ipcMain) {
       acpRequestSessions.set(requestId, chatSessionId);
       acpChatRuns.set(chatSessionId, { requestId, cancelRequested: false });
 
-      // Prepend context hint so the agent uses MCP tools for remote hosts
+      // Prepend context hint so the agent uses Netcatty MCP tools for the scoped sessions
       const contextualPrompt =
-        `[Context: You are inside Netcatty, a multi-host SSH terminal manager. ` +
-        `The user is managing REMOTE servers, not the local machine. ` +
-        `Use the "netcatty-remote-hosts" MCP tools to operate on the remote hosts. ` +
-        `Call get_environment first to discover available hosts and their session IDs. ` +
+        `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
+        `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
+        `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
+        `Call get_environment first to discover available sessions and their IDs. ` +
         `For normal shell commands, use terminal_execute so you receive command output. ` +
         `Use terminal_send_input only to respond to an interactive prompt that is already running; it does not read back the updated terminal output. ` +
-        `Do NOT use local shell execution.]\n\n${prompt}`;
+        `SFTP file tools only work for remote SSH sessions, not local terminals.]\n\n${prompt}`;
 
       // Build message content: text + optional attachments
       // ACP provider only supports image/* and audio/* inline via `type: "file"`.

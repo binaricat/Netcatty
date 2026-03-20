@@ -102,6 +102,9 @@ interface AIChatSidePanelProps {
     label: string;
     os?: string;
     username?: string;
+    protocol?: string;
+    shellType?: string;
+    shellExecutable?: string;
     connected: boolean;
   }>;
   resolveExecutorContext?: (scope: {
