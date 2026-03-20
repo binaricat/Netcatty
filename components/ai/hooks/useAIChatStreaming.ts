@@ -64,6 +64,32 @@ interface ToolResultChunk {
   result?: unknown;
 }
 
+/** Detect tool results that represent errors/denials (e.g. `{ error: "..." }` or `{ ok: false }`) */
+function isToolResultError(output: unknown): boolean {
+  if (output == null) return false;
+  
+  if (typeof output === 'object') {
+    const obj = output as Record<string, unknown>;
+    // Check for explicit error objects
+    if ('error' in obj && typeof obj.error === 'string') return true;
+    if ('ok' in obj && obj.ok === false) return true;
+  }
+  
+  // Check stringified JSON (common for tool result wrapping)
+  if (typeof output === 'string') {
+    try {
+      const parsed = JSON.parse(output);
+      if (parsed && typeof parsed === 'object') {
+        const parsedObj = parsed as Record<string, unknown>;
+        if ('error' in parsedObj && typeof parsedObj.error === 'string') return true;
+        if ('ok' in parsedObj && parsedObj.ok === false) return true;
+      }
+    } catch { /* not JSON, not an error */ }
+  }
+  
+  return false;
+}
+
 /** Shape of an error chunk from the Vercel AI SDK fullStream. */
 interface ErrorChunk {
   type: 'error';
@@ -425,6 +451,7 @@ export function useAIChatStreaming({
               ? { ...msg, executionStatus: 'completed', statusText: undefined } : msg,
           );
           const toolOutput = typedChunk.output ?? typedChunk.result;
+          const toolError = isToolResultError(toolOutput);
           addMessageToSession(streamSessionId, {
             id: generateId(),
             role: 'tool',
@@ -434,7 +461,7 @@ export function useAIChatStreaming({
               content: typeof toolOutput === 'string'
                 ? toolOutput
                 : JSON.stringify(toolOutput),
-              isError: false,
+              isError: toolError,
             }],
             timestamp: Date.now(),
             executionStatus: 'completed',
@@ -565,9 +592,10 @@ export function useAIChatStreaming({
                 : msg.toolCalls;
               return { ...msg, toolCalls: updatedToolCalls, executionStatus: 'completed', statusText: undefined };
             });
+            const toolError = isToolResultError(result);
             addMessageToSession(sessionId, {
               id: generateId(), role: 'tool', content: '',
-              toolResults: [{ toolCallId, content: result, isError: false }],
+              toolResults: [{ toolCallId, content: result, isError: toolError }],
               timestamp: Date.now(), executionStatus: 'completed',
             });
             needsNewAssistantMsg = true;
