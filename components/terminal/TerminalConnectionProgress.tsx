@@ -15,7 +15,8 @@ export interface TerminalConnectionProgressProps {
     isCancelling: boolean;
     showLogs: boolean;
     progressLogs: string[];
-    onCancel: () => void;
+    onCancelConnect: () => void;
+    onCloseSession: () => void;
     onRetry: () => void;
 }
 
@@ -26,7 +27,8 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     isCancelling,
     showLogs,
     progressLogs,
-    onCancel,
+    onCancelConnect,
+    onCloseSession,
     onRetry,
 }) => {
     const { t } = useI18n();
@@ -48,15 +50,15 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                             variant="ghost"
                             size="sm"
                             className="h-8"
-                            onClick={onCancel}
+                            onClick={onCancelConnect}
                             disabled={isCancelling}
                         >
                             {isCancelling ? t('terminal.progress.cancelling') : t('common.close')}
                         </Button>
                     ) : (
                         <div className="flex gap-2">
-                            <Button variant="ghost" size="sm" className="h-8" onClick={onCancel}>
-                                {t('common.close')}
+                            <Button variant="ghost" size="sm" className="h-8" onClick={onCloseSession}>
+                                {t('terminal.toolbar.closeSession')}
                             </Button>
                             <Button size="sm" className="h-8" onClick={onRetry}>
                                 <Play className="h-3 w-3 mr-2" /> {t('terminal.progress.startOver')}

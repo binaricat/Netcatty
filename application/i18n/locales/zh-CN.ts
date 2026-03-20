@@ -722,6 +722,7 @@ const zhCN: Messages = {
   'terminal.progress.disconnected': '已断开',
   'terminal.progress.cancelling': '正在取消...',
   'terminal.progress.startOver': '重新开始',
+  'terminal.connection.dismissDisconnectedDialog': '关闭断连提示',
   'terminal.connection.chainOf': 'Chain {current} / {total}',
   'terminal.connection.showLogs': '显示日志',
   'terminal.connection.hideLogs': '隐藏日志',

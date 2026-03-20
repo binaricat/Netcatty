@@ -302,6 +302,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [showSFTP, setShowSFTP] = useState(false);
   const [progressValue, setProgressValue] = useState(15);
   const [hasSelection, setHasSelection] = useState(false);
+  const [isDisconnectedDialogDismissed, setIsDisconnectedDialogDismissed] = useState(false);
 
   const statusRef = useRef<TerminalSession["status"]>(status);
   statusRef.current = status;
@@ -502,6 +503,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setProgressLogs([]);
     setShowLogs(false);
     setIsCancelling(false);
+    setIsDisconnectedDialogDismissed(false);
 
     const boot = async () => {
       try {
@@ -678,6 +680,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- updateStatus is a stable internal helper
   }, [status, auth.needsAuth, host.protocol, host.hostname]);
+
+  useEffect(() => {
+    if (status === "connecting") {
+      setIsDisconnectedDialogDismissed(false);
+    }
+  }, [status]);
 
   const safeFit = (options?: { force?: boolean; requireVisible?: boolean }) => {
     const fitAddon = fitAddonRef.current;
@@ -1110,6 +1118,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onCloseSession?.(sessionId);
   };
 
+  const handleDismissDisconnectedDialog = () => {
+    setIsDisconnectedDialogDismissed(true);
+  };
+
+  const handleCloseDisconnectedSession = () => {
+    onCloseSession?.(sessionId);
+  };
+
   const handleHostKeyClose = () => {
     setNeedsHostKeyVerification(false);
     setPendingHostKeyInfo(null);
@@ -1150,16 +1166,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     cleanupSession();
     auth.resetForRetry();
     hasRunStartupCommandRef.current = false;
+    setIsDisconnectedDialogDismissed(false);
     setStatus("connecting");
     setError(null);
     setProgressLogs(["Retrying secure channel..."]);
     setShowLogs(true);
-    if (host.protocol === "local" || host.hostname === "localhost") {
+    if (host.protocol === "serial") {
+      sessionStarters.startSerial(termRef.current);
+    } else if (host.protocol === "local" || host.hostname === "localhost") {
       sessionStarters.startLocal(termRef.current);
+    } else if (host.protocol === "telnet") {
+      sessionStarters.startTelnet(termRef.current);
+    } else if (host.moshEnabled) {
+      sessionStarters.startMosh(termRef.current);
     } else {
       sessionStarters.startSSH(termRef.current);
     }
   };
+
+  const shouldShowConnectionDialog = status !== "connected"
+    && !needsHostKeyVerification
+    && !((isLocalConnection || isSerialConnection) && status === "connecting")
+    && !(status === "disconnected" && isDisconnectedDialogDismissed);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -1734,9 +1762,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           )}
 
           {/* Connection dialog: skip for local/serial during connecting phase, but show on error */}
-          {status !== "connected" && !needsHostKeyVerification && !(
-            (isLocalConnection || isSerialConnection) && status === "connecting"
-          ) && (
+          {shouldShowConnectionDialog && (
               <TerminalConnectionDialog
                 host={host}
                 status={status}
@@ -1747,6 +1773,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 showLogs={showLogs}
                 _setShowLogs={setShowLogs}
                 keys={keys}
+                onDismissDisconnected={handleDismissDisconnectedDialog}
                 authProps={{
                   authMethod: auth.authMethod,
                   setAuthMethod: auth.setAuthMethod,
@@ -1772,7 +1799,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   timeLeft,
                   isCancelling,
                   progressLogs,
-                  onCancel: handleCancelConnect,
+                  onCancelConnect: handleCancelConnect,
+                  onCloseSession: handleCloseDisconnectedSession,
                   onRetry: handleRetry,
                 }}
               />

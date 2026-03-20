@@ -2,7 +2,7 @@
  * Terminal Connection Dialog
  * Full connection overlay with host info, progress indicator, and auth/progress content
  */
-import { Loader2, TerminalSquare, User } from 'lucide-react';
+import { Loader2, TerminalSquare, User, X } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
@@ -30,6 +30,7 @@ export interface TerminalConnectionDialogProps {
     // Auth dialog props
     authProps: Omit<TerminalAuthDialogProps, 'keys'>;
     keys: SSHKey[];
+    onDismissDisconnected?: () => void;
     // Progress props
     progressProps: Omit<TerminalConnectionProgressProps, 'status' | 'error' | 'showLogs'>;
 }
@@ -68,11 +69,13 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     _setShowLogs: setShowLogs, // Rename back to setShowLogs for internal use
     authProps,
     keys,
+    onDismissDisconnected,
     progressProps,
 }) => {
     const { t } = useI18n();
     const hasError = Boolean(error);
     const isConnecting = status === 'connecting';
+    const canDismissDisconnected = status === 'disconnected' && !needsAuth && !!onDismissDisconnected;
     const protocolInfo = getProtocolInfo(host);
 
     return (
@@ -112,16 +115,30 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             )}
                         </div>
                     </div>
-                    {!needsAuth && (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs"
-                            onClick={() => setShowLogs(!showLogs)}
-                        >
-                            {showLogs ? t('terminal.connection.hideLogs') : t('terminal.connection.showLogs')}
-                        </Button>
-                    )}
+                    <div className="flex items-center gap-2">
+                        {!needsAuth && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs"
+                                onClick={() => setShowLogs(!showLogs)}
+                            >
+                                {showLogs ? t('terminal.connection.hideLogs') : t('terminal.connection.showLogs')}
+                            </Button>
+                        )}
+                        {canDismissDisconnected && (
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                aria-label={t('terminal.connection.dismissDisconnectedDialog')}
+                                title={t('terminal.connection.dismissDisconnectedDialog')}
+                                onClick={onDismissDisconnected}
+                            >
+                                <X size={14} />
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Progress indicator - icons with progress bar below */}
