@@ -445,6 +445,7 @@ const zhCN: Messages = {
   'sftp.transfers': '传输',
   'sftp.transfers.active': '{count} 个进行中',
   'sftp.transfers.clearCompleted': '清除已完成',
+  'sftp.transfers.calculatingTotal': '正在统计总大小...',
   'sftp.goUp': '上一级',
   'sftp.goToTerminalCwd': '定位到终端当前目录',
   'sftp.encoding.label': '文件名编码',

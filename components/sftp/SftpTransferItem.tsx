@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import React, { memo } from 'react';
 import { getParentPath } from '../../application/state/sftp/utils';
+import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { TransferTask } from '../../types';
 import { Button } from '../ui/button';
@@ -35,6 +36,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     canRevealTarget = false,
     onRevealTarget,
 }) => {
+    const { t } = useI18n();
+    const hasKnownTotal = task.totalBytes > 0;
     const progress = task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0;
 
     // Calculate remaining time from backend-reported sliding-window speed
@@ -42,7 +45,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const effectiveSpeed = task.status === 'transferring'
         ? (Number.isFinite(task.speed) && task.speed > 0 ? task.speed : 0)
         : 0;
-    const remainingTime = effectiveSpeed > 0
+    const remainingTime = hasKnownTotal && effectiveSpeed > 0
         ? Math.ceil(remainingBytes / effectiveSpeed)
         : 0;
     const remainingFormatted = remainingTime > 60
@@ -54,6 +57,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     // Format bytes transferred / total
     const bytesDisplay = task.status === 'transferring' && task.totalBytes > 0
         ? `${formatTransferBytes(task.transferredBytes)} / ${formatTransferBytes(task.totalBytes)}`
+        : task.status === 'transferring'
+            ? formatTransferBytes(task.transferredBytes)
         : task.status === 'completed' && task.totalBytes > 0
             ? formatTransferBytes(task.totalBytes)
             : '';
@@ -99,12 +104,14 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                             <div
                                 className={cn(
                                     "h-full rounded-full relative overflow-hidden",
-                                    task.status === 'pending'
+                                    task.status === 'pending' || (task.status === 'transferring' && !hasKnownTotal)
                                         ? "bg-muted-foreground/50 animate-pulse"
                                         : "bg-gradient-to-r from-primary via-primary/90 to-primary"
                                 )}
                                 style={{
-                                    width: task.status === 'pending' ? '100%' : `${progress}%`,
+                                    width: task.status === 'pending' || (task.status === 'transferring' && !hasKnownTotal)
+                                        ? '100%'
+                                        : `${progress}%`,
                                     transition: 'width 150ms ease-out'
                                 }}
                             >
@@ -121,13 +128,22 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                             </div>
                         </div>
                         <span className="text-[10px] text-muted-foreground shrink-0 min-w-[34px] text-right font-mono">
-                            {task.status === 'pending' ? 'waiting...' : `${Math.round(progress)}%`}
+                            {task.status === 'pending'
+                                ? 'waiting...'
+                                : hasKnownTotal
+                                    ? `${Math.round(progress)}%`
+                                    : '...'}
                         </span>
                     </div>
                 )}
                 {task.status === 'transferring' && bytesDisplay && (
                     <div className="text-[9px] text-muted-foreground mt-0.5 font-mono">
                         {bytesDisplay}
+                    </div>
+                )}
+                {task.status === 'transferring' && !hasKnownTotal && (
+                    <div className="text-[9px] text-muted-foreground mt-0.5">
+                        {t('sftp.transfers.calculatingTotal')}
                     </div>
                 )}
                 {task.status === 'completed' && bytesDisplay && (

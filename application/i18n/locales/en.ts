@@ -618,6 +618,7 @@ const en: Messages = {
   'sftp.transfers': 'Transfers',
   'sftp.transfers.active': '{count} active',
   'sftp.transfers.clearCompleted': 'Clear completed',
+  'sftp.transfers.calculatingTotal': 'Calculating total size...',
   'sftp.goUp': 'Go up',
   'sftp.goToTerminalCwd': 'Go to terminal directory',
   'sftp.encoding.label': 'Filename Encoding',

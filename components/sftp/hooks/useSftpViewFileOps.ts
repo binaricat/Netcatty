@@ -425,6 +425,7 @@ export const useSftpViewFileOps = ({
           const transferId = `download-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           let activeChildTransferId: string | null = null;
           let completedBytes = 0;
+          let estimatedTotalBytes = 0;
           const MAX_SYMLINK_DEPTH = 32;
 
           const isTaskCancelled = () =>
@@ -567,10 +568,7 @@ export const useSftpViewFileOps = ({
                     const totalProgress = completedBytes + transferred;
                     sftpRef.current.updateExternalUpload(transferId, {
                       transferredBytes: totalProgress,
-                      totalBytes:
-                        estimatedTotalBytes > 0
-                          ? estimatedTotalBytes
-                          : Math.max(totalProgress, completedBytes + total),
+                      totalBytes: estimatedTotalBytes > 0 ? estimatedTotalBytes : 0,
                       speed: Number.isFinite(speed) && speed > 0 ? speed : 0,
                     });
                   },
@@ -606,7 +604,7 @@ export const useSftpViewFileOps = ({
             sourceConnectionId: pane.connection.id,
             targetConnectionId: "local",
             direction: "download",
-            status: "pending",
+            status: "transferring",
             totalBytes: 0,
             transferredBytes: 0,
             speed: 0,
@@ -615,19 +613,27 @@ export const useSftpViewFileOps = ({
             retryable: false,
           });
 
-          try {
-            const estimatedTotalBytes = await estimateDirectoryBytes(
-              fullPath,
-              new Set<string>(),
-            );
-
-            sftpRef.current.updateExternalUpload(transferId, {
-              fileName: file.name,
-              status: "transferring",
-              totalBytes: estimatedTotalBytes,
-              transferredBytes: 0,
+          const scanPromise = estimateDirectoryBytes(fullPath, new Set<string>())
+            .then((total) => {
+              estimatedTotalBytes = total;
+              sftpRef.current.updateExternalUpload(transferId, {
+                fileName: file.name,
+                totalBytes: total,
+              });
+            })
+            .catch((error) => {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              const isCancelled =
+                errorMessage.includes("cancelled") || errorMessage.includes("canceled");
+              if (!isCancelled) {
+                logger.warn("[SftpView] Failed to pre-scan folder size, continuing without total:", error);
+                sftpRef.current.updateExternalUpload(transferId, {
+                  fileName: file.name,
+                });
+              }
             });
 
+          try {
             try {
               await mkdirLocal(targetPath);
             } catch (mkdirErr: unknown) {
@@ -642,11 +648,13 @@ export const useSftpViewFileOps = ({
             }
 
             await downloadDir(fullPath, targetPath, new Set<string>());
+            await scanPromise.catch(() => undefined);
 
             sftpRef.current.updateExternalUpload(transferId, {
               status: "completed",
+              fileName: file.name,
               transferredBytes: completedBytes,
-              totalBytes: estimatedTotalBytes,
+              totalBytes: estimatedTotalBytes > 0 ? estimatedTotalBytes : completedBytes,
               speed: 0,
               endTime: Date.now(),
             });
