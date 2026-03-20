@@ -212,10 +212,13 @@ const arePropsEqual = (
     // Always re-render on fileName change
     if (prev.fileName !== next.fileName) return false;
     if (prev.targetPath !== next.targetPath) return false;
+    if (prev.totalBytes !== next.totalBytes) return false;
     if ((prevProps.canRevealTarget ?? false) !== (nextProps.canRevealTarget ?? false)) return false;
 
     // For transferring status, allow frequent re-renders for smooth progress bar
     if (next.status === 'transferring') {
+        if (next.totalBytes <= 0 && prev.transferredBytes !== next.transferredBytes) return false;
+
         // Re-render on any meaningful progress change (0.1% for smooth bar animation)
         const prevProgress = prev.totalBytes > 0 ? (prev.transferredBytes / prev.totalBytes) * 100 : 0;
         const nextProgress = next.totalBytes > 0 ? (next.transferredBytes / next.totalBytes) * 100 : 0;

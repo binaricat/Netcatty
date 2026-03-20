@@ -696,9 +696,8 @@ export const useSftpViewFileOps = ({
                   return;
                 }
 
-                const concurrencyLimit = getDynamicConcurrencyLimit();
                 while (
-                  activeQueueTasks < concurrencyLimit
+                  activeQueueTasks < getDynamicConcurrencyLimit()
                 ) {
                   const nextTask = dequeueTask();
                   if (!nextTask) break;

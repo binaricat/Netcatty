@@ -34,6 +34,7 @@ const TRANSFER_CONCURRENCY = 64;          // 64 parallel SFTP requests
 // Progress IPC throttle: sending too many IPC messages bogs down the event loop
 const PROGRESS_THROTTLE_MS = 100;         // Send IPC at most every 100ms
 const PROGRESS_THROTTLE_BYTES = 256 * 1024; // Or every 256KB of progress
+const ISOLATED_DOWNLOAD_IDLE_TTL_MS = 5000;
 
 // Speed calculation uses strict sliding-window average:
 // speed = bytes_delta_in_window / time_delta_in_window
@@ -71,6 +72,7 @@ function getIsolatedDownloadChannelPool(client) {
   if (!pool) {
     pool = {
       idle: [],
+      idleTimers: new Map(),
       busy: new Set(),
       waiters: [],
       opening: 0,
@@ -96,6 +98,39 @@ function waitForIsolatedDownloadChannel(pool) {
   });
 }
 
+function notifyIsolatedDownloadWaiter(pool) {
+  const waiter = pool.waiters.shift();
+  if (waiter) waiter();
+}
+
+function removeIdleIsolatedDownloadChannel(pool, sftp) {
+  const index = pool.idle.indexOf(sftp);
+  if (index !== -1) {
+    pool.idle.splice(index, 1);
+  }
+}
+
+function clearIdleIsolatedDownloadTimer(pool, sftp) {
+  const timer = pool.idleTimers.get(sftp);
+  if (timer) {
+    clearTimeout(timer);
+    pool.idleTimers.delete(sftp);
+  }
+}
+
+function scheduleIdleIsolatedDownloadChannel(client, sftp) {
+  const pool = isolatedDownloadChannelPools.get(client);
+  if (!pool) return;
+
+  clearIdleIsolatedDownloadTimer(pool, sftp);
+  const timer = setTimeout(() => {
+    clearIdleIsolatedDownloadTimer(pool, sftp);
+    removeIdleIsolatedDownloadChannel(pool, sftp);
+    try { sftp?.end?.(); } catch { }
+  }, ISOLATED_DOWNLOAD_IDLE_TTL_MS);
+  pool.idleTimers.set(sftp, timer);
+}
+
 function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   const { dispose = false } = options;
   const pool = isolatedDownloadChannelPools.get(client);
@@ -107,20 +142,17 @@ function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   }
 
   pool.busy.delete(sftp);
+  clearIdleIsolatedDownloadTimer(pool, sftp);
 
   if (dispose) {
     try { sftp?.end?.(); } catch { }
-    return;
-  }
-
-  const waiter = pool.waiters.shift();
-  if (waiter) {
-    pool.busy.add(sftp);
-    waiter(sftp);
+    notifyIsolatedDownloadWaiter(pool);
     return;
   }
 
   pool.idle.push(sftp);
+  scheduleIdleIsolatedDownloadChannel(client, sftp);
+  notifyIsolatedDownloadWaiter(pool);
 }
 
 async function acquireIsolatedDownloadChannel(client) {
@@ -129,6 +161,7 @@ async function acquireIsolatedDownloadChannel(client) {
   while (true) {
     const cached = pool.idle.pop();
     if (cached) {
+      clearIdleIsolatedDownloadTimer(pool, cached);
       pool.busy.add(cached);
       return cached;
     }
@@ -140,7 +173,6 @@ async function acquireIsolatedDownloadChannel(client) {
         return null;
       }
       const awaited = await waitForIsolatedDownloadChannel(pool);
-      if (awaited) return awaited;
       continue;
     }
 
@@ -150,11 +182,15 @@ async function acquireIsolatedDownloadChannel(client) {
       pool.opening -= 1;
       if (!opened) return null;
       pool.busy.add(opened);
+      const knownCapacity = pool.idle.length + pool.busy.size + pool.opening;
+      if (pool.maxChannels !== null) {
+        pool.maxChannels = Math.max(pool.maxChannels, knownCapacity);
+      }
       return opened;
     } catch (err) {
       pool.opening -= 1;
       if (isIsolatedChannelOpenFailure(err)) {
-        const detectedCapacity = pool.idle.length + pool.busy.size;
+        const detectedCapacity = pool.idle.length + pool.busy.size + pool.opening;
         pool.maxChannels = detectedCapacity;
         if (!pool.warnedCapacity) {
           pool.warnedCapacity = true;
@@ -163,8 +199,7 @@ async function acquireIsolatedDownloadChannel(client) {
           );
         }
         if (detectedCapacity > 0) {
-          const awaited = await waitForIsolatedDownloadChannel(pool);
-          if (awaited) return awaited;
+          await waitForIsolatedDownloadChannel(pool);
           continue;
         }
         return null;
