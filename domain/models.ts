@@ -594,6 +594,7 @@ export interface TerminalSession {
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial';
   port?: number;
   moshEnabled?: boolean;
+  shellType?: 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
   // Serial-specific connection settings
   serialConfig?: SerialConfig;
 }

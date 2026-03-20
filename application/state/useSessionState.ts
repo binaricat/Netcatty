@@ -38,7 +38,9 @@ export const useSessionState = () => {
   // Log views: stores open log replay tabs
   const [logViews, setLogViews] = useState<LogView[]>([]);
 
-  const createLocalTerminal = useCallback(() => {
+  const createLocalTerminal = useCallback((options?: {
+    shellType?: TerminalSession['shellType'];
+  }) => {
     const sessionId = crypto.randomUUID();
     const localHostId = `local-${sessionId}`;
     const newSession: TerminalSession = {
@@ -48,6 +50,8 @@ export const useSessionState = () => {
       hostname: 'localhost',
       username: 'local',
       status: 'connecting',
+      protocol: 'local',
+      shellType: options?.shellType,
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(sessionId);
@@ -434,6 +438,7 @@ export const useSessionState = () => {
           protocol: session.protocol,
           port: session.port,
           moshEnabled: session.moshEnabled,
+          shellType: session.shellType,
         };
         
         // Add pane to existing workspace
@@ -464,6 +469,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
+        shellType: session.shellType,
       };
       
       const hint: SplitHint = {
@@ -631,6 +637,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
+        shellType: session.shellType,
         serialConfig: session.serialConfig,
       };
 

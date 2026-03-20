@@ -65,25 +65,11 @@ const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<s
   return changed ? next : source;
 };
 
-type AISessionShellType = 'posix' | 'fish' | 'powershell' | 'cmd';
-type AISessionOs = 'linux' | 'macos' | 'windows';
-
-const detectLocalOs = (): AISessionOs => {
+const detectLocalOs = (): 'linux' | 'macos' | 'windows' => {
   const platform = navigator.platform || navigator.userAgent || '';
   if (/mac/i.test(platform)) return 'macos';
   if (/win/i.test(platform)) return 'windows';
   return 'linux';
-};
-
-const classifyShellType = (shellPath: string | undefined, os: AISessionOs): AISessionShellType => {
-  const shellName = shellPath?.split(/[\\/]/).pop()?.toLowerCase() || '';
-  if (shellName === 'fish') return 'fish';
-  if (shellName === 'cmd' || shellName === 'cmd.exe') return 'cmd';
-  if (shellName === 'powershell' || shellName === 'powershell.exe' || shellName === 'pwsh' || shellName === 'pwsh.exe') {
-    return 'powershell';
-  }
-  if (os === 'windows') return 'powershell';
-  return 'posix';
 };
 
 interface TerminalLayerProps {
@@ -1030,9 +1016,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Build terminal session context for the AI chat panel
   const aiTerminalSessions = useMemo(() => {
     const localOs = detectLocalOs();
-    const localShellType = classifyShellType(terminalSettings?.localShell, localOs);
-    const localShellExecutable = terminalSettings?.localShell
-      || (localOs === 'windows' ? 'system default (PowerShell)' : 'system default shell');
     const sessionIds = activeWorkspace?.root
       ? collectSessionIds(activeWorkspace.root)
       : activeSession ? [activeSession.id] : [];
@@ -1050,13 +1033,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         os: host?.os || (isLocalSession ? localOs : undefined),
         username: host?.username || s?.username,
         protocol,
-        shellType: isLocalSession ? localShellType : undefined,
-        shellExecutable: isLocalSession ? localShellExecutable : undefined,
+        shellType: s?.shellType && s.shellType !== 'unknown' ? s.shellType : undefined,
         connected: s?.status === 'connected',
       };
     });
     return result;
-  }, [sessions, hosts, activeWorkspace, activeSession, terminalSettings?.localShell]);
+  }, [sessions, hosts, activeWorkspace, activeSession]);
 
   const resolveAIExecutorContext = useCallback((scope: {
     type: 'terminal' | 'workspace';
@@ -1066,6 +1048,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const latestWorkspaces = workspacesRef.current;
     const latestSessions = sessionsRef.current;
     const latestHosts = hostsRef.current;
+    const localOs = detectLocalOs();
     const sessionIds = scope.type === 'workspace'
       ? (() => {
           const workspace = scope.targetId ? latestWorkspaces.find((w) => w.id === scope.targetId) : undefined;
@@ -1083,10 +1066,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         const host = session?.hostId ? latestHosts.find((h) => h.id === session.hostId) : undefined;
         const protocol = session?.protocol || host?.protocol;
         const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
-        const localOs = detectLocalOs();
-        const localShellType = classifyShellType(terminalSettings?.localShell, localOs);
-        const localShellExecutable = terminalSettings?.localShell
-          || (localOs === 'windows' ? 'system default (PowerShell)' : 'system default shell');
         return {
           sessionId: sid,
           hostId: session?.hostId || '',
@@ -1095,15 +1074,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           os: host?.os || (isLocalSession ? localOs : undefined),
           username: host?.username || session?.username,
           protocol,
-          shellType: isLocalSession ? localShellType : undefined,
-          shellExecutable: isLocalSession ? localShellExecutable : undefined,
+          shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
           connected: session?.status === 'connected',
         };
       }),
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
       workspaceName,
     };
-  }, [terminalSettings?.localShell]);
+  }, []);
 
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();

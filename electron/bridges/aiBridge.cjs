@@ -889,6 +889,13 @@ function registerHandlers(ipcMain) {
     }
 
     try {
+      if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
+        return {
+          ok: false,
+          error: "AI execution is not supported for this local shell executable. Configure the local terminal to use bash/zsh/sh, fish, PowerShell/pwsh, or cmd.exe.",
+        };
+      }
+
       // Prefer PTY stream (visible in terminal)
       const ptyStream = session.stream || session.pty || session.proc;
       if (ptyStream && typeof ptyStream.write === "function") {

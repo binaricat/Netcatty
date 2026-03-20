@@ -108,6 +108,24 @@ const LazyTerminalLayer = lazy(() =>
   import('./components/TerminalLayer').then((m) => ({ default: m.TerminalLayer })),
 );
 
+type LocalShellType = 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
+
+const detectConfiguredLocalShellType = (shellPath: string | undefined): LocalShellType => {
+  const shellName = shellPath?.split(/[\\/]/).pop()?.toLowerCase() || '';
+  if (shellName === 'fish') return 'fish';
+  if (shellName === 'cmd' || shellName === 'cmd.exe') return 'cmd';
+  if (shellName === 'powershell' || shellName === 'powershell.exe' || shellName === 'pwsh' || shellName === 'pwsh.exe') {
+    return 'powershell';
+  }
+  if (shellName === 'sh' || shellName === 'bash' || shellName === 'zsh' || shellName === 'ksh' || shellName === 'dash' || shellName === 'ash') {
+    return 'posix';
+  }
+  if (!shellName) {
+    return /win/i.test(navigator.platform || navigator.userAgent || '') ? 'powershell' : 'posix';
+  }
+  return 'unknown';
+};
+
 type SettingsState = ReturnType<typeof useSettingsState>;
 type SftpViewProps = React.ComponentProps<typeof SftpViewComponent>;
 type TerminalLayerProps = React.ComponentProps<typeof TerminalLayerComponent>;
@@ -657,6 +675,12 @@ function App({ settings }: { settings: SettingsState }) {
   const addConnectionLogRef = useRef(addConnectionLog);
   addConnectionLogRef.current = addConnectionLog;
 
+  const createLocalTerminalWithCurrentShell = useCallback(() => {
+    return createLocalTerminal({
+      shellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+    });
+  }, [createLocalTerminal, terminalSettings.localShell]);
+
   // Shared hotkey action handler - used by both global handler and terminal callback
   const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
     switch (action) {
@@ -728,7 +752,7 @@ function App({ settings }: { settings: SettingsState }) {
           localHostname: systemInfoRef.current.hostname,
           saved: false,
         });
-        createLocalTerminal();
+        createLocalTerminalWithCurrentShell();
         break;
       case 'openHosts':
         setActiveTabId('vault');
@@ -822,7 +846,7 @@ function App({ settings }: { settings: SettingsState }) {
         break;
       }
     }
-  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminal, splitSession, moveFocusInWorkspace, toggleBroadcast]);
+  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSession, moveFocusInWorkspace, toggleBroadcast]);
 
   // Callback for terminal to invoke app-level hotkey actions
   const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -968,7 +992,7 @@ function App({ settings }: { settings: SettingsState }) {
   // Wrapper to create local terminal with logging
   const handleCreateLocalTerminal = useCallback(() => {
     const { username, hostname } = systemInfoRef.current;
-    const sessionId = createLocalTerminal();
+    const sessionId = createLocalTerminalWithCurrentShell();
     addConnectionLog({
       sessionId,
       hostId: '',
@@ -981,7 +1005,7 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: hostname,
       saved: false,
     });
-  }, [addConnectionLog, createLocalTerminal]);
+  }, [addConnectionLog, createLocalTerminalWithCurrentShell]);
 
   // Wrapper to connect to host with logging
   const handleConnectToHost = useCallback((host: Host) => {

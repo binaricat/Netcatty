@@ -114,7 +114,6 @@ export function executeWorkspaceGetInfo(
     username?: string;
     protocol?: string;
     shellType?: string;
-    shellExecutable?: string;
     connected: boolean;
   }>;
 }> {
@@ -132,7 +131,6 @@ export function executeWorkspaceGetInfo(
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
-        shellExecutable: s.shellExecutable,
         connected: s.connected,
       })),
     },

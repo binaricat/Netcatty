@@ -134,7 +134,7 @@ function isChatSessionCancelled(chatSessionId) {
  * Register metadata for terminal sessions (called from renderer via IPC).
  * Metadata is stored per-scope (chatSessionId) so different AI chat sessions
  * only see their own hosts.
- * @param {Array<{sessionId, hostname, label, os, username, connected, protocol?, shellType?, shellExecutable?}>} sessionList
+ * @param {Array<{sessionId, hostname, label, os, username, connected, protocol?, shellType?}>} sessionList
  * @param {string} [chatSessionId] - AI chat session ID for per-scope isolation
  */
 function updateSessionMetadata(sessionList, chatSessionId) {
@@ -148,7 +148,6 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       username: s.username || "",
       protocol: s.protocol || "",
       shellType: s.shellType || "",
-      shellExecutable: s.shellExecutable || "",
       connected: s.connected !== false,
     });
   }
@@ -190,6 +189,20 @@ function getSessionMeta(sessionId, chatSessionId) {
     if (scope.metadata?.has(sessionId)) return scope.metadata.get(sessionId);
   }
   return null;
+}
+
+function sessionSupportsSftp(session) {
+  const sshClient = session?.conn || session?.sshClient;
+  return !!(sshClient && typeof sshClient.exec === "function");
+}
+
+function scopeHasSftpSessions(sessionIds) {
+  if (!Array.isArray(sessionIds) || sessionIds.length === 0) return false;
+  for (const sessionId of sessionIds) {
+    const session = sessions?.get(sessionId);
+    if (sessionSupportsSftp(session)) return true;
+  }
+  return false;
 }
 
 /**
@@ -441,7 +454,7 @@ function handleGetContext(params) {
       username: meta.username || session.username || "",
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
-      shellExecutable: meta.shellExecutable || session.shellExecutable || "",
+      supportsSftp: sessionSupportsSftp(session),
       connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream),
     });
   }
@@ -474,6 +487,13 @@ function handleExec(params) {
 
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
+
+  if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
+    return {
+      ok: false,
+      error: "AI execution is not supported for this local shell executable. Configure the local terminal to use bash/zsh/sh, fish, PowerShell/pwsh, or cmd.exe.",
+    };
+  }
 
   const sshClient = session.conn || session.sshClient;
   const ptyStream = session.stream || session.pty || session.proc;
@@ -801,6 +821,11 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
   if (chatSessionId) {
     env.push({ name: "NETCATTY_MCP_CHAT_SESSION_ID", value: chatSessionId });
   }
+
+  env.push({
+    name: "NETCATTY_MCP_ENABLE_SFTP",
+    value: scopeHasSftpSessions(effectiveIds) ? "1" : "0",
+  });
 
   // Pass permission mode so MCP server can enforce it locally (defense-in-depth)
   env.push({ name: "NETCATTY_MCP_PERMISSION_MODE", value: permissionMode });

@@ -241,7 +241,6 @@ export function useToolApproval({
           username: s.username,
           protocol: s.protocol,
           shellType: s.shellType,
-          shellExecutable: s.shellExecutable,
           connected: s.connected,
         })),
         permissionMode: approvalContext.globalPermissionMode,

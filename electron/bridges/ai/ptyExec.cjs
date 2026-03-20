@@ -24,7 +24,10 @@ function detectShellKind(shellPath, platform = process.platform) {
   if (CMD_SHELLS.has(shellName)) return "cmd";
   if (FISH_SHELLS.has(shellName)) return "fish";
   if (POSIX_SHELLS.has(shellName)) return "posix";
-  return platform === "win32" ? "powershell" : "posix";
+  if (!shellName) {
+    return platform === "win32" ? "powershell" : "posix";
+  }
+  return "unknown";
 }
 
 function subscribeToPtyData(ptyStream, onData) {
@@ -57,6 +60,10 @@ function buildWrappedCommand(command, shellKind, marker) {
   switch (shellKind) {
     case "powershell":
       return [
+        "$env:PAGER='cat'",
+        "$env:SYSTEMD_PAGER=''",
+        "$env:GIT_PAGER='cat'",
+        "$env:LESS=''",
         `Write-Output '${marker}_S'`,
         "$global:LASTEXITCODE = 0",
         command,
@@ -67,6 +74,10 @@ function buildWrappedCommand(command, shellKind, marker) {
 
     case "cmd":
       return [
+        'set "PAGER=cat"',
+        'set "SYSTEMD_PAGER="',
+        'set "GIT_PAGER=cat"',
+        'set "LESS="',
         `echo ${marker}_S`,
         command,
         `echo ${marker}_E:%errorlevel%`,
@@ -75,6 +86,10 @@ function buildWrappedCommand(command, shellKind, marker) {
 
     case "fish":
       return [
+        "set -gx PAGER cat",
+        "set -gx SYSTEMD_PAGER ''",
+        "set -gx GIT_PAGER cat",
+        "set -gx LESS ''",
         `printf '%s\\n' '${marker}_S'`,
         command,
         "set __nc $status",

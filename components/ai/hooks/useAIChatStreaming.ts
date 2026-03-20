@@ -112,7 +112,6 @@ export interface TerminalSessionInfo {
   username?: string;
   protocol?: string;
   shellType?: string;
-  shellExecutable?: string;
   connected: boolean;
 }
 
@@ -702,7 +701,6 @@ export function useAIChatStreaming({
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
-        shellExecutable: s.shellExecutable,
         connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,

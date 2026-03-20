@@ -9,7 +9,6 @@ export interface SystemPromptContext {
     username?: string;
     protocol?: string;
     shellType?: string;
-    shellExecutable?: string;
     connected: boolean;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
@@ -90,7 +89,6 @@ function buildHostList(
       host.os ? `os: ${host.os}` : null,
       host.username ? `user: ${host.username}` : null,
       host.shellType ? `shell: ${host.shellType}` : null,
-      host.shellExecutable ? `shell executable: ${host.shellExecutable}` : null,
       `status: ${status}`,
     ]
       .filter(Boolean)
