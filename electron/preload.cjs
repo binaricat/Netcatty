@@ -27,29 +27,25 @@ function cleanupTransferListeners(transferId) {
   transferCancelledListeners.delete(transferId);
 }
 
-// Filter MCP marker artifacts from terminal output:
-// 1. Marker output lines (standalone): __NCMCP_xxx_S or __NCMCP_xxx_E:0
-// 2. End marker command echo: __nc=$?;printf '__NCMCP_...'
-// 3. Start marker printf prefix in echoed command: printf '__NCMCP_...\n';
-// We keep the actual command part visible.
+// Filter MCP marker artifacts from terminal output.
+// All internal wrapper vars use the __NCMCP_ prefix so the guard
+// `data.includes("__NCMCP_")` catches every chunk containing wrapper noise.
 function filterMcpMarkers(data) {
   return data
-    // ── Marker output lines (printf output) ──
+    // ── Marker output lines (printf / Write-Output / echo output) ──
     .replace(/^__NCMCP_[^\r\n]*[\r\n]*/gm, "")
-    // ── Posix: echoed command lines ──
-    // printf '%s\n' '__NCMCP_..._S'  (start marker echo)
-    .replace(/[^\r\n]*printf '%s\\n' '__NCMCP_[^']*'[\r\n]*/g, "")
-    // __nc=$?;printf '%s\n' '__NCMCP_..._E:'...  (end marker echo)
-    .replace(/[^\r\n]*__nc=\$\?;printf [^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/g, "")
-    // (exit $__nc)  (exit code restoration echo)
-    .replace(/[^\r\n]*\(exit \$__nc\)[\r\n]*/g, "")
-    // printf prefix from combined single-line commands (semicolon form)
-    .replace(/printf '__NCMCP_[^']*\\n';/g, "")
-    // ── Pager env var prefixes ──
+    // ── Posix: echoed combined line 1 ──
+    // printf '%s\n' '__NCMCP_..._S'; PAGER=... command
+    // → strip the printf prefix, keep the command visible, also strip PAGER env
+    .replace(/printf '%s\\n' '__NCMCP_[^']*';/g, "")
+    // ── Posix: echoed combined line 2 ──
+    // __NCMCP_rc=$?;printf ... (exit $__NCMCP_rc)
+    .replace(/[^\r\n]*__NCMCP_rc=\$\?;printf [^\r\n]*[\r\n]*/g, "")
+    // ── Pager env var prefixes (inline on the command line) ──
     .replace(/PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= /g, "")
     // ── Fish: pager + marker lines ──
     .replace(/^set -gx (?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS) [^\r\n]*[\r\n]*/gm, "")
-    .replace(/^set __nc \$status[\r\n]*/gm, "")
+    .replace(/^set __NCMCP_rc \$status[\r\n]*/gm, "")
     // ── Cmd: pager + marker lines ──
     .replace(/^set "(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)=[^"]*"[\r\n]*/gm, "")
     .replace(/^echo __NCMCP_[^\r\n]*[\r\n]*/gm, "")
@@ -57,7 +53,7 @@ function filterMcpMarkers(data) {
     .replace(/^\$env:(?:PAGER|SYSTEMD_PAGER|GIT_PAGER|LESS)='[^']*'[\r\n]*/gm, "")
     .replace(/^Write-Output '__NCMCP_[^']*'[\r\n]*/gm, "")
     .replace(/^\$global:LASTEXITCODE = 0[\r\n]*/gm, "")
-    .replace(/^\$__nc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/gm, "");
+    .replace(/^\$__NCMCP_rc = if \(\$LASTEXITCODE[^\r\n]*[\r\n]*/gm, "");
 }
 
 ipcRenderer.on("netcatty:data", (_event, payload) => {

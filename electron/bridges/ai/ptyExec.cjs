@@ -54,8 +54,8 @@ function buildWrappedCommand(command, shellKind, marker) {
         `Write-Output '${marker}_S'`,
         "$global:LASTEXITCODE = 0",
         command,
-        "$__nc = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($?) { 0 } else { 1 }",
-        `Write-Output ("${marker}_E:{0}" -f $__nc)`,
+        "$__NCMCP_rc = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } elseif ($?) { 0 } else { 1 }",
+        `Write-Output ("${marker}_E:{0}" -f $__NCMCP_rc)`,
         "",
       ].join("\r\n");
 
@@ -79,19 +79,20 @@ function buildWrappedCommand(command, shellKind, marker) {
         "set -gx LESS ''",
         `printf '%s\\n' '${marker}_S'`,
         command,
-        "set __nc $status",
-        `printf '%s\\n' '${marker}_E:'$__nc`,
+        "set __NCMCP_rc $status",
+        `printf '%s\\n' '${marker}_E:'$__NCMCP_rc`,
         "",
       ].join("\n");
 
     case "posix":
     default: {
+      // Combine into 2 PTY lines to minimise prompt echo duplication:
+      //   Line 1: start marker + pager env + user command
+      //   Line 2: capture exit code + end marker + restore exit code
       const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
       return (
-        `printf '%s\\n' '${marker}_S'\n` +
-        `${noPager}${command}\n` +
-        `__nc=$?;printf '%s\\n' '${marker}_E:'"$__nc"\n` +
-        `(exit $__nc)\n`
+        `printf '%s\\n' '${marker}_S';${noPager}${command}\n` +
+        `__NCMCP_rc=$?;printf '%s\\n' '${marker}_E:'"$__NCMCP_rc";(exit $__NCMCP_rc)\n`
       );
     }
   }
