@@ -121,10 +121,16 @@ jobs:
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
 
+      - name: Prepare node-pty Linux runtime
+        run: bash scripts/ensure-node-pty-linux.sh prepare x64
+
       - name: Build package
         env:
           ELECTRON_BUILDER_PUBLISH: "never"
         run: npm run pack:linux-x64
+
+      - name: Verify packaged node-pty Linux runtime
+        run: bash scripts/ensure-node-pty-linux.sh verify x64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -176,11 +182,19 @@ jobs:
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
 
+      - name: Prepare node-pty Linux runtime
+        env:
+          npm_config_arch: arm64
+        run: bash scripts/ensure-node-pty-linux.sh prepare arm64
+
       - name: Build package
         env:
           npm_config_arch: arm64
           ELECTRON_BUILDER_PUBLISH: "never"
         run: npm run pack:linux-arm64
+
+      - name: Verify packaged node-pty Linux runtime
+        run: bash scripts/ensure-node-pty-linux.sh verify arm64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
