@@ -205,11 +205,14 @@ export function setupMcpApprovalBridge(): () => void {
         args: Record<string, unknown>;
         chatSessionId?: string;
       }) => void) => () => void;
+      onMcpApprovalCleared?: (cb: (payload: {
+        approvalIds: string[];
+      }) => void) => () => void;
     };
   }).netcatty;
   if (!bridge?.onMcpApprovalRequest) return () => {};
 
-  return bridge.onMcpApprovalRequest((payload) => {
+  const unsubRequest = bridge.onMcpApprovalRequest((payload) => {
     const request: ApprovalRequest = {
       toolCallId: payload.approvalId,
       toolName: payload.toolName,
@@ -232,4 +235,26 @@ export function setupMcpApprovalBridge(): () => void {
       try { listener(request); } catch { /* ignore listener errors */ }
     }
   });
+
+  // Subscribe to main-process approval cleared events (timeout, cancel)
+  // so stale approval cards are removed from the renderer UI.
+  const unsubCleared = bridge.onMcpApprovalCleared?.((payload) => {
+    const clearedIds: string[] = [];
+    for (const id of payload.approvalIds) {
+      if (pendingApprovals.has(id)) {
+        pendingApprovals.delete(id);
+        clearedIds.push(id);
+      }
+    }
+    if (clearedIds.length > 0) {
+      for (const cl of clearedListeners) {
+        try { cl(clearedIds); } catch { /* ignore */ }
+      }
+    }
+  });
+
+  return () => {
+    unsubRequest();
+    unsubCleared?.();
+  };
 }

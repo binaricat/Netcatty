@@ -88,6 +88,13 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
       if (pendingApprovals.has(approvalId)) {
         pendingApprovals.delete(approvalId);
         resolve(false);
+        // Notify renderer to remove the stale approval card
+        try {
+          const win = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('netcatty:ai:mcp:approval-cleared', { approvalIds: [approvalId] });
+          }
+        } catch { /* ignore */ }
       }
     }, APPROVAL_TIMEOUT_MS);
 

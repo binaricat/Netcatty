@@ -1087,6 +1087,12 @@ const api = {
   respondMcpApproval: async (approvalId, approved) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:approval-response", { approvalId, approved });
   },
+  // MCP approval cleared: main process timed out or cancelled an approval
+  onMcpApprovalCleared: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:ai:mcp:approval-cleared", handler);
+    return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-cleared", handler);
+  },
   // ACP streaming
   aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images) => {
     return ipcRenderer.invoke("netcatty:ai:acp:stream", { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images });
