@@ -11,7 +11,7 @@
 
 const crypto = require("crypto");
 const { stripAnsi } = require("./shellUtils.cjs");
-const { classifyLocalShellType } = require("../../lib/localShell.cjs");
+const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
 
 function detectShellKind(shellPath, platform = process.platform) {
   return classifyLocalShellType(shellPath, platform);
