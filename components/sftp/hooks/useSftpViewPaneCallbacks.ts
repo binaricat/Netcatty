@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
+import type { RemoteFile, SftpFilenameEncoding } from "../../../types";
 import type { SftpPaneCallbacks } from "../SftpContext";
 import { useSftpViewPaneActions } from "./useSftpViewPaneActions";
 import { useSftpViewFileOps } from "./useSftpViewFileOps";
@@ -19,6 +20,9 @@ interface UseSftpViewPaneCallbacksParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  listSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<RemoteFile[]>;
+  mkdirLocal?: (path: string) => Promise<unknown>;
+  deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   startStreamTransfer?: (
     options: {
@@ -30,6 +34,8 @@ interface UseSftpViewPaneCallbacksParams {
       sourceSftpId?: string;
       targetSftpId?: string;
       totalBytes?: number;
+      sourceEncoding?: SftpFilenameEncoding;
+      targetEncoding?: SftpFilenameEncoding;
     },
     onProgress?: (transferred: number, total: number, speed: number) => void,
     onComplete?: () => void,
@@ -45,6 +51,9 @@ export const useSftpViewPaneCallbacks = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
+  listSftp,
+  mkdirLocal,
+  deleteLocalFile,
   showSaveDialog,
   startStreamTransfer,
   getSftpIdForConnection,
@@ -57,6 +66,9 @@ export const useSftpViewPaneCallbacks = ({
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
+    listSftp,
+    mkdirLocal,
+    deleteLocalFile,
     showSaveDialog,
     startStreamTransfer,
     getSftpIdForConnection,

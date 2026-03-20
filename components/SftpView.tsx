@@ -86,8 +86,14 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
 
-  // Get stream transfer functions for optimized downloads
-  const { showSaveDialog, startStreamTransfer } = useSftpBackend();
+  // Get backend helpers for file downloads and local filesystem writes.
+  const {
+    showSaveDialog,
+    startStreamTransfer,
+    listSftp,
+    mkdirLocal,
+    deleteLocalFile,
+  } = useSftpBackend();
 
   // Store sftp in a ref so callbacks can access the latest instance
   // without needing to re-create when sftp changes
@@ -176,6 +182,9 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
+    listSftp,
+    mkdirLocal,
+    deleteLocalFile,
     showSaveDialog,
     startStreamTransfer,
     getSftpIdForConnection: sftp.getSftpIdForConnection,

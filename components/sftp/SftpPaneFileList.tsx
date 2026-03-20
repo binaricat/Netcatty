@@ -151,7 +151,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
                 {t("sftp.context.edit")}
               </ContextMenuItem>
             )}
-            {!isNavigableDirectory(entry) && onDownloadFile && (
+            {onDownloadFile &&
+              (!isNavigableDirectory(entry) || !pane.connection?.isLocal) && (
               <ContextMenuItem onClick={() => onDownloadFile(entry)}>
                 <Download size={14} className="mr-2" />{" "}
                 {t("sftp.context.download")}

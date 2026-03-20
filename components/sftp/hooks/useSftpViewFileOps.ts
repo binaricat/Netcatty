@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import type { MutableRefObject } from "react";
-import type { SftpFileEntry } from "../../../types";
+import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
+import { joinPath as joinFsPath } from "../../../application/state/sftp/utils";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { logger } from "../../../lib/logger";
 import { toast } from "../../ui/toast";
@@ -20,6 +21,9 @@ interface UseSftpViewFileOpsParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+  listSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<RemoteFile[]>;
+  mkdirLocal?: (path: string) => Promise<unknown>;
+  deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   startStreamTransfer?: (
     options: {
@@ -31,6 +35,8 @@ interface UseSftpViewFileOpsParams {
       sourceSftpId?: string;
       targetSftpId?: string;
       totalBytes?: number;
+      sourceEncoding?: SftpFilenameEncoding;
+      targetEncoding?: SftpFilenameEncoding;
     },
     onProgress?: (transferred: number, total: number, speed: number) => void,
     onComplete?: () => void,
@@ -105,6 +111,9 @@ export const useSftpViewFileOps = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
+  listSftp,
+  mkdirLocal,
+  deleteLocalFile,
   showSaveDialog,
   startStreamTransfer,
   getSftpIdForConnection,
@@ -363,10 +372,16 @@ export const useSftpViewFileOps = ({
       if (!pane.connection) return;
 
       const fullPath = sftpRef.current.joinPath(pane.connection.currentPath, file.name);
+      const isDirectory = isNavigableDirectory(file);
 
       try {
-        // For local files, use blob download
+        // For local files, use blob download.
         if (pane.connection.isLocal) {
+          if (isDirectory) {
+            toast.error(t("sftp.error.downloadFailed"), "SFTP");
+            return;
+          }
+
           const content = await sftpRef.current.readBinaryFile(side, fullPath);
 
           const blob = new Blob([content], { type: "application/octet-stream" });
@@ -383,7 +398,7 @@ export const useSftpViewFileOps = ({
           return;
         }
 
-        // For remote SFTP files, use streaming download with save dialog
+        // For remote SFTP files/directories, use streaming download with save dialog.
         if (!showSaveDialog || !startStreamTransfer || !getSftpIdForConnection) {
           toast.error(t("sftp.error.downloadFailed"), "SFTP");
           return;
@@ -392,6 +407,198 @@ export const useSftpViewFileOps = ({
         const sftpId = getSftpIdForConnection(pane.connection.id);
         if (!sftpId) {
           throw new Error("SFTP session not found");
+        }
+
+        if (isDirectory) {
+          if (!listSftp || !mkdirLocal) {
+            toast.error(t("sftp.error.downloadFailed"), "SFTP");
+            return;
+          }
+
+          const targetPath = await showSaveDialog(file.name);
+          if (!targetPath) return;
+
+          const transferId = `download-dir-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          let activeChildTransferId: string | null = null;
+          let completedBytes = 0;
+          const visitedPaths = new Set<string>();
+          const MAX_SYMLINK_DEPTH = 32;
+
+          const isTaskCancelled = () =>
+            sftpRef.current.transfers.some(
+              (task) => task.id === transferId && task.status === "cancelled",
+            );
+
+          const downloadDir = async (
+            remotePath: string,
+            localPath: string,
+            symlinkDepth = 0,
+          ): Promise<void> => {
+            if (visitedPaths.has(remotePath)) return;
+            visitedPaths.add(remotePath);
+
+            if (isTaskCancelled()) {
+              throw new Error("Transfer cancelled");
+            }
+
+            const entries = await listSftp(sftpId, remotePath, pane.filenameEncoding);
+
+            for (const entry of entries) {
+              if (entry.name === ".." || entry.name === ".") continue;
+
+              if (isTaskCancelled()) {
+                if (activeChildTransferId) {
+                  await sftpRef.current.cancelTransfer(activeChildTransferId).catch(() => undefined);
+                }
+                throw new Error("Transfer cancelled");
+              }
+
+              const remoteEntryPath = sftpRef.current.joinPath(remotePath, entry.name);
+              const localEntryPath = joinFsPath(localPath, entry.name);
+              const isRealDir = entry.type === "directory";
+              const isSymlinkDir =
+                entry.type === "symlink" && entry.linkTarget === "directory";
+
+              if (isRealDir || isSymlinkDir) {
+                if (isSymlinkDir && symlinkDepth >= MAX_SYMLINK_DEPTH) {
+                  throw new Error(
+                    "Maximum symlink directory depth exceeded (possible symlink cycle)",
+                  );
+                }
+
+                try {
+                  await mkdirLocal(localEntryPath);
+                } catch (mkdirErr: unknown) {
+                  const isEEXIST =
+                    mkdirErr instanceof Error && mkdirErr.message.includes("EEXIST");
+                  if (!isEEXIST) throw mkdirErr;
+                }
+
+                await downloadDir(
+                  remoteEntryPath,
+                  localEntryPath,
+                  isSymlinkDir ? symlinkDepth + 1 : symlinkDepth,
+                );
+                continue;
+              }
+
+              const childTransferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+              const entrySize =
+                typeof entry.size === "string"
+                  ? parseInt(String(entry.size), 10) || 0
+                  : entry.size || 0;
+
+              activeChildTransferId = childTransferId;
+
+              await new Promise<void>((resolve, reject) => {
+                startStreamTransfer(
+                  {
+                    transferId: childTransferId,
+                    sourcePath: remoteEntryPath,
+                    targetPath: localEntryPath,
+                    sourceType: "sftp",
+                    targetType: "local",
+                    sourceSftpId: sftpId,
+                    totalBytes: entrySize,
+                    sourceEncoding: pane.filenameEncoding,
+                  },
+                  (transferred, total, speed) => {
+                    if (isTaskCancelled()) {
+                      sftpRef.current.cancelTransfer(childTransferId).catch(() => undefined);
+                      return;
+                    }
+
+                    const totalProgress = completedBytes + transferred;
+                    sftpRef.current.updateExternalUpload(transferId, {
+                      transferredBytes: totalProgress,
+                      totalBytes: Math.max(totalProgress, completedBytes + total),
+                      speed: Number.isFinite(speed) && speed > 0 ? speed : 0,
+                    });
+                  },
+                  () => {
+                    completedBytes += entrySize;
+                    activeChildTransferId = null;
+                    resolve();
+                  },
+                  (error) => {
+                    activeChildTransferId = null;
+                    reject(new Error(error));
+                  },
+                )
+                  .then((result) => {
+                    if (result === undefined) {
+                      activeChildTransferId = null;
+                      reject(new Error("Stream transfer unavailable"));
+                    } else if (result.error) {
+                      activeChildTransferId = null;
+                      reject(new Error(result.error));
+                    }
+                  })
+                  .catch(reject);
+              });
+            }
+          };
+
+          sftpRef.current.addExternalUpload({
+            id: transferId,
+            fileName: file.name,
+            sourcePath: fullPath,
+            targetPath,
+            sourceConnectionId: pane.connection.id,
+            targetConnectionId: "local",
+            direction: "download",
+            status: "transferring",
+            totalBytes: 0,
+            transferredBytes: 0,
+            speed: 0,
+            startTime: Date.now(),
+            isDirectory: true,
+            retryable: false,
+          });
+
+          try {
+            try {
+              await mkdirLocal(targetPath);
+            } catch (mkdirErr: unknown) {
+              const isEEXIST =
+                mkdirErr instanceof Error && mkdirErr.message.includes("EEXIST");
+              if (isEEXIST && deleteLocalFile) {
+                await deleteLocalFile(targetPath);
+                await mkdirLocal(targetPath);
+              } else {
+                throw mkdirErr;
+              }
+            }
+
+            await downloadDir(fullPath, targetPath);
+
+            sftpRef.current.updateExternalUpload(transferId, {
+              status: "completed",
+              transferredBytes: completedBytes,
+              totalBytes: completedBytes,
+              speed: 0,
+              endTime: Date.now(),
+            });
+            toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : t("sftp.error.downloadFailed");
+            const isCancelled =
+              errorMessage.includes("cancelled") || errorMessage.includes("canceled");
+
+            sftpRef.current.updateExternalUpload(transferId, {
+              status: isCancelled ? "cancelled" : "failed",
+              error: isCancelled ? undefined : errorMessage,
+              speed: 0,
+              endTime: Date.now(),
+            });
+
+            if (!isCancelled) {
+              toast.error(errorMessage, "SFTP");
+            }
+          }
+
+          return;
         }
 
         // Show save dialog to get target path
@@ -433,6 +640,7 @@ export const useSftpViewFileOps = ({
             targetType: 'local',
             sourceSftpId: sftpId,
             totalBytes: fileSize,
+            sourceEncoding: pane.filenameEncoding,
           },
           (transferred, total, speed) => {
             // Update transfer progress in the queue
@@ -497,7 +705,16 @@ export const useSftpViewFileOps = ({
         );
       }
     },
-    [sftpRef, t, showSaveDialog, startStreamTransfer, getSftpIdForConnection],
+    [
+      sftpRef,
+      t,
+      listSftp,
+      mkdirLocal,
+      deleteLocalFile,
+      showSaveDialog,
+      startStreamTransfer,
+      getSftpIdForConnection,
+    ],
   );
 
   const onDownloadFileLeft = useCallback(
