@@ -681,6 +681,18 @@ function App({ settings }: { settings: SettingsState }) {
     });
   }, [createLocalTerminal, terminalSettings.localShell]);
 
+  const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => {
+    return splitSession(sessionId, direction, {
+      localShellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+    });
+  }, [splitSession, terminalSettings.localShell]);
+
+  const copySessionWithCurrentShell = useCallback((sessionId: string) => {
+    return copySession(sessionId, {
+      localShellType: detectConfiguredLocalShellType(terminalSettings.localShell),
+    });
+  }, [copySession, terminalSettings.localShell]);
+
   // Shared hotkey action handler - used by both global handler and terminal callback
   const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
     switch (action) {
@@ -791,7 +803,7 @@ function App({ settings }: { settings: SettingsState }) {
         const activeWs = workspaces.find(w => w.id === currentId);
         if (activeSession && !activeSession.workspaceId) {
           // Standalone session - split it
-          splitSession(activeSession.id, 'horizontal');
+          splitSessionWithCurrentShell(activeSession.id, 'horizontal');
         } else if (activeWs) {
           // In a workspace - need to determine focused session
           // For now, we'll need the terminal to handle this via context menu
@@ -806,7 +818,7 @@ function App({ settings }: { settings: SettingsState }) {
         const activeWs = workspaces.find(w => w.id === currentId);
         if (activeSession && !activeSession.workspaceId) {
           // Standalone session - split it
-          splitSession(activeSession.id, 'vertical');
+          splitSessionWithCurrentShell(activeSession.id, 'vertical');
         } else if (activeWs) {
           // In a workspace - need to determine focused session
           if (IS_DEV) console.log('[Hotkey] Split vertical in workspace - use context menu on specific terminal');
@@ -846,7 +858,7 @@ function App({ settings }: { settings: SettingsState }) {
         break;
       }
     }
-  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSession, moveFocusInWorkspace, toggleBroadcast]);
+  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSessionWithCurrentShell, moveFocusInWorkspace, toggleBroadcast]);
 
   // Callback for terminal to invoke app-level hotkey actions
   const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -1228,7 +1240,7 @@ function App({ settings }: { settings: SettingsState }) {
         isMacClient={isMacClient}
         onCloseSession={closeSession}
         onRenameSession={startSessionRename}
-        onCopySession={copySession}
+        onCopySession={copySessionWithCurrentShell}
         onRenameWorkspace={startWorkspaceRename}
         onCloseWorkspace={closeWorkspace}
         onCloseLogView={closeLogView}
@@ -1322,7 +1334,7 @@ function App({ settings }: { settings: SettingsState }) {
           onSetDraggingSessionId={setDraggingSessionId}
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
-          onSplitSession={splitSession}
+          onSplitSession={splitSessionWithCurrentShell}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
           updateHosts={updateHosts}

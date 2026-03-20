@@ -776,7 +776,7 @@ async function handleMultiExec(params) {
   } else {
     // Parallel execution with concurrency limit
     const tasks = sessionIds.map((sid) => () => {
-      return handleExec({ sessionId: sid, command }).then(result => ({
+      return Promise.resolve(handleExec({ sessionId: sid, command })).then(result => ({
         sid,
         ok: result.ok,
         output: result.ok ? (result.stdout || "(no output)") : `Error: ${result.error || result.stderr || "Failed"}`,

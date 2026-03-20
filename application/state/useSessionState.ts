@@ -418,11 +418,17 @@ export const useSessionState = () => {
   // direction: 'horizontal' = split top/bottom, 'vertical' = split left/right
   const splitSession = useCallback((
     sessionId: string,
-    direction: SplitDirection
+    direction: SplitDirection,
+    options?: {
+      localShellType?: TerminalSession['shellType'];
+    },
   ) => {
 	    setSessions(prevSessions => {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
+      const nextShellType = session.protocol === 'local'
+        ? options?.localShellType
+        : session.shellType;
       
       // If session is already in a workspace, split within that workspace
       if (session.workspaceId) {
@@ -438,7 +444,7 @@ export const useSessionState = () => {
           protocol: session.protocol,
           port: session.port,
           moshEnabled: session.moshEnabled,
-          shellType: session.shellType,
+          shellType: nextShellType,
         };
         
         // Add pane to existing workspace
@@ -469,7 +475,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
-        shellType: session.shellType,
+        shellType: nextShellType,
       };
       
       const hint: SplitHint = {
@@ -621,10 +627,15 @@ export const useSessionState = () => {
   }, [setActiveTabId]);
 
   // Copy a session - creates a new session with the same host connection
-  const copySession = useCallback((sessionId: string) => {
+  const copySession = useCallback((sessionId: string, options?: {
+    localShellType?: TerminalSession['shellType'];
+  }) => {
     setSessions(prevSessions => {
       const session = prevSessions.find(s => s.id === sessionId);
       if (!session) return prevSessions;
+      const nextShellType = session.protocol === 'local'
+        ? options?.localShellType
+        : session.shellType;
 
       // Create a new session with the same connection info
       const newSession: TerminalSession = {
@@ -637,7 +648,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
-        shellType: session.shellType,
+        shellType: nextShellType,
         serialConfig: session.serialConfig,
       };
 
