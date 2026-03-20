@@ -341,6 +341,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [sftpPendingUploadsForTab, setSftpPendingUploadsForTab] = useState<
     Map<string, PendingSftpUpload>
   >(new Map());
+  const [aiExtraSessionIdsForTab, setAiExtraSessionIdsForTab] = useState<Map<string, string[]>>(new Map());
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
 
@@ -586,7 +587,92 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpHostForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpInitialLocationForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpPendingUploadsForTab(prev => filterTabsMap(prev, validTerminalTabIds));
+    setAiExtraSessionIdsForTab(prev => filterTabsMap(prev, validTerminalTabIds));
   }, [validTerminalTabIds]);
+
+  const baseAiSessionIds = useMemo(() => {
+    if (activeWorkspace?.root) {
+      return collectSessionIds(activeWorkspace.root);
+    }
+    if (activeSession?.id) {
+      return [activeSession.id];
+    }
+    return [];
+  }, [activeWorkspace, activeSession]);
+
+  const selectedExtraAiSessionIds = useMemo(() => {
+    if (!activeTabId) return [];
+    const validSessionIds = new Set(sessions.map((session) => session.id));
+    const baseSessionIdSet = new Set(baseAiSessionIds);
+    return (aiExtraSessionIdsForTab.get(activeTabId) ?? []).filter((sessionId) => (
+      validSessionIds.has(sessionId) && !baseSessionIdSet.has(sessionId)
+    ));
+  }, [activeTabId, aiExtraSessionIdsForTab, sessions, baseAiSessionIds]);
+
+  const aiTerminalSessions = useMemo(() => {
+    const selectedSessionIds = [...baseAiSessionIds];
+    for (const sessionId of selectedExtraAiSessionIds) {
+      if (!selectedSessionIds.includes(sessionId)) {
+        selectedSessionIds.push(sessionId);
+      }
+    }
+
+    return selectedSessionIds.map((sid) => {
+      const session = sessions.find((s) => s.id === sid);
+      const host = session?.hostId ? hosts.find((h) => h.id === session.hostId) : undefined;
+      return {
+        sessionId: sid,
+        hostId: session?.hostId || '',
+        hostname: host?.hostname || session?.hostname || '',
+        label: host?.label || session?.hostLabel || '',
+        os: host?.os,
+        username: host?.username ?? session?.username,
+        connected: session?.status === 'connected',
+      };
+    });
+  }, [baseAiSessionIds, selectedExtraAiSessionIds, sessions, hosts]);
+
+  const availableAiTerminalSessions = useMemo(() => {
+    return sessions.map((session) => {
+      const host = session.hostId ? hosts.find((h) => h.id === session.hostId) : undefined;
+      return {
+        sessionId: session.id,
+        hostId: session.hostId || '',
+        hostname: host?.hostname || session.hostname || '',
+        label: host?.label || session.hostLabel || '',
+        os: host?.os,
+        username: host?.username ?? session.username,
+        connected: session.status === 'connected',
+      };
+    });
+  }, [sessions, hosts]);
+
+  const handleToggleExtraAiSession = useCallback((sessionId: string) => {
+    if (!activeTabId) return;
+    setAiExtraSessionIdsForTab((prev) => {
+      const current = prev.get(activeTabId) ?? [];
+      const nextIds = current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : [...current, sessionId];
+      const next = new Map(prev);
+      if (nextIds.length > 0) {
+        next.set(activeTabId, nextIds);
+      } else {
+        next.delete(activeTabId);
+      }
+      return next;
+    });
+  }, [activeTabId]);
+
+  const handleClearExtraAiSessions = useCallback(() => {
+    if (!activeTabId) return;
+    setAiExtraSessionIdsForTab((prev) => {
+      if (!prev.has(activeTabId)) return prev;
+      const next = new Map(prev);
+      next.delete(activeTabId);
+      return next;
+    });
+  }, [activeTabId]);
 
   const computeWorkspaceRects = useCallback((workspace?: Workspace, size?: { width: number; height: number }): Record<string, WorkspaceRect> => {
     if (!workspace) return {} as Record<string, WorkspaceRect>;
@@ -1006,28 +1092,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     cleanupOrphanedSessions(activeIds);
   }, [sessions, workspaces, cleanupOrphanedSessions]);
 
-  // Build terminal session context for the AI chat panel
-  const aiTerminalSessions = useMemo(() => {
-    const sessionIds = activeWorkspace?.root
-      ? collectSessionIds(activeWorkspace.root)
-      : activeSession ? [activeSession.id] : [];
-
-    const result = sessionIds.map(sid => {
-      const s = sessions.find(s => s.id === sid);
-      const host = s?.hostId ? hosts.find(h => h.id === s.hostId) : undefined;
-      return {
-        sessionId: sid,
-        hostId: s?.hostId || '',
-        hostname: host?.hostname || '',
-        label: host?.label || s?.hostLabel || '',
-        os: host?.os,
-        username: host?.username,
-        connected: s?.status === 'connected',
-      };
-    });
-    return result;
-  }, [sessions, hosts, activeWorkspace, activeSession]);
-
   const resolveAIExecutorContext = useCallback((scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -1042,6 +1106,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           return workspace?.root ? collectSessionIds(workspace.root) : [];
         })()
       : scope.targetId ? [scope.targetId] : [];
+
+    const extraSessionIds = (() => {
+      const targetTabId = scope.targetId;
+      if (!targetTabId) return [];
+      const raw = aiExtraSessionIdsForTab.get(targetTabId) ?? [];
+      const baseIdSet = new Set(sessionIds);
+      return raw.filter((sessionId) => !baseIdSet.has(sessionId));
+    })();
+
+    for (const sessionId of extraSessionIds) {
+      if (!sessionIds.includes(sessionId)) {
+        sessionIds.push(sessionId);
+      }
+    }
 
     const workspaceName = scope.type === 'workspace'
       ? latestWorkspaces.find((w) => w.id === scope.targetId)?.title ?? scope.label
@@ -1064,7 +1142,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
       workspaceName,
     };
-  }, []);
+  }, [aiExtraSessionIdsForTab]);
 
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();
@@ -1461,6 +1539,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         }
                         scopeLabel={activeWorkspace?.title ?? activeSession?.hostLabel ?? ''}
                         terminalSessions={aiTerminalSessions}
+                        availableTerminalSessions={availableAiTerminalSessions}
+                        extraTerminalSessionIds={selectedExtraAiSessionIds}
+                        onToggleExtraTerminalSession={handleToggleExtraAiSession}
+                        onClearExtraTerminalSessions={handleClearExtraAiSessions}
                         resolveExecutorContext={resolveAIExecutorContext}
                       />
                     </div>

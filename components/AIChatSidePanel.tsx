@@ -13,6 +13,7 @@
 import {
   History,
   Plus,
+  Server,
   Trash2,
   X,
 } from 'lucide-react';
@@ -104,6 +105,18 @@ interface AIChatSidePanelProps {
     username?: string;
     connected: boolean;
   }>;
+  availableTerminalSessions?: Array<{
+    sessionId: string;
+    hostId: string;
+    hostname: string;
+    label: string;
+    os?: string;
+    username?: string;
+    connected: boolean;
+  }>;
+  extraTerminalSessionIds?: string[];
+  onToggleExtraTerminalSession?: (sessionId: string) => void;
+  onClearExtraTerminalSessions?: () => void;
   resolveExecutorContext?: (scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -184,6 +197,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   scopeHostIds,
   scopeLabel,
   terminalSessions = [],
+  availableTerminalSessions = [],
+  extraTerminalSessionIds = [],
+  onToggleExtraTerminalSession,
+  onClearExtraTerminalSessions,
   resolveExecutorContext,
   isVisible = true,
 }) => {
@@ -200,6 +217,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   }, [scopeKey]);
 
   const [showHistory, setShowHistory] = useState(false);
+  const [showConnectionPicker, setShowConnectionPicker] = useState(false);
   const [currentAgentId, setCurrentAgentId] = useState(defaultAgentId);
 
   const { files, addFiles, removeFile, clearFiles } = useFileUpload();
@@ -328,6 +346,20 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const providerDisplayName = activeProvider?.name ?? '';
   const modelDisplayName = activeModelId || activeProvider?.defaultModel || '';
 
+  const extraSessionIdSet = useMemo(
+    () => new Set(extraTerminalSessionIds),
+    [extraTerminalSessionIds],
+  );
+  const baseSessionIdSet = useMemo(
+    () => new Set(terminalSessions.map((session) => session.sessionId)),
+    [terminalSessions],
+  );
+  const availableExtraSessions = useMemo(
+    () =>
+      availableTerminalSessions.filter((session) => !baseSessionIdSet.has(session.sessionId)),
+    [availableTerminalSessions, baseSessionIdSet],
+  );
+
   // Agent model presets for the current external agent
   const currentAgentConfig = useMemo(
     () => currentAgentId !== 'catty' ? externalAgents.find(a => a.id === currentAgentId) : undefined,
@@ -395,6 +427,19 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const handleOpenSettings = useCallback(() => {
     void openSettingsWindow();
   }, [openSettingsWindow]);
+
+  const handleToggleConnectionPicker = useCallback(() => {
+    setShowConnectionPicker((prev) => !prev);
+  }, []);
+
+  const handleToggleExtraSession = useCallback((sessionId: string) => {
+    onToggleExtraTerminalSession?.(sessionId);
+  }, [onToggleExtraTerminalSession]);
+
+  const handleClearExtraSessions = useCallback(() => {
+    onClearExtraTerminalSessions?.();
+    setShowConnectionPicker(false);
+  }, [onClearExtraTerminalSessions]);
 
   // -------------------------------------------------------------------
   // Shared helpers for handleSend sub-flows
@@ -613,6 +658,123 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           onManageAgents={handleOpenSettings}
         />
         <div className="flex items-center gap-0.5">
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 rounded-md px-2 text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
+              onClick={handleToggleConnectionPicker}
+              title={t('ai.chat.connections')}
+            >
+              <Server size={13} />
+              <span className="max-w-[74px] truncate text-[11px]">
+                {terminalSessions.length}
+                {extraTerminalSessionIds.length > 0 ? ` +${extraTerminalSessionIds.length}` : ''}
+              </span>
+            </Button>
+            {showConnectionPicker && (
+              <>
+                <div
+                  className="fixed inset-0 z-[40]"
+                  onClick={() => setShowConnectionPicker(false)}
+                />
+                <div className="absolute right-0 top-9 z-[41] w-72 rounded-lg border border-border/60 bg-popover p-2 shadow-xl">
+                  <div className="px-2 pb-2">
+                    <div className="text-xs font-medium text-foreground/85">
+                      {t('ai.chat.connections')}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground/70">
+                      {t('ai.chat.connectionsHint')}
+                    </div>
+                  </div>
+
+                  <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground/55">
+                    {t('ai.chat.currentScope')}
+                  </div>
+                  <div className="space-y-1 px-1 pb-2">
+                    {terminalSessions.map((session) => (
+                      <div
+                        key={session.sessionId}
+                        className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-2 py-1.5"
+                      >
+                        <span className={cn(
+                          'h-2 w-2 shrink-0 rounded-full',
+                          session.connected ? 'bg-green-500' : 'bg-muted-foreground/35',
+                        )}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[12px] text-foreground/85">
+                            {session.label || session.hostname}
+                          </div>
+                          <div className="truncate text-[10px] text-muted-foreground/65">
+                            {session.hostname}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between px-2 pb-1 pt-1">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground/55">
+                      {t('ai.chat.additionalConnections')}
+                    </div>
+                    {extraTerminalSessionIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearExtraSessions}
+                        className="text-[10px] text-muted-foreground/70 hover:text-foreground"
+                      >
+                        {t('ai.chat.clearConnections')}
+                      </button>
+                    )}
+                  </div>
+                  <ScrollArea className="max-h-56">
+                    <div className="space-y-1 px-1">
+                      {availableExtraSessions.length > 0 ? availableExtraSessions.map((session) => {
+                        const isSelected = extraSessionIdSet.has(session.sessionId);
+                        return (
+                          <button
+                            key={session.sessionId}
+                            type="button"
+                            onClick={() => handleToggleExtraSession(session.sessionId)}
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors',
+                              isSelected ? 'bg-primary/12 text-foreground' : 'hover:bg-muted/30 text-foreground/82',
+                            )}
+                          >
+                            <span className={cn(
+                              'h-2 w-2 shrink-0 rounded-full',
+                              session.connected ? 'bg-green-500' : 'bg-muted-foreground/35',
+                            )}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate">{session.label || session.hostname}</div>
+                              <div className="truncate text-[10px] text-muted-foreground/65">
+                                {session.hostname}
+                              </div>
+                            </div>
+                            <div className={cn(
+                              'flex h-4 w-4 items-center justify-center rounded border text-[10px]',
+                              isSelected
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : 'border-border/60 text-transparent',
+                            )}
+                            >
+                              ✓
+                            </div>
+                          </button>
+                        );
+                      }) : (
+                        <div className="px-2 py-3 text-[11px] text-muted-foreground/65">
+                          {t('ai.chat.noAdditionalConnections')}
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </>
+            )}
+          </div>
           <ConversationExport
             session={activeSession}
             onExport={handleExport}

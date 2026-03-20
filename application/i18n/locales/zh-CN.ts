@@ -1641,6 +1641,12 @@ const zhCN: Messages = {
   'ai.chat.menuFiles': '文件',
   'ai.chat.menuImage': '图片',
   'ai.chat.menuMentionHost': '提及主机',
+  'ai.chat.connections': '连接',
+  'ai.chat.connectionsHint': '把额外的已打开终端连接一起提供给 AI。',
+  'ai.chat.currentScope': '当前范围',
+  'ai.chat.additionalConnections': '附加连接',
+  'ai.chat.clearConnections': '清空',
+  'ai.chat.noAdditionalConnections': '当前没有其他可供加入的已打开终端连接。',
 
   // AI Error
   'ai.codex.bridgeError': 'Codex 主进程处理器尚未加载。请完全重启 Netcatty 或重启 Electron 开发进程，然后重试。',
