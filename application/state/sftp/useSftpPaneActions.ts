@@ -226,16 +226,7 @@ export const useSftpPaneActions = ({
           const sftpId = sftpSessionsRef.current.get(pane.connection.id);
           if (!sftpId) {
             clearCacheForConnection(pane.connection.id);
-            updateTab(side, targetTabId, (prev) => ({
-              ...prev,
-              connection: null,
-              files: [],
-              loading: false,
-              reconnecting: false,
-              error: "SFTP session lost. Please reconnect.",
-              selectedFiles: new Set(),
-              filter: "",
-            }));
+            handleSessionError(side, new Error("SFTP session lost"));
             return;
           }
 
@@ -245,16 +236,7 @@ export const useSftpPaneActions = ({
             if (isSessionError(err)) {
               sftpSessionsRef.current.delete(pane.connection.id);
               clearCacheForConnection(pane.connection.id);
-              updateTab(side, targetTabId, (prev) => ({
-                ...prev,
-                connection: null,
-                files: [],
-                loading: false,
-                reconnecting: false,
-                error: "SFTP session expired. Please reconnect.",
-                selectedFiles: new Set(),
-                filter: "",
-              }));
+              handleSessionError(side, err as Error);
               return;
             }
             throw err as Error;
@@ -363,6 +345,7 @@ export const useSftpPaneActions = ({
       listRemoteFiles,
       sftpSessionsRef,
       clearCacheForConnection,
+      handleSessionError,
       isSessionError,
     ],
   );
