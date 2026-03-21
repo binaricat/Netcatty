@@ -218,7 +218,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (!connectedProvider) return;
     
     try {
-      console.log('[AutoSync] Checking remote version...');
       // Load base BEFORE downloading (downloadFromProvider overwrites the base)
       const base = await manager.loadSyncBase(connectedProvider);
       const remotePayload = await sync.downloadFromProvider(connectedProvider);
@@ -228,7 +227,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         const localPayload = buildPayload();
         const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
 
-        console.log('[AutoSync] Remote is newer, merged:', mergeResult.summary);
         config.onApplyPayload(mergeResult.payload);
         // Don't save base or skip auto-sync — let the data-change effect
         // naturally trigger an upload of the merged payload (which will
@@ -282,7 +280,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     
     // Debounce sync by 3 seconds
     syncTimeoutRef.current = setTimeout(() => {
-      console.log('[AutoSync] Data changed, syncing...');
       syncNow();
     }, 3000);
     

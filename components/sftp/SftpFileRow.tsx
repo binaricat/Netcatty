@@ -47,7 +47,6 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
         onSelect(entry, index, e);
     }, [entry, index, onSelect]);
     const handleOpen = useCallback(() => {
-        console.log("[SftpFileRow] handleOpen called", { entryName: entry.name, entryType: entry.type });
         onOpen(entry);
     }, [entry, onOpen]);
     const handleDragStart = useCallback((e: React.DragEvent) => {

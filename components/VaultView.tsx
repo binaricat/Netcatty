@@ -571,7 +571,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
         if (isManaged && (newHosts.length > 0 || updatedExistingHosts.length > 0)) {
           const sourceId = crypto.randomUUID();
-          console.log('[Import] File path resolved:', filePath);
           const newSource: ManagedSource = {
             id: sourceId,
             type: "ssh_config",

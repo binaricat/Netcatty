@@ -119,18 +119,14 @@ export default function SettingsTerminalTab(props: {
   const handleImportItermcolors = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) {
-      console.log('[Settings] No file selected');
       return;
     }
-    console.log('[Settings] File selected:', file.name, 'size:', file.size);
     const name = file.name.replace(/\.(itermcolors|xml)$/i, '');
     const reader = new FileReader();
     reader.onload = () => {
       const xml = reader.result as string;
-      console.log('[Settings] File read successfully, length:', xml.length);
       const parsed = parseItermcolors(xml, name);
       if (parsed) {
-        console.log('[Settings] Theme parsed successfully:', parsed.id, parsed.name);
         customThemeStore.addTheme(parsed);
         setTerminalThemeId(parsed.id);
       } else {

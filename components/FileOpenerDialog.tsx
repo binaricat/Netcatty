@@ -45,7 +45,6 @@ export const FileOpenerDialog: React.FC<FileOpenerDialogProps> = ({
     try {
       const result = await onSelectSystemApp();
       if (result) {
-        console.log('[FileOpenerDialog] Calling onSelect with rememberChoice:', rememberChoice, 'result:', result);
         onSelect('system-app', rememberChoice, result);
         onClose();
       }

@@ -411,7 +411,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 ) : (
                     <Button
                         size="sm"
-                        onClick={() => { console.log('[ProviderCard] Connect clicked'); onConnect(); }}
+                        onClick={() => { onConnect(); }}
                         className="gap-1"
                         disabled={disabled || isConnecting}
                     >
@@ -689,15 +689,6 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
         }
     };
 
-    // Debug: log provider states
-    console.log('[SyncDashboard] Provider states:', {
-        github: sync.providers.github.status,
-        google: sync.providers.google.status,
-        onedrive: sync.providers.onedrive.status,
-        webdav: sync.providers.webdav.status,
-        s3: sync.providers.s3.status,
-    });
-
     // GitHub Device Flow state
     const [showGitHubModal, setShowGitHubModal] = useState(false);
     const [gitHubUserCode, setGitHubUserCode] = useState('');
@@ -789,12 +780,9 @@ export const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
     // Connect GitHub (disconnect others first - single provider only)
     const handleConnectGitHub = async () => {
-        console.log('[CloudSync] handleConnectGitHub called');
         try {
             await disconnectOtherProviders('github');
-            console.log('[CloudSync] Calling sync.connectGitHub()...');
             const deviceFlow = await sync.connectGitHub();
-            console.log('[CloudSync] Device flow received:', deviceFlow.userCode);
             setGitHubUserCode(deviceFlow.userCode);
             setGitHubVerificationUri(deviceFlow.verificationUri);
             setShowGitHubModal(true);

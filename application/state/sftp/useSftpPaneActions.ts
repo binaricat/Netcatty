@@ -116,8 +116,6 @@ export const useSftpPaneActions = ({
       path: string,
       options?: { force?: boolean; tabId?: string },
     ) => {
-      console.log("[SFTP navigateTo] called", { side, path, force: options?.force, tabId: options?.tabId });
-
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
       // When tabId is specified, target that specific tab instead of the active one.
       // This allows refreshing a background tab (e.g. after a transfer completes
@@ -127,15 +125,7 @@ export const useSftpPaneActions = ({
         ? sideTabs.tabs.find((t) => t.id === options.tabId) ?? null
         : getActivePane(side);
 
-      console.log("[SFTP navigateTo] state check", {
-        paneId: pane?.id,
-        hasConnection: !!pane?.connection,
-        targetTabId,
-        currentPath: pane?.connection?.currentPath,
-      });
-
       if (!pane?.connection || !targetTabId) {
-        console.log("[SFTP navigateTo] No pane/connection/targetTabId, returning early");
         return;
       }
 
@@ -151,7 +141,6 @@ export const useSftpPaneActions = ({
         Date.now() - cached.timestamp < dirCacheTtlMs &&
         cached.files
       ) {
-        console.log("[SFTP navigateTo] Using cached files for path", { path, cacheKey });
         tabNavSeqRef.current.set(targetTabId, requestId);
         lastConfirmedRef.current.set(targetTabId, {
           connectionId,
@@ -185,7 +174,6 @@ export const useSftpPaneActions = ({
         return;
       }
 
-      console.log("[SFTP navigateTo] Fetching files from server for path", { path });
       // Re-seed confirmed state whenever the pane is settled (not loading), or
       // when the connection has changed. This captures post-mutation state from
       // optimistic updates (e.g. deleteFilesAtPath) so that a failed refresh
@@ -395,42 +383,24 @@ export const useSftpPaneActions = ({
 
   const openEntry = useCallback(
     async (side: "left" | "right", entry: SftpFileEntry) => {
-      console.log("[SFTP openEntry] called", { side, entryName: entry.name, entryType: entry.type });
-
       const pane = getActivePane(side);
-      console.log("[SFTP openEntry] getActivePane result", {
-        paneId: pane?.id,
-        hasConnection: !!pane?.connection,
-        currentPath: pane?.connection?.currentPath,
-      });
 
       if (!pane?.connection) {
-        console.log("[SFTP openEntry] No pane or connection, returning early");
         return;
       }
 
       if (entry.name === "..") {
         const currentPath = pane.connection.currentPath;
         const isAtRoot = currentPath === "/" || isWindowsRoot(currentPath);
-        console.log("[SFTP openEntry] Navigating up from '..'", {
-          currentPath,
-          isAtRoot,
-          isWindowsRoot: isWindowsRoot(currentPath),
-        });
-
         if (!isAtRoot) {
           const parentPath = getParentPath(currentPath);
-          console.log("[SFTP openEntry] Calculated parent path", { currentPath, parentPath });
           await navigateTo(side, parentPath);
-        } else {
-          console.log("[SFTP openEntry] Already at root, not navigating");
         }
         return;
       }
 
       if (isNavigableDirectory(entry)) {
         const newPath = joinPath(pane.connection.currentPath, entry.name);
-        console.log("[SFTP openEntry] Navigating into directory", { currentPath: pane.connection.currentPath, entryName: entry.name, newPath });
         await navigateTo(side, newPath);
       }
     },

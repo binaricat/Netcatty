@@ -25,7 +25,6 @@ let snapshotRef: { associations: FileAssociationsMap } = { associations: {} };
 
 function loadFromStorage(): FileAssociationsMap {
   const stored = localStorageAdapter.read<FileAssociationsMap>(STORAGE_KEY_SFTP_FILE_ASSOCIATIONS);
-  console.log('[SftpFileAssociations] Loading from storage:', stored);
   if (stored) {
     const migrated: FileAssociationsMap = {};
     for (const [ext, value] of Object.entries(stored)) {
@@ -35,7 +34,6 @@ function loadFromStorage(): FileAssociationsMap {
         migrated[ext] = value as FileAssociationEntry;
       }
     }
-    console.log('[SftpFileAssociations] Migrated associations:', migrated);
     return migrated;
   }
   return {};
@@ -45,19 +43,13 @@ function loadFromStorage(): FileAssociationsMap {
 snapshotRef = { associations: loadFromStorage() };
 
 function saveToStorage(associations: FileAssociationsMap) {
-  console.log('[SftpFileAssociations] saveToStorage called with:', associations);
   localStorageAdapter.write(STORAGE_KEY_SFTP_FILE_ASSOCIATIONS, associations);
-  // Verify it was saved
-  const verify = localStorageAdapter.read(STORAGE_KEY_SFTP_FILE_ASSOCIATIONS);
-  console.log('[SftpFileAssociations] Verification read from storage:', verify);
 }
 
 function updateAssociations(newAssociations: FileAssociationsMap) {
-  console.log('[SftpFileAssociations] Updating associations:', newAssociations);
   // Create new reference so useSyncExternalStore detects change
   snapshotRef = { associations: newAssociations };
   saveToStorage(newAssociations);
-  console.log('[SftpFileAssociations] Notifying', subscribers.size, 'subscribers');
   subscribers.forEach(callback => callback());
 }
 
@@ -101,8 +93,6 @@ export function useSftpFileAssociations() {
     openerType: FileOpenerType,
     systemApp?: SystemAppInfo
   ) => {
-    console.log('[SftpFileAssociations] setOpenerForExtension called with:', { extension, openerType, systemApp });
-    console.log('[SftpFileAssociations] Current associations before update:', snapshotRef.associations);
     updateAssociations({
       ...snapshotRef.associations,
       [extension.toLowerCase()]: { openerType, systemApp },
@@ -122,13 +112,11 @@ export function useSftpFileAssociations() {
    * Get all associations as an array
    */
   const getAllAssociations = useCallback((): FileAssociation[] => {
-    const result = Object.entries(associations).map(([extension, entry]: [string, FileAssociationEntry]) => ({
+    return Object.entries(associations).map(([extension, entry]: [string, FileAssociationEntry]) => ({
       extension,
       openerType: entry.openerType,
       systemApp: entry.systemApp,
     }));
-    console.log('[SftpFileAssociations] getAllAssociations called, returning', result.length, 'items:', result);
-    return result;
   }, [associations]);
 
   /**

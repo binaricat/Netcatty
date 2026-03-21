@@ -216,9 +216,7 @@ export const useSftpBackend = () => {
     }
     
     // Download the file to temp
-    console.log("[SFTPBackend] Downloading file to temp", { sftpId, remotePath, fileName });
     const tempPath = await bridge.downloadSftpToTemp(sftpId, remotePath, fileName, options?.encoding);
-    console.log("[SFTPBackend] File downloaded to temp", { tempPath });
     
     // Register temp file for cleanup when SFTP session closes (regardless of auto-sync setting)
     if (bridge.registerTempFile) {
@@ -230,25 +228,18 @@ export const useSftpBackend = () => {
     }
     
     // Open with the selected application
-    console.log("[SFTPBackend] Opening with application", { tempPath, appPath });
     await bridge.openWithApplication(tempPath, appPath);
-    console.log("[SFTPBackend] Application launched");
     
     // Start file watching if enabled
     let watchId: string | undefined;
-    console.log("[SFTPBackend] Auto-sync enabled check", { enableWatch: options?.enableWatch, hasStartFileWatch: !!bridge.startFileWatch });
     if (options?.enableWatch && bridge.startFileWatch) {
       try {
-        console.log("[SFTPBackend] Starting file watch", { tempPath, remotePath, sftpId });
         const result = await bridge.startFileWatch(tempPath, remotePath, sftpId, options?.encoding);
         watchId = result.watchId;
-        console.log("[SFTPBackend] File watch started successfully", { watchId, tempPath, remotePath });
       } catch (err) {
         console.warn("[SFTPBackend] Failed to start file watch:", err);
         // Don't fail the operation if watching fails
       }
-    } else {
-      console.log("[SFTPBackend] File watching not enabled or not available");
     }
     
     return { localTempPath: tempPath, watchId };

@@ -27,9 +27,6 @@ export class KeywordHighlighter implements IDisposable {
   constructor(term: XTerm) {
     this.term = term;
 
-    // Debug logging
-    console.log('[KeywordHighlighter] Initialized');
-
     // Hook into terminal events to trigger highlighting
     this.disposables.push(
       // When user scrolls, refresh visible area

@@ -52,35 +52,27 @@ export const joinPath = (base: string, name: string): string => {
 };
 
 export const getParentPath = (path: string): string => {
-  console.log("[SFTP getParentPath] input", { path, isWindows: isWindowsPath(path) });
-
   if (isWindowsPath(path)) {
     const normalized = normalizeWindowsRoot(path).replace(/[\\]+$/, "");
     const drive = normalized.slice(0, 2);
     if (/^[A-Za-z]:$/.test(normalized) || /^[A-Za-z]:\\$/.test(normalized)) {
-      console.log("[SFTP getParentPath] Windows root, returning", { result: `${drive}\\` });
       return `${drive}\\`;
     }
     const rest = normalized.slice(2).replace(/^[\\]+/, "");
     const parts = rest ? rest.split(/[\\]+/).filter(Boolean) : [];
     if (parts.length <= 1) {
-      console.log("[SFTP getParentPath] Windows near root, returning", { result: `${drive}\\` });
       return `${drive}\\`;
     }
     parts.pop();
     const result = `${drive}\\${parts.join("\\")}`;
-    console.log("[SFTP getParentPath] Windows result", { result });
     return result;
   }
   if (path === "/") {
-    console.log("[SFTP getParentPath] Unix root, returning /");
     return "/";
   }
   const parts = path.split("/").filter(Boolean);
-  console.log("[SFTP getParentPath] Unix parts before pop", { parts: [...parts] });
   parts.pop();
   const result = parts.length ? `/${parts.join("/")}` : "/";
-  console.log("[SFTP getParentPath] Unix result", { result, partsAfterPop: parts });
   return result;
 };
 

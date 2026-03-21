@@ -103,8 +103,6 @@ export const useManagedSourceSync = ({
 
   const writeSshConfigToFile = useCallback(
     async (source: ManagedSource, managedHosts: Host[]) => {
-      console.log(`[ManagedSourceSync] writeSshConfigToFile called for ${source.groupName}, hosts:`, managedHosts.length);
-
       const bridge = netcattyBridge.get();
       if (!bridge?.writeLocalFile) {
         console.warn("[ManagedSourceSync] writeLocalFile not available");
@@ -121,14 +119,9 @@ export const useManagedSourceSync = ({
           managedHosts,
           hosts,
         );
-        console.log(`[ManagedSourceSync] Final content (${finalContent.length} chars)`);
-
         const encoder = new TextEncoder();
         const buffer = encoder.encode(finalContent);
-        console.log(`[ManagedSourceSync] Writing to ${source.filePath}`);
-
         await bridge.writeLocalFile(source.filePath, buffer.buffer as ArrayBuffer);
-        console.log(`[ManagedSourceSync] Write successful`);
         return true;
       } catch (err) {
         console.error("[ManagedSourceSync] Failed to write SSH config:", err);
@@ -159,12 +152,8 @@ export const useManagedSourceSync = ({
   // This should be called before deleting a managed group to avoid stale entries
   const clearAndRemoveSource = useCallback(
     async (source: ManagedSource) => {
-      console.log(`[ManagedSourceSync] Clearing managed block for ${source.groupName}`);
       // Write empty hosts list to clear the managed block
       const success = await writeSshConfigToFile(source, []);
-      if (success) {
-        console.log(`[ManagedSourceSync] Managed block cleared, removing source`);
-      }
       // Remove the source regardless of write success
       const updatedSources = managedSourcesRef.current.filter((s) => s.id !== source.id);
       onUpdateManagedSources(updatedSources);
@@ -179,18 +168,13 @@ export const useManagedSourceSync = ({
     async (sources: ManagedSource[]) => {
       if (sources.length === 0) return;
 
-      console.log(`[ManagedSourceSync] Clearing ${sources.length} managed blocks`);
-
       // Clear all files in parallel
-      const results = await Promise.all(
+      await Promise.all(
         sources.map(async (source) => {
           const success = await writeSshConfigToFile(source, []);
           return { sourceId: source.id, success };
         })
       );
-
-      const successCount = results.filter(r => r.success).length;
-      console.log(`[ManagedSourceSync] Cleared ${successCount}/${sources.length} managed blocks`);
 
       // Remove all sources atomically in a single update
       const sourceIdsToRemove = new Set(sources.map(s => s.id));
@@ -273,8 +257,6 @@ export const useManagedSourceSync = ({
         const prevManaged = prevHostsBySource.get(source.id) || [];
         const currManaged = currHostsBySource.get(source.id) || [];
 
-        console.log(`[ManagedSourceSync] Source ${source.groupName}: prev=${prevManaged.length}, curr=${currManaged.length}`);
-
         if (prevManaged.length !== currManaged.length) {
           changedSourceIds.add(source.id);
           continue;
@@ -328,7 +310,6 @@ export const useManagedSourceSync = ({
     }
 
     if (changedSourceIds.size > 0) {
-      console.log(`[ManagedSourceSync] Syncing sources:`, Array.from(changedSourceIds));
       syncInProgressRef.current = true;
 
       Promise.all(

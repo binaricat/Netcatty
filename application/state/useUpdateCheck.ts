@@ -16,12 +16,8 @@ const STARTUP_CHECK_DELAY_MS = 8000;
 const IS_UPDATE_DEMO_MODE = typeof window !== 'undefined' && 
   window.localStorage?.getItem('debug.updateDemo') === '1';
 
-// Debug logging for update checks
-const debugLog = (...args: unknown[]) => {
-  if (IS_UPDATE_DEMO_MODE || (typeof window !== 'undefined' && window.localStorage?.getItem('debug.updateCheck') === '1')) {
-    console.log('[UpdateCheck]', ...args);
-  }
-};
+// Debug logging for update checks (no-op in production)
+const debugLog = (..._args: unknown[]) => {};
 
 export type AutoDownloadStatus = 'idle' | 'downloading' | 'ready' | 'error';
 

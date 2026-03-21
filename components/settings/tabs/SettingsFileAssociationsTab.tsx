@@ -33,9 +33,6 @@ export default function SettingsFileAssociationsTab() {
   const associations = getAllAssociations();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
 
-  // Debug log for Settings page
-  console.log('[SettingsFileAssociationsTab] Rendering with', associations.length, 'associations:', associations);
-
   const handleRemove = useCallback((extension: string) => {
     if (confirm(t('settings.sftpFileAssociations.removeConfirm', { ext: extension === 'file' ? t('sftp.opener.noExtension') : extension }))) {
       removeAssociation(extension);

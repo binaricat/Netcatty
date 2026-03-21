@@ -427,15 +427,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     try {
       const termEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
 
-      // DEBUG: Log key info for troubleshooting
-      console.log("[Terminal] Starting SSH session with key info:", {
-        keyId: key?.id,
-        keyLabel: key?.label,
-        keySource: key?.source,
-        hasPublicKey: !!key?.publicKey,
-        hasPrivateKey: !!key?.privateKey,
-      });
-
       const startAttempt = async (attempt: {
         password?: string;
         key?: SSHKey;
