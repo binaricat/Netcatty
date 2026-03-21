@@ -262,27 +262,15 @@ export const useSftpPaneActions = ({
         }
 
         if (navSeqRef.current[side] !== requestId) {
-          // Another navigation on this side superseded this request.
-          // Only restore if no newer navigation has occurred on this specific tab
-          // AND the tab still belongs to the same connection (connect/disconnect
-          // bump navSeqRef but not tabNavSeqRef).
+          // Side-level sequence was bumped by another tab's navigation or
+          // a connect/disconnect. Check if THIS tab's request is still current.
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
+            // This tab also has a newer navigation — drop completely.
             return;
           }
-          updateTab(side, targetTabId, (prev) => {
-            if (prev.connection?.id !== connectionId) {
-              // Tab was reconnected or disconnected; don't restore stale state.
-              return prev;
-            }
-            return {
-              ...prev,
-              connection: { ...prev.connection, currentPath: previousPath },
-              files: previousFiles,
-              selectedFiles: previousSelection,
-              loading: false,
-            };
-          });
-          return;
+          // Side was superseded by another tab, but this tab's request is
+          // still current. The fetched files are valid — fall through to
+          // apply them instead of restoring previousPath.
         }
 
         dirCacheRef.current.set(cacheKey, {
@@ -319,19 +307,8 @@ export const useSftpPaneActions = ({
           if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
             return;
           }
-          updateTab(side, targetTabId, (prev) => {
-            if (prev.connection?.id !== connectionId) {
-              return prev;
-            }
-            return {
-              ...prev,
-              connection: { ...prev.connection, currentPath: previousPath },
-              files: previousFiles,
-              selectedFiles: previousSelection,
-              loading: false,
-            };
-          });
-          return;
+          // Side superseded by another tab, but this tab's request is
+          // current — fall through to show the error on this tab.
         }
         updateTab(side, targetTabId, (prev) => {
           if (prev.connection?.id !== connectionId) {

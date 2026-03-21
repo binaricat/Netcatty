@@ -302,10 +302,13 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       return;
     }
 
-    // Create a new tab when there's already an active connection to a different
-    // host, so the previous tab is preserved for instant switching on focus change.
+    // Create a new tab when there's already an active connection, so the
+    // previous tab is preserved for instant switching on focus change.
+    // This covers both different hosts AND same host with different
+    // session-time overrides (port/protocol), preventing the old SFTP
+    // session from being closed while it may have in-flight transfers.
     const currentConn = s.leftPane.connection;
-    const needsNewTab = !!(currentConn && currentConn.status === "connected" && currentConn.hostId !== activeHost.id);
+    const needsNewTab = !!(currentConn && currentConn.status === "connected");
 
     connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
