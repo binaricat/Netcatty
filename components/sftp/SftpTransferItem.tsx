@@ -39,6 +39,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const { t } = useI18n();
     const hasKnownTotal = task.totalBytes > 0;
     const progress = task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0;
+    // Show indeterminate state when transferring but no real progress received yet
+    const isIndeterminate = task.status === 'transferring' && hasKnownTotal && task.transferredBytes === 0;
 
     // Calculate remaining time from backend-reported sliding-window speed
     const remainingBytes = task.totalBytes - task.transferredBytes;
@@ -82,10 +84,10 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                     <span className="text-[13px] leading-5 truncate font-medium">{task.fileName}</span>
-                    {task.status === 'transferring' && speedFormatted && (
+                    {task.status === 'transferring' && !isIndeterminate && speedFormatted && (
                         <span className="text-[10px] text-primary/80 font-mono transition-opacity duration-300">{speedFormatted}</span>
                     )}
-                    {task.status === 'transferring' && remainingFormatted && (
+                    {task.status === 'transferring' && !isIndeterminate && remainingFormatted && (
                         <span className="text-[10px] text-muted-foreground transition-opacity duration-300">{remainingFormatted}</span>
                     )}
                 </div>
@@ -106,10 +108,12 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                                     "h-full rounded-full relative overflow-hidden",
                                     task.status === 'pending' || (task.status === 'transferring' && !hasKnownTotal)
                                         ? "bg-muted-foreground/50 animate-pulse"
-                                        : "bg-gradient-to-r from-primary via-primary/90 to-primary"
+                                        : isIndeterminate
+                                            ? "bg-primary/60 animate-pulse"
+                                            : "bg-gradient-to-r from-primary via-primary/90 to-primary"
                                 )}
                                 style={{
-                                    width: task.status === 'pending' || (task.status === 'transferring' && !hasKnownTotal)
+                                    width: task.status === 'pending' || (task.status === 'transferring' && !hasKnownTotal) || isIndeterminate
                                         ? '100%'
                                         : `${progress}%`,
                                     transition: 'width 150ms ease-out'
@@ -130,9 +134,11 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         <span className="text-[10px] text-muted-foreground shrink-0 min-w-[34px] text-right font-mono">
                             {task.status === 'pending'
                                 ? 'waiting...'
-                                : hasKnownTotal
-                                    ? `${Math.round(progress)}%`
-                                    : '...'}
+                                : isIndeterminate
+                                    ? t('sftp.transfer.preparing', 'preparing...')
+                                    : hasKnownTotal
+                                        ? `${Math.round(progress)}%`
+                                        : '...'}
                         </span>
                     </div>
                 )}

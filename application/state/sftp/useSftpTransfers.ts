@@ -222,18 +222,11 @@ export const useSftpTransfers = ({
           targetEncoding: targetIsLocal ? undefined : targetEncoding,
         };
 
-        let receivedFirstProgress = false;
         const onProgress = (
           transferred: number,
           total: number,
           speed: number,
         ) => {
-          // Stop simulated progress on the first real progress update
-          if (!receivedFirstProgress) {
-            receivedFirstProgress = true;
-            stopProgressSimulation(task.id);
-          }
-
           // Bubble up streaming progress to parent (for directory transfers)
           onStreamProgress?.(transferred, total, speed);
 
@@ -242,9 +235,11 @@ export const useSftpTransfers = ({
               if (t.id !== task.id) return t;
               if (t.status === "cancelled") return t;
               const normalizedTotal = total > 0 ? total : t.totalBytes;
-              const normalizedTransferred = Math.max(
-                t.transferredBytes,
-                Math.min(transferred, normalizedTotal > 0 ? normalizedTotal : transferred),
+              // Use backend-reported values directly. The backend already
+              // enforces monotonic progress via its own normalization.
+              const normalizedTransferred = Math.min(
+                transferred,
+                normalizedTotal > 0 ? normalizedTotal : transferred,
               );
               return {
                 ...t,
@@ -525,12 +520,10 @@ export const useSftpTransfers = ({
         startTime: Date.now(),
       });
 
-      // Always start simulated progress so the bar moves immediately
-      // during setup (channel acquisition, conflict check, etc.).
-      // For streaming transfers, the simulation is stopped as soon as
-      // the first real progress arrives; for non-streaming it runs
-      // throughout the transfer.
-      if (!task.isDirectory) {
+      // Only simulate progress for non-streaming transfers where we have
+      // no real progress callback. Streaming transfers use an indeterminate
+      // progress bar during setup, then switch to real progress.
+      if (!hasStreamingTransfer && !task.isDirectory) {
         useSimulatedProgress = true;
         startProgressSimulation(task.id, estimatedSize);
       }
