@@ -1102,10 +1102,15 @@ export class CloudSyncManager {
       if (checkResult.conflict && checkResult.remoteFile) {
         // Remote is newer — attempt three-way merge instead of blocking
         try {
-          const remotePayload = await EncryptionService.decryptPayload(
-            checkResult.remoteFile,
-            this.masterPassword,
-          );
+          let remotePayload: SyncPayload;
+          try {
+            remotePayload = await EncryptionService.decryptPayload(
+              checkResult.remoteFile,
+              this.masterPassword,
+            );
+          } catch (decryptError) {
+            throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
+          }
           const base = await this.loadSyncBase(provider);
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
@@ -1239,13 +1244,23 @@ export class CloudSyncManager {
     const adapter = await this.getConnectedAdapter(provider);
 
     try {
-      const remoteFile = await adapter.download();
+      let remoteFile: SyncedFile | null;
+      try {
+        remoteFile = await adapter.download();
+      } catch (downloadError) {
+        throw new Error(`Download failed: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
+      }
       if (!remoteFile) {
         return null;
       }
 
       // Decrypt
-      const payload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
+      let payload: SyncPayload;
+      try {
+        payload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
+      } catch (decryptError) {
+        throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
+      }
 
       // Update local tracking
       this.state.localVersion = remoteFile.meta.version;
