@@ -195,16 +195,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // correctly identify tabs when the same host ID has different overrides.
   const tabConnectionKeyMapRef = useRef<Map<string, string>>(new Map());
   const pendingConnectionKeyRef = useRef<string | null>(null);
-  const prevIsVisibleRef = useRef(isVisible);
 
-  // Reset location guard when the panel is reopened so the terminal cwd
-  // is re-applied even if it matches the previous session's path.
-  useEffect(() => {
-    if (isVisible && !prevIsVisibleRef.current) {
-      lastAppliedInitialLocationKeyRef.current = null;
-    }
-    prevIsVisibleRef.current = isVisible;
-  }, [isVisible]);
+  // NOTE: We intentionally do NOT reset lastAppliedInitialLocationKeyRef on
+  // visibility changes. When the user switches terminal tabs, the panel
+  // toggles isVisible but should preserve its navigation state (the user may
+  // have navigated away from initialLocation). When the panel is truly
+  // closed, the component unmounts and all refs are naturally reset.
 
   // Navigate SFTP to the terminal's current working directory
   const handleGoToTerminalCwd = useCallback(async () => {
