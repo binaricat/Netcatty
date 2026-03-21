@@ -20,7 +20,7 @@ export type { UploadResult };
 
 interface UseSftpExternalOperationsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
-  refresh: (side: "left" | "right") => Promise<void>;
+  refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
   clearDirCacheEntry?: (connectionId: string, path: string) => void;
@@ -524,6 +524,7 @@ export const useSftpExternalOperations = (
         throw new Error("SFTP session not found");
       }
 
+      const uploadPaneId = pane.id;
       // Create a new upload controller for this upload
       const controller = new UploadController();
       uploadControllerRef.current = controller;
@@ -550,7 +551,7 @@ export const useSftpExternalOperations = (
           controller
         );
 
-        await refresh(side);
+        await refresh(side, { tabId: uploadPaneId });
         return results;
       } catch (error) {
         logger.error("[SFTP] Upload failed:", error);

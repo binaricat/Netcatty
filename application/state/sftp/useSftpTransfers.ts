@@ -14,7 +14,7 @@ import { joinPath } from "./utils";
 
 interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
-  refresh: (side: "left" | "right") => Promise<void>;
+  refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
@@ -165,17 +165,11 @@ export const useSftpTransfers = ({
         targetEncoding: targetIsLocal ? undefined : targetEncoding,
       };
 
-      let firstProgressLogged = false;
-      const transferStartTime = performance.now();
       const onProgress = (
         transferred: number,
         total: number,
         speed: number,
       ) => {
-        if (!firstProgressLogged) {
-          firstProgressLogged = true;
-          console.log(`[Transfer ${task.id.slice(0, 8)}] first real progress: transferred=${transferred}, total=${total}, speed=${speed} +${Math.round(performance.now() - transferStartTime)}ms after transferFile call`);
-        }
         // Bubble up streaming progress to parent (for directory transfers)
         onStreamProgress?.(transferred, total, speed);
 
@@ -184,11 +178,11 @@ export const useSftpTransfers = ({
             if (t.id !== task.id) return t;
             if (t.status === "cancelled") return t;
             const normalizedTotal = total > 0 ? total : t.totalBytes;
-            // Use backend-reported values directly. The backend already
-            // enforces monotonic progress via its own normalization.
-            const normalizedTransferred = Math.min(
-              transferred,
-              normalizedTotal > 0 ? normalizedTotal : transferred,
+            // Clamp to [previous, total] — the backend normalizes progress
+            // but we guard against any non-monotonic edge cases.
+            const normalizedTransferred = Math.max(
+              t.transferredBytes,
+              Math.min(transferred, normalizedTotal > 0 ? normalizedTotal : transferred),
             );
             return {
               ...t,
@@ -334,10 +328,6 @@ export const useSftpTransfers = ({
       ? "auto"
       : targetPane.filenameEncoding || "auto";
 
-    const t0 = performance.now();
-    const logT = (label: string) => console.log(`[Transfer ${task.id.slice(0, 8)}] ${label} +${Math.round(performance.now() - t0)}ms`);
-    logT(`processTransfer start (file=${task.fileName}, size=${task.totalBytes})`);
-
     let actualFileSize = task.totalBytes;
     let prescanCancelled = false;
     if (task.isDirectory) {
@@ -360,6 +350,7 @@ export const useSftpTransfers = ({
         // Fall back to the existing estimate below if size discovery fails.
       }
     } else if (actualFileSize === 0) {
+      // Fallback stat when file wasn't in the pane's file list (e.g., filtered view)
       try {
         const sourceSftpId = sourcePane.connection?.isLocal
           ? null
@@ -367,14 +358,24 @@ export const useSftpTransfers = ({
 
         if (sourcePane.connection?.isLocal) {
           const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
-          if (stat) actualFileSize = stat.size;
+          if (stat) {
+            actualFileSize = stat.size;
+            if (!task.sourceLastModified && stat.lastModified) {
+              task.sourceLastModified = stat.lastModified;
+            }
+          }
         } else if (sourceSftpId) {
           const stat = await netcattyBridge.get()?.statSftp?.(
             sourceSftpId,
             task.sourcePath,
             sourceEncoding,
           );
-          if (stat) actualFileSize = stat.size;
+          if (stat) {
+            actualFileSize = stat.size;
+            if (!task.sourceLastModified && stat.lastModified) {
+              task.sourceLastModified = stat.lastModified;
+            }
+          }
         }
       } catch {
         // Ignore stat errors
@@ -412,7 +413,6 @@ export const useSftpTransfers = ({
         throw new Error("Transfer cancelled");
       }
 
-      logT(`status → transferring (estimatedSize=${estimatedSize})`);
       updateTask({
         status: "transferring",
         totalBytes: estimatedSize,
@@ -421,7 +421,6 @@ export const useSftpTransfers = ({
       });
 
       if (!task.skipConflictCheck && !task.isDirectory && targetPane.connection) {
-        logT('conflict check: stat target start');
         let targetExists = false;
         let existingStat: { size: number; mtime: number } | null = null;
         // Use cached metadata from the task instead of an extra stat round-trip
@@ -458,7 +457,6 @@ export const useSftpTransfers = ({
           // ignore
         }
 
-        logT(`conflict check done (targetExists=${targetExists})`);
         if (targetExists && existingStat) {
           const newConflict: FileConflict = {
             transferId: task.id,
@@ -479,7 +477,6 @@ export const useSftpTransfers = ({
         }
       }
 
-      logT('calling transferFile/transferDirectory');
       if (task.isDirectory) {
         // Track real progress for directory transfers:
         // completedBytes = sum of all finished child files

@@ -29,8 +29,8 @@ interface UseSftpPaneActionsParams {
 }
 
 interface UseSftpPaneActionsResult {
-  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean }) => Promise<void>;
-  refresh: (side: "left" | "right") => Promise<void>;
+  navigateTo: (side: "left" | "right", path: string, options?: { force?: boolean; tabId?: string }) => Promise<void>;
+  refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
   toggleSelection: (side: "left" | "right", fileName: string, multiSelect: boolean) => void;
@@ -226,7 +226,17 @@ export const useSftpPaneActions = ({
           const sftpId = sftpSessionsRef.current.get(pane.connection.id);
           if (!sftpId) {
             clearCacheForConnection(pane.connection.id);
-            handleSessionError(side, new Error("SFTP session lost"));
+            // For background tabs (explicit tabId), update that tab directly
+            // instead of handleSessionError which targets the active tab.
+            if (options?.tabId) {
+              updateTab(side, targetTabId, (prev) => ({
+                ...prev,
+                error: "sftp.error.sessionLost",
+                loading: false,
+              }));
+            } else {
+              handleSessionError(side, new Error("SFTP session lost"));
+            }
             return;
           }
 
@@ -236,7 +246,15 @@ export const useSftpPaneActions = ({
             if (isSessionError(err)) {
               sftpSessionsRef.current.delete(pane.connection.id);
               clearCacheForConnection(pane.connection.id);
-              handleSessionError(side, err as Error);
+              if (options?.tabId) {
+                updateTab(side, targetTabId, (prev) => ({
+                  ...prev,
+                  error: "sftp.error.sessionLost",
+                  loading: false,
+                }));
+              } else {
+                handleSessionError(side, err as Error);
+              }
               return;
             }
             throw err as Error;
@@ -359,6 +377,10 @@ export const useSftpPaneActions = ({
       if (pane?.connection) {
         await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId });
       } else if (!pane?.connection && pane?.error) {
+        // For background tabs, don't trigger reconnection (it operates on
+        // the active tab). Just leave the error state for the user to see
+        // when they switch back to that tab.
+        if (options?.tabId) return;
         const lastHost = lastConnectedHostRef.current[side];
         if (lastHost && !reconnectingRef.current[side]) {
           reconnectingRef.current[side] = true;
