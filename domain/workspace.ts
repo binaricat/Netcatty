@@ -1,7 +1,7 @@
 import { Workspace,WorkspaceNode,WorkspaceViewMode } from './models';
 
 export type SplitDirection = 'horizontal' | 'vertical';
-export type SplitPosition = 'left' | 'right' | 'top' | 'bottom';
+type SplitPosition = 'left' | 'right' | 'top' | 'bottom';
 
 export type SplitHint = {
   direction: SplitDirection;

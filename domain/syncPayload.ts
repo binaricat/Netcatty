@@ -56,7 +56,7 @@ export interface SyncableVaultData {
 }
 
 /** Callbacks used by `applySyncPayload` to import data into local state. */
-export interface SyncPayloadImporters {
+interface SyncPayloadImporters {
   /** Import vault data (hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts). */
   importVaultData: (jsonString: string) => void;
   /** Import port-forwarding rules (lives outside the vault hook). */
@@ -164,7 +164,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
  * Apply synced settings to localStorage. Merges terminal settings
  * to preserve platform-specific fields.
  */
-export function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): void {
+function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): void {
   // Theme & Appearance
   if (settings.theme != null) localStorageAdapter.writeString(STORAGE_KEY_THEME, settings.theme);
   if (settings.lightUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, settings.lightUiThemeId);

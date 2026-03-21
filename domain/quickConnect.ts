@@ -4,7 +4,7 @@ export interface QuickConnectTarget {
   port?: number;
 }
 
-export interface QuickConnectParseResult {
+interface QuickConnectParseResult {
   target: QuickConnectTarget | null;
   warnings: string[];
 }

@@ -1,11 +1,5 @@
 import { Host } from './models';
 
-type TerminalAppearanceDefaults = {
-  themeId: string;
-  fontFamilyId: string;
-  fontSize: number;
-};
-
 const hasLegacyStringValue = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -53,14 +47,3 @@ export const resolveHostTerminalFontFamilyId = (host: Host | null | undefined, d
 export const resolveHostTerminalFontSize = (host: Host | null | undefined, defaultFontSize: number): number =>
   hasHostFontSizeOverride(host) && host?.fontSize != null ? host.fontSize : defaultFontSize;
 
-export const resolveHostTerminalAppearance = (
-  host: Host | null | undefined,
-  defaults: TerminalAppearanceDefaults,
-) => ({
-  themeId: resolveHostTerminalThemeId(host, defaults.themeId),
-  fontFamilyId: resolveHostTerminalFontFamilyId(host, defaults.fontFamilyId),
-  fontSize: resolveHostTerminalFontSize(host, defaults.fontSize),
-  hasThemeOverride: hasHostThemeOverride(host),
-  hasFontFamilyOverride: hasHostFontFamilyOverride(host),
-  hasFontSizeOverride: hasHostFontSizeOverride(host),
-});

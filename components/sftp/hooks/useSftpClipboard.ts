@@ -7,14 +7,14 @@
 
 import { useSyncExternalStore } from "react";
 
-export type SftpClipboardOperation = "copy" | "cut";
+type SftpClipboardOperation = "copy" | "cut";
 
 export interface SftpClipboardFile {
   name: string;
   isDirectory: boolean;
 }
 
-export interface SftpClipboardState {
+interface SftpClipboardState {
   files: SftpClipboardFile[];
   sourcePath: string;
   sourceConnectionId: string;

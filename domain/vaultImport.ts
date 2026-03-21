@@ -84,28 +84,28 @@ export type VaultImportFormat =
   | "securecrt"
   | "ssh_config";
 
-export type VaultImportIssueLevel = "warning" | "error";
+type VaultImportIssueLevel = "warning" | "error";
 
-export interface VaultImportIssue {
+interface VaultImportIssue {
   level: VaultImportIssueLevel;
   message: string;
 }
 
-export interface VaultImportStats {
+interface VaultImportStats {
   parsed: number;
   imported: number;
   skipped: number;
   duplicates: number;
 }
 
-export interface VaultImportResult {
+interface VaultImportResult {
   hosts: Host[];
   groups: string[];
   issues: VaultImportIssue[];
   stats: VaultImportStats;
 }
 
-export interface VaultCsvTemplateOptions {
+interface VaultCsvTemplateOptions {
   includeExampleRows?: boolean;
 }
 
@@ -998,7 +998,7 @@ export const getVaultCsvTemplate = (
   return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
 };
 
-export const exportHostsToCsv = (hosts: Host[]): string => {
+const exportHostsToCsv = (hosts: Host[]): string => {
   const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username"];
   const rows: string[][] = [header];
 
@@ -1053,7 +1053,7 @@ export const exportHostsToCsv = (hosts: Host[]): string => {
   return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
 };
 
-export interface ExportHostsResult {
+interface ExportHostsResult {
   csv: string;
   exportedCount: number;
   skippedCount: number;

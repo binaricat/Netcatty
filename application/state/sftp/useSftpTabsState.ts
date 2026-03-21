@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { createEmptyPane, EMPTY_LEFT_PANE_ID, EMPTY_RIGHT_PANE_ID, SftpPane, SftpSideTabs } from "./types";
 import { logger } from "../../../lib/logger";
 
-export interface SftpTabsState {
+interface SftpTabsState {
   leftTabs: SftpSideTabs;
   rightTabs: SftpSideTabs;
   leftTabsRef: React.MutableRefObject<SftpSideTabs>;

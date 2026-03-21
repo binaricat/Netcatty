@@ -1,6 +1,6 @@
 import type { SyncPayload } from "./sync";
 
-export const CREDENTIAL_ENCRYPTION_PREFIX = "enc:v1:";
+const CREDENTIAL_ENCRYPTION_PREFIX = "enc:v1:";
 
 /**
  * Base64 pattern: only allows A-Z, a-z, 0-9, +, / and trailing = padding.

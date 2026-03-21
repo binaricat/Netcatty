@@ -8,9 +8,9 @@
 import { useSyncExternalStore, useEffect } from "react";
 import { sftpFocusStore, SftpFocusedSide } from "./useSftpFocusedPane";
 
-export type SftpDialogActionType = "rename" | "delete" | "newFolder" | "newFile" | null;
+type SftpDialogActionType = "rename" | "delete" | "newFolder" | "newFile" | null;
 
-export interface SftpDialogAction {
+interface SftpDialogAction {
   type: SftpDialogActionType;
   targetSide: SftpFocusedSide;
   targetFiles?: string[]; // For rename (single file) or delete (multiple files)

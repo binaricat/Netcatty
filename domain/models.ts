@@ -1,5 +1,5 @@
 // Proxy configuration for SSH connections
-export type ProxyType = 'http' | 'socks5';
+type ProxyType = 'http' | 'socks5';
 // UI locale identifier, stored in settings and used for i18n (e.g., "en", "zh-CN").
 export type UILanguage = string;
 
@@ -41,7 +41,7 @@ export interface SerialConfig {
 }
 
 // Per-protocol configuration
-export interface ProtocolConfig {
+interface ProtocolConfig {
   protocol: HostProtocol;
   port: number;
   enabled: boolean;
@@ -116,9 +116,9 @@ export interface Host {
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';
-export type KeySource = 'generated' | 'imported';
+type KeySource = 'generated' | 'imported';
 export type KeyCategory = 'key' | 'certificate' | 'identity';
-export type IdentityAuthMethod = 'password' | 'key' | 'certificate';
+type IdentityAuthMethod = 'password' | 'key' | 'certificate';
 
 export interface SSHKey {
   id: string;
@@ -155,13 +155,6 @@ export interface Snippet {
   targets?: string[]; // host ids
   shortkey?: string; // Keyboard shortcut to send this snippet in terminal (e.g., "F1", "Ctrl + F1")
   noAutoRun?: boolean; // If true, paste command without executing (no trailing Enter)
-}
-
-export interface TerminalLine {
-  type: 'input' | 'output' | 'error' | 'system';
-  content: string;
-  directory?: string;
-  timestamp: number;
 }
 
 export interface ChatMessage {
@@ -451,11 +444,11 @@ export interface TerminalSettings {
 
 const STRICT_IPV4_OCTET_PATTERN = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
 
-export const URL_HIGHLIGHT_PATTERN =
+const URL_HIGHLIGHT_PATTERN =
   "(?:\\bhttps?:\\/\\/\\[[0-9A-Fa-f:.]+\\](?::\\d+)?(?:[/?#][^\\s<>\"'`]*)?(?<![.,;:!?\\)}])|\\b(?:https?:\\/\\/|www\\.)[^\\s<>\"'`]+(?<![.,;:!?\\])}]))";
-export const IPV4_HIGHLIGHT_PATTERN =
+const IPV4_HIGHLIGHT_PATTERN =
   `(?<![\\w.])(?<!\\bver\\s)(?<!\\bversion\\s)(?:${STRICT_IPV4_OCTET_PATTERN}\\.){3}${STRICT_IPV4_OCTET_PATTERN}(?![\\w.])`;
-export const MAC_ADDRESS_HIGHLIGHT_PATTERN =
+const MAC_ADDRESS_HIGHLIGHT_PATTERN =
   '\\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\\b';
 
 export const DEFAULT_KEYWORD_HIGHLIGHT_RULES: KeywordHighlightRule[] = [
@@ -472,7 +465,7 @@ const cloneKeywordHighlightRule = (rule: KeywordHighlightRule): KeywordHighlight
   patterns: [...rule.patterns],
 });
 
-export const normalizeKeywordHighlightRules = (
+const normalizeKeywordHighlightRules = (
   rules?: KeywordHighlightRule[],
 ): KeywordHighlightRule[] => {
   if (!rules || rules.length === 0) {
@@ -522,7 +515,7 @@ export const normalizeTerminalSettings = (
   };
 };
 
-export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
+const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollback: 10000,
   drawBoldInBrightColors: true,
   terminalEmulationType: 'xterm-256color',
@@ -711,7 +704,7 @@ export interface FileConflict {
 
 // Port Forwarding Types
 export type PortForwardingType = 'local' | 'remote' | 'dynamic';
-export type PortForwardingStatus = 'inactive' | 'connecting' | 'active' | 'error';
+type PortForwardingStatus = 'inactive' | 'connecting' | 'active' | 'error';
 
 export interface PortForwardingRule {
   id: string;
@@ -778,14 +771,8 @@ export interface ConnectionLog {
 // Session Logs Settings - for auto-saving terminal logs to local filesystem
 export type SessionLogFormat = 'txt' | 'raw' | 'html';
 
-export interface SessionLogsSettings {
-  enabled: boolean; // Whether auto-save is enabled
-  directory: string; // Base directory for logs
-  format: SessionLogFormat; // Log file format
-}
-
 // Managed Source - external file that manages a group of hosts (e.g., ~/.ssh/config)
-export type ManagedSourceType = 'ssh_config';
+type ManagedSourceType = 'ssh_config';
 
 export interface ManagedSource {
   id: string;

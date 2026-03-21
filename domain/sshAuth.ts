@@ -1,8 +1,8 @@
 import type { Host, Identity, SSHKey } from "./models";
 
-export type HostAuthMethod = "password" | "key" | "certificate";
+type HostAuthMethod = "password" | "key" | "certificate";
 
-export type HostAuthOverride = {
+type HostAuthOverride = {
   authMethod?: HostAuthMethod;
   username?: string;
   password?: string;
@@ -10,7 +10,7 @@ export type HostAuthOverride = {
   passphrase?: string;
 };
 
-export type ResolvedHostAuth = {
+type ResolvedHostAuth = {
   identity?: Identity;
   authMethod: HostAuthMethod;
   username: string;

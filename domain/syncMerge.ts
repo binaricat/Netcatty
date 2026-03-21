@@ -25,13 +25,13 @@ import type { SyncPayload } from './sync';
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface MergeSummary {
+interface MergeSummary {
   added: { local: number; remote: number };
   deleted: { local: number; remote: number };
   modified: { local: number; remote: number; conflicts: number };
 }
 
-export interface MergeResult {
+interface MergeResult {
   payload: SyncPayload;
   /** True when both sides modified the same entity (resolved by preferring local) */
   hadConflicts: boolean;

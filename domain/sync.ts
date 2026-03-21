@@ -70,7 +70,7 @@ export interface S3Config {
 /**
  * Provider-specific connection status
  */
-export type ProviderConnectionStatus = 
+type ProviderConnectionStatus =
   | 'disconnected'
   | 'connecting'
   | 'connected'
@@ -113,7 +113,7 @@ export interface ProviderConnection {
   error?: string;
 }
 
-export const hasProviderConnectionData = (
+const hasProviderConnectionData = (
   connection: Pick<ProviderConnection, 'tokens' | 'config'>,
 ): boolean => Boolean(connection.tokens || connection.config);
 
@@ -209,17 +209,6 @@ export interface SyncPayload {
 // ============================================================================
 
 /**
- * Key derivation parameters
- */
-export interface KDFParams {
-  algorithm: 'PBKDF2' | 'Argon2id';
-  salt: Uint8Array;
-  iterations?: number;      // For PBKDF2 (default: 600000)
-  memory?: number;          // For Argon2 (KB)
-  parallelism?: number;     // For Argon2
-}
-
-/**
  * Encryption result
  */
 export interface EncryptionResult {
@@ -299,17 +288,6 @@ export interface ConflictInfo {
 }
 
 /**
- * Sync manager configuration
- */
-export interface SyncManagerConfig {
-  autoSync: boolean;
-  autoSyncInterval: number; // Minutes
-  providers: CloudProvider[];
-  deviceId: string;
-  deviceName: string;
-}
-
-/**
  * Sync history record entry
  */
 export interface SyncHistoryEntry {
@@ -346,33 +324,6 @@ export interface PKCEChallenge {
   codeVerifier: string;
   codeChallenge: string;
   state: string;
-}
-
-/**
- * Google OAuth token response
- */
-export interface GoogleTokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  token_type: string;
-  scope: string;
-}
-
-/**
- * OneDrive/MSAL token response
- */
-export interface OneDriveTokenResponse {
-  accessToken: string;
-  refreshToken?: string;
-  expiresOn: number;
-  tokenType: string;
-  scopes: string[];
-  account?: {
-    homeAccountId: string;
-    username: string;
-    name?: string;
-  };
 }
 
 // ============================================================================
@@ -500,19 +451,6 @@ export const formatLastSync = (timestamp?: number): string => {
   
   const date = new Date(timestamp);
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-};
-
-/**
- * Get status color for sync state
- */
-export const getSyncStatusColor = (status: ProviderConnectionStatus): string => {
-  switch (status) {
-    case 'connected': return 'text-green-500';
-    case 'syncing': return 'text-blue-500';
-    case 'error': return 'text-red-500';
-    case 'connecting': return 'text-yellow-500';
-    default: return 'text-muted-foreground';
-  }
 };
 
 /**
