@@ -194,7 +194,6 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // Maps tab IDs to the connectionKey used to create them, so we can
   // correctly identify tabs when the same host ID has different overrides.
   const tabConnectionKeyMapRef = useRef<Map<string, string>>(new Map());
-  const pendingConnectionKeyRef = useRef<string | null>(null);
 
   // NOTE: We intentionally do NOT reset lastAppliedInitialLocationKeyRef on
   // visibility changes. When the user switches terminal tabs, the panel
@@ -312,20 +311,13 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
-    // Store the pending key so the effect below can map it once the tab is created
-    pendingConnectionKeyRef.current = connectionKey;
-    s.connect("left", activeHost, needsNewTab ? { forceNewTab: true } : undefined);
+    s.connect("left", activeHost, {
+      ...(needsNewTab ? { forceNewTab: true } : undefined),
+      onTabCreated: (tabId) => {
+        tabConnectionKeyMapRef.current.set(tabId, connectionKey);
+      },
+    });
   }, [activeHost, hasActiveWork]); // Re-evaluate when work finishes so deferred switch can proceed
-
-  // Track the active tab's connectionKey after connect() creates or reuses it.
-  // Watches both activeTabId (new tab) and connection status (reused tab reconnecting).
-  useEffect(() => {
-    const activeTabId = sftp.leftTabs.activeTabId;
-    if (activeTabId && pendingConnectionKeyRef.current) {
-      tabConnectionKeyMapRef.current.set(activeTabId, pendingConnectionKeyRef.current);
-      pendingConnectionKeyRef.current = null;
-    }
-  }, [sftp.leftTabs.activeTabId, sftp.leftPane.connection?.status]);
 
   // Clear the remembered connection key when the pane disconnects or the
   // session is lost, so re-opening SFTP for the same terminal reconnects.
