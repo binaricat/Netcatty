@@ -671,7 +671,9 @@ export const useSftpTransfers = ({
         }),
       );
 
-      await refresh(targetSide);
+      // Refresh the specific target tab, not whichever tab happens to be
+      // active now — focus may have switched during the transfer.
+      await refresh(targetSide, { tabId: targetPane.id });
       const completionHandler = completionHandlersRef.current.get(task.id);
       if (completionHandler) {
         try {

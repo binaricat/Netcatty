@@ -594,6 +594,9 @@ export const useSftpExternalOperations = (
         throw new Error("SFTP session not found");
       }
 
+      // Capture the pane ID now so we can refresh the correct tab after
+      // upload, even if focus switches during the transfer.
+      const uploadPaneId = pane.id;
       const controller = new UploadController();
       uploadControllerRef.current = controller;
       const uploadTargetPath = options?.targetPath || pane.connection.currentPath;
@@ -623,17 +626,14 @@ export const useSftpExternalOperations = (
           controller,
         );
 
-        // Refresh the current directory and invalidate the upload target's
-        // cache entry.  If the user navigated away during the upload, the
-        // invalidation ensures returning to the target path triggers a fresh
-        // listing instead of serving stale cached data.
-        const livePane = getActivePane(side);
-        if (livePane?.connection) {
-          if (livePane.connection.currentPath !== uploadTargetPath && clearDirCacheEntry) {
-            clearDirCacheEntry(livePane.connection.id, uploadTargetPath);
-          }
-          await refresh(side);
+        // Refresh the specific tab that initiated the upload (not whichever
+        // tab is active now — focus may have switched during the transfer).
+        // Also invalidate the upload target's cache entry so returning to
+        // that path triggers a fresh listing.
+        if (clearDirCacheEntry) {
+          clearDirCacheEntry(pane.connection.id, uploadTargetPath);
         }
+        await refresh(side, { tabId: uploadPaneId });
         return results;
       } catch (error) {
         logger.error("[SFTP] Upload failed:", error);

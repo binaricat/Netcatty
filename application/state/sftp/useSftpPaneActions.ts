@@ -114,23 +114,28 @@ export const useSftpPaneActions = ({
     async (
       side: "left" | "right",
       path: string,
-      options?: { force?: boolean },
+      options?: { force?: boolean; tabId?: string },
     ) => {
-      console.log("[SFTP navigateTo] called", { side, path, force: options?.force });
+      console.log("[SFTP navigateTo] called", { side, path, force: options?.force, tabId: options?.tabId });
 
-      const pane = getActivePane(side);
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
-      const activeTabId = sideTabs.activeTabId;
+      // When tabId is specified, target that specific tab instead of the active one.
+      // This allows refreshing a background tab (e.g. after a transfer completes
+      // while focus has switched to another host).
+      const targetTabId = options?.tabId ?? sideTabs.activeTabId;
+      const pane = options?.tabId
+        ? sideTabs.tabs.find((t) => t.id === options.tabId) ?? null
+        : getActivePane(side);
 
       console.log("[SFTP navigateTo] state check", {
         paneId: pane?.id,
         hasConnection: !!pane?.connection,
-        activeTabId,
+        targetTabId,
         currentPath: pane?.connection?.currentPath,
       });
 
-      if (!pane?.connection || !activeTabId) {
-        console.log("[SFTP navigateTo] No pane/connection/activeTabId, returning early");
+      if (!pane?.connection || !targetTabId) {
+        console.log("[SFTP navigateTo] No pane/connection/targetTabId, returning early");
         return;
       }
 
@@ -147,14 +152,14 @@ export const useSftpPaneActions = ({
         cached.files
       ) {
         console.log("[SFTP navigateTo] Using cached files for path", { path, cacheKey });
-        tabNavSeqRef.current.set(activeTabId, requestId);
-        lastConfirmedRef.current.set(activeTabId, {
+        tabNavSeqRef.current.set(targetTabId, requestId);
+        lastConfirmedRef.current.set(targetTabId, {
           connectionId,
           path,
           files: cached.files,
           selectedFiles: new Set(),
         });
-        updateTab(side, activeTabId, (prev) => ({
+        updateTab(side, targetTabId, (prev) => ({
           ...prev,
           connection: prev.connection
             ? { ...prev.connection, currentPath: path }
@@ -185,24 +190,24 @@ export const useSftpPaneActions = ({
       // when the connection has changed. This captures post-mutation state from
       // optimistic updates (e.g. deleteFilesAtPath) so that a failed refresh
       // doesn't resurrect deleted items.
-      const existing = lastConfirmedRef.current.get(activeTabId);
+      const existing = lastConfirmedRef.current.get(targetTabId);
       if (!existing || existing.connectionId !== connectionId || !pane.loading) {
-        lastConfirmedRef.current.set(activeTabId, {
+        lastConfirmedRef.current.set(targetTabId, {
           connectionId,
           path: pane.connection.currentPath,
           files: pane.files,
           selectedFiles: pane.selectedFiles,
         });
       }
-      const confirmed = lastConfirmedRef.current.get(activeTabId)!;
+      const confirmed = lastConfirmedRef.current.get(targetTabId)!;
       const previousPath = confirmed.path;
       const previousFiles = confirmed.files;
       const previousSelection = confirmed.selectedFiles;
-      tabNavSeqRef.current.set(activeTabId, requestId);
+      tabNavSeqRef.current.set(targetTabId, requestId);
       // Keep existing files visible during loading — the loading overlay
       // (pointer-events-none) prevents interaction. This avoids blanking a tab
       // that gets superseded by another tab navigating on the same side.
-      updateTab(side, activeTabId, (prev) => ({
+      updateTab(side, targetTabId, (prev) => ({
         ...prev,
         connection: prev.connection
           ? { ...prev.connection, currentPath: path }
@@ -221,7 +226,7 @@ export const useSftpPaneActions = ({
           const sftpId = sftpSessionsRef.current.get(pane.connection.id);
           if (!sftpId) {
             clearCacheForConnection(pane.connection.id);
-            updateTab(side, activeTabId, (prev) => ({
+            updateTab(side, targetTabId, (prev) => ({
               ...prev,
               connection: null,
               files: [],
@@ -240,7 +245,7 @@ export const useSftpPaneActions = ({
             if (isSessionError(err)) {
               sftpSessionsRef.current.delete(pane.connection.id);
               clearCacheForConnection(pane.connection.id);
-              updateTab(side, activeTabId, (prev) => ({
+              updateTab(side, targetTabId, (prev) => ({
                 ...prev,
                 connection: null,
                 files: [],
@@ -261,10 +266,10 @@ export const useSftpPaneActions = ({
           // Only restore if no newer navigation has occurred on this specific tab
           // AND the tab still belongs to the same connection (connect/disconnect
           // bump navSeqRef but not tabNavSeqRef).
-          if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
+          if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
             return;
           }
-          updateTab(side, activeTabId, (prev) => {
+          updateTab(side, targetTabId, (prev) => {
             if (prev.connection?.id !== connectionId) {
               // Tab was reconnected or disconnected; don't restore stale state.
               return prev;
@@ -285,14 +290,14 @@ export const useSftpPaneActions = ({
           timestamp: Date.now(),
         });
 
-        lastConfirmedRef.current.set(activeTabId, {
+        lastConfirmedRef.current.set(targetTabId, {
           connectionId,
           path,
           files,
           selectedFiles: new Set(),
         });
 
-        updateTab(side, activeTabId, (prev) => ({
+        updateTab(side, targetTabId, (prev) => ({
           ...prev,
           connection: prev.connection
             ? { ...prev.connection, currentPath: path }
@@ -311,10 +316,10 @@ export const useSftpPaneActions = ({
         }
       } catch (err) {
         if (navSeqRef.current[side] !== requestId) {
-          if (tabNavSeqRef.current.get(activeTabId) !== requestId) {
+          if (tabNavSeqRef.current.get(targetTabId) !== requestId) {
             return;
           }
-          updateTab(side, activeTabId, (prev) => {
+          updateTab(side, targetTabId, (prev) => {
             if (prev.connection?.id !== connectionId) {
               return prev;
             }
@@ -328,7 +333,7 @@ export const useSftpPaneActions = ({
           });
           return;
         }
-        updateTab(side, activeTabId, (prev) => {
+        updateTab(side, targetTabId, (prev) => {
           if (prev.connection?.id !== connectionId) {
             return prev;
           }
@@ -363,10 +368,13 @@ export const useSftpPaneActions = ({
   );
 
   const refresh = useCallback(
-    async (side: "left" | "right") => {
-      const pane = getActivePane(side);
+    async (side: "left" | "right", options?: { tabId?: string }) => {
+      const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
+      const pane = options?.tabId
+        ? sideTabs.tabs.find((t) => t.id === options.tabId) ?? null
+        : getActivePane(side);
       if (pane?.connection) {
-        await navigateTo(side, pane.connection.currentPath, { force: true });
+        await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId });
       } else if (!pane?.connection && pane?.error) {
         const lastHost = lastConnectedHostRef.current[side];
         if (lastHost && !reconnectingRef.current[side]) {
@@ -384,7 +392,7 @@ export const useSftpPaneActions = ({
         }
       }
     },
-    [getActivePane, navigateTo, updateActiveTab, lastConnectedHostRef, reconnectingRef],
+    [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, reconnectingRef],
   );
 
   const navigateUp = useCallback(
