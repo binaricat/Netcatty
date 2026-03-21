@@ -222,11 +222,18 @@ export const useSftpTransfers = ({
           targetEncoding: targetIsLocal ? undefined : targetEncoding,
         };
 
+        let receivedFirstProgress = false;
         const onProgress = (
           transferred: number,
           total: number,
           speed: number,
         ) => {
+          // Stop simulated progress on the first real progress update
+          if (!receivedFirstProgress) {
+            receivedFirstProgress = true;
+            stopProgressSimulation(task.id);
+          }
+
           // Bubble up streaming progress to parent (for directory transfers)
           onStreamProgress?.(transferred, total, speed);
 
@@ -518,7 +525,12 @@ export const useSftpTransfers = ({
         startTime: Date.now(),
       });
 
-      if (!hasStreamingTransfer && !task.isDirectory) {
+      // Always start simulated progress so the bar moves immediately
+      // during setup (channel acquisition, conflict check, etc.).
+      // For streaming transfers, the simulation is stopped as soon as
+      // the first real progress arrives; for non-streaming it runs
+      // throughout the transfer.
+      if (!task.isDirectory) {
         useSimulatedProgress = true;
         startProgressSimulation(task.id, estimatedSize);
       }
