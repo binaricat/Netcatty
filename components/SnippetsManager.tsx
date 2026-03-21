@@ -439,8 +439,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     const name = newPackageName.trim();
     if (!name) return;
     
-    // Allow leading slash and validate the rest - allow hyphens anywhere in package names
-    if (!/^\/?([\w-]+(\/[\w-]+)*)\/?$/.test(name)) {
+    // Allow leading slash and validate the rest - allow hyphens and Unicode letters/numbers
+    if (!/^\/?([\w\p{L}\p{N}-]+(\/[\w\p{L}\p{N}-]+)*)\/?$/u.test(name)) {
       // Could add toast notification here for invalid characters
       return;
     }
@@ -550,9 +550,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       return;
     }
 
-    // Validate: same rules as createPackage - only allow letters, numbers, hyphens, underscores
+    // Validate: same rules as createPackage - allow Unicode letters, numbers, hyphens, underscores
     // Since we're renaming a single segment (no slashes allowed), use the segment-level pattern
-    if (!/^[\w-]+$/.test(newName)) {
+    if (!/^[\w\p{L}\p{N}-]+$/u.test(newName)) {
       setRenameError(t('snippets.renameDialog.error.invalidChars'));
       return;
     }
@@ -1203,7 +1203,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 value={newPackageName}
                 onChange={(e) => setNewPackageName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createPackage()}
-                pattern="^/?([\w-]+(/[\w-]+)*)?/?$"
                 title="Package names can contain letters, numbers, hyphens, underscores, and forward slashes. Can optionally start with /"
               />
               <p className="text-[11px] text-muted-foreground">{t('snippets.packageDialog.hint')}</p>
