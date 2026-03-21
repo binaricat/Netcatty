@@ -693,6 +693,7 @@ export interface TransferTask {
   isDirectory: boolean;
   childTasks?: string[]; // For directory transfers
   parentTaskId?: string;
+  sourceLastModified?: number; // Cached from file list to avoid redundant stat
   skipConflictCheck?: boolean; // Skip conflict check for replace operations
   retryable?: boolean; // False for task types that cannot be safely replayed through generic retry
 }

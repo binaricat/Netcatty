@@ -526,33 +526,11 @@ export const useSftpTransfers = ({
       if (!task.skipConflictCheck && !task.isDirectory && targetPane.connection) {
         let targetExists = false;
         let existingStat: { size: number; mtime: number } | null = null;
-        let sourceStat: { size: number; mtime: number } | null = null;
-
-        try {
-          if (sourcePane.connection.isLocal) {
-            const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
-            if (stat) {
-              sourceStat = {
-                size: stat.size,
-                mtime: stat.lastModified || Date.now(),
-              };
-            }
-          } else if (sourceSftpId) {
-            const stat = await netcattyBridge.get()?.statSftp?.(
-              sourceSftpId,
-              task.sourcePath,
-              sourceEncoding,
-            );
-            if (stat) {
-              sourceStat = {
-                size: stat.size,
-                mtime: stat.lastModified || Date.now(),
-              };
-            }
-          }
-        } catch {
-          // ignore
-        }
+        // Use cached metadata from the task instead of an extra stat round-trip
+        const sourceStat: { size: number; mtime: number } | null =
+          (task.totalBytes > 0 || task.sourceLastModified)
+            ? { size: task.totalBytes, mtime: task.sourceLastModified || Date.now() }
+            : null;
 
         try {
           if (targetPane.connection.isLocal) {
@@ -756,17 +734,9 @@ export const useSftpTransfers = ({
 
       if (!sourcePane?.connection || !targetPane?.connection) return [];
 
-      const sourceEncoding: SftpFilenameEncoding = sourcePane.connection.isLocal
-        ? "auto"
-        : sourcePane.filenameEncoding || "auto";
-
       const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
       const targetPath = targetPane.connection.currentPath;
       const sourceConnectionId = options?.sourceConnectionId ?? sourcePane.connection.id;
-
-      const sourceSftpId = sourcePane.connection.isLocal
-        ? null
-        : sftpSessionsRef.current.get(sourceConnectionId);
 
       const newTasks: TransferTask[] = [];
 
@@ -778,25 +748,11 @@ export const useSftpTransfers = ({
               ? "download"
               : "remote-to-remote";
 
-        let fileSize = 0;
-        if (!file.isDirectory) {
-          try {
-            const fullPath = joinPath(sourcePath, file.name);
-            if (sourcePane.connection!.isLocal) {
-              const stat = await netcattyBridge.get()?.statLocal?.(fullPath);
-              if (stat) fileSize = stat.size;
-            } else if (sourceSftpId) {
-              const stat = await netcattyBridge.get()?.statSftp?.(
-                sourceSftpId,
-                fullPath,
-                sourceEncoding,
-              );
-              if (stat) fileSize = stat.size;
-            }
-          } catch {
-            // ignore
-          }
-        }
+        // Use cached metadata from the source pane's file list to avoid
+        // redundant stat calls over the network.
+        const fileEntry = sourcePane.files.find((f) => f.name === file.name);
+        const fileSize = file.isDirectory ? 0 : (fileEntry?.size ?? 0);
+        const sourceLastModified = fileEntry?.lastModified ?? 0;
 
         newTasks.push({
           id: crypto.randomUUID(),
@@ -813,6 +769,7 @@ export const useSftpTransfers = ({
           speed: 0,
           startTime: Date.now(),
           isDirectory: file.isDirectory,
+          sourceLastModified,
         });
       }
 
