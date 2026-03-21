@@ -106,6 +106,11 @@ module.exports = {
         ],
         category: 'Development'
     },
+    deb: {
+        // Use gzip instead of default xz(lzma) for better compatibility with
+        // Deepin OS and other distros that have issues with lzma decompression
+        compression: 'gz'
+    },
     publish: [
         {
             provider: 'github',
