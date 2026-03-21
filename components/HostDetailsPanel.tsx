@@ -127,8 +127,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         os: "linux",
         authMethod: "password",
         charset: "UTF-8",
-        theme: terminalThemeId,
-        fontSize: terminalFontSize,
         distroMode: "auto",
         createdAt: Date.now(),
         group: defaultGroup || undefined, // Pre-fill with current navigation group
