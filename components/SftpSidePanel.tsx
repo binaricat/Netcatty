@@ -212,14 +212,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   // Track whether there's active work that should block connection switching.
   // Computed outside the effect so it can be in the dependency array.
-  const hasActiveTransfers = useMemo(
-    () => sftp.transfers.some((t) => t.status === "pending" || t.status === "transferring"),
-    [sftp.transfers],
-  );
-  // Block host-following while any connection-sensitive UI or operation
-  // is active: text editor, permissions dialog, file-opener dialog, or
+  // Block host-following while any connection-sensitive interactive UI is
+  // active: text editor, permissions dialog, file-opener dialog, or
   // auto-synced external file watches.
-  const hasActiveWork = hasActiveTransfers || showTextEditor || !!permissionsState || showFileOpenerDialog
+  // Note: transfers are NOT included here — they run on their own sftpId
+  // independent of the active tab, and forceNewTab preserves old connections.
+  const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
 
   useEffect(() => {
