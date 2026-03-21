@@ -165,11 +165,17 @@ export const useSftpTransfers = ({
         targetEncoding: targetIsLocal ? undefined : targetEncoding,
       };
 
+      let firstProgressLogged = false;
+      const transferStartTime = performance.now();
       const onProgress = (
         transferred: number,
         total: number,
         speed: number,
       ) => {
+        if (!firstProgressLogged) {
+          firstProgressLogged = true;
+          console.log(`[Transfer ${task.id.slice(0, 8)}] first real progress: transferred=${transferred}, total=${total}, speed=${speed} +${Math.round(performance.now() - transferStartTime)}ms after transferFile call`);
+        }
         // Bubble up streaming progress to parent (for directory transfers)
         onStreamProgress?.(transferred, total, speed);
 
@@ -328,6 +334,10 @@ export const useSftpTransfers = ({
       ? "auto"
       : targetPane.filenameEncoding || "auto";
 
+    const t0 = performance.now();
+    const logT = (label: string) => console.log(`[Transfer ${task.id.slice(0, 8)}] ${label} +${Math.round(performance.now() - t0)}ms`);
+    logT(`processTransfer start (file=${task.fileName}, size=${task.totalBytes})`);
+
     let actualFileSize = task.totalBytes;
     let prescanCancelled = false;
     if (task.isDirectory) {
@@ -402,6 +412,7 @@ export const useSftpTransfers = ({
         throw new Error("Transfer cancelled");
       }
 
+      logT(`status → transferring (estimatedSize=${estimatedSize})`);
       updateTask({
         status: "transferring",
         totalBytes: estimatedSize,
@@ -410,6 +421,7 @@ export const useSftpTransfers = ({
       });
 
       if (!task.skipConflictCheck && !task.isDirectory && targetPane.connection) {
+        logT('conflict check: stat target start');
         let targetExists = false;
         let existingStat: { size: number; mtime: number } | null = null;
         // Use cached metadata from the task instead of an extra stat round-trip
@@ -446,6 +458,7 @@ export const useSftpTransfers = ({
           // ignore
         }
 
+        logT(`conflict check done (targetExists=${targetExists})`);
         if (targetExists && existingStat) {
           const newConflict: FileConflict = {
             transferId: task.id,
@@ -466,6 +479,7 @@ export const useSftpTransfers = ({
         }
       }
 
+      logT('calling transferFile/transferDirectory');
       if (task.isDirectory) {
         // Track real progress for directory transfers:
         // completedBytes = sum of all finished child files

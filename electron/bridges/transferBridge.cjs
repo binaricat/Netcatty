@@ -29,8 +29,11 @@ async function ensureLocalDir(dir) {
 // ── Transfer performance tuning ──────────────────────────────────────────────
 // ssh2's fastPut/fastGet send multiple SFTP read/write requests in parallel,
 // dramatically improving throughput over sequential stream piping.
+// Note: High concurrency (e.g. 64) can overwhelm SFTP servers, causing
+// extreme delays before the first chunk arrives. 4 is a safe default that
+// still provides significant speedup over sequential streaming.
 const TRANSFER_CHUNK_SIZE = 512 * 1024;   // 512KB per SFTP request
-const TRANSFER_CONCURRENCY = 64;          // 64 parallel SFTP requests
+const TRANSFER_CONCURRENCY = 4;           // 4 parallel SFTP requests
 // Progress IPC throttle: sending too many IPC messages bogs down the event loop
 const PROGRESS_THROTTLE_MS = 100;         // Send IPC at most every 100ms
 const PROGRESS_THROTTLE_BYTES = 256 * 1024; // Or every 256KB of progress
@@ -251,7 +254,11 @@ async function acquireIsolatedDownloadChannel(client, transfer) {
  * Falls back to sequential stream piping if fastPut is unavailable.
  */
 async function uploadFile(localPath, remotePath, client, fileSize, transfer, sendProgress) {
+  const ul0 = Date.now();
+  const logUL = (label) => console.log(`[uploadFile] ${label} +${Date.now() - ul0}ms`);
+  logUL('start');
   await requireSftpChannel(client);
+  logUL('requireSftpChannel done');
   const sftp = client.sftp;
   if (!sftp) throw new Error("SFTP client not ready");
 
@@ -259,7 +266,9 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
   if (!client.__netcattySudoMode) {
     let fastSftp = null;
     try {
+      logUL('openIsolatedSftpChannel start');
       fastSftp = await openIsolatedSftpChannel(client);
+      logUL('openIsolatedSftpChannel done');
     } catch (err) {
       console.warn("[transferBridge] Failed to open isolated SFTP channel for fastPut, falling back to streams:", err.message || String(err));
     }
@@ -299,10 +308,16 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
           return;
         }
 
+        logUL('fastPut start');
+        let firstStep = true;
         fastSftp.fastPut(localPath, remotePath, {
           chunkSize: TRANSFER_CHUNK_SIZE,
           concurrency: TRANSFER_CONCURRENCY,
           step: (transferred, _chunk, total) => {
+            if (firstStep) {
+              firstStep = false;
+              logUL(`fastPut first step: transferred=${transferred}, total=${total}`);
+            }
             if (transfer.cancelled) return;
             sendProgress(transferred, total || fileSize);
           },
@@ -359,13 +374,19 @@ async function uploadFile(localPath, remotePath, client, fileSize, transfer, sen
  * Falls back to sequential stream piping if fastGet is unavailable.
  */
 async function downloadFile(remotePath, localPath, client, fileSize, transfer, sendProgress) {
+  const dl0 = Date.now();
+  const logDL = (label) => console.log(`[downloadFile] ${label} +${Date.now() - dl0}ms`);
+  logDL('start');
   await requireSftpChannel(client);
+  logDL('requireSftpChannel done');
   const sftp = client.sftp;
   if (!sftp) throw new Error("SFTP client not ready");
 
   // Prefer fastGet on an isolated SFTP channel so cancellation can abort just this transfer.
   if (!client.__netcattySudoMode) {
+      logDL('acquireIsolatedDownloadChannel start');
       const fastSftp = await acquireIsolatedDownloadChannel(client, transfer);
+      logDL(`acquireIsolatedDownloadChannel done (got=${!!fastSftp})`);
 
     if (fastSftp && typeof fastSftp.fastGet === "function") {
       return new Promise((resolve, reject) => {
@@ -403,10 +424,16 @@ async function downloadFile(remotePath, localPath, client, fileSize, transfer, s
           return;
         }
 
+        logDL('fastGet start');
+        let firstStep = true;
         fastSftp.fastGet(remotePath, localPath, {
           chunkSize: TRANSFER_CHUNK_SIZE,
           concurrency: TRANSFER_CONCURRENCY,
           step: (transferred, _chunk, total) => {
+            if (firstStep) {
+              firstStep = false;
+              logDL(`fastGet first step: transferred=${transferred}, total=${total}`);
+            }
             if (transfer.cancelled) return;
             sendProgress(transferred, total || fileSize);
           },
@@ -587,10 +614,15 @@ async function startTransfer(event, payload, onProgress) {
     sender.send("netcatty:transfer:error", { transferId, error: error.message || String(error) });
   };
 
+  const bt0 = Date.now();
+  const logBT = (label) => console.log(`[Transfer:backend ${transferId.slice(0, 8)}] ${label} +${Date.now() - bt0}ms`);
+  logBT(`startTransfer begin (totalBytes=${totalBytes}, ${sourceType}→${targetType})`);
+
   try {
     let fileSize = totalBytes || 0;
 
     if (!fileSize) {
+      logBT('stat file (totalBytes not provided)');
       if (sourceType === 'local') {
         const stat = await fs.promises.stat(sourcePath);
         fileSize = stat.size;
@@ -602,6 +634,7 @@ async function startTransfer(event, payload, onProgress) {
         const stat = await client.stat(encodedSourcePath);
         fileSize = stat.size;
       }
+      logBT(`stat done (fileSize=${fileSize})`);
     }
 
     sendProgress(0, fileSize);
@@ -614,7 +647,9 @@ async function startTransfer(event, payload, onProgress) {
       try { await ensureRemoteDirForSession(targetSftpId, dir, targetEncoding); } catch { }
 
       const encodedTargetPath = encodePathForSession(targetSftpId, targetPath, targetEncoding);
+      logBT('uploadFile start');
       await uploadFile(sourcePath, encodedTargetPath, client, fileSize, transfer, sendProgress);
+      logBT('uploadFile done');
 
     } else if (sourceType === 'sftp' && targetType === 'local') {
       const client = sftpClients.get(sourceSftpId);
@@ -624,7 +659,9 @@ async function startTransfer(event, payload, onProgress) {
       await ensureLocalDir(dir);
 
       const encodedSourcePath = encodePathForSession(sourceSftpId, sourcePath, sourceEncoding);
+      logBT('downloadFile start');
       await downloadFile(encodedSourcePath, targetPath, client, fileSize, transfer, sendProgress);
+      logBT('downloadFile done');
 
     } else if (sourceType === 'local' && targetType === 'local') {
       const dir = path.dirname(targetPath);
