@@ -424,10 +424,19 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   ]);
 
   const MAX_VISIBLE_TRANSFERS = 5;
-  const visibleTransfers = useMemo(
-    () => [...sftp.transfers].reverse().slice(0, MAX_VISIBLE_TRANSFERS),
-    [sftp.transfers],
-  );
+  const visibleTransfers = useMemo(() => {
+    const connection = sftp.leftPane.connection;
+    if (!connection) return [];
+    // Filter transfers to those relevant to the active connection's host,
+    // so workspace focus switches don't show transfers from other hosts.
+    const filtered = sftp.transfers.filter((t) => {
+      if (connection.isLocal) {
+        return t.sourceConnectionId === connection.id || t.targetConnectionId === connection.id;
+      }
+      return t.targetHostId === connection.hostId || t.sourceConnectionId === connection.id || t.targetConnectionId === connection.id;
+    });
+    return [...filtered].reverse().slice(0, MAX_VISIBLE_TRANSFERS);
+  }, [sftp.transfers, sftp.leftPane.connection]);
 
   const handleRevealTransferTarget = useCallback(
     async (task: TransferTask) => {

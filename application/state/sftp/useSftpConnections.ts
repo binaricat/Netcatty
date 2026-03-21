@@ -123,12 +123,15 @@ export const useSftpConnections = ({
         if (currentPane?.connection && !currentPane.connection.isLocal) {
           const oldSftpId = sftpSessionsRef.current.get(currentPane.connection.id);
           if (oldSftpId) {
+            // Delete the mapping BEFORE the async closeSftp call to prevent
+            // concurrent code from using a stale sftpId that the backend may
+            // have already removed during the await.
+            sftpSessionsRef.current.delete(currentPane.connection.id);
             try {
               await netcattyBridge.get()?.closeSftp(oldSftpId);
             } catch {
               // Ignore errors when closing stale SFTP sessions
             }
-            sftpSessionsRef.current.delete(currentPane.connection.id);
           }
         }
       }
