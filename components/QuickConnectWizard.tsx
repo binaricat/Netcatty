@@ -13,6 +13,7 @@ import {
 import React, { useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import type { QuickConnectTarget } from "../domain/quickConnect";
+import { formatHostPort } from "../domain/host";
 import { cn } from "../lib/utils";
 import { Host, SSHKey } from "../types";
 import { Button } from "./ui/button";
@@ -531,11 +532,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       case "protocol":
         return target.hostname;
       case "username":
-        return `${protocol.toUpperCase()} ${target.hostname}:${port}`;
+        return `${protocol.toUpperCase()} ${formatHostPort(target.hostname, port)}`;
       case "knownhost":
-        return `${protocol.toUpperCase()} ${effectiveUsername}@${target.hostname}:${port}`;
+        return `${protocol.toUpperCase()} ${effectiveUsername}@${formatHostPort(target.hostname, port)}`;
       case "auth":
-        return `${protocol.toUpperCase()} ${target.hostname}:${port}`;
+        return `${protocol.toUpperCase()} ${formatHostPort(target.hostname, port)}`;
     }
   };
 

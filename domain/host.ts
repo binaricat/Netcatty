@@ -48,6 +48,14 @@ export const getEffectiveHostDistro = (
   return detected;
 };
 
+/** Format hostname:port for display, wrapping IPv6 addresses in brackets. */
+export const formatHostPort = (hostname: string, port?: number | null): string => {
+  if (port == null) return hostname;
+  const isIPv6 = hostname.includes(':') && !hostname.startsWith('[');
+  const display = isIPv6 ? `[${hostname}]` : hostname;
+  return `${display}:${port}`;
+};
+
 export const sanitizeHost = (host: Host): Host => {
   const cleanHostname = (host.hostname || '').split(/\s+/)[0];
   const cleanDistro = normalizeDistroId(host.distro);

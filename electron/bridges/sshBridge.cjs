@@ -347,7 +347,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       const jump = jumpHosts[i];
       const isFirst = i === 0;
       const isLast = i === jumpHosts.length - 1;
-      const hopLabel = jump.label || `${jump.hostname}:${jump.port || 22}`;
+      const hopLabel = jump.label || (jump.hostname.includes(':') ? `[${jump.hostname}]:${jump.port || 22}` : `${jump.hostname}:${jump.port || 22}`);
 
       sendProgress(i + 1, totalHops + 1, hopLabel, 'connecting');
 

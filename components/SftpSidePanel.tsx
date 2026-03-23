@@ -11,6 +11,7 @@
  */
 
 import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { formatHostPort } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
@@ -518,7 +519,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
               />
               <div
                 className="min-w-0 flex-1 max-w-[calc(100%-1.75rem)] text-[11px] leading-5 truncate"
-                title={`${displayHost.label} · ${(displayHost.username || "root")}@${displayHost.hostname}:${displayHost.port || 22}`}
+                title={`${displayHost.label} · ${(displayHost.username || "root")}@${formatHostPort(displayHost.hostname, displayHost.port || 22)}`}
               >
                 <span className="font-medium">
                   {displayHost.label}

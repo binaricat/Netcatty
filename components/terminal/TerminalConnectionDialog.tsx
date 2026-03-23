@@ -7,6 +7,7 @@ import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { Host, SSHKey } from '../../types';
+import { formatHostPort } from '../../domain/host';
 import { DistroAvatar } from '../DistroAvatar';
 import { Button } from '../ui/button';
 import { TerminalAuthDialog, TerminalAuthDialogProps } from './TerminalAuthDialog';
@@ -101,14 +102,14 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         <span>{chainProgress.currentHostLabel}</span>
                                     </div>
                                     <div className="text-[11px] text-muted-foreground font-mono">
-                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? `${host.hostname}:${protocolInfo.port}` : host.hostname}
+                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
                             ) : (
                                 <>
                                     <div className="text-lg font-semibold">{host.label}</div>
                                     <div className="text-[11px] text-muted-foreground font-mono">
-                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? `${host.hostname}:${protocolInfo.port}` : host.hostname}
+                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
                             )}
