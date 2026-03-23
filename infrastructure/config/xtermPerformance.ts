@@ -94,10 +94,6 @@ export const XTERM_PERFORMANCE_CONFIG = {
     // Debounce time for viewport scanning (ms)
     // Higher values = better scrolling performance, but slower highlight "catch up"
     debounceMs: 200,
-
-    // Number of unique line scan results to keep cached.
-    // Large enough to cover typical viewport reuse without letting cache grow unbounded.
-    cacheEntries: 1200,
   },
 };
 
