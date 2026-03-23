@@ -213,7 +213,7 @@ async function getAvailableAgentSocket() {
 * @param {Array} [options.unlockedEncryptedKeys] - Array of unlocked encrypted keys with passphrases
  */
 function buildAuthHandler(options) {
-  const { privateKey, password, passphrase, agent, username, logPrefix = "[SSH]", unlockedEncryptedKeys = [], defaultKeys = [], sshAgentSocketOverride } = options;
+  const { privateKey, password, passphrase, agent, username, logPrefix = "[SSH]", unlockedEncryptedKeys = [], defaultKeys = [], sshAgentSocketOverride, onAuthAttempt } = options;
 
   // Determine what type of explicit auth the user configured
   const hasExplicitKey = !!privateKey;
@@ -394,9 +394,19 @@ function buildAuthHandler(options) {
 
       if (method.type === "agent" && (availableMethods.includes("publickey") || availableMethods.includes("agent"))) {
         console.log(`${logPrefix} Trying agent auth`);
+        onAuthAttempt?.("SSH agent");
         return callback("agent");
       } else if (method.type === "publickey" && availableMethods.includes("publickey")) {
         console.log(`${logPrefix} Trying publickey auth:`, method.id);
+        // Build a readable label for the key
+        const keyLabel = method.id.startsWith("publickey-default-")
+          ? `key ${method.id.replace("publickey-default-", "")}`
+          : method.id.startsWith("publickey-encrypted-")
+            ? `key ${method.id.replace("publickey-encrypted-", "")} (encrypted)`
+            : method.id === "publickey-user"
+              ? "configured key"
+              : method.id;
+        onAuthAttempt?.(keyLabel);
         const pubkeyAuth = {
           type: "publickey",
           username,
@@ -408,12 +418,14 @@ function buildAuthHandler(options) {
         return callback(pubkeyAuth);
       } else if (method.type === "password" && availableMethods.includes("password")) {
         console.log(`${logPrefix} Trying password auth`);
+        onAuthAttempt?.("password");
         return callback({
           type: "password",
           username,
           password,
         });
       } else if (method.type === "keyboard-interactive" && availableMethods.includes("keyboard-interactive")) {
+        onAuthAttempt?.("keyboard-interactive");
         return callback("keyboard-interactive");
       }
     }

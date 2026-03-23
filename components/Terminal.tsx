@@ -635,28 +635,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Local terminal and serial connections don't need timeout/progress UI
     if (isLocalConnection || isSerialConnection) return;
 
-    // Only show SSH-specific scripted logs for SSH connections
-    const isSSH = host.protocol !== "telnet";
-
-    let stepTimer: ReturnType<typeof setInterval> | undefined;
-    if (isSSH) {
-      const scripted = [
-        "Resolving host and keys...",
-        "Negotiating ciphers...",
-        "Exchanging keys...",
-        "Authenticating user...",
-        "Waiting for server greeting...",
-      ];
-      let idx = 0;
-      stepTimer = setInterval(() => {
-        setProgressLogs((prev) => {
-          if (idx >= scripted.length) return prev;
-          const next = scripted[idx++];
-          return prev.includes(next) ? prev : [...prev, next];
-        });
-      }, 900);
-    }
-
     setTimeLeft(CONNECTION_TIMEOUT / 1000);
     const countdown = setInterval(() => {
       setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
@@ -679,7 +657,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }, 200);
 
     return () => {
-      if (stepTimer) clearInterval(stepTimer);
       clearInterval(countdown);
       clearTimeout(timeout);
       clearInterval(prog);

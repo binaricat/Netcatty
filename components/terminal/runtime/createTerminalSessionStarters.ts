@@ -44,7 +44,7 @@ type TerminalBackendApi = {
     cb: (evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void,
   ) => () => void;
   onChainProgress: (
-    cb: (hop: number, total: number, label: string, status: string) => void,
+    cb: (hop: number, total: number, label: string, status: string, error?: string) => void,
   ) => (() => void) | undefined;
   writeToSession: (sessionId: string, data: string) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
@@ -403,21 +403,50 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         currentHostLabel:
           jumpHosts[0]?.label || jumpHosts[0]?.hostname || ctx.host.hostname,
       });
-      ctx.setProgressLogs((prev) => [
-        ...prev,
-        `Starting chain connection (${totalHops} hops)...`,
-      ]);
+    }
 
-      const unsub = ctx.terminalBackend.onChainProgress((hop, total, label, status) => {
+    {
+      const unsub = ctx.terminalBackend.onChainProgress((hop, total, label, status, error) => {
         ctx.setChainProgress({
           currentHop: hop,
           totalHops: total,
           currentHostLabel: label,
         });
-        ctx.setProgressLogs((prev) => [
-          ...prev,
-          `Chain ${hop} of ${total}: ${label} - ${status}`,
-        ]);
+
+        // Build human-readable log line
+        let logLine: string;
+        const prefix = total > 1 ? `[${hop}/${total}] ` : '';
+
+        switch (status) {
+          case 'connecting':
+            logLine = `${prefix}${tr("terminal.progress.connecting", "Connecting to")} ${label}...`;
+            break;
+          case 'authenticating':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.keyExchangeComplete", "Key exchange complete")}`;
+            break;
+          case 'auth-attempt':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.trying", "Trying")} ${error}...`;
+            break;
+          case 'authenticated':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.authenticated", "Authenticated")}`;
+            break;
+          case 'connected':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.connected", "Connected")}`;
+            break;
+          case 'forwarding':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.forwarding", "Forwarding")}...`;
+            break;
+          case 'shell':
+            logLine = `${prefix}${tr("terminal.progress.openingShell", "Opening shell")}...`;
+            break;
+          case 'error':
+            logLine = `${prefix}${label} - ${tr("terminal.progress.error", "Error")}${error ? `: ${error}` : ''}`;
+            break;
+          default:
+            logLine = `${prefix}${label} - ${status}${error ? `: ${error}` : ''}`;
+        }
+
+        ctx.setProgressLogs((prev) => [...prev, logLine]);
         const hopProgress = (hop / total) * 80 + 10;
         ctx.setProgressValue(Math.min(95, hopProgress));
       });

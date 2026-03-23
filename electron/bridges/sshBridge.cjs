@@ -333,9 +333,9 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
   const connections = [];
   let currentSocket = null;
 
-  const sendProgress = (hop, total, label, status) => {
+  const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { hop, total, label, status });
+      sender.send("netcatty:chain:progress", { hop, total, label, status, error });
     }
   };
 
@@ -406,6 +406,9 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         logPrefix: `[Chain] Hop ${i + 1}`,
         unlockedEncryptedKeys: options._unlockedEncryptedKeys || [],
         defaultKeys,
+        onAuthAttempt: (method) => {
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', method);
+        },
       });
       applyAuthToConnOpts(connOpts, authConfig);
 
@@ -424,6 +427,10 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
       // Connect this hop
       await new Promise((resolve, reject) => {
+        conn.once('handshake', () => {
+          console.log(`[Chain] Hop ${i + 1}/${totalHops}: ${hopLabel} handshake complete`);
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'authenticating');
+        });
         conn.once('ready', () => {
           console.log(`[Chain] Hop ${i + 1}/${totalHops}: ${hopLabel} connected`);
           sendProgress(i + 1, totalHops + 1, hopLabel, 'connected');
@@ -431,12 +438,14 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         });
         conn.once('error', (err) => {
           console.error(`[Chain] Hop ${i + 1}/${totalHops}: ${hopLabel} error:`, err.message);
-          sendProgress(i + 1, totalHops + 1, hopLabel, 'error');
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'error', err.message);
           reject(err);
         });
         conn.once('timeout', () => {
           console.error(`[Chain] Hop ${i + 1}/${totalHops}: ${hopLabel} timeout`);
-          reject(new Error(`Connection timeout to ${hopLabel}`));
+          const errMsg = `Connection timeout to ${hopLabel}`;
+          sendProgress(i + 1, totalHops + 1, hopLabel, 'error', errMsg);
+          reject(new Error(errMsg));
         });
         // Handle keyboard-interactive authentication for jump hosts (2FA/MFA)
         conn.on('keyboard-interactive', createKeyboardInteractiveHandler({
@@ -508,9 +517,9 @@ async function startSSHSession(event, options) {
   const rows = options.rows || 24;
   const sender = event.sender;
 
-  const sendProgress = (hop, total, label, status) => {
+  const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { hop, total, label, status });
+      sender.send("netcatty:chain:progress", { hop, total, label, status, error });
     }
   };
 
@@ -850,10 +859,19 @@ async function startSSHSession(event, options) {
               // Only log safe identifier, not the full agent object which may contain private keys
               const agentType = typeof connectOpts.agent === "string" ? "path" : "NetcattyAgent";
               log("Trying agent auth", { id: method.id, agentType });
+              sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'SSH agent');
               // Return "agent" string to use SSH agent for authentication
               return callback("agent");
             } else if (method.type === "publickey") {
               log("Trying publickey auth", { id: method.id, isDefault: method.isDefault || false });
+              const keyLabel = method.id.startsWith("publickey-default-")
+                ? `key ${method.id.replace("publickey-default-", "")}`
+                : method.id.startsWith("publickey-encrypted-")
+                  ? `key ${method.id.replace("publickey-encrypted-", "")} (encrypted)`
+                  : method.id === "publickey-user"
+                    ? "configured key"
+                    : method.id;
+              sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', keyLabel);
               return callback({
                 type: "publickey",
                 username: connectOpts.username,
@@ -862,6 +880,7 @@ async function startSSHSession(event, options) {
               });
             } else if (method.type === "password") {
               log("Trying password auth", { id: method.id });
+              sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'password');
               return callback({
                 type: "password",
                 username: connectOpts.username,
@@ -869,6 +888,7 @@ async function startSSHSession(event, options) {
               });
             } else if (method.type === "keyboard-interactive") {
               log("Trying keyboard-interactive auth", { id: method.id });
+              sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'keyboard-interactive');
               // Return string instead of object - ssh2 requires a prompt function
               // for keyboard-interactive objects. Returning the string lets ssh2
               // use its default handling and trigger the keyboard-interactive event.
@@ -924,10 +944,20 @@ async function startSSHSession(event, options) {
       connectOpts.sock = connectionSocket;
       delete connectOpts.host;
       delete connectOpts.port;
+    } else {
+      // Direct connection (no jump hosts, no proxy)
+      sendProgress(1, 1, options.hostname, 'connecting');
     }
 
     return new Promise((resolve, reject) => {
       const logPrefix = hasJumpHosts ? '[Chain]' : '[SSH]';
+      let settled = false;
+
+      conn.once("handshake", () => {
+        console.log(`${logPrefix} ${options.hostname} handshake complete`);
+        sendProgress(totalHops, totalHops, options.hostname, 'authenticating');
+      });
+
       conn.once("ready", () => {
         console.log(`${logPrefix} ${options.hostname} ready`);
 
@@ -939,9 +969,8 @@ async function startSSHSession(event, options) {
           }
         }
 
-        if (hasJumpHosts || hasProxy) {
-          sendProgress(totalHops, totalHops, options.hostname, 'connected');
-        }
+        sendProgress(totalHops, totalHops, options.hostname, 'authenticated');
+        sendProgress(totalHops, totalHops, options.hostname, 'shell');
 
         conn.shell(
           {
@@ -962,9 +991,12 @@ async function startSSHSession(event, options) {
               for (const c of chainConnections) {
                 try { c.end(); } catch { }
               }
+              sendProgress(totalHops, totalHops, options.hostname, 'error', `Failed to open shell: ${err.message}`);
               reject(err);
               return;
             }
+
+            sendProgress(totalHops, totalHops, options.hostname, 'connected');
 
             const session = {
               conn,
@@ -1076,6 +1108,7 @@ async function startSSHSession(event, options) {
               }, 300);
             }
 
+            settled = true;
             resolve({ sessionId });
           }
         );
@@ -1102,6 +1135,7 @@ async function startSSHSession(event, options) {
           console.error(`${logPrefix} ${options.hostname} error:`, err.message);
         }
 
+        sendProgress(totalHops, totalHops, options.hostname, 'error', err.message);
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
         sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
@@ -1117,6 +1151,7 @@ async function startSSHSession(event, options) {
         console.error(`${logPrefix} ${options.hostname} connection timeout`);
         const err = new Error(`Connection timeout to ${options.hostname}`);
         const contents = event.sender;
+        sendProgress(totalHops, totalHops, options.hostname, 'error', err.message);
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "timeout" });
         sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
@@ -1130,6 +1165,9 @@ async function startSSHSession(event, options) {
 
       conn.once("close", () => {
         const contents = event.sender;
+        if (!settled) {
+          sendProgress(totalHops, totalHops, options.hostname, 'error', `Connection to ${options.hostname} closed unexpectedly`);
+        }
         safeSend(contents, "netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
         sessionLogStreamManager.stopStream(sessionId);
         sessions.delete(sessionId);
@@ -1137,6 +1175,10 @@ async function startSSHSession(event, options) {
         sessionDecoders.delete(sessionId);
         for (const c of chainConnections) {
           try { c.end(); } catch { }
+        }
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Connection to ${options.hostname} closed unexpectedly`));
         }
       });
 
