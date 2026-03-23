@@ -10,6 +10,12 @@ interface CompiledRule {
   color: string;
 }
 
+interface CachedDecorationRange {
+  x: number;
+  width: number;
+  color: string;
+}
+
 /**
  * Manages terminal decorations for keyword highlighting.
  * Uses xterm.js Decoration API to overlay styles without modifying the data stream.
@@ -20,6 +26,9 @@ export class KeywordHighlighter implements IDisposable {
   private compiledRules: CompiledRule[] = [];
   private decorations: { decoration: IDecoration; marker: IMarker }[] = [];
   private debounceTimer: NodeJS.Timeout | null = null;
+  private animationFrameId: number | null = null;
+  private lastRefreshTime: number = 0;
+  private matchCache = new Map<string, CachedDecorationRange[]>();
   private enabled: boolean = false;
   private disposables: IDisposable[] = [];
   private lastViewportY: number = -1;
@@ -31,23 +40,22 @@ export class KeywordHighlighter implements IDisposable {
     this.disposables.push(
       // When user scrolls, refresh visible area
       this.term.onScroll(() => {
-        // console.log('[KeywordHighlighter] onScroll');
-        this.triggerRefresh();
+        this.triggerRefresh("debounced");
       }),
-      // When new data is written, refresh
+      // When new data is written, refresh on the next frame so highlights land
+      // with the freshly rendered content instead of trailing behind it.
       this.term.onWriteParsed(() => {
-        // console.log('[KeywordHighlighter] onWriteParsed');
-        this.triggerRefresh();
+        this.triggerRefresh("immediate");
       }),
       // Also refresh on resize as viewport content changes
-      this.term.onResize(() => this.triggerRefresh()),
+      this.term.onResize(() => this.triggerRefresh("debounced")),
       // onRender fires after each render cycle - catch scrolls that onScroll might miss
       this.term.onRender(() => {
         // Only trigger refresh if viewport position changed
         const currentViewportY = this.term.buffer.active?.viewportY ?? 0;
         if (currentViewportY !== this.lastViewportY) {
           this.lastViewportY = currentViewportY;
-          this.triggerRefresh();
+          this.triggerRefresh("debounced");
         }
       })
     );
@@ -55,6 +63,7 @@ export class KeywordHighlighter implements IDisposable {
 
   public setRules(rules: KeywordHighlightRule[], enabled: boolean) {
     this.enabled = enabled;
+    this.matchCache.clear();
 
     // Pre-compile all patterns into regexes for better performance
     // This avoids creating new RegExp objects on every viewport refresh
@@ -76,7 +85,7 @@ export class KeywordHighlighter implements IDisposable {
     // Clear existing and force an immediate refresh if enabling
     this.clearDecorations();
     if (this.enabled && this.compiledRules.length > 0) {
-      this.triggerRefresh();
+      this.triggerRefresh("immediate");
     }
   }
 
@@ -87,9 +96,14 @@ export class KeywordHighlighter implements IDisposable {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.matchCache.clear();
   }
 
-  private triggerRefresh() {
+  private triggerRefresh(mode: "immediate" | "debounced") {
     if (!this.enabled || this.compiledRules.length === 0) return;
 
     // Optimization: Disable highlighting in Alternate Buffer (e.g. Vim, Htop)
@@ -101,12 +115,44 @@ export class KeywordHighlighter implements IDisposable {
       return;
     }
 
+    if (mode === "immediate") {
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+        this.debounceTimer = null;
+      }
+      // Throttle: skip if a rAF is already pending or we refreshed recently
+      if (this.animationFrameId !== null) {
+        return;
+      }
+      const now = performance.now();
+      const minInterval = XTERM_PERFORMANCE_CONFIG.highlighting.immediateMinIntervalMs;
+      if (now - this.lastRefreshTime < minInterval) {
+        // Too soon — fall through to debounced path instead of dropping
+        this.triggerRefresh("debounced");
+        return;
+      }
+      this.animationFrameId = requestAnimationFrame(() => {
+        this.animationFrameId = null;
+        this.lastRefreshTime = performance.now();
+        this.refreshViewport();
+      });
+      return;
+    }
+
+    if (this.animationFrameId !== null) {
+      return;
+    }
+
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
 
     const delay = XTERM_PERFORMANCE_CONFIG.highlighting.debounceMs;
-    this.debounceTimer = setTimeout(() => this.refreshViewport(), delay);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.lastRefreshTime = performance.now();
+      this.refreshViewport();
+    }, delay);
   }
 
   private clearDecorations() {
@@ -140,8 +186,14 @@ export class KeywordHighlighter implements IDisposable {
       // Skip continuation cells (width 0) - these are the 2nd cell of wide characters
       if (width === 0) continue;
 
-      // Map each character in this cell to the current cell column
-      for (let i = 0; i < chars.length; i++) {
+      if (chars.length > 0) {
+        // Map each character in this cell to the current cell column
+        for (let i = 0; i < chars.length; i++) {
+          map.push(cellCol);
+        }
+      } else {
+        // Empty cell (codepoint 0) — translateToString() outputs a space
+        // for it, so we must push one entry to keep the map aligned.
         map.push(cellCol);
       }
 
@@ -177,49 +229,93 @@ export class KeywordHighlighter implements IDisposable {
       const lineText = line.translateToString(true); // true = trim right whitespace
       if (!lineText) continue;
 
-      // Build mapping from string index to cell column for wide char support
-      const cellMap = this.buildStringToCellMap(line);
+      const cachedRanges = this.getCachedRanges(line, lineText);
+      if (cachedRanges.length === 0) continue;
 
-      // Process each pre-compiled rule
-      for (const { regex, color } of this.compiledRules) {
-        // Reset regex state for reuse (global flag maintains lastIndex)
-        regex.lastIndex = 0;
-        let match;
+      // Calculate offset relative to the absolute cursor position
+      // offset = targetLineAbs - (baseY + cursorY)
+      const offset = lineY - cursorAbsoluteY;
 
-        while ((match = regex.exec(lineText)) !== null) {
-          const strStart = match.index;
-          const strEnd = strStart + match[0].length;
+      for (const range of cachedRanges) {
+        const marker = this.term.registerMarker(offset);
 
-          // Map string indices to cell columns
-          const cellStartCol = cellMap[strStart] ?? strStart;
-          const cellEndCol = cellMap[strEnd] ?? strEnd;
-          const cellWidth = cellEndCol - cellStartCol;
+        if (marker) {
+          const deco = this.term.registerDecoration({
+            marker,
+            x: range.x,
+            width: range.width,
+            foregroundColor: range.color,
+          });
 
-          // Skip if width is 0 or negative (shouldn't happen, but be safe)
-          if (cellWidth <= 0) continue;
-
-          // Calculate offset relative to the absolute cursor position
-          // offset = targetLineAbs - (baseY + cursorY)
-          const offset = lineY - cursorAbsoluteY;
-          const marker = this.term.registerMarker(offset);
-
-          if (marker) {
-            const deco = this.term.registerDecoration({
-              marker,
-              x: cellStartCol,
-              width: cellWidth,
-              foregroundColor: color,
-            });
-
-            if (deco) {
-              this.decorations.push({ decoration: deco, marker });
-            } else {
-              // If decoration failed, cleanup marker
-              marker.dispose();
-            }
+          if (deco) {
+            this.decorations.push({ decoration: deco, marker });
+          } else {
+            // If decoration failed, cleanup marker
+            marker.dispose();
           }
         }
       }
     }
+  }
+
+  private getCachedRanges(line: IBufferLine, lineText: string): CachedDecorationRange[] {
+    const cached = this.matchCache.get(lineText);
+    if (cached) {
+      // LRU: move to end
+      this.matchCache.delete(lineText);
+      this.matchCache.set(lineText, cached);
+      return cached;
+    }
+
+    const ranges = this.scanLine(line, lineText);
+    this.matchCache.set(lineText, ranges);
+
+    const maxEntries = XTERM_PERFORMANCE_CONFIG.highlighting.cacheEntries;
+    if (this.matchCache.size > maxEntries) {
+      const oldestKey = this.matchCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.matchCache.delete(oldestKey);
+      }
+    }
+
+    return ranges;
+  }
+
+  private scanLine(line: IBufferLine, lineText: string): CachedDecorationRange[] {
+    let cellMap: number[] | null = null;
+    const ranges: CachedDecorationRange[] = [];
+
+    // Process each pre-compiled rule
+    for (const { regex, color } of this.compiledRules) {
+      // Reset regex state for reuse (global flag maintains lastIndex)
+      regex.lastIndex = 0;
+      let match;
+
+      while ((match = regex.exec(lineText)) !== null) {
+        const strStart = match.index;
+        const strEnd = strStart + match[0].length;
+
+        // Lazily build cellMap only when a match is found
+        if (cellMap === null) {
+          cellMap = this.buildStringToCellMap(line);
+        }
+
+        // Map string indices to cell columns
+        const cellStartCol = cellMap[strStart] ?? strStart;
+        const cellEndCol = cellMap[strEnd] ?? strEnd;
+        const cellWidth = cellEndCol - cellStartCol;
+
+        // Skip if width is 0 or negative (shouldn't happen, but be safe)
+        if (cellWidth <= 0) continue;
+
+        ranges.push({
+          x: cellStartCol,
+          width: cellWidth,
+          color,
+        });
+      }
+    }
+
+    return ranges;
   }
 }

@@ -94,6 +94,11 @@ export const XTERM_PERFORMANCE_CONFIG = {
     // Debounce time for viewport scanning (ms)
     // Higher values = better scrolling performance, but slower highlight "catch up"
     debounceMs: 200,
+    // Minimum interval between immediate (rAF) refreshes in ms.
+    // Prevents heavy output (e.g. tail -f) from refreshing every frame.
+    immediateMinIntervalMs: 50,
+    // Number of unique line scan results to keep cached.
+    cacheEntries: 1200,
   },
 };
 
