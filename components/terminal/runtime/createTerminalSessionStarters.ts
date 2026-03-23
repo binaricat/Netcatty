@@ -44,7 +44,7 @@ type TerminalBackendApi = {
     cb: (evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void,
   ) => () => void;
   onChainProgress: (
-    cb: (hop: number, total: number, label: string, status: string, error?: string) => void,
+    cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void,
   ) => (() => void) | undefined;
   writeToSession: (sessionId: string, data: string) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
@@ -406,12 +406,18 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
 
     {
-      const unsub = ctx.terminalBackend.onChainProgress((hop, total, label, status, error) => {
-        ctx.setChainProgress({
-          currentHop: hop,
-          totalHops: total,
-          currentHostLabel: label,
-        });
+      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error) => {
+        // P1: Only process events for this session
+        if (sid !== ctx.sessionId) return;
+
+        // P3: Only show chain progress UI for multi-hop connections
+        if (total > 1) {
+          ctx.setChainProgress({
+            currentHop: hop,
+            totalHops: total,
+            currentHostLabel: label,
+          });
+        }
 
         // Build human-readable log line
         let logLine: string;

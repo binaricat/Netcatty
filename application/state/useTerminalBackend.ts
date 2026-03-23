@@ -96,7 +96,7 @@ export const useTerminalBackend = () => {
     return bridge.onSessionExit(sessionId, cb);
   }, []);
 
-  const onChainProgress = useCallback((cb: (hop: number, total: number, label: string, status: string) => void) => {
+  const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onChainProgress?.(cb);
   }, []);

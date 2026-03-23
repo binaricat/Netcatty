@@ -462,8 +462,8 @@ declare global {
     onLanguageChanged?(cb: (language: string) => void): () => void;
 
     // Chain progress listener for jump host connections
-    // Callback receives: (currentHop: number, totalHops: number, hostLabel: string, status: string)
-    onChainProgress?(cb: (hop: number, total: number, label: string, status: string) => void): () => void;
+    // Callback receives: (sessionId: string, currentHop: number, totalHops: number, hostLabel: string, status: string, error?: string)
+    onChainProgress?(cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void): () => void;
 
     // OAuth callback server for cloud sync
     startOAuthCallback?(expectedState?: string): Promise<{ code: string; state?: string }>;

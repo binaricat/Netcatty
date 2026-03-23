@@ -335,7 +335,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
   const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { hop, total, label, status, error });
+      sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error });
     }
   };
 
@@ -519,7 +519,7 @@ async function startSSHSession(event, options) {
 
   const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { hop, total, label, status, error });
+      sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error });
     }
   };
 
@@ -1144,6 +1144,7 @@ async function startSSHSession(event, options) {
         for (const c of chainConnections) {
           try { c.end(); } catch { }
         }
+        settled = true;
         reject(err);
       });
 
@@ -1160,6 +1161,7 @@ async function startSSHSession(event, options) {
         for (const c of chainConnections) {
           try { c.end(); } catch { }
         }
+        settled = true;
         reject(err);
       });
 
