@@ -242,15 +242,22 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private getCachedRanges(line: IBufferLine, lineText: string): CachedDecorationRange[] {
-    const cached = this.matchCache.get(lineText);
+    // Build the cell map up front so we can include its shape in the cache
+    // key.  Two lines can share the same translateToString() output yet
+    // differ in cell layout (e.g. empty cells vs real spaces after a tab
+    // stop), which would produce different x/width decoration ranges.
+    const cellMap = this.buildStringToCellMap(line);
+    const cacheKey = `${lineText}\0${cellMap.join(',')}`;
+
+    const cached = this.matchCache.get(cacheKey);
     if (cached) {
-      this.matchCache.delete(lineText);
-      this.matchCache.set(lineText, cached);
+      this.matchCache.delete(cacheKey);
+      this.matchCache.set(cacheKey, cached);
       return cached;
     }
 
-    const ranges = this.scanLine(line, lineText);
-    this.matchCache.set(lineText, ranges);
+    const ranges = this.scanLine(cellMap, lineText);
+    this.matchCache.set(cacheKey, ranges);
 
     const maxEntries = XTERM_PERFORMANCE_CONFIG.highlighting.cacheEntries;
     if (this.matchCache.size > maxEntries) {
@@ -263,8 +270,7 @@ export class KeywordHighlighter implements IDisposable {
     return ranges;
   }
 
-  private scanLine(line: IBufferLine, lineText: string): CachedDecorationRange[] {
-    let cellMap: number[] | null = null;
+  private scanLine(cellMap: number[], lineText: string): CachedDecorationRange[] {
     const ranges: CachedDecorationRange[] = [];
 
     // Process each pre-compiled rule
@@ -276,10 +282,6 @@ export class KeywordHighlighter implements IDisposable {
       while ((match = regex.exec(lineText)) !== null) {
         const strStart = match.index;
         const strEnd = strStart + match[0].length;
-
-        if (cellMap === null) {
-          cellMap = this.buildStringToCellMap(line);
-        }
 
         // Map string indices to cell columns
         const cellStartCol = cellMap[strStart] ?? strStart;
