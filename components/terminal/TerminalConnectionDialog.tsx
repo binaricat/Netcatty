@@ -86,9 +86,9 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         )}>
             <div className="w-[560px] max-w-[90vw] bg-background/95 border border-border/60 rounded-xl shadow-xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10 rounded-lg" />
-                        <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10 rounded-lg shrink-0" />
+                        <div className="min-w-0">
                             {chainProgress ? (
                                 <>
                                     <div className="text-sm font-semibold truncate">
