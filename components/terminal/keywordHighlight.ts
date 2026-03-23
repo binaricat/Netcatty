@@ -153,6 +153,18 @@ export class KeywordHighlighter implements IDisposable {
       if (!this.debounceTimer) {
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
+          // Fallback fired — the rAF never ran (hidden/background tab).
+          // Cancel the stale rAF so future immediate calls aren't blocked.
+          if (this.animationFrameId !== null) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+          }
+          // Re-check state, same as the rAF callback
+          if (!this.enabled || this.compiledRules.length === 0) return;
+          if (this.term.buffer.active.type === 'alternate') {
+            if (this.decorations.length > 0) this.clearDecorations();
+            return;
+          }
           this.lastRefreshTime = performance.now();
           this.refreshViewport();
         }, XTERM_PERFORMANCE_CONFIG.highlighting.debounceMs);
