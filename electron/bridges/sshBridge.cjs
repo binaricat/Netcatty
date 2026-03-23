@@ -987,6 +987,7 @@ async function startSSHSession(event, options) {
           },
           (err, stream) => {
             if (err) {
+              settled = true;
               conn.end();
               for (const c of chainConnections) {
                 try { c.end(); } catch { }
