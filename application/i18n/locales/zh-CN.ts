@@ -1219,6 +1219,8 @@ const zhCN: Messages = {
   'settings.terminal.behavior.scrollOnKeyPress.desc': '按键（例如 Enter）时将终端滚动到底部',
   'settings.terminal.behavior.scrollOnPaste': '粘贴时自动滚动',
   'settings.terminal.behavior.scrollOnPaste.desc': '粘贴文本时将终端滚动到底部',
+  'settings.terminal.behavior.smoothScrolling': '平滑滚动',
+  'settings.terminal.behavior.smoothScrolling.desc': '滚动终端视口时使用平滑动画',
   'settings.terminal.behavior.linkModifier': '链接修饰键',
   'settings.terminal.behavior.linkModifier.desc': '按住此键再点击终端中的链接',
   'settings.terminal.behavior.linkModifier.none': '无（直接点击）',

@@ -617,6 +617,13 @@ export default function SettingsTerminalTab(props: {
         </SettingRow>
 
         <SettingRow
+          label={t("settings.terminal.behavior.smoothScrolling")}
+          description={t("settings.terminal.behavior.smoothScrolling.desc")}
+        >
+          <Toggle checked={terminalSettings.smoothScrolling} onChange={(v) => updateTerminalSetting("smoothScrolling", v)} />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.linkModifier")}
           description={t("settings.terminal.behavior.linkModifier.desc")}
         >

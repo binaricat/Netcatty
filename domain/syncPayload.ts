@@ -74,6 +74,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'scrollback', 'drawBoldInBrightColors', 'fontLigatures', 'fontWeight', 'fontWeightBold',
   'linePadding', 'cursorShape', 'cursorBlink', 'minimumContrastRatio',
   'scrollOnInput', 'scrollOnOutput', 'scrollOnKeyPress', 'scrollOnPaste',
+  'smoothScrolling',
   'rightClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'disableBracketedPaste', 'osc52Clipboard',

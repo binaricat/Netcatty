@@ -410,6 +410,8 @@ export interface TerminalSettings {
   scrollOnKeyPress: boolean; // Scroll terminal to bottom on key press
   scrollOnPaste: boolean; // Scroll terminal to bottom on paste
 
+  smoothScrolling: boolean; // Animate viewport scrolling instead of jumping instantly
+
   // Mouse
   rightClickBehavior: RightClickBehavior;
   copyOnSelect: boolean; // Automatically copy selected text
@@ -532,6 +534,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollOnOutput: false,
   scrollOnKeyPress: false,
   scrollOnPaste: true,
+  smoothScrolling: true,
   rightClickBehavior: 'context-menu',
   copyOnSelect: false,
   middleClickPaste: true,

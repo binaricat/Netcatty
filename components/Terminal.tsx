@@ -764,6 +764,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           terminalSettings.drawBoldInBrightColors;
         termRef.current.options.minimumContrastRatio =
           terminalSettings.minimumContrastRatio;
+        termRef.current.options.smoothScrollDuration =
+          terminalSettings.smoothScrolling
+            ? XTERM_PERFORMANCE_CONFIG.rendering.smoothScrollDuration
+            : 0;
         termRef.current.options.scrollOnUserInput =
           shouldEnableNativeUserInputAutoScroll(terminalSettings);
         termRef.current.options.altClickMovesCursor = !terminalSettings.altAsMeta;

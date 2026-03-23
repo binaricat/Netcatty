@@ -311,6 +311,9 @@ const en: Messages = {
   'settings.terminal.behavior.scrollOnPaste': 'Scroll on paste',
   'settings.terminal.behavior.scrollOnPaste.desc':
     'Scroll terminal to bottom when pasting text',
+  'settings.terminal.behavior.smoothScrolling': 'Smooth scrolling',
+  'settings.terminal.behavior.smoothScrolling.desc':
+    'Animate terminal viewport scrolling instead of jumping instantly',
   'settings.terminal.behavior.linkModifier': 'Link modifier key',
   'settings.terminal.behavior.linkModifier.desc': 'Hold this key to click on links in terminal',
   'settings.terminal.behavior.linkModifier.none': 'None (click directly)',

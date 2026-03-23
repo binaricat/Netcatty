@@ -161,6 +161,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const lineHeight = 1 + (settings?.linePadding ?? 0) / 10;
   const minimumContrastRatio = settings?.minimumContrastRatio ?? 1;
   const scrollOnUserInput = shouldEnableNativeUserInputAutoScroll(settings);
+  const smoothScrollDuration = settings?.smoothScrolling
+    ? performanceConfig.options.smoothScrollDuration
+    : 0;
   const altIsMeta = settings?.altAsMeta ?? false;
   const wordSeparator = settings?.wordSeparators ?? " ()[]{}'\"";
   const keywordHighlightRules = settings?.keywordHighlightRules ?? [];
@@ -213,6 +216,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     allowProposedApi: true,
     drawBoldTextInBrightColors,
     minimumContrastRatio,
+    smoothScrollDuration,
     scrollOnUserInput,
     macOptionClickForcesSelection: true,
     altClickMovesCursor: !altIsMeta,
