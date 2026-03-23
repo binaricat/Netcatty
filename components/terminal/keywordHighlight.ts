@@ -136,15 +136,7 @@ export class KeywordHighlighter implements IDisposable {
           clearTimeout(this.debounceTimer);
           this.debounceTimer = null;
         }
-        // Re-check state: user may have disabled highlighting or switched
-        // to alternate buffer while the rAF was pending.
-        if (!this.enabled || this.compiledRules.length === 0) return;
-        if (this.term.buffer.active.type === 'alternate') {
-          if (this.decorations.length > 0) this.clearDecorations();
-          return;
-        }
-        this.lastRefreshTime = performance.now();
-        this.refreshViewport();
+        this.executeRefresh();
       });
       // Arm a debounced fallback: rAF does not fire in background/hidden
       // tabs (Chromium throttles it), so the timer ensures highlights
@@ -153,20 +145,7 @@ export class KeywordHighlighter implements IDisposable {
       if (!this.debounceTimer) {
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
-          // Fallback fired — the rAF never ran (hidden/background tab).
-          // Cancel the stale rAF so future immediate calls aren't blocked.
-          if (this.animationFrameId !== null) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
-          }
-          // Re-check state, same as the rAF callback
-          if (!this.enabled || this.compiledRules.length === 0) return;
-          if (this.term.buffer.active.type === 'alternate') {
-            if (this.decorations.length > 0) this.clearDecorations();
-            return;
-          }
-          this.lastRefreshTime = performance.now();
-          this.refreshViewport();
+          this.executeRefresh();
         }, XTERM_PERFORMANCE_CONFIG.highlighting.debounceMs);
       }
       return;
@@ -183,9 +162,25 @@ export class KeywordHighlighter implements IDisposable {
     const delay = XTERM_PERFORMANCE_CONFIG.highlighting.debounceMs;
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      this.lastRefreshTime = performance.now();
-      this.refreshViewport();
+      this.executeRefresh();
     }, delay);
+  }
+
+  /** Shared refresh execution for both rAF and timer callbacks. */
+  private executeRefresh() {
+    // Cancel any stale rAF that will never fire (e.g. hidden tab)
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    // Re-check state: may have changed since the refresh was scheduled
+    if (!this.enabled || this.compiledRules.length === 0) return;
+    if (this.term.buffer.active.type === 'alternate') {
+      if (this.decorations.length > 0) this.clearDecorations();
+      return;
+    }
+    this.lastRefreshTime = performance.now();
+    this.refreshViewport();
   }
 
   private clearDecorations() {
