@@ -444,7 +444,7 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
       const jump = jumpHosts[i];
       const isFirst = i === 0;
       const isLast = i === jumpHosts.length - 1;
-      const hopLabel = jump.label || (jump.hostname.includes(':') ? `[${jump.hostname}]:${jump.port || 22}` : `${jump.hostname}:${jump.port || 22}`);
+      const hopLabel = jump.label || (jump.hostname.includes(':') && !jump.hostname.startsWith('[') ? `[${jump.hostname}]:${jump.port || 22}` : `${jump.hostname}:${jump.port || 22}`);
 
       console.log(`[SFTP Chain] Hop ${i + 1}/${jumpHosts.length}: Connecting to ${hopLabel}...`);
 
