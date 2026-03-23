@@ -16,6 +16,13 @@ interface CachedDecorationRange {
   color: string;
 }
 
+/** Shared empty array for non-matching lines to avoid per-call allocations. */
+const EMPTY_RANGES: readonly CachedDecorationRange[] = Object.freeze([]);
+
+/** ASCII-only test — when true, string indices equal cell columns. */
+// eslint-disable-next-line no-control-regex
+const RE_ASCII_ONLY = /^[\x00-\x7f]*$/;
+
 /**
  * Manages terminal decorations for keyword highlighting.
  * Uses xterm.js Decoration API to overlay styles without modifying the data stream.
@@ -310,8 +317,11 @@ export class KeywordHighlighter implements IDisposable {
   }
 
   private scanLine(line: IBufferLine, lineText: string): CachedDecorationRange[] {
+    // ASCII-only lines have a 1:1 string-index-to-cell-column mapping,
+    // so we can skip the expensive buildStringToCellMap call entirely.
+    const asciiOnly = RE_ASCII_ONLY.test(lineText);
     let cellMap: number[] | null = null;
-    const ranges: CachedDecorationRange[] = [];
+    let ranges: CachedDecorationRange[] | null = null;
 
     // Process each pre-compiled rule
     for (const { regex, color } of this.compiledRules) {
@@ -323,19 +333,29 @@ export class KeywordHighlighter implements IDisposable {
         const strStart = match.index;
         const strEnd = strStart + match[0].length;
 
-        // Lazily build cellMap only when a match is found
-        if (cellMap === null) {
-          cellMap = this.buildStringToCellMap(line);
+        let cellStartCol: number;
+        let cellEndCol: number;
+
+        if (asciiOnly) {
+          cellStartCol = strStart;
+          cellEndCol = strEnd;
+        } else {
+          // Lazily build cellMap only when a match is found
+          if (cellMap === null) {
+            cellMap = this.buildStringToCellMap(line);
+          }
+          cellStartCol = cellMap[strStart] ?? strStart;
+          cellEndCol = cellMap[strEnd] ?? strEnd;
         }
 
-        // Map string indices to cell columns
-        const cellStartCol = cellMap[strStart] ?? strStart;
-        const cellEndCol = cellMap[strEnd] ?? strEnd;
         const cellWidth = cellEndCol - cellStartCol;
 
         // Skip if width is 0 or negative (shouldn't happen, but be safe)
         if (cellWidth <= 0) continue;
 
+        if (ranges === null) {
+          ranges = [];
+        }
         ranges.push({
           x: cellStartCol,
           width: cellWidth,
@@ -344,6 +364,6 @@ export class KeywordHighlighter implements IDisposable {
       }
     }
 
-    return ranges;
+    return ranges ?? (EMPTY_RANGES as CachedDecorationRange[]);
   }
 }
