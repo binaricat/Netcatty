@@ -115,7 +115,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             )}
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
                         {!needsAuth && (
                             <Button
                                 size="sm"
