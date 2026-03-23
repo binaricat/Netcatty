@@ -9,10 +9,17 @@ interface QuickConnectParseResult {
   warnings: string[];
 }
 
-/** Matches a bare (un-bracketed) IPv6 address — must contain at least two colons. */
+/** Test whether a string looks like a bare (un-bracketed) IPv6 address.
+ *  Must have only hex digits and colons, with either:
+ *  - A "::" shorthand (unambiguously IPv6), or
+ *  - Exactly 7 colons (full 8-group notation like 2607:f130:0:179:0:0:b0df:eec4)
+ *  This avoids false positives on MAC addresses (6 groups, 5 colons). */
 const BARE_IPV6_RE = /^[a-fA-F0-9:]+$/;
-const isBareIPv6 = (s: string): boolean =>
-  BARE_IPV6_RE.test(s) && (s.match(/:/g) || []).length >= 2;
+const isBareIPv6 = (s: string): boolean => {
+  if (!BARE_IPV6_RE.test(s)) return false;
+  if (s.includes('::')) return true;
+  return (s.match(/:/g) || []).length === 7;
+};
 
 const parseDirectTarget = (input: string): QuickConnectTarget | null => {
   const trimmed = input.trim();
