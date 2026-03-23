@@ -133,9 +133,29 @@ export class KeywordHighlighter implements IDisposable {
       }
       this.animationFrameId = requestAnimationFrame(() => {
         this.animationFrameId = null;
+        // Re-check state: user may have disabled highlighting or switched
+        // to alternate buffer while the rAF was pending.
+        if (!this.enabled || this.compiledRules.length === 0) return;
+        if (this.term.buffer.active.type === 'alternate') {
+          if (this.decorations.length > 0) this.clearDecorations();
+          return;
+        }
         this.lastRefreshTime = performance.now();
         this.refreshViewport();
       });
+      // Also schedule a debounced fallback: rAF does not fire in background
+      // tabs (Chromium throttles it), so without this a hidden tab with
+      // ongoing output would never update highlights until the next scroll
+      // or resize event.
+      this.debounceTimer = setTimeout(() => {
+        this.debounceTimer = null;
+        if (this.animationFrameId !== null) {
+          // rAF already ran or will run — skip
+          return;
+        }
+        this.lastRefreshTime = performance.now();
+        this.refreshViewport();
+      }, XTERM_PERFORMANCE_CONFIG.highlighting.debounceMs);
       return;
     }
 
