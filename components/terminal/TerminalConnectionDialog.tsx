@@ -88,10 +88,10 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10 rounded-lg" />
-                        <div>
+                        <div className="min-w-0 flex-1">
                             {chainProgress ? (
                                 <>
-                                    <div className="text-sm font-semibold">
+                                    <div className="text-sm font-semibold truncate">
                                         <span className="text-muted-foreground">
                                             {t('terminal.connection.chainOf', {
                                                 current: chainProgress.currentHop,
@@ -101,14 +101,14 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         </span>
                                         <span>{chainProgress.currentHostLabel}</span>
                                     </div>
-                                    <div className="text-[11px] text-muted-foreground font-mono">
+                                    <div className="text-[11px] text-muted-foreground font-mono truncate">
                                         {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
                             ) : (
                                 <>
-                                    <div className="text-lg font-semibold">{host.label}</div>
-                                    <div className="text-[11px] text-muted-foreground font-mono">
+                                    <div className="text-lg font-semibold truncate">{host.label}</div>
+                                    <div className="text-[11px] text-muted-foreground font-mono truncate">
                                         {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
