@@ -432,7 +432,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             logLine = `${prefix}${label} - ${tr("terminal.progress.keyExchangeComplete", "Key exchange complete")}`;
             break;
           case 'auth-attempt':
-            logLine = `${prefix}${label} - ${tr("terminal.progress.trying", "Trying")} ${error}...`;
+            if (error?.endsWith('rejected')) {
+              logLine = `${prefix}${label} - ✗ ${error}`;
+            } else if (error === 'all methods exhausted') {
+              logLine = `${prefix}${label} - ✗ ${tr("terminal.progress.allMethodsExhausted", "All authentication methods exhausted")}`;
+            } else {
+              logLine = `${prefix}${label} - ${tr("terminal.progress.trying", "Trying")} ${error}...`;
+            }
             break;
           case 'authenticated':
             logLine = `${prefix}${label} - ${tr("terminal.progress.authenticated", "Authenticated")}`;

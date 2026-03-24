@@ -380,10 +380,16 @@ function buildAuthHandler(options) {
 
   // Use dynamic authHandler to try all keys
   let authIndex = 0;
+  let lastAttemptedLabel = null;
   const attemptedMethodIds = new Set();
 
   const authHandler = (methodsLeft, partialSuccess, callback) => {
     const availableMethods = methodsLeft || ["publickey", "password", "keyboard-interactive", "agent"];
+
+    // Log rejection of previous method (authHandler is called again when server rejects)
+    if (lastAttemptedLabel && !partialSuccess) {
+      onAuthAttempt?.(`${lastAttemptedLabel} rejected`);
+    }
 
     while (authIndex < authMethods.length) {
       const method = authMethods[authIndex];
@@ -394,6 +400,7 @@ function buildAuthHandler(options) {
 
       if (method.type === "agent" && (availableMethods.includes("publickey") || availableMethods.includes("agent"))) {
         console.log(`${logPrefix} Trying agent auth`);
+        lastAttemptedLabel = "SSH agent";
         onAuthAttempt?.("SSH agent");
         return callback("agent");
       } else if (method.type === "publickey" && availableMethods.includes("publickey")) {
@@ -406,6 +413,7 @@ function buildAuthHandler(options) {
             : method.id === "publickey-user"
               ? "configured key"
               : method.id;
+        lastAttemptedLabel = keyLabel;
         onAuthAttempt?.(keyLabel);
         const pubkeyAuth = {
           type: "publickey",
@@ -418,6 +426,7 @@ function buildAuthHandler(options) {
         return callback(pubkeyAuth);
       } else if (method.type === "password" && availableMethods.includes("password")) {
         console.log(`${logPrefix} Trying password auth`);
+        lastAttemptedLabel = "password";
         onAuthAttempt?.("password");
         return callback({
           type: "password",
@@ -425,6 +434,7 @@ function buildAuthHandler(options) {
           password,
         });
       } else if (method.type === "keyboard-interactive" && availableMethods.includes("keyboard-interactive")) {
+        lastAttemptedLabel = "keyboard-interactive";
         onAuthAttempt?.("keyboard-interactive");
         return callback("keyboard-interactive");
       }

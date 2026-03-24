@@ -424,7 +424,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
             connOpts.privateKey = keyContent;
             if (isKeyEncrypted(keyContent)) {
               console.log(`[Chain] Hop ${i + 1}: identity file ${resolvedPath} is encrypted, requesting passphrase`);
-              sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'passphrase required');
+              sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', `key ${path.basename(resolvedPath)} requires passphrase`);
               const result = await passphraseHandler.requestPassphrase(
                 sender,
                 resolvedPath,
@@ -440,6 +440,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
               }
             }
             console.log(`[Chain] Hop ${i + 1}: loaded identity file ${resolvedPath}`);
+            sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', `loaded key ${path.basename(resolvedPath)}`);
             break;
           } catch (err) {
             console.warn(`[Chain] Hop ${i + 1}: failed to read identity file ${keyPath}:`, err.message);
@@ -660,6 +661,7 @@ async function startSSHSession(event, options) {
           // Check if key is encrypted — if so, prompt for passphrase
           if (isKeyEncrypted(keyContent)) {
             log("Identity file is encrypted, requesting passphrase", { keyPath: resolvedPath });
+            sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', `key ${path.basename(resolvedPath)} requires passphrase`);
             const result = await passphraseHandler.requestPassphrase(
               sender,
               resolvedPath,
@@ -675,6 +677,7 @@ async function startSSHSession(event, options) {
             }
           }
           log("Loaded identity file", { keyPath: resolvedPath, encrypted: isKeyEncrypted(keyContent) });
+          sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', `loaded key ${path.basename(resolvedPath)}`);
           break; // Use the first successfully loaded key
         } catch (err) {
           log("Failed to read identity file", { keyPath, error: err.message });
@@ -853,6 +856,12 @@ async function startSSHSession(event, options) {
         connectOpts.authHandler = (methodsLeft, partialSuccess, callback) => {
           log("authHandler called", { methodsLeft, partialSuccess, authIndex, attemptedMethodIds: Array.from(attemptedMethodIds) });
 
+          // When authHandler is called again after the first attempt, it means the
+          // previous method was rejected by the server. Log this for user visibility.
+          if (lastTriedMethod && !partialSuccess) {
+            sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', `${lastTriedMethod} rejected`);
+          }
+
           // methodsLeft can be null on first call (before server responds with available methods)
           // Include "agent" for SSH agent-based auth (used with agentForwarding)
           const availableMethods = methodsLeft || ["publickey", "password", "keyboard-interactive", "agent"];
@@ -989,6 +998,7 @@ async function startSSHSession(event, options) {
           }
 
           log("All auth methods exhausted");
+          sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'all methods exhausted');
           return callback(false);
         };
 
@@ -1293,12 +1303,15 @@ async function startSSHSession(event, options) {
           return;
         }
 
+        sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'waiting for user input...');
+
         // Forward ALL prompts to user - no auto-fill to avoid semantic detection issues
         // (Prompt text is admin-customizable and may not contain expected keywords)
         const requestId = keyboardInteractiveHandler.generateRequestId('ssh');
 
         keyboardInteractiveHandler.storeRequest(requestId, (userResponses) => {
           console.log(`${logPrefix} Received user responses, finishing keyboard-interactive`);
+          sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'user responded');
           finish(userResponses);
         }, sender.id, sessionId);
 
