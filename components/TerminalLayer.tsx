@@ -1,6 +1,7 @@
 import { Circle, FolderTree, LayoutGrid, MessageSquare, PanelLeft, PanelRight, Palette, Server, X, Zap } from 'lucide-react';
 import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
+import { sessionActivityStore } from '../application/state/sessionActivityStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
@@ -78,6 +79,17 @@ const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<s
     }
   }
   return changed ? next : source;
+};
+
+const stripTerminalControlSequences = (data: string): string => {
+  return data
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+};
+
+const hasNotifiableTerminalOutput = (data: string): boolean => {
+  return stripTerminalControlSequences(data).trim().length > 0;
 };
 
 type AITerminalSessionInfo = {
@@ -422,6 +434,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     snippetExecutorsRef.current.delete(sessionId);
   }, []);
 
+  const onSessionData = terminalBackend.onSessionData;
+
   const [workspaceArea, setWorkspaceArea] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const workspaceOuterRef = useRef<HTMLDivElement>(null);
   const workspaceInnerRef = useRef<HTMLDivElement>(null);
@@ -746,6 +760,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpHostForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpInitialLocationForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpPendingUploadsForTab(prev => filterTabsMap(prev, validTerminalTabIds));
+    sessionActivityStore.prune(validTerminalTabIds);
   }, [validTerminalTabIds]);
 
   useEffect(() => {
@@ -1103,6 +1118,30 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     window.addEventListener('netcatty:toggle-ai-panel', handler);
     return () => window.removeEventListener('netcatty:toggle-ai-panel', handler);
   }, [handleOpenAI]);
+
+  useEffect(() => {
+    if (!activeTabId || activeTabId === 'vault' || activeTabId === 'sftp') return;
+    sessionActivityStore.clearTab(activeTabId);
+  }, [activeTabId]);
+
+  useEffect(() => {
+    const unsubscribers = sessions.map((session) => {
+      return onSessionData(session.id, (chunk) => {
+        if (!hasNotifiableTerminalOutput(chunk)) return;
+
+        const tabId = session.workspaceId || session.id;
+        if (activeTabIdRef.current === tabId) return;
+
+        sessionActivityStore.setTabActive(tabId, true);
+      });
+    });
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
+  }, [onSessionData, sessions]);
 
   // Execute snippet on the focused terminal session
   const handleSnippetClickForFocusedSession = useCallback((command: string, noAutoRun?: boolean) => {
