@@ -113,6 +113,12 @@ body {
   color: hsl(var(--foreground));
 }
 
+/* Immersive mode: smooth color transitions on the shell and body */
+.immersive-transition,
+.immersive-transition body {
+  transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, background 300ms ease;
+}
+
 .netcatty-shell {
   position: relative;
   background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 60%, hsl(var(--background) / 0.9) 100%);

@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
+import { useImmersiveMode } from './application/state/useImmersiveMode';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
 import { usePortForwardingAutoStart } from './application/state/usePortForwardingAutoStart';
 import { usePortForwardingState } from './application/state/usePortForwardingState';
@@ -14,6 +15,9 @@ import { initializeUIFonts } from './application/state/uiFontStore';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
 import { resolveHostAuth } from './domain/sshAuth';
+import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
+import { useCustomThemes } from './application/state/customThemeStore';
 import { applySyncPayload } from './domain/syncPayload';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
@@ -192,6 +196,7 @@ function App({ settings }: { settings: SettingsState }) {
     sessionLogsEnabled,
     sessionLogsDir,
     sessionLogsFormat,
+    reapplyCurrentTheme,
   } = settings;
 
   const {
@@ -270,6 +275,39 @@ function App({ settings }: { settings: SettingsState }) {
 
   // isMacClient is used for window controls styling
   const isMacClient = typeof navigator !== 'undefined' && /Mac|Macintosh/.test(navigator.userAgent);
+
+  // ---------------------------------------------------------------------------
+  // Immersive Mode — derive UI chrome colors from the active terminal's theme
+  // ---------------------------------------------------------------------------
+  const activeTabId = useActiveTabId();
+  const customThemes = useCustomThemes();
+
+  // Resolve the effective TerminalTheme for the currently focused terminal tab
+  const activeTerminalTheme = useMemo<TerminalTheme | null>(() => {
+    if (activeTabId === 'vault' || activeTabId === 'sftp') return null;
+    // Find session
+    const session = sessions.find(s => s.id === activeTabId);
+    // For workspaces, the workspace's focused session matters
+    const workspace = workspaces.find(w => w.id === activeTabId);
+    const focusedSessionId = workspace?.focusedSessionId;
+    const effectiveSession = focusedSessionId
+      ? sessions.find(s => s.id === focusedSessionId)
+      : session;
+    if (!effectiveSession) return null;
+    // Resolve host for the session
+    const host = hosts.find(h => h.id === effectiveSession.hostId) ?? null;
+    const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
+    const resolved = TERMINAL_THEMES.find(t => t.id === themeId)
+      || customThemes.find(t => t.id === themeId)
+      || currentTerminalTheme;
+    return resolved;
+  }, [activeTabId, sessions, workspaces, hosts, currentTerminalTheme, customThemes]);
+
+  const { isImmersive, toggleImmersive } = useImmersiveMode({
+    activeTabId,
+    activeTerminalTheme,
+    restoreOriginalTheme: reapplyCurrentTheme,
+  });
 
   // Get port forwarding rules and import function
   const { rules: portForwardingRules, importRules: importPortForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
@@ -1204,7 +1242,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen text-foreground font-sans netcatty-shell" onContextMenu={handleRootContextMenu}>
+    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", isImmersive && "immersive-transition")} onContextMenu={handleRootContextMenu}>
       <TopTabs
         theme={resolvedTheme}
         hosts={hosts}

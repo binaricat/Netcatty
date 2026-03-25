@@ -1053,6 +1053,12 @@ export const useSettingsState = () => {
     setTerminalSettings(prev => ({ ...prev, [key]: value }));
   }, [setTerminalSettings]);
 
+  /** Re-apply the current UI theme tokens (used to restore after immersive mode override). */
+  const reapplyCurrentTheme = useCallback(() => {
+    const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
+    applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
+  }, [theme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
+
   return {
     theme,
     setTheme,
@@ -1127,6 +1133,7 @@ export const useSettingsState = () => {
     globalHotkeyEnabled,
     setGlobalHotkeyEnabled,
     rehydrateAllFromStorage,
+    reapplyCurrentTheme,
     // Opaque version that changes when any synced setting changes, used by useAutoSync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     settingsVersion: useMemo(() => Math.random(), [
