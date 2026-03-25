@@ -151,6 +151,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   // Ref to store the latest save function to avoid stale closure in keyboard shortcut
   const handleSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const readClipboardTextRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
 
   // Track theme from document.documentElement class (syncs with app theme)
   const [isDarkTheme, setIsDarkTheme] = useState(() =>
@@ -254,6 +255,10 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
     }
   }, [readClipboardTextFromBridge]);
 
+  useEffect(() => {
+    readClipboardTextRef.current = readClipboardText;
+  }, [readClipboardText]);
+
   const handlePaste = useCallback(async () => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -316,7 +321,30 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
     });
 
     // Fallback paste path for Electron environments where Monaco paste can fail.
+    // Skip custom paste when focus is inside the find/replace widget so that
+    // its input fields receive the pasted text via default browser behavior.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, () => {
+      const active = document.activeElement;
+      if (active?.closest('.find-widget')) {
+        // Read clipboard and insert into the find/replace input field.
+        void (async () => {
+          try {
+            const text = await readClipboardTextRef.current();
+            if (!text) return;
+            // Monaco find widget inputs are <textarea> elements inside .monaco-inputbox
+            if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+              const start = active.selectionStart ?? active.value.length;
+              const end = active.selectionEnd ?? active.value.length;
+              active.focus();
+              active.setSelectionRange(start, end);
+              document.execCommand('insertText', false, text);
+            }
+          } catch {
+            // Ignore – paste simply won't work
+          }
+        })();
+        return;
+      }
       void handlePasteRef.current();
     });
   }, []);
