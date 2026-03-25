@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, List, ListTree, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -51,6 +51,8 @@ interface SftpPaneToolbarProps {
   showHiddenFiles: boolean;
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
+  viewMode: 'list' | 'tree';
+  onSetViewMode: (mode: 'list' | 'tree') => void;
 }
 
 // Prioritize breadcrumb path display. 6 action buttons need ~156px,
@@ -97,6 +99,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   showHiddenFiles,
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
+  viewMode,
+  onSetViewMode,
 }) => {
   const outerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -153,6 +157,32 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
           <TooltipContent>{t("sftp.goToTerminalCwd")}</TooltipContent>
         </Tooltip>
       )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-6 w-6", viewMode === 'list' && "bg-secondary text-foreground")}
+            onClick={() => onSetViewMode('list')}
+          >
+            <List size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t('sftp.viewMode.list')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-6 w-6", viewMode === 'tree' && "bg-secondary text-foreground")}
+            onClick={() => onSetViewMode('tree')}
+          >
+            <ListTree size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t('sftp.viewMode.tree')}</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -275,6 +305,26 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   // Overflow dropdown menu items (same collapsible actions as menu items)
   const overflowMenuItems = (
     <div className="flex flex-col min-w-[140px]">
+      <button
+        className={cn(
+          "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
+          viewMode === 'list' && "text-primary"
+        )}
+        onClick={() => onSetViewMode('list')}
+      >
+        <List size={14} className="shrink-0" />
+        {t('sftp.viewMode.list')}
+      </button>
+      <button
+        className={cn(
+          "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
+          viewMode === 'tree' && "text-primary"
+        )}
+        onClick={() => onSetViewMode('tree')}
+      >
+        <ListTree size={14} className="shrink-0" />
+        {t('sftp.viewMode.tree')}
+      </button>
       {isRemote && (
         <Popover>
           <PopoverTrigger asChild>
