@@ -625,7 +625,7 @@ export const useSettingsState = () => {
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   });
   settingsSnapshotRef.current = {
     theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent,
@@ -634,7 +634,7 @@ export const useSettingsState = () => {
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   };
 
   // Listen for storage changes from other windows (cross-window sync)
@@ -795,6 +795,13 @@ export const useSettingsState = () => {
         const newValue = e.newValue === 'true';
         if (newValue !== s.autoUpdateEnabled) {
           setAutoUpdateEnabled(newValue);
+        }
+      }
+      // Sync immersive mode from other windows
+      if (e.key === STORAGE_KEY_IMMERSIVE_MODE && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.immersiveMode) {
+          setImmersiveModeState(newValue);
         }
       }
     };
