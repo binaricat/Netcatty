@@ -7,6 +7,7 @@ import { SftpPaneDialogs } from "./SftpPaneDialogs";
 import { SftpPaneEmptyState } from "./SftpPaneEmptyState";
 import { SftpPaneFileList } from "./SftpPaneFileList";
 import { SftpPaneToolbar } from "./SftpPaneToolbar";
+import { SftpPaneTreeView } from "./SftpPaneTreeView";
 import {
   useActiveTabId,
   useSftpDrag,
@@ -78,6 +79,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const { t } = useI18n();
   const [, startTransition] = useTransition();
   const [showFilterBar, setShowFilterBar] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   const filterInputRef = useRef<HTMLInputElement>(null);
 
   useRenderTracker(`SftpPaneView[${side}]`, {
@@ -263,6 +265,14 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     startTransition(() => handleSort(field));
   };
 
+  const handleSetViewMode = useCallback((mode: 'list' | 'tree') => {
+    setViewMode(mode);
+    if (mode === 'tree') {
+      setShowFilterBar(false);
+      callbacks.onSetFilter('');
+    }
+  }, [callbacks, setShowFilterBar]);
+
   useEffect(() => {
     logger.debug("SftpPaneView active state", {
       side,
@@ -337,8 +347,29 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         showHiddenFiles={pane.showHiddenFiles}
         onToggleShowHiddenFiles={onToggleShowHiddenFiles}
         onGoToTerminalCwd={onGoToTerminalCwd}
+        viewMode={viewMode}
+        onSetViewMode={handleSetViewMode}
       />
 
+      {viewMode === 'tree' ? (
+        <SftpPaneTreeView
+          pane={pane}
+          side={side}
+          onLoadChildren={callbacks.onListDirectory}
+          onOpenEntry={callbacks.onOpenEntry}
+          onNavigateTo={callbacks.onNavigateTo}
+          draggedFiles={draggedFiles}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          openRenameDialog={openRenameDialog}
+          openDeleteConfirm={openDeleteConfirm}
+          onCopyToOtherPane={callbacks.onCopyToOtherPane}
+          onOpenFileWith={callbacks.onOpenFileWith}
+          onEditFile={callbacks.onEditFile}
+          onDownloadFile={callbacks.onDownloadFile}
+          onEditPermissions={callbacks.onEditPermissions}
+        />
+      ) : (
       <SftpPaneFileList
         t={t}
         pane={pane}
@@ -379,6 +410,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         rowHeight={rowHeight}
         visibleRows={visibleRows}
       />
+      )}
 
       <SftpPaneDialogs
         t={t}
