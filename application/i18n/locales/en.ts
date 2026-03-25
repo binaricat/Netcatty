@@ -712,6 +712,7 @@ const en: Messages = {
   'sftp.upload.phase.compressed': 'Compressed',
 
   // SFTP File Opener
+  'sftp.context.copyPath': 'Copy file path',
   'sftp.context.openWith': 'Open with...',
   'sftp.context.edit': 'Edit',
   'sftp.context.preview': 'Preview',

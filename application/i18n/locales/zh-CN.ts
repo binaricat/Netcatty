@@ -1053,6 +1053,7 @@ const zhCN: Messages = {
   'sftp.upload.phase.compressed': '压缩传输',
 
   // SFTP File Opener
+  'sftp.context.copyPath': '复制文件路径',
   'sftp.context.openWith': '打开方式...',
   'sftp.context.edit': '编辑',
   'sftp.context.preview': '预览',

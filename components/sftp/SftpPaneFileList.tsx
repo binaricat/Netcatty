@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { AlertCircle, ArrowDown, ChevronDown, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -217,6 +217,18 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             >
               <Copy size={14} className="mr-2" />{" "}
               {t("sftp.context.copyToOtherPane")}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                const currentPath = pane.connection.currentPath;
+                const fullPath = currentPath.endsWith("/")
+                  ? `${currentPath}${entry.name}`
+                  : `${currentPath}/${entry.name}`;
+                navigator.clipboard.writeText(fullPath);
+              }}
+            >
+              <ClipboardCopy size={14} className="mr-2" />{" "}
+              {t("sftp.context.copyPath")}
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => openRenameDialog(entry.name)}>
