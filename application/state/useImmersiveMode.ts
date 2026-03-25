@@ -95,9 +95,9 @@ function buildImmersiveCss(theme: TerminalTheme): string {
 
 const cssCache = new Map<string, string>();
 
-// Fingerprint: id + 3 key colors (detects in-place edits of custom themes)
+// Fingerprint: id + type + 3 key colors (detects in-place edits including dark↔light)
 function themeFingerprint(t: TerminalTheme): string {
-  return `${t.id}\0${t.colors.background}\0${t.colors.foreground}\0${t.colors.cursor}`;
+  return `${t.id}\0${t.type}\0${t.colors.background}\0${t.colors.foreground}\0${t.colors.cursor}`;
 }
 
 // Pre-compute built-in themes

@@ -198,6 +198,8 @@ export interface SyncPayload {
     sftpShowHiddenFiles?: boolean;
     sftpUseCompressedUpload?: boolean;
     sftpAutoOpenSidebar?: boolean;
+    // Immersive mode
+    immersiveMode?: boolean;
   };
 
   // Sync metadata

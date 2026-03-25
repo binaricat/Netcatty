@@ -121,8 +121,11 @@ const applyThemeTokens = (
   accentOverride: string,
 ) => {
   const root = window.document.documentElement;
-  root.classList.remove('light', 'dark');
-  root.classList.add(resolvedTheme);
+  // If immersive mode is active (style tag present), it owns the dark/light class — don't override
+  if (!document.getElementById('netcatty-immersive-override')) {
+    root.classList.remove('light', 'dark');
+    root.classList.add(resolvedTheme);
+  }
   root.style.setProperty('--background', tokens.background);
   root.style.setProperty('--foreground', tokens.foreground);
   root.style.setProperty('--card', tokens.card);
@@ -425,6 +428,10 @@ export const useSettingsState = () => {
     if (storedCompress === 'true' || storedCompress === 'false') setSftpUseCompressedUpload(storedCompress === 'true');
     const storedAutoOpenSidebar = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
     if (storedAutoOpenSidebar === 'true' || storedAutoOpenSidebar === 'false') setSftpAutoOpenSidebar(storedAutoOpenSidebar === 'true');
+
+    // Immersive mode
+    const storedImmersive = readStoredString(STORAGE_KEY_IMMERSIVE_MODE);
+    if (storedImmersive === 'true' || storedImmersive === 'false') setImmersiveModeState(storedImmersive === 'true');
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
