@@ -1,6 +1,7 @@
 import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Shield, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
+import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { LogView } from '../application/state/useSessionState';
 import { useWindowControls } from '../application/state/useWindowControls';
@@ -340,6 +341,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return map;
   }, [hosts]);
 
+  const workspaceActivityMap = useMemo(() => {
+    return buildWorkspaceActivityMap(sessions, sessionActivityMap);
+  }, [sessionActivityMap, sessions]);
+
   // Pre-compute session counts per workspace for O(1) access
   const workspacePaneCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -535,7 +540,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       if (item.type === 'workspace') {
         const workspace = item.workspace;
         const paneCount = item.paneCount;
-        const hasActivity = !!sessionActivityMap[workspace.id];
+        const hasActivity = !!workspaceActivityMap.get(workspace.id);
         const isActive = activeTabId === workspace.id;
         const isBeingDragged = draggingSessionId === workspace.id;
         const shiftStyle = tabShiftStyles[workspace.id] || {};

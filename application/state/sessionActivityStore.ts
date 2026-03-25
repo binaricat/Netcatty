@@ -35,6 +35,21 @@ class SessionActivityStore {
     this.setTabActive(tabId, false);
   };
 
+  clearTabs = (tabIds: Iterable<string>) => {
+    let changed = false;
+    const next = { ...this.snapshot };
+
+    for (const tabId of tabIds) {
+      if (!next[tabId]) continue;
+      delete next[tabId];
+      changed = true;
+    }
+
+    if (!changed) return;
+    this.snapshot = next;
+    this.emit();
+  };
+
   prune = (validTabIds: Set<string>) => {
     let changed = false;
     const next: Record<string, boolean> = {};
