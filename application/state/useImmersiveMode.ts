@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { TerminalTheme } from '../../domain/models';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
+import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 // ---------------------------------------------------------------------------
 // Hex → HSL conversion (returns "H S% L%" without the hsl() wrapper)
@@ -122,7 +123,7 @@ function getImmersiveCss(theme: TerminalTheme): string {
 
 const STYLE_ID = 'netcatty-immersive-override';
 
-function applyImmersiveStyle(css: string, isDark: boolean) {
+function applyImmersiveStyle(css: string, isDark: boolean, bg: string) {
   const root = document.documentElement;
   const targetClass = isDark ? 'dark' : 'light';
   if (!root.classList.contains(targetClass)) {
@@ -136,6 +137,9 @@ function applyImmersiveStyle(css: string, isDark: boolean) {
     document.head.appendChild(style);
   }
   style.textContent = css;
+  // Sync native Electron window chrome
+  netcattyBridge.get()?.setTheme?.(isDark ? 'dark' : 'light');
+  netcattyBridge.get()?.setBackgroundColor?.(bg);
 }
 
 function removeImmersiveStyle() {
@@ -171,7 +175,7 @@ export function useImmersiveMode({
       if (appliedFpRef.current === fp) return;
       overrideActiveRef.current = true;
       appliedFpRef.current = fp;
-      applyImmersiveStyle(getImmersiveCss(activeTerminalTheme), activeTerminalTheme.type === 'dark');
+      applyImmersiveStyle(getImmersiveCss(activeTerminalTheme), activeTerminalTheme.type === 'dark', activeTerminalTheme.colors.background);
     }
   }, [isImmersive, isTerminalTab, activeTerminalTheme]);
 
