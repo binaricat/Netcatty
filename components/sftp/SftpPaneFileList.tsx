@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import { cn } from "../../lib/utils";
+import { joinPath } from "../../application/state/sftp/utils";
 import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { ColumnWidths, SortField, SortOrder } from "./utils";
@@ -220,11 +221,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
-                const currentPath = pane.connection.currentPath;
-                const fullPath = currentPath.endsWith("/")
-                  ? `${currentPath}${entry.name}`
-                  : `${currentPath}/${entry.name}`;
-                navigator.clipboard.writeText(fullPath);
+                navigator.clipboard.writeText(joinPath(pane.connection.currentPath, entry.name));
               }}
             >
               <ClipboardCopy size={14} className="mr-2" />{" "}
