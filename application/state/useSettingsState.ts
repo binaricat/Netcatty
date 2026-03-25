@@ -326,7 +326,8 @@ export const useSettingsState = () => {
   }, []);
 
   const [immersiveMode, setImmersiveModeState] = useState<boolean>(() => {
-    return localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE) === 'true';
+    const stored = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
+    return stored === null || stored === '' ? true : stored === 'true';
   });
   const setImmersiveMode = useCallback((enabled: boolean) => {
     setImmersiveModeState(enabled);
