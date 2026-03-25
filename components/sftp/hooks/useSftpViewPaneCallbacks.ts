@@ -6,6 +6,7 @@ import type { SftpPaneCallbacks } from "../SftpContext";
 import { useSftpViewPaneActions } from "./useSftpViewPaneActions";
 import { useSftpViewFileOps } from "./useSftpViewFileOps";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
+import { formatFileSize, formatDate } from '../../../application/state/sftp/utils';
 
 interface UseSftpViewPaneCallbacksParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -43,6 +44,7 @@ interface UseSftpViewPaneCallbacksParams {
     onError?: (error: string) => void
   ) => Promise<{ transferId: string; totalBytes?: number; error?: string }>;
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
+  listLocalFiles?: (path: string) => Promise<RemoteFile[]>;
 }
 
 export const useSftpViewPaneCallbacks = ({
@@ -59,6 +61,7 @@ export const useSftpViewPaneCallbacks = ({
   selectDirectory,
   startStreamTransfer,
   getSftpIdForConnection,
+  listLocalFiles,
 }: UseSftpViewPaneCallbacksParams) => {
   const paneActions = useSftpViewPaneActions({ sftpRef });
   const fileOps = useSftpViewFileOps({
@@ -103,6 +106,47 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithLeft,
       onDownloadFile: fileOps.onDownloadFileLeft,
       onUploadExternalFiles: fileOps.onUploadExternalFilesLeft,
+      onListDirectory: async (path: string) => {
+        const pane = sftpRef.current.leftPane;
+        if (!pane?.connection) return [];
+        const size = (raw: string) => parseInt(raw) || 0;
+        const ts = (raw: string) => new Date(raw).getTime();
+        if (pane.connection.isLocal) {
+          const rawFiles = await listLocalFiles?.(path);
+          if (!rawFiles) return [];
+          return rawFiles.map(f => {
+            const s = size(f.size);
+            const t = ts(f.lastModified);
+            return {
+              name: f.name,
+              type: f.type as 'file' | 'directory' | 'symlink',
+              size: s,
+              sizeFormatted: formatFileSize(s),
+              lastModified: t,
+              lastModifiedFormatted: formatDate(t),
+              linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
+              hidden: f.hidden,
+            };
+          });
+        }
+        const sftpId = getSftpIdForConnection?.(pane.connection.id);
+        if (!sftpId) return [];
+        const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
+        if (!rawFiles) return [];
+        return rawFiles.map(f => {
+          const s = size(f.size);
+          const t = ts(f.lastModified);
+          return {
+            name: f.name,
+            type: f.type as 'file' | 'directory' | 'symlink',
+            size: s,
+            sizeFormatted: formatFileSize(s),
+            lastModified: t,
+            lastModifiedFormatted: formatDate(t),
+            linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
+          };
+        });
+      },
     }),
     [],
   );
@@ -132,6 +176,47 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithRight,
       onDownloadFile: fileOps.onDownloadFileRight,
       onUploadExternalFiles: fileOps.onUploadExternalFilesRight,
+      onListDirectory: async (path: string) => {
+        const pane = sftpRef.current.rightPane;
+        if (!pane?.connection) return [];
+        const size = (raw: string) => parseInt(raw) || 0;
+        const ts = (raw: string) => new Date(raw).getTime();
+        if (pane.connection.isLocal) {
+          const rawFiles = await listLocalFiles?.(path);
+          if (!rawFiles) return [];
+          return rawFiles.map(f => {
+            const s = size(f.size);
+            const t = ts(f.lastModified);
+            return {
+              name: f.name,
+              type: f.type as 'file' | 'directory' | 'symlink',
+              size: s,
+              sizeFormatted: formatFileSize(s),
+              lastModified: t,
+              lastModifiedFormatted: formatDate(t),
+              linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
+              hidden: f.hidden,
+            };
+          });
+        }
+        const sftpId = getSftpIdForConnection?.(pane.connection.id);
+        if (!sftpId) return [];
+        const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
+        if (!rawFiles) return [];
+        return rawFiles.map(f => {
+          const s = size(f.size);
+          const t = ts(f.lastModified);
+          return {
+            name: f.name,
+            type: f.type as 'file' | 'directory' | 'symlink',
+            size: s,
+            sizeFormatted: formatFileSize(s),
+            lastModified: t,
+            lastModifiedFormatted: formatDate(t),
+            linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
+          };
+        });
+      },
     }),
     [],
   );
