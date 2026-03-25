@@ -1,6 +1,8 @@
 import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Shield, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
+import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
+import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { LogView } from '../application/state/useSessionState';
 import { useWindowControls } from '../application/state/useWindowControls';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -117,13 +119,23 @@ const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; prot
 });
 SessionTabIcon.displayName = 'SessionTabIcon';
 
-const sessionStatusDot = (status: TerminalSession['status']) => {
+const sessionStatusDot = (status: TerminalSession['status'], hasActivity: boolean) => {
   const tone = status === 'connected'
     ? "bg-emerald-400"
     : status === 'connecting'
       ? "bg-amber-400"
       : "bg-rose-500";
-  return <span className={cn("inline-block h-2 w-2 rounded-full ring-2 ring-background/60", tone)} />;
+  return (
+    <span className="relative inline-flex h-2 w-2 shrink-0 items-center justify-center">
+      <span
+        className={cn(
+          "relative inline-block h-2 w-2 rounded-full ring-2 ring-background/60",
+          tone,
+          hasActivity && "session-activity-dot",
+        )}
+      />
+    </span>
+  );
 };
 
 // Custom window controls for Windows/Linux (frameless window)
@@ -225,6 +237,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   // Subscribe to activeTabId from external store
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
   const activeTabId = useActiveTabId();
+  const sessionActivityMap = useSessionActivityMap();
   const isVaultActive = activeTabId === 'vault';
   const isSftpActive = activeTabId === 'sftp';
   const onSelectTab = activeTabStore.setActiveTabId;
@@ -327,6 +340,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     for (const h of hosts) map.set(h.id, h);
     return map;
   }, [hosts]);
+
+  const workspaceActivityMap = useMemo(() => {
+    return buildWorkspaceActivityMap(sessions, sessionActivityMap);
+  }, [sessionActivityMap, sessions]);
 
   // Pre-compute session counts per workspace for O(1) access
   const workspacePaneCounts = useMemo(() => {
@@ -451,6 +468,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
       if (item.type === 'session') {
         const session = item.session;
+        const hasActivity = !!sessionActivityMap[session.id];
         const isBeingDragged = draggingSessionId === session.id;
         const shiftStyle = tabShiftStyles[session.id] || {};
         const showDropIndicatorBefore = dropIndicator?.tabId === session.id && dropIndicator.position === 'before';
@@ -493,7 +511,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <SessionTabIcon host={hostMap.get(session.hostId)} isActive={activeTabId === session.id} protocol={session.protocol} />
                   <span className="truncate">{session.hostLabel}</span>
-                  <div className="flex-shrink-0">{sessionStatusDot(session.status)}</div>
+                  <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
                 </div>
                 <button
                   onClick={(e) => onCloseSession(session.id, e)}
@@ -522,6 +540,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       if (item.type === 'workspace') {
         const workspace = item.workspace;
         const paneCount = item.paneCount;
+        const hasActivity = !!workspaceActivityMap.get(workspace.id);
         const isActive = activeTabId === workspace.id;
         const isBeingDragged = draggingSessionId === workspace.id;
         const shiftStyle = tabShiftStyles[workspace.id] || {};
@@ -566,8 +585,11 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                   <LayoutGrid size={14} className={cn("shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
                   <span className="truncate">{workspace.title}</span>
                 </div>
-                <div className="text-[10px] px-1.5 py-0.5 rounded-full border border-border/70 bg-background/60 min-w-[22px] text-center">
-                  {paneCount}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {hasActivity && sessionStatusDot('connected', true)}
+                  <div className="text-[10px] px-1.5 py-0.5 rounded-full border border-border/70 bg-background/60 min-w-[22px] text-center">
+                    {paneCount}
+                  </div>
                 </div>
               </div>
             </ContextMenuTrigger>
