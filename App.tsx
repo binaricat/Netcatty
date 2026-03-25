@@ -16,6 +16,7 @@ import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
 import { resolveHostAuth } from './domain/sshAuth';
 import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import { collectSessionIds } from './domain/workspace';
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
 import { applySyncPayload } from './domain/syncPayload';
@@ -33,7 +34,7 @@ import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './componen
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
 import { classifyLocalShellType } from './lib/localShell';
-import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalTheme } from './types';
+import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalSession, TerminalTheme } from './types';
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
@@ -197,6 +198,7 @@ function App({ settings }: { settings: SettingsState }) {
     sessionLogsDir,
     sessionLogsFormat,
     reapplyCurrentTheme,
+    immersiveMode,
   } = settings;
 
   const {
@@ -285,25 +287,34 @@ function App({ settings }: { settings: SettingsState }) {
   // Resolve the effective TerminalTheme for the currently focused terminal tab
   const activeTerminalTheme = useMemo<TerminalTheme | null>(() => {
     if (activeTabId === 'vault' || activeTabId === 'sftp') return null;
-    // Find session
-    const session = sessions.find(s => s.id === activeTabId);
-    // For workspaces, the workspace's focused session matters
+
+    const resolveTheme = (s: TerminalSession): TerminalTheme => {
+      const host = hosts.find(h => h.id === s.hostId) ?? null;
+      const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
+      return TERMINAL_THEMES.find(t => t.id === themeId)
+        || customThemes.find(t => t.id === themeId)
+        || currentTerminalTheme;
+    };
+
+    // Workspace: check if all sessions share the same theme
     const workspace = workspaces.find(w => w.id === activeTabId);
-    const focusedSessionId = workspace?.focusedSessionId;
-    const effectiveSession = focusedSessionId
-      ? sessions.find(s => s.id === focusedSessionId)
-      : session;
-    if (!effectiveSession) return null;
-    // Resolve host for the session
-    const host = hosts.find(h => h.id === effectiveSession.hostId) ?? null;
-    const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
-    const resolved = TERMINAL_THEMES.find(t => t.id === themeId)
-      || customThemes.find(t => t.id === themeId)
-      || currentTerminalTheme;
-    return resolved;
+    if (workspace) {
+      const sessionIds = collectSessionIds(workspace.root);
+      const wsSessions = sessionIds.map(id => sessions.find(s => s.id === id)).filter(Boolean) as TerminalSession[];
+      if (wsSessions.length === 0) return null;
+      const firstTheme = resolveTheme(wsSessions[0]);
+      const allSame = wsSessions.every(s => resolveTheme(s).id === firstTheme.id);
+      return allSame ? firstTheme : null;
+    }
+
+    // Single session tab
+    const session = sessions.find(s => s.id === activeTabId);
+    if (!session) return null;
+    return resolveTheme(session);
   }, [activeTabId, sessions, workspaces, hosts, currentTerminalTheme, customThemes]);
 
-  const { isImmersive, toggleImmersive } = useImmersiveMode({
+  useImmersiveMode({
+    isImmersive: immersiveMode,
     activeTabId,
     activeTerminalTheme,
     restoreOriginalTheme: reapplyCurrentTheme,
@@ -1242,7 +1253,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   return (
-    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", isImmersive && "immersive-transition")} onContextMenu={handleRootContextMenu}>
+    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", immersiveMode && activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>
       <TopTabs
         theme={resolvedTheme}
         hosts={hosts}
@@ -1263,6 +1274,7 @@ function App({ settings }: { settings: SettingsState }) {
         onToggleTheme={handleToggleTheme}
         onOpenSettings={handleOpenSettings}
         onSyncNow={handleSyncNowManual}
+        isImmersiveActive={immersiveMode && activeTerminalTheme !== null}
         onStartSessionDrag={setDraggingSessionId}
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderTabs}

@@ -187,18 +187,27 @@ export const AgentIconBadge: React.FC<{
 
   if (variant === 'plain') {
     return (
-      <img
-        src={visual.src}
-        alt=""
+      <div
         aria-hidden="true"
-        draggable={false}
-        className={cn('shrink-0', imageSize, visual.imageClassName, className)}
+        className={cn('shrink-0', imageSize, className)}
+        style={{
+          maskImage: `url(${visual.src})`,
+          WebkitMaskImage: `url(${visual.src})`,
+          maskSize: 'contain',
+          WebkitMaskSize: 'contain',
+          maskRepeat: 'no-repeat',
+          WebkitMaskRepeat: 'no-repeat',
+          maskPosition: 'center',
+          WebkitMaskPosition: 'center',
+          backgroundColor: 'currentColor',
+        }}
       />
     );
   }
 
   return (
     <div
+      data-agent-badge=""
       className={cn(
         'flex shrink-0 items-center justify-center overflow-hidden border',
         badgeSize,

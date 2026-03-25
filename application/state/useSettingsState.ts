@@ -30,6 +30,7 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
+  STORAGE_KEY_IMMERSIVE_MODE,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
@@ -324,6 +325,15 @@ export const useSettingsState = () => {
     }
   }, []);
 
+  const [immersiveMode, setImmersiveModeState] = useState<boolean>(() => {
+    return localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE) === 'true';
+  });
+  const setImmersiveMode = useCallback((enabled: boolean) => {
+    setImmersiveModeState(enabled);
+    localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(enabled));
+    notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, enabled);
+  }, [notifySettingsChanged]);
+
   const syncAppearanceFromStorage = useCallback(() => {
     const storedTheme = readStoredString(STORAGE_KEY_THEME);
     const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
@@ -557,6 +567,9 @@ export const useSettingsState = () => {
       }
       if (key === STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR && typeof value === 'boolean') {
         setSftpAutoOpenSidebar((prev) => (prev === value ? prev : value));
+      }
+      if (key === STORAGE_KEY_IMMERSIVE_MODE && typeof value === 'boolean') {
+        setImmersiveModeState((prev) => (prev === value ? prev : value));
       }
     });
     return () => {
@@ -1134,6 +1147,8 @@ export const useSettingsState = () => {
     setGlobalHotkeyEnabled,
     rehydrateAllFromStorage,
     reapplyCurrentTheme,
+    immersiveMode,
+    setImmersiveMode,
     // Opaque version that changes when any synced setting changes, used by useAutoSync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     settingsVersion: useMemo(() => Math.random(), [

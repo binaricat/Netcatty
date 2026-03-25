@@ -5,9 +5,6 @@
 import { AppWindow, Cloud, FileType, HardDrive, Keyboard, Palette, Sparkles, TerminalSquare, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSettingsState } from "../application/state/useSettingsState";
-import { STORAGE_KEY_IMMERSIVE_MODE } from "../infrastructure/config/storageKeys";
-import { localStorageAdapter } from "../infrastructure/persistence/localStorageAdapter";
-import { netcattyBridge } from "../infrastructure/services/netcattyBridge";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
 import { useVaultState } from "../application/state/useVaultState";
@@ -155,17 +152,10 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
     const { updateState, checkNow, installUpdate, openReleasePage } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
-    const [isImmersive, setIsImmersive] = useState(() => localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE) === 'true');
+    const isImmersive = settings.immersiveMode;
     const toggleImmersive = useCallback(() => {
-        setIsImmersive(prev => {
-            const next = !prev;
-            localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(next));
-            try {
-                netcattyBridge.get()?.notifySettingsChanged?.({ key: STORAGE_KEY_IMMERSIVE_MODE, value: next });
-            } catch { /* ignore */ }
-            return next;
-        });
-    }, []);
+        settings.setImmersiveMode(!isImmersive);
+    }, [settings, isImmersive]);
 
     useEffect(() => {
         notifyRendererReady();

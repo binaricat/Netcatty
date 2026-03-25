@@ -5,12 +5,9 @@
  * derived from the focused terminal's theme. When the active tab is not a terminal (vault / sftp)
  * or immersive mode is off, the original UI theme tokens are restored.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { TerminalTheme } from '../../domain/models';
 import { UiThemeTokens } from '../../infrastructure/config/uiThemes';
-import { STORAGE_KEY_IMMERSIVE_MODE } from '../../infrastructure/config/storageKeys';
-import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
-import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 // ---------------------------------------------------------------------------
 // Hex → HSL conversion (returns "H S% L%" without the hsl() wrapper)
@@ -84,8 +81,9 @@ export function deriveUiTokensFromTerminalTheme(theme: TerminalTheme): UiThemeTo
   const border = adjustLightness(bg, isDark ? 12 : -10);
   // Primary: use cursor color (usually the accent)
   const primary = cursor;
-  // Primary foreground: ensure contrast
-  const primaryFg = isDark ? '0 0% 100%' : '0 0% 100%';
+  // Primary foreground: pick black or white based on cursor luminance for contrast
+  const cursorL = parseFloat(cursor.split(' ')[2] ?? '50');
+  const primaryFg = cursorL > 55 ? '0 0% 0%' : '0 0% 100%';
   // Destructive: standard red
   const destructive = '0 70% 50%';
   const destructiveFg = '0 0% 100%';
@@ -154,10 +152,13 @@ function applyImmersiveTokens(tokens: UiThemeTokens, isDark: boolean) {
 // ---------------------------------------------------------------------------
 
 export function useImmersiveMode({
+  isImmersive,
   activeTabId,
   activeTerminalTheme,
   restoreOriginalTheme,
 }: {
+  /** Whether immersive mode is enabled (from useSettingsState). */
+  isImmersive: boolean;
   /** The currently active tab ID ('vault' | 'sftp' | session-id). */
   activeTabId: string;
   /** The resolved TerminalTheme for the focused terminal, or null if no terminal is focused. */
@@ -165,43 +166,11 @@ export function useImmersiveMode({
   /** Callback to restore the user's original UI theme (calls applyThemeTokens internally). */
   restoreOriginalTheme: () => void;
 }) {
-  const [isImmersive, setIsImmersive] = useState<boolean>(() => {
-    const stored = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
-    return stored === 'true';
-  });
-
   // Track whether we have an active override so we can restore on toggle-off / tab switch
   const overrideActiveRef = useRef(false);
 
-  const toggleImmersive = useCallback(() => {
-    setIsImmersive(prev => {
-      const next = !prev;
-      localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(next));
-      return next;
-    });
-  }, []);
-
-  const setImmersive = useCallback((value: boolean) => {
-    setIsImmersive(value);
-    localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(value));
-  }, []);
-
-  // Listen for cross-window IPC changes (e.g. toggled from Settings window)
-  useEffect(() => {
-    const bridge = netcattyBridge.get();
-    if (!bridge?.onSettingsChanged) return;
-    const unsubscribe = bridge.onSettingsChanged((payload: { key: string; value: unknown }) => {
-      if (payload.key === STORAGE_KEY_IMMERSIVE_MODE && typeof payload.value === 'boolean') {
-        setIsImmersive(payload.value);
-      }
-    });
-    return () => {
-      try { unsubscribe?.(); } catch { /* ignore */ }
-    };
-  }, []);
-
-  // Determine if the active tab is a terminal tab
-  const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp';
+  // Determine if the active tab is a terminal tab (exclude vault, sftp, and log views)
+  const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !activeTabId.startsWith('log-');
 
   useEffect(() => {
     if (isImmersive && isTerminalTab && activeTerminalTheme) {
@@ -209,11 +178,23 @@ export function useImmersiveMode({
       applyImmersiveTokens(tokens, activeTerminalTheme.type === 'dark');
       overrideActiveRef.current = true;
     } else if (overrideActiveRef.current) {
-      // Need to restore original theme
       overrideActiveRef.current = false;
+      // Create a full-screen overlay with the current immersive background,
+      // then restore the theme underneath and fade the overlay out.
+      const bg = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+      const overlay = document.createElement('div');
+      overlay.className = 'immersive-fade-overlay';
+      overlay.style.backgroundColor = `hsl(${bg})`;
+      document.body.appendChild(overlay);
       restoreOriginalTheme();
+      // Trigger fade-out on next frame
+      requestAnimationFrame(() => {
+        overlay.classList.add('fade-out');
+        overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+      });
+      // Safety fallback: always clean up overlay
+      const fallback = setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 400);
+      return () => { clearTimeout(fallback); if (overlay.parentNode) overlay.remove(); };
     }
   }, [isImmersive, isTerminalTab, activeTerminalTheme, restoreOriginalTheme]);
-
-  return { isImmersive, toggleImmersive, setImmersive };
 }
