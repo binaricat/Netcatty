@@ -1,13 +1,15 @@
 /**
  * Immersive Mode — makes the entire UI chrome adapt colors to match the active terminal's theme.
  *
- * When enabled, CSS custom properties on `document.documentElement` are overridden with values
- * derived from the focused terminal's theme. When the active tab is not a terminal (vault / sftp)
- * or immersive mode is off, the original UI theme tokens are restored.
+ * Performance strategy:
+ * - All built-in themes' CSS strings are pre-computed at module load (zero cost at switch time)
+ * - Custom/unknown themes are computed lazily and cached
+ * - A single `<style>` tag with `!important` overrides inline CSS variables atomically
+ * - `useLayoutEffect` ensures the update happens before browser paint (no flash)
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { TerminalTheme } from '../../domain/models';
-import { UiThemeTokens } from '../../infrastructure/config/uiThemes';
+import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
 
 // ---------------------------------------------------------------------------
 // Hex → HSL conversion (returns "H S% L%" without the hsl() wrapper)
@@ -26,125 +28,118 @@ function hexToHsl(hex: string): string {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
     switch (max) {
-      case r:
-        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-        break;
-      case g:
-        h = ((b - r) / d + 2) / 6;
-        break;
-      case b:
-        h = ((r - g) / d + 4) / 6;
-        break;
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
     }
   }
   return `${Math.round(h * 3600) / 10} ${Math.round(s * 1000) / 10}% ${Math.round(l * 1000) / 10}%`;
 }
 
-/** Adjust lightness of an HSL token string by a delta (clamped 0..100). */
 function adjustLightness(hsl: string, delta: number): string {
   const parts = hsl.split(/\s+/);
-  const h = parts[0];
-  const s = parts[1];
-  const lVal = parseFloat(parts[2]);
-  const newL = Math.max(0, Math.min(100, lVal + delta));
-  return `${h} ${s} ${Math.round(newL * 10) / 10}%`;
+  const newL = Math.max(0, Math.min(100, parseFloat(parts[2]) + delta));
+  return `${parts[0]} ${parts[1]} ${Math.round(newL * 10) / 10}%`;
 }
 
-/** Adjust saturation of an HSL token string by a factor (clamped 0..100). */
 function adjustSaturation(hsl: string, factor: number): string {
   const parts = hsl.split(/\s+/);
-  const h = parts[0];
-  const sVal = parseFloat(parts[1]);
-  const l = parts[2];
-  const newS = Math.max(0, Math.min(100, sVal * factor));
-  return `${h} ${Math.round(newS * 10) / 10}% ${l}`;
+  const newS = Math.max(0, Math.min(100, parseFloat(parts[1]) * factor));
+  return `${parts[0]} ${Math.round(newS * 10) / 10}% ${parts[2]}`;
 }
 
 // ---------------------------------------------------------------------------
-// Derive UI theme tokens from a TerminalTheme
+// Build the CSS rule string from a TerminalTheme
 // ---------------------------------------------------------------------------
 
-export function deriveUiTokensFromTerminalTheme(theme: TerminalTheme): UiThemeTokens {
+const CSS_VARS = [
+  'background', 'foreground', 'card', 'card-foreground',
+  'popover', 'popover-foreground', 'primary', 'primary-foreground',
+  'secondary', 'secondary-foreground', 'muted', 'muted-foreground',
+  'accent', 'accent-foreground', 'destructive', 'destructive-foreground',
+  'border', 'input', 'ring',
+] as const;
+
+function buildImmersiveCss(theme: TerminalTheme): string {
   const bg = hexToHsl(theme.colors.background);
   const fg = hexToHsl(theme.colors.foreground);
   const cursor = hexToHsl(theme.colors.cursor);
   const isDark = theme.type === 'dark';
 
-  // Card: slightly lighter (dark) or slightly darker (light) than background
   const card = adjustLightness(bg, isDark ? 4 : -3);
-  // Secondary: slight shift from bg
   const secondary = adjustLightness(bg, isDark ? 6 : -5);
-  // Muted: between bg and fg
   const muted = adjustLightness(bg, isDark ? 10 : -8);
-  const mutedForeground = adjustLightness(fg, isDark ? -20 : 20);
-  // Border: subtle variant
+  const mutedFg = adjustSaturation(adjustLightness(fg, isDark ? -20 : 20), 0.5);
   const border = adjustLightness(bg, isDark ? 12 : -10);
-  // Primary: use cursor color (usually the accent)
-  const primary = cursor;
-  // Primary foreground: pick black or white based on cursor luminance for contrast
   const cursorL = parseFloat(cursor.split(' ')[2] ?? '50');
   const primaryFg = cursorL > 55 ? '0 0% 0%' : '0 0% 100%';
-  // Destructive: standard red
-  const destructive = '0 70% 50%';
-  const destructiveFg = '0 0% 100%';
 
-  return {
-    background: bg,
-    foreground: fg,
-    card,
-    cardForeground: fg,
-    popover: card,
-    popoverForeground: fg,
-    primary,
-    primaryForeground: primaryFg,
-    secondary,
-    secondaryForeground: fg,
-    muted,
-    mutedForeground: adjustSaturation(mutedForeground, 0.5),
-    accent: primary,
-    accentForeground: primaryFg,
-    destructive,
-    destructiveForeground: destructiveFg,
-    border,
-    input: border,
-    ring: primary,
-  };
+  const values = [
+    bg, fg, card, fg,         // background, foreground, card, card-foreground
+    card, fg,                 // popover, popover-foreground
+    cursor, primaryFg,        // primary, primary-foreground
+    secondary, fg,            // secondary, secondary-foreground
+    muted, mutedFg,           // muted, muted-foreground
+    cursor, primaryFg,        // accent, accent-foreground
+    '0 70% 50%', '0 0% 100%', // destructive, destructive-foreground
+    border, border, cursor,   // border, input, ring
+  ];
+
+  const rules = CSS_VARS.map((name, i) => `--${name}: ${values[i]} !important`).join('; ');
+  return `:root { ${rules}; }`;
 }
 
 // ---------------------------------------------------------------------------
-// Apply / restore CSS variable overrides
+// Pre-compute CSS for all built-in themes at module load — O(1) lookup at switch time
 // ---------------------------------------------------------------------------
 
-const CSS_VAR_KEYS: Array<[keyof UiThemeTokens, string]> = [
-  ['background', '--background'],
-  ['foreground', '--foreground'],
-  ['card', '--card'],
-  ['cardForeground', '--card-foreground'],
-  ['popover', '--popover'],
-  ['popoverForeground', '--popover-foreground'],
-  ['primary', '--primary'],
-  ['primaryForeground', '--primary-foreground'],
-  ['secondary', '--secondary'],
-  ['secondaryForeground', '--secondary-foreground'],
-  ['muted', '--muted'],
-  ['mutedForeground', '--muted-foreground'],
-  ['accent', '--accent'],
-  ['accentForeground', '--accent-foreground'],
-  ['destructive', '--destructive'],
-  ['destructiveForeground', '--destructive-foreground'],
-  ['border', '--border'],
-  ['input', '--input'],
-  ['ring', '--ring'],
-];
+const cssCache = new Map<string, string>();
 
-function applyImmersiveTokens(tokens: UiThemeTokens, isDark: boolean) {
-  const root = document.documentElement;
-  // Update dark/light class to match terminal theme type
-  root.classList.remove('light', 'dark');
-  root.classList.add(isDark ? 'dark' : 'light');
-  for (const [key, cssVar] of CSS_VAR_KEYS) {
-    root.style.setProperty(cssVar, tokens[key]);
+// Fingerprint: id + 3 key colors (detects in-place edits of custom themes)
+function themeFingerprint(t: TerminalTheme): string {
+  return `${t.id}\0${t.colors.background}\0${t.colors.foreground}\0${t.colors.cursor}`;
+}
+
+// Pre-compute built-in themes
+for (const theme of TERMINAL_THEMES) {
+  cssCache.set(themeFingerprint(theme), buildImmersiveCss(theme));
+}
+
+/** Get (or lazily compute & cache) the immersive CSS for a theme. */
+function getImmersiveCss(theme: TerminalTheme): string {
+  const fp = themeFingerprint(theme);
+  let css = cssCache.get(fp);
+  if (!css) {
+    css = buildImmersiveCss(theme);
+    cssCache.set(fp, css);
   }
+  return css;
+}
+
+// ---------------------------------------------------------------------------
+// Style tag management
+// ---------------------------------------------------------------------------
+
+const STYLE_ID = 'netcatty-immersive-override';
+
+function applyImmersiveStyle(css: string, isDark: boolean) {
+  const root = document.documentElement;
+  const targetClass = isDark ? 'dark' : 'light';
+  if (!root.classList.contains(targetClass)) {
+    root.classList.remove('light', 'dark');
+    root.classList.add(targetClass);
+  }
+  let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement('style');
+    style.id = STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+}
+
+function removeImmersiveStyle() {
+  document.getElementById(STYLE_ID)?.remove();
 }
 
 // ---------------------------------------------------------------------------
@@ -157,44 +152,59 @@ export function useImmersiveMode({
   activeTerminalTheme,
   restoreOriginalTheme,
 }: {
-  /** Whether immersive mode is enabled (from useSettingsState). */
   isImmersive: boolean;
-  /** The currently active tab ID ('vault' | 'sftp' | session-id). */
   activeTabId: string;
-  /** The resolved TerminalTheme for the focused terminal, or null if no terminal is focused. */
   activeTerminalTheme: TerminalTheme | null;
-  /** Callback to restore the user's original UI theme (calls applyThemeTokens internally). */
   restoreOriginalTheme: () => void;
 }) {
-  // Track whether we have an active override so we can restore on toggle-off / tab switch
   const overrideActiveRef = useRef(false);
+  const appliedFpRef = useRef<string | null>(null);
+  const restoreRef = useRef(restoreOriginalTheme);
+  restoreRef.current = restoreOriginalTheme;
 
-  // Determine if the active tab is a terminal tab (exclude vault, sftp, and log views)
   const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !activeTabId.startsWith('log-');
 
-  useEffect(() => {
+  // APPLY: useLayoutEffect — runs before paint, O(1) Map lookup, single DOM write
+  useLayoutEffect(() => {
     if (isImmersive && isTerminalTab && activeTerminalTheme) {
-      const tokens = deriveUiTokensFromTerminalTheme(activeTerminalTheme);
-      applyImmersiveTokens(tokens, activeTerminalTheme.type === 'dark');
+      const fp = themeFingerprint(activeTerminalTheme);
+      if (appliedFpRef.current === fp) return;
       overrideActiveRef.current = true;
-    } else if (overrideActiveRef.current) {
-      overrideActiveRef.current = false;
-      // Create a full-screen overlay with the current immersive background,
-      // then restore the theme underneath and fade the overlay out.
-      const bg = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
-      const overlay = document.createElement('div');
-      overlay.className = 'immersive-fade-overlay';
-      overlay.style.backgroundColor = `hsl(${bg})`;
-      document.body.appendChild(overlay);
-      restoreOriginalTheme();
-      // Trigger fade-out on next frame
-      requestAnimationFrame(() => {
-        overlay.classList.add('fade-out');
-        overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
-      });
-      // Safety fallback: always clean up overlay
-      const fallback = setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 400);
-      return () => { clearTimeout(fallback); if (overlay.parentNode) overlay.remove(); };
+      appliedFpRef.current = fp;
+      applyImmersiveStyle(getImmersiveCss(activeTerminalTheme), activeTerminalTheme.type === 'dark');
     }
+  }, [isImmersive, isTerminalTab, activeTerminalTheme]);
+
+  // RESTORE: useEffect — runs after paint, with fade overlay
+  useEffect(() => {
+    if (isImmersive && isTerminalTab && activeTerminalTheme) return;
+    if (!overrideActiveRef.current) return;
+    overrideActiveRef.current = false;
+    appliedFpRef.current = null;
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+    const overlay = document.createElement('div');
+    overlay.className = 'immersive-fade-overlay';
+    overlay.style.backgroundColor = `hsl(${bg})`;
+    document.body.appendChild(overlay);
+    removeImmersiveStyle();
+    restoreOriginalTheme();
+    requestAnimationFrame(() => {
+      overlay.classList.add('fade-out');
+      overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+    });
+    const fallback = setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 400);
+    return () => { clearTimeout(fallback); if (overlay.parentNode) overlay.remove(); };
   }, [isImmersive, isTerminalTab, activeTerminalTheme, restoreOriginalTheme]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      removeImmersiveStyle();
+      appliedFpRef.current = null;
+      if (overrideActiveRef.current) {
+        overrideActiveRef.current = false;
+        restoreRef.current();
+      }
+    };
+  }, []);
 }
