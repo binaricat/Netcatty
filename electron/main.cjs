@@ -620,6 +620,19 @@ const registerBridges = (win) => {
     
     try {
       let child;
+      // On Windows, minimize the current window before spawning the editor
+      // so the OS allows the new process to take foreground focus.
+      // Windows restricts SetForegroundWindow to the process that currently
+      // owns the foreground — minimizing releases that ownership.
+      let winToRestore = null;
+      if (process.platform === "win32") {
+        const focusedWin = BrowserWindow.getFocusedWindow();
+        if (focusedWin && !focusedWin.isDestroyed()) {
+          winToRestore = focusedWin;
+          focusedWin.minimize();
+        }
+      }
+
       if (process.platform === "darwin") {
         // On macOS, use 'open' command with -a flag for specific app
         const args = ["-a", appPath, filePath];
@@ -675,6 +688,17 @@ const registerBridges = (win) => {
       });
       
       child.unref();
+
+      // On Windows, restore the minimized window after a short delay
+      // to give the editor enough time to take foreground focus.
+      if (winToRestore && !winToRestore.isDestroyed()) {
+        setTimeout(() => {
+          if (!winToRestore.isDestroyed()) {
+            winToRestore.restore();
+          }
+        }, 500);
+      }
+
       return true;
     } catch (err) {
       console.error(`[Main] Error opening file with application:`, err);
