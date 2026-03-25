@@ -330,7 +330,12 @@ export const useSettingsState = () => {
 
   const [immersiveMode, setImmersiveModeState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
-    return stored === null || stored === '' ? true : stored === 'true';
+    if (stored === null || stored === '') {
+      // Persist default so collectSyncableSettings() can include it
+      localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, 'true');
+      return true;
+    }
+    return stored === 'true';
   });
   const setImmersiveMode = useCallback((enabled: boolean) => {
     setImmersiveModeState(enabled);
@@ -431,11 +436,15 @@ export const useSettingsState = () => {
 
     // Immersive mode
     const storedImmersive = readStoredString(STORAGE_KEY_IMMERSIVE_MODE);
-    if (storedImmersive === 'true' || storedImmersive === 'false') setImmersiveModeState(storedImmersive === 'true');
+    if (storedImmersive === 'true' || storedImmersive === 'false') {
+      const val = storedImmersive === 'true';
+      setImmersiveModeState(val);
+      notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, val);
+    }
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
-  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
+  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings, notifySettingsChanged]);
 
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
