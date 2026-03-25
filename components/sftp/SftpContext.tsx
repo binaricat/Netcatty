@@ -36,6 +36,7 @@ export interface SftpPaneCallbacks {
     onDownloadFile?: (entry: SftpFileEntry) => void;  // Download to local filesystem
     // External file upload (supports folders via DataTransfer)
     onUploadExternalFiles?: (dataTransfer: DataTransfer) => Promise<void>;
+    onListDirectory: (path: string) => Promise<SftpFileEntry[]>;
 }
 
 export interface SftpDragCallbacks {
