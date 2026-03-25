@@ -296,9 +296,15 @@ function App({ settings }: { settings: SettingsState }) {
         || currentTerminalTheme;
     };
 
-    // Workspace: check if all sessions share the same theme
+    // Workspace
     const workspace = workspaces.find(w => w.id === activeTabId);
     if (workspace) {
+      // Focus mode: only one terminal is visible, use its theme
+      if (workspace.viewMode === 'focus' && workspace.focusedSessionId) {
+        const focused = sessions.find(s => s.id === workspace.focusedSessionId);
+        return focused ? resolveTheme(focused) : null;
+      }
+      // Split mode: require all sessions to share the same theme
       const sessionIds = collectSessionIds(workspace.root);
       const wsSessions = sessionIds.map(id => sessions.find(s => s.id === id)).filter(Boolean) as TerminalSession[];
       if (wsSessions.length === 0) return null;

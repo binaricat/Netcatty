@@ -1165,7 +1165,7 @@ export const useSettingsState = () => {
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar,
-      customThemes,
+      customThemes, immersiveMode,
     ]),
   };
 };
