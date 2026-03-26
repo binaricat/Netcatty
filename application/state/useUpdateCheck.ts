@@ -520,7 +520,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     const bridge = netcattyBridge.get();
     try {
       const checkResult = await bridge?.checkForUpdate?.();
-      if (checkResult && checkResult.supported === false) return;
+      if (!checkResult || checkResult.supported === false || checkResult.checking === true || checkResult.available === false) return;
     } catch {
       return;
     }
