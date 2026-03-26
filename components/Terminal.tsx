@@ -358,6 +358,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const id = sessionRef.current;
     if (id && text) {
       terminalBackend.writeToSession(id, text);
+
+      // Broadcast to other sessions if broadcast mode is enabled
+      if (isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
+        onBroadcastInputRef.current(text, sessionId);
+      }
+
       // Update command buffer for onCommandExecuted tracking
       for (const ch of text) {
         if (ch === "\r" || ch === "\n") {

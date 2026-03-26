@@ -269,8 +269,11 @@ export function useTerminalAutocomplete(
         return;
       }
 
-      // Ignore escape sequences (arrow keys handled by handleKeyEvent)
+      // Escape sequences (arrow keys, Home, End, etc.): clear stale suggestions
+      // since cursor position may have changed, making current suggestions invalid.
+      // Up/Down/Right/Tab are handled by handleKeyEvent; other sequences land here.
       if (data.startsWith("\x1b") && data !== "\x1b") {
+        clearState();
         return;
       }
 

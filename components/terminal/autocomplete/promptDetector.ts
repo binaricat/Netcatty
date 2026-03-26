@@ -127,8 +127,10 @@ function findPromptBoundary(lineText: string): number {
 
     if (!PROMPT_CHARS.has(ch)) continue;
 
-    // Must be followed by a space (prompt char + space = prompt boundary)
-    if (i + 1 >= lineText.length || lineText[i + 1] !== " ") continue;
+    // Must be followed by a space, or be the last character on the line
+    // (e.g., cmd.exe `C:\path>` has no trailing space)
+    const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;
+    if (nextChar !== null && nextChar !== " ") continue;
 
     // For '$': exclude shell variable references ($HOME, $PATH, ${...}, $(...))
     if (ch === "$") {
@@ -173,8 +175,8 @@ function findPromptBoundary(lineText: string): number {
       }
     }
 
-    // Prompt boundary found: user input starts at i + 2 (after "$ ")
-    return i + 2;
+    // Prompt boundary found: user input starts after prompt char + optional space
+    return nextChar === " " ? i + 2 : i + 1;
   }
 
   return -1;
