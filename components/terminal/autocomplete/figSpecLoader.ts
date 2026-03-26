@@ -75,35 +75,14 @@ export async function getAvailableSpecs(): Promise<string[]> {
   if (availableSpecs) return availableSpecs;
 
   try {
+    // Try importing from static assets (works in both dev and production)
     const baseUrl = getFigSpecBaseUrl();
-    const res = await fetch(`${baseUrl}/index.js`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-
-    // The index.js format: var e=[...],diffVersionedCompletions=[...];export{...};
-    // Extract the first array (the spec name list) by finding the matching ].
-    // Can't use simple regex with `;` anchor because `,` follows the first array.
-    const arrayStart = text.indexOf("[");
-    if (arrayStart >= 0) {
-      // Find the matching closing bracket (flat array of strings, no nesting)
-      const arrayEnd = text.indexOf("]", arrayStart);
-      if (arrayEnd >= 0) {
-        const arrayStr = text.substring(arrayStart, arrayEnd + 1);
-        const parsed = JSON.parse(arrayStr);
-        availableSpecs = parsed as string[];
-      }
-    }
-
-    if (!availableSpecs) {
-      // Fallback: try dynamic import (works in dev mode)
-      const mod = await import("@withfig/autocomplete");
-      availableSpecs = mod.default as string[];
-    }
-
+    const mod = await import(/* @vite-ignore */ `${baseUrl}/index.js`);
+    availableSpecs = mod.default as string[];
     availableSpecsSet = new Set(availableSpecs);
     return availableSpecs;
   } catch {
-    // Last resort fallback: try native import
+    // Fallback: try node_modules import (works in Vite dev mode)
     try {
       const mod = await import("@withfig/autocomplete");
       availableSpecs = mod.default as string[];
@@ -132,27 +111,15 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
 
   const loadPromise = (async (): Promise<FigSpec | null> => {
     try {
-      // Try fetching from static assets first (works in both dev and production)
+      // Dynamic import with full URL — works in both dev (http://localhost:5173)
+      // and production (app:// protocol) since files are in public/fig-specs/
       const baseUrl = getFigSpecBaseUrl();
-      const url = `${baseUrl}/${commandName}.js`;
-      const res = await fetch(url);
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-
-      // Create a blob URL and dynamically import it as an ES module
-      const blob = new Blob([text], { type: "application/javascript" });
-      const blobUrl = URL.createObjectURL(blob);
-      try {
-        const mod = await import(/* @vite-ignore */ blobUrl);
-        const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
-        specCache.set(commandName, spec);
-        return spec;
-      } finally {
-        URL.revokeObjectURL(blobUrl);
-      }
+      const mod = await import(/* @vite-ignore */ `${baseUrl}/${commandName}.js`);
+      const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
+      specCache.set(commandName, spec);
+      return spec;
     } catch {
-      // Fallback: try direct import (works in Vite dev mode)
+      // Fallback: try node_modules import (works in Vite dev mode)
       try {
         const mod = await import(
           /* @vite-ignore */
