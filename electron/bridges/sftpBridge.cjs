@@ -412,17 +412,7 @@ function buildSftpAlgorithms(legacyEnabled) {
   return algorithms;
 }
 
-/**
- * Send message to renderer safely
- */
-function safeSend(sender, channel, payload) {
-  try {
-    if (!sender || sender.isDestroyed()) return;
-    sender.send(channel, payload);
-  } catch {
-    // Ignore destroyed webContents during shutdown.
-  }
-}
+const { safeSend } = require("./ipcUtils.cjs");
 
 /**
  * Initialize the SFTP bridge with dependencies

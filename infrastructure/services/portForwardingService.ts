@@ -8,6 +8,8 @@ import { Host, Identity, PortForwardingRule, SSHKey } from '../../domain/models'
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveHostAuth } from '../../domain/sshAuth';
 import { logger } from '../../lib/logger';
+import { localStorageAdapter } from '../persistence/localStorageAdapter';
+import { STORAGE_KEY_PF_RECONNECT_CANCEL } from '../config/storageKeys';
 import { netcattyBridge } from './netcattyBridge';
 
 export interface PortForwardingConnection {
@@ -57,14 +59,12 @@ export const clearReconnectTimer = (ruleId: string): void => {
 // Cross-window reconnect cancellation via localStorage broadcast.
 // When one window deletes/replaces a rule, it writes to this key so
 // other windows (with pending reconnect timers) can cancel them.
-const RECONNECT_CANCEL_KEY = '__netcatty_pf_cancel_reconnect';
-
 const broadcastReconnectCancel = (ruleId: string): void => {
   try {
     // Write then immediately remove so the storage event fires on
     // other windows without leaving stale data.
-    window.localStorage.setItem(RECONNECT_CANCEL_KEY, ruleId);
-    window.localStorage.removeItem(RECONNECT_CANCEL_KEY);
+    localStorageAdapter.writeString(STORAGE_KEY_PF_RECONNECT_CANCEL, ruleId);
+    localStorageAdapter.remove(STORAGE_KEY_PF_RECONNECT_CANCEL);
   } catch {
     // localStorage may be unavailable in some contexts
   }
@@ -77,7 +77,7 @@ const broadcastReconnectCancel = (ruleId: string): void => {
  */
 export const initReconnectCancelListener = (): (() => void) => {
   const handler = (e: StorageEvent) => {
-    if (e.key !== RECONNECT_CANCEL_KEY || !e.newValue) return;
+    if (e.key !== STORAGE_KEY_PF_RECONNECT_CANCEL || !e.newValue) return;
     const ruleId = e.newValue;
     clearReconnectTimer(ruleId);
 

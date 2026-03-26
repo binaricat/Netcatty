@@ -4,6 +4,8 @@ import AppLogo from "./AppLogo";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
+import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { STORAGE_KEY_DEBUG_UPDATE_DEMO } from '../infrastructure/config/storageKeys';
 import type { UpdateState, UseUpdateCheckResult } from "../application/state/useUpdateCheck";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { SettingsTabContent } from "./settings/settings-ui";
@@ -95,8 +97,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
   }, [getApplicationInfo]);
 
   // Check if demo mode is enabled for development testing
-  const isUpdateDemoMode = typeof window !== 'undefined' &&
-    window.localStorage?.getItem('debug.updateDemo') === '1';
+  const isUpdateDemoMode = localStorageAdapter.readString(STORAGE_KEY_DEBUG_UPDATE_DEMO) === '1';
 
   const handleCheckForUpdates = async () => {
     // In demo mode, allow checking even for dev builds

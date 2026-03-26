@@ -565,17 +565,7 @@ function createKeyboardInteractiveHandler(options) {
   };
 }
 
-/**
- * Send message to renderer safely
- */
-function safeSend(sender, channel, payload) {
-  try {
-    if (!sender || sender.isDestroyed()) return;
-    sender.send(channel, payload);
-  } catch {
-    // Ignore destroyed webContents during shutdown.
-  }
-}
+const { safeSend } = require("./ipcUtils.cjs");
 
 /**
  * Apply auth configuration to connection options

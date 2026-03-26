@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkForUpdates, getReleaseUrl, type ReleaseInfo, type UpdateCheckResult } from '../../infrastructure/services/updateService';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
-import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE, STORAGE_KEY_AUTO_UPDATE_ENABLED } from '../../infrastructure/config/storageKeys';
+import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE, STORAGE_KEY_AUTO_UPDATE_ENABLED, STORAGE_KEY_DEBUG_UPDATE_DEMO } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 // Check for updates at most once per hour
@@ -13,8 +13,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 // arrives after 8s the duplicate check is avoided.
 const STARTUP_CHECK_DELAY_MS = 8000;
 // Enable demo mode for development (set via localStorage: localStorage.setItem('debug.updateDemo', '1'))
-const IS_UPDATE_DEMO_MODE = typeof window !== 'undefined' && 
-  window.localStorage?.getItem('debug.updateDemo') === '1';
+const IS_UPDATE_DEMO_MODE = localStorageAdapter.readString(STORAGE_KEY_DEBUG_UPDATE_DEMO) === '1';
 
 // Debug logging for update checks (no-op in production)
 const debugLog = (..._args: unknown[]) => {};

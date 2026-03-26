@@ -93,3 +93,13 @@ export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 
 // Immersive Mode
 export const STORAGE_KEY_IMMERSIVE_MODE = 'netcatty_immersive_mode_v1';
+
+// Side Panel
+export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
+
+// Port Forwarding (transient cross-window broadcast key)
+export const STORAGE_KEY_PF_RECONNECT_CANCEL = '__netcatty_pf_cancel_reconnect';
+
+// Debug Flags (no _v1 suffix — developer-only, not persisted data)
+export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';
+export const STORAGE_KEY_DEBUG_UPDATE_DEMO = 'debug.updateDemo';

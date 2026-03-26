@@ -19,6 +19,8 @@ import {
 import { cn, normalizeLineEndings } from '../lib/utils';
 import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
+import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { STORAGE_KEY_SIDE_PANEL_WIDTH } from '../infrastructure/config/storageKeys';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, Identity, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
@@ -474,8 +476,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Maps tab IDs to the active sub-panel type (sftp/scripts/theme), absent = closed
   const [sidePanelOpenTabs, setSidePanelOpenTabs] = useState<Map<string, SidePanelTab>>(new Map());
   const [sidePanelWidth, setSidePanelWidth] = useState(() => {
-    const stored = window.localStorage.getItem('netcatty_side_panel_width');
-    return stored ? Math.max(280, Math.min(800, Number(stored))) : 420;
+    const stored = localStorageAdapter.readNumber(STORAGE_KEY_SIDE_PANEL_WIDTH);
+    return stored ? Math.max(280, Math.min(800, stored)) : 420;
   });
   const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right'>(
     'netcatty_side_panel_position',
@@ -616,7 +618,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     };
     const onMouseUp = () => {
       sftpResizingRef.current = false;
-      window.localStorage.setItem('netcatty_side_panel_width', String(lastWidth));
+      localStorageAdapter.writeNumber(STORAGE_KEY_SIDE_PANEL_WIDTH, lastWidth);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
