@@ -94,6 +94,8 @@ const TERMINAL_OSC_SEQUENCE_REGEX = new RegExp('\\u001B\\][^\\u0007\\u001B]*(?:\
 const TERMINAL_ESCAPE_SEQUENCE_REGEX = new RegExp('\\u001B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])', 'g');
 // eslint-disable-next-line no-control-regex
 const TERMINAL_CONTROL_CHAR_REGEX = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F]', 'g');
+// eslint-disable-next-line no-control-regex
+const INCOMPLETE_ESCAPE_TAIL_REGEX = new RegExp('\\u001B(?:\\][^\\u0007\\u001B]*|\\[[0-?]*[ -/]*)?$');
 
 const stripTerminalControlSequences = (data: string): string => {
   return data
@@ -102,8 +104,23 @@ const stripTerminalControlSequences = (data: string): string => {
     .replace(TERMINAL_CONTROL_CHAR_REGEX, '');
 };
 
-const hasNotifiableTerminalOutput = (data: string): boolean => {
-  return stripTerminalControlSequences(data).trim().length > 0;
+class ChunkedEscapeFilter {
+  private pending = '';
+
+  feed(chunk: string): string {
+    const data = this.pending + chunk;
+    const tailMatch = INCOMPLETE_ESCAPE_TAIL_REGEX.exec(data);
+    if (tailMatch && tailMatch[0].length <= 256) {
+      this.pending = tailMatch[0];
+      return stripTerminalControlSequences(data.slice(0, tailMatch.index));
+    }
+    this.pending = '';
+    return stripTerminalControlSequences(data);
+  }
+}
+
+const hasNotifiableTerminalOutput = (filter: ChunkedEscapeFilter, chunk: string): boolean => {
+  return filter.feed(chunk).trim().length > 0;
 };
 
 type AITerminalSessionInfo = {
@@ -1149,8 +1166,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   useEffect(() => {
     const unsubscribers = sessions.map((session) => {
+      const filter = new ChunkedEscapeFilter();
       return onSessionData(session.id, (chunk) => {
-        if (!hasNotifiableTerminalOutput(chunk)) return;
+        if (!hasNotifiableTerminalOutput(filter, chunk)) return;
 
         if (!shouldMarkSessionActivity(activeTabIdRef.current, session)) {
           return;
