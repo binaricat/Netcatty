@@ -525,7 +525,10 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
         openReleasePage();
         return;
       }
-      if (checkResult.available === false) return;
+      if (checkResult.available === false) {
+        openReleasePage();
+        return;
+      }
     } catch {
       return;
     }
