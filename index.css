@@ -328,20 +328,13 @@ body {
   overflow: visible;
 }
 
-.workspace-pane::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 0;
-  border: 2px solid hsl(var(--primary));
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 120ms ease, box-shadow 120ms ease;
-  z-index: 40;
+/* Dim terminal text in unfocused workspace panes by reducing canvas opacity */
+.workspace-pane .xterm-screen {
+  transition: opacity 150ms ease;
 }
 
-.workspace-pane:focus-within::after {
-  opacity: 1;
+.workspace-pane:not(:focus-within) .xterm-screen {
+  opacity: 0.7;
 }
 
 /* ── Streamdown code block overrides ── */

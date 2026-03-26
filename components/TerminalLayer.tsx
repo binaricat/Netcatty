@@ -1834,7 +1834,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   "absolute bg-background",
                   inActiveWorkspace && "workspace-pane",
                   isVisible && "z-10",
-                  isFocusedPane && "ring-1 ring-primary/50 ring-inset"
+                  // Focus indicator is handled by CSS .workspace-pane::after dimming overlay
                 )}
                 style={style}
                 tabIndex={-1}
