@@ -231,6 +231,9 @@ const en: Messages = {
   'settings.appearance.themeColor.desc': 'Pick a preset palette for each theme',
   'settings.appearance.themeColor.light': 'Light palette',
   'settings.appearance.themeColor.dark': 'Dark palette',
+  'settings.appearance.immersiveMode': 'Immersive Mode',
+  'settings.appearance.immersiveMode.desc':
+    'When enabled, the UI chrome (tab bar, sidebar, status bar) adapts its colors to match the active terminal theme for a visually cohesive experience.',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
     'Add custom CSS to personalize the app appearance. Changes apply immediately.',
@@ -712,6 +715,7 @@ const en: Messages = {
   'sftp.upload.phase.compressed': 'Compressed',
 
   // SFTP File Opener
+  'sftp.context.copyPath': 'Copy file path',
   'sftp.context.openWith': 'Open with...',
   'sftp.context.edit': 'Edit',
   'sftp.context.preview': 'Preview',

@@ -215,6 +215,9 @@ const zhCN: Messages = {
   'settings.appearance.themeColor.desc': '为浅色与深色主题选择预设配色',
   'settings.appearance.themeColor.light': '浅色主题',
   'settings.appearance.themeColor.dark': '深色主题',
+  'settings.appearance.immersiveMode': '沉浸模式',
+  'settings.appearance.immersiveMode.desc':
+    '启用后，UI 外观（标签栏、侧边栏、状态栏）会自动适配当前终端主题的配色，营造视觉一体化的沉浸体验。',
   'settings.appearance.customCss': '自定义 CSS',
   'settings.appearance.customCss.desc': '使用自定义 CSS 个性化界面，修改会立即生效。',
   'settings.appearance.customCss.placeholder':
@@ -1053,6 +1056,7 @@ const zhCN: Messages = {
   'sftp.upload.phase.compressed': '压缩传输',
 
   // SFTP File Opener
+  'sftp.context.copyPath': '复制文件路径',
   'sftp.context.openWith': '打开方式...',
   'sftp.context.edit': '编辑',
   'sftp.context.preview': '预览',

@@ -152,6 +152,10 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
     const { updateState, checkNow, installUpdate, openReleasePage } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
+    const isImmersive = settings.immersiveMode;
+    const toggleImmersive = useCallback(() => {
+        settings.setImmersiveMode(!isImmersive);
+    }, [settings, isImmersive]);
 
     useEffect(() => {
         notifyRendererReady();
@@ -277,6 +281,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             setUiLanguage={settings.setUiLanguage}
                             customCSS={settings.customCSS}
                             setCustomCSS={settings.setCustomCSS}
+                            isImmersive={isImmersive}
+                            onToggleImmersive={toggleImmersive}
                         />
                     )}
 

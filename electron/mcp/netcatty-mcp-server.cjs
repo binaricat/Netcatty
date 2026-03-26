@@ -3,7 +3,7 @@
  *
  * Spawned by codex-acp (or other ACP agents) as a child process.
  * Communicates with the Netcatty main process via TCP (JSON-RPC over newline-delimited JSON).
- * Exposes Netcatty terminal and SFTP tools so ACP agents can operate on scoped sessions.
+ * Exposes Netcatty terminal tools so ACP agents can operate on scoped sessions.
  */
 "use strict";
 
@@ -39,7 +39,6 @@ const CHAT_SESSION_ID = process.env.NETCATTY_MCP_CHAT_SESSION_ID || null;
 
 // Permission mode: 'observer' | 'confirm' | 'autonomous' (defense-in-depth, TCP bridge also checks)
 const PERMISSION_MODE = process.env.NETCATTY_MCP_PERMISSION_MODE || "confirm";
-const ENABLE_SFTP_TOOLS = process.env.NETCATTY_MCP_ENABLE_SFTP !== "0";
 
 // Default command blocklist (defense-in-depth, TCP bridge also checks)
 // NOTE: Keep in sync with DEFAULT_COMMAND_BLOCKLIST in infrastructure/ai/types.ts
@@ -76,12 +75,14 @@ function checkCommandSafety(command) {
   return { blocked: false };
 }
 
-/** Guard for write tools: blocks in observer mode, checks command safety for commands. */
-function guardWriteOperation(command) {
+/** Guard for write tools: blocks in observer mode, optionally checks command safety. */
+function guardWriteOperation(command, { skipBlocklist = false } = {}) {
   if (PERMISSION_MODE === "observer") {
     return 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
   }
-  if (command) {
+  // When skipBlocklist is true, the caller relies on the TCP bridge layer for
+  // session-aware blocklist checks (e.g. serial sessions skip shell patterns).
+  if (!skipBlocklist && command) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
       return `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`;
@@ -197,7 +198,7 @@ server.resource(
 // Tool: get_environment
 server.tool(
   "get_environment",
-  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, or Mosh-backed shells. Call this first before executing commands.",
+  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, Mosh-backed shells, or serial port connections (network devices, embedded systems). Serial sessions have protocol 'serial' and shellType 'raw'. Call this first before executing commands.",
   {},
   async () => {
     process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
@@ -206,10 +207,7 @@ server.tool(
     return {
       content: [{
         type: "text",
-        text: JSON.stringify({
-          ...ctx,
-          sftpAvailable: ENABLE_SFTP_TOOLS,
-        }, null, 2),
+        text: JSON.stringify(ctx, null, 2),
       }],
     };
   },
@@ -218,13 +216,14 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a shell command on a Netcatty terminal session. The command runs in that session's shell and output (stdout/stderr) is returned when complete.",
+  "Execute a command on a Netcatty terminal session. For shell sessions, the command runs in the session's shell. For serial/raw sessions (network devices), the command is sent as-is without shell wrapping and exit codes are unavailable.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The shell command to execute in the target session."),
+    command: z.string().describe("The command to execute in the target session."),
   },
   async ({ sessionId, command }) => {
-    const guardErr = guardWriteOperation(command);
+    // skipBlocklist: bridge layer does session-aware blocklist (serial sessions skip shell patterns)
+    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
@@ -235,193 +234,11 @@ server.tool(
     const parts = [];
     if (result.stdout) parts.push(result.stdout);
     if (result.stderr) parts.push(`[stderr] ${result.stderr}`);
-    parts.push(`[exit code: ${result.exitCode ?? -1}]`);
+    // Serial/raw sessions return null exitCode (vendor CLIs have no exit codes)
+    if (result.exitCode != null) {
+      parts.push(`[exit code: ${result.exitCode}]`);
+    }
     return { content: [{ type: "text", text: parts.join("\n") }] };
-  },
-);
-
-// Tool: terminal_send_input
-server.tool(
-  "terminal_send_input",
-  "Send raw input to a Netcatty terminal session. Use only for interactive programs that are already running: y/n prompts, passwords, ctrl+c (\\x03), ctrl+d (\\x04), or pressing enter (\\n). This tool does not return the updated terminal output. For normal commands, use terminal_execute.",
-  {
-    sessionId: z.string().describe("The terminal session ID to send input to."),
-    input: z.string().describe("The raw input string. Use escape sequences for special keys (e.g. \\x03 for ctrl+c, \\n for enter)."),
-  },
-  async ({ sessionId, input }) => {
-    const guardErr = guardWriteOperation(input);
-    if (guardErr) {
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-    }
-    const result = await rpcCall("netcatty/terminalWrite", { ...scopeParams, sessionId, input });
-    if (!result.ok) {
-      return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-    }
-    return { content: [{ type: "text", text: `Sent input to session ${sessionId}` }] };
-  },
-);
-
-if (ENABLE_SFTP_TOOLS) {
-  // Tool: sftp_list_directory
-  server.tool(
-    "sftp_list_directory",
-    "List the contents of a directory on the remote host. Returns file names, sizes, types, and modification timestamps.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path of the remote directory to list."),
-    },
-    async ({ sessionId, path }) => {
-      const result = await rpcCall("netcatty/sftpList", { ...scopeParams, sessionId, path });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result.files || result.output, null, 2) }] };
-    },
-  );
-
-  // Tool: sftp_read_file
-  server.tool(
-    "sftp_read_file",
-    "Read the content of a file on the remote host. Returns file content as text, truncated if the file is large.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path of the remote file to read."),
-      maxBytes: z.number().optional().default(10000).describe("Maximum bytes to read. Defaults to 10000."),
-    },
-    async ({ sessionId, path, maxBytes }) => {
-      const safeMaxBytes = Math.max(1, Math.min(10 * 1024 * 1024, Number(maxBytes) || 10000));
-      const result = await rpcCall("netcatty/sftpRead", { ...scopeParams, sessionId, path, maxBytes: safeMaxBytes });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: result.content || "(empty file)" }] };
-    },
-  );
-
-  // Tool: sftp_write_file
-  server.tool(
-    "sftp_write_file",
-    "Write content to a file on the remote host. Creates the file if it does not exist, or overwrites it.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path of the remote file to write."),
-      content: z.string().describe("The text content to write to the file."),
-    },
-    async ({ sessionId, path, content }) => {
-      const guardErr = guardWriteOperation(path);
-      if (guardErr) {
-        return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-      }
-      const result = await rpcCall("netcatty/sftpWrite", { ...scopeParams, sessionId, path, content });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: `Written: ${path}` }] };
-    },
-  );
-
-  // Tool: sftp_mkdir
-  server.tool(
-    "sftp_mkdir",
-    "Create a directory on the remote host. Creates parent directories if they don't exist.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path of the directory to create."),
-    },
-    async ({ sessionId, path }) => {
-      const guardErr = guardWriteOperation();
-      if (guardErr) {
-        return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-      }
-      const result = await rpcCall("netcatty/sftpMkdir", { ...scopeParams, sessionId, path });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: `Created directory: ${path}` }] };
-    },
-  );
-
-  // Tool: sftp_remove
-  server.tool(
-    "sftp_remove",
-    "Delete a file or directory on the remote host. Directories are removed recursively.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path of the file or directory to delete."),
-    },
-    async ({ sessionId, path }) => {
-      const guardErr = guardWriteOperation();
-      if (guardErr) {
-        return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-      }
-      const result = await rpcCall("netcatty/sftpRemove", { ...scopeParams, sessionId, path });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: `Removed: ${path}` }] };
-    },
-  );
-
-  // Tool: sftp_rename
-  server.tool(
-    "sftp_rename",
-    "Rename or move a file/directory on the remote host.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      oldPath: z.string().describe("The current absolute path."),
-      newPath: z.string().describe("The new absolute path."),
-    },
-    async ({ sessionId, oldPath, newPath }) => {
-      const guardErr = guardWriteOperation();
-      if (guardErr) {
-        return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-      }
-      const result = await rpcCall("netcatty/sftpRename", { ...scopeParams, sessionId, oldPath, newPath });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: `Renamed: ${oldPath} → ${newPath}` }] };
-    },
-  );
-
-  // Tool: sftp_stat
-  server.tool(
-    "sftp_stat",
-    "Get file/directory metadata on the remote host: type, size, permissions, and modification time.",
-    {
-      sessionId: z.string().describe("The terminal session ID for the remote host."),
-      path: z.string().describe("The absolute path to stat."),
-    },
-    async ({ sessionId, path }) => {
-      const result = await rpcCall("netcatty/sftpStat", { ...scopeParams, sessionId, path });
-      if (result.error) {
-        return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    },
-  );
-}
-
-// Tool: multi_host_execute
-server.tool(
-  "multi_host_execute",
-  "Execute a command on multiple Netcatty terminal sessions simultaneously or sequentially. Useful for fleet-wide operations, or to compare local and remote environments.",
-  {
-    sessionIds: z.array(z.string()).describe("Array of session IDs to execute on."),
-    command: z.string().describe("The shell command to execute on each host."),
-    mode: z.enum(["parallel", "sequential"]).optional().default("parallel").describe("Execution mode. Defaults to parallel."),
-    stopOnError: z.boolean().optional().default(false).describe("In sequential mode, stop on first failure."),
-  },
-  async ({ sessionIds, command, mode, stopOnError }) => {
-    const guardErr = guardWriteOperation(command);
-    if (guardErr) {
-      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
-    }
-    const result = await rpcCall("netcatty/multiExec", { ...scopeParams, sessionIds, command, mode, stopOnError });
-    if (result.error) {
-      return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
-    }
-    return { content: [{ type: "text", text: JSON.stringify(result.results, null, 2) }] };
   },
 );
 

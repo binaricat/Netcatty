@@ -208,7 +208,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
       <DropdownContent
         align="start"
         sideOffset={6}
-        className="w-[288px] rounded-2xl border border-border/50 bg-popover p-0 text-foreground shadow-lg supports-[backdrop-filter]:backdrop-blur-xl"
+        className="w-[288px] overflow-hidden rounded-2xl border border-border/50 bg-popover p-0 text-foreground shadow-lg supports-[backdrop-filter]:backdrop-blur-xl"
       >
         {BUILTIN_AGENTS.map((agent) => (
           <AgentMenuRow

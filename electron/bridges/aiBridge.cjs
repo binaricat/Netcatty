@@ -891,15 +891,18 @@ function registerHandlers(ipcMain) {
     if (mcpServerBridge.getPermissionMode() === "observer") {
       return { ok: false, error: "Execution blocked: permission mode is 'observer'" };
     }
-    // Check command against safety blocklist before executing
-    const safety = mcpServerBridge.checkCommandSafety(command);
-    if (safety.blocked) {
-      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-    }
-
     const session = sessions?.get(sessionId);
     if (!session) {
       return { ok: false, error: "Session not found" };
+    }
+
+    // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
+    // disables an interface on Cisco). Skip for serial sessions.
+    if (session.protocol !== "serial") {
+      const safety = mcpServerBridge.checkCommandSafety(command);
+      if (safety.blocked) {
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
     }
 
     try {
@@ -936,6 +939,17 @@ function registerHandlers(ipcMain) {
         });
       }
 
+      // Serial port: raw command execution (no shell wrapping)
+      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return execViaRawPty(session.serialPort, command, {
+          timeoutMs: serialTimeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+        });
+      }
+
       return { ok: false, error: "No terminal stream or SSH client available for this session" };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
@@ -949,45 +963,6 @@ function registerHandlers(ipcMain) {
     }
     mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
     return { ok: true };
-  });
-
-  // Write to terminal session (send input like a user typing)
-  ipcMain.handle("netcatty:ai:terminal:write", async (event, { sessionId, data }) => {
-    // Validate IPC sender (Issue #17)
-    if (!validateSender(event)) {
-      return { ok: false, error: "Unauthorized IPC sender" };
-    }
-    // Block writes in observer mode (Issue #11)
-    if (mcpServerBridge.getPermissionMode() === "observer") {
-      return { ok: false, error: "Terminal write blocked: permission mode is 'observer'" };
-    }
-    // Check input against safety blocklist before writing
-    const safety = mcpServerBridge.checkCommandSafety(data);
-    if (safety.blocked) {
-      return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-    }
-
-    const session = sessions?.get(sessionId);
-    if (!session) {
-      return { ok: false, error: "Session not found" };
-    }
-    try {
-      if (session.stream) {
-        session.stream.write(data);
-        return { ok: true };
-      }
-      if (session.pty) {
-        session.pty.write(data);
-        return { ok: true };
-      }
-      if (session.proc) {
-        session.proc.write(data);
-        return { ok: true };
-      }
-      return { ok: false, error: "No writable stream for session" };
-    } catch (err) {
-      return { ok: false, error: err?.message || String(err) };
-    }
   });
 
   async function runCommand(command, args, options) {
@@ -1936,8 +1911,7 @@ function registerHandlers(ipcMain) {
         `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
         `Call get_environment first to discover available sessions and their IDs. ` +
         `For normal shell commands, use terminal_execute so you receive command output. ` +
-        `Use terminal_send_input only to respond to an interactive prompt that is already running; it does not read back the updated terminal output. ` +
-        `SFTP file tools only work for remote SSH sessions, not local terminals.]\n\n${prompt}`;
+        `For serial/raw sessions (network devices), commands are sent as-is without shell wrapping and exit codes are unavailable.]\n\n${prompt}`;
 
       // Build message content: text + optional attachments
       // ACP provider only supports image/* and audio/* inline via `type: "file"`.

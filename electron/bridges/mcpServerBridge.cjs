@@ -2,8 +2,7 @@
  * MCP Server Bridge — TCP host in Electron main process
  *
  * Starts a local TCP server that the netcatty-mcp-server.cjs child process
- * connects to. Handles JSON-RPC calls by dispatching to real SSH sessions
- * and SFTP clients.
+ * connects to. Handles JSON-RPC calls by dispatching to real terminal sessions.
  */
 "use strict";
 
@@ -13,24 +12,15 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
-const { execViaPty, execViaChannel } = require("./ai/ptyExec.cjs");
+const { execViaPty, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
-let sftpClients = null; // Map<sftpId, SFTPWrapper>
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
-
-/**
- * Safely quote a string for use in a POSIX shell command.
- * Wraps the value in single quotes and escapes any embedded single quotes.
- */
-function shellQuote(s) {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
 
 // Per-scope metadata: chatSessionId → { sessionIds: string[], metadata: Map<sessionId, meta> }
 // Each chat session only sees the hosts registered for its scope.
@@ -171,7 +161,6 @@ function cancelPtyExecsForSession(chatSessionId) {
 
 function init(deps) {
   sessions = deps.sessions;
-  sftpClients = deps.sftpClients;
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
   }
@@ -290,38 +279,9 @@ function getSessionMeta(sessionId, chatSessionId) {
   return null;
 }
 
-function sessionSupportsSftp(session) {
-  const sshClient = session?.conn || session?.sshClient;
-  return !!(sshClient && typeof sshClient.exec === "function");
-}
-
-function scopeHasSftpSessions(sessionIds) {
-  if (!Array.isArray(sessionIds) || sessionIds.length === 0) return false;
-  for (const sessionId of sessionIds) {
-    const session = sessions?.get(sessionId);
-    if (sessionSupportsSftp(session)) return true;
-  }
-  return false;
-}
-
 /**
  * Run an array of async task factories with a concurrency limit.
  */
-async function limitConcurrency(tasks, limit) {
-  const results = [];
-  const executing = new Set();
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
-    const p = task().then(r => { results[i] = r; }).finally(() => executing.delete(p));
-    executing.add(p);
-    if (executing.size >= limit) {
-      await Promise.race(executing);
-    }
-  }
-  await Promise.all(executing);
-  return results;
-}
-
 function checkCommandSafety(command) {
   for (let i = 0; i < compiledBlocklist.length; i++) {
     const re = compiledBlocklist[i];
@@ -438,12 +398,6 @@ async function handleMessage(socket, line) {
 // Methods that modify remote state — blocked in observer mode
 const WRITE_METHODS = new Set([
   "netcatty/exec",
-  "netcatty/terminalWrite",
-  "netcatty/sftpWrite",
-  "netcatty/sftpMkdir",
-  "netcatty/sftpRemove",
-  "netcatty/sftpRename",
-  "netcatty/multiExec",
 ]);
 
 /**
@@ -483,37 +437,11 @@ async function dispatch(method, params) {
     const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
-  // For multi-exec, validate all session IDs
-  if (method === "netcatty/multiExec" && Array.isArray(params?.sessionIds)) {
-    for (const sid of params.sessionIds) {
-      const scopeErr = validateSessionScope(sid, params?.chatSessionId);
-      if (scopeErr) return { ok: false, error: scopeErr };
-    }
-  }
-
   switch (method) {
     case "netcatty/getContext":
       return handleGetContext(params);
     case "netcatty/exec":
       return handleExec(params);
-    case "netcatty/terminalWrite":
-      return handleTerminalWrite(params);
-    case "netcatty/sftpList":
-      return handleSftpList(params);
-    case "netcatty/sftpRead":
-      return handleSftpRead(params);
-    case "netcatty/sftpWrite":
-      return handleSftpWrite(params);
-    case "netcatty/sftpMkdir":
-      return handleSftpMkdir(params);
-    case "netcatty/sftpRemove":
-      return handleSftpRemove(params);
-    case "netcatty/sftpRename":
-      return handleSftpRename(params);
-    case "netcatty/sftpStat":
-      return handleSftpStat(params);
-    case "netcatty/multiExec":
-      return handleMultiExec(params);
     default:
       throw new Error(`Unknown method: ${method}`);
   }
@@ -550,7 +478,8 @@ function handleGetContext(params) {
     const sshClient = session.conn || session.sshClient;
     const hasCommandablePty = ptyStream && typeof ptyStream.write === "function";
     const hasSshExec = sshClient && typeof sshClient.exec === "function";
-    if (!hasCommandablePty && !hasSshExec) continue;
+    const hasSerialPort = session.serialPort && typeof session.serialPort.write === "function";
+    if (!hasCommandablePty && !hasSshExec && !hasSerialPort) continue;
 
     // Look up metadata scoped to this chat session
     const meta = getSessionMeta(sessionId, chatSessionId) || {};
@@ -562,17 +491,16 @@ function handleGetContext(params) {
       username: meta.username || session.username || "",
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
-      supportsSftp: sessionSupportsSftp(session),
-      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream),
+      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
     });
   }
 
   return {
     environment: "netcatty-terminal",
     description: "You are operating inside Netcatty, a multi-session terminal manager. " +
-      "The available sessions may be remote hosts, local terminals, or Mosh-backed shells. " +
+      "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
-      "SFTP tools only work for remote SSH sessions. " +
+      "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
     hostCount: hosts.length,
@@ -588,13 +516,26 @@ function handleExec(params) {
     return { ok: false, error: 'Invalid command', exitCode: 1 };
   }
 
-  const safety = checkCommandSafety(command);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
-
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
+
+  // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
+  // are meaningless on network device CLIs. Serial sessions skip the check because
+  // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
+  //
+  // Design note: the serial protocol is explicitly chosen by the user in the UI
+  // for network devices / embedded systems. While startSerialSession technically
+  // supports PTY devices, users connecting to a Linux/BusyBox shell should use
+  // the "local" protocol (which goes through the normal shell path with blocklist).
+  // Additionally, execViaRawPty sends commands without shell wrapping, so shell
+  // metacharacters in blocklist patterns (eval, $(), backticks, pipes) cannot
+  // actually be interpreted even if sent to a serial-connected shell.
+  if (session.protocol !== "serial") {
+    const safety = checkCommandSafety(command);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
 
   if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
     return {
@@ -616,288 +557,25 @@ function handleExec(params) {
     });
   }
 
-  // If no PTY stream, fall back to exec channel for SSH sessions only.
-  if (!sshClient || typeof sshClient.exec !== "function") {
-    return { ok: false, error: "Session does not support command execution" };
-  }
-
-  if (!ptyStream || typeof ptyStream.write !== "function") {
+  // Fallback: SSH exec channel (invisible to terminal).
+  // At this point ptyStream is not writable (already returned above if it was).
+  if (sshClient && typeof sshClient.exec === "function") {
     return execViaChannel(sshClient, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
     });
   }
-}
 
-// ── Handler: terminalWrite ──
-
-function handleTerminalWrite(params) {
-  const { sessionId, input } = params;
-  if (!sessionId || input == null) throw new Error("sessionId and input are required");
-
-  // Validate input against command blocklist
-  const safety = checkCommandSafety(input);
-  if (safety.blocked) {
-    return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
-
-  const session = sessions?.get(sessionId);
-  if (!session) return { ok: false, error: "Session not found" };
-
-  if (session.stream) {
-    session.stream.write(input);
-    return { ok: true };
-  }
-  if (session.pty) {
-    session.pty.write(input);
-    return { ok: true };
-  }
-  if (session.proc) {
-    session.proc.write(input);
-    return { ok: true };
-  }
-  return { ok: false, error: "No writable stream" };
-}
-
-// ── SFTP Helpers ──
-
-function findSftpForSession(sessionId) {
-  // Try to find an SFTP client keyed by the same sessionId
-  if (sftpClients?.has(sessionId)) {
-    return sftpClients.get(sessionId);
-  }
-  // Look through all SFTP clients for one sharing the same SSH connection
-  const session = sessions?.get(sessionId);
-  if (!session?.sshClient) return null;
-
-  for (const [, client] of sftpClients || []) {
-    if (client.client === session.sshClient || client._sshClient === session.sshClient) {
-      return client;
-    }
-  }
-  return null;
-}
-
-// ── Handler: sftpList ──
-
-async function handleSftpList(params) {
-  const { sessionId, path: dirPath } = params;
-  if (!sessionId || !dirPath) throw new Error("sessionId and path are required");
-
-  const sftpClient = findSftpForSession(sessionId);
-  if (sftpClient) {
-    try {
-      const list = await sftpClient.list(dirPath);
-      return {
-        files: list.map(f => ({
-          name: f.name,
-          type: f.type === "d" ? "directory" : f.type === "l" ? "symlink" : "file",
-          size: f.size,
-          lastModified: f.modifyTime,
-          permissions: f.rights ? `${f.rights.user}${f.rights.group}${f.rights.other}` : undefined,
-        })),
-      };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  }
-
-  // Fallback: use SSH exec
-  const result = await handleExec({ sessionId, command: `ls -la ${shellQuote(dirPath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { output: result.stdout || "(empty directory)" };
-}
-
-// ── Handler: sftpRead ──
-
-async function handleSftpRead(params) {
-  const { sessionId, path: filePath } = params;
-  if (params.maxBytes != null && (typeof params.maxBytes !== 'number' || params.maxBytes < 1 || params.maxBytes > 10 * 1024 * 1024)) {
-    return { ok: false, error: 'maxBytes must be a positive number between 1 and 10485760' };
-  }
-  // Clamp maxBytes to a safe upper bound (10MB)
-  const maxBytes = Math.max(1, Math.min(Number(params.maxBytes) || 10000, 10 * 1024 * 1024));
-  if (!sessionId || !filePath) throw new Error("sessionId and path are required");
-
-  // Fallback to SSH exec (more reliable across SFTP client states)
-  const result = await handleExec({ sessionId, command: `head -c ${maxBytes} ${shellQuote(filePath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { content: result.stdout || "(empty file)" };
-}
-
-// ── Handler: sftpWrite ──
-
-async function handleSftpWrite(params) {
-  const { sessionId, path: filePath, content } = params;
-  if (!sessionId || !filePath || content == null) throw new Error("sessionId, path and content are required");
-
-  const sftpClient = findSftpForSession(sessionId);
-  if (sftpClient) {
-    try {
-      await sftpClient.put(Buffer.from(content, "utf-8"), filePath);
-      return { written: filePath };
-    } catch {
-      // Fallback to SSH
-    }
-  }
-
-  // Use base64 encoding to avoid heredoc delimiter collision issues
-  const b64 = Buffer.from(content, "utf-8").toString("base64");
-  const result = await handleExec({ sessionId, command: `echo ${shellQuote(b64)} | base64 -d > ${shellQuote(filePath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { written: filePath };
-}
-
-// ── Handler: sftpMkdir ──
-
-async function handleSftpMkdir(params) {
-  const { sessionId, path: dirPath } = params;
-  if (!sessionId || !dirPath) throw new Error("sessionId and path are required");
-
-  const sftpClient = findSftpForSession(sessionId);
-  if (sftpClient) {
-    try {
-      await sftpClient.mkdir(dirPath, true); // recursive
-      return { created: dirPath };
-    } catch {
-      // Fallback
-    }
-  }
-
-  const result = await handleExec({ sessionId, command: `mkdir -p ${shellQuote(dirPath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { created: dirPath };
-}
-
-// ── Handler: sftpRemove ──
-
-// Critical paths that must never be removed (module-level constant)
-const CRITICAL_PATHS = new Set([
-  "/", "/root", "/home", "/etc", "/var", "/usr", "/boot",
-  "/bin", "/sbin", "/lib", "/lib64", "/dev", "/proc", "/sys", "/tmp", "/opt",
-]);
-
-async function handleSftpRemove(params) {
-  const { sessionId, path: targetPath } = params;
-  if (!sessionId || !targetPath) throw new Error("sessionId and path are required");
-
-  // Guard against deleting root or critical system directories
-  // Normalize to resolve "..", "//", and trailing slashes before checking
-  const normalizedPath = path.posix.normalize(targetPath).replace(/\/+$/, "") || "/";
-  if (CRITICAL_PATHS.has(normalizedPath) || /^\/[^/]+$/.test(normalizedPath)) {
-    return { ok: false, error: `Refusing to remove critical or root-level path: ${targetPath}` };
-  }
-
-  // Use rm -r (without -f) so permission errors surface instead of being silently ignored
-  const result = await handleExec({ sessionId, command: `rm -r ${shellQuote(targetPath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { removed: targetPath };
-}
-
-// ── Handler: sftpRename ──
-
-async function handleSftpRename(params) {
-  const { sessionId, oldPath, newPath } = params;
-  if (!sessionId || !oldPath || !newPath) throw new Error("sessionId, oldPath and newPath are required");
-
-  const sftpClient = findSftpForSession(sessionId);
-  if (sftpClient) {
-    try {
-      await sftpClient.rename(oldPath, newPath);
-      return { renamed: `${oldPath} → ${newPath}` };
-    } catch {
-      // Fallback
-    }
-  }
-
-  const result = await handleExec({ sessionId, command: `mv ${shellQuote(oldPath)} ${shellQuote(newPath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  return { renamed: `${oldPath} → ${newPath}` };
-}
-
-// ── Handler: sftpStat ──
-
-async function handleSftpStat(params) {
-  const { sessionId, path: targetPath } = params;
-  if (!sessionId || !targetPath) throw new Error("sessionId and path are required");
-
-  const sftpClient = findSftpForSession(sessionId);
-  if (sftpClient) {
-    try {
-      const stat = await sftpClient.stat(targetPath);
-      return {
-        name: path.basename(targetPath),
-        type: stat.isDirectory ? "directory" : stat.isSymbolicLink ? "symlink" : "file",
-        size: stat.size,
-        lastModified: stat.modifyTime,
-        permissions: stat.mode ? (stat.mode & 0o777).toString(8) : undefined,
-      };
-    } catch {
-      // Fallback
-    }
-  }
-
-  // Fallback: use stat command
-  const result = await handleExec({ sessionId, command: `stat -c '{"size":%s,"mode":"%a","mtime":%Y,"type":"%F"}' ${shellQuote(targetPath)}` });
-  if (!result.ok) return { ok: false, error: result.error };
-  try {
-    const parsed = JSON.parse(result.stdout.trim());
-    return {
-      name: path.basename(targetPath),
-      type: parsed.type?.includes("directory") ? "directory" : "file",
-      size: parsed.size,
-      lastModified: parsed.mtime * 1000,
-      permissions: parsed.mode,
-    };
-  } catch {
-    return { ok: false, error: "Failed to parse stat output" };
-  }
-}
-
-// ── Handler: multiExec ──
-
-async function handleMultiExec(params) {
-  const { sessionIds, command, mode = "parallel", stopOnError = false } = params;
-  if (!Array.isArray(sessionIds) || !command) throw new Error("sessionIds and command are required");
-  if (sessionIds.length > 50) {
-    return { ok: false, error: 'Too many session IDs: maximum is 50' };
-  }
-  if (typeof command !== 'string' || !command.trim()) {
-    return { ok: false, error: 'Invalid command' };
-  }
-
-  const safety = checkCommandSafety(command);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
-
-  const results = {};
-
-  if (mode === "sequential") {
-    for (const sid of sessionIds) {
-      const result = await handleExec({ sessionId: sid, command });
-      results[sid] = {
-        ok: result.ok,
-        output: result.ok ? (result.stdout || "(no output)") : `Error: ${result.error || result.stderr || "Failed"}`,
-      };
-      if (!result.ok && stopOnError) break;
-    }
-  } else {
-    // Parallel execution with concurrency limit
-    const tasks = sessionIds.map((sid) => () => {
-      return Promise.resolve(handleExec({ sessionId: sid, command })).then(result => ({
-        sid,
-        ok: result.ok,
-        output: result.ok ? (result.stdout || "(no output)") : `Error: ${result.error || result.stderr || "Failed"}`,
-      }));
+  // Serial port: raw command execution (no shell wrapping)
+  if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+    return execViaRawPty(session.serialPort, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activePtyExecs,
+      chatSessionId: params?.chatSessionId,
     });
-    const resolved = await limitConcurrency(tasks, 10);
-    for (const r of resolved) {
-      results[r.sid] = { ok: r.ok, output: r.output };
-    }
   }
 
-  return { results };
+  return { ok: false, error: "Session does not support command execution" };
 }
 
 // ── MCP Server Config Builder ──
@@ -930,11 +608,6 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
   if (chatSessionId) {
     env.push({ name: "NETCATTY_MCP_CHAT_SESSION_ID", value: chatSessionId });
   }
-
-  env.push({
-    name: "NETCATTY_MCP_ENABLE_SFTP",
-    value: scopeHasSftpSessions(effectiveIds) ? "1" : "0",
-  });
 
   // Pass permission mode so MCP server can enforce it locally (defense-in-depth)
   env.push({ name: "NETCATTY_MCP_PERMISSION_MODE", value: permissionMode });

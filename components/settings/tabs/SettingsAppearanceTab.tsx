@@ -25,6 +25,8 @@ export default function SettingsAppearanceTab(props: {
   setUiLanguage: (language: string) => void;
   customCSS: string;
   setCustomCSS: (css: string) => void;
+  isImmersive?: boolean;
+  onToggleImmersive?: () => void;
 }) {
   const { t } = useI18n();
   const availableUIFonts = useAvailableUIFonts();
@@ -45,6 +47,8 @@ export default function SettingsAppearanceTab(props: {
     setUiLanguage,
     customCSS,
     setCustomCSS,
+    isImmersive,
+    onToggleImmersive,
   } = props;
 
   const getHslStyle = useCallback((hsl: string) => ({ backgroundColor: `hsl(${hsl})` }), []);
@@ -251,6 +255,19 @@ export default function SettingsAppearanceTab(props: {
         </SettingRow>
         <SettingRow label={t("settings.appearance.themeColor.dark")}>
           {renderThemeSwatches(DARK_UI_THEMES, darkUiThemeId, setDarkUiThemeId)}
+        </SettingRow>
+      </div>
+
+      <SectionHeader title={t("settings.appearance.immersiveMode")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          label={t("settings.appearance.immersiveMode")}
+          description={t("settings.appearance.immersiveMode.desc")}
+        >
+          <Toggle
+            checked={!!isImmersive}
+            onChange={() => onToggleImmersive?.()}
+          />
         </SettingRow>
       </div>
 

@@ -537,27 +537,6 @@ function attachOAuthLoadingOverlay(win) {
   });
 }
 
-async function waitForRootPaint(win, { timeoutMs = 400, intervalMs = 30 } = {}) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      if (win.isDestroyed()) return false;
-      const count = await win.webContents.executeJavaScript(
-        `(() => {
-          const root = document.getElementById("root");
-          return root ? root.children.length : 0;
-        })()`,
-        true,
-      );
-      if (Number(count) > 0) return true;
-    } catch {
-      return false;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  return false;
-}
-
 function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true } = {}) {
   const webContentsId = (() => {
     try {
@@ -605,13 +584,10 @@ function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true 
     tryShow();
   });
 
-  win.webContents.once("did-finish-load", () => {
-    void (async () => {
-      // If the renderer mounts shortly after load, wait briefly to avoid showing a blank root.
-      const painted = await waitForRootPaint(win, { timeoutMs: 800, intervalMs: 50 });
-      if (painted) markRendererReady();
-    })();
-  });
+  // Renderer calls netcattyBridge.rendererReady() after React mount,
+  // which sends IPC "netcatty:renderer:ready" → markRendererReady().
+  // The timeout fallback (timeoutMs) ensures the window is shown even if
+  // the signal is never received.
 
   // Dev/edge-case fallback: don't keep the window hidden forever.
   if (Number(timeoutMs) > 0) {

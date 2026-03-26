@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
+import { useImmersiveMode } from './application/state/useImmersiveMode';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
 import { usePortForwardingAutoStart } from './application/state/usePortForwardingAutoStart';
 import { usePortForwardingState } from './application/state/usePortForwardingState';
@@ -14,6 +15,10 @@ import { initializeUIFonts } from './application/state/uiFontStore';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
 import { resolveHostAuth } from './domain/sshAuth';
+import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import { collectSessionIds } from './domain/workspace';
+import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
+import { useCustomThemes } from './application/state/customThemeStore';
 import { applySyncPayload } from './domain/syncPayload';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
@@ -29,7 +34,7 @@ import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './componen
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
 import { classifyLocalShellType } from './lib/localShell';
-import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalTheme } from './types';
+import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalSession, TerminalTheme } from './types';
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
@@ -192,6 +197,8 @@ function App({ settings }: { settings: SettingsState }) {
     sessionLogsEnabled,
     sessionLogsDir,
     sessionLogsFormat,
+    reapplyCurrentTheme,
+    immersiveMode,
   } = settings;
 
   const {
@@ -270,6 +277,56 @@ function App({ settings }: { settings: SettingsState }) {
 
   // isMacClient is used for window controls styling
   const isMacClient = typeof navigator !== 'undefined' && /Mac|Macintosh/.test(navigator.userAgent);
+
+  // ---------------------------------------------------------------------------
+  // Immersive Mode — derive UI chrome colors from the active terminal's theme
+  // ---------------------------------------------------------------------------
+  const activeTabId = useActiveTabId();
+  const customThemes = useCustomThemes();
+
+  // Resolve the effective TerminalTheme for the currently focused terminal tab
+  const activeTerminalTheme = useMemo<TerminalTheme | null>(() => {
+    if (activeTabId === 'vault' || activeTabId === 'sftp') return null;
+
+    const resolveTheme = (s: TerminalSession): TerminalTheme => {
+      const host = hosts.find(h => h.id === s.hostId) ?? null;
+      const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
+      return TERMINAL_THEMES.find(t => t.id === themeId)
+        || customThemes.find(t => t.id === themeId)
+        || currentTerminalTheme;
+    };
+
+    // Workspace
+    const workspace = workspaces.find(w => w.id === activeTabId);
+    if (workspace) {
+      // Focus mode: use the focused (or first remaining) session's theme
+      if (workspace.viewMode === 'focus') {
+        const wsSessionIds = collectSessionIds(workspace.root);
+        const focused = sessions.find(s => s.id === workspace.focusedSessionId)
+          ?? sessions.find(s => wsSessionIds.includes(s.id));
+        return focused ? resolveTheme(focused) : null;
+      }
+      // Split mode: require all sessions to share the same theme
+      const sessionIds = collectSessionIds(workspace.root);
+      const wsSessions = sessionIds.map(id => sessions.find(s => s.id === id)).filter(Boolean) as TerminalSession[];
+      if (wsSessions.length === 0) return null;
+      const firstTheme = resolveTheme(wsSessions[0]);
+      const allSame = wsSessions.every(s => resolveTheme(s).id === firstTheme.id);
+      return allSame ? firstTheme : null;
+    }
+
+    // Single session tab
+    const session = sessions.find(s => s.id === activeTabId);
+    if (!session) return null;
+    return resolveTheme(session);
+  }, [activeTabId, sessions, workspaces, hosts, currentTerminalTheme, customThemes]);
+
+  useImmersiveMode({
+    isImmersive: immersiveMode,
+    activeTabId,
+    activeTerminalTheme,
+    restoreOriginalTheme: reapplyCurrentTheme,
+  });
 
   // Get port forwarding rules and import function
   const { rules: portForwardingRules, importRules: importPortForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
@@ -1204,7 +1261,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen text-foreground font-sans netcatty-shell" onContextMenu={handleRootContextMenu}>
+    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", immersiveMode && activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>
       <TopTabs
         theme={resolvedTheme}
         hosts={hosts}
@@ -1225,6 +1282,7 @@ function App({ settings }: { settings: SettingsState }) {
         onToggleTheme={handleToggleTheme}
         onOpenSettings={handleOpenSettings}
         onSyncNow={handleSyncNowManual}
+        isImmersiveActive={immersiveMode && activeTerminalTheme !== null}
         onStartSessionDrag={setDraggingSessionId}
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderTabs}

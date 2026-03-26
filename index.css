@@ -113,6 +113,25 @@ body {
   color: hsl(var(--foreground));
 }
 
+/* Immersive mode: fade-out overlay for smooth theme restoration */
+.immersive-fade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 200ms ease-out;
+}
+.immersive-fade-overlay.fade-out {
+  opacity: 0;
+}
+
+/* Immersive mode: override agent icon badge colors to follow the theme */
+.immersive-transition [data-agent-badge] {
+  border-color: hsl(var(--primary) / 0.2) !important;
+  background-color: hsl(var(--primary) / 0.1) !important;
+}
+
 .netcatty-shell {
   position: relative;
   background: linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 60%, hsl(var(--background) / 0.9) 100%);

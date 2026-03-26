@@ -425,9 +425,209 @@ function execViaChannel(sshClient, command, options) {
   });
 }
 
+/**
+ * Execute command on a raw serial port (no shell wrapping).
+ *
+ * Used for network devices (Cisco IOS, Huawei VRP, etc.) and embedded systems
+ * that do not run a standard POSIX/PowerShell/CMD shell.
+ *
+ * The command is sent as-is followed by CR. Completion is detected via idle
+ * timeout (no new data for `idleMs` milliseconds). The idle timer does NOT
+ * start until the first data chunk arrives, so slow devices won't time out
+ * before producing any output.
+ *
+ * Exit code is always `null` because vendor CLIs do not expose exit codes.
+ *
+ * @param {object} serialPort - The SerialPort instance with .write() and .on("data")
+ * @param {string} command - The raw command to send
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs=60000] - Overall timeout
+ * @param {number} [options.idleMs=3000] - Idle timeout to detect command completion
+ * @param {Map} [options.trackForCancellation] - Map for cancellation tracking
+ * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
+ * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
+ */
+function execViaRawPty(serialPort, command, options) {
+  const {
+    timeoutMs = 60000,
+    idleMs = 3000,
+    trackForCancellation = null,
+    chatSessionId,
+    abortSignal,
+  } = options || {};
+
+  // Simple incrementing key for the cancellation map (no markers sent to device)
+  const cancelKey = `__NCRAW_${Date.now().toString(36)}_${(++execViaRawPty._seq).toString(36)}`;
+
+  if (abortSignal?.aborted) {
+    return Promise.resolve({ ok: false, stdout: "", stderr: "", exitCode: null, error: "Cancelled" });
+  }
+
+  return new Promise((resolve) => {
+    let output = "";
+    let finished = false;
+    let overallTimer = null;
+    let idleTimer = null;
+    const cleanupFns = [];
+
+    function safeWrite(data) {
+      try {
+        if (typeof serialPort.write === "function") serialPort.write(data);
+      } catch { /* serial port may already be closed */ }
+    }
+
+    // finish signature differs from execViaPty intentionally: no exitCode param
+    // because vendor CLIs have no exit code concept (always null).
+    function finish(stdout, error) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(overallTimer);
+      clearTimeout(idleTimer);
+      for (const fn of cleanupFns) { try { fn(); } catch { /* ignore */ } }
+      if (trackForCancellation) {
+        trackForCancellation.delete(cancelKey);
+      }
+
+      let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
+
+      // Strip echoed command from the beginning of output.
+      // Network devices typically echo back the typed command on the first line,
+      // often prefixed by the device prompt (e.g. "Router#show version").
+      // Only strip when the first line is a close match to avoid removing
+      // legitimate output on devices that don't echo.
+      const lines = cleaned.split("\n");
+      if (lines.length > 1) {
+        const firstLine = lines[0].trim();
+        const cmdTrimmed = command.trim();
+        if (cmdTrimmed && (firstLine === cmdTrimmed || firstLine.endsWith(cmdTrimmed))) {
+          lines.shift();
+        }
+      }
+      cleaned = lines.join("\n").trim();
+
+      if (error) {
+        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: null, error });
+      } else {
+        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: null });
+      }
+    }
+
+    // Track data chunks to distinguish echo phase from real output.
+    // The first 1-2 chunks are typically the echoed command + prompt.
+    // Use a longer idle timeout during this phase so that commands like
+    // ping/traceroute/copy that stay quiet after the echo aren't truncated.
+    let chunkCount = 0;
+    const ECHO_PHASE_CHUNKS = 2;
+
+    function resetIdleTimer() {
+      clearTimeout(idleTimer);
+      // During echo phase (first few chunks), use 2× idleMs to avoid
+      // truncating commands that produce output after a delay.
+      const effectiveIdle = chunkCount <= ECHO_PHASE_CHUNKS ? idleMs * 2 : idleMs;
+      idleTimer = setTimeout(() => {
+        finish(output, null);
+      }, effectiveIdle);
+    }
+
+    let noResponseTimer = null;
+
+    // Cap output to prevent unbounded accumulation on noisy serial consoles
+    // (e.g. devices that continuously emit syslog/debug messages). Once the cap
+    // is reached, stop resetting the idle timer so the function can resolve.
+    const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
+
+    const onData = (data) => {
+      // Use latin1 to match the terminal display decoder in terminalBridge.cjs.
+      const chunk = data.toString("latin1");
+      chunkCount++;
+      // Cancel the no-response fallback on first data
+      if (noResponseTimer) {
+        clearTimeout(noResponseTimer);
+        noResponseTimer = null;
+      }
+      if (output.length < MAX_OUTPUT_BYTES) {
+        output += chunk;
+        // Only reset idle timer while accumulating — once capped, let it fire
+        // so noisy sessions don't hang until the overall timeout.
+        resetIdleTimer();
+      }
+    };
+
+    // Subscribe to serial port data
+    if (typeof serialPort.on === "function") {
+      serialPort.on("data", onData);
+      cleanupFns.push(() => {
+        try { serialPort.removeListener("data", onData); } catch { /* ignore */ }
+      });
+
+      // Error / close detection
+      const onError = (err) => finish(output, `Serial port error: ${err?.message || err}`);
+      const onClose = () => finish(output, "Serial port closed unexpectedly");
+      serialPort.on("error", onError);
+      serialPort.on("close", onClose);
+      cleanupFns.push(() => {
+        try { serialPort.removeListener("error", onError); } catch { /* */ }
+        try { serialPort.removeListener("close", onClose); } catch { /* */ }
+      });
+    }
+
+    // Overall timeout
+    overallTimer = setTimeout(() => {
+      safeWrite("\x03");
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      finish(output, `Command timed out (${timeoutSec}s)`);
+    }, timeoutMs);
+
+    // Cancellation tracking
+    if (trackForCancellation) {
+      trackForCancellation.set(cancelKey, {
+        chatSessionId: chatSessionId || null,
+        cancel: () => {
+          safeWrite("\x03");
+          finish(output, "Cancelled");
+        },
+        cleanup: () => {
+          clearTimeout(overallTimer);
+          clearTimeout(idleTimer);
+        },
+      });
+    }
+
+    // AbortSignal handling
+    if (abortSignal) {
+      const onAbort = () => {
+        safeWrite("\x03");
+        finish(output, "Cancelled");
+      };
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+      cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
+    }
+
+    // Send the raw command followed by CR (network devices expect \r).
+    safeWrite(command + "\r");
+
+    // Start a "no-response" fallback timer. If the device produces no output at
+    // all (e.g. silent mode-changing commands like "enable", "configure terminal",
+    // or devices with echo disabled), the idle timer never starts because onData
+    // never fires. This fallback resolves successfully to avoid waiting for the
+    // full overall timeout. Uses min(idleMs * 4, timeoutMs / 4) to balance between
+    // not waiting too long for silent commands and not truncating slow operations.
+    // Cleared on first data in onData.
+    const noResponseMs = Math.min(idleMs * 4, Math.floor(timeoutMs / 4));
+    noResponseTimer = setTimeout(() => {
+      // Resolve with ok:true but include a hint that no output was received,
+      // so the AI knows the command may still be running or produced no output.
+      finish(output || "(no output received — command may have completed silently or may still be running)", null);
+    }, noResponseMs);
+    cleanupFns.push(() => clearTimeout(noResponseTimer));
+  });
+}
+execViaRawPty._seq = 0;
+
 module.exports = {
   execViaPty,
   execViaChannel,
+  execViaRawPty,
   detectShellKind,
   stripAnsi,
 };
