@@ -124,13 +124,16 @@ const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "�
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
-  // Scan up to 200 chars to support long prompts (git branch, kube context, long paths).
-  // Collect ALL candidate boundaries and return the LAST one — handles complex prompts
-  // like Starship "➜  repo git:(main) $ " where multiple prompt chars appear.
-  const scanLimit = Math.min(lineText.length, 200);
+  // Scan for prompt boundary. Complex prompts like Starship "➜  repo git:(main) $ "
+  // have multiple prompt chars, so we take the LAST candidate — but only within the
+  // first half of the line to avoid matching shell syntax like "> " in "echo foo > bar".
+  const lineLen = lineText.trimEnd().length;
+  const scanLimit = Math.min(lineLen, 200);
+  // Only search the first 60% of the line — prompt can't be in the tail half
+  const promptScanLimit = Math.min(scanLimit, Math.max(40, Math.floor(lineLen * 0.6)));
   let lastBoundary = -1;
 
-  for (let i = 0; i < scanLimit; i++) {
+  for (let i = 0; i < promptScanLimit; i++) {
     const ch = lineText[i];
 
     if (!PROMPT_CHARS.has(ch)) continue;
@@ -140,7 +143,7 @@ function findPromptBoundary(lineText: string): number {
     if (nextChar !== null && nextChar !== " ") {
       // Special case: cmd.exe prompt `C:\path>command` — allow > without space
       // only if preceded by a path-like pattern (drive letter or backslash)
-      if (ch === ">" && i > 1 && (lineText[i - 1] === "\\" || lineText[i - 1] === "/")) {
+      if (ch === ">" && i > 1 && (lineText[i - 1] === "\\" || lineText[i - 1] === "/" || /^[A-Za-z]:/.test(lineText))) {
         // Looks like a path ending — accept as prompt
       } else {
         continue;
