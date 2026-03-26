@@ -306,6 +306,10 @@ export function useTerminalAutocomplete(
         return;
       }
 
+      // User is typing more — invalidate accepted command fallback since the
+      // command is being edited further (e.g., accepted "git status" then added " --short")
+      lastAcceptedCommandRef.current = null;
+
       // Fast typing suppression: if typing faster than threshold, skip this debounce cycle
       const isFastTyping = timeSinceLastKeystroke < settingsRef.current.fastTypingThresholdMs;
 
@@ -346,6 +350,8 @@ export function useTerminalAutocomplete(
           const ghostText = ghost.getGhostText();
           if (ghostText) {
             writeToTerminal(ghostText);
+            // Track accepted command for accurate history recording on fast Enter
+            lastAcceptedCommandRef.current = ghost.getSuggestion();
             ghost.hide();
             clearState();
           }
@@ -388,6 +394,7 @@ export function useTerminalAutocomplete(
           const ghostText = ghost.getGhostText();
           if (ghostText) {
             writeToTerminal(ghostText);
+            lastAcceptedCommandRef.current = ghost.getSuggestion();
             ghost.hide();
             clearState();
           }

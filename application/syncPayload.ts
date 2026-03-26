@@ -79,6 +79,8 @@ const SYNCABLE_TERMINAL_KEYS = [
   'rightClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'disableBracketedPaste', 'osc52Clipboard',
+  'autocompleteEnabled', 'autocompleteGhostText', 'autocompletePopupMenu',
+  'autocompleteDebounceMs', 'autocompleteMinChars', 'autocompleteMaxSuggestions',
 ] as const;
 
 /**
