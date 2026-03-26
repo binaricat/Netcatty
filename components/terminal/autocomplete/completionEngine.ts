@@ -149,11 +149,12 @@ export async function getCompletions(
   const suggestions: CompletionSuggestion[] = [];
 
   // 1. History suggestions (full command line prefix match)
+  // Cap history to leave room for spec suggestions in the popup
   const historyOpts: HistoryQueryOptions = {
     hostId,
     os,
     includeOsMatches: true,
-    limit: 8,
+    limit: 5,
   };
 
   const historyMatches = queryHistory(input, historyOpts);
@@ -227,9 +228,31 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
   const spec = await loadSpec(ctx.commandName);
   if (!spec) return [];
 
-  // If we're still typing the command name
+  // If we're still typing the command name (partial match, not yet complete)
   if (ctx.wordIndex === 0) {
-    return [];
+    // Check if the typed text exactly matches the command name —
+    // if so, show a preview of top subcommands even without trailing space
+    const typedLower = ctx.currentWord.toLowerCase();
+    const specNames = resolveNames(spec.name);
+    const isExactMatch = specNames.some((n) => n.toLowerCase() === typedLower);
+    if (!isExactMatch) {
+      return [];
+    }
+    // Show subcommands as preview (user typed full command but no space yet)
+    if (spec.subcommands) {
+      for (const sub of spec.subcommands) {
+        const names = resolveNames(sub.name);
+        suggestions.push({
+          text: ctx.currentWord + " " + names[0],
+          displayText: names[0],
+          description: sub.description,
+          source: "subcommand",
+          score: 800,
+        });
+        if (suggestions.length >= 10) break;
+      }
+    }
+    return suggestions;
   }
 
   // Navigate the spec tree based on typed tokens
