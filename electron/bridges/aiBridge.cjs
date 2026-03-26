@@ -936,6 +936,17 @@ function registerHandlers(ipcMain) {
         });
       }
 
+      // Serial port: raw command execution (no shell wrapping)
+      if (session.serialPort && typeof session.serialPort.write === "function") {
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return execViaRawPty(session.serialPort, command, {
+          timeoutMs: serialTimeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+        });
+      }
+
       return { ok: false, error: "No terminal stream or SSH client available for this session" };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
@@ -982,6 +993,10 @@ function registerHandlers(ipcMain) {
       }
       if (session.proc) {
         session.proc.write(data);
+        return { ok: true };
+      }
+      if (session.serialPort) {
+        session.serialPort.write(data);
         return { ok: true };
       }
       return { ok: false, error: "No writable stream for session" };

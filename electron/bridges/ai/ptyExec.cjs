@@ -425,9 +425,147 @@ function execViaChannel(sshClient, command, options) {
   });
 }
 
+/**
+ * Execute command on a raw serial port (no shell wrapping).
+ *
+ * Used for network devices (Cisco IOS, Huawei VRP, etc.) and embedded systems
+ * that do not run a standard POSIX/PowerShell/CMD shell.
+ *
+ * The command is sent as-is followed by CR. Completion is detected via idle
+ * timeout (no new data for `idleMs` milliseconds).
+ *
+ * @param {object} serialPort - The SerialPort instance with .write() and .on("data")
+ * @param {string} command - The raw command to send
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs=60000] - Overall timeout
+ * @param {number} [options.idleMs=2000] - Idle timeout to detect command completion
+ * @param {Map} [options.trackForCancellation] - Map for cancellation tracking
+ * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
+ * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
+ */
+function execViaRawPty(serialPort, command, options) {
+  const {
+    timeoutMs = 60000,
+    idleMs = 2000,
+    trackForCancellation = null,
+    chatSessionId,
+    abortSignal,
+  } = options || {};
+
+  const marker = `__NCRAW_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}__`;
+
+  if (abortSignal?.aborted) {
+    return Promise.resolve({ ok: false, stdout: "", stderr: "", exitCode: -1, error: "Cancelled" });
+  }
+
+  return new Promise((resolve) => {
+    let output = "";
+    let finished = false;
+    let overallTimer = null;
+    let idleTimer = null;
+    const cleanupFns = [];
+
+    function finish(stdout, error) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(overallTimer);
+      clearTimeout(idleTimer);
+      for (const fn of cleanupFns) { try { fn(); } catch { /* ignore */ } }
+      if (trackForCancellation) {
+        trackForCancellation.delete(marker);
+      }
+
+      let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
+
+      // Strip echoed command from the beginning of output.
+      // Network devices echo back the typed command on the first line.
+      const lines = cleaned.split("\n");
+      if (lines.length > 0) {
+        const firstLine = lines[0].trim();
+        const cmdTrimmed = command.trim();
+        if (firstLine === cmdTrimmed || firstLine.endsWith(cmdTrimmed)) {
+          lines.shift();
+        }
+      }
+      cleaned = lines.join("\n").trim();
+
+      if (error) {
+        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: -1, error });
+      } else {
+        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: -1 });
+      }
+    }
+
+    function resetIdleTimer() {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        finish(output, null);
+      }, idleMs);
+    }
+
+    const onData = (data) => {
+      output += data.toString();
+      resetIdleTimer();
+    };
+
+    // Subscribe to serial port data
+    serialPort.on("data", onData);
+    cleanupFns.push(() => {
+      try { serialPort.removeListener("data", onData); } catch { /* ignore */ }
+    });
+
+    // Error / close detection
+    const onError = (err) => finish(output, `Serial port error: ${err?.message || err}`);
+    const onClose = () => finish(output, "Serial port closed unexpectedly");
+    serialPort.on("error", onError);
+    serialPort.on("close", onClose);
+    cleanupFns.push(() => {
+      try { serialPort.removeListener("error", onError); } catch { /* */ }
+      try { serialPort.removeListener("close", onClose); } catch { /* */ }
+    });
+
+    // Overall timeout
+    overallTimer = setTimeout(() => {
+      serialPort.write("\x03");
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      finish(output, `Command timed out (${timeoutSec}s)`);
+    }, timeoutMs);
+
+    // Cancellation tracking
+    if (trackForCancellation) {
+      trackForCancellation.set(marker, {
+        chatSessionId: chatSessionId || null,
+        cancel: () => {
+          serialPort.write("\x03");
+          finish(output, "Cancelled");
+        },
+        cleanup: () => {
+          clearTimeout(overallTimer);
+          clearTimeout(idleTimer);
+        },
+      });
+    }
+
+    // AbortSignal handling
+    if (abortSignal) {
+      const onAbort = () => {
+        serialPort.write("\x03");
+        finish(output, "Cancelled");
+      };
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+      cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
+    }
+
+    // Send the raw command followed by CR (network devices expect \r)
+    serialPort.write(command + "\r");
+    resetIdleTimer();
+  });
+}
+
 module.exports = {
   execViaPty,
   execViaChannel,
+  execViaRawPty,
   detectShellKind,
   stripAnsi,
 };

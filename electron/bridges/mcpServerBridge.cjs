@@ -13,7 +13,7 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
-const { execViaPty, execViaChannel } = require("./ai/ptyExec.cjs");
+const { execViaPty, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
 let sftpClients = null; // Map<sftpId, SFTPWrapper>
@@ -550,7 +550,8 @@ function handleGetContext(params) {
     const sshClient = session.conn || session.sshClient;
     const hasCommandablePty = ptyStream && typeof ptyStream.write === "function";
     const hasSshExec = sshClient && typeof sshClient.exec === "function";
-    if (!hasCommandablePty && !hasSshExec) continue;
+    const hasSerialPort = session.serialPort && typeof session.serialPort.write === "function";
+    if (!hasCommandablePty && !hasSshExec && !hasSerialPort) continue;
 
     // Look up metadata scoped to this chat session
     const meta = getSessionMeta(sessionId, chatSessionId) || {};
@@ -563,7 +564,7 @@ function handleGetContext(params) {
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
       supportsSftp: sessionSupportsSftp(session),
-      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream),
+      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
     });
   }
 
@@ -617,16 +618,25 @@ function handleExec(params) {
   }
 
   // If no PTY stream, fall back to exec channel for SSH sessions only.
-  if (!sshClient || typeof sshClient.exec !== "function") {
-    return { ok: false, error: "Session does not support command execution" };
+  if (sshClient && typeof sshClient.exec === "function") {
+    if (!ptyStream || typeof ptyStream.write !== "function") {
+      return execViaChannel(sshClient, command, {
+        timeoutMs: commandTimeoutMs,
+        trackForCancellation: activePtyExecs,
+      });
+    }
   }
 
-  if (!ptyStream || typeof ptyStream.write !== "function") {
-    return execViaChannel(sshClient, command, {
+  // Serial port: raw command execution (no shell wrapping)
+  if (session.serialPort && typeof session.serialPort.write === "function") {
+    return execViaRawPty(session.serialPort, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
+      chatSessionId: params?.chatSessionId,
     });
   }
+
+  return { ok: false, error: "Session does not support command execution" };
 }
 
 // ── Handler: terminalWrite ──
@@ -654,6 +664,10 @@ function handleTerminalWrite(params) {
   }
   if (session.proc) {
     session.proc.write(input);
+    return { ok: true };
+  }
+  if (session.serialPort) {
+    session.serialPort.write(input);
     return { ok: true };
   }
   return { ok: false, error: "No writable stream" };
