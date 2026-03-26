@@ -348,6 +348,9 @@ function registerHandlers(ipcMain) {
       await updater.downloadUpdate();
       return { success: true };
     } catch (err) {
+      _isDownloading = false;
+      _lastStatus = { ..._lastStatus, status: 'error', error: err?.message || "Download failed", percent: 0 };
+      broadcastUpdateStatus(_lastStatus);
       console.error("[AutoUpdate] Download failed:", err?.message || err);
       return { success: false, error: err?.message || "Download failed" };
     }
