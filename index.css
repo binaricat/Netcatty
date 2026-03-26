@@ -195,6 +195,23 @@ body {
   box-shadow: 0 4px 12px hsl(var(--foreground) / 0.06);
 }
 
+@keyframes session-activity-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.1);
+    opacity: 0.18;
+  }
+}
+
+.session-activity-dot {
+  animation: session-activity-breathe 1.4s ease-in-out infinite;
+}
+
 .card-highlight {
   position: relative;
   overflow: hidden;
