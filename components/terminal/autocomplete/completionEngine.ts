@@ -252,10 +252,53 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
   }
 
   // Navigate the spec tree based on typed tokens
-  const resolved = resolveSpecContext(spec, ctx.tokens.slice(1, ctx.wordIndex));
+  let resolved = resolveSpecContext(spec, ctx.tokens.slice(1, ctx.wordIndex));
   const currentToken = ctx.currentWord;
 
-  // Suggest subcommands
+  // Check if currentToken exactly matches a subcommand — if so, navigate into it
+  // and show its children as preview (e.g., "git commit" shows commit's options)
+  if (currentToken && resolved.subcommands) {
+    const exactMatch = resolved.subcommands.find((s) => {
+      const names = resolveNames(s.name);
+      return names.includes(currentToken);
+    });
+    if (exactMatch) {
+      // Navigate into the matched subcommand and show its children
+      const childResolved = resolveSpecContext(spec, ctx.tokens.slice(1, ctx.wordIndex + 1));
+
+      // Show child subcommands
+      if (childResolved.subcommands) {
+        for (const sub of childResolved.subcommands) {
+          const names = resolveNames(sub.name);
+          suggestions.push({
+            text: ctx.commandLine + " " + names[0],
+            displayText: names[0],
+            description: sub.description,
+            source: "subcommand",
+            score: 800,
+          });
+          if (suggestions.length >= 10) break;
+        }
+      }
+      // Show child options
+      if (childResolved.options) {
+        for (const opt of childResolved.options) {
+          const names = resolveNames(opt.name);
+          suggestions.push({
+            text: ctx.commandLine + " " + names[0],
+            displayText: names[0],
+            description: opt.description,
+            source: "option",
+            score: 700,
+          });
+          if (suggestions.length >= 15) break;
+        }
+      }
+      return suggestions;
+    }
+  }
+
+  // Suggest subcommands (prefix match, excluding exact matches)
   if (resolved.subcommands) {
     for (const sub of resolved.subcommands) {
       const names = resolveNames(sub.name);
