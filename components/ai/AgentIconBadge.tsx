@@ -154,13 +154,6 @@ function getAgentIconKey(agent: AgentLike | 'add-more'): AgentIconKey {
   return 'terminal';
 }
 
-export function getAgentCommandLabel(agent: AgentLike): string | undefined {
-  if (agent.type === 'builtin') {
-    return 'Built-in terminal assistant';
-  }
-  return agent.command ? `CLI: ${agent.command}` : 'External CLI agent';
-}
-
 export const AgentIconBadge: React.FC<{
   agent: AgentLike | 'add-more';
   size?: 'xs' | 'sm' | 'md' | 'lg';

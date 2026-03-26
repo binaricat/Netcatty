@@ -380,10 +380,5 @@ function cleanup() {
 module.exports = {
   init,
   registerHandlers,
-  startWatching,
-  stopWatching,
   stopWatchersForSession,
-  listWatchers,
-  registerTempFile,
-  cleanup,
 };

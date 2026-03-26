@@ -11,7 +11,7 @@ export const SUPPORTED_UI_LOCALES: LocaleOption[] = [
   { id: 'zh-CN', label: '简体中文' },
 ];
 
-export const isSupportedLocale = (locale: string): boolean => {
+const isSupportedLocale = (locale: string): boolean => {
   return SUPPORTED_UI_LOCALES.some((l) => l.id === locale);
 };
 

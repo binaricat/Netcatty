@@ -726,14 +726,6 @@ function cleanup() {
 module.exports = {
   init,
   registerHandlers,
-  registerGlobalHotkey,
-  unregisterGlobalHotkey,
-  setCloseToTray,
-  isCloseToTrayEnabled,
   handleWindowClose,
-  toggleWindowVisibility,
-  getHotkeyStatus,
-  setTrayMenuData,
-  updateTrayMenu,
   cleanup,
 };

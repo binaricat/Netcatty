@@ -551,6 +551,4 @@ function registerHandlers(ipcMain) {
 module.exports = {
   init,
   registerHandlers,
-  checkTarAvailable,
-  checkRemoteTarAvailable,
 };

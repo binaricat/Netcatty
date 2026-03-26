@@ -14,8 +14,8 @@ import type {
   PortForwardingRule,
   Snippet,
   SSHKey,
-} from './models';
-import type { SyncPayload } from './sync';
+} from '../domain/models';
+import type { SyncPayload } from '../domain/sync';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
 import {
   STORAGE_KEY_THEME,

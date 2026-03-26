@@ -1,8 +1,8 @@
 import React, { useCallback } from "react";
 import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
-import { buildSyncPayload, applySyncPayload } from "../../../domain/syncPayload";
-import type { SyncableVaultData } from "../../../domain/syncPayload";
+import { buildSyncPayload, applySyncPayload } from "../../../application/syncPayload";
+import type { SyncableVaultData } from "../../../application/syncPayload";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { getEffectiveKnownHosts } from "../../../infrastructure/syncHelpers";
