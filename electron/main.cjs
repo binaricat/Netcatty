@@ -508,8 +508,19 @@ const registerBridges = (win) => {
   // Fig autocomplete spec loader — uses dynamic import() since @withfig/autocomplete is ESM
   ipcMain.handle("netcatty:figspec:list", async () => {
     try {
+      const fs = require("fs");
       const mod = await import("@withfig/autocomplete");
-      return mod.default || [];
+      const figSpecs = mod.default || [];
+      // Merge local specs (covers commands missing from @withfig/autocomplete)
+      const localSpecDir = path.join(electronDir, "specs");
+      let localNames = [];
+      try {
+        localNames = fs.readdirSync(localSpecDir)
+          .filter(f => f.endsWith(".js"))
+          .map(f => f.slice(0, -3));
+      } catch { /* no local specs dir */ }
+      const merged = [...new Set([...figSpecs, ...localNames])];
+      return merged;
     } catch (err) {
       console.warn("[Main] Failed to load fig spec list:", err?.message || err);
       return [];
@@ -520,10 +531,21 @@ const registerBridges = (win) => {
       // Sanitize: reject absolute paths, path traversal, and non-spec characters
       if (!commandName || commandName.startsWith("/") || commandName.startsWith("\\") ||
           commandName.includes("..") || !/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
+      const { pathToFileURL } = require("url");
+      const fs = require("fs");
+
+      // Try local specs first (covers commands missing from @withfig/autocomplete)
+      const localSpec = path.join(electronDir, "specs", `${commandName}.js`);
+      if (fs.existsSync(localSpec)) {
+        const mod = await import(pathToFileURL(localSpec).href);
+        const spec = mod.default?.default ?? mod.default ?? null;
+        return spec ? JSON.parse(JSON.stringify(spec)) : null;
+      }
+
+      // Fall back to @withfig/autocomplete
       // Can't use `import("@withfig/autocomplete/build/...")` because the package's
       // "exports" field restricts allowed import paths. Use file URL to bypass.
       const specFile = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
-      const { pathToFileURL } = require("url");
       const mod = await import(pathToFileURL(specFile).href);
       const spec = mod.default?.default ?? mod.default ?? null;
       // IPC requires serializable data — JSON round-trip strips functions/symbols

@@ -157,7 +157,7 @@ export async function getCompletions(
     cwd?: string;
   } = {},
 ): Promise<CompletionSuggestion[]> {
-  const { hostId, os, maxResults = 15 } = options;
+  const { hostId, maxResults = 15 } = options;
 
   if (!input || input.trim().length === 0) return [];
 
@@ -174,8 +174,6 @@ export async function getCompletions(
   // Cap history to leave room for spec suggestions in the popup
   const historyOpts: HistoryQueryOptions = {
     hostId,
-    os,
-    includeOsMatches: true,
     limit: preferPathSuggestions ? 0 : 5,
   };
 
@@ -198,8 +196,6 @@ export async function getCompletions(
       excludeCommand: input,
       argumentPrefix: normalizeHistoryPathPrefix(ctx.currentWord),
       hostId,
-      os,
-      includeOsMatches: true,
       limit: 3,
     });
     for (let index = 0; index < recentHistory.length; index++) {

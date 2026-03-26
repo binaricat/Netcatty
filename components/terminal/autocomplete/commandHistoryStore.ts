@@ -132,12 +132,8 @@ function scoreEntryAt(entry: HistoryEntry, now: number): number {
 }
 
 export interface HistoryQueryOptions {
-  /** Filter by host ID */
+  /** Filter by host ID (strict isolation — only this host's history) */
   hostId?: string;
-  /** Also include entries from hosts with the same OS */
-  includeOsMatches?: boolean;
-  /** OS to match for cross-host suggestions */
-  os?: "linux" | "windows" | "macos";
   /** Maximum number of results */
   limit?: number;
 }
@@ -159,7 +155,7 @@ export function queryHistory(
   prefix: string,
   options: HistoryQueryOptions = {},
 ): HistoryEntry[] {
-  const { hostId, includeOsMatches = true, os, limit = 20 } = options;
+  const { hostId, limit = 20 } = options;
   if (limit <= 0) return [];
   const store = loadStore();
   const lowerPrefix = prefix.toLowerCase();
@@ -171,24 +167,15 @@ export function queryHistory(
     // Must not be identical to prefix
     if (entry.command === prefix) return false;
 
-    // Host filtering
+    // Host filtering: strict per-host isolation
     if (hostId) {
-      if (entry.hostId === hostId) return true;
-      if (includeOsMatches && os && entry.os === os) return true;
-      return false;
+      return entry.hostId === hostId;
     }
     return true;
   });
 
-  // Sort by: same host first, then by score
-  filtered.sort((a, b) => {
-    if (hostId) {
-      const aIsHost = a.hostId === hostId ? 1 : 0;
-      const bIsHost = b.hostId === hostId ? 1 : 0;
-      if (aIsHost !== bIsHost) return bIsHost - aIsHost;
-    }
-    return scoreEntryAt(b, now) - scoreEntryAt(a, now);
-  });
+  // Sort by score (frequency * recency)
+  filtered.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
 
   // Deduplicate by command text (keep highest scored)
   const seen = new Set<string>();
@@ -212,7 +199,7 @@ export function fuzzyQueryHistory(
   query: string,
   options: HistoryQueryOptions = {},
 ): HistoryEntry[] {
-  const { hostId, includeOsMatches = true, os, limit = 10 } = options;
+  const { hostId, limit = 10 } = options;
   if (limit <= 0) return [];
   const store = loadStore();
   const lowerQuery = query.toLowerCase();
@@ -223,9 +210,7 @@ export function fuzzyQueryHistory(
   for (const entry of store.entries) {
     // Host filtering
     if (hostId) {
-      const isHost = entry.hostId === hostId;
-      const isOsMatch = includeOsMatches && os && entry.os === os;
-      if (!isHost && !isOsMatch) continue;
+      if (entry.hostId !== hostId) continue;
     }
 
     const matchScore = fuzzyScore(lowerQuery, entry.command.toLowerCase());
@@ -234,16 +219,9 @@ export function fuzzyQueryHistory(
     }
   }
 
-  scored.sort((a, b) => {
-    // Prefer same host
-    if (hostId) {
-      const aIsHost = a.entry.hostId === hostId ? 1 : 0;
-      const bIsHost = b.entry.hostId === hostId ? 1 : 0;
-      if (aIsHost !== bIsHost) return bIsHost - aIsHost;
-    }
-    // Then by fuzzy match quality * history score
-    return b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now);
-  });
+  scored.sort((a, b) =>
+    b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now),
+  );
 
   const seen = new Set<string>();
   const results: HistoryEntry[] = [];
@@ -270,8 +248,6 @@ export function queryRecentHistoryByCommand(
     excludeCommand,
     argumentPrefix,
     hostId,
-    includeOsMatches = true,
-    os,
     limit = 3,
   } = options;
   if (!commandName || limit <= 0) return [];
@@ -296,21 +272,12 @@ export function queryRecentHistoryByCommand(
     }
 
     if (hostId) {
-      if (entry.hostId === hostId) return true;
-      if (includeOsMatches && os && entry.os === os) return true;
-      return false;
+      return entry.hostId === hostId;
     }
     return true;
   });
 
-  filtered.sort((a, b) => {
-    if (hostId) {
-      const aIsHost = a.hostId === hostId ? 1 : 0;
-      const bIsHost = b.hostId === hostId ? 1 : 0;
-      if (aIsHost !== bIsHost) return bIsHost - aIsHost;
-    }
-    return b.lastUsedAt - a.lastUsedAt;
-  });
+  filtered.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
 
   const seen = new Set<string>();
   const results: HistoryEntry[] = [];
