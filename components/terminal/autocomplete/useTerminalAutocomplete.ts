@@ -110,6 +110,8 @@ export function useTerminalAutocomplete(
   const suppressNextEnterRecordRef = useRef(false);
   /** Monotonic counter to invalidate stale async completion results */
   const fetchVersionRef = useRef(0);
+  /** Last accepted suggestion text — for accurate history recording on fast Enter after accept */
+  const lastAcceptedCommandRef = useRef<string | null>(null);
 
   // Preload common specs on first mount (only if enabled)
   useEffect(() => {
@@ -270,15 +272,21 @@ export function useTerminalAutocomplete(
         if (suppressNextEnterRecordRef.current) {
           suppressNextEnterRecordRef.current = false;
         } else {
-          // Try real-time detection first; fall back to cached prompt if buffer
-          // hasn't been updated yet (high-latency SSH, autocomplete text not echoed)
-          const livePrompt = termRef.current ? detectPrompt(termRef.current) : null;
-          const prompt = (livePrompt?.isAtPrompt && livePrompt.userInput.trim())
-            ? livePrompt
-            : lastPromptRef.current;
-          if (prompt?.isAtPrompt && prompt.userInput.trim()) {
-            recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
+          // If user accepted a completion (Tab/→) and immediately pressed Enter,
+          // the buffer may not reflect the accepted text yet. Use the tracked value.
+          if (lastAcceptedCommandRef.current) {
+            recordCommand(lastAcceptedCommandRef.current, hostIdRef.current, hostOsRef.current);
+          } else {
+            // Try real-time detection; fall back to cached prompt
+            const livePrompt = termRef.current ? detectPrompt(termRef.current) : null;
+            const prompt = (livePrompt?.isAtPrompt && livePrompt.userInput.trim())
+              ? livePrompt
+              : lastPromptRef.current;
+            if (prompt?.isAtPrompt && prompt.userInput.trim()) {
+              recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
+            }
           }
+          lastAcceptedCommandRef.current = null;
         }
         clearState();
         return;
@@ -476,6 +484,11 @@ export function useTerminalAutocomplete(
 
       if (payload) {
         writeToTerminal(payload);
+      }
+
+      // Track accepted command for accurate history recording on fast Enter
+      if (!execute) {
+        lastAcceptedCommandRef.current = suggestion.text;
       }
 
       // When executing, record command here and suppress the handleInput Enter recording

@@ -395,6 +395,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         } else if (ch === "\x15") {
           // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
           commandBufferRef.current = "";
+        } else if (ch === "\b" || ch === "\x7f") {
+          // Backspace: remove last character (Windows fuzzy replacement uses \b)
+          commandBufferRef.current = commandBufferRef.current.slice(0, -1);
         } else if (ch.charCodeAt(0) >= 32) {
           commandBufferRef.current += ch;
         }
