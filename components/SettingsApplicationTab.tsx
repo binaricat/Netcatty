@@ -68,10 +68,11 @@ interface SettingsApplicationTabProps {
   checkNow: UseUpdateCheckResult['checkNow'];
   openReleasePage: UseUpdateCheckResult['openReleasePage'];
   installUpdate: UseUpdateCheckResult['installUpdate'];
+  startDownload: UseUpdateCheckResult['startDownload'];
   isUpdateDemoMode: boolean;
 }
 
-export default function SettingsApplicationTab({ updateState, checkNow, openReleasePage, installUpdate, isUpdateDemoMode }: SettingsApplicationTabProps) {
+export default function SettingsApplicationTab({ updateState, checkNow, openReleasePage, installUpdate, startDownload, isUpdateDemoMode }: SettingsApplicationTabProps) {
   const { t } = useI18n();
   const { openExternal, getApplicationInfo } = useApplicationBackend();
   const [appInfo, setAppInfo] = useState<AppInfo>({ name: "Netcatty", version: "" });
@@ -147,7 +148,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
                 {/* Update badge - reflects auto-download state */}
                 {updateState.latestRelease && (updateState.hasUpdate || updateState.autoDownloadStatus === 'downloading' || updateState.autoDownloadStatus === 'ready') && (
                   <button
-                    onClick={() => updateState.autoDownloadStatus === 'ready' ? installUpdate() : void openReleasePage()}
+                    onClick={() => updateState.autoDownloadStatus === 'ready' ? installUpdate() : updateState.autoDownloadStatus === 'downloading' ? undefined : startDownload()}
                     className={cn(
                       "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium",
                       updateState.autoDownloadStatus === 'ready'
@@ -174,7 +175,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
               variant="secondary"
               className="gap-2"
               onClick={() => void handleCheckForUpdates()}
-              disabled={updateState.isChecking}
+              disabled={updateState.isChecking || updateState.manualCheckStatus === 'checking' || updateState.autoDownloadStatus === 'downloading' || updateState.autoDownloadStatus === 'ready'}
             >
               {updateState.isChecking ? (
                 <Loader2 size={16} className="animate-spin" />

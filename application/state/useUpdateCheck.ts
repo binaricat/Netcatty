@@ -43,6 +43,7 @@ export interface UseUpdateCheckResult {
   dismissUpdate: () => void;
   openReleasePage: () => void;
   installUpdate: () => void;
+  startDownload: () => void;
   isUpdateDemoMode: boolean;
 }
 
@@ -514,6 +515,31 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     netcattyBridge.get()?.installUpdate?.();
   }, []);
 
+  const startDownload = useCallback(() => {
+    if (autoDownloadStatusRef.current === 'downloading' || autoDownloadStatusRef.current === 'ready') return;
+    setUpdateState((prev) => ({
+      ...prev,
+      autoDownloadStatus: 'downloading',
+      downloadPercent: 0,
+      downloadError: null,
+    }));
+    void netcattyBridge.get()?.downloadUpdate?.().then((res) => {
+      if (res && !res.success) {
+        setUpdateState((prev) => ({
+          ...prev,
+          autoDownloadStatus: 'error',
+          downloadError: res.error || 'Download failed',
+        }));
+      }
+    }).catch(() => {
+      setUpdateState((prev) => ({
+        ...prev,
+        autoDownloadStatus: 'error',
+        downloadError: 'Download failed',
+      }));
+    });
+  }, []);
+
   // Startup check with delay - runs once on mount
   useEffect(() => {
     debugLog('Startup check effect mounted, IS_UPDATE_DEMO_MODE:', IS_UPDATE_DEMO_MODE);
@@ -653,6 +679,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     dismissUpdate,
     openReleasePage,
     installUpdate,
+    startDownload,
     isUpdateDemoMode: IS_UPDATE_DEMO_MODE,
   };
 }

@@ -373,7 +373,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, [handleSyncNow]);
 
   // Update check hook - checks for new versions on startup
-  const { updateState, dismissUpdate, openReleasePage, installUpdate } = useUpdateCheck();
+  const { updateState, dismissUpdate, installUpdate } = useUpdateCheck();
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();
@@ -408,7 +408,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, [updateState.hasUpdate, updateState.latestRelease, updateState.autoDownloadStatus, t, openSettingsWindow, dismissUpdate]);
 
   // Track previous autoDownloadStatus so toast effects fire only on actual transitions,
-  // not when unrelated deps (openReleasePage, installUpdate) change their reference.
+  // not when unrelated deps (installUpdate, openSettingsWindow) change their reference.
   const prevAutoDownloadStatusRef = useRef(updateState.autoDownloadStatus);
   useEffect(() => {
     const prev = prevAutoDownloadStatusRef.current;
@@ -431,12 +431,12 @@ function App({ settings }: { settings: SettingsState }) {
         t('update.downloadFailed.message'),
         {
           title: t('update.downloadFailed.title'),
-          actionLabel: t('update.openReleases'),
-          onClick: () => openReleasePage(),
+          actionLabel: t('update.viewInSettings'),
+          onClick: () => void openSettingsWindow(),
         }
       );
     }
-  }, [updateState.autoDownloadStatus, updateState.latestRelease?.version, t, installUpdate, openReleasePage]);
+  }, [updateState.autoDownloadStatus, updateState.latestRelease?.version, t, installUpdate, openSettingsWindow]);
 
   // Auto-start port forwarding rules on app launch
   usePortForwardingAutoStart({
