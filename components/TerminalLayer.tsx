@@ -19,7 +19,7 @@ import {
 import { cn, normalizeLineEndings } from '../lib/utils';
 import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
-import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { useStoredNumber } from '../application/state/useStoredNumber';
 import { STORAGE_KEY_SIDE_PANEL_WIDTH } from '../infrastructure/config/storageKeys';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
@@ -475,10 +475,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Side panel state - per-tab tracking of which sub-panel is active
   // Maps tab IDs to the active sub-panel type (sftp/scripts/theme), absent = closed
   const [sidePanelOpenTabs, setSidePanelOpenTabs] = useState<Map<string, SidePanelTab>>(new Map());
-  const [sidePanelWidth, setSidePanelWidth] = useState(() => {
-    const stored = localStorageAdapter.readNumber(STORAGE_KEY_SIDE_PANEL_WIDTH);
-    return stored ? Math.max(280, Math.min(800, stored)) : 420;
-  });
+  const [sidePanelWidth, setSidePanelWidth, persistSidePanelWidth] = useStoredNumber(
+    STORAGE_KEY_SIDE_PANEL_WIDTH, 420, { min: 280, max: 800 },
+  );
   const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right'>(
     'netcatty_side_panel_position',
     'left',
@@ -618,13 +617,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     };
     const onMouseUp = () => {
       sftpResizingRef.current = false;
-      localStorageAdapter.writeNumber(STORAGE_KEY_SIDE_PANEL_WIDTH, lastWidth);
+      persistSidePanelWidth(lastWidth);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  }, [sidePanelWidth, sidePanelPosition]);
+  }, [sidePanelWidth, sidePanelPosition, setSidePanelWidth, persistSidePanelWidth]);
 
   // Pre-compute host lookup map for O(1) access
   const hostMap = useMemo(() => {

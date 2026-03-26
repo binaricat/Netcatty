@@ -43,6 +43,7 @@ export interface UseUpdateCheckResult {
   dismissUpdate: () => void;
   openReleasePage: () => void;
   installUpdate: () => void;
+  isUpdateDemoMode: boolean;
 }
 
 /**
@@ -652,5 +653,6 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     dismissUpdate,
     openReleasePage,
     installUpdate,
+    isUpdateDemoMode: IS_UPDATE_DEMO_MODE,
   };
 }

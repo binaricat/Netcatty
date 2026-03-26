@@ -24,7 +24,6 @@ import {
   isProviderReadyForSync,
 } from '../../domain/sync';
 import {
-  CloudSyncManager,
   getCloudSyncManager,
   type SyncManagerState,
 } from '../../infrastructure/services/CloudSyncManager';
@@ -101,12 +100,6 @@ export interface CloudSyncHook {
   formatLastSync: (timestamp?: number) => string;
   getProviderDotColor: (provider: CloudProvider) => string;
   refresh: () => void;
-}
-
-interface GitHubAuthState {
-  isAuthenticating: boolean;
-  deviceFlowState: DeviceFlowState | null;
-  error: string | null;
 }
 
 // ============================================================================

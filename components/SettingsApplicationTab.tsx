@@ -4,8 +4,6 @@ import AppLogo from "./AppLogo";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
-import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
-import { STORAGE_KEY_DEBUG_UPDATE_DEMO } from '../infrastructure/config/storageKeys';
 import type { UpdateState, UseUpdateCheckResult } from "../application/state/useUpdateCheck";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { SettingsTabContent } from "./settings/settings-ui";
@@ -70,9 +68,10 @@ interface SettingsApplicationTabProps {
   checkNow: UseUpdateCheckResult['checkNow'];
   openReleasePage: UseUpdateCheckResult['openReleasePage'];
   installUpdate: UseUpdateCheckResult['installUpdate'];
+  isUpdateDemoMode: boolean;
 }
 
-export default function SettingsApplicationTab({ updateState, checkNow, openReleasePage, installUpdate }: SettingsApplicationTabProps) {
+export default function SettingsApplicationTab({ updateState, checkNow, openReleasePage, installUpdate, isUpdateDemoMode }: SettingsApplicationTabProps) {
   const { t } = useI18n();
   const { openExternal, getApplicationInfo } = useApplicationBackend();
   const [appInfo, setAppInfo] = useState<AppInfo>({ name: "Netcatty", version: "" });
@@ -95,9 +94,6 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
       cancelled = true;
     };
   }, [getApplicationInfo]);
-
-  // Check if demo mode is enabled for development testing
-  const isUpdateDemoMode = localStorageAdapter.readString(STORAGE_KEY_DEBUG_UPDATE_DEMO) === '1';
 
   const handleCheckForUpdates = async () => {
     // In demo mode, allow checking even for dev builds

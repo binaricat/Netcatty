@@ -149,7 +149,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
     const { t } = useI18n();
     const { notifyRendererReady, closeSettingsWindow } = useWindowControls();
-    const { updateState, checkNow, installUpdate, openReleasePage } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
+    const { updateState, checkNow, installUpdate, openReleasePage, isUpdateDemoMode } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
     const isImmersive = settings.immersiveMode;
@@ -260,6 +260,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             checkNow={checkNow}
                             openReleasePage={openReleasePage}
                             installUpdate={installUpdate}
+                            isUpdateDemoMode={isUpdateDemoMode}
                         />
                     )}
 
