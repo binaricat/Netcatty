@@ -47,7 +47,9 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
 
   if (!line) return NO_PROMPT;
 
-  const lineText = line.translateToString(true);
+  // translateToString(false) preserves trailing spaces — important for cursor-based
+  // input extraction (trailing space triggers empty token for option suggestions)
+  const lineText = line.translateToString(false);
 
   // Check for non-prompt patterns (pagers, editors, etc.)
   for (const pattern of NON_PROMPT_PATTERNS) {
@@ -86,7 +88,7 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
 
     const promptLine = buffer.getLine(promptRow);
     if (promptLine) {
-      const promptLineText = promptLine.translateToString(true);
+      const promptLineText = promptLine.translateToString(false);
       const pEnd = findPromptBoundary(promptLineText);
       if (pEnd >= 0) {
         const promptText = promptLineText.substring(0, pEnd);
@@ -94,7 +96,7 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
         let fullInput = promptLineText.substring(pEnd);
         for (let row = promptRow + 1; row <= cursorY; row++) {
           const rowLine = buffer.getLine(row);
-          if (rowLine) fullInput += rowLine.translateToString(true);
+          if (rowLine) fullInput += rowLine.translateToString(false);
         }
         // Trim to cursor position on the last row
         const totalCols = term.cols;
@@ -196,7 +198,7 @@ export function isLikelyAtPrompt(term: XTerm): boolean {
   const line = buffer.getLine(cursorY);
   if (!line) return false;
 
-  const lineText = line.translateToString(true);
+  const lineText = line.translateToString(false);
   if (lineText.trim().length === 0) return false;
 
   for (const pattern of NON_PROMPT_PATTERNS) {
