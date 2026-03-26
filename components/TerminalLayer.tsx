@@ -110,7 +110,7 @@ class ChunkedEscapeFilter {
   feed(chunk: string): string {
     const data = this.pending + chunk;
     const tailMatch = INCOMPLETE_ESCAPE_TAIL_REGEX.exec(data);
-    if (tailMatch && tailMatch[0].length <= 256) {
+    if (tailMatch) {
       this.pending = tailMatch[0];
       return stripTerminalControlSequences(data.slice(0, tailMatch.index));
     }
