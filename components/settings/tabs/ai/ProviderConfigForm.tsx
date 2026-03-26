@@ -185,7 +185,7 @@ export const ProviderConfigForm: React.FC<{
                 type="number"
                 min={1}
                 step={1}
-                value={form.advancedParams.maxTokens ?? ""}
+                value={advancedParamRaw.maxTokens ?? (form.advancedParams.maxTokens != null ? String(form.advancedParams.maxTokens) : "")}
                 onChange={(e) => handleAdvancedParam("maxTokens", e.target.value)}
                 placeholder={t('ai.providers.advancedParams.maxTokens.placeholder')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -199,7 +199,7 @@ export const ProviderConfigForm: React.FC<{
                 min={0}
                 max={2}
                 step={0.1}
-                value={form.advancedParams.temperature ?? ""}
+                value={advancedParamRaw.temperature ?? (form.advancedParams.temperature != null ? String(form.advancedParams.temperature) : "")}
                 onChange={(e) => handleAdvancedParam("temperature", e.target.value)}
                 placeholder={t('ai.providers.advancedParams.default')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -213,7 +213,7 @@ export const ProviderConfigForm: React.FC<{
                 min={0}
                 max={1}
                 step={0.05}
-                value={form.advancedParams.topP ?? ""}
+                value={advancedParamRaw.topP ?? (form.advancedParams.topP != null ? String(form.advancedParams.topP) : "")}
                 onChange={(e) => handleAdvancedParam("topP", e.target.value)}
                 placeholder={t('ai.providers.advancedParams.default')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
