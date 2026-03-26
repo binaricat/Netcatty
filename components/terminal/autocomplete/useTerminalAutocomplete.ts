@@ -108,6 +108,8 @@ export function useTerminalAutocomplete(
   stateRef.current = state;
   /** Flag to suppress handleInput's Enter recording when selectAndExecute already did it */
   const suppressNextEnterRecordRef = useRef(false);
+  /** Monotonic counter to invalidate stale async completion results */
+  const fetchVersionRef = useRef(0);
 
   // Preload common specs on first mount (only if enabled)
   useEffect(() => {
@@ -169,6 +171,8 @@ export function useTerminalAutocomplete(
    */
   const clearState = useCallback(() => {
     ghostAddonRef.current?.hide();
+    // Bump version to invalidate any in-flight async completions
+    fetchVersionRef.current++;
     setState((prev) =>
       prev.popupVisible || prev.suggestions.length > 0 ? { ...EMPTY_STATE } : prev,
     );
@@ -183,6 +187,9 @@ export function useTerminalAutocomplete(
     if (!term || disposedRef.current || !settingsRef.current.enabled) {
       return;
     }
+
+    // Capture version at start — if it changes during async work, discard results
+    const version = ++fetchVersionRef.current;
 
     const prompt = detectPrompt(term);
     lastPromptRef.current = prompt;
@@ -201,7 +208,7 @@ export function useTerminalAutocomplete(
       maxResults: settingsRef.current.maxSuggestions,
     });
 
-    if (disposedRef.current) return;
+    if (disposedRef.current || version !== fetchVersionRef.current) return;
 
     // Discard stale results: if the user kept typing while getCompletions was running,
     // the current prompt input will have changed. Re-detect and compare.

@@ -120,7 +120,8 @@ const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "�
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
-  const scanLimit = Math.min(lineText.length, 80);
+  // Scan up to 200 chars to support long prompts (git branch, kube context, long paths)
+  const scanLimit = Math.min(lineText.length, 200);
 
   for (let i = 0; i < scanLimit; i++) {
     const ch = lineText[i];

@@ -370,6 +370,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const cmd = commandBufferRef.current.trim();
           if (cmd && onCommandExecuted) onCommandExecuted(cmd, host.id, host.label, sessionId);
           commandBufferRef.current = "";
+        } else if (ch === "\x15") {
+          // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
+          commandBufferRef.current = "";
         } else if (ch.charCodeAt(0) >= 32) {
           commandBufferRef.current += ch;
         }
