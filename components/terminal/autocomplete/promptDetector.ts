@@ -19,6 +19,8 @@ const NON_PROMPT_PATTERNS = [
   /^\s*\(END\)/,                 // less end marker
   /^:\s*$/,                      // vim command mode
   /^\s*~\s*$/,                   // vim tilde lines
+  /^>{2,}\s/,                    // python >>> / node > REPL
+  /^\w+>\s/,                     // mysql> / sqlite> / redis-cli> REPL prompts
 ];
 
 export interface PromptDetectionResult {
@@ -130,14 +132,9 @@ function findPromptBoundary(lineText: string): number {
 
     if (!PROMPT_CHARS.has(ch)) continue;
 
-    // Must be followed by a space, end-of-line, or (for > only) any character.
-    // cmd.exe prompts like `C:\path>dir` have no space after >.
+    // Must be followed by a space or end-of-line.
     const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;
-    if (ch === ">" || ch === "❯" || ch === "➜" || ch === "›") {
-      // These prompt chars often appear without trailing space — always accept
-    } else if (nextChar !== null && nextChar !== " ") {
-      continue; // $, #, % require trailing space to avoid false positives
-    }
+    if (nextChar !== null && nextChar !== " ") continue;
 
     // For '$': exclude shell variable references ($HOME, $PATH, ${...}, $(...))
     if (ch === "$") {

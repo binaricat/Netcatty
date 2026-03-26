@@ -409,7 +409,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     termRef,
     sessionId,
     hostId: host.id,
-    hostOs: host.os || "linux",
+    hostOs: host.os || (host.protocol === "local"
+      ? (navigator.platform?.startsWith("Win") ? "windows" : navigator.platform?.startsWith("Mac") ? "macos" : "linux")
+      : "linux"),
     settings: terminalSettings ? {
       enabled: terminalSettings.autocompleteEnabled ?? true,
       showGhostText: terminalSettings.autocompleteGhostText ?? true,
