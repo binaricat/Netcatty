@@ -1,5 +1,6 @@
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { setNotify } from '../../application/notification';
 import { cn } from '../../lib/utils';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -96,6 +97,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Register global toast function
     useEffect(() => {
         globalShowToast = showToast;
+        setNotify(toast);
         return () => {
             globalShowToast = null;
         };
