@@ -520,7 +520,11 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     const bridge = netcattyBridge.get();
     try {
       const checkResult = await bridge?.checkForUpdate?.();
-      if (!checkResult || checkResult.supported === false || checkResult.checking === true || checkResult.available === false) return;
+      if (!checkResult || checkResult.checking === true || checkResult.available === false) return;
+      if (checkResult.supported === false) {
+        openReleasePage();
+        return;
+      }
     } catch {
       return;
     }
@@ -545,7 +549,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
         downloadError: 'Download failed',
       }));
     });
-  }, []);
+  }, [openReleasePage]);
 
   // Startup check with delay - runs once on mount
   useEffect(() => {
