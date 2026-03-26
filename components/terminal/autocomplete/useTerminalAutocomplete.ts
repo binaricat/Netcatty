@@ -141,9 +141,9 @@ export function useTerminalAutocomplete(
   }, []);
 
   /**
-   * Reset popup/ghost state. Uses EMPTY_STATE reference when possible to skip re-render.
+   * Clear popup/ghost state. Skips re-render if already empty.
    */
-  const resetState = useCallback(() => {
+  const clearState = useCallback(() => {
     ghostAddonRef.current?.hide();
     setState((prev) =>
       prev.popupVisible || prev.suggestions.length > 0 ? { ...EMPTY_STATE } : prev,
@@ -162,7 +162,7 @@ export function useTerminalAutocomplete(
     lastPromptRef.current = prompt;
 
     if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
-      resetState();
+      clearState();
       return;
     }
 
@@ -201,7 +201,7 @@ export function useTerminalAutocomplete(
           : prev,
       );
     }
-  }, [termRef, resetState]);
+  }, [termRef, clearState]);
 
   /**
    * Handle terminal input data. Called on every character.
@@ -220,18 +220,19 @@ export function useTerminalAutocomplete(
         if (suppressNextEnterRecordRef.current) {
           suppressNextEnterRecordRef.current = false;
         } else {
-          const prompt = lastPromptRef.current ?? (termRef.current ? detectPrompt(termRef.current) : null);
+          // Always use real-time prompt detection for accurate command recording
+          const prompt = termRef.current ? detectPrompt(termRef.current) : null;
           if (prompt?.isAtPrompt && prompt.userInput.trim()) {
             recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
           }
         }
-        resetState();
+        clearState();
         return;
       }
 
       // Ctrl+C, Ctrl+U — clear
       if (data === "\x03" || data === "\x15") {
-        resetState();
+        clearState();
         return;
       }
 
@@ -259,7 +260,7 @@ export function useTerminalAutocomplete(
         }, settingsRef.current.debounceMs);
       }
     },
-    [fetchSuggestions, termRef, resetState],
+    [fetchSuggestions, termRef, clearState],
   );
 
   /**
@@ -281,7 +282,7 @@ export function useTerminalAutocomplete(
           if (ghostText) {
             writeToTerminal(ghostText);
             ghost.hide();
-            setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
+            clearState();
           }
           return false;
         }
@@ -323,7 +324,7 @@ export function useTerminalAutocomplete(
           if (ghostText) {
             writeToTerminal(ghostText);
             ghost.hide();
-            setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
+            clearState();
           }
           return false;
         }
@@ -369,7 +370,7 @@ export function useTerminalAutocomplete(
       if (e.key === "Escape" && s.popupVisible) {
         e.preventDefault();
         ghost?.hide();
-        setState({ ...EMPTY_STATE });
+        clearState();
         return false;
       }
 
@@ -388,7 +389,9 @@ export function useTerminalAutocomplete(
       const term = termRef.current;
       if (!term) return;
 
-      const prompt = lastPromptRef.current ?? detectPrompt(term);
+      // Always use real-time prompt detection — lastPromptRef may be stale
+      // if the user typed more characters after suggestions were fetched
+      const prompt = detectPrompt(term);
       if (!prompt.isAtPrompt) return;
 
       const textToInsert = suggestion.text.substring(prompt.userInput.length);
@@ -402,11 +405,14 @@ export function useTerminalAutocomplete(
       if (execute) {
         recordCommand(suggestion.text, hostIdRef.current, hostOsRef.current);
         suppressNextEnterRecordRef.current = true;
+        // Safety timeout: clear the flag if handleInput's Enter doesn't consume it
+        // (e.g., if xterm doesn't fire onData because handleKeyEvent returned false)
+        setTimeout(() => { suppressNextEnterRecordRef.current = false; }, 100);
       }
 
-      ghostAddonRef.current?.hide();
-      setState({ ...EMPTY_STATE });
+      clearState();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clearState is stable
     [termRef, writeToTerminal],
   );
 
@@ -421,9 +427,8 @@ export function useTerminalAutocomplete(
   );
 
   const closePopup = useCallback(() => {
-    ghostAddonRef.current?.hide();
-    setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
-  }, []);
+    clearState();
+  }, [clearState]);
 
   const dispose = useCallback(() => {
     disposedRef.current = true;

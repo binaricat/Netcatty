@@ -8,7 +8,7 @@
  */
 
 import type { Terminal as XTerm, IDisposable } from "@xterm/xterm";
-import { getXTermCellDimensions } from "./xtermUtils";
+import { getXTermCellDimensions, invalidateCellDimensionCache } from "./xtermUtils";
 
 export class GhostTextAddon implements IDisposable {
   private term: XTerm | null = null;
@@ -18,6 +18,8 @@ export class GhostTextAddon implements IDisposable {
   private currentInput: string = "";
   private disposed = false;
   private disposables: IDisposable[] = [];
+  private lastLeft = -1;
+  private lastTop = -1;
 
   activate(term: XTerm): void {
     this.term = term;
@@ -67,6 +69,13 @@ export class GhostTextAddon implements IDisposable {
         if (this.isVisible()) this.updatePosition();
       }),
     );
+
+    // Invalidate cell dimension cache on resize so measurements stay accurate
+    this.disposables.push(
+      term.onResize(() => {
+        invalidateCellDimensionCache();
+      }),
+    );
   }
 
   /**
@@ -92,6 +101,9 @@ export class GhostTextAddon implements IDisposable {
     this.updatePosition();
     this.ghostElement.textContent = ghostText;
     this.ghostElement.style.display = "block";
+    // Set font properties once per show (not per frame in updatePosition)
+    this.ghostElement.style.fontSize = `${this.term.options.fontSize}px`;
+    this.ghostElement.style.fontFamily = this.term.options.fontFamily || "inherit";
   }
 
   hide(): void {
@@ -126,12 +138,14 @@ export class GhostTextAddon implements IDisposable {
     const trimmed = ghost.replace(/^\s+/, "");
     const leadingSpace = ghost.length - trimmed.length;
 
-    if (trimmed.length === 0) return ghost;
+    if (trimmed.length === 0) return ghost; // Only whitespace
 
-    const wordEnd = trimmed.search(/[\s/\\-]/);
-    if (wordEnd <= 0) return ghost;
+    // Search for word boundary starting from index 1 (skip leading separator chars like /)
+    const wordEnd = trimmed.substring(1).search(/[\s/\\-]/);
+    if (wordEnd < 0) return ghost; // Single word, accept all
 
-    return ghost.substring(0, leadingSpace + wordEnd + 1);
+    // Include leading whitespace + the word up to (and including) the separator
+    return ghost.substring(0, leadingSpace + 1 + wordEnd + 1);
   }
 
   private updatePosition(): void {
@@ -140,16 +154,16 @@ export class GhostTextAddon implements IDisposable {
     const dims = getXTermCellDimensions(this.term);
 
     const buffer = this.term.buffer.active;
-    const cursorX = buffer.cursorX;
-    const cursorY = buffer.cursorY;
+    const left = buffer.cursorX * dims.width;
+    const top = buffer.cursorY * dims.height;
 
-    const left = cursorX * dims.width;
-    const top = cursorY * dims.height;
+    // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)
+    if (left === this.lastLeft && top === this.lastTop) return;
+    this.lastLeft = left;
+    this.lastTop = top;
 
     this.ghostElement.style.left = `${left}px`;
     this.ghostElement.style.top = `${top}px`;
-    this.ghostElement.style.fontSize = `${this.term.options.fontSize}px`;
-    this.ghostElement.style.fontFamily = this.term.options.fontFamily || "inherit";
     this.ghostElement.style.lineHeight = `${dims.height}px`;
     this.ghostElement.style.height = `${dims.height}px`;
   }

@@ -28,7 +28,6 @@ interface AutocompletePopupProps {
   /** Terminal theme colors for consistent styling */
   themeColors?: AutocompleteThemeColors;
   onSelect: (suggestion: CompletionSuggestion) => void;
-  onClose?: () => void;
   maxHeight?: number;
 }
 
@@ -48,7 +47,6 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   expandUpward = false,
   themeColors,
   onSelect,
-  onClose: _onClose,
   maxHeight = 200,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);

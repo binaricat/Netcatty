@@ -52,6 +52,7 @@ const inFlightLoads = new Map<string, Promise<FigSpec | null>>();
 
 // All available spec names from @withfig/autocomplete
 let availableSpecs: string[] | null = null;
+let availableSpecsSet: Set<string> | null = null;
 
 /**
  * Get the list of all available command specs.
@@ -62,9 +63,11 @@ export async function getAvailableSpecs(): Promise<string[]> {
   try {
     const mod = await import("@withfig/autocomplete");
     availableSpecs = mod.default as string[];
+    availableSpecsSet = new Set(availableSpecs);
     return availableSpecs;
   } catch {
     availableSpecs = [];
+    availableSpecsSet = new Set();
     return [];
   }
 }
@@ -112,8 +115,8 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
  */
 export async function hasSpec(commandName: string): Promise<boolean> {
   if (specCache.has(commandName)) return specCache.get(commandName) !== null;
-  const specs = await getAvailableSpecs();
-  return specs.includes(commandName);
+  await getAvailableSpecs();
+  return availableSpecsSet?.has(commandName) ?? false;
 }
 
 /**

@@ -354,7 +354,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   // Terminal autocomplete — onAcceptText writes directly to session (no CustomEvent)
   const autocompleteAcceptTextRef = useRef<((text: string) => void) | undefined>(undefined);
-  autocompleteAcceptTextRef.current = useCallback((text: string) => {
+  autocompleteAcceptTextRef.current = (text: string) => {
     const id = sessionRef.current;
     if (id && text) {
       terminalBackend.writeToSession(id, text);
@@ -369,7 +369,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
       }
     }
-  }, [terminalBackend, host.id, host.label, sessionId, onCommandExecuted]);
+  };
 
   const autocomplete = useTerminalAutocomplete({
     termRef,
