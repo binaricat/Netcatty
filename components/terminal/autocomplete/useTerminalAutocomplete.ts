@@ -189,7 +189,7 @@ export function useTerminalAutocomplete(
       const { position, expandUpward } = calculatePopupPosition(term, completions.length);
       setState({
         suggestions: completions,
-        selectedIndex: 0,
+        selectedIndex: -1, // No item selected until user presses ↑/↓
         popupVisible: true,
         popupPosition: position,
         expandUpward,
@@ -353,14 +353,20 @@ export function useTerminalAutocomplete(
           return false;
         }
 
-        // Enter on popup: select current item AND execute
+        // Enter on popup: only execute suggestion if user has actively selected
+        // an item via ↑/↓. If no selection (selectedIndex === -1), close popup
+        // and let Enter pass through to execute the user's own typed command.
         if (e.key === "Enter") {
-          const selected = s.suggestions[Math.max(0, s.selectedIndex)];
-          if (selected) {
-            e.preventDefault();
-            insertSuggestion(selected, true);
-            return false;
+          if (s.selectedIndex >= 0) {
+            const selected = s.suggestions[s.selectedIndex];
+            if (selected) {
+              e.preventDefault();
+              insertSuggestion(selected, true);
+              return false;
+            }
           }
+          // No selection — close popup, let Enter propagate to terminal
+          clearState();
         }
       }
 
