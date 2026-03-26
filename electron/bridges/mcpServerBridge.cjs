@@ -596,6 +596,9 @@ function handleExec(params) {
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
   // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
+  // Note: serial protocol is explicitly chosen by the user for network devices.
+  // If a serial port is connected to a Linux/BusyBox shell, the user should use
+  // the "local" protocol instead, which goes through the normal shell path.
   if (session.protocol !== "serial") {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {

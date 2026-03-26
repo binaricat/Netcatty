@@ -519,11 +519,18 @@ function execViaRawPty(serialPort, command, options) {
       }, idleMs);
     }
 
+    let noResponseTimer = null;
+
     const onData = (data) => {
       // Use latin1 to match the terminal display decoder in terminalBridge.cjs.
       // Idle timer resets on each chunk; it is only started here (not after
       // safeWrite), so slow devices won't time out before producing output.
       output += data.toString("latin1");
+      // Cancel the no-response fallback on first data
+      if (noResponseTimer) {
+        clearTimeout(noResponseTimer);
+        noResponseTimer = null;
+      }
       resetIdleTimer();
     };
 
@@ -577,8 +584,18 @@ function execViaRawPty(serialPort, command, options) {
       cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
     }
 
-    // Send the raw command followed by CR (network devices expect \r)
+    // Send the raw command followed by CR (network devices expect \r).
     safeWrite(command + "\r");
+
+    // Start a "no-response" fallback timer. If the device produces no output at
+    // all (e.g. silent mode-changing commands like "enable", "configure terminal",
+    // or devices with echo disabled), the idle timer never starts because onData
+    // never fires. This fallback resolves successfully after 2× idleMs to avoid
+    // waiting for the full overall timeout. Cleared on first data in onData.
+    noResponseTimer = setTimeout(() => {
+      finish(output, null);
+    }, idleMs * 2);
+    cleanupFns.push(() => clearTimeout(noResponseTimer));
   });
 }
 execViaRawPty._seq = 0;
