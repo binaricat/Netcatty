@@ -765,6 +765,8 @@ async function startSerialSession(event, options) {
         const session = {
           serialPort,
           type: 'serial',
+          protocol: 'serial',
+          shellKind: 'raw',
           webContentsId: event.sender.id,
         };
         sessions.set(sessionId, session);

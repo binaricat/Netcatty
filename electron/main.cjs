@@ -505,6 +505,35 @@ const registerBridges = (win) => {
   aiBridge.registerHandlers(ipcMain);
   crashLogBridge.registerHandlers(ipcMain);
 
+  // Fig autocomplete spec loader — uses dynamic import() since @withfig/autocomplete is ESM
+  ipcMain.handle("netcatty:figspec:list", async () => {
+    try {
+      const mod = await import("@withfig/autocomplete");
+      return mod.default || [];
+    } catch (err) {
+      console.warn("[Main] Failed to load fig spec list:", err?.message || err);
+      return [];
+    }
+  });
+  ipcMain.handle("netcatty:figspec:load", async (_event, commandName) => {
+    try {
+      // Sanitize: reject absolute paths, path traversal, and non-spec characters
+      if (!commandName || commandName.startsWith("/") || commandName.startsWith("\\") ||
+          commandName.includes("..") || !/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
+      // Can't use `import("@withfig/autocomplete/build/...")` because the package's
+      // "exports" field restricts allowed import paths. Use file URL to bypass.
+      const specFile = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
+      const { pathToFileURL } = require("url");
+      const mod = await import(pathToFileURL(specFile).href);
+      const spec = mod.default?.default ?? mod.default ?? null;
+      // IPC requires serializable data — JSON round-trip strips functions/symbols
+      return spec ? JSON.parse(JSON.stringify(spec)) : null;
+    } catch (err) {
+      console.warn("[Main] Failed to load fig spec:", commandName, err?.message);
+      return null;
+    }
+  });
+
   // Settings window handler
   ipcMain.handle("netcatty:settings:open", async () => {
     try {

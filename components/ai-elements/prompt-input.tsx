@@ -8,8 +8,6 @@
 import { ArrowUp, Square, X } from 'lucide-react';
 import type {
   ComponentProps,
-  ComponentPropsWithoutRef,
-  ElementRef,
   FormEvent,
   HTMLAttributes,
   KeyboardEvent,
@@ -17,13 +15,6 @@ import type {
 } from 'react';
 import { forwardRef, useCallback, useRef } from 'react';
 import { cn } from '../../lib/utils';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import {
   InputGroup,
@@ -254,30 +245,3 @@ export const PromptInputSubmit = forwardRef<HTMLButtonElement, PromptInputSubmit
 );
 PromptInputSubmit.displayName = 'PromptInputSubmit';
 
-// ---------------------------------------------------------------------------
-// PromptInputSelect (thin wrappers around the project's Select component)
-// ---------------------------------------------------------------------------
-
-export const PromptInputSelect = Select;
-
-export const PromptInputSelectTrigger = forwardRef<
-  ElementRef<typeof SelectTrigger>,
-  ComponentPropsWithoutRef<typeof SelectTrigger>
->(({ className, ...props }, ref) => (
-  <SelectTrigger
-    ref={ref}
-    className={cn(
-      'h-7 min-w-0 w-auto gap-1 border-none bg-transparent px-2 text-[11px]',
-      'text-muted-foreground/40 hover:text-muted-foreground/70',
-      'focus:ring-0 focus:ring-offset-0',
-      '[&>svg]:h-3 [&>svg]:w-3 [&>svg]:opacity-40',
-      className,
-    )}
-    {...props}
-  />
-));
-PromptInputSelectTrigger.displayName = 'PromptInputSelectTrigger';
-
-export const PromptInputSelectContent = SelectContent;
-export const PromptInputSelectItem = SelectItem;
-export const PromptInputSelectValue = SelectValue;

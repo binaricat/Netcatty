@@ -149,9 +149,13 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
     const { t } = useI18n();
     const { notifyRendererReady, closeSettingsWindow } = useWindowControls();
-    const { updateState, checkNow, installUpdate, openReleasePage } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
+    const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
+    const isImmersive = settings.immersiveMode;
+    const toggleImmersive = useCallback(() => {
+        settings.setImmersiveMode(!isImmersive);
+    }, [settings, isImmersive]);
 
     useEffect(() => {
         notifyRendererReady();
@@ -256,6 +260,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             checkNow={checkNow}
                             openReleasePage={openReleasePage}
                             installUpdate={installUpdate}
+                            startDownload={startDownload}
+                            isUpdateDemoMode={isUpdateDemoMode}
                         />
                     )}
 
@@ -277,6 +283,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             setUiLanguage={settings.setUiLanguage}
                             customCSS={settings.customCSS}
                             setCustomCSS={settings.setCustomCSS}
+                            isImmersive={isImmersive}
+                            onToggleImmersive={toggleImmersive}
                         />
                     )}
 
@@ -331,6 +339,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             checkNow={checkNow}
                             installUpdate={installUpdate}
                             openReleasePage={openReleasePage}
+                            startDownload={startDownload}
                         />
                     )}
                 </div>

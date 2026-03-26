@@ -55,6 +55,7 @@ export interface SftpBookmark {
   id: string;
   path: string;
   label: string;
+  global?: boolean;
 }
 
 export interface Host {
@@ -445,6 +446,14 @@ export interface TerminalSettings {
 
   // Rendering
   rendererType: 'auto' | 'webgl' | 'canvas'; // Terminal renderer: auto (detect based on hardware), webgl, or canvas
+
+  // Autocomplete
+  autocompleteEnabled: boolean; // Enable terminal command autocomplete
+  autocompleteGhostText: boolean; // Show inline ghost text suggestions (like fish shell)
+  autocompletePopupMenu: boolean; // Show popup menu with multiple suggestions
+  autocompleteDebounceMs: number; // Debounce delay for fetching suggestions (ms)
+  autocompleteMinChars: number; // Minimum characters before showing suggestions
+  autocompleteMaxSuggestions: number; // Maximum suggestions in popup menu
 }
 
 const STRICT_IPV4_OCTET_PATTERN = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
@@ -553,6 +562,12 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   disableBracketedPaste: false, // Bracketed paste enabled by default
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
+  autocompleteEnabled: true, // Autocomplete enabled by default
+  autocompleteGhostText: true, // Ghost text enabled by default
+  autocompletePopupMenu: true, // Popup menu enabled by default
+  autocompleteDebounceMs: 100, // 100ms debounce
+  autocompleteMinChars: 1, // Start suggesting after 1 character
+  autocompleteMaxSuggestions: 8, // Show up to 8 suggestions
 };
 
 export interface TerminalTheme {

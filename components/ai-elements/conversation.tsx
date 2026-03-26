@@ -1,5 +1,5 @@
 import { cn } from '../../lib/utils';
-import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
+import type { ComponentProps } from 'react';
 import React, { useCallback } from 'react';
 import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom';
 import { ArrowDown } from 'lucide-react';
@@ -23,41 +23,6 @@ export const ConversationContent = ({ className, ...props }: ConversationContent
     className={cn('flex flex-col gap-4 p-4', className)}
     {...props}
   />
-);
-
-export interface ConversationEmptyStateProps extends HTMLAttributes<HTMLDivElement> {
-  title?: string;
-  description?: string;
-  icon?: ReactNode;
-}
-
-export const ConversationEmptyState = ({
-  className,
-  title,
-  description,
-  icon,
-  children,
-  ...props
-}: ConversationEmptyStateProps) => (
-  <div
-    className={cn(
-      'flex size-full flex-col items-center justify-center gap-3 p-8 text-center',
-      className,
-    )}
-    {...props}
-  >
-    {children ?? (
-      <>
-        {icon && <div className="text-muted-foreground">{icon}</div>}
-        <div className="space-y-1">
-          <h3 className="font-medium text-sm">{title}</h3>
-          {description && (
-            <p className="text-muted-foreground text-sm">{description}</p>
-          )}
-        </div>
-      </>
-    )}
-  </div>
 );
 
 export const ConversationScrollButton = ({ className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => {

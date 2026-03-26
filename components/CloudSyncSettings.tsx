@@ -611,7 +611,7 @@ interface SyncDashboardProps {
     onClearLocalData?: () => void;
 }
 
-export const SyncDashboard: React.FC<SyncDashboardProps> = ({
+const SyncDashboard: React.FC<SyncDashboardProps> = ({
     onBuildPayload,
     onApplyPayload,
     onClearLocalData,

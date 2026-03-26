@@ -46,6 +46,9 @@ export const STORAGE_KEY_SFTP_FILE_ASSOCIATIONS = 'netcatty_sftp_file_associatio
 // SFTP Local Bookmarks
 export const STORAGE_KEY_SFTP_LOCAL_BOOKMARKS = 'netcatty_sftp_local_bookmarks_v1';
 
+// SFTP Global Bookmarks (shared across all hosts)
+export const STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS = 'netcatty_sftp_global_bookmarks_v1';
+
 // SFTP Settings
 export const STORAGE_KEY_SFTP_DOUBLE_CLICK_BEHAVIOR = 'netcatty_sftp_double_click_behavior_v1';
 export const STORAGE_KEY_SFTP_AUTO_SYNC = 'netcatty_sftp_auto_sync_v1';
@@ -90,3 +93,16 @@ export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
+
+// Immersive Mode
+export const STORAGE_KEY_IMMERSIVE_MODE = 'netcatty_immersive_mode_v1';
+
+// Side Panel
+export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
+
+// Port Forwarding (transient cross-window broadcast key)
+export const STORAGE_KEY_PF_RECONNECT_CANCEL = '__netcatty_pf_cancel_reconnect';
+
+// Debug Flags (no _v1 suffix — developer-only, not persisted data)
+export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';
+export const STORAGE_KEY_DEBUG_UPDATE_DEMO = 'debug.updateDemo';

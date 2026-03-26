@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { AlertCircle, ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import { cn } from "../../lib/utils";
+import { joinPath } from "../../application/state/sftp/utils";
 import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { ColumnWidths, SortField, SortOrder } from "./utils";
@@ -64,20 +65,20 @@ const SftpErrorWithLogs: React.FC<{
   onRetry: () => void;
   t: (key: string) => string;
 }> = ({ error, connectionLogs, onRetry, t }) => {
-  const [showLogs, setShowLogs] = useState(false);
+  const [showLogs, setShowLogs] = useState(connectionLogs.length > 0);
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2 text-destructive">
-      <AlertCircle size={24} />
-      <span className="text-sm text-center px-4">{t(error)}</span>
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+      <Unplug size={28} className="text-destructive/70" />
+      <span className="text-xs text-center px-6 max-w-xs leading-relaxed">{t(error)}</span>
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={onRetry}>
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onRetry}>
           {t("sftp.retry")}
         </Button>
         {connectionLogs.length > 0 && (
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground"
+            className="h-7 text-xs text-muted-foreground"
             onClick={() => setShowLogs(!showLogs)}
           >
             <ChevronDown size={14} className={`mr-1 transition-transform ${showLogs ? 'rotate-180' : ''}`} />
@@ -220,12 +221,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
-                const currentPath = pane.connection?.currentPath ?? "";
-                const sep = currentPath.includes("\\") ? "\\" : "/";
-                const fullPath = currentPath === "/" || currentPath === ""
-                  ? `/${entry.name}`
-                  : `${currentPath.replace(/[/\\]+$/, "")}${sep}${entry.name}`;
-                navigator.clipboard.writeText(fullPath);
+                navigator.clipboard.writeText(joinPath(pane.connection.currentPath, entry.name));
               }}
             >
               <ClipboardCopy size={14} className="mr-2" />{" "}

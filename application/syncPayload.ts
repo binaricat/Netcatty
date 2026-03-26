@@ -14,8 +14,8 @@ import type {
   PortForwardingRule,
   Snippet,
   SSHKey,
-} from './models';
-import type { SyncPayload } from './sync';
+} from '../domain/models';
+import type { SyncPayload } from '../domain/sync';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
 import {
   STORAGE_KEY_THEME,
@@ -38,6 +38,7 @@ import {
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_CUSTOM_THEMES,
+  STORAGE_KEY_IMMERSIVE_MODE,
 } from '../infrastructure/config/storageKeys';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,8 @@ const SYNCABLE_TERMINAL_KEYS = [
   'rightClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'disableBracketedPaste', 'osc52Clipboard',
+  'autocompleteEnabled', 'autocompleteGhostText', 'autocompletePopupMenu',
+  'autocompleteDebounceMs', 'autocompleteMinChars', 'autocompleteMaxSuggestions',
 ] as const;
 
 /**
@@ -158,6 +161,10 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
   if (autoOpenSidebar === 'true' || autoOpenSidebar === 'false') settings.sftpAutoOpenSidebar = autoOpenSidebar === 'true';
 
+  // Immersive mode
+  const immersive = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
+  if (immersive === 'true' || immersive === 'false') settings.immersiveMode = immersive === 'true';
+
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
@@ -216,6 +223,9 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
+
+  // Immersive mode
+  if (settings.immersiveMode != null) localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(settings.immersiveMode));
 }
 
 // ---------------------------------------------------------------------------

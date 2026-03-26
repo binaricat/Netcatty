@@ -24,7 +24,6 @@ import {
   isProviderReadyForSync,
 } from '../../domain/sync';
 import {
-  CloudSyncManager,
   getCloudSyncManager,
   type SyncManagerState,
 } from '../../infrastructure/services/CloudSyncManager';
@@ -101,12 +100,6 @@ export interface CloudSyncHook {
   formatLastSync: (timestamp?: number) => string;
   getProviderDotColor: (provider: CloudProvider) => string;
   refresh: () => void;
-}
-
-export interface GitHubAuthState {
-  isAuthenticating: boolean;
-  deviceFlowState: DeviceFlowState | null;
-  error: string | null;
 }
 
 // ============================================================================
@@ -469,62 +462,6 @@ export const useCloudSync = (): CloudSyncHook => {
     formatLastSync,
     getProviderDotColor,
     refresh,
-  };
-};
-
-// ============================================================================
-// Convenience Hooks
-// ============================================================================
-
-/**
- * Hook for just the security state (lighter weight)
- */
-export const useSecurityState = () => {
-  const [manager] = useState<CloudSyncManager>(() => getCloudSyncManager());
-  const [securityState, setSecurityState] = useState<SecurityState>(
-    () => manager.getSecurityState()
-  );
-  
-  useEffect(() => {
-    const unsubscribe = manager.subscribe((event) => {
-      if (event.type === 'SECURITY_STATE_CHANGED') {
-        setSecurityState(event.state);
-      }
-    });
-    return unsubscribe;
-  }, [manager]);
-  
-  return {
-    securityState,
-    isUnlocked: securityState === 'UNLOCKED',
-    isLocked: securityState === 'LOCKED',
-    hasNoKey: securityState === 'NO_KEY',
-  };
-};
-
-/**
- * Hook for provider status indicators
- */
-export const useProviderStatus = (provider: CloudProvider) => {
-  const [manager] = useState<CloudSyncManager>(() => getCloudSyncManager());
-  const [connection, setConnection] = useState<ProviderConnection>(
-    () => manager.getProviderConnection(provider)
-  );
-  
-  useEffect(() => {
-    const unsubscribe = manager.subscribe(() => {
-      setConnection(manager.getProviderConnection(provider));
-    });
-    return unsubscribe;
-  }, [manager, provider]);
-  
-  return {
-    ...connection,
-    isConnected: isProviderReadyForSync(connection),
-    isSyncing: connection.status === 'syncing',
-    hasError: connection.status === 'error',
-    dotColor: getSyncDotColor(connection.status),
-    lastSyncFormatted: formatLastSync(connection.lastSync),
   };
 };
 

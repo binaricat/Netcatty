@@ -36,6 +36,7 @@ import {
 import packageJson from '../../package.json';
 import { EncryptionService } from './EncryptionService';
 import { createAdapter, type CloudAdapter } from './adapters';
+import { localStorageAdapter } from '../persistence/localStorageAdapter';
 import type { GitHubAdapter } from './adapters/GitHubAdapter';
 import type { GoogleDriveAdapter } from './adapters/GoogleDriveAdapter';
 import type { OneDriveAdapter } from './adapters/OneDriveAdapter';
@@ -239,31 +240,15 @@ export class CloudSyncManager {
   }
 
   private loadFromStorage<T>(key: string): T | null {
-    try {
-      // eslint-disable-next-line no-restricted-globals
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : null;
-    } catch {
-      return null;
-    }
+    return localStorageAdapter.read<T>(key);
   }
 
   private saveToStorage(key: string, value: unknown): void {
-    try {
-      // eslint-disable-next-line no-restricted-globals
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (e) {
-      console.error('Failed to save to storage:', e);
-    }
+    localStorageAdapter.write(key, value);
   }
 
   private removeFromStorage(key: string): void {
-    try {
-      // eslint-disable-next-line no-restricted-globals
-      localStorage.removeItem(key);
-    } catch {
-      // ignore storage removal failures
-    }
+    localStorageAdapter.remove(key);
   }
 
   // ==========================================================================

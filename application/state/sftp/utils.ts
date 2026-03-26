@@ -48,7 +48,7 @@ export const joinPath = (base: string, name: string): string => {
     return `${normalizedBase}\\${name}`;
   }
   if (base === "/") return `/${name}`;
-  return `${base}/${name}`;
+  return `${base.replace(/\/+$/, "")}/${name}`;
 };
 
 export const getParentPath = (path: string): string => {

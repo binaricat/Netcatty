@@ -16,11 +16,11 @@ import {
   findSyncPayloadEncryptedCredentialPaths,
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
-import { collectSyncableSettings } from '../../domain/syncPayload';
+import { collectSyncableSettings } from '../syncPayload';
 import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
-import { toast } from '../../components/ui/toast';
+import { notify } from '../notification';
 
 interface AutoSyncConfig {
   // Data to sync
@@ -189,7 +189,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw error;
       }
       console.error('[AutoSync] Sync failed:', error);
-      toast.error(
+      notify.error(
         error instanceof Error ? error.message : t('common.unknownError'),
         t('sync.autoSync.failedTitle'),
       );
@@ -231,7 +231,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // Don't save base or skip auto-sync — let the data-change effect
         // naturally trigger an upload of the merged payload (which will
         // go through syncAllProviders and save base on success).
-        toast.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
+        notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);

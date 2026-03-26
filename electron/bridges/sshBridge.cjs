@@ -361,14 +361,7 @@ function resolveLangFromCharset(charset) {
   return trimmed;
 }
 
-function safeSend(sender, channel, payload) {
-  try {
-    if (!sender || sender.isDestroyed()) return;
-    sender.send(channel, payload);
-  } catch {
-    // Ignore destroyed webContents during shutdown.
-  }
-}
+const { safeSend } = require("./ipcUtils.cjs");
 
 /**
  * Initialize the SSH bridge with dependencies
@@ -2281,16 +2274,4 @@ module.exports = {
   init,
   registerHandlers,
   connectThroughChain,
-  createProxySocket,
-  startSSHSession,
-  execCommand,
-  getSessionPwd,
-  getServerStats,
-  generateKeyPair,
-  checkWindowsSshAgent,
-  findDefaultPrivateKey,
-  findAllDefaultPrivateKeys,
-  isKeyEncrypted,
-  findAllDefaultPrivateKeys,
-  isKeyEncrypted,
 };

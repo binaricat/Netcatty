@@ -18,6 +18,7 @@ import type {
   ChatMessage,
   ChatMessageAttachment,
   ExternalAgentConfig,
+  ProviderAdvancedParams,
   ProviderConfig,
   WebSearchConfig,
 } from '../../../infrastructure/ai/types';
@@ -186,6 +187,7 @@ export interface UseAIChatStreamingReturn {
     sdkMessages: Array<ModelMessage>,
     signal: AbortSignal,
     currentAssistantMsgId: string,
+    advancedParams?: ProviderAdvancedParams,
   ) => Promise<void>;
   /** Send a message to the Catty agent (built-in). */
   sendToCattyAgent: (
@@ -320,6 +322,7 @@ export function useAIChatStreaming({
     sdkMessages: Array<ModelMessage>,
     signal: AbortSignal,
     currentAssistantMsgId: string,
+    advancedParams?: ProviderAdvancedParams,
   ): Promise<void> => {
     const result = streamText({
       model,
@@ -328,6 +331,11 @@ export function useAIChatStreaming({
       tools,
       stopWhen: stepCountIs(maxIterations),
       abortSignal: signal,
+      ...(advancedParams?.maxTokens != null && { maxOutputTokens: advancedParams.maxTokens }),
+      ...(advancedParams?.temperature != null && { temperature: advancedParams.temperature }),
+      ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
+      ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
+      ...(advancedParams?.presencePenalty != null && { presencePenalty: advancedParams.presencePenalty }),
     });
 
     // Track the current assistant message ID so updates target the correct message
@@ -804,7 +812,7 @@ export function useAIChatStreaming({
         sdkMessages.push({ role: 'user', content: trimmed });
       }
 
-      await processCattyStream(sessionId, model, systemPrompt, tools, sdkMessages, abortController.signal, assistantMsgId);
+      await processCattyStream(sessionId, model, systemPrompt, tools, sdkMessages, abortController.signal, assistantMsgId, context.activeProvider?.advancedParams);
     } catch (err) {
       console.error('[Catty] streamText error:', err);
       reportStreamError(sessionId, abortController.signal, err);

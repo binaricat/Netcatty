@@ -101,6 +101,11 @@ export type CreateXTermRuntimeContext = {
 
   // Callback when remote requests clipboard read in 'prompt' mode; resolves to user's decision
   onOsc52ReadRequest?: () => Promise<boolean>;
+
+  // Autocomplete key event handler — returns false if event was consumed
+  onAutocompleteKeyEvent?: (e: KeyboardEvent) => boolean;
+  // Autocomplete input handler — called on every character input
+  onAutocompleteInput?: (data: string) => void;
 };
 
 const detectPlatform = (): XTermPlatform => {
@@ -375,6 +380,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (e.type !== "keydown") {
       return true;
     }
+
+    // Autocomplete key handler (must be checked before other handlers)
+    if (ctx.onAutocompleteKeyEvent) {
+      const consumed = ctx.onAutocompleteKeyEvent(e);
+      if (!consumed) return false; // Event was consumed by autocomplete
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === "f" && e.type === "keydown") {
       e.preventDefault();
       ctx.setIsSearchOpen(true);
@@ -566,6 +578,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       }
 
       scrollToBottomAfterInput(data);
+
+      // Notify autocomplete of input
+      ctx.onAutocompleteInput?.(data);
 
       if (ctx.statusRef.current === "connected" && ctx.onCommandExecuted) {
         if (data === "\r" || data === "\n") {

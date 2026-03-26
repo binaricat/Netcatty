@@ -215,6 +215,9 @@ const zhCN: Messages = {
   'settings.appearance.themeColor.desc': '为浅色与深色主题选择预设配色',
   'settings.appearance.themeColor.light': '浅色主题',
   'settings.appearance.themeColor.dark': '深色主题',
+  'settings.appearance.immersiveMode': '沉浸模式',
+  'settings.appearance.immersiveMode.desc':
+    '启用后，UI 外观（标签栏、侧边栏、状态栏）会自动适配当前终端主题的配色，营造视觉一体化的沉浸体验。',
   'settings.appearance.customCss': '自定义 CSS',
   'settings.appearance.customCss.desc': '使用自定义 CSS 个性化界面，修改会立即生效。',
   'settings.appearance.customCss.placeholder':
@@ -425,6 +428,8 @@ const zhCN: Messages = {
   'sftp.filter.placeholder': '按文件名筛选...',
   'sftp.bookmark.add': '收藏此路径',
   'sftp.bookmark.remove': '取消收藏',
+  'sftp.bookmark.addGlobal': '+全局',
+  'sftp.bookmark.addGlobalTooltip': '保存为全局收藏（所有主机共享）',
   'sftp.bookmark.empty': '暂无收藏路径',
   'sftp.columns.name': '名称',
   'sftp.columns.modified': '修改时间',
@@ -1059,6 +1064,7 @@ const zhCN: Messages = {
   'sftp.upload.phase.compressed': '压缩传输',
 
   // SFTP File Opener
+  'sftp.context.copyPath': '复制文件路径',
   'sftp.context.openWith': '打开方式...',
   'sftp.context.edit': '编辑',
   'sftp.context.preview': '预览',
@@ -1267,6 +1273,15 @@ const zhCN: Messages = {
   'settings.terminal.rendering.renderer': '渲染器',
   'settings.terminal.rendering.renderer.desc': '选择终端渲染技术。自动模式会在低内存设备上使用 Canvas。更改将在新终端会话中生效。',
   'settings.terminal.rendering.auto': '自动',
+
+  // Settings > Terminal > Autocomplete
+  'settings.terminal.section.autocomplete': '自动补全',
+  'settings.terminal.autocomplete.enabled': '启用自动补全',
+  'settings.terminal.autocomplete.enabled.desc': '输入时根据历史命令和命令规范显示补全建议。',
+  'settings.terminal.autocomplete.ghostText': '行内建议',
+  'settings.terminal.autocomplete.ghostText.desc': '在光标后显示灰色的建议文本（类似 fish shell）。',
+  'settings.terminal.autocomplete.popupMenu': '弹出菜单',
+  'settings.terminal.autocomplete.popupMenu.desc': '显示包含多个建议的浮动列表。',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': '快捷键方案',
@@ -1604,6 +1619,10 @@ const zhCN: Messages = {
   'ai.providers.noMatchingModels': '没有匹配的模型',
   'ai.providers.clickToLoadModels': '点击加载模型',
   'ai.providers.showingModels': '显示前 100 个，共 {count} 个模型。输入以筛选。',
+  'ai.providers.advancedParams': '高级参数',
+  'ai.providers.advancedParams.hint': '留空则使用提供商默认值。',
+  'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
+  'ai.providers.advancedParams.default': '提供商默认',
 
   // AI Codex
   'ai.codex': 'Codex',

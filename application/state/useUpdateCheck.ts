@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkForUpdates, getReleaseUrl, type ReleaseInfo, type UpdateCheckResult } from '../../infrastructure/services/updateService';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
-import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE, STORAGE_KEY_AUTO_UPDATE_ENABLED } from '../../infrastructure/config/storageKeys';
+import { STORAGE_KEY_UPDATE_DISMISSED_VERSION, STORAGE_KEY_UPDATE_LAST_CHECK, STORAGE_KEY_UPDATE_LATEST_RELEASE, STORAGE_KEY_AUTO_UPDATE_ENABLED, STORAGE_KEY_DEBUG_UPDATE_DEMO } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 // Check for updates at most once per hour
@@ -13,8 +13,7 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 // arrives after 8s the duplicate check is avoided.
 const STARTUP_CHECK_DELAY_MS = 8000;
 // Enable demo mode for development (set via localStorage: localStorage.setItem('debug.updateDemo', '1'))
-const IS_UPDATE_DEMO_MODE = typeof window !== 'undefined' && 
-  window.localStorage?.getItem('debug.updateDemo') === '1';
+const IS_UPDATE_DEMO_MODE = localStorageAdapter.readString(STORAGE_KEY_DEBUG_UPDATE_DEMO) === '1';
 
 // Debug logging for update checks (no-op in production)
 const debugLog = (..._args: unknown[]) => {};
@@ -44,6 +43,8 @@ export interface UseUpdateCheckResult {
   dismissUpdate: () => void;
   openReleasePage: () => void;
   installUpdate: () => void;
+  startDownload: () => void;
+  isUpdateDemoMode: boolean;
 }
 
 /**
@@ -514,6 +515,46 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     netcattyBridge.get()?.installUpdate?.();
   }, []);
 
+  const startDownload = useCallback(async () => {
+    if (autoDownloadStatusRef.current === 'downloading' || autoDownloadStatusRef.current === 'ready') return;
+    const bridge = netcattyBridge.get();
+    try {
+      const checkResult = await bridge?.checkForUpdate?.();
+      if (!checkResult || checkResult.checking === true || checkResult.ready === true || checkResult.downloading === true) return;
+      if (checkResult.supported === false) {
+        openReleasePage();
+        return;
+      }
+      if (checkResult.available === false) {
+        openReleasePage();
+        return;
+      }
+    } catch {
+      return;
+    }
+    setUpdateState((prev) => ({
+      ...prev,
+      autoDownloadStatus: 'downloading',
+      downloadPercent: 0,
+      downloadError: null,
+    }));
+    void bridge?.downloadUpdate?.().then((res) => {
+      if (res && !res.success) {
+        setUpdateState((prev) => ({
+          ...prev,
+          autoDownloadStatus: 'error',
+          downloadError: res.error || 'Download failed',
+        }));
+      }
+    }).catch(() => {
+      setUpdateState((prev) => ({
+        ...prev,
+        autoDownloadStatus: 'error',
+        downloadError: 'Download failed',
+      }));
+    });
+  }, [openReleasePage]);
+
   // Startup check with delay - runs once on mount
   useEffect(() => {
     debugLog('Startup check effect mounted, IS_UPDATE_DEMO_MODE:', IS_UPDATE_DEMO_MODE);
@@ -653,5 +694,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     dismissUpdate,
     openReleasePage,
     installUpdate,
+    startDownload,
+    isUpdateDemoMode: IS_UPDATE_DEMO_MODE,
   };
 }

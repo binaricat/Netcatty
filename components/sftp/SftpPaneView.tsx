@@ -26,6 +26,7 @@ import { useSftpPaneVirtualList } from "./hooks/useSftpPaneVirtualList";
 import { useSftpDialogActionHandler } from "./hooks/useSftpDialogAction";
 import { useSftpBookmarks } from "./hooks/useSftpBookmarks";
 import { useLocalSftpBookmarks } from "./hooks/useLocalSftpBookmarks";
+import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
 
 interface SftpPaneWrapperProps {
   side: "left" | "right";
@@ -111,12 +112,36 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const localBookmarks = useLocalSftpBookmarks({
     currentPath: pane.connection?.currentPath,
   });
-  const {
-    bookmarks,
-    isCurrentPathBookmarked,
-    toggleBookmark,
-    deleteBookmark,
-  } = pane.connection?.isLocal ? localBookmarks : remoteBookmarks;
+  const globalBookmarks = useGlobalSftpBookmarks({
+    currentPath: pane.connection?.currentPath,
+  });
+  const hostBookmarks = pane.connection?.isLocal ? localBookmarks : remoteBookmarks;
+  const mergedBookmarks = useMemo(
+    () => [...globalBookmarks.bookmarks.map((b) => ({ ...b, global: true as const })), ...hostBookmarks.bookmarks],
+    [hostBookmarks.bookmarks, globalBookmarks.bookmarks],
+  );
+  const isCurrentPathBookmarked = hostBookmarks.isCurrentPathBookmarked || globalBookmarks.isCurrentPathBookmarked;
+  const toggleBookmark = useCallback(() => {
+    if (globalBookmarks.isCurrentPathBookmarked && !hostBookmarks.isCurrentPathBookmarked) {
+      const currentPath = pane.connection?.currentPath;
+      if (currentPath) {
+        const bm = globalBookmarks.bookmarks.find((b) => b.path === currentPath);
+        if (bm) globalBookmarks.deleteBookmark(bm.id);
+      }
+    } else {
+      hostBookmarks.toggleBookmark();
+    }
+  }, [hostBookmarks, globalBookmarks, pane.connection?.currentPath]);
+  const deleteBookmark = useCallback(
+    (id: string) => {
+      if (id.startsWith("gbm-")) {
+        globalBookmarks.deleteBookmark(id);
+      } else {
+        hostBookmarks.deleteBookmark(id);
+      }
+    },
+    [hostBookmarks, globalBookmarks],
+  );
 
   const { filteredFiles, sortedDisplayFiles } = useSftpPaneFiles({
     files: pane.files,
@@ -339,9 +364,11 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         setShowNewFileDialog={setShowNewFileDialog}
         setShowNewFolderDialog={setShowNewFolderDialog}
         setNewFolderName={setNewFolderName}
-        bookmarks={bookmarks}
+        bookmarks={mergedBookmarks}
         isCurrentPathBookmarked={isCurrentPathBookmarked}
         onToggleBookmark={toggleBookmark}
+        onAddGlobalBookmark={globalBookmarks.addBookmark}
+        isCurrentPathGlobalBookmarked={globalBookmarks.isCurrentPathBookmarked}
         onNavigateToBookmark={callbacks.onNavigateTo}
         onDeleteBookmark={deleteBookmark}
         showHiddenFiles={pane.showHiddenFiles}

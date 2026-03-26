@@ -30,6 +30,7 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
+  STORAGE_KEY_IMMERSIVE_MODE,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
@@ -120,8 +121,11 @@ const applyThemeTokens = (
   accentOverride: string,
 ) => {
   const root = window.document.documentElement;
-  root.classList.remove('light', 'dark');
-  root.classList.add(resolvedTheme);
+  // If immersive mode is active (style tag present), it owns the dark/light class — don't override
+  if (!document.getElementById('netcatty-immersive-override')) {
+    root.classList.remove('light', 'dark');
+    root.classList.add(resolvedTheme);
+  }
   root.style.setProperty('--background', tokens.background);
   root.style.setProperty('--foreground', tokens.foreground);
   root.style.setProperty('--card', tokens.card);
@@ -324,6 +328,21 @@ export const useSettingsState = () => {
     }
   }, []);
 
+  const [immersiveMode, setImmersiveModeState] = useState<boolean>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
+    if (stored === null || stored === '') {
+      // Persist default so collectSyncableSettings() can include it
+      localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, 'true');
+      return true;
+    }
+    return stored === 'true';
+  });
+  const setImmersiveMode = useCallback((enabled: boolean) => {
+    setImmersiveModeState(enabled);
+    localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(enabled));
+    notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, enabled);
+  }, [notifySettingsChanged]);
+
   const syncAppearanceFromStorage = useCallback(() => {
     const storedTheme = readStoredString(STORAGE_KEY_THEME);
     const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
@@ -415,9 +434,17 @@ export const useSettingsState = () => {
     const storedAutoOpenSidebar = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
     if (storedAutoOpenSidebar === 'true' || storedAutoOpenSidebar === 'false') setSftpAutoOpenSidebar(storedAutoOpenSidebar === 'true');
 
+    // Immersive mode
+    const storedImmersive = readStoredString(STORAGE_KEY_IMMERSIVE_MODE);
+    if (storedImmersive === 'true' || storedImmersive === 'false') {
+      const val = storedImmersive === 'true';
+      setImmersiveModeState(val);
+      notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, val);
+    }
+
     // Custom terminal themes
     customThemeStore.loadFromStorage();
-  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
+  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings, notifySettingsChanged]);
 
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
@@ -558,6 +585,9 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR && typeof value === 'boolean') {
         setSftpAutoOpenSidebar((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_IMMERSIVE_MODE && typeof value === 'boolean') {
+        setImmersiveModeState((prev) => (prev === value ? prev : value));
+      }
     });
     return () => {
       try {
@@ -595,7 +625,7 @@ export const useSettingsState = () => {
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   });
   settingsSnapshotRef.current = {
     theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent,
@@ -604,7 +634,7 @@ export const useSettingsState = () => {
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   };
 
   // Listen for storage changes from other windows (cross-window sync)
@@ -765,6 +795,13 @@ export const useSettingsState = () => {
         const newValue = e.newValue === 'true';
         if (newValue !== s.autoUpdateEnabled) {
           setAutoUpdateEnabled(newValue);
+        }
+      }
+      // Sync immersive mode from other windows
+      if (e.key === STORAGE_KEY_IMMERSIVE_MODE && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.immersiveMode) {
+          setImmersiveModeState(newValue);
         }
       }
     };
@@ -1053,6 +1090,12 @@ export const useSettingsState = () => {
     setTerminalSettings(prev => ({ ...prev, [key]: value }));
   }, [setTerminalSettings]);
 
+  /** Re-apply the current UI theme tokens (used to restore after immersive mode override). */
+  const reapplyCurrentTheme = useCallback(() => {
+    const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
+    applyThemeTokens(theme, resolvedTheme, tokens, accentMode, customAccent);
+  }, [theme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
+
   return {
     theme,
     setTheme,
@@ -1127,6 +1170,9 @@ export const useSettingsState = () => {
     globalHotkeyEnabled,
     setGlobalHotkeyEnabled,
     rehydrateAllFromStorage,
+    reapplyCurrentTheme,
+    immersiveMode,
+    setImmersiveMode,
     // Opaque version that changes when any synced setting changes, used by useAutoSync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     settingsVersion: useMemo(() => Math.random(), [
@@ -1135,7 +1181,7 @@ export const useSettingsState = () => {
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar,
-      customThemes,
+      customThemes, immersiveMode,
     ]),
   };
 };

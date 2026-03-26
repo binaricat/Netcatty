@@ -1,5 +1,5 @@
 import type { RemoteFile, SftpFilenameEncoding } from "./types";
-import type { S3Config, SMBConfig, SyncedFile, WebDAVConfig } from "./domain/sync";
+import type { S3Config, SyncedFile, WebDAVConfig } from "./domain/sync";
 
 declare module "*.cjs" {
   const value: Record<string, unknown>;
@@ -440,14 +440,6 @@ declare global {
     cloudSyncS3Download?(config: S3Config): Promise<{ syncedFile: SyncedFile | null }>;
     cloudSyncS3Delete?(config: S3Config): Promise<{ ok: true }>;
 
-    cloudSyncSmbInitialize?(config: SMBConfig): Promise<{ resourceId: string | null }>;
-    cloudSyncSmbUpload?(
-      config: SMBConfig,
-      syncedFile: SyncedFile
-    ): Promise<{ resourceId: string }>;
-    cloudSyncSmbDownload?(config: SMBConfig): Promise<{ syncedFile: SyncedFile | null }>;
-    cloudSyncSmbDelete?(config: SMBConfig): Promise<{ ok: true }>;
-
     // Port Forwarding
     startPortForward?(options: PortForwardOptions): Promise<PortForwardResult>;
     stopPortForward?(tunnelId: string): Promise<PortForwardResult>;
@@ -670,7 +662,6 @@ declare global {
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
-    aiTerminalWrite?(sessionId: string, data: string): Promise<{ ok: boolean; error?: string }>;
     aiDiscoverAgents?(): Promise<Array<{
       command: string;
       name: string;

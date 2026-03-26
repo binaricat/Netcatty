@@ -54,6 +54,7 @@ import { useTerminalContextActions } from "./terminal/hooks/useTerminalContextAc
 import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useServerStats } from "./terminal/hooks/useServerStats";
 import { extractDropEntries, getPathForFile, DropEntry } from "../lib/sftpFileUtils";
+import { useTerminalAutocomplete, AutocompletePopup } from "./terminal/autocomplete";
 
 /**
  * Extract unique root paths from drop entries for local terminal path insertion.
@@ -296,6 +297,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const snippetsRef = useRef(snippets);
   snippetsRef.current = snippets;
 
+  // Autocomplete handler refs (set after hook initialization)
+  const autocompleteKeyEventRef = useRef<((e: KeyboardEvent) => boolean) | undefined>(undefined);
+  const autocompleteInputRef = useRef<((data: string) => void) | undefined>(undefined);
+
   const terminalBackend = useTerminalBackend();
   const { resizeSession, setSessionEncoding } = terminalBackend;
 
@@ -346,6 +351,96 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleFindPrevious,
     handleCloseSearch,
   } = terminalSearch;
+
+  // Terminal autocomplete — onAcceptText writes directly to session (no CustomEvent)
+  const autocompleteAcceptTextRef = useRef<((text: string) => void) | undefined>(undefined);
+  autocompleteAcceptTextRef.current = (text: string) => {
+    const id = sessionRef.current;
+    if (id && text) {
+      // Serial line mode: buffer text and handle local echo instead of direct send
+      if (host.protocol === "serial" && serialConfig?.lineMode) {
+        for (const ch of text) {
+          if (ch === "\r") {
+            const line = serialLineBufferRef.current + "\r";
+            terminalBackend.writeToSession(id, line);
+            serialLineBufferRef.current = "";
+            if (serialConfig?.localEcho) termRef.current?.write("\r\n");
+          } else if (ch === "\x15") {
+            if (serialConfig?.localEcho && serialLineBufferRef.current.length > 0) {
+              termRef.current?.write("\b \b".repeat(serialLineBufferRef.current.length));
+            }
+            serialLineBufferRef.current = "";
+          } else if (ch === "\b" || ch === "\x7f") {
+            if (serialLineBufferRef.current.length > 0) {
+              serialLineBufferRef.current = serialLineBufferRef.current.slice(0, -1);
+              if (serialConfig?.localEcho) termRef.current?.write("\b \b");
+            }
+          } else if (ch.charCodeAt(0) >= 32) {
+            serialLineBufferRef.current += ch;
+            if (serialConfig?.localEcho) termRef.current?.write(ch);
+          }
+        }
+        // Still update commandBuffer and broadcast for serial line mode
+        // (fall through to shared bookkeeping below — don't return early)
+      } else if (host.protocol === "serial" && serialConfig?.localEcho) {
+        // Serial character mode with local echo: echo accepted text locally
+        terminalBackend.writeToSession(id, text);
+        for (const ch of text) {
+          if (ch === "\r") {
+            termRef.current?.write("\r\n");
+          } else if (ch.charCodeAt(0) >= 32) {
+            termRef.current?.write(ch);
+          }
+        }
+      } else {
+        terminalBackend.writeToSession(id, text);
+      }
+
+      // Broadcast to other sessions if broadcast mode is enabled
+      if (isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
+        onBroadcastInputRef.current(text, sessionId);
+      }
+
+      // Update command buffer for onCommandExecuted tracking
+      for (const ch of text) {
+        if (ch === "\r" || ch === "\n") {
+          const cmd = commandBufferRef.current.trim();
+          if (cmd && onCommandExecuted) onCommandExecuted(cmd, host.id, host.label, sessionId);
+          commandBufferRef.current = "";
+        } else if (ch === "\x15") {
+          // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
+          commandBufferRef.current = "";
+        } else if (ch === "\b" || ch === "\x7f") {
+          // Backspace: remove last character (Windows fuzzy replacement uses \b)
+          commandBufferRef.current = commandBufferRef.current.slice(0, -1);
+        } else if (ch.charCodeAt(0) >= 32) {
+          commandBufferRef.current += ch;
+        }
+      }
+    }
+  };
+
+  const autocomplete = useTerminalAutocomplete({
+    termRef,
+    sessionId,
+    hostId: host.id,
+    hostOs: host.os || (host.protocol === "local"
+      ? (navigator.platform?.startsWith("Win") ? "windows" : navigator.platform?.startsWith("Mac") ? "macos" : "linux")
+      : "linux"),
+    settings: terminalSettings ? {
+      enabled: terminalSettings.autocompleteEnabled ?? true,
+      showGhostText: terminalSettings.autocompleteGhostText ?? true,
+      showPopupMenu: terminalSettings.autocompletePopupMenu ?? true,
+      debounceMs: terminalSettings.autocompleteDebounceMs ?? 100,
+      minChars: terminalSettings.autocompleteMinChars ?? 1,
+      maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 8,
+    } : undefined,
+    onAcceptText: (text) => autocompleteAcceptTextRef.current?.(text),
+  });
+
+  // Wire up autocomplete handler refs so createXTermRuntime can use them
+  autocompleteKeyEventRef.current = autocomplete.handleKeyEvent;
+  autocompleteInputRef.current = autocomplete.handleInput;
 
   // Check if this is a local or serial connection (doesn't need connection dialog during connecting)
   const isLocalConnection = host.protocol === "local";
@@ -545,6 +640,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           serialLineMode: serialConfig?.lineMode,
           serialLineBufferRef,
           onOsc52ReadRequest: handleOsc52ReadRequest,
+          // Autocomplete integration
+          onAutocompleteKeyEvent: (e: KeyboardEvent) => autocompleteKeyEventRef.current?.(e) ?? true,
+          onAutocompleteInput: (data: string) => autocompleteInputRef.current?.(data),
         });
 
         xtermRuntimeRef.current = runtime;
@@ -1767,6 +1865,29 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               backgroundColor: effectiveTheme.colors.background,
             }}
           />
+
+          {/* Autocomplete popup overlay — pointer-events-none so terminal stays interactive */}
+          {autocomplete.state.popupVisible && autocomplete.state.suggestions.length > 0 && (
+            <div
+              className="absolute inset-x-0 bottom-0 pointer-events-none"
+              style={{
+                top: isSearchOpen ? "64px" : "30px",
+                paddingLeft: 6,
+              }}
+            >
+              <div className="relative w-full h-full">
+                <AutocompletePopup
+                  suggestions={autocomplete.state.suggestions}
+                  selectedIndex={autocomplete.state.selectedIndex}
+                  position={autocomplete.state.popupPosition}
+                  visible={autocomplete.state.popupVisible}
+                  expandUpward={autocomplete.state.expandUpward}
+                  themeColors={effectiveTheme.colors}
+                  onSelect={autocomplete.selectSuggestion}
+                />
+              </div>
+            </div>
+          )}
 
           {needsHostKeyVerification && pendingHostKeyInfo && (
             <div className="absolute inset-0 z-30 bg-background">

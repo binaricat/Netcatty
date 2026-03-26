@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { KeyBinding, matchesKeyBinding } from '../../domain/models';
 
-export interface HotkeyActions {
+interface HotkeyActions {
   // Tab management
   switchToTab: (tabIndex: number) => void;
   nextTab: () => void;

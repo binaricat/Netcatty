@@ -6,7 +6,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const net = require("node:net");
 const { TextDecoder } = require("node:util");
 const SftpClient = require("ssh2-sftp-client");
 const { Client: SSHClient } = require("ssh2");
@@ -412,17 +411,7 @@ function buildSftpAlgorithms(legacyEnabled) {
   return algorithms;
 }
 
-/**
- * Send message to renderer safely
- */
-function safeSend(sender, channel, payload) {
-  try {
-    if (!sender || sender.isDestroyed()) return;
-    sender.send(channel, payload);
-  } catch {
-    // Ignore destroyed webContents during shutdown.
-  }
-}
+const { safeSend } = require("./ipcUtils.cjs");
 
 /**
  * Initialize the SFTP bridge with dependencies

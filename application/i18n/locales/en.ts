@@ -231,6 +231,9 @@ const en: Messages = {
   'settings.appearance.themeColor.desc': 'Pick a preset palette for each theme',
   'settings.appearance.themeColor.light': 'Light palette',
   'settings.appearance.themeColor.dark': 'Dark palette',
+  'settings.appearance.immersiveMode': 'Immersive Mode',
+  'settings.appearance.immersiveMode.desc':
+    'When enabled, the UI chrome (tab bar, sidebar, status bar) adapts its colors to match the active terminal theme for a visually cohesive experience.',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
     'Add custom CSS to personalize the app appearance. Changes apply immediately.',
@@ -351,6 +354,15 @@ const en: Messages = {
   'settings.terminal.rendering.renderer': 'Renderer',
   'settings.terminal.rendering.renderer.desc': 'Choose the terminal rendering technology. Auto will use Canvas on low-memory devices. Changes take effect on new terminal sessions.',
   'settings.terminal.rendering.auto': 'Auto',
+
+  // Settings > Terminal > Autocomplete
+  'settings.terminal.section.autocomplete': 'Autocomplete',
+  'settings.terminal.autocomplete.enabled': 'Enable autocomplete',
+  'settings.terminal.autocomplete.enabled.desc': 'Show command suggestions based on history and command specs as you type.',
+  'settings.terminal.autocomplete.ghostText': 'Ghost text',
+  'settings.terminal.autocomplete.ghostText.desc': 'Show inline gray suggestion text after the cursor (like fish shell).',
+  'settings.terminal.autocomplete.popupMenu': 'Popup menu',
+  'settings.terminal.autocomplete.popupMenu.desc': 'Show a floating list of multiple suggestions.',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Hotkey Scheme',
@@ -601,6 +613,8 @@ const en: Messages = {
   'sftp.filter.placeholder': 'Filter by filename...',
   'sftp.bookmark.add': 'Bookmark this path',
   'sftp.bookmark.remove': 'Remove bookmark',
+  'sftp.bookmark.addGlobal': '+Global',
+  'sftp.bookmark.addGlobalTooltip': 'Save as global bookmark (shared across all hosts)',
   'sftp.bookmark.empty': 'No bookmarks yet',
   'sftp.columns.name': 'Name',
   'sftp.columns.modified': 'Modified',
@@ -718,6 +732,7 @@ const en: Messages = {
   'sftp.upload.phase.compressed': 'Compressed',
 
   // SFTP File Opener
+  'sftp.context.copyPath': 'Copy file path',
   'sftp.context.openWith': 'Open with...',
   'sftp.context.edit': 'Edit',
   'sftp.context.preview': 'Preview',
@@ -1590,6 +1605,10 @@ const en: Messages = {
   'ai.providers.noMatchingModels': 'No matching models',
   'ai.providers.clickToLoadModels': 'Click to load models',
   'ai.providers.showingModels': 'Showing first 100 of {count} models. Type to filter.',
+  'ai.providers.advancedParams': 'Advanced Parameters',
+  'ai.providers.advancedParams.hint': 'Leave blank to use provider defaults.',
+  'ai.providers.advancedParams.maxTokens.placeholder': 'e.g. 4096',
+  'ai.providers.advancedParams.default': 'Provider default',
 
   // AI Codex
   'ai.codex': 'Codex',

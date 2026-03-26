@@ -36,6 +36,7 @@ interface TopTabsProps {
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   onSyncNow?: () => Promise<void>;
+  isImmersiveActive?: boolean;
   onStartSessionDrag: (sessionId: string) => void;
   onEndSessionDrag: () => void;
   onReorderTabs: (draggedId: string, targetId: string, position: 'before' | 'after') => void;
@@ -217,6 +218,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onToggleTheme,
   onOpenSettings,
   onSyncNow,
+  isImmersiveActive,
   onStartSessionDrag,
   onEndSessionDrag,
   onReorderTabs,
@@ -765,6 +767,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             size="icon"
             className="h-6 w-6 text-muted-foreground hover:text-foreground app-no-drag"
             onClick={onToggleTheme}
+            disabled={isImmersiveActive}
             title="Toggle theme"
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
@@ -788,10 +791,12 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.orphanSessions === next.orphanSessions &&
     prev.workspaces === next.workspaces &&
     prev.orderedTabs === next.orderedTabs &&
+    prev.logViews === next.logViews &&
     prev.draggingSessionId === next.draggingSessionId &&
     prev.isMacClient === next.isMacClient &&
     prev.onOpenSettings === next.onOpenSettings &&
-    prev.onSyncNow === next.onSyncNow
+    prev.onSyncNow === next.onSyncNow &&
+    prev.isImmersiveActive === next.isImmersiveActive
   );
 };
 

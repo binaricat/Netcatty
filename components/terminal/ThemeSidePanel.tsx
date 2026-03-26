@@ -39,7 +39,7 @@ const ThemeItem = memo(({
     onClick={() => onSelect(theme.id)}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(theme.id); } }}
     className={cn(
-      'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors group cursor-pointer',
+      'w-full flex items-center gap-2.5 px-3 py-2 text-left group cursor-pointer',
       isSelected
         ? 'bg-accent/50'
         : 'hover:bg-accent/50'

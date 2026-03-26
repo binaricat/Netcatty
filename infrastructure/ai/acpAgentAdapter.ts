@@ -32,7 +32,7 @@ interface AcpBridge {
     model?: string,
     existingSessionId?: string,
     historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
-    images?: ImageAttachment[],
+    images?: FileAttachment[],
   ): Promise<{ ok: boolean; error?: string }>;
   aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
@@ -57,9 +57,6 @@ export interface FileAttachment {
   filePath?: string;
 }
 
-/** @deprecated Use FileAttachment instead */
-export type ImageAttachment = FileAttachment;
-
 export async function runAcpAgentTurn(
   bridge: Record<string, (...args: unknown[]) => unknown>,
   requestId: string,
@@ -72,7 +69,7 @@ export async function runAcpAgentTurn(
   model?: string,
   existingSessionId?: string,
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  images?: ImageAttachment[],
+  images?: FileAttachment[],
 ): Promise<void> {
   const acpBridge = bridge as unknown as AcpBridge;
 

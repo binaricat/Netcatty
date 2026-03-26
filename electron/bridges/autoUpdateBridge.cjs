@@ -283,6 +283,17 @@ function registerHandlers(ipcMain) {
       return { available: false, supported: true, checking: true };
     }
 
+    // If a download is already in progress or the update is ready to install,
+    // skip the check entirely — calling checkForUpdates() while downloading
+    // can cause electron-updater to error, which corrupts the download state
+    // and forces the user to download manually (GitHub issue #522).
+    if (_isDownloading) {
+      return { available: true, supported: true, downloading: true, version: _lastStatus.version };
+    }
+    if (_lastStatus.status === 'ready') {
+      return { available: true, supported: true, ready: true, version: _lastStatus.version };
+    }
+
     try {
       _isChecking = true;
       _lastStatus = { ..._lastStatus, isChecking: true };
@@ -324,16 +335,22 @@ function registerHandlers(ipcMain) {
 
   // ---- Download update ---------------------------------------------------
   ipcMain.handle("netcatty:update:download", async () => {
+    if (_isDownloading) {
+      return { success: true };
+    }
     const updater = getAutoUpdater();
     if (!updater) {
       return { success: false, error: "Update module not available." };
     }
     try {
-      // Global listeners (registered in setupGlobalListeners) handle all
-      // progress/downloaded/error events. Just trigger the download.
+      _isDownloading = true;
+      _lastStatus = { ..._lastStatus, status: 'downloading', percent: 0, error: null };
       await updater.downloadUpdate();
       return { success: true };
     } catch (err) {
+      _isDownloading = false;
+      _lastStatus = { ..._lastStatus, status: 'error', error: err?.message || "Download failed", percent: 0 };
+      // Don't broadcast here — the global updater "error" listener already handles it
       console.error("[AutoUpdate] Download failed:", err?.message || err);
       return { success: false, error: err?.message || "Download failed" };
     }

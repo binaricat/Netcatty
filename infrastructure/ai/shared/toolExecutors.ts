@@ -78,9 +78,16 @@ export async function executeTerminalExecute(
   if (isObserver(permissionMode)) {
     return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
   }
-  const safety = checkCommandSafety(command, commandBlocklist);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
+  // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
+  // disables an interface on Cisco). Skip for serial sessions. The bridge layer
+  // (handleExec / netcatty:ai:exec) also has its own session-aware check.
+  const resolved = resolveContext(context);
+  const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
+  if (targetSession?.protocol !== 'serial') {
+    const safety = checkCommandSafety(command, commandBlocklist);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
+    }
   }
 
   const result = await bridge.aiExec(sessionId, command, deps.chatSessionId);

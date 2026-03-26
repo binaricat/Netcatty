@@ -89,6 +89,7 @@ interface SettingsSystemTabProps {
   checkNow: () => Promise<unknown>;
   installUpdate: () => void;
   openReleasePage: () => void;
+  startDownload: () => void;
 }
 
 const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
@@ -111,6 +112,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   checkNow,
   installUpdate,
   openReleasePage,
+  startDownload,
 }) => {
   const { t } = useI18n();
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
@@ -463,7 +465,16 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   </Button>
                 )}
 
-                {/* Open releases — shown when update found on unsupported platform, or on check error */}
+                {/* Download button — shown when update found and no download in progress */}
+                {updateState.autoDownloadStatus === 'idle' &&
+                  updateState.manualCheckStatus === 'available' && (
+                  <Button variant="outline" size="sm" onClick={startDownload}>
+                    <Download size={14} className="mr-1.5" />
+                    {t('update.downloadNow')}
+                  </Button>
+                )}
+
+                {/* Open releases — fallback for unsupported platforms or check errors */}
                 {updateState.autoDownloadStatus === 'idle' &&
                   (updateState.manualCheckStatus === 'available' || updateState.manualCheckStatus === 'error' || (updateState.manualCheckStatus === 'idle' && updateState.hasUpdate)) && (
                   <Button variant="ghost" size="sm" onClick={openReleasePage}>
