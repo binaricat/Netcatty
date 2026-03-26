@@ -1,20 +1,17 @@
 /**
  * Popup autocomplete menu for terminal.
  * Renders a floating list of completion suggestions near the terminal cursor.
+ * Shows a detail tooltip for the selected/hovered item with full description.
  * Colors are derived from the active terminal theme for visual consistency.
  */
 
-import React, { useEffect, useRef, memo } from "react";
+import React, { useEffect, useRef, useState, memo } from "react";
 import type { CompletionSuggestion, SuggestionSource } from "./completionEngine";
 
 export interface AutocompleteThemeColors {
-  /** Terminal background color */
   background: string;
-  /** Terminal foreground color */
   foreground: string;
-  /** Terminal selection/highlight color */
   selection: string;
-  /** Cursor color (used for accents) */
   cursor: string;
 }
 
@@ -23,20 +20,18 @@ interface AutocompletePopupProps {
   selectedIndex: number;
   position: { x: number; y: number };
   visible: boolean;
-  /** When true, the popup grows upward — bottom edge anchored at position.y */
   expandUpward?: boolean;
-  /** Terminal theme colors for consistent styling */
   themeColors?: AutocompleteThemeColors;
   onSelect: (suggestion: CompletionSuggestion) => void;
   maxHeight?: number;
 }
 
-const SOURCE_LABELS: Record<SuggestionSource, { label: string; fallbackColor: string }> = {
-  history: { label: "h", fallbackColor: "#FBBF24" },
-  command: { label: "c", fallbackColor: "#34D399" },
-  subcommand: { label: "s", fallbackColor: "#60A5FA" },
-  option: { label: "o", fallbackColor: "#A78BFA" },
-  arg: { label: "a", fallbackColor: "#F87171" },
+const SOURCE_LABELS: Record<SuggestionSource, { label: string; fullLabel: string; fallbackColor: string }> = {
+  history: { label: "h", fullLabel: "History", fallbackColor: "#FBBF24" },
+  command: { label: "c", fullLabel: "Command", fallbackColor: "#34D399" },
+  subcommand: { label: "s", fullLabel: "Subcommand", fallbackColor: "#60A5FA" },
+  option: { label: "o", fullLabel: "Option", fallbackColor: "#A78BFA" },
+  arg: { label: "a", fullLabel: "Argument", fallbackColor: "#F87171" },
 };
 
 const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
@@ -47,12 +42,12 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   expandUpward = false,
   themeColors,
   onSelect,
-  maxHeight = 200,
+  maxHeight = 240,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+  const [hoveredIndex, setHoveredIndex] = useState(-1);
 
-  // Scroll selected item into view
   useEffect(() => {
     if (selectedRef.current && listRef.current) {
       selectedRef.current.scrollIntoView({
@@ -62,12 +57,15 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     }
   }, [selectedIndex]);
 
+  // Reset hover when suggestions change
+  useEffect(() => {
+    setHoveredIndex(-1);
+  }, [suggestions]);
+
   if (!visible || suggestions.length === 0) return null;
 
-  // Derive colors from terminal theme
   const bg = themeColors?.background ?? "#1e1e2e";
   const fg = themeColors?.foreground ?? "#cdd6f4";
-  // Computed theme-aware colors
   const popupBg = `color-mix(in srgb, ${bg} 92%, ${fg} 8%)`;
   const popupBorder = `color-mix(in srgb, ${bg} 75%, ${fg} 25%)`;
   const selectedBg = `color-mix(in srgb, ${bg} 78%, ${fg} 22%)`;
@@ -75,10 +73,25 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const textColor = fg;
   const dimTextColor = `color-mix(in srgb, ${fg} 50%, ${bg} 50%)`;
 
+  // Determine which item to show the detail tooltip for
+  const detailIndex = hoveredIndex >= 0 ? hoveredIndex : selectedIndex;
+  const detailItem = detailIndex >= 0 ? suggestions[detailIndex] : null;
+  const showDetail = detailItem?.description && detailItem.description.length > 0;
+
+  const sharedBoxStyle = {
+    backgroundColor: popupBg,
+    border: `1px solid ${popupBorder}`,
+    borderRadius: "6px",
+    boxShadow: expandUpward
+      ? "0 -4px 12px rgba(0, 0, 0, 0.4)"
+      : "0 4px 12px rgba(0, 0, 0, 0.4)",
+    fontFamily: "inherit",
+    fontSize: "13px",
+    color: textColor,
+  };
+
   return (
     <div
-      ref={listRef}
-      className="xterm-autocomplete-popup"
       style={{
         position: "absolute",
         left: `${position.x}px`,
@@ -86,125 +99,171 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
           ? { bottom: `calc(100% - ${position.y}px)` }
           : { top: `${position.y}px` }),
         zIndex: 1000,
-        maxHeight: `${maxHeight}px`,
-        minWidth: "200px",
-        maxWidth: "500px",
-        overflowY: "auto",
-        overflowX: "hidden",
-        backgroundColor: popupBg,
-        border: `1px solid ${popupBorder}`,
-        borderRadius: "6px",
-        boxShadow: expandUpward
-          ? "0 -4px 12px rgba(0, 0, 0, 0.4)"
-          : "0 4px 12px rgba(0, 0, 0, 0.4)",
-        fontFamily: "inherit",
-        fontSize: "13px",
-        padding: "4px 0",
-        userSelect: "none",
-        color: textColor,
+        display: "flex",
+        alignItems: expandUpward ? "flex-end" : "flex-start",
+        gap: "4px",
       }}
       onMouseDown={(e) => {
-        // Prevent terminal from losing focus
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      {suggestions.map((suggestion, index) => {
-        const isSelected = index === selectedIndex;
-        const sourceInfo = SOURCE_LABELS[suggestion.source];
+      {/* Main suggestion list */}
+      <div
+        ref={listRef}
+        className="xterm-autocomplete-popup"
+        style={{
+          ...sharedBoxStyle,
+          maxHeight: `${maxHeight}px`,
+          minWidth: "180px",
+          maxWidth: "400px",
+          overflowY: "auto",
+          overflowX: "hidden",
+          padding: "4px 0",
+          userSelect: "none",
+        }}
+      >
+        {suggestions.map((suggestion, index) => {
+          const isSelected = index === selectedIndex;
+          const isHovered = index === hoveredIndex;
+          const sourceInfo = SOURCE_LABELS[suggestion.source];
 
-        return (
-          <div
-            key={`${suggestion.text}-${index}`}
-            ref={isSelected ? selectedRef : undefined}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              padding: "4px 8px",
-              cursor: "pointer",
-              backgroundColor: isSelected ? selectedBg : "transparent",
-              gap: "8px",
-              lineHeight: "1.4",
-            }}
-            onMouseEnter={(e) => {
-              if (!isSelected) {
-                (e.currentTarget as HTMLDivElement).style.backgroundColor = hoverBg;
-              }
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLDivElement).style.backgroundColor =
-                isSelected ? selectedBg : "transparent";
-            }}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onSelect(suggestion);
-            }}
-          >
-            {/* Command text */}
-            <span
+          return (
+            <div
+              key={`${suggestion.text}-${index}`}
+              ref={isSelected ? selectedRef : undefined}
               style={{
-                flex: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                color: textColor,
+                display: "flex",
+                alignItems: "center",
+                padding: "5px 10px",
+                cursor: "pointer",
+                backgroundColor: isSelected ? selectedBg : isHovered ? hoverBg : "transparent",
+                gap: "8px",
+                lineHeight: "1.4",
+              }}
+              onMouseEnter={() => setHoveredIndex(index)}
+              onMouseLeave={() => setHoveredIndex(-1)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelect(suggestion);
               }}
             >
-              {suggestion.displayText}
-            </span>
-
-            {/* Description */}
-            {suggestion.description && (
+              {/* Source indicator */}
               <span
                 style={{
-                  fontSize: "11px",
-                  color: dimTextColor,
+                  width: "18px",
+                  height: "18px",
+                  borderRadius: "3px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  color: sourceInfo.fallbackColor,
+                  backgroundColor: `${sourceInfo.fallbackColor}15`,
+                  flexShrink: 0,
+                }}
+              >
+                {sourceInfo.label}
+              </span>
+
+              {/* Command text */}
+              <span
+                style={{
+                  flex: 1,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  maxWidth: "150px",
-                  flexShrink: 0,
+                  color: textColor,
+                  fontWeight: isSelected ? 500 : 400,
                 }}
               >
-                {suggestion.description}
+                {suggestion.displayText}
               </span>
-            )}
 
-            {/* Frequency badge for history */}
-            {suggestion.frequency && suggestion.frequency > 1 && (
-              <span
-                style={{
-                  fontSize: "10px",
-                  color: dimTextColor,
-                  flexShrink: 0,
-                }}
-              >
-                ×{suggestion.frequency}
-              </span>
-            )}
+              {/* Inline description (truncated) */}
+              {suggestion.description && (
+                <span
+                  style={{
+                    fontSize: "11px",
+                    color: dimTextColor,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    maxWidth: "160px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {suggestion.description}
+                </span>
+              )}
 
-            {/* Source indicator */}
+              {/* Frequency badge for history */}
+              {suggestion.frequency && suggestion.frequency > 1 && (
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: dimTextColor,
+                    flexShrink: 0,
+                  }}
+                >
+                  ×{suggestion.frequency}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Detail tooltip panel — shows full description for selected/hovered item */}
+      {showDetail && detailItem && (
+        <div
+          style={{
+            ...sharedBoxStyle,
+            padding: "10px 12px",
+            maxWidth: "280px",
+            minWidth: "160px",
+            alignSelf: expandUpward ? "flex-end" : "flex-start",
+          }}
+        >
+          {/* Header: command name + source type */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              marginBottom: "6px",
+            }}
+          >
+            <span style={{ fontWeight: 600, fontSize: "13px" }}>
+              {detailItem.displayText}
+            </span>
             <span
               style={{
-                width: "16px",
-                height: "16px",
-                borderRadius: "3px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
                 fontSize: "10px",
-                fontWeight: 600,
-                color: sourceInfo.fallbackColor,
-                backgroundColor: `${sourceInfo.fallbackColor}20`,
-                flexShrink: 0,
+                color: SOURCE_LABELS[detailItem.source].fallbackColor,
+                padding: "1px 5px",
+                borderRadius: "3px",
+                backgroundColor: `${SOURCE_LABELS[detailItem.source].fallbackColor}15`,
               }}
             >
-              {sourceInfo.label}
+              {SOURCE_LABELS[detailItem.source].fullLabel}
             </span>
           </div>
-        );
-      })}
+          {/* Full description */}
+          <div
+            style={{
+              fontSize: "12px",
+              color: dimTextColor,
+              lineHeight: "1.5",
+              wordBreak: "break-word",
+            }}
+          >
+            {detailItem.description}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
