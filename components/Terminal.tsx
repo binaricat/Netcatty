@@ -1811,6 +1811,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   selectedIndex={autocomplete.state.selectedIndex}
                   position={autocomplete.state.popupPosition}
                   visible={autocomplete.state.popupVisible}
+                  expandUpward={autocomplete.state.expandUpward}
                   onSelect={autocomplete.selectSuggestion}
                   onClose={autocomplete.closePopup}
                 />

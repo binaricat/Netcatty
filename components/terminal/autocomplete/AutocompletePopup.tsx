@@ -12,6 +12,8 @@ interface AutocompletePopupProps {
   selectedIndex: number;
   position: { x: number; y: number };
   visible: boolean;
+  /** When true, the popup grows upward — bottom edge anchored at position.y */
+  expandUpward?: boolean;
   onSelect: (suggestion: CompletionSuggestion) => void;
   onClose?: () => void;
   maxHeight?: number;
@@ -30,6 +32,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   selectedIndex,
   position,
   visible,
+  expandUpward = false,
   onSelect,
   onClose: _onClose,
   maxHeight = 200,
@@ -56,7 +59,9 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
       style={{
         position: "absolute",
         left: `${position.x}px`,
-        top: `${position.y}px`,
+        ...(expandUpward
+          ? { bottom: `calc(100% - ${position.y}px)` }
+          : { top: `${position.y}px` }),
         zIndex: 1000,
         maxHeight: `${maxHeight}px`,
         minWidth: "200px",
@@ -66,7 +71,9 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
         backgroundColor: "var(--autocomplete-bg, #1e1e2e)",
         border: "1px solid var(--autocomplete-border, #45475a)",
         borderRadius: "6px",
-        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.4)",
+        boxShadow: expandUpward
+          ? "0 -4px 12px rgba(0, 0, 0, 0.4)"
+          : "0 4px 12px rgba(0, 0, 0, 0.4)",
         fontFamily: "var(--font-mono, monospace)",
         fontSize: "13px",
         padding: "4px 0",

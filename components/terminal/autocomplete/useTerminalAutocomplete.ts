@@ -57,6 +57,8 @@ export interface AutocompleteState {
   popupVisible: boolean;
   /** Popup position (px) */
   popupPosition: { x: number; y: number };
+  /** Whether popup expands upward (when cursor is near bottom) */
+  expandUpward: boolean;
 }
 
 interface UseTerminalAutocompleteOptions {
@@ -107,7 +109,8 @@ export function useTerminalAutocomplete(
     selectedIndex: -1,
     popupVisible: false,
     popupPosition: { x: 0, y: 0 },
-  });
+    expandUpward: false,
+  } as AutocompleteState);
 
   const ghostAddonRef = useRef<GhostTextAddon | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,17 +184,18 @@ export function useTerminalAutocomplete(
       if (disposedRef.current) return;
 
       if (completions.length > 0) {
-        const pos = calculatePopupPosition(term);
+        const { position, expandUpward } = calculatePopupPosition(term, completions.length);
         setState({
           suggestions: completions,
           selectedIndex: 0,
           popupVisible: true,
-          popupPosition: pos,
+          popupPosition: position,
+          expandUpward,
         });
       } else {
         setState((prev) =>
           prev.popupVisible
-            ? { ...prev, suggestions: [], popupVisible: false, selectedIndex: -1 }
+            ? { ...prev, suggestions: [], popupVisible: false, selectedIndex: -1, expandUpward: false }
             : prev,
         );
       }
@@ -502,10 +506,14 @@ export function useTerminalAutocomplete(
 
 /**
  * Calculate popup position based on terminal cursor.
+ * When the cursor is near the bottom of the terminal, the popup expands upward.
  */
-function calculatePopupPosition(term: XTerm): { x: number; y: number } {
+function calculatePopupPosition(
+  term: XTerm,
+  itemCount: number,
+): { position: { x: number; y: number }; expandUpward: boolean } {
   const termElement = term.element;
-  if (!termElement) return { x: 0, y: 0 };
+  if (!termElement) return { position: { x: 0, y: 0 }, expandUpward: false };
 
   const coreAccess = term as XTerm & {
     _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } };
@@ -517,9 +525,31 @@ function calculatePopupPosition(term: XTerm): { x: number; y: number } {
   const cursorX = buffer.cursorX;
   const cursorY = buffer.cursorY;
 
-  // Position below the cursor
+  // Estimate popup height: each item ~28px + 8px padding
+  const estimatedPopupHeight = itemCount * 28 + 8;
+  // Available space below the cursor line
+  const totalRows = term.rows;
+  const spaceBelow = (totalRows - cursorY - 1) * cellHeight;
+
+  const expandUpward = spaceBelow < estimatedPopupHeight && cursorY > 2;
+
+  if (expandUpward) {
+    // Position: bottom edge of popup aligns with the cursor line
+    return {
+      position: {
+        x: cursorX * cellWidth,
+        y: cursorY * cellHeight, // top of cursor row — popup will grow upward from here
+      },
+      expandUpward: true,
+    };
+  }
+
+  // Default: below the cursor
   return {
-    x: cursorX * cellWidth,
-    y: (cursorY + 1) * cellHeight + 4,
+    position: {
+      x: cursorX * cellWidth,
+      y: (cursorY + 1) * cellHeight + 4,
+    },
+    expandUpward: false,
   };
 }
