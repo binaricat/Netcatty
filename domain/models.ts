@@ -55,6 +55,7 @@ export interface SftpBookmark {
   id: string;
   path: string;
   label: string;
+  global?: boolean;
 }
 
 export interface Host {

@@ -46,6 +46,9 @@ export const STORAGE_KEY_SFTP_FILE_ASSOCIATIONS = 'netcatty_sftp_file_associatio
 // SFTP Local Bookmarks
 export const STORAGE_KEY_SFTP_LOCAL_BOOKMARKS = 'netcatty_sftp_local_bookmarks_v1';
 
+// SFTP Global Bookmarks (shared across all hosts)
+export const STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS = 'netcatty_sftp_global_bookmarks_v1';
+
 // SFTP Settings
 export const STORAGE_KEY_SFTP_DOUBLE_CLICK_BEHAVIOR = 'netcatty_sftp_double_click_behavior_v1';
 export const STORAGE_KEY_SFTP_AUTO_SYNC = 'netcatty_sftp_auto_sync_v1';

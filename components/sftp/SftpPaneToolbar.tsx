@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, Home, Languages, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { Bookmark, Check, Eye, EyeOff, FilePlus, Folder, FolderPlus, Globe, Home, Languages, MoreHorizontal, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -46,6 +46,8 @@ interface SftpPaneToolbarProps {
   bookmarks: SftpBookmark[];
   isCurrentPathBookmarked: boolean;
   onToggleBookmark: () => void;
+  onAddGlobalBookmark: (path: string) => void;
+  isCurrentPathGlobalBookmarked: boolean;
   onNavigateToBookmark: (path: string) => void;
   onDeleteBookmark: (id: string) => void;
   showHiddenFiles: boolean;
@@ -92,6 +94,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
   bookmarks,
   isCurrentPathBookmarked,
   onToggleBookmark,
+  onAddGlobalBookmark,
+  isCurrentPathGlobalBookmarked,
   onNavigateToBookmark,
   onDeleteBookmark,
   showHiddenFiles,
@@ -440,16 +444,31 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
               <TooltipContent>{isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}</TooltipContent>
             </Tooltip>
             <PopoverContent className="w-64 p-0" align="start">
-              <div className="p-2 border-b border-border/40">
+              <div className="p-2 border-b border-border/40 flex gap-1">
                 <Button
                   variant={isCurrentPathBookmarked ? "secondary" : "ghost"}
                   size="sm"
-                  className="w-full justify-start text-xs h-7"
+                  className="flex-1 justify-start text-xs h-7"
                   onClick={onToggleBookmark}
                 >
                   <Bookmark size={12} fill={isCurrentPathBookmarked ? "currentColor" : "none"} className={cn("mr-2", isCurrentPathBookmarked && "text-yellow-500")} />
                   {isCurrentPathBookmarked ? t("sftp.bookmark.remove") : t("sftp.bookmark.add")}
                 </Button>
+                {pane.connection?.currentPath && !isCurrentPathGlobalBookmarked && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-7 px-2 shrink-0"
+                        onClick={() => pane.connection?.currentPath && onAddGlobalBookmark(pane.connection.currentPath)}
+                      >
+                        {t("sftp.bookmark.addGlobal")}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sftp.bookmark.addGlobalTooltip")}</TooltipContent>
+                  </Tooltip>
+                )}
               </div>
               {bookmarks.length > 0 ? (
                 <div className="max-h-48 overflow-auto py-1">
@@ -458,6 +477,9 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
                       key={bm.id}
                       className="flex items-center gap-1 px-2 py-1 hover:bg-secondary/60 group"
                     >
+                      {bm.global && (
+                        <Globe size={10} className="shrink-0 text-primary" />
+                      )}
                       <button
                         type="button"
                         className="flex-1 text-left text-xs truncate font-mono"

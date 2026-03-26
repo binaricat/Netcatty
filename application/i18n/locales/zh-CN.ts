@@ -428,6 +428,8 @@ const zhCN: Messages = {
   'sftp.filter.placeholder': '按文件名筛选...',
   'sftp.bookmark.add': '收藏此路径',
   'sftp.bookmark.remove': '取消收藏',
+  'sftp.bookmark.addGlobal': '+全局',
+  'sftp.bookmark.addGlobalTooltip': '保存为全局收藏（所有主机共享）',
   'sftp.bookmark.empty': '暂无收藏路径',
   'sftp.columns.name': '名称',
   'sftp.columns.modified': '修改时间',

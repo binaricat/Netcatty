@@ -604,6 +604,8 @@ const en: Messages = {
   'sftp.filter.placeholder': 'Filter by filename...',
   'sftp.bookmark.add': 'Bookmark this path',
   'sftp.bookmark.remove': 'Remove bookmark',
+  'sftp.bookmark.addGlobal': '+Global',
+  'sftp.bookmark.addGlobalTooltip': 'Save as global bookmark (shared across all hosts)',
   'sftp.bookmark.empty': 'No bookmarks yet',
   'sftp.columns.name': 'Name',
   'sftp.columns.modified': 'Modified',
