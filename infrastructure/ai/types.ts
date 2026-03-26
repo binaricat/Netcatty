@@ -1,6 +1,14 @@
 // AI Provider types
 export type AIProviderId = 'openai' | 'anthropic' | 'google' | 'ollama' | 'openrouter' | 'custom';
 
+export interface ProviderAdvancedParams {
+  maxTokens?: number;
+  temperature?: number;       // 0–2
+  topP?: number;              // 0–1
+  frequencyPenalty?: number;  // -2–2
+  presencePenalty?: number;   // -2–2
+}
+
 export interface ProviderConfig {
   id: string;
   providerId: AIProviderId;
@@ -11,6 +19,7 @@ export interface ProviderConfig {
   customHeaders?: Record<string, string>;
   enabled: boolean;
   skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)
+  advancedParams?: ProviderAdvancedParams;
 }
 
 export interface ModelInfo {

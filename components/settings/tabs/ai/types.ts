@@ -4,6 +4,7 @@
 import type {
   AIProviderId,
   ExternalAgentConfig,
+  ProviderAdvancedParams,
 } from "../../../../infrastructure/ai/types";
 
 export type CodexIntegrationState =
@@ -42,6 +43,7 @@ export interface ProviderFormState {
   baseURL: string;
   defaultModel: string;
   skipTLSVerify: boolean;
+  advancedParams: ProviderAdvancedParams;
 }
 
 export interface FetchedModel {

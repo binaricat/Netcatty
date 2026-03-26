@@ -1602,6 +1602,10 @@ const zhCN: Messages = {
   'ai.providers.noMatchingModels': '没有匹配的模型',
   'ai.providers.clickToLoadModels': '点击加载模型',
   'ai.providers.showingModels': '显示前 100 个，共 {count} 个模型。输入以筛选。',
+  'ai.providers.advancedParams': '高级参数',
+  'ai.providers.advancedParams.hint': '留空则使用提供商默认值。',
+  'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
+  'ai.providers.advancedParams.default': '提供商默认',
 
   // AI Codex
   'ai.codex': 'Codex',

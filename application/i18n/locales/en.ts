@@ -1588,6 +1588,10 @@ const en: Messages = {
   'ai.providers.noMatchingModels': 'No matching models',
   'ai.providers.clickToLoadModels': 'Click to load models',
   'ai.providers.showingModels': 'Showing first 100 of {count} models. Type to filter.',
+  'ai.providers.advancedParams': 'Advanced Parameters',
+  'ai.providers.advancedParams.hint': 'Leave blank to use provider defaults.',
+  'ai.providers.advancedParams.maxTokens.placeholder': 'e.g. 4096',
+  'ai.providers.advancedParams.default': 'Provider default',
 
   // AI Codex
   'ai.codex': 'Codex',
