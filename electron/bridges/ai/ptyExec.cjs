@@ -590,11 +590,14 @@ function execViaRawPty(serialPort, command, options) {
     // Start a "no-response" fallback timer. If the device produces no output at
     // all (e.g. silent mode-changing commands like "enable", "configure terminal",
     // or devices with echo disabled), the idle timer never starts because onData
-    // never fires. This fallback resolves successfully after 2× idleMs to avoid
-    // waiting for the full overall timeout. Cleared on first data in onData.
+    // never fires. This fallback resolves successfully to avoid waiting for the
+    // full overall timeout. Uses min(idleMs * 4, timeoutMs / 4) to balance between
+    // not waiting too long for silent commands and not truncating slow operations.
+    // Cleared on first data in onData.
+    const noResponseMs = Math.min(idleMs * 4, Math.floor(timeoutMs / 4));
     noResponseTimer = setTimeout(() => {
       finish(output, null);
-    }, idleMs * 2);
+    }, noResponseMs);
     cleanupFns.push(() => clearTimeout(noResponseTimer));
   });
 }

@@ -596,9 +596,14 @@ function handleExec(params) {
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
   // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
-  // Note: serial protocol is explicitly chosen by the user for network devices.
-  // If a serial port is connected to a Linux/BusyBox shell, the user should use
-  // the "local" protocol instead, which goes through the normal shell path.
+  //
+  // Design note: the serial protocol is explicitly chosen by the user in the UI
+  // for network devices / embedded systems. While startSerialSession technically
+  // supports PTY devices, users connecting to a Linux/BusyBox shell should use
+  // the "local" protocol (which goes through the normal shell path with blocklist).
+  // Additionally, execViaRawPty sends commands without shell wrapping, so shell
+  // metacharacters in blocklist patterns (eval, $(), backticks, pipes) cannot
+  // actually be interpreted even if sent to a serial-connected shell.
   if (session.protocol !== "serial") {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
