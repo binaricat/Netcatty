@@ -366,20 +366,35 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             serialLineBufferRef.current = "";
             if (serialConfig?.localEcho) termRef.current?.write("\r\n");
           } else if (ch === "\x15") {
-            // Ctrl+U clear line
             if (serialConfig?.localEcho && serialLineBufferRef.current.length > 0) {
               termRef.current?.write("\b \b".repeat(serialLineBufferRef.current.length));
             }
             serialLineBufferRef.current = "";
+          } else if (ch === "\b" || ch === "\x7f") {
+            if (serialLineBufferRef.current.length > 0) {
+              serialLineBufferRef.current = serialLineBufferRef.current.slice(0, -1);
+              if (serialConfig?.localEcho) termRef.current?.write("\b \b");
+            }
           } else if (ch.charCodeAt(0) >= 32) {
             serialLineBufferRef.current += ch;
             if (serialConfig?.localEcho) termRef.current?.write(ch);
           }
         }
-        return; // Don't fall through to normal writeToSession
+        // Still update commandBuffer and broadcast for serial line mode
+        // (fall through to shared bookkeeping below — don't return early)
+      } else if (host.protocol === "serial" && serialConfig?.localEcho) {
+        // Serial character mode with local echo: echo accepted text locally
+        terminalBackend.writeToSession(id, text);
+        for (const ch of text) {
+          if (ch === "\r") {
+            termRef.current?.write("\r\n");
+          } else if (ch.charCodeAt(0) >= 32) {
+            termRef.current?.write(ch);
+          }
+        }
+      } else {
+        terminalBackend.writeToSession(id, text);
       }
-
-      terminalBackend.writeToSession(id, text);
 
       // Broadcast to other sessions if broadcast mode is enabled
       if (isBroadcastEnabledRef.current && onBroadcastInputRef.current) {

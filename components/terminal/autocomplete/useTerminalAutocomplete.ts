@@ -122,8 +122,13 @@ export function useTerminalAutocomplete(
   }, []);
 
   // Initialize ghost text addon — poll for termRef since it's set after xterm runtime creation
+  // Also clears popup/ghost when autocomplete is disabled at runtime
   useEffect(() => {
-    if (!settings.enabled) return;
+    if (!settings.enabled) {
+      // Clear any visible popup/ghost when disabled
+      clearState();
+      return;
+    }
 
     let addon: GhostTextAddon | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;

@@ -134,7 +134,15 @@ function findPromptBoundary(lineText: string): number {
 
     // Must be followed by a space or end-of-line.
     const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;
-    if (nextChar !== null && nextChar !== " ") continue;
+    if (nextChar !== null && nextChar !== " ") {
+      // Special case: cmd.exe prompt `C:\path>command` — allow > without space
+      // only if preceded by a path-like pattern (drive letter or backslash)
+      if (ch === ">" && i > 1 && (lineText[i - 1] === "\\" || lineText[i - 1] === "/")) {
+        // Looks like a path ending — accept as prompt
+      } else {
+        continue;
+      }
+    }
 
     // For '$': exclude shell variable references ($HOME, $PATH, ${...}, $(...))
     if (ch === "$") {
