@@ -124,8 +124,11 @@ const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "�
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
-  // Scan up to 200 chars to support long prompts (git branch, kube context, long paths)
+  // Scan up to 200 chars to support long prompts (git branch, kube context, long paths).
+  // Collect ALL candidate boundaries and return the LAST one — handles complex prompts
+  // like Starship "➜  repo git:(main) $ " where multiple prompt chars appear.
   const scanLimit = Math.min(lineText.length, 200);
+  let lastBoundary = -1;
 
   for (let i = 0; i < scanLimit; i++) {
     const ch = lineText[i];
@@ -187,11 +190,11 @@ function findPromptBoundary(lineText: string): number {
       }
     }
 
-    // Prompt boundary found: user input starts after prompt char + optional space
-    return nextChar === " " ? i + 2 : i + 1;
+    // Record this as a candidate boundary
+    lastBoundary = nextChar === " " ? i + 2 : i + 1;
   }
 
-  return -1;
+  return lastBoundary;
 }
 
 /**
