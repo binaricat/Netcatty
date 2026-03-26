@@ -148,8 +148,8 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     border: `1px solid ${popupBorder}`,
     borderRadius: "6px",
     boxShadow: expandUpward
-      ? "0 -4px 12px rgba(0, 0, 0, 0.4)"
-      : "0 4px 12px rgba(0, 0, 0, 0.4)",
+      ? "0 -2px 6px rgba(0, 0, 0, 0.15)"
+      : "0 2px 6px rgba(0, 0, 0, 0.15)",
     fontFamily: "inherit",
     fontSize: "13px",
     color: textColor,

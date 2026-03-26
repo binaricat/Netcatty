@@ -1415,14 +1415,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Track previous focusedSessionId to detect changes
   const prevFocusedSessionIdRef = useRef<string | undefined>(undefined);
 
-  // When focusedSessionId changes in split view, focus the corresponding terminal
+  // When focusedSessionId changes or terminal layer becomes visible,
+  // focus the corresponding terminal to restore :focus-within CSS state
   useEffect(() => {
     // Only handle split view mode (not focus mode)
     if (isFocusMode || !focusedSessionId || !activeWorkspace) return;
 
-    // Only trigger when focusedSessionId actually changes
-    if (prevFocusedSessionIdRef.current === focusedSessionId) return;
-    const prevFocusedId = prevFocusedSessionIdRef.current;
+    // Trigger on focusedSessionId change OR when layer becomes visible again
+    const sessionChanged = prevFocusedSessionIdRef.current !== focusedSessionId;
+    if (!sessionChanged && !isTerminalLayerVisible) return;
+    const prevFocusedId = sessionChanged ? prevFocusedSessionIdRef.current : undefined;
     prevFocusedSessionIdRef.current = focusedSessionId;
 
     // First, blur the currently focused terminal immediately
@@ -1460,7 +1462,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       clearTimeout(timer2);
       clearTimeout(timer3);
     };
-  }, [focusedSessionId, isFocusMode, activeWorkspace]);
+  }, [focusedSessionId, isFocusMode, activeWorkspace, isTerminalLayerVisible]);
 
   // Get sessions for the active workspace in focus mode
   const workspaceSessionIds = useMemo(() => {
@@ -1548,7 +1550,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       <div
         ref={workspaceOuterRef}
         className="absolute inset-0 bg-background flex flex-col"
-        style={{ display: isTerminalLayerVisible ? 'flex' : 'none', zIndex: isTerminalLayerVisible ? 10 : 0 }}
+        style={{
+          visibility: isTerminalLayerVisible ? 'visible' : 'hidden',
+          pointerEvents: isTerminalLayerVisible ? 'auto' : 'none',
+          zIndex: isTerminalLayerVisible ? 10 : 0,
+        }}
       >
         <div className={cn("flex-1 flex min-h-0 relative", sidePanelPosition === 'right' && "flex-row-reverse")}>
         {/* Side panel with tab header + content (SFTP / Scripts / Theme) */}
@@ -1812,7 +1818,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             const style: React.CSSProperties = { ...layoutStyle };
 
             if (!isVisible) {
-              style.display = 'none';
+              style.visibility = 'hidden';
+              style.pointerEvents = 'none';
+              // Use absolute offscreen position instead of display:none to preserve
+              // xterm canvas state in memory and avoid full re-render on tab switch.
+              style.left = '-9999px';
+              style.top = '-9999px';
             }
 
             // Check if this pane is the focused one in the workspace
@@ -1834,7 +1845,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   "absolute bg-background",
                   inActiveWorkspace && "workspace-pane",
                   isVisible && "z-10",
-                  // Focus indicator is handled by CSS .workspace-pane::after dimming overlay
+                  // Focus indicator is handled by CSS .workspace-pane:not(:focus-within)
                 )}
                 style={style}
                 tabIndex={-1}
