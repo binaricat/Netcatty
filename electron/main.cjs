@@ -505,6 +505,26 @@ const registerBridges = (win) => {
   aiBridge.registerHandlers(ipcMain);
   crashLogBridge.registerHandlers(ipcMain);
 
+  // Fig autocomplete spec loader — uses Node.js require() to load specs from node_modules
+  ipcMain.handle("netcatty:figspec:list", async () => {
+    try {
+      const mod = require("@withfig/autocomplete");
+      return mod.default || mod;
+    } catch {
+      return [];
+    }
+  });
+  ipcMain.handle("netcatty:figspec:load", async (_event, commandName) => {
+    try {
+      // Sanitize: only allow alphanumeric, dash, underscore, slash, dot, @
+      if (!/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
+      const mod = require(`@withfig/autocomplete/build/${commandName}.js`);
+      return JSON.parse(JSON.stringify(mod.default?.default ?? mod.default ?? null));
+    } catch {
+      return null;
+    }
+  });
+
   // Settings window handler
   ipcMain.handle("netcatty:settings:open", async () => {
     try {

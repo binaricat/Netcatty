@@ -1271,6 +1271,12 @@ const api = {
   },
 };
 
+// Fig autocomplete spec loading via main process
+const figSpecApi = {
+  listFigSpecs: () => ipcRenderer.invoke("netcatty:figspec:list"),
+  loadFigSpec: (commandName) => ipcRenderer.invoke("netcatty:figspec:load", commandName),
+};
+
 // Merge with existing netcatty (if any) to avoid stale objects on hot reload
 const existing = (typeof window !== "undefined" && window.netcatty) ? window.netcatty : {};
 
@@ -1311,7 +1317,7 @@ function isTrustedRendererLocation(allowedOrigins) {
 
 const allowedOrigins = getAllowedRendererOrigins();
 if (isTrustedRendererLocation(allowedOrigins)) {
-  contextBridge.exposeInMainWorld("netcatty", { ...existing, ...api });
+  contextBridge.exposeInMainWorld("netcatty", { ...existing, ...api, ...figSpecApi });
 } else {
   // If a window navigates to an untrusted origin, do NOT expose the bridge.
   try {

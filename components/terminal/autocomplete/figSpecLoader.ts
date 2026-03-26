@@ -1,10 +1,7 @@
 /**
  * Loader for @withfig/autocomplete command specifications.
- * Lazily loads specs on demand and caches them in memory.
- *
- * Specs are copied to public/fig-specs/ at build time (scripts/copy-fig-specs.cjs)
- * and served as static assets. This ensures they work in both dev and production
- * (Electron's app:// protocol only serves from dist/).
+ * Loads specs via Electron main process IPC (Node.js require),
+ * which reliably accesses node_modules in both dev and production.
  */
 
 /** Minimal Fig spec types — mirrors @withfig/autocomplete-types */
@@ -47,58 +44,53 @@ export interface FigSpec extends FigSubcommand {
   // Top-level spec may include additional metadata
 }
 
+// Bridge type augmentation
+interface FigSpecBridge {
+  listFigSpecs?: () => Promise<string[]>;
+  loadFigSpec?: (commandName: string) => Promise<FigSpec | null>;
+}
+
+function getBridge(): FigSpecBridge | undefined {
+  return (window as Window & { netcatty?: FigSpecBridge }).netcatty;
+}
+
 // Cache loaded specs
 const specCache = new Map<string, FigSpec | null>();
 
-// In-flight loading promises to avoid duplicate imports
+// In-flight loading promises to avoid duplicate loads
 const inFlightLoads = new Map<string, Promise<FigSpec | null>>();
 
-// All available spec names from @withfig/autocomplete
+// All available spec names
 let availableSpecs: string[] | null = null;
 let availableSpecsSet: Set<string> | null = null;
 
 /**
- * Resolve the base URL for fig-specs static assets.
- * Works in both dev (Vite dev server) and production (Electron app://).
- */
-function getFigSpecBaseUrl(): string {
-  // In Electron production: app://./fig-specs/
-  // In Vite dev: /fig-specs/ (served from public/)
-  return `${window.location.origin}/fig-specs`;
-}
-
-/**
- * Get the list of all available command specs.
- * Loads the index module which exports the list of spec names.
+ * Get the list of all available command specs via IPC.
  */
 export async function getAvailableSpecs(): Promise<string[]> {
   if (availableSpecs) return availableSpecs;
 
   try {
-    // Try importing from static assets (works in both dev and production)
-    const baseUrl = getFigSpecBaseUrl();
-    const mod = await import(/* @vite-ignore */ `${baseUrl}/index.js`);
-    availableSpecs = mod.default as string[];
-    availableSpecsSet = new Set(availableSpecs);
-    return availableSpecs;
-  } catch {
-    // Fallback: try node_modules import (works in Vite dev mode)
-    try {
-      const mod = await import("@withfig/autocomplete");
-      availableSpecs = mod.default as string[];
-      availableSpecsSet = new Set(availableSpecs);
-      return availableSpecs;
-    } catch {
-      availableSpecs = [];
-      availableSpecsSet = new Set();
-      return [];
+    const bridge = getBridge();
+    if (bridge?.listFigSpecs) {
+      const specs = await bridge.listFigSpecs();
+      if (Array.isArray(specs) && specs.length > 0) {
+        availableSpecs = specs;
+        availableSpecsSet = new Set(specs);
+        return specs;
+      }
     }
+  } catch {
+    // Bridge unavailable
   }
+
+  availableSpecs = [];
+  availableSpecsSet = new Set();
+  return [];
 }
 
 /**
- * Load a command specification by name.
- * Fetches the spec JS file from static assets and evaluates it.
+ * Load a command specification by name via IPC.
  * Uses in-flight deduplication to avoid loading the same spec twice concurrently.
  */
 export async function loadSpec(commandName: string): Promise<FigSpec | null> {
@@ -111,27 +103,18 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
 
   const loadPromise = (async (): Promise<FigSpec | null> => {
     try {
-      // Dynamic import with full URL — works in both dev (http://localhost:5173)
-      // and production (app:// protocol) since files are in public/fig-specs/
-      const baseUrl = getFigSpecBaseUrl();
-      const mod = await import(/* @vite-ignore */ `${baseUrl}/${commandName}.js`);
-      const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
-      specCache.set(commandName, spec);
-      return spec;
-    } catch {
-      // Fallback: try node_modules import (works in Vite dev mode)
-      try {
-        const mod = await import(
-          /* @vite-ignore */
-          `@withfig/autocomplete/build/${commandName}.js`
-        );
-        const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
-        specCache.set(commandName, spec);
-        return spec;
-      } catch {
+      const bridge = getBridge();
+      if (!bridge?.loadFigSpec) {
         specCache.set(commandName, null);
         return null;
       }
+
+      const spec = await bridge.loadFigSpec(commandName);
+      specCache.set(commandName, spec);
+      return spec;
+    } catch {
+      specCache.set(commandName, null);
+      return null;
     } finally {
       inFlightLoads.delete(commandName);
     }
@@ -151,7 +134,7 @@ export async function hasSpec(commandName: string): Promise<boolean> {
 }
 
 /**
- * Preload commonly used specs in batches to avoid overwhelming the event loop.
+ * Preload commonly used specs in batches to avoid overwhelming IPC.
  * Only call this when autocomplete is enabled.
  */
 export function preloadCommonSpecs(): void {
