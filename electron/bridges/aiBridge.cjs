@@ -10,7 +10,6 @@ const http = require("node:http");
 const { URL } = require("node:url");
 const { spawn, execFileSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
-const path = require("node:path");
 
 const mcpServerBridge = require("./mcpServerBridge.cjs");
 

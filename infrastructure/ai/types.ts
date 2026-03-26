@@ -30,9 +30,6 @@ export interface ChatMessageAttachment {
   filePath?: string;    // original filesystem path (for ACP agents to read directly)
 }
 
-/** @deprecated Use ChatMessageAttachment instead */
-export type ChatMessageImage = ChatMessageAttachment;
-
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
