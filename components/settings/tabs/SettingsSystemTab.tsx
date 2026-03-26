@@ -467,7 +467,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
 
                 {/* Download button — shown when update found and no download in progress */}
                 {updateState.autoDownloadStatus === 'idle' &&
-                  (updateState.manualCheckStatus === 'available' || (updateState.manualCheckStatus === 'idle' && updateState.hasUpdate)) && (
+                  updateState.manualCheckStatus === 'available' && (
                   <Button variant="outline" size="sm" onClick={startDownload}>
                     <Download size={14} className="mr-1.5" />
                     {t('update.downloadNow')}
