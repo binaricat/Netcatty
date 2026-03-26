@@ -447,6 +447,8 @@ const zhCN: Messages = {
   'sftp.viewMode.list': '列表视图',
   'sftp.viewMode.tree': '树形视图',
   'sftp.tree.loadError': '加载目录失败',
+  'sftp.tree.loading': '加载中...',
+  'sftp.kind.folder': '文件夹',
   'sftp.context.rename': '重命名',
   'sftp.context.permissions': '权限',
   'sftp.context.delete': '删除',

@@ -623,6 +623,8 @@ const en: Messages = {
   'sftp.viewMode.list': 'List view',
   'sftp.viewMode.tree': 'Tree view',
   'sftp.tree.loadError': 'Failed to load directory',
+  'sftp.tree.loading': 'Loading...',
+  'sftp.kind.folder': 'Folder',
   'sftp.context.rename': 'Rename',
   'sftp.context.permissions': 'Permissions',
   'sftp.context.delete': 'Delete',
