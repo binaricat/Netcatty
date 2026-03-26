@@ -1001,7 +1001,9 @@ function registerHandlers(ipcMain) {
         return { ok: true };
       }
       if (session.serialPort) {
-        session.serialPort.write(data);
+        // Serial devices expect CR (\r) for Enter, not LF (\n).
+        const serialData = data.replace(/\n/g, "\r");
+        session.serialPort.write(serialData);
         return { ok: true };
       }
       return { ok: false, error: "No writable stream for session" };

@@ -531,18 +531,26 @@ function execViaRawPty(serialPort, command, options) {
 
     let noResponseTimer = null;
 
+    // Cap output to prevent unbounded accumulation on noisy serial consoles
+    // (e.g. devices that continuously emit syslog/debug messages). Once the cap
+    // is reached, stop resetting the idle timer so the function can resolve.
+    const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
+
     const onData = (data) => {
       // Use latin1 to match the terminal display decoder in terminalBridge.cjs.
-      // Idle timer resets on each chunk; it is only started here (not after
-      // safeWrite), so slow devices won't time out before producing output.
-      output += data.toString("latin1");
+      const chunk = data.toString("latin1");
       chunkCount++;
       // Cancel the no-response fallback on first data
       if (noResponseTimer) {
         clearTimeout(noResponseTimer);
         noResponseTimer = null;
       }
-      resetIdleTimer();
+      if (output.length < MAX_OUTPUT_BYTES) {
+        output += chunk;
+        // Only reset idle timer while accumulating — once capped, let it fire
+        // so noisy sessions don't hang until the overall timeout.
+        resetIdleTimer();
+      }
     };
 
     // Subscribe to serial port data

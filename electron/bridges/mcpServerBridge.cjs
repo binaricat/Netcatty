@@ -682,7 +682,10 @@ function handleTerminalWrite(params) {
     return { ok: true };
   }
   if (session.serialPort) {
-    session.serialPort.write(input);
+    // Serial devices expect CR (\r) for Enter, not LF (\n). The MCP tool
+    // description tells callers to use \n for Enter, so translate here.
+    const serialInput = input.replace(/\n/g, "\r");
+    session.serialPort.write(serialInput);
     return { ok: true };
   }
   return { ok: false, error: "No writable stream" };
