@@ -1132,9 +1132,6 @@ const api = {
   aiCattyCancelExec: async (chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId });
   },
-  aiTerminalWrite: async (sessionId, data) => {
-    return ipcRenderer.invoke("netcatty:ai:terminal:write", { sessionId, data });
-  },
   aiDiscoverAgents: async () => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover");
   },

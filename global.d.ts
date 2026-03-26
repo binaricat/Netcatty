@@ -670,7 +670,6 @@ declare global {
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
-    aiTerminalWrite?(sessionId: string, data: string): Promise<{ ok: boolean; error?: string }>;
     aiDiscoverAgents?(): Promise<Array<{
       command: string;
       name: string;
