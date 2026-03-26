@@ -571,8 +571,9 @@ function handleGetContext(params) {
   return {
     environment: "netcatty-terminal",
     description: "You are operating inside Netcatty, a multi-session terminal manager. " +
-      "The available sessions may be remote hosts, local terminals, or Mosh-backed shells. " +
+      "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
+      "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "SFTP tools only work for remote SSH sessions. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
@@ -649,14 +650,16 @@ function handleTerminalWrite(params) {
   const { sessionId, input } = params;
   if (!sessionId || input == null) throw new Error("sessionId and input are required");
 
-  // Validate input against command blocklist
-  const safety = checkCommandSafety(input);
-  if (safety.blocked) {
-    return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
-
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
+
+  // Shell blocklist is meaningless on network device CLIs. Skip for serial.
+  if (session.protocol !== "serial") {
+    const safety = checkCommandSafety(input);
+    if (safety.blocked) {
+      return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
 
   if (session.stream) {
     session.stream.write(input);
@@ -884,10 +887,8 @@ async function handleMultiExec(params) {
     return { ok: false, error: 'Invalid command' };
   }
 
-  const safety = checkCommandSafety(command);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
+  // No outer blocklist check here — handleExec does session-aware checks per
+  // session (serial sessions skip shell-oriented patterns like "shutdown").
 
   const results = {};
 

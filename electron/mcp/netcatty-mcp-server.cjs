@@ -76,12 +76,14 @@ function checkCommandSafety(command) {
   return { blocked: false };
 }
 
-/** Guard for write tools: blocks in observer mode, checks command safety for commands. */
-function guardWriteOperation(command) {
+/** Guard for write tools: blocks in observer mode, optionally checks command safety. */
+function guardWriteOperation(command, { skipBlocklist = false } = {}) {
   if (PERMISSION_MODE === "observer") {
     return 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
   }
-  if (command) {
+  // When skipBlocklist is true, the caller relies on the TCP bridge layer for
+  // session-aware blocklist checks (e.g. serial sessions skip shell patterns).
+  if (!skipBlocklist && command) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
       return `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`;
@@ -224,7 +226,8 @@ server.tool(
     command: z.string().describe("The command to execute in the target session."),
   },
   async ({ sessionId, command }) => {
-    const guardErr = guardWriteOperation(command);
+    // skipBlocklist: bridge layer does session-aware blocklist (serial sessions skip shell patterns)
+    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
@@ -252,7 +255,7 @@ server.tool(
     input: z.string().describe("The raw input string. Use escape sequences for special keys (e.g. \\x03 for ctrl+c, \\n for enter)."),
   },
   async ({ sessionId, input }) => {
-    const guardErr = guardWriteOperation(input);
+    const guardErr = guardWriteOperation(input, { skipBlocklist: true });
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }
@@ -416,7 +419,7 @@ server.tool(
     stopOnError: z.boolean().optional().default(false).describe("In sequential mode, stop on first failure."),
   },
   async ({ sessionIds, command, mode, stopOnError }) => {
-    const guardErr = guardWriteOperation(command);
+    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
     if (guardErr) {
       return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
     }

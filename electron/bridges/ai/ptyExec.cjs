@@ -466,7 +466,6 @@ function execViaRawPty(serialPort, command, options) {
   return new Promise((resolve) => {
     let output = "";
     let finished = false;
-    let receivedFirstChunk = false;
     let overallTimer = null;
     let idleTimer = null;
     const cleanupFns = [];
@@ -521,13 +520,10 @@ function execViaRawPty(serialPort, command, options) {
     }
 
     const onData = (data) => {
-      // Use latin1 to match the terminal display decoder in terminalBridge.cjs
+      // Use latin1 to match the terminal display decoder in terminalBridge.cjs.
+      // Idle timer resets on each chunk; it is only started here (not after
+      // safeWrite), so slow devices won't time out before producing output.
       output += data.toString("latin1");
-      // Start idle timer only after first data arrives, so slow devices
-      // don't prematurely resolve with empty output.
-      if (!receivedFirstChunk) {
-        receivedFirstChunk = true;
-      }
       resetIdleTimer();
     };
 

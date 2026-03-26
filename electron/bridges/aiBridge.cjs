@@ -975,15 +975,17 @@ function registerHandlers(ipcMain) {
     if (mcpServerBridge.getPermissionMode() === "observer") {
       return { ok: false, error: "Terminal write blocked: permission mode is 'observer'" };
     }
-    // Check input against safety blocklist before writing
-    const safety = mcpServerBridge.checkCommandSafety(data);
-    if (safety.blocked) {
-      return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-    }
-
     const session = sessions?.get(sessionId);
     if (!session) {
       return { ok: false, error: "Session not found" };
+    }
+
+    // Shell blocklist is meaningless on network device CLIs. Skip for serial.
+    if (session.protocol !== "serial") {
+      const safety = mcpServerBridge.checkCommandSafety(data);
+      if (safety.blocked) {
+        return { ok: false, error: `Input blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
     }
     try {
       if (session.stream) {
