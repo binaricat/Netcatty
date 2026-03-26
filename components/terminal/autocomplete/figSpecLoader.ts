@@ -1,7 +1,10 @@
 /**
  * Loader for @withfig/autocomplete command specifications.
  * Lazily loads specs on demand and caches them in memory.
- * Provides a unified interface to query subcommands, options, and arguments.
+ *
+ * Specs are copied to public/fig-specs/ at build time (scripts/copy-fig-specs.cjs)
+ * and served as static assets. This ensures they work in both dev and production
+ * (Electron's app:// protocol only serves from dist/).
  */
 
 /** Minimal Fig spec types — mirrors @withfig/autocomplete-types */
@@ -55,51 +58,110 @@ let availableSpecs: string[] | null = null;
 let availableSpecsSet: Set<string> | null = null;
 
 /**
+ * Resolve the base URL for fig-specs static assets.
+ * Works in both dev (Vite dev server) and production (Electron app://).
+ */
+function getFigSpecBaseUrl(): string {
+  // In Electron production: app://./fig-specs/
+  // In Vite dev: /fig-specs/ (served from public/)
+  return `${window.location.origin}/fig-specs`;
+}
+
+/**
  * Get the list of all available command specs.
+ * Loads the index module which exports the list of spec names.
  */
 export async function getAvailableSpecs(): Promise<string[]> {
   if (availableSpecs) return availableSpecs;
 
   try {
-    const mod = await import("@withfig/autocomplete");
-    availableSpecs = mod.default as string[];
+    const baseUrl = getFigSpecBaseUrl();
+    const res = await fetch(`${baseUrl}/index.js`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+
+    // The index.js exports a default array of spec names as ESM.
+    // Parse it by evaluating — extract the array from the export statement.
+    const match = text.match(/var\s+\w+\s*=\s*(\[[\s\S]*?\]);/);
+    if (match) {
+      // The array is a JS literal — parse it safely
+      const parsed = JSON.parse(
+        match[1]
+          .replace(/'/g, '"') // single quotes to double
+          .replace(/,\s*\]/, ']') // trailing commas
+      );
+      availableSpecs = parsed as string[];
+    } else {
+      // Fallback: try dynamic import (works in dev mode)
+      const mod = await import("@withfig/autocomplete");
+      availableSpecs = mod.default as string[];
+    }
+
     availableSpecsSet = new Set(availableSpecs);
     return availableSpecs;
   } catch {
-    availableSpecs = [];
-    availableSpecsSet = new Set();
-    return [];
+    // Last resort fallback: try native import
+    try {
+      const mod = await import("@withfig/autocomplete");
+      availableSpecs = mod.default as string[];
+      availableSpecsSet = new Set(availableSpecs);
+      return availableSpecs;
+    } catch {
+      availableSpecs = [];
+      availableSpecsSet = new Set();
+      return [];
+    }
   }
 }
 
 /**
  * Load a command specification by name.
- * Returns null if the spec doesn't exist.
+ * Fetches the spec JS file from static assets and evaluates it.
  * Uses in-flight deduplication to avoid loading the same spec twice concurrently.
  */
 export async function loadSpec(commandName: string): Promise<FigSpec | null> {
-  // Check cache first
   if (specCache.has(commandName)) {
     return specCache.get(commandName) ?? null;
   }
 
-  // Check if there's already an in-flight load for this spec
   const existing = inFlightLoads.get(commandName);
   if (existing) return existing;
 
-  // Start loading and register in-flight
   const loadPromise = (async (): Promise<FigSpec | null> => {
     try {
-      const mod = await import(
-        /* @vite-ignore */
-        `@withfig/autocomplete/build/${commandName}.js`
-      );
-      const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
-      specCache.set(commandName, spec);
-      return spec;
+      // Try fetching from static assets first (works in both dev and production)
+      const baseUrl = getFigSpecBaseUrl();
+      const url = `${baseUrl}/${commandName}.js`;
+      const res = await fetch(url);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+
+      // Create a blob URL and dynamically import it as an ES module
+      const blob = new Blob([text], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        const mod = await import(/* @vite-ignore */ blobUrl);
+        const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
+        specCache.set(commandName, spec);
+        return spec;
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
     } catch {
-      specCache.set(commandName, null);
-      return null;
+      // Fallback: try direct import (works in Vite dev mode)
+      try {
+        const mod = await import(
+          /* @vite-ignore */
+          `@withfig/autocomplete/build/${commandName}.js`
+        );
+        const spec = (mod.default?.default ?? mod.default ?? null) as FigSpec | null;
+        specCache.set(commandName, spec);
+        return spec;
+      } catch {
+        specCache.set(commandName, null);
+        return null;
+      }
     } finally {
       inFlightLoads.delete(commandName);
     }
@@ -111,7 +173,6 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
 
 /**
  * Check if a spec exists for a given command name (without loading it).
- * Returns synchronously when cache/availableSpecs are already populated.
  */
 export async function hasSpec(commandName: string): Promise<boolean> {
   if (specCache.has(commandName)) return specCache.get(commandName) !== null;
@@ -125,19 +186,15 @@ export async function hasSpec(commandName: string): Promise<boolean> {
  */
 export function preloadCommonSpecs(): void {
   const common = [
-    // Batch 1: highest frequency commands
     "git", "docker", "kubectl", "npm", "yarn", "pnpm",
     "ls", "cd", "cat", "grep", "find", "ssh", "scp",
-    // Batch 2
     "curl", "wget", "tar", "zip", "unzip", "make",
     "python", "python3", "pip", "pip3", "node",
-    // Batch 3
     "systemctl", "journalctl", "apt", "yum", "brew",
     "vim", "nano", "less", "head", "tail", "sort",
     "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir",
   ];
 
-  // Load in batches of 8 with idle-time scheduling
   const BATCH_SIZE = 8;
   let offset = 0;
 
@@ -159,7 +216,6 @@ export function preloadCommonSpecs(): void {
     }
   };
 
-  // Start first batch after a short delay to not interfere with initial render
   setTimeout(loadBatch, 200);
 }
 

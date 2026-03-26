@@ -24,6 +24,7 @@ coverage
 /out
 *.asar
 /public/monaco
+/public/fig-specs
 
 # Editor directories and files
 .vscode/*
