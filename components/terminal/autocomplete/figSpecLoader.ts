@@ -80,18 +80,21 @@ export async function getAvailableSpecs(): Promise<string[]> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
 
-    // The index.js exports a default array of spec names as ESM.
-    // Parse it by evaluating — extract the array from the export statement.
-    const match = text.match(/var\s+\w+\s*=\s*(\[[\s\S]*?\]);/);
-    if (match) {
-      // The array is a JS literal — parse it safely
-      const parsed = JSON.parse(
-        match[1]
-          .replace(/'/g, '"') // single quotes to double
-          .replace(/,\s*\]/, ']') // trailing commas
-      );
-      availableSpecs = parsed as string[];
-    } else {
+    // The index.js format: var e=[...],diffVersionedCompletions=[...];export{...};
+    // Extract the first array (the spec name list) by finding the matching ].
+    // Can't use simple regex with `;` anchor because `,` follows the first array.
+    const arrayStart = text.indexOf("[");
+    if (arrayStart >= 0) {
+      // Find the matching closing bracket (flat array of strings, no nesting)
+      const arrayEnd = text.indexOf("]", arrayStart);
+      if (arrayEnd >= 0) {
+        const arrayStr = text.substring(arrayStart, arrayEnd + 1);
+        const parsed = JSON.parse(arrayStr);
+        availableSpecs = parsed as string[];
+      }
+    }
+
+    if (!availableSpecs) {
       // Fallback: try dynamic import (works in dev mode)
       const mod = await import("@withfig/autocomplete");
       availableSpecs = mod.default as string[];
