@@ -65,7 +65,7 @@ export const ProviderConfigForm: React.FC<{
   const handleSave = useCallback(async () => {
     const cleanedParams: ProviderAdvancedParams = {};
     const ap = form.advancedParams;
-    if (ap.maxTokens != null && ap.maxTokens > 0) cleanedParams.maxTokens = Math.round(ap.maxTokens);
+    if (ap.maxTokens != null && ap.maxTokens > 0) cleanedParams.maxTokens = Math.max(1, Math.round(ap.maxTokens));
     if (ap.temperature != null) cleanedParams.temperature = Math.min(2, Math.max(0, ap.temperature));
     if (ap.topP != null) cleanedParams.topP = Math.min(1, Math.max(0, ap.topP));
     if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = Math.min(2, Math.max(-2, ap.frequencyPenalty));
