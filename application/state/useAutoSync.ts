@@ -20,7 +20,6 @@ import { collectSyncableSettings } from '../syncPayload';
 import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
-import { toast } from '../../components/ui/toast';
 
 interface AutoSyncConfig {
   // Data to sync
