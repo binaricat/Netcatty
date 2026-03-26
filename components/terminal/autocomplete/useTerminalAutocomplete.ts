@@ -199,6 +199,16 @@ export function useTerminalAutocomplete(
       return;
     }
 
+    // Suppress autocomplete when cursor is not at end of input —
+    // inserting text mid-line would corrupt the command (e.g., "git st|tus" → "git statustus")
+    const buffer = term.buffer.active;
+    const lineAfterCursor = buffer.getLine(buffer.cursorY + buffer.baseY)
+      ?.translateToString(false).substring(buffer.cursorX).trimEnd();
+    if (lineAfterCursor && lineAfterCursor.length > 0) {
+      clearState();
+      return;
+    }
+
     const input = prompt.userInput;
 
     // Single query for both ghost text and popup
@@ -260,8 +270,12 @@ export function useTerminalAutocomplete(
         if (suppressNextEnterRecordRef.current) {
           suppressNextEnterRecordRef.current = false;
         } else {
-          // Always use real-time prompt detection for accurate command recording
-          const prompt = termRef.current ? detectPrompt(termRef.current) : null;
+          // Try real-time detection first; fall back to cached prompt if buffer
+          // hasn't been updated yet (high-latency SSH, autocomplete text not echoed)
+          const livePrompt = termRef.current ? detectPrompt(termRef.current) : null;
+          const prompt = (livePrompt?.isAtPrompt && livePrompt.userInput.trim())
+            ? livePrompt
+            : lastPromptRef.current;
           if (prompt?.isAtPrompt && prompt.userInput.trim()) {
             recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
           }
@@ -450,8 +464,14 @@ export function useTerminalAutocomplete(
         const textToInsert = suggestion.text.substring(prompt.userInput.length);
         payload = execute ? textToInsert + "\r" : textToInsert;
       } else {
-        // Fuzzy match: clear current input with Ctrl+U, then write full command
-        payload = "\x15" + suggestion.text + (execute ? "\r" : "");
+        // Fuzzy match: clear current input, then write full command.
+        // Ctrl+U works on POSIX shells (bash/zsh/fish).
+        // On Windows (cmd.exe/PowerShell), use backspaces to erase instead.
+        const isWindows = hostOsRef.current === "windows";
+        const clearSequence = isWindows
+          ? "\b".repeat(prompt.userInput.length) // Backspace to erase
+          : "\x15"; // Ctrl+U (readline kill-line)
+        payload = clearSequence + suggestion.text + (execute ? "\r" : "");
       }
 
       if (payload) {
