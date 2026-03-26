@@ -54,6 +54,8 @@ export type XTermRuntime = {
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
+  /** Cleanup function for autocomplete accept listener */
+  cleanupAutocompleteListener: (() => void) | null;
 };
 
 export type CreateXTermRuntimeContext = {
@@ -101,6 +103,11 @@ export type CreateXTermRuntimeContext = {
 
   // Callback when remote requests clipboard read in 'prompt' mode; resolves to user's decision
   onOsc52ReadRequest?: () => Promise<boolean>;
+
+  // Autocomplete key event handler — returns false if event was consumed
+  onAutocompleteKeyEvent?: (e: KeyboardEvent) => boolean;
+  // Autocomplete input handler — called on every character input
+  onAutocompleteInput?: (data: string) => void;
 };
 
 const detectPlatform = (): XTermPlatform => {
@@ -375,6 +382,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (e.type !== "keydown") {
       return true;
     }
+
+    // Autocomplete key handler (must be checked before other handlers)
+    if (ctx.onAutocompleteKeyEvent) {
+      const consumed = ctx.onAutocompleteKeyEvent(e);
+      if (!consumed) return false; // Event was consumed by autocomplete
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === "f" && e.type === "keydown") {
       e.preventDefault();
       ctx.setIsSearchOpen(true);
@@ -567,6 +581,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
       scrollToBottomAfterInput(data);
 
+      // Notify autocomplete of input
+      ctx.onAutocompleteInput?.(data);
+
       if (ctx.statusRef.current === "connected" && ctx.onCommandExecuted) {
         if (data === "\r" || data === "\n") {
           const cmd = ctx.commandBufferRef.current.trim();
@@ -704,14 +721,40 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const keywordHighlighter = new KeywordHighlighter(term);
   keywordHighlighter.setRules(keywordHighlightRules, keywordHighlightEnabled);
 
+  // Autocomplete accept listener — writes accepted text to the session
+  let cleanupAutocompleteListener: (() => void) | null = null;
+  const screenEl = term.element?.querySelector(".xterm-screen") ?? term.element;
+  if (screenEl) {
+    const handleAccept = (e: Event) => {
+      const detail = (e as CustomEvent<{ text: string; sessionId: string }>).detail;
+      const id = ctx.sessionRef.current;
+      if (id && detail?.text) {
+        ctx.terminalBackend.writeToSession(id, detail.text);
+        // Update command buffer
+        if (detail.text.length > 0 && !detail.text.startsWith("\x1b")) {
+          ctx.commandBufferRef.current += detail.text;
+        }
+      }
+    };
+    screenEl.addEventListener("autocomplete:accept", handleAccept);
+    // Also listen on the parent element for bubbling
+    term.element?.addEventListener("autocomplete:accept", handleAccept);
+    cleanupAutocompleteListener = () => {
+      screenEl.removeEventListener("autocomplete:accept", handleAccept);
+      term.element?.removeEventListener("autocomplete:accept", handleAccept);
+    };
+  }
+
   return {
     term,
     fitAddon,
     serializeAddon,
     searchAddon,
     keywordHighlighter,
+    cleanupAutocompleteListener,
     dispose: () => {
       cleanupMiddleClick?.();
+      cleanupAutocompleteListener?.();
       keywordHighlighter.dispose();
       osc7Disposable.dispose();
       osc52Disposable.dispose();
