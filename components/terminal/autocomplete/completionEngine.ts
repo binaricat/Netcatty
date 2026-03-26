@@ -369,6 +369,8 @@ async function getCommandNameSuggestions(prefix: string): Promise<CompletionSugg
   const suggestions: CompletionSuggestion[] = [];
 
   for (const name of specs) {
+    // Skip sub-path specs like "aws/s3", "dotnet/dotnet-build" — not direct shell commands
+    if (name.includes("/")) continue;
     if (name.startsWith(lower) && name !== lower) {
       suggestions.push({
         text: name,

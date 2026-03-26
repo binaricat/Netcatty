@@ -1833,7 +1833,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   expandUpward={autocomplete.state.expandUpward}
                   themeColors={effectiveTheme.colors}
                   onSelect={autocomplete.selectSuggestion}
-                  onClose={autocomplete.closePopup}
                 />
               </div>
             </div>
