@@ -509,7 +509,9 @@ const registerBridges = (win) => {
   ipcMain.handle("netcatty:figspec:list", async () => {
     try {
       const mod = await import("@withfig/autocomplete");
-      return mod.default || [];
+      const result = mod.default || [];
+      console.log("[Main] figspec:list type:", typeof result, "isArray:", Array.isArray(result), "length:", result?.length, "sample:", Array.isArray(result) ? result.slice(0, 3) : result);
+      return result;
     } catch (err) {
       console.warn("[Main] Failed to load fig spec list:", err?.message || err);
       return [];
@@ -519,11 +521,16 @@ const registerBridges = (win) => {
     try {
       // Sanitize: only allow alphanumeric, dash, underscore, slash, dot, @
       if (!/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
-      const mod = await import(`@withfig/autocomplete/build/${commandName}.js`);
+      // Can't use `import("@withfig/autocomplete/build/...")` because the package's
+      // "exports" field restricts allowed import paths. Use file URL to bypass.
+      const specFile = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
+      const { pathToFileURL } = require("url");
+      const mod = await import(pathToFileURL(specFile).href);
       const spec = mod.default?.default ?? mod.default ?? null;
       // IPC requires serializable data — JSON round-trip strips functions/symbols
       return spec ? JSON.parse(JSON.stringify(spec)) : null;
-    } catch {
+    } catch (err) {
+      console.warn("[Main] Failed to load fig spec:", commandName, err?.message);
       return null;
     }
   });

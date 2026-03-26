@@ -156,10 +156,14 @@ export function useTerminalAutocomplete(
    */
   const fetchSuggestions = useCallback(async () => {
     const term = termRef.current;
-    if (!term || disposedRef.current || !settingsRef.current.enabled) return;
+    if (!term || disposedRef.current || !settingsRef.current.enabled) {
+      console.log("[Autocomplete] skip: term=%s disposed=%s enabled=%s", !!term, disposedRef.current, settingsRef.current.enabled);
+      return;
+    }
 
     const prompt = detectPrompt(term);
     lastPromptRef.current = prompt;
+    console.log("[Autocomplete] prompt:", { isAtPrompt: prompt.isAtPrompt, userInput: prompt.userInput, promptText: prompt.promptText });
 
     if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
       clearState();
@@ -208,6 +212,7 @@ export function useTerminalAutocomplete(
    */
   const handleInput = useCallback(
     (data: string) => {
+      console.log("[Autocomplete] handleInput:", JSON.stringify(data), "enabled:", settingsRef.current.enabled);
       if (!settingsRef.current.enabled) return;
 
       const now = Date.now();

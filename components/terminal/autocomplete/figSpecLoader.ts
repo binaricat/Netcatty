@@ -68,24 +68,26 @@ let availableSpecsSet: Set<string> | null = null;
  * Get the list of all available command specs via IPC.
  */
 export async function getAvailableSpecs(): Promise<string[]> {
-  if (availableSpecs) return availableSpecs;
+  // Only return cache if it has actual specs (not an empty failure)
+  if (availableSpecs && availableSpecs.length > 0) return availableSpecs;
 
   try {
     const bridge = getBridge();
+    console.log("[Autocomplete] figspec bridge available:", !!bridge?.listFigSpecs);
     if (bridge?.listFigSpecs) {
       const specs = await bridge.listFigSpecs();
+      console.log("[Autocomplete] figspec list result:", Array.isArray(specs) ? `${specs.length} specs` : typeof specs);
       if (Array.isArray(specs) && specs.length > 0) {
         availableSpecs = specs;
         availableSpecsSet = new Set(specs);
         return specs;
       }
     }
-  } catch {
-    // Bridge unavailable
+  } catch (err) {
+    console.warn("[Autocomplete] figspec bridge error:", err);
   }
 
-  availableSpecs = [];
-  availableSpecsSet = new Set();
+  // Don't cache empty — allow retry on next call
   return [];
 }
 
@@ -110,10 +112,14 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
       }
 
       const spec = await bridge.loadFigSpec(commandName);
-      specCache.set(commandName, spec);
+      if (spec) {
+        specCache.set(commandName, spec);
+      }
+      // Don't cache null — the load may have failed transiently (bridge not ready, etc.)
+      // Only cache null when we're confident the spec doesn't exist (hasSpec returned false)
       return spec;
     } catch {
-      specCache.set(commandName, null);
+      // Don't cache failures — allow retry on next request
       return null;
     } finally {
       inFlightLoads.delete(commandName);
@@ -128,7 +134,11 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
  * Check if a spec exists for a given command name (without loading it).
  */
 export async function hasSpec(commandName: string): Promise<boolean> {
-  if (specCache.has(commandName)) return specCache.get(commandName) !== null;
+  // Only trust positive cache hits (spec loaded successfully).
+  // Null entries may be stale failures from preload — ignore them.
+  const cached = specCache.get(commandName);
+  if (cached) return true;
+
   await getAvailableSpecs();
   return availableSpecsSet?.has(commandName) ?? false;
 }

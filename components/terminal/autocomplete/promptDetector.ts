@@ -61,7 +61,11 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   const promptEnd = findPromptBoundary(lineText);
   if (promptEnd >= 0) {
     const promptText = lineText.substring(0, promptEnd);
-    const userInput = lineText.substring(promptEnd).replace(/\s+$/, "");
+    // Use cursor position to determine actual input length — don't trim trailing
+    // spaces since they're significant for autocomplete (e.g., "git commit " should
+    // produce an empty trailing token to trigger option suggestions).
+    const rawInput = lineText.substring(promptEnd);
+    const userInput = rawInput.substring(0, Math.max(0, cursorX - promptEnd));
     const cursorOffset = Math.max(0, cursorX - promptEnd);
 
     return { isAtPrompt: true, promptText, userInput, cursorOffset };
