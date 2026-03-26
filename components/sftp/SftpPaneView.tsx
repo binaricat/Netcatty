@@ -119,7 +119,17 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     [hostBookmarks.bookmarks, globalBookmarks.bookmarks],
   );
   const isCurrentPathBookmarked = hostBookmarks.isCurrentPathBookmarked || globalBookmarks.isCurrentPathBookmarked;
-  const toggleBookmark = hostBookmarks.toggleBookmark;
+  const toggleBookmark = useCallback(() => {
+    if (globalBookmarks.isCurrentPathBookmarked && !hostBookmarks.isCurrentPathBookmarked) {
+      const currentPath = pane.connection?.currentPath;
+      if (currentPath) {
+        const bm = globalBookmarks.bookmarks.find((b) => b.path === currentPath);
+        if (bm) globalBookmarks.deleteBookmark(bm.id);
+      }
+    } else {
+      hostBookmarks.toggleBookmark();
+    }
+  }, [hostBookmarks, globalBookmarks, pane.connection?.currentPath]);
   const deleteBookmark = useCallback(
     (id: string) => {
       if (id.startsWith("gbm-")) {
