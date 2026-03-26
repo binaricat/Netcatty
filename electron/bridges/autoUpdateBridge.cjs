@@ -350,7 +350,7 @@ function registerHandlers(ipcMain) {
     } catch (err) {
       _isDownloading = false;
       _lastStatus = { ..._lastStatus, status: 'error', error: err?.message || "Download failed", percent: 0 };
-      broadcastUpdateStatus(_lastStatus);
+      broadcastToAllWindows("netcatty:update:error", { message: err?.message || "Download failed" });
       console.error("[AutoUpdate] Download failed:", err?.message || err);
       return { success: false, error: err?.message || "Download failed" };
     }

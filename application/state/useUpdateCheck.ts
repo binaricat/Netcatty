@@ -515,15 +515,22 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
     netcattyBridge.get()?.installUpdate?.();
   }, []);
 
-  const startDownload = useCallback(() => {
+  const startDownload = useCallback(async () => {
     if (autoDownloadStatusRef.current === 'downloading' || autoDownloadStatusRef.current === 'ready') return;
+    // Ensure electron-updater has run checkForUpdates before downloading
+    const bridge = netcattyBridge.get();
+    try {
+      await bridge?.checkForUpdate?.();
+    } catch {
+      // Ignore check errors — downloadUpdate will fail gracefully if no update
+    }
     setUpdateState((prev) => ({
       ...prev,
       autoDownloadStatus: 'downloading',
       downloadPercent: 0,
       downloadError: null,
     }));
-    void netcattyBridge.get()?.downloadUpdate?.().then((res) => {
+    void bridge?.downloadUpdate?.().then((res) => {
       if (res && !res.success) {
         setUpdateState((prev) => ({
           ...prev,
