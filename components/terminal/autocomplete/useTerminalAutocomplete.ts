@@ -334,12 +334,12 @@ export function useTerminalAutocomplete(
           return false;
         }
 
-        // Enter on popup: select current item
+        // Enter on popup: select current item AND execute
         if (e.key === "Enter") {
           const selected = s.suggestions[Math.max(0, s.selectedIndex)];
           if (selected) {
             e.preventDefault();
-            selectSuggestion(selected);
+            selectAndExecute(selected);
             return false;
           }
         }
@@ -423,10 +423,33 @@ export function useTerminalAutocomplete(
   }, [termRef, sessionId]);
 
   /**
-   * Select a suggestion from the popup.
+   * Insert a suggestion from the popup (Tab / mouse click — insert only, no execute).
    */
   const selectSuggestion = useCallback(
     (suggestion: CompletionSuggestion) => {
+      insertSuggestionText(suggestion, false);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [termRef, sessionId],
+  );
+
+  /**
+   * Insert a suggestion AND execute it (Enter on popup — insert + send CR).
+   */
+  const selectAndExecute = useCallback(
+    (suggestion: CompletionSuggestion) => {
+      insertSuggestionText(suggestion, true);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [termRef, sessionId],
+  );
+
+  /**
+   * Shared logic for inserting a suggestion.
+   * @param execute If true, also sends \r to execute the command.
+   */
+  const insertSuggestionText = useCallback(
+    (suggestion: CompletionSuggestion, execute: boolean) => {
       const term = termRef.current;
       if (!term) return;
 
@@ -434,20 +457,20 @@ export function useTerminalAutocomplete(
       if (!prompt.isAtPrompt) return;
 
       // Calculate text to insert: the suggestion minus what's already typed
-      let textToInsert: string;
-      if (suggestion.source === "history") {
-        // For history, replace the entire input line
-        textToInsert = suggestion.text.substring(prompt.userInput.length);
-      } else {
-        // For spec suggestions, the text field is the full rebuilt command
-        textToInsert = suggestion.text.substring(prompt.userInput.length);
-      }
+      const textToInsert = suggestion.text.substring(prompt.userInput.length);
 
-      if (textToInsert) {
+      const payload = execute ? textToInsert + "\r" : textToInsert;
+
+      if (payload) {
         const event = new CustomEvent("autocomplete:accept", {
-          detail: { text: textToInsert, sessionId },
+          detail: { text: payload, sessionId },
         });
         term.element?.dispatchEvent(event);
+      }
+
+      // Record command to history when executing
+      if (execute) {
+        recordCommand(suggestion.text, hostId, hostOs);
       }
 
       ghostAddonRef.current?.hide();
@@ -456,9 +479,10 @@ export function useTerminalAutocomplete(
         selectedIndex: -1,
         popupVisible: false,
         popupPosition: { x: 0, y: 0 },
+        expandUpward: false,
       });
     },
-    [termRef, sessionId],
+    [termRef, sessionId, hostId, hostOs],
   );
 
   /**

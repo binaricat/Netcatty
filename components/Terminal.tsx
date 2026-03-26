@@ -1812,6 +1812,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   position={autocomplete.state.popupPosition}
                   visible={autocomplete.state.popupVisible}
                   expandUpward={autocomplete.state.expandUpward}
+                  themeColors={effectiveTheme.colors}
                   onSelect={autocomplete.selectSuggestion}
                   onClose={autocomplete.closePopup}
                 />

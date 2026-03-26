@@ -1,11 +1,22 @@
 /**
  * Popup autocomplete menu for terminal.
  * Renders a floating list of completion suggestions near the terminal cursor.
- * Supports keyboard navigation (↑/↓/Tab/Enter/Esc).
+ * Colors are derived from the active terminal theme for visual consistency.
  */
 
 import React, { useEffect, useRef, memo } from "react";
 import type { CompletionSuggestion, SuggestionSource } from "./completionEngine";
+
+export interface AutocompleteThemeColors {
+  /** Terminal background color */
+  background: string;
+  /** Terminal foreground color */
+  foreground: string;
+  /** Terminal selection/highlight color */
+  selection: string;
+  /** Cursor color (used for accents) */
+  cursor: string;
+}
 
 interface AutocompletePopupProps {
   suggestions: CompletionSuggestion[];
@@ -14,17 +25,19 @@ interface AutocompletePopupProps {
   visible: boolean;
   /** When true, the popup grows upward — bottom edge anchored at position.y */
   expandUpward?: boolean;
+  /** Terminal theme colors for consistent styling */
+  themeColors?: AutocompleteThemeColors;
   onSelect: (suggestion: CompletionSuggestion) => void;
   onClose?: () => void;
   maxHeight?: number;
 }
 
-const SOURCE_LABELS: Record<SuggestionSource, { label: string; color: string }> = {
-  history: { label: "h", color: "#FBBF24" },
-  command: { label: "c", color: "#34D399" },
-  subcommand: { label: "s", color: "#60A5FA" },
-  option: { label: "o", color: "#A78BFA" },
-  arg: { label: "a", color: "#F87171" },
+const SOURCE_LABELS: Record<SuggestionSource, { label: string; fallbackColor: string }> = {
+  history: { label: "h", fallbackColor: "#FBBF24" },
+  command: { label: "c", fallbackColor: "#34D399" },
+  subcommand: { label: "s", fallbackColor: "#60A5FA" },
+  option: { label: "o", fallbackColor: "#A78BFA" },
+  arg: { label: "a", fallbackColor: "#F87171" },
 };
 
 const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
@@ -33,6 +46,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   position,
   visible,
   expandUpward = false,
+  themeColors,
   onSelect,
   onClose: _onClose,
   maxHeight = 200,
@@ -52,6 +66,19 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
 
   if (!visible || suggestions.length === 0) return null;
 
+  // Derive colors from terminal theme
+  const bg = themeColors?.background ?? "#1e1e2e";
+  const fg = themeColors?.foreground ?? "#cdd6f4";
+  const _selectionColor = themeColors?.selection ?? "#45475a";
+
+  // Computed theme-aware colors
+  const popupBg = `color-mix(in srgb, ${bg} 92%, ${fg} 8%)`;
+  const popupBorder = `color-mix(in srgb, ${bg} 75%, ${fg} 25%)`;
+  const selectedBg = `color-mix(in srgb, ${bg} 78%, ${fg} 22%)`;
+  const hoverBg = `color-mix(in srgb, ${bg} 85%, ${fg} 15%)`;
+  const textColor = fg;
+  const dimTextColor = `color-mix(in srgb, ${fg} 50%, ${bg} 50%)`;
+
   return (
     <div
       ref={listRef}
@@ -68,16 +95,17 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
         maxWidth: "500px",
         overflowY: "auto",
         overflowX: "hidden",
-        backgroundColor: "var(--autocomplete-bg, #1e1e2e)",
-        border: "1px solid var(--autocomplete-border, #45475a)",
+        backgroundColor: popupBg,
+        border: `1px solid ${popupBorder}`,
         borderRadius: "6px",
         boxShadow: expandUpward
           ? "0 -4px 12px rgba(0, 0, 0, 0.4)"
           : "0 4px 12px rgba(0, 0, 0, 0.4)",
-        fontFamily: "var(--font-mono, monospace)",
+        fontFamily: "inherit",
         fontSize: "13px",
         padding: "4px 0",
         userSelect: "none",
+        color: textColor,
       }}
       onMouseDown={(e) => {
         // Prevent terminal from losing focus
@@ -98,24 +126,18 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
               alignItems: "center",
               padding: "4px 8px",
               cursor: "pointer",
-              backgroundColor: isSelected
-                ? "var(--autocomplete-selected, #313244)"
-                : "transparent",
+              backgroundColor: isSelected ? selectedBg : "transparent",
               gap: "8px",
               lineHeight: "1.4",
             }}
             onMouseEnter={(e) => {
-              // Visual hover effect (selection follows keyboard, not mouse)
-              (e.currentTarget as HTMLDivElement).style.backgroundColor =
-                isSelected
-                  ? "var(--autocomplete-selected, #313244)"
-                  : "var(--autocomplete-hover, #262637)";
+              if (!isSelected) {
+                (e.currentTarget as HTMLDivElement).style.backgroundColor = hoverBg;
+              }
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLDivElement).style.backgroundColor =
-                isSelected
-                  ? "var(--autocomplete-selected, #313244)"
-                  : "transparent";
+                isSelected ? selectedBg : "transparent";
             }}
             onMouseDown={(e) => {
               e.preventDefault();
@@ -130,9 +152,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                color: isSelected
-                  ? "var(--autocomplete-text-selected, #cdd6f4)"
-                  : "var(--autocomplete-text, #bac2de)",
+                color: textColor,
               }}
             >
               {suggestion.displayText}
@@ -143,7 +163,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
               <span
                 style={{
                   fontSize: "11px",
-                  color: "var(--autocomplete-desc, #6c7086)",
+                  color: dimTextColor,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -160,7 +180,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
               <span
                 style={{
                   fontSize: "10px",
-                  color: "var(--autocomplete-freq, #6c7086)",
+                  color: dimTextColor,
                   flexShrink: 0,
                 }}
               >
@@ -179,8 +199,8 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 justifyContent: "center",
                 fontSize: "10px",
                 fontWeight: 600,
-                color: sourceInfo.color,
-                backgroundColor: `${sourceInfo.color}20`,
+                color: sourceInfo.fallbackColor,
+                backgroundColor: `${sourceInfo.fallbackColor}20`,
                 flexShrink: 0,
               }}
             >
