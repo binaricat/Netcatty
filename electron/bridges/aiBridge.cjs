@@ -891,15 +891,18 @@ function registerHandlers(ipcMain) {
     if (mcpServerBridge.getPermissionMode() === "observer") {
       return { ok: false, error: "Execution blocked: permission mode is 'observer'" };
     }
-    // Check command against safety blocklist before executing
-    const safety = mcpServerBridge.checkCommandSafety(command);
-    if (safety.blocked) {
-      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-    }
-
     const session = sessions?.get(sessionId);
     if (!session) {
       return { ok: false, error: "Session not found" };
+    }
+
+    // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
+    // disables an interface on Cisco). Skip for serial sessions.
+    if (session.protocol !== "serial") {
+      const safety = mcpServerBridge.checkCommandSafety(command);
+      if (safety.blocked) {
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
     }
 
     try {
@@ -937,7 +940,7 @@ function registerHandlers(ipcMain) {
       }
 
       // Serial port: raw command execution (no shell wrapping)
-      if (session.serialPort && typeof session.serialPort.write === "function") {
+      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return execViaRawPty(session.serialPort, command, {

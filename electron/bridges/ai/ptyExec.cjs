@@ -432,13 +432,17 @@ function execViaChannel(sshClient, command, options) {
  * that do not run a standard POSIX/PowerShell/CMD shell.
  *
  * The command is sent as-is followed by CR. Completion is detected via idle
- * timeout (no new data for `idleMs` milliseconds).
+ * timeout (no new data for `idleMs` milliseconds). The idle timer does NOT
+ * start until the first data chunk arrives, so slow devices won't time out
+ * before producing any output.
+ *
+ * Exit code is always `null` because vendor CLIs do not expose exit codes.
  *
  * @param {object} serialPort - The SerialPort instance with .write() and .on("data")
  * @param {string} command - The raw command to send
  * @param {object} [options]
  * @param {number} [options.timeoutMs=60000] - Overall timeout
- * @param {number} [options.idleMs=2000] - Idle timeout to detect command completion
+ * @param {number} [options.idleMs=3000] - Idle timeout to detect command completion
  * @param {Map} [options.trackForCancellation] - Map for cancellation tracking
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
@@ -446,25 +450,35 @@ function execViaChannel(sshClient, command, options) {
 function execViaRawPty(serialPort, command, options) {
   const {
     timeoutMs = 60000,
-    idleMs = 2000,
+    idleMs = 3000,
     trackForCancellation = null,
     chatSessionId,
     abortSignal,
   } = options || {};
 
-  const marker = `__NCRAW_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}__`;
+  // Simple incrementing key for the cancellation map (no markers sent to device)
+  const cancelKey = `__NCRAW_${Date.now().toString(36)}_${(++execViaRawPty._seq).toString(36)}`;
 
   if (abortSignal?.aborted) {
-    return Promise.resolve({ ok: false, stdout: "", stderr: "", exitCode: -1, error: "Cancelled" });
+    return Promise.resolve({ ok: false, stdout: "", stderr: "", exitCode: null, error: "Cancelled" });
   }
 
   return new Promise((resolve) => {
     let output = "";
     let finished = false;
+    let receivedFirstChunk = false;
     let overallTimer = null;
     let idleTimer = null;
     const cleanupFns = [];
 
+    function safeWrite(data) {
+      try {
+        if (typeof serialPort.write === "function") serialPort.write(data);
+      } catch { /* serial port may already be closed */ }
+    }
+
+    // finish signature differs from execViaPty intentionally: no exitCode param
+    // because vendor CLIs have no exit code concept (always null).
     function finish(stdout, error) {
       if (finished) return;
       finished = true;
@@ -472,27 +486,30 @@ function execViaRawPty(serialPort, command, options) {
       clearTimeout(idleTimer);
       for (const fn of cleanupFns) { try { fn(); } catch { /* ignore */ } }
       if (trackForCancellation) {
-        trackForCancellation.delete(marker);
+        trackForCancellation.delete(cancelKey);
       }
 
       let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
 
       // Strip echoed command from the beginning of output.
-      // Network devices echo back the typed command on the first line.
+      // Network devices typically echo back the typed command on the first line,
+      // often prefixed by the device prompt (e.g. "Router#show version").
+      // Only strip when the first line is a close match to avoid removing
+      // legitimate output on devices that don't echo.
       const lines = cleaned.split("\n");
-      if (lines.length > 0) {
+      if (lines.length > 1) {
         const firstLine = lines[0].trim();
         const cmdTrimmed = command.trim();
-        if (firstLine === cmdTrimmed || firstLine.endsWith(cmdTrimmed)) {
+        if (cmdTrimmed && (firstLine === cmdTrimmed || firstLine.endsWith(cmdTrimmed))) {
           lines.shift();
         }
       }
       cleaned = lines.join("\n").trim();
 
       if (error) {
-        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: -1, error });
+        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: null, error });
       } else {
-        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: -1 });
+        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: null });
       }
     }
 
@@ -504,39 +521,47 @@ function execViaRawPty(serialPort, command, options) {
     }
 
     const onData = (data) => {
-      output += data.toString();
+      // Use latin1 to match the terminal display decoder in terminalBridge.cjs
+      output += data.toString("latin1");
+      // Start idle timer only after first data arrives, so slow devices
+      // don't prematurely resolve with empty output.
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true;
+      }
       resetIdleTimer();
     };
 
     // Subscribe to serial port data
-    serialPort.on("data", onData);
-    cleanupFns.push(() => {
-      try { serialPort.removeListener("data", onData); } catch { /* ignore */ }
-    });
+    if (typeof serialPort.on === "function") {
+      serialPort.on("data", onData);
+      cleanupFns.push(() => {
+        try { serialPort.removeListener("data", onData); } catch { /* ignore */ }
+      });
 
-    // Error / close detection
-    const onError = (err) => finish(output, `Serial port error: ${err?.message || err}`);
-    const onClose = () => finish(output, "Serial port closed unexpectedly");
-    serialPort.on("error", onError);
-    serialPort.on("close", onClose);
-    cleanupFns.push(() => {
-      try { serialPort.removeListener("error", onError); } catch { /* */ }
-      try { serialPort.removeListener("close", onClose); } catch { /* */ }
-    });
+      // Error / close detection
+      const onError = (err) => finish(output, `Serial port error: ${err?.message || err}`);
+      const onClose = () => finish(output, "Serial port closed unexpectedly");
+      serialPort.on("error", onError);
+      serialPort.on("close", onClose);
+      cleanupFns.push(() => {
+        try { serialPort.removeListener("error", onError); } catch { /* */ }
+        try { serialPort.removeListener("close", onClose); } catch { /* */ }
+      });
+    }
 
     // Overall timeout
     overallTimer = setTimeout(() => {
-      serialPort.write("\x03");
+      safeWrite("\x03");
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(output, `Command timed out (${timeoutSec}s)`);
     }, timeoutMs);
 
     // Cancellation tracking
     if (trackForCancellation) {
-      trackForCancellation.set(marker, {
+      trackForCancellation.set(cancelKey, {
         chatSessionId: chatSessionId || null,
         cancel: () => {
-          serialPort.write("\x03");
+          safeWrite("\x03");
           finish(output, "Cancelled");
         },
         cleanup: () => {
@@ -549,7 +574,7 @@ function execViaRawPty(serialPort, command, options) {
     // AbortSignal handling
     if (abortSignal) {
       const onAbort = () => {
-        serialPort.write("\x03");
+        safeWrite("\x03");
         finish(output, "Cancelled");
       };
       abortSignal.addEventListener("abort", onAbort, { once: true });
@@ -557,10 +582,10 @@ function execViaRawPty(serialPort, command, options) {
     }
 
     // Send the raw command followed by CR (network devices expect \r)
-    serialPort.write(command + "\r");
-    resetIdleTimer();
+    safeWrite(command + "\r");
   });
 }
+execViaRawPty._seq = 0;
 
 module.exports = {
   execViaPty,

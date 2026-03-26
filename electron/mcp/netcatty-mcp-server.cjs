@@ -197,7 +197,7 @@ server.resource(
 // Tool: get_environment
 server.tool(
   "get_environment",
-  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, or Mosh-backed shells. Call this first before executing commands.",
+  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, Mosh-backed shells, or serial port connections (network devices, embedded systems). Serial sessions have protocol 'serial' and shellType 'raw'. Call this first before executing commands.",
   {},
   async () => {
     process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
@@ -218,10 +218,10 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a shell command on a Netcatty terminal session. The command runs in that session's shell and output (stdout/stderr) is returned when complete.",
+  "Execute a command on a Netcatty terminal session. For shell sessions, the command runs in the session's shell. For serial/raw sessions (network devices), the command is sent as-is without shell wrapping and exit codes are unavailable.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
-    command: z.string().describe("The shell command to execute in the target session."),
+    command: z.string().describe("The command to execute in the target session."),
   },
   async ({ sessionId, command }) => {
     const guardErr = guardWriteOperation(command);
@@ -235,7 +235,10 @@ server.tool(
     const parts = [];
     if (result.stdout) parts.push(result.stdout);
     if (result.stderr) parts.push(`[stderr] ${result.stderr}`);
-    parts.push(`[exit code: ${result.exitCode ?? -1}]`);
+    // Serial/raw sessions return null exitCode (vendor CLIs have no exit codes)
+    if (result.exitCode != null) {
+      parts.push(`[exit code: ${result.exitCode}]`);
+    }
     return { content: [{ type: "text", text: parts.join("\n") }] };
   },
 );
@@ -408,7 +411,7 @@ server.tool(
   "Execute a command on multiple Netcatty terminal sessions simultaneously or sequentially. Useful for fleet-wide operations, or to compare local and remote environments.",
   {
     sessionIds: z.array(z.string()).describe("Array of session IDs to execute on."),
-    command: z.string().describe("The shell command to execute on each host."),
+    command: z.string().describe("The command to execute on each host."),
     mode: z.enum(["parallel", "sequential"]).optional().default("parallel").describe("Execution mode. Defaults to parallel."),
     stopOnError: z.boolean().optional().default(false).describe("In sequential mode, stop on first failure."),
   },

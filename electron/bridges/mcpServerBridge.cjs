@@ -589,13 +589,18 @@ function handleExec(params) {
     return { ok: false, error: 'Invalid command', exitCode: 1 };
   }
 
-  const safety = checkCommandSafety(command);
-  if (safety.blocked) {
-    return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-  }
-
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
+
+  // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
+  // are meaningless on network device CLIs. Serial sessions skip the check because
+  // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
+  if (session.protocol !== "serial") {
+    const safety = checkCommandSafety(command);
+    if (safety.blocked) {
+      return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+    }
+  }
 
   if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
     return {
@@ -617,18 +622,17 @@ function handleExec(params) {
     });
   }
 
-  // If no PTY stream, fall back to exec channel for SSH sessions only.
+  // Fallback: SSH exec channel (invisible to terminal).
+  // At this point ptyStream is not writable (already returned above if it was).
   if (sshClient && typeof sshClient.exec === "function") {
-    if (!ptyStream || typeof ptyStream.write !== "function") {
-      return execViaChannel(sshClient, command, {
-        timeoutMs: commandTimeoutMs,
-        trackForCancellation: activePtyExecs,
-      });
-    }
+    return execViaChannel(sshClient, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activePtyExecs,
+    });
   }
 
   // Serial port: raw command execution (no shell wrapping)
-  if (session.serialPort && typeof session.serialPort.write === "function") {
+  if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
     return execViaRawPty(session.serialPort, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
