@@ -148,7 +148,6 @@ export async function getCompletions(
   if (!input || input.trim().length === 0) return [];
 
   const ctx = parseCommandLine(input);
-  // console.log("[Autocomplete] getCompletions:", { input, commandName: ctx.commandName, wordIndex: ctx.wordIndex, currentWord: ctx.currentWord });
   const suggestions: CompletionSuggestion[] = [];
 
   // 1. History suggestions (full command line prefix match)
@@ -218,7 +217,6 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
   const suggestions: CompletionSuggestion[] = [];
 
   const specAvailable = await hasSpec(ctx.commandName);
-  // console.log("[Autocomplete] spec:", { commandName: ctx.commandName, specAvailable });
   if (!specAvailable) {
     if (ctx.wordIndex === 0 && ctx.currentWord.length >= 1) {
       return await getCommandNameSuggestions(ctx.currentWord);
@@ -227,7 +225,6 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
   }
 
   const spec = await loadSpec(ctx.commandName);
-  // console.log("[Autocomplete] loadSpec result:", { commandName: ctx.commandName, loaded: !!spec, subcommands: spec?.subcommands?.length, options: spec?.options?.length });
   if (!spec) return [];
 
   // If we're still typing the command name (partial match, not yet complete)

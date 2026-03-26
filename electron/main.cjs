@@ -509,9 +509,7 @@ const registerBridges = (win) => {
   ipcMain.handle("netcatty:figspec:list", async () => {
     try {
       const mod = await import("@withfig/autocomplete");
-      const result = mod.default || [];
-      console.log("[Main] figspec:list type:", typeof result, "isArray:", Array.isArray(result), "length:", result?.length, "sample:", Array.isArray(result) ? result.slice(0, 3) : result);
-      return result;
+      return mod.default || [];
     } catch (err) {
       console.warn("[Main] Failed to load fig spec list:", err?.message || err);
       return [];

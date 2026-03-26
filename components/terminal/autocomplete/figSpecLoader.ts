@@ -73,10 +73,8 @@ export async function getAvailableSpecs(): Promise<string[]> {
 
   try {
     const bridge = getBridge();
-    // console.log("[Autocomplete] figspec bridge available:", !!bridge?.listFigSpecs);
     if (bridge?.listFigSpecs) {
       const specs = await bridge.listFigSpecs();
-      // console.log("[Autocomplete] figspec list result:", Array.isArray(specs) ? `${specs.length} specs` : typeof specs);
       if (Array.isArray(specs) && specs.length > 0) {
         availableSpecs = specs;
         availableSpecsSet = new Set(specs);
