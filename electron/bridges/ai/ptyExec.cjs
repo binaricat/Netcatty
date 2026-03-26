@@ -607,7 +607,9 @@ function execViaRawPty(serialPort, command, options) {
     // Cleared on first data in onData.
     const noResponseMs = Math.min(idleMs * 4, Math.floor(timeoutMs / 4));
     noResponseTimer = setTimeout(() => {
-      finish(output, null);
+      // Resolve with ok:true but include a hint that no output was received,
+      // so the AI knows the command may still be running or produced no output.
+      finish(output || "(no output received — command may have completed silently or may still be running)", null);
     }, noResponseMs);
     cleanupFns.push(() => clearTimeout(noResponseTimer));
   });
