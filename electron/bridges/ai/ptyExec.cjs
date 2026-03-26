@@ -512,11 +512,21 @@ function execViaRawPty(serialPort, command, options) {
       }
     }
 
+    // Track data chunks to distinguish echo phase from real output.
+    // The first 1-2 chunks are typically the echoed command + prompt.
+    // Use a longer idle timeout during this phase so that commands like
+    // ping/traceroute/copy that stay quiet after the echo aren't truncated.
+    let chunkCount = 0;
+    const ECHO_PHASE_CHUNKS = 2;
+
     function resetIdleTimer() {
       clearTimeout(idleTimer);
+      // During echo phase (first few chunks), use 2× idleMs to avoid
+      // truncating commands that produce output after a delay.
+      const effectiveIdle = chunkCount <= ECHO_PHASE_CHUNKS ? idleMs * 2 : idleMs;
       idleTimer = setTimeout(() => {
         finish(output, null);
-      }, idleMs);
+      }, effectiveIdle);
     }
 
     let noResponseTimer = null;
@@ -526,6 +536,7 @@ function execViaRawPty(serialPort, command, options) {
       // Idle timer resets on each chunk; it is only started here (not after
       // safeWrite), so slow devices won't time out before producing output.
       output += data.toString("latin1");
+      chunkCount++;
       // Cancel the no-response fallback on first data
       if (noResponseTimer) {
         clearTimeout(noResponseTimer);
