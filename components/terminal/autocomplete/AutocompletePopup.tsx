@@ -102,6 +102,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
         display: "flex",
         alignItems: expandUpward ? "flex-end" : "flex-start",
         gap: "4px",
+        pointerEvents: "auto", // Re-enable on popup itself (parent is pointer-events-none)
       }}
       onMouseDown={(e) => {
         e.preventDefault();

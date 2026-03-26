@@ -1815,7 +1815,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             }}
           />
 
-          {/* Autocomplete popup overlay */}
+          {/* Autocomplete popup overlay — pointer-events-none so terminal stays interactive */}
           {autocomplete.state.popupVisible && autocomplete.state.suggestions.length > 0 && (
             <div
               className="absolute inset-x-0 bottom-0 pointer-events-none"
@@ -1824,7 +1824,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 paddingLeft: 6,
               }}
             >
-              <div className="relative w-full h-full pointer-events-auto">
+              <div className="relative w-full h-full">
                 <AutocompletePopup
                   suggestions={autocomplete.state.suggestions}
                   selectedIndex={autocomplete.state.selectedIndex}

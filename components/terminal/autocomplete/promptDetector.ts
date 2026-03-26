@@ -57,7 +57,7 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   // Empty line
   if (lineText.trim().length === 0) return NO_PROMPT;
 
-  // Try to find the prompt boundary
+  // Try to find the prompt boundary on the current line
   const promptEnd = findPromptBoundary(lineText);
   if (promptEnd >= 0) {
     const promptText = lineText.substring(0, promptEnd);
@@ -69,6 +69,42 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
     const cursorOffset = Math.max(0, cursorX - promptEnd);
 
     return { isAtPrompt: true, promptText, userInput, cursorOffset };
+  }
+
+  // Handle wrapped lines: if the prompt is on a previous row (e.g., long path or
+  // long command wrapped onto multiple rows), look upward for the prompt line.
+  // The current row's content is continuation of the command.
+  if (line.isWrapped) {
+    // Walk up to find the first non-wrapped line (the prompt line)
+    let promptRow = cursorY - 1;
+    while (promptRow >= 0) {
+      const prevLine = buffer.getLine(promptRow);
+      if (!prevLine) break;
+      if (!prevLine.isWrapped) break;
+      promptRow--;
+    }
+
+    const promptLine = buffer.getLine(promptRow);
+    if (promptLine) {
+      const promptLineText = promptLine.translateToString(true);
+      const pEnd = findPromptBoundary(promptLineText);
+      if (pEnd >= 0) {
+        const promptText = promptLineText.substring(0, pEnd);
+        // Concatenate all rows from promptRow to cursorY to get full input
+        let fullInput = promptLineText.substring(pEnd);
+        for (let row = promptRow + 1; row <= cursorY; row++) {
+          const rowLine = buffer.getLine(row);
+          if (rowLine) fullInput += rowLine.translateToString(true);
+        }
+        // Trim to cursor position on the last row
+        const totalCols = term.cols;
+        const charsBeforeCursorRow = (cursorY - promptRow) * totalCols - pEnd;
+        const userInput = fullInput.substring(0, charsBeforeCursorRow + cursorX);
+        const cursorOffset = userInput.length;
+
+        return { isAtPrompt: true, promptText, userInput, cursorOffset };
+      }
+    }
   }
 
   return NO_PROMPT;

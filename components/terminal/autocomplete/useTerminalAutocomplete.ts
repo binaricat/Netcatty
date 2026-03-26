@@ -117,17 +117,41 @@ export function useTerminalAutocomplete(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Initialize ghost text addon
+  // Initialize ghost text addon — poll for termRef since it's set after xterm runtime creation
   useEffect(() => {
-    const term = termRef.current;
-    if (!term || !settings.enabled) return;
+    if (!settings.enabled) return;
 
-    const addon = new GhostTextAddon();
-    addon.activate(term);
-    ghostAddonRef.current = addon;
+    let addon: GhostTextAddon | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const tryActivate = () => {
+      const term = termRef.current;
+      if (!term || cancelled) return;
+      addon = new GhostTextAddon();
+      addon.activate(term);
+      ghostAddonRef.current = addon;
+    };
+
+    // termRef may not be set yet on first render — poll briefly
+    if (termRef.current) {
+      tryActivate();
+    } else {
+      const poll = () => {
+        if (cancelled) return;
+        if (termRef.current) {
+          tryActivate();
+        } else {
+          pollTimer = setTimeout(poll, 50);
+        }
+      };
+      pollTimer = setTimeout(poll, 50);
+    }
 
     return () => {
-      addon.dispose();
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      addon?.dispose();
       ghostAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,6 +202,13 @@ export function useTerminalAutocomplete(
     });
 
     if (disposedRef.current) return;
+
+    // Discard stale results: if the user kept typing while getCompletions was running,
+    // the current prompt input will have changed. Re-detect and compare.
+    const currentPrompt = detectPrompt(term);
+    if (!currentPrompt.isAtPrompt || currentPrompt.userInput !== input) {
+      return; // Input changed — these completions are stale
+    }
 
     // Ghost text: use the best suggestion
     if (settingsRef.current.showGhostText && completions.length > 0) {
@@ -402,8 +433,16 @@ export function useTerminalAutocomplete(
       const prompt = detectPrompt(term);
       if (!prompt.isAtPrompt) return;
 
-      const textToInsert = suggestion.text.substring(prompt.userInput.length);
-      const payload = execute ? textToInsert + "\r" : textToInsert;
+      // If suggestion starts with the current input, insert only the remaining part.
+      // Otherwise (fuzzy match), clear the line first and write the full suggestion.
+      let payload: string;
+      if (suggestion.text.startsWith(prompt.userInput)) {
+        const textToInsert = suggestion.text.substring(prompt.userInput.length);
+        payload = execute ? textToInsert + "\r" : textToInsert;
+      } else {
+        // Fuzzy match: clear current input with Ctrl+U, then write full command
+        payload = "\x15" + suggestion.text + (execute ? "\r" : "");
+      }
 
       if (payload) {
         writeToTerminal(payload);
