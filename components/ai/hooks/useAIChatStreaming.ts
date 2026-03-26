@@ -331,7 +331,7 @@ export function useAIChatStreaming({
       tools,
       stopWhen: stepCountIs(maxIterations),
       abortSignal: signal,
-      ...(advancedParams?.maxTokens != null && { maxTokens: advancedParams.maxTokens }),
+      ...(advancedParams?.maxTokens != null && { maxOutputTokens: advancedParams.maxTokens }),
       ...(advancedParams?.temperature != null && { temperature: advancedParams.temperature }),
       ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
       ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
