@@ -6,35 +6,25 @@
  * - Popup menu state
  * - Keyboard interaction (→ accept, Tab toggle popup, ↑↓ navigate, Esc close)
  * - Input debouncing
- * - History recording
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { GhostTextAddon } from "./GhostTextAddon";
 import { detectPrompt, type PromptDetectionResult } from "./promptDetector";
-import {
-  getCompletions,
-  getInlineSuggestion,
-  type CompletionSuggestion,
-} from "./completionEngine";
+import { getCompletions, type CompletionSuggestion } from "./completionEngine";
 import { recordCommand } from "./commandHistoryStore";
 import { preloadCommonSpecs } from "./figSpecLoader";
+import { getXTermCellDimensions } from "./xtermUtils";
 
 export interface AutocompleteSettings {
-  /** Enable/disable the autocomplete system */
   enabled: boolean;
-  /** Show ghost text inline suggestions */
   showGhostText: boolean;
-  /** Show popup menu for multiple suggestions */
   showPopupMenu: boolean;
-  /** Debounce delay in ms for fetching suggestions */
   debounceMs: number;
-  /** Minimum characters before showing suggestions */
   minChars: number;
-  /** Maximum suggestions in popup menu */
   maxSuggestions: number;
-  /** Typing speed threshold — disable when typing faster than this (ms between keystrokes) */
+  /** Typing speed threshold — suppress suggestions when typing faster than this (ms between keystrokes) */
   fastTypingThresholdMs: number;
 }
 
@@ -48,16 +38,20 @@ export const DEFAULT_AUTOCOMPLETE_SETTINGS: AutocompleteSettings = {
   fastTypingThresholdMs: 40,
 };
 
+/** Shared empty state to avoid creating new objects on every reset */
+const EMPTY_STATE: AutocompleteState = Object.freeze({
+  suggestions: [],
+  selectedIndex: -1,
+  popupVisible: false,
+  popupPosition: { x: 0, y: 0 },
+  expandUpward: false,
+});
+
 export interface AutocompleteState {
-  /** Current suggestions for popup */
   suggestions: CompletionSuggestion[];
-  /** Selected index in popup (-1 = none) */
   selectedIndex: number;
-  /** Whether popup is visible */
   popupVisible: boolean;
-  /** Popup position (px) */
   popupPosition: { x: number; y: number };
-  /** Whether popup expands upward (when cursor is near bottom) */
   expandUpward: boolean;
 }
 
@@ -67,50 +61,43 @@ interface UseTerminalAutocompleteOptions {
   hostId: string;
   hostOs: "linux" | "windows" | "macos";
   settings?: Partial<AutocompleteSettings>;
-  /** Called when a command is accepted (for recording) */
-  onCommandRecorded?: (command: string) => void;
+  /** Callback to write text to the terminal session — replaces CustomEvent */
+  onAcceptText?: (text: string) => void;
 }
 
-/**
- * Hook return type
- */
 export interface TerminalAutocompleteHandle {
-  /** Current popup state */
   state: AutocompleteState;
-  /** The GhostTextAddon instance (for manual control) */
   ghostTextAddon: GhostTextAddon | null;
-  /** Handle terminal input data (call from onData) */
   handleInput: (data: string) => void;
-  /** Handle key events (call from attachCustomKeyEventHandler) */
   handleKeyEvent: (e: KeyboardEvent) => boolean;
-  /** Select a suggestion from the popup */
   selectSuggestion: (suggestion: CompletionSuggestion) => void;
-  /** Close the popup */
   closePopup: () => void;
-  /** Dispose of all resources */
   dispose: () => void;
 }
 
 export function useTerminalAutocomplete(
   options: UseTerminalAutocompleteOptions,
 ): TerminalAutocompleteHandle {
-  const { termRef, sessionId, hostId, hostOs, settings: userSettings } = options;
+  const { termRef, sessionId, hostId, hostOs, settings: userSettings, onAcceptText } = options;
 
   const settings: AutocompleteSettings = {
     ...DEFAULT_AUTOCOMPLETE_SETTINGS,
     ...userSettings,
   };
 
+  // Use refs for values accessed in callbacks to avoid stale closures
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const onAcceptTextRef = useRef(onAcceptText);
+  onAcceptTextRef.current = onAcceptText;
+  const hostIdRef = useRef(hostId);
+  hostIdRef.current = hostId;
+  const hostOsRef = useRef(hostOs);
+  hostOsRef.current = hostOs;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
-  const [state, setState] = useState<AutocompleteState>({
-    suggestions: [],
-    selectedIndex: -1,
-    popupVisible: false,
-    popupPosition: { x: 0, y: 0 },
-    expandUpward: false,
-  } as AutocompleteState);
+  const [state, setState] = useState<AutocompleteState>(EMPTY_STATE);
 
   const ghostAddonRef = useRef<GhostTextAddon | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,10 +106,15 @@ export function useTerminalAutocomplete(
   const disposedRef = useRef(false);
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** Flag to suppress handleInput's Enter recording when selectAndExecute already did it */
+  const suppressNextEnterRecordRef = useRef(false);
 
-  // Preload common specs on first mount
+  // Preload common specs on first mount (only if enabled)
   useEffect(() => {
-    preloadCommonSpecs();
+    if (settings.enabled) {
+      preloadCommonSpecs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Initialize ghost text addon
@@ -142,7 +134,25 @@ export function useTerminalAutocomplete(
   }, [sessionId, settings.enabled]);
 
   /**
+   * Write accepted text to the terminal via callback (no CustomEvent).
+   */
+  const writeToTerminal = useCallback((text: string) => {
+    onAcceptTextRef.current?.(text);
+  }, []);
+
+  /**
+   * Reset popup/ghost state. Uses EMPTY_STATE reference when possible to skip re-render.
+   */
+  const resetState = useCallback(() => {
+    ghostAddonRef.current?.hide();
+    setState((prev) =>
+      prev.popupVisible || prev.suggestions.length > 0 ? { ...EMPTY_STATE } : prev,
+    );
+  }, []);
+
+  /**
    * Fetch and display suggestions based on current input.
+   * Single query path for both ghost text and popup (no duplicate queries).
    */
   const fetchSuggestions = useCallback(async () => {
     const term = termRef.current;
@@ -152,55 +162,46 @@ export function useTerminalAutocomplete(
     lastPromptRef.current = prompt;
 
     if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
-      ghostAddonRef.current?.hide();
-      setState((prev) =>
-        prev.popupVisible || prev.suggestions.length > 0
-          ? { ...prev, suggestions: [], popupVisible: false, selectedIndex: -1 }
-          : prev,
-      );
+      resetState();
       return;
     }
 
     const input = prompt.userInput;
 
-    // Ghost text: show single best suggestion
-    if (settingsRef.current.showGhostText) {
-      const inline = await getInlineSuggestion(input, { hostId, os: hostOs });
-      if (inline && !disposedRef.current) {
-        ghostAddonRef.current?.show(inline, input);
-      } else {
-        ghostAddonRef.current?.hide();
-      }
+    // Single query for both ghost text and popup
+    const completions = await getCompletions(input, {
+      hostId: hostIdRef.current,
+      os: hostOsRef.current,
+      maxResults: settingsRef.current.maxSuggestions,
+    });
+
+    if (disposedRef.current) return;
+
+    // Ghost text: use the best suggestion
+    if (settingsRef.current.showGhostText && completions.length > 0) {
+      ghostAddonRef.current?.show(completions[0].text, input);
+    } else {
+      ghostAddonRef.current?.hide();
     }
 
-    // Popup: fetch multiple suggestions
-    if (settingsRef.current.showPopupMenu) {
-      const completions = await getCompletions(input, {
-        hostId,
-        os: hostOs,
-        maxResults: settingsRef.current.maxSuggestions,
+    // Popup
+    if (settingsRef.current.showPopupMenu && completions.length > 0) {
+      const { position, expandUpward } = calculatePopupPosition(term, completions.length);
+      setState({
+        suggestions: completions,
+        selectedIndex: 0,
+        popupVisible: true,
+        popupPosition: position,
+        expandUpward,
       });
-
-      if (disposedRef.current) return;
-
-      if (completions.length > 0) {
-        const { position, expandUpward } = calculatePopupPosition(term, completions.length);
-        setState({
-          suggestions: completions,
-          selectedIndex: 0,
-          popupVisible: true,
-          popupPosition: position,
-          expandUpward,
-        });
-      } else {
-        setState((prev) =>
-          prev.popupVisible
-            ? { ...prev, suggestions: [], popupVisible: false, selectedIndex: -1, expandUpward: false }
-            : prev,
-        );
-      }
+    } else {
+      setState((prev) =>
+        prev.popupVisible
+          ? { ...EMPTY_STATE }
+          : prev,
+      );
     }
-  }, [termRef, hostId, hostOs]);
+  }, [termRef, resetState]);
 
   /**
    * Handle terminal input data. Called on every character.
@@ -210,58 +211,55 @@ export function useTerminalAutocomplete(
       if (!settingsRef.current.enabled) return;
 
       const now = Date.now();
-
-      // Fast typing detection — suppress if typing too fast
       const timeSinceLastKeystroke = now - lastKeystrokeRef.current;
       lastKeystrokeRef.current = now;
 
-      if (timeSinceLastKeystroke < settingsRef.current.fastTypingThresholdMs) {
-        // User is typing fast, don't show suggestions yet
-        // But still debounce — they might pause
-      }
-
       // Command recording: Enter key
       if (data === "\r" || data === "\n") {
-        const prompt = lastPromptRef.current ?? (termRef.current ? detectPrompt(termRef.current) : null);
-        if (prompt?.isAtPrompt && prompt.userInput.trim()) {
-          recordCommand(prompt.userInput.trim(), hostId, hostOs);
+        // Skip recording if selectAndExecute already recorded this command
+        if (suppressNextEnterRecordRef.current) {
+          suppressNextEnterRecordRef.current = false;
+        } else {
+          const prompt = lastPromptRef.current ?? (termRef.current ? detectPrompt(termRef.current) : null);
+          if (prompt?.isAtPrompt && prompt.userInput.trim()) {
+            recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
+          }
         }
-        ghostAddonRef.current?.hide();
-        setState({
-          suggestions: [],
-          selectedIndex: -1,
-          popupVisible: false,
-          popupPosition: { x: 0, y: 0 },
-        });
+        resetState();
         return;
       }
 
       // Ctrl+C, Ctrl+U — clear
       if (data === "\x03" || data === "\x15") {
-        ghostAddonRef.current?.hide();
-        setState({
-          suggestions: [],
-          selectedIndex: -1,
-          popupVisible: false,
-          popupPosition: { x: 0, y: 0 },
-        });
+        resetState();
         return;
       }
 
-      // Ignore escape sequences (arrow keys, etc.)
+      // Ignore escape sequences (arrow keys handled by handleKeyEvent)
       if (data.startsWith("\x1b") && data !== "\x1b") {
         return;
       }
+
+      // Fast typing suppression: if typing faster than threshold, skip this debounce cycle
+      const isFastTyping = timeSinceLastKeystroke < settingsRef.current.fastTypingThresholdMs;
 
       // Debounced suggestion fetch
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
-      debounceTimerRef.current = setTimeout(() => {
-        fetchSuggestions();
-      }, settingsRef.current.debounceMs);
+
+      if (isFastTyping) {
+        // Still debounce, but with a longer delay to wait for typing to pause
+        debounceTimerRef.current = setTimeout(() => {
+          fetchSuggestions();
+        }, settingsRef.current.debounceMs * 2);
+      } else {
+        debounceTimerRef.current = setTimeout(() => {
+          fetchSuggestions();
+        }, settingsRef.current.debounceMs);
+      }
     },
-    [fetchSuggestions, hostId, hostOs, termRef],
+    [fetchSuggestions, termRef, resetState],
   );
 
   /**
@@ -279,7 +277,12 @@ export function useTerminalAutocomplete(
       if (e.key === "ArrowRight" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (ghost?.isVisible()) {
           e.preventDefault();
-          acceptFullSuggestion();
+          const ghostText = ghost.getGhostText();
+          if (ghostText) {
+            writeToTerminal(ghostText);
+            ghost.hide();
+            setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
+          }
           return false;
         }
       }
@@ -288,25 +291,40 @@ export function useTerminalAutocomplete(
       if (e.key === "ArrowRight" && (e.ctrlKey || e.altKey) && !e.metaKey && !e.shiftKey) {
         if (ghost?.isVisible()) {
           e.preventDefault();
-          acceptNextWord();
+          const nextWord = ghost.getNextWord();
+          if (nextWord) {
+            writeToTerminal(nextWord);
+            // Update ghost text to show remaining
+            const fullSuggestion = ghost.getSuggestion();
+            const currentInput = ghost.getGhostText().substring(nextWord.length);
+            if (currentInput && fullSuggestion) {
+              // Rebuild: the new input is old input + nextWord
+              const oldInput = fullSuggestion.substring(0, fullSuggestion.length - ghost.getGhostText().length);
+              ghost.show(fullSuggestion, oldInput + nextWord);
+            } else {
+              ghost.hide();
+            }
+          }
           return false;
         }
       }
 
-      // Tab: accept selected popup suggestion, or toggle popup
+      // Tab: accept selected popup suggestion, or accept ghost text
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (s.popupVisible && s.suggestions.length > 0) {
           e.preventDefault();
           const selected = s.suggestions[Math.max(0, s.selectedIndex)];
-          if (selected) {
-            selectSuggestion(selected);
-          }
+          if (selected) insertSuggestion(selected, false);
           return false;
         }
-        // If ghost text is visible and no popup, accept ghost text
         if (ghost?.isVisible()) {
           e.preventDefault();
-          acceptFullSuggestion();
+          const ghostText = ghost.getGhostText();
+          if (ghostText) {
+            writeToTerminal(ghostText);
+            ghost.hide();
+            setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
+          }
           return false;
         }
       }
@@ -339,116 +357,33 @@ export function useTerminalAutocomplete(
           const selected = s.suggestions[Math.max(0, s.selectedIndex)];
           if (selected) {
             e.preventDefault();
-            selectAndExecute(selected);
+            insertSuggestion(selected, true);
             return false;
           }
         }
       }
 
       // Escape: close popup and hide ghost text
-      if (e.key === "Escape") {
-        if (s.popupVisible || ghost?.isVisible()) {
-          e.preventDefault();
-          ghost?.hide();
-          setState({
-            suggestions: [],
-            selectedIndex: -1,
-            popupVisible: false,
-            popupPosition: { x: 0, y: 0 },
-          });
-          return false;
-        }
+      // Only consume Escape if popup is visible; don't block Escape for vi-mode shells
+      // when only ghost text is showing (ghost text is passive/non-intrusive)
+      if (e.key === "Escape" && s.popupVisible) {
+        e.preventDefault();
+        ghost?.hide();
+        setState({ ...EMPTY_STATE });
+        return false;
       }
 
       return true;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- insertSuggestion uses refs, stable identity
+    [writeToTerminal],
   );
 
   /**
-   * Accept the full ghost text suggestion.
-   */
-  const acceptFullSuggestion = useCallback(() => {
-    const ghost = ghostAddonRef.current;
-    const term = termRef.current;
-    if (!ghost || !term) return;
-
-    const ghostText = ghost.getGhostText();
-    if (!ghostText) return;
-
-    // Write the remaining text to the terminal
-    // We need to use writeToSession, but from here we just fire
-    // a custom event that the Terminal component can listen to
-    const event = new CustomEvent("autocomplete:accept", {
-      detail: { text: ghostText, sessionId },
-    });
-    term.element?.dispatchEvent(event);
-
-    ghost.hide();
-    setState({
-      suggestions: [],
-      selectedIndex: -1,
-      popupVisible: false,
-      popupPosition: { x: 0, y: 0 },
-    });
-  }, [termRef, sessionId]);
-
-  /**
-   * Accept the next word from ghost text.
-   */
-  const acceptNextWord = useCallback(() => {
-    const ghost = ghostAddonRef.current;
-    const term = termRef.current;
-    if (!ghost || !term) return;
-
-    const nextWord = ghost.getNextWord();
-    if (!nextWord) return;
-
-    const event = new CustomEvent("autocomplete:accept", {
-      detail: { text: nextWord, sessionId },
-    });
-    term.element?.dispatchEvent(event);
-
-    // Update ghost text to show remaining
-    const remaining = ghost.getGhostText().substring(nextWord.length);
-    if (remaining) {
-      const prompt = detectPrompt(term);
-      if (prompt.isAtPrompt) {
-        ghost.show(prompt.userInput + nextWord + remaining, prompt.userInput + nextWord);
-      }
-    } else {
-      ghost.hide();
-    }
-  }, [termRef, sessionId]);
-
-  /**
-   * Insert a suggestion from the popup (Tab / mouse click — insert only, no execute).
-   */
-  const selectSuggestion = useCallback(
-    (suggestion: CompletionSuggestion) => {
-      insertSuggestionText(suggestion, false);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [termRef, sessionId],
-  );
-
-  /**
-   * Insert a suggestion AND execute it (Enter on popup — insert + send CR).
-   */
-  const selectAndExecute = useCallback(
-    (suggestion: CompletionSuggestion) => {
-      insertSuggestionText(suggestion, true);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [termRef, sessionId],
-  );
-
-  /**
-   * Shared logic for inserting a suggestion.
+   * Insert a suggestion into the terminal.
    * @param execute If true, also sends \r to execute the command.
    */
-  const insertSuggestionText = useCallback(
+  const insertSuggestion = useCallback(
     (suggestion: CompletionSuggestion, execute: boolean) => {
       const term = termRef.current;
       if (!term) return;
@@ -456,51 +391,40 @@ export function useTerminalAutocomplete(
       const prompt = lastPromptRef.current ?? detectPrompt(term);
       if (!prompt.isAtPrompt) return;
 
-      // Calculate text to insert: the suggestion minus what's already typed
       const textToInsert = suggestion.text.substring(prompt.userInput.length);
-
       const payload = execute ? textToInsert + "\r" : textToInsert;
 
       if (payload) {
-        const event = new CustomEvent("autocomplete:accept", {
-          detail: { text: payload, sessionId },
-        });
-        term.element?.dispatchEvent(event);
+        writeToTerminal(payload);
       }
 
-      // Record command to history when executing
+      // When executing, record command here and suppress the handleInput Enter recording
       if (execute) {
-        recordCommand(suggestion.text, hostId, hostOs);
+        recordCommand(suggestion.text, hostIdRef.current, hostOsRef.current);
+        suppressNextEnterRecordRef.current = true;
       }
 
       ghostAddonRef.current?.hide();
-      setState({
-        suggestions: [],
-        selectedIndex: -1,
-        popupVisible: false,
-        popupPosition: { x: 0, y: 0 },
-        expandUpward: false,
-      });
+      setState({ ...EMPTY_STATE });
     },
-    [termRef, sessionId, hostId, hostOs],
+    [termRef, writeToTerminal],
   );
 
   /**
-   * Close the popup.
+   * Select a suggestion from the popup (Tab / mouse click — insert only, no execute).
    */
+  const selectSuggestion = useCallback(
+    (suggestion: CompletionSuggestion) => {
+      insertSuggestion(suggestion, false);
+    },
+    [insertSuggestion],
+  );
+
   const closePopup = useCallback(() => {
     ghostAddonRef.current?.hide();
-    setState({
-      suggestions: [],
-      selectedIndex: -1,
-      popupVisible: false,
-      popupPosition: { x: 0, y: 0 },
-    });
+    setState((prev) => prev.popupVisible ? { ...EMPTY_STATE } : prev);
   }, []);
 
-  /**
-   * Dispose all resources.
-   */
   const dispose = useCallback(() => {
     disposedRef.current = true;
     if (debounceTimerRef.current) {
@@ -510,11 +434,8 @@ export function useTerminalAutocomplete(
     ghostAddonRef.current = null;
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      dispose();
-    };
+    return () => { dispose(); };
   }, [dispose]);
 
   return {
@@ -530,7 +451,6 @@ export function useTerminalAutocomplete(
 
 /**
  * Calculate popup position based on terminal cursor.
- * When the cursor is near the bottom of the terminal, the popup expands upward.
  */
 function calculatePopupPosition(
   term: XTerm,
@@ -539,41 +459,25 @@ function calculatePopupPosition(
   const termElement = term.element;
   if (!termElement) return { position: { x: 0, y: 0 }, expandUpward: false };
 
-  const coreAccess = term as XTerm & {
-    _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } };
-  };
-  const cellWidth = coreAccess._core?._renderService?.dimensions?.css?.cell?.width ?? 8;
-  const cellHeight = coreAccess._core?._renderService?.dimensions?.css?.cell?.height ?? 16;
-
+  const dims = getXTermCellDimensions(term);
   const buffer = term.buffer.active;
   const cursorX = buffer.cursorX;
   const cursorY = buffer.cursorY;
 
-  // Estimate popup height: each item ~28px + 8px padding
   const estimatedPopupHeight = itemCount * 28 + 8;
-  // Available space below the cursor line
   const totalRows = term.rows;
-  const spaceBelow = (totalRows - cursorY - 1) * cellHeight;
-
+  const spaceBelow = (totalRows - cursorY - 1) * dims.height;
   const expandUpward = spaceBelow < estimatedPopupHeight && cursorY > 2;
 
   if (expandUpward) {
-    // Position: bottom edge of popup aligns with the cursor line
     return {
-      position: {
-        x: cursorX * cellWidth,
-        y: cursorY * cellHeight, // top of cursor row — popup will grow upward from here
-      },
+      position: { x: cursorX * dims.width, y: cursorY * dims.height },
       expandUpward: true,
     };
   }
 
-  // Default: below the cursor
   return {
-    position: {
-      x: cursorX * cellWidth,
-      y: (cursorY + 1) * cellHeight + 4,
-    },
+    position: { x: cursorX * dims.width, y: (cursorY + 1) * dims.height + 4 },
     expandUpward: false,
   };
 }

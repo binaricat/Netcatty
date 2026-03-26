@@ -2,21 +2,12 @@
  * Prompt detector for terminal autocomplete.
  * Detects whether the user is currently at a shell prompt (vs. inside a running program).
  * Uses xterm.js buffer analysis to identify common prompt patterns.
+ *
+ * Strategy: scan left-to-right for the FIRST prompt-ending character ($ # % > etc.)
+ * followed by a space. Exclude false positives like $HOME, $PATH, etc.
  */
 
 import type { Terminal as XTerm } from "@xterm/xterm";
-
-/**
- * Common prompt ending patterns.
- * Covers bash ($), root (#), zsh (%), fish (>), PowerShell (>), and custom prompts.
- */
-const PROMPT_END_PATTERNS = [
-  /[$#%>❯❮→➜➤⟩»›]\s*$/,      // Common prompt characters
-  /\)\s*[$#%>]\s*$/,            // Subshell: (env)$
-  /\]\s*[$#%>]\s*$/,            // Bracketed: [user@host ~]$
-  /:\s*[$#%>~]\s*$/,            // Colon-ended: user@host:~$
-  /\w+@\w+[^$#%]*[$#%]\s*$/,   // user@host...$
-];
 
 /**
  * Patterns that indicate the user is NOT at a prompt
@@ -27,6 +18,7 @@ const NON_PROMPT_PATTERNS = [
   /^\s*--\s*More\s*--/,          // less/more pager
   /^\s*\(END\)/,                 // less end marker
   /^:\s*$/,                      // vim command mode
+  /^\s*~\s*$/,                   // vim tilde lines
 ];
 
 export interface PromptDetectionResult {
@@ -40,13 +32,12 @@ export interface PromptDetectionResult {
   cursorOffset: number;
 }
 
+const NO_PROMPT: PromptDetectionResult = {
+  isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0,
+};
+
 /**
  * Detect whether the terminal cursor is at a shell prompt and extract the current user input.
- *
- * Strategy:
- * 1. Read the current line from the xterm buffer
- * 2. Try to identify the prompt boundary using known patterns
- * 3. Extract the user input portion (text after the prompt)
  */
 export function detectPrompt(term: XTerm): PromptDetectionResult {
   const buffer = term.buffer.active;
@@ -54,23 +45,17 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   const cursorX = buffer.cursorX;
   const line = buffer.getLine(cursorY);
 
-  if (!line) {
-    return { isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0 };
-  }
+  if (!line) return NO_PROMPT;
 
   const lineText = line.translateToString(true);
 
   // Check for non-prompt patterns (pagers, editors, etc.)
   for (const pattern of NON_PROMPT_PATTERNS) {
-    if (pattern.test(lineText)) {
-      return { isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0 };
-    }
+    if (pattern.test(lineText)) return NO_PROMPT;
   }
 
-  // Empty line — might be a prompt with just $ or similar
-  if (lineText.trim().length === 0) {
-    return { isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0 };
-  }
+  // Empty line
+  if (lineText.trim().length === 0) return NO_PROMPT;
 
   // Try to find the prompt boundary
   const promptEnd = findPromptBoundary(lineText);
@@ -79,47 +64,77 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
     const userInput = lineText.substring(promptEnd).replace(/\s+$/, "");
     const cursorOffset = Math.max(0, cursorX - promptEnd);
 
-    return {
-      isAtPrompt: true,
-      promptText,
-      userInput,
-      cursorOffset,
-    };
+    return { isAtPrompt: true, promptText, userInput, cursorOffset };
   }
 
-  return { isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0 };
+  return NO_PROMPT;
 }
+
+/** Characters that commonly end a shell prompt */
+const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "➤", "⟩", "»", "›"]);
 
 /**
  * Find the boundary between prompt and user input.
+ * Scans left-to-right within the first 80 chars for a prompt character followed by space.
+ * Avoids false positives: $VAR, $(...), ${...} are not prompt endings.
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
-  // Strategy: find the last prompt-ending character sequence,
-  // then the user input starts after it (plus any trailing space).
+  const scanLimit = Math.min(lineText.length, 80);
 
-  for (const pattern of PROMPT_END_PATTERNS) {
-    // Try matching from the start of the line, looking for prompt endings
-    // We want the FIRST match (leftmost prompt end), not the last,
-    // because user input might contain $ or # characters.
-    const match = lineText.match(pattern);
-    if (match && match.index !== undefined) {
-      // The boundary is after the matched prompt ending + any space
-      const afterMatch = match.index + match[0].length;
-      // But only if there's reasonable prompt length (not the entire line)
-      if (afterMatch <= lineText.length && match.index < 80) {
-        return afterMatch;
+  for (let i = 0; i < scanLimit; i++) {
+    const ch = lineText[i];
+
+    if (!PROMPT_CHARS.has(ch)) continue;
+
+    // Must be followed by a space (prompt char + space = prompt boundary)
+    if (i + 1 >= lineText.length || lineText[i + 1] !== " ") continue;
+
+    // For '$': exclude shell variable references ($HOME, $PATH, ${...}, $(...))
+    if (ch === "$") {
+      // Check what comes AFTER the space — but more importantly check what
+      // comes BEFORE to see if this looks like a prompt ending vs mid-command $.
+      // A prompt $ is typically preceded by: space, ), ], digit, username chars, or is at position 0.
+      // A variable $ is typically inside a command: echo $HOME, export PATH=$PATH:...
+      //
+      // Heuristic: if the $ is preceded by a letter/digit/underscore without a space before it
+      // (i.e., it's part of a token like "echo" or "=$PATH"), it's likely a variable.
+      if (i > 0) {
+        const prev = lineText[i - 1];
+        // If preceded by = or / or another non-separator, it's a variable reference
+        if (prev === "=" || prev === "/" || prev === ":") continue;
+        // If preceded by a letter and there's no space between, it could be $HOME-style
+        // But actually: "user@host:~$ " has letter before $. So check if there's
+        // a valid prompt pattern before the $.
+      }
+
+      // Check what follows: if after "$ " there's more content with $ in variable positions
+      // Actually the simplest reliable check: if the character after the space is alphanumeric
+      // or $ or (, this is likely the START of a command (i.e., this $ IS the prompt ending).
+      // That's always true for a prompt. So the $ check is really about false positives mid-line.
+      //
+      // Better heuristic: if we haven't seen a space before this $ (meaning the $ is inside
+      // the first token), it's likely a prompt. If we've already passed spaces (meaning
+      // we're past the first "word"), a $ is more likely a variable.
+      let seenSpaceBeforeDollar = false;
+      for (let j = 0; j < i; j++) {
+        if (lineText[j] === " ") { seenSpaceBeforeDollar = true; break; }
+      }
+      // If there was a space before this $, it might be mid-command (like "echo $HOME")
+      // Only accept if the $ is reasonably close to common prompt patterns
+      if (seenSpaceBeforeDollar) {
+        // Check if this looks like a bracketed prompt ending: "]$ " or ")$ "
+        if (i > 0 && (lineText[i - 1] === "]" || lineText[i - 1] === ")" ||
+            lineText[i - 1] === " " || lineText[i - 1] === "~")) {
+          // Likely a prompt ending like [user@host ~]$
+        } else {
+          continue; // Skip — likely a variable reference mid-command
+        }
       }
     }
-  }
 
-  // Fallback: look for common prompt characters followed by space
-  for (let i = 0; i < Math.min(lineText.length, 80); i++) {
-    const ch = lineText[i];
-    if ((ch === "$" || ch === "#" || ch === "%" || ch === ">" || ch === "❯" || ch === "➜") &&
-        i + 1 < lineText.length && lineText[i + 1] === " ") {
-      return i + 2;
-    }
+    // Prompt boundary found: user input starts at i + 2 (after "$ ")
+    return i + 2;
   }
 
   return -1;
@@ -127,7 +142,6 @@ function findPromptBoundary(lineText: string): number {
 
 /**
  * Simplified prompt detection: just check if we're likely at a prompt.
- * Faster than full detectPrompt() for quick checks.
  */
 export function isLikelyAtPrompt(term: XTerm): boolean {
   const buffer = term.buffer.active;
@@ -138,7 +152,6 @@ export function isLikelyAtPrompt(term: XTerm): boolean {
   const lineText = line.translateToString(true);
   if (lineText.trim().length === 0) return false;
 
-  // Check non-prompt patterns
   for (const pattern of NON_PROMPT_PATTERNS) {
     if (pattern.test(lineText)) return false;
   }

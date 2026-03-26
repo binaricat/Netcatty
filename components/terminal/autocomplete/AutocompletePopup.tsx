@@ -59,7 +59,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     if (selectedRef.current && listRef.current) {
       selectedRef.current.scrollIntoView({
         block: "nearest",
-        behavior: "smooth",
+        behavior: "instant" as ScrollBehavior,
       });
     }
   }, [selectedIndex]);
@@ -69,8 +69,6 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   // Derive colors from terminal theme
   const bg = themeColors?.background ?? "#1e1e2e";
   const fg = themeColors?.foreground ?? "#cdd6f4";
-  const _selectionColor = themeColors?.selection ?? "#45475a";
-
   // Computed theme-aware colors
   const popupBg = `color-mix(in srgb, ${bg} 92%, ${fg} 8%)`;
   const popupBorder = `color-mix(in srgb, ${bg} 75%, ${fg} 25%)`;

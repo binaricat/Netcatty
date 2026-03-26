@@ -352,7 +352,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleCloseSearch,
   } = terminalSearch;
 
-  // Terminal autocomplete
+  // Terminal autocomplete — onAcceptText writes directly to session (no CustomEvent)
+  const autocompleteAcceptTextRef = useRef<((text: string) => void) | undefined>(undefined);
+  autocompleteAcceptTextRef.current = useCallback((text: string) => {
+    const id = sessionRef.current;
+    if (id && text) {
+      terminalBackend.writeToSession(id, text);
+      // Update command buffer for onCommandExecuted tracking
+      for (const ch of text) {
+        if (ch === "\r" || ch === "\n") {
+          const cmd = commandBufferRef.current.trim();
+          if (cmd && onCommandExecuted) onCommandExecuted(cmd, host.id, host.label, sessionId);
+          commandBufferRef.current = "";
+        } else if (ch.charCodeAt(0) >= 32) {
+          commandBufferRef.current += ch;
+        }
+      }
+    }
+  }, [terminalBackend, host.id, host.label, sessionId, onCommandExecuted]);
+
   const autocomplete = useTerminalAutocomplete({
     termRef,
     sessionId,
@@ -366,6 +384,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       minChars: terminalSettings.autocompleteMinChars ?? 1,
       maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 8,
     } : undefined,
+    onAcceptText: (text) => autocompleteAcceptTextRef.current?.(text),
   });
 
   // Wire up autocomplete handler refs so createXTermRuntime can use them

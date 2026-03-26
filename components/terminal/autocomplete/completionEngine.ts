@@ -17,6 +17,7 @@ import {
 import {
   loadSpec,
   hasSpec,
+  getAvailableSpecs,
   normalizeCommandName,
   resolveNames,
   type FigSpec,
@@ -126,12 +127,13 @@ export function parseCommandLine(input: string): CompletionContext {
     wordIndex,
     tokens,
     commandName,
-    isOptionArg: false, // Will be determined during completion
+    isOptionArg: false,
   };
 }
 
 /**
  * Main completion function. Returns sorted suggestions from all sources.
+ * Ghost text should use completions[0].text instead of a separate query.
  */
 export async function getCompletions(
   input: string,
@@ -168,7 +170,7 @@ export async function getCompletions(
     });
   }
 
-  // 2. Spec-based suggestions (if we're past the command name)
+  // 2. Spec-based suggestions
   if (ctx.commandName && ctx.wordIndex >= 0) {
     const specSuggestions = await getSpecSuggestions(ctx);
     suggestions.push(...specSuggestions);
@@ -181,7 +183,6 @@ export async function getCompletions(
       limit: 5,
     });
     for (const entry of fuzzyMatches) {
-      // Avoid duplicates
       if (suggestions.some((s) => s.text === entry.command)) continue;
       suggestions.push({
         text: entry.command,
@@ -215,10 +216,8 @@ export async function getCompletions(
 async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSuggestion[]> {
   const suggestions: CompletionSuggestion[] = [];
 
-  // Check if we have a spec for this command
   const specAvailable = await hasSpec(ctx.commandName);
   if (!specAvailable) {
-    // No spec — provide basic command name completions if we're typing the command
     if (ctx.wordIndex === 0 && ctx.currentWord.length >= 1) {
       return await getCommandNameSuggestions(ctx.currentWord);
     }
@@ -230,14 +229,11 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
 
   // If we're still typing the command name (partial match, not yet complete)
   if (ctx.wordIndex === 0) {
-    // Check if the typed text exactly matches the command name —
-    // if so, show a preview of top subcommands even without trailing space
     const typedLower = ctx.currentWord.toLowerCase();
     const specNames = resolveNames(spec.name);
     const isExactMatch = specNames.some((n) => n.toLowerCase() === typedLower);
-    if (!isExactMatch) {
-      return [];
-    }
+    if (!isExactMatch) return [];
+
     // Show subcommands as preview (user typed full command but no space yet)
     if (spec.subcommands) {
       for (const sub of spec.subcommands) {
@@ -322,9 +318,9 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<CompletionSug
 
 /**
  * Get command name suggestions by matching against available specs.
+ * Uses the already-imported getAvailableSpecs directly (no dynamic self-import).
  */
 async function getCommandNameSuggestions(prefix: string): Promise<CompletionSuggestion[]> {
-  const { getAvailableSpecs } = await import("./figSpecLoader");
   const specs = await getAvailableSpecs();
   const lower = prefix.toLowerCase();
   const suggestions: CompletionSuggestion[] = [];
@@ -352,13 +348,37 @@ interface ResolvedContext {
 
 /**
  * Walk the spec tree following the typed tokens to find the current context.
+ * Handles options with arguments (e.g., --name value) by skipping the value token.
  */
 function resolveSpecContext(spec: FigSpec, consumedTokens: string[]): ResolvedContext {
   let current: FigSubcommand = spec;
+  let skipNext = false;
 
   for (const token of consumedTokens) {
-    // Skip option flags (they don't navigate the tree)
-    if (token.startsWith("-")) continue;
+    // Skip this token if it's the argument value of a previous option
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    // Handle option flags
+    if (token.startsWith("-")) {
+      // Check if this option expects an argument
+      if (current.options) {
+        const opt = current.options.find((o) => {
+          const names = resolveNames(o.name);
+          return names.includes(token);
+        });
+        if (opt?.args) {
+          // This option expects an argument — skip the next token
+          const args = Array.isArray(opt.args) ? opt.args : [opt.args];
+          if (args.length > 0 && !args[0].isOptional) {
+            skipNext = true;
+          }
+        }
+      }
+      continue;
+    }
 
     // Try to find a matching subcommand
     if (current.subcommands) {
@@ -373,16 +393,12 @@ function resolveSpecContext(spec: FigSpec, consumedTokens: string[]): ResolvedCo
     }
 
     // If no subcommand matched, we're at the args level
-    // (further tokens are arguments, not navigable)
     break;
   }
 
-  // Collect persistent options from parent chain
-  const allOptions = [...(current.options || [])];
-
   return {
     subcommands: current.subcommands,
-    options: allOptions,
+    options: current.options ? [...current.options] : undefined,
     args: current.args,
   };
 }
@@ -394,46 +410,4 @@ function rebuildCommand(tokens: string[], replaceIndex: number, replacement: str
   const rebuilt = [...tokens];
   rebuilt[replaceIndex] = replacement;
   return rebuilt.join(" ");
-}
-
-/**
- * Get the single best inline suggestion (for ghost text).
- * Prioritizes history matches over spec-based completions.
- */
-export async function getInlineSuggestion(
-  input: string,
-  options: {
-    hostId?: string;
-    os?: "linux" | "windows" | "macos";
-  } = {},
-): Promise<string | null> {
-  if (!input || input.trim().length === 0) return null;
-
-  const { hostId, os } = options;
-
-  // First try: exact prefix match in history
-  const historyMatches = queryHistory(input, {
-    hostId,
-    os,
-    includeOsMatches: true,
-    limit: 1,
-  });
-
-  if (historyMatches.length > 0) {
-    return historyMatches[0].command;
-  }
-
-  // Second try: spec-based single best completion
-  const ctx = parseCommandLine(input);
-  if (ctx.commandName && ctx.wordIndex >= 0) {
-    const specAvailable = await hasSpec(ctx.commandName);
-    if (specAvailable) {
-      const suggestions = await getSpecSuggestions(ctx);
-      if (suggestions.length > 0) {
-        return suggestions[0].text;
-      }
-    }
-  }
-
-  return null;
 }

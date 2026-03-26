@@ -54,8 +54,6 @@ export type XTermRuntime = {
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
-  /** Cleanup function for autocomplete accept listener */
-  cleanupAutocompleteListener: (() => void) | null;
 };
 
 export type CreateXTermRuntimeContext = {
@@ -721,40 +719,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const keywordHighlighter = new KeywordHighlighter(term);
   keywordHighlighter.setRules(keywordHighlightRules, keywordHighlightEnabled);
 
-  // Autocomplete accept listener — writes accepted text to the session
-  let cleanupAutocompleteListener: (() => void) | null = null;
-  const screenEl = term.element?.querySelector(".xterm-screen") ?? term.element;
-  if (screenEl) {
-    const handleAccept = (e: Event) => {
-      const detail = (e as CustomEvent<{ text: string; sessionId: string }>).detail;
-      const id = ctx.sessionRef.current;
-      if (id && detail?.text) {
-        ctx.terminalBackend.writeToSession(id, detail.text);
-        // Update command buffer
-        if (detail.text.length > 0 && !detail.text.startsWith("\x1b")) {
-          ctx.commandBufferRef.current += detail.text;
-        }
-      }
-    };
-    screenEl.addEventListener("autocomplete:accept", handleAccept);
-    // Also listen on the parent element for bubbling
-    term.element?.addEventListener("autocomplete:accept", handleAccept);
-    cleanupAutocompleteListener = () => {
-      screenEl.removeEventListener("autocomplete:accept", handleAccept);
-      term.element?.removeEventListener("autocomplete:accept", handleAccept);
-    };
-  }
-
   return {
     term,
     fitAddon,
     serializeAddon,
     searchAddon,
     keywordHighlighter,
-    cleanupAutocompleteListener,
     dispose: () => {
       cleanupMiddleClick?.();
-      cleanupAutocompleteListener?.();
       keywordHighlighter.dispose();
       osc7Disposable.dispose();
       osc52Disposable.dispose();

@@ -54,8 +54,10 @@ function saveStore(store: HistoryStore): void {
   saveTimer = setTimeout(() => {
     const ok = localStorageAdapter.write(STORAGE_KEY, store);
     if (!ok) {
-      // Storage full — evict oldest entries and retry
-      store.entries = store.entries.slice(-Math.floor(MAX_ENTRIES / 2));
+      // Storage full — evict lowest scored entries (not just oldest by insertion)
+      const now = Date.now();
+      store.entries.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
+      store.entries = store.entries.slice(0, Math.floor(MAX_ENTRIES / 2));
       localStorageAdapter.write(STORAGE_KEY, store);
     }
     saveTimer = null;
@@ -96,13 +98,12 @@ export function recordCommand(
     });
   }
 
-  // Enforce per-host limit
+  // Enforce per-host limit (evict by score, not insertion order)
   const hostEntries = store.entries.filter((e) => e.hostId === hostId);
   if (hostEntries.length > MAX_ENTRIES_PER_HOST) {
-    // Sort by score (frequency * recency) and remove lowest
-    const sorted = hostEntries.sort((a, b) => scoreEntry(a) - scoreEntry(b));
+    hostEntries.sort((a, b) => scoreEntryAt(a, now) - scoreEntryAt(b, now));
     const toRemove = new Set(
-      sorted.slice(0, hostEntries.length - MAX_ENTRIES_PER_HOST).map((e) => e.command),
+      hostEntries.slice(0, hostEntries.length - MAX_ENTRIES_PER_HOST).map((e) => e.command),
     );
     store.entries = store.entries.filter(
       (e) => e.hostId !== hostId || !toRemove.has(e.command),
@@ -111,7 +112,7 @@ export function recordCommand(
 
   // Enforce global limit
   if (store.entries.length > MAX_ENTRIES) {
-    store.entries.sort((a, b) => scoreEntry(b) - scoreEntry(a));
+    store.entries.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
     store.entries = store.entries.slice(0, MAX_ENTRIES);
   }
 
@@ -119,11 +120,11 @@ export function recordCommand(
 }
 
 /**
- * Score an entry for ranking. Higher = more relevant.
- * Combines frequency with recency decay.
+ * Score an entry for ranking at a specific timestamp.
+ * Caches Date.now() at query boundaries to avoid repeated syscalls during sort.
  */
-function scoreEntry(entry: HistoryEntry): number {
-  const ageMs = Date.now() - entry.lastUsedAt;
+function scoreEntryAt(entry: HistoryEntry, now: number): number {
+  const ageMs = now - entry.lastUsedAt;
   const ageHours = ageMs / (1000 * 60 * 60);
   // Exponential decay: halve relevance every 24 hours
   const recencyScore = Math.pow(0.5, ageHours / 24);
@@ -152,6 +153,7 @@ export function queryHistory(
   const { hostId, includeOsMatches = true, os, limit = 20 } = options;
   const store = loadStore();
   const lowerPrefix = prefix.toLowerCase();
+  const now = Date.now(); // Cache once per query
 
   const filtered = store.entries.filter((entry) => {
     // Must match prefix
@@ -175,7 +177,7 @@ export function queryHistory(
       const bIsHost = b.hostId === hostId ? 1 : 0;
       if (aIsHost !== bIsHost) return bIsHost - aIsHost;
     }
-    return scoreEntry(b) - scoreEntry(a);
+    return scoreEntryAt(b, now) - scoreEntryAt(a, now);
   });
 
   // Deduplicate by command text (keep highest scored)
@@ -203,6 +205,7 @@ export function fuzzyQueryHistory(
   const { hostId, includeOsMatches = true, os, limit = 10 } = options;
   const store = loadStore();
   const lowerQuery = query.toLowerCase();
+  const now = Date.now(); // Cache once per query
 
   const scored: { entry: HistoryEntry; matchScore: number }[] = [];
 
@@ -228,7 +231,7 @@ export function fuzzyQueryHistory(
       if (aIsHost !== bIsHost) return bIsHost - aIsHost;
     }
     // Then by fuzzy match quality * history score
-    return b.matchScore * scoreEntry(b.entry) - a.matchScore * scoreEntry(a.entry);
+    return b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now);
   });
 
   const seen = new Set<string>();
@@ -255,15 +258,6 @@ function fuzzyScore(query: string, target: string): number {
   let score = 0;
   let queryIdx = 0;
   let prevMatchIdx = -2;
-  const wordBoundaries = new Set<number>();
-
-  // Pre-compute word boundaries
-  for (let i = 0; i < target.length; i++) {
-    if (i === 0 || target[i - 1] === " " || target[i - 1] === "/" ||
-        target[i - 1] === "-" || target[i - 1] === "_") {
-      wordBoundaries.add(i);
-    }
-  }
 
   for (let i = 0; i < target.length && queryIdx < query.length; i++) {
     if (target[i] === query[queryIdx]) {
@@ -273,7 +267,10 @@ function fuzzyScore(query: string, target: string): number {
       // Consecutive match bonus
       if (i === prevMatchIdx + 1) score += 5;
       // Word boundary bonus
-      if (wordBoundaries.has(i)) score += 3;
+      if (i === 0 || target[i - 1] === " " || target[i - 1] === "/" ||
+          target[i - 1] === "-" || target[i - 1] === "_") {
+        score += 3;
+      }
       score += 1;
       prevMatchIdx = i;
     }
