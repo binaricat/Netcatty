@@ -19,7 +19,7 @@ const NON_PROMPT_PATTERNS = [
   /^\s*\(END\)/,                 // less end marker
   /^:\s*$/,                      // vim command mode
   /^\s*~\s*$/,                   // vim tilde lines
-  /^>{2,}\s/,                    // python >>> / node > REPL
+  /^>{1,3}\s/,                   // Bare > (bash PS2 continuation), >> or >>> (python REPL)
   /^\w+>\s/,                     // mysql> / sqlite> / redis-cli> REPL prompts
 ];
 

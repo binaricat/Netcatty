@@ -398,11 +398,13 @@ interface ResolvedContext {
 function resolveSpecContext(spec: FigSpec, consumedTokens: string[]): ResolvedContext {
   let current: FigSubcommand = spec;
   let skipNext = false;
+  let lastOptionArgs: FigSubcommand["args"] | undefined;
 
   for (const token of consumedTokens) {
     // Skip this token if it's the argument value of a previous option
     if (skipNext) {
       skipNext = false;
+      lastOptionArgs = undefined;
       continue;
     }
 
@@ -415,10 +417,11 @@ function resolveSpecContext(spec: FigSpec, consumedTokens: string[]): ResolvedCo
           return names.includes(token);
         });
         if (opt?.args) {
-          // This option expects an argument — skip the next token
+          // This option expects an argument — the next token is its value
           const args = Array.isArray(opt.args) ? opt.args : [opt.args];
           if (args.length > 0 && !args[0].isOptional) {
             skipNext = true;
+            lastOptionArgs = opt.args; // Track for the case where next token is currentWord
           }
         }
       }
@@ -439,6 +442,17 @@ function resolveSpecContext(spec: FigSpec, consumedTokens: string[]): ResolvedCo
 
     // If no subcommand matched, we're at the args level
     break;
+  }
+
+  // If skipNext is still true, the currentWord is an option's arg value
+  // (e.g., "git archive --format |" — currentWord is the format value)
+  // Return the option's args instead of the subcommand's args.
+  if (skipNext && lastOptionArgs) {
+    return {
+      subcommands: undefined,
+      options: undefined,
+      args: lastOptionArgs,
+    };
   }
 
   return {

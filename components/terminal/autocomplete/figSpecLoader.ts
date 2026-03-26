@@ -105,7 +105,7 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
     try {
       const bridge = getBridge();
       if (!bridge?.loadFigSpec) {
-        specCache.set(commandName, null);
+        // Don't cache — bridge may not be ready yet (dev reload, non-Electron preview)
         return null;
       }
 
