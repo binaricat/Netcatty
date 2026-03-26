@@ -109,21 +109,21 @@ export const useSftpViewPaneCallbacks = ({
       onListDirectory: async (path: string) => {
         const pane = sftpRef.current.leftPane;
         if (!pane?.connection) return [];
-        const size = (raw: string) => parseInt(raw) || 0;
-        const ts = (raw: string) => new Date(raw).getTime();
+        const toSize = (raw: string) => parseInt(raw) || 0;
+        const toTs = (raw: string) => new Date(raw).getTime();
         if (pane.connection.isLocal) {
           const rawFiles = await listLocalFiles?.(path);
           if (!rawFiles) return [];
           return rawFiles.map(f => {
-            const s = size(f.size);
-            const t = ts(f.lastModified);
+            const s = toSize(f.size);
+            const ms = toTs(f.lastModified);
             return {
               name: f.name,
               type: f.type as 'file' | 'directory' | 'symlink',
               size: s,
               sizeFormatted: formatFileSize(s),
-              lastModified: t,
-              lastModifiedFormatted: formatDate(t),
+              lastModified: ms,
+              lastModifiedFormatted: formatDate(ms),
               linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
               hidden: f.hidden,
             };
@@ -134,15 +134,15 @@ export const useSftpViewPaneCallbacks = ({
         const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
         if (!rawFiles) return [];
         return rawFiles.map(f => {
-          const s = size(f.size);
-          const t = ts(f.lastModified);
+          const s = toSize(f.size);
+          const ms = toTs(f.lastModified);
           return {
             name: f.name,
             type: f.type as 'file' | 'directory' | 'symlink',
             size: s,
             sizeFormatted: formatFileSize(s),
-            lastModified: t,
-            lastModifiedFormatted: formatDate(t),
+            lastModified: ms,
+            lastModifiedFormatted: formatDate(ms),
             linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
           };
         });
@@ -179,21 +179,21 @@ export const useSftpViewPaneCallbacks = ({
       onListDirectory: async (path: string) => {
         const pane = sftpRef.current.rightPane;
         if (!pane?.connection) return [];
-        const size = (raw: string) => parseInt(raw) || 0;
-        const ts = (raw: string) => new Date(raw).getTime();
+        const toSize = (raw: string) => parseInt(raw) || 0;
+        const toTs = (raw: string) => new Date(raw).getTime();
         if (pane.connection.isLocal) {
           const rawFiles = await listLocalFiles?.(path);
           if (!rawFiles) return [];
           return rawFiles.map(f => {
-            const s = size(f.size);
-            const t = ts(f.lastModified);
+            const s = toSize(f.size);
+            const ms = toTs(f.lastModified);
             return {
               name: f.name,
               type: f.type as 'file' | 'directory' | 'symlink',
               size: s,
               sizeFormatted: formatFileSize(s),
-              lastModified: t,
-              lastModifiedFormatted: formatDate(t),
+              lastModified: ms,
+              lastModifiedFormatted: formatDate(ms),
               linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
               hidden: f.hidden,
             };
@@ -204,15 +204,15 @@ export const useSftpViewPaneCallbacks = ({
         const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
         if (!rawFiles) return [];
         return rawFiles.map(f => {
-          const s = size(f.size);
-          const t = ts(f.lastModified);
+          const s = toSize(f.size);
+          const ms = toTs(f.lastModified);
           return {
             name: f.name,
             type: f.type as 'file' | 'directory' | 'symlink',
             size: s,
             sizeFormatted: formatFileSize(s),
-            lastModified: t,
-            lastModifiedFormatted: formatDate(t),
+            lastModified: ms,
+            lastModifiedFormatted: formatDate(ms),
             linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
           };
         });
