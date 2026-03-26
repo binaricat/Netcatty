@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { AlertCircle, ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
+import { ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
