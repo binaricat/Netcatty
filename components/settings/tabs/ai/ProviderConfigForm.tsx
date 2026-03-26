@@ -45,10 +45,12 @@ export const ProviderConfigForm: React.FC<{
     }
   }, [provider.apiKey]);
 
+  const [advancedParamRaw, setAdvancedParamRaw] = useState<Record<string, string>>({});
   const handleAdvancedParam = useCallback((key: keyof ProviderAdvancedParams, raw: string) => {
+    setAdvancedParamRaw((prev) => ({ ...prev, [key]: raw }));
     setForm((prev) => {
       const next = { ...prev.advancedParams };
-      if (raw.trim() === "") {
+      if (raw.trim() === "" || raw.trim() === "-") {
         delete next[key];
       } else {
         const num = Number(raw);
@@ -64,10 +66,10 @@ export const ProviderConfigForm: React.FC<{
     const cleanedParams: ProviderAdvancedParams = {};
     const ap = form.advancedParams;
     if (ap.maxTokens != null && ap.maxTokens > 0) cleanedParams.maxTokens = Math.round(ap.maxTokens);
-    if (ap.temperature != null) cleanedParams.temperature = ap.temperature;
-    if (ap.topP != null) cleanedParams.topP = ap.topP;
-    if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = ap.frequencyPenalty;
-    if (ap.presencePenalty != null) cleanedParams.presencePenalty = ap.presencePenalty;
+    if (ap.temperature != null) cleanedParams.temperature = Math.min(2, Math.max(0, ap.temperature));
+    if (ap.topP != null) cleanedParams.topP = Math.min(1, Math.max(0, ap.topP));
+    if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = Math.min(2, Math.max(-2, ap.frequencyPenalty));
+    if (ap.presencePenalty != null) cleanedParams.presencePenalty = Math.min(2, Math.max(-2, ap.presencePenalty));
 
     const updates: Partial<ProviderConfig> = {
       baseURL: form.baseURL || undefined,
@@ -225,7 +227,7 @@ export const ProviderConfigForm: React.FC<{
                 min={-2}
                 max={2}
                 step={0.1}
-                value={form.advancedParams.frequencyPenalty ?? ""}
+                value={advancedParamRaw.frequencyPenalty ?? (form.advancedParams.frequencyPenalty != null ? String(form.advancedParams.frequencyPenalty) : "")}
                 onChange={(e) => handleAdvancedParam("frequencyPenalty", e.target.value)}
                 placeholder={t('ai.providers.advancedParams.default')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -239,7 +241,7 @@ export const ProviderConfigForm: React.FC<{
                 min={-2}
                 max={2}
                 step={0.1}
-                value={form.advancedParams.presencePenalty ?? ""}
+                value={advancedParamRaw.presencePenalty ?? (form.advancedParams.presencePenalty != null ? String(form.advancedParams.presencePenalty) : "")}
                 onChange={(e) => handleAdvancedParam("presencePenalty", e.target.value)}
                 placeholder={t('ai.providers.advancedParams.default')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
