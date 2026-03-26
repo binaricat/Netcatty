@@ -517,12 +517,12 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
 
   const startDownload = useCallback(async () => {
     if (autoDownloadStatusRef.current === 'downloading' || autoDownloadStatusRef.current === 'ready') return;
-    // Ensure electron-updater has run checkForUpdates before downloading
     const bridge = netcattyBridge.get();
     try {
-      await bridge?.checkForUpdate?.();
+      const checkResult = await bridge?.checkForUpdate?.();
+      if (checkResult && checkResult.supported === false) return;
     } catch {
-      // Ignore check errors — downloadUpdate will fail gracefully if no update
+      return;
     }
     setUpdateState((prev) => ({
       ...prev,
