@@ -355,6 +355,15 @@ const en: Messages = {
   'settings.terminal.rendering.renderer.desc': 'Choose the terminal rendering technology. Auto will use Canvas on low-memory devices. Changes take effect on new terminal sessions.',
   'settings.terminal.rendering.auto': 'Auto',
 
+  // Settings > Terminal > Autocomplete
+  'settings.terminal.section.autocomplete': 'Autocomplete',
+  'settings.terminal.autocomplete.enabled': 'Enable autocomplete',
+  'settings.terminal.autocomplete.enabled.desc': 'Show command suggestions based on history and command specs as you type.',
+  'settings.terminal.autocomplete.ghostText': 'Ghost text',
+  'settings.terminal.autocomplete.ghostText.desc': 'Show inline gray suggestion text after the cursor (like fish shell).',
+  'settings.terminal.autocomplete.popupMenu': 'Popup menu',
+  'settings.terminal.autocomplete.popupMenu.desc': 'Show a floating list of multiple suggestions.',
+
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Hotkey Scheme',
   'settings.shortcuts.scheme.label': 'Keyboard shortcuts',

@@ -851,6 +851,39 @@ export default function SettingsTerminalTab(props: {
           />
         </SettingRow>
       </div>
+      {/* Autocomplete */}
+      <SectionHeader title={t("settings.terminal.section.autocomplete")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          label={t("settings.terminal.autocomplete.enabled")}
+          description={t("settings.terminal.autocomplete.enabled.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.autocompleteEnabled}
+            onChange={(v) => updateTerminalSetting("autocompleteEnabled", v)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.autocomplete.ghostText")}
+          description={t("settings.terminal.autocomplete.ghostText.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.autocompleteGhostText}
+            onChange={(v) => updateTerminalSetting("autocompleteGhostText", v)}
+            disabled={!terminalSettings.autocompleteEnabled}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.autocomplete.popupMenu")}
+          description={t("settings.terminal.autocomplete.popupMenu.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.autocompletePopupMenu}
+            onChange={(v) => updateTerminalSetting("autocompletePopupMenu", v)}
+            disabled={!terminalSettings.autocompleteEnabled}
+          />
+        </SettingRow>
+      </div>
     </SettingsTabContent>
   );
 }

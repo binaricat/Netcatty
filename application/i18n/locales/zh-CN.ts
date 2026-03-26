@@ -1266,6 +1266,15 @@ const zhCN: Messages = {
   'settings.terminal.rendering.renderer.desc': '选择终端渲染技术。自动模式会在低内存设备上使用 Canvas。更改将在新终端会话中生效。',
   'settings.terminal.rendering.auto': '自动',
 
+  // Settings > Terminal > Autocomplete
+  'settings.terminal.section.autocomplete': '自动补全',
+  'settings.terminal.autocomplete.enabled': '启用自动补全',
+  'settings.terminal.autocomplete.enabled.desc': '输入时根据历史命令和命令规范显示补全建议。',
+  'settings.terminal.autocomplete.ghostText': '行内建议',
+  'settings.terminal.autocomplete.ghostText.desc': '在光标后显示灰色的建议文本（类似 fish shell）。',
+  'settings.terminal.autocomplete.popupMenu': '弹出菜单',
+  'settings.terminal.autocomplete.popupMenu.desc': '显示包含多个建议的浮动列表。',
+
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': '快捷键方案',
   'settings.shortcuts.scheme.label': '键盘快捷键',
