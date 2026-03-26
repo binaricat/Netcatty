@@ -128,10 +128,14 @@ function findPromptBoundary(lineText: string): number {
 
     if (!PROMPT_CHARS.has(ch)) continue;
 
-    // Must be followed by a space, or be the last character on the line
-    // (e.g., cmd.exe `C:\path>` has no trailing space)
+    // Must be followed by a space, end-of-line, or (for > only) any character.
+    // cmd.exe prompts like `C:\path>dir` have no space after >.
     const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;
-    if (nextChar !== null && nextChar !== " ") continue;
+    if (ch === ">" || ch === "❯" || ch === "➜" || ch === "›") {
+      // These prompt chars often appear without trailing space — always accept
+    } else if (nextChar !== null && nextChar !== " ") {
+      continue; // $, #, % require trailing space to avoid false positives
+    }
 
     // For '$': exclude shell variable references ($HOME, $PATH, ${...}, $(...))
     if (ch === "$") {

@@ -357,6 +357,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   autocompleteAcceptTextRef.current = (text: string) => {
     const id = sessionRef.current;
     if (id && text) {
+      // Serial line mode: buffer text and handle local echo instead of direct send
+      if (host.protocol === "serial" && serialConfig?.lineMode) {
+        for (const ch of text) {
+          if (ch === "\r") {
+            const line = serialLineBufferRef.current + "\r";
+            terminalBackend.writeToSession(id, line);
+            serialLineBufferRef.current = "";
+            if (serialConfig?.localEcho) termRef.current?.write("\r\n");
+          } else if (ch === "\x15") {
+            // Ctrl+U clear line
+            if (serialConfig?.localEcho && serialLineBufferRef.current.length > 0) {
+              termRef.current?.write("\b \b".repeat(serialLineBufferRef.current.length));
+            }
+            serialLineBufferRef.current = "";
+          } else if (ch.charCodeAt(0) >= 32) {
+            serialLineBufferRef.current += ch;
+            if (serialConfig?.localEcho) termRef.current?.write(ch);
+          }
+        }
+        return; // Don't fall through to normal writeToSession
+      }
+
       terminalBackend.writeToSession(id, text);
 
       // Broadcast to other sessions if broadcast mode is enabled

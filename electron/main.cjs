@@ -517,9 +517,9 @@ const registerBridges = (win) => {
   });
   ipcMain.handle("netcatty:figspec:load", async (_event, commandName) => {
     try {
-      // Sanitize: only allow alphanumeric, dash, underscore, slash, dot, @
-      // Block path traversal attempts (..)
-      if (!/^[@a-zA-Z0-9._/+-]+$/.test(commandName) || commandName.includes("..")) return null;
+      // Sanitize: reject absolute paths, path traversal, and non-spec characters
+      if (!commandName || commandName.startsWith("/") || commandName.startsWith("\\") ||
+          commandName.includes("..") || !/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
       // Can't use `import("@withfig/autocomplete/build/...")` because the package's
       // "exports" field restricts allowed import paths. Use file URL to bypass.
       const specFile = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
