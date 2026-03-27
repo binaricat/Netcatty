@@ -25,6 +25,7 @@ import {
   Trash2,
   Variable,
   Wifi,
+  Router,
   X,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState, useCallback } from "react";
@@ -1544,6 +1545,30 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                   {t("hostDetails.agentForwarding.agentNotRunningHint")}
                 </p>
               </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Network Device Mode */}
+        <Card className="p-3 space-y-2 bg-card border-border/80">
+          <div className="flex items-center gap-2">
+            <Router size={14} className="text-muted-foreground" />
+            <p className="text-xs font-semibold">{t("hostDetails.section.deviceType")}</p>
+          </div>
+          <ToggleRow
+            label={t("hostDetails.deviceType")}
+            enabled={form.deviceType === 'network'}
+            onToggle={() => update("deviceType", form.deviceType === 'network' ? undefined : 'network')}
+          />
+          <p className="text-xs text-muted-foreground break-words">
+            {t("hostDetails.deviceType.desc")}
+          </p>
+          {form.deviceType === 'network' && (
+            <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+              <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
+                {t("hostDetails.deviceType.warning")}
+              </p>
             </div>
           )}
         </Card>
