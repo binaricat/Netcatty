@@ -682,9 +682,11 @@ export const useSessionState = () => {
       ...workspaces.map(w => w.id),
       ...logViews.map(lv => lv.id),
     ];
+    const allTabIdSet = new Set(allTabIds);
     // Filter tabOrder to only include existing tabs, then add any new tabs at the end
-    const orderedIds = tabOrder.filter(id => allTabIds.includes(id));
-    const newIds = allTabIds.filter(id => !orderedIds.includes(id));
+    const orderedIds = tabOrder.filter(id => allTabIdSet.has(id));
+    const orderedIdSet = new Set(orderedIds);
+    const newIds = allTabIds.filter(id => !orderedIdSet.has(id));
     return [...orderedIds, ...newIds];
   }, [orphanSessions, workspaces, logViews, tabOrder]);
 
@@ -698,10 +700,12 @@ export const useSessionState = () => {
         ...workspaces.map(w => w.id),
         ...logViews.map(lv => lv.id),
       ];
+      const allTabIdSet = new Set(allTabIds);
       
       // Build current effective order: existing order + new tabs at end
-      const orderedIds = prevTabOrder.filter(id => allTabIds.includes(id));
-      const newIds = allTabIds.filter(id => !orderedIds.includes(id));
+      const orderedIds = prevTabOrder.filter(id => allTabIdSet.has(id));
+      const orderedIdSet = new Set(orderedIds);
+      const newIds = allTabIds.filter(id => !orderedIdSet.has(id));
       const currentOrder = [...orderedIds, ...newIds];
       
       const draggedIndex = currentOrder.indexOf(draggedId);

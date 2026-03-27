@@ -50,6 +50,7 @@ interface UseServerStatsOptions {
   refreshInterval: number;    // Refresh interval in seconds
   isSupportedOs: boolean;     // Only collect stats for Linux/macOS servers
   isConnected: boolean;       // Only collect when connected
+  isVisible: boolean;         // Pause background polling for hidden terminals
 }
 
 export function useServerStats({
@@ -58,6 +59,7 @@ export function useServerStats({
   refreshInterval,
   isSupportedOs,
   isConnected,
+  isVisible,
 }: UseServerStatsOptions) {
   const [stats, setStats] = useState<ServerStats>({
     cpu: null,
@@ -86,7 +88,7 @@ export function useServerStats({
   const isMountedRef = useRef(true);
 
   const fetchStats = useCallback(async () => {
-    if (!enabled || !isSupportedOs || !isConnected || !sessionId) {
+    if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
       return;
     }
 
@@ -137,7 +139,7 @@ export function useServerStats({
         setIsLoading(false);
       }
     }
-  }, [sessionId, enabled, isSupportedOs, isConnected]);
+  }, [sessionId, enabled, isSupportedOs, isConnected, isVisible]);
 
   // Initial fetch and periodic refresh
   useEffect(() => {
@@ -175,6 +177,16 @@ export function useServerStats({
       return;
     }
 
+    if (!isVisible) {
+      return () => {
+        isMountedRef.current = false;
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      };
+    }
+
     // Initial fetch with a small delay to let the connection stabilize
     const initialTimer = setTimeout(() => {
       fetchStats();
@@ -192,7 +204,7 @@ export function useServerStats({
         intervalRef.current = null;
       }
     };
-  }, [enabled, isSupportedOs, isConnected, refreshInterval, fetchStats]);
+  }, [enabled, isSupportedOs, isConnected, isVisible, refreshInterval, fetchStats]);
 
   // Manual refresh function
   const refresh = useCallback(() => {

@@ -108,10 +108,10 @@ export const useSftpPaneDragAndSelect = ({
         e.preventDefault();
         return;
       }
-      const selectedNames = Array.from(selectedFilesRef.current);
-      const files = selectedNames.includes(entry.name)
+      const selectedNames = new Set(selectedFilesRef.current);
+      const files = selectedNames.has(entry.name)
         ? sortedFilesRef.current
-          .filter((f) => selectedNames.includes(f.name))
+          .filter((f) => selectedNames.has(f.name))
           .map((f) => ({
             name: f.name,
             isDirectory: isNavigableDirectory(f),

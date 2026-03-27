@@ -5,6 +5,22 @@ import type { RefObject } from "react";
 
 type SearchMatchCount = { current: number; total: number } | null;
 
+const SEARCH_DECORATIONS = {
+  matchBackground: "#FFFF0044",
+  matchBorder: "#FFFF00",
+  matchOverviewRuler: "#FFFF00",
+  activeMatchBackground: "#FF880088",
+  activeMatchBorder: "#FF8800",
+  activeMatchColorOverviewRuler: "#FF8800",
+} as const;
+
+const SEARCH_OPTIONS = {
+  regex: false,
+  caseSensitive: false,
+  wholeWord: false,
+  decorations: SEARCH_DECORATIONS,
+} as const;
+
 export const useTerminalSearch = ({
   searchAddonRef,
   termRef,
@@ -39,19 +55,7 @@ export const useTerminalSearch = ({
       searchTermRef.current = term;
       searchAddon.clearDecorations();
 
-      const found = searchAddon.findNext(term, {
-        regex: false,
-        caseSensitive: false,
-        wholeWord: false,
-        decorations: {
-          matchBackground: "#FFFF0044",
-          matchBorder: "#FFFF00",
-          matchOverviewRuler: "#FFFF00",
-          activeMatchBackground: "#FF880088",
-          activeMatchBorder: "#FF8800",
-          activeMatchColorOverviewRuler: "#FF8800",
-        },
-      });
+      const found = searchAddon.findNext(term, SEARCH_OPTIONS);
 
       if (found) {
         setSearchMatchCount({ current: 1, total: 1 });
@@ -68,38 +72,14 @@ export const useTerminalSearch = ({
     const searchAddon = searchAddonRef.current;
     const term = searchTermRef.current;
     if (!searchAddon || !term) return false;
-    return searchAddon.findNext(term, {
-      regex: false,
-      caseSensitive: false,
-      wholeWord: false,
-      decorations: {
-        matchBackground: "#FFFF0044",
-        matchBorder: "#FFFF00",
-        matchOverviewRuler: "#FFFF00",
-        activeMatchBackground: "#FF880088",
-        activeMatchBorder: "#FF8800",
-        activeMatchColorOverviewRuler: "#FF8800",
-      },
-    });
+    return searchAddon.findNext(term, SEARCH_OPTIONS);
   }, [searchAddonRef]);
 
   const handleFindPrevious = useCallback((): boolean => {
     const searchAddon = searchAddonRef.current;
     const term = searchTermRef.current;
     if (!searchAddon || !term) return false;
-    return searchAddon.findPrevious(term, {
-      regex: false,
-      caseSensitive: false,
-      wholeWord: false,
-      decorations: {
-        matchBackground: "#FFFF0044",
-        matchBorder: "#FFFF00",
-        matchOverviewRuler: "#FFFF00",
-        activeMatchBackground: "#FF880088",
-        activeMatchBorder: "#FF8800",
-        activeMatchColorOverviewRuler: "#FF8800",
-      },
-    });
+    return searchAddon.findPrevious(term, SEARCH_OPTIONS);
   }, [searchAddonRef]);
 
   const handleCloseSearch = useCallback(() => {

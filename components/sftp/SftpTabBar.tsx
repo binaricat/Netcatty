@@ -147,7 +147,8 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
         container.scrollLeft += tabRect.right - containerRect.right + 8;
       }
     }
-    setTimeout(updateScrollState, 100);
+    const timer = setTimeout(updateScrollState, 100);
+    return () => clearTimeout(timer);
   }, [activeTabId, updateScrollState]);
 
   // Drag handlers

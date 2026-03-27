@@ -34,20 +34,29 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     }
   };
 
+  const rafIdRef = useRef<number | null>(null);
+
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!resizingRef.current) return;
-    const diff = e.clientX - resizingRef.current.startX;
-    const newWidth = Math.max(
-      10,
-      Math.min(60, resizingRef.current.startWidth + diff / 5),
-    );
-    setColumnWidths((prev) => ({
-      ...prev,
-      [resizingRef.current!.field]: newWidth,
-    }));
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      if (!resizingRef.current) return;
+      const diff = e.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(
+        10,
+        Math.min(60, resizingRef.current.startWidth + diff / 5),
+      );
+      setColumnWidths((prev) => ({
+        ...prev,
+        [resizingRef.current!.field]: newWidth,
+      }));
+    });
   }, []);
 
   const handleResizeEnd = useCallback(() => {
+    if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
     resizingRef.current = null;
     document.removeEventListener("mousemove", handleResizeMove);
     document.removeEventListener("mouseup", handleResizeEnd);

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
 import { useImmersiveMode } from './application/state/useImmersiveMode';
@@ -138,17 +138,18 @@ const SftpViewMount: React.FC<SftpViewProps> = (props) => {
 const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   const isVisible = useIsTerminalLayerVisible(props.draggingSessionId);
   const [shouldMount, setShouldMount] = useState(isVisible);
+  const shouldPrewarm = props.sessions.length > 0 || props.workspaces.length > 0;
 
   useEffect(() => {
     if (isVisible) setShouldMount(true);
   }, [isVisible]);
 
   useEffect(() => {
-    if (shouldMount) return;
+    if (shouldMount || !shouldPrewarm) return;
     // Warm up the terminal layer shortly after first paint to reduce latency when opening a session.
     const id = window.setTimeout(() => setShouldMount(true), 1200);
     return () => window.clearTimeout(id);
-  }, [shouldMount]);
+  }, [shouldMount, shouldPrewarm]);
 
   if (!shouldMount) return null;
 
@@ -286,30 +287,48 @@ function App({ settings }: { settings: SettingsState }) {
   const customThemes = useCustomThemes();
 
   // Resolve the effective TerminalTheme for the currently focused terminal tab
+  const hostById = useMemo(
+    () => new Map(hosts.map((host) => [host.id, host])),
+    [hosts],
+  );
+  const sessionById = useMemo(
+    () => new Map(sessions.map((session) => [session.id, session])),
+    [sessions],
+  );
+  const workspaceById = useMemo(
+    () => new Map(workspaces.map((workspace) => [workspace.id, workspace])),
+    [workspaces],
+  );
+  const themeById = useMemo(
+    () => new Map([...TERMINAL_THEMES, ...customThemes].map((theme) => [theme.id, theme])),
+    [customThemes],
+  );
   const activeTerminalTheme = useMemo<TerminalTheme | null>(() => {
     if (activeTabId === 'vault' || activeTabId === 'sftp') return null;
 
     const resolveTheme = (s: TerminalSession): TerminalTheme => {
-      const host = hosts.find(h => h.id === s.hostId) ?? null;
+      const host = hostById.get(s.hostId) ?? null;
       const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
-      return TERMINAL_THEMES.find(t => t.id === themeId)
-        || customThemes.find(t => t.id === themeId)
-        || currentTerminalTheme;
+      return themeById.get(themeId) || currentTerminalTheme;
     };
 
     // Workspace
-    const workspace = workspaces.find(w => w.id === activeTabId);
+    const workspace = workspaceById.get(activeTabId);
     if (workspace) {
       // Focus mode: use the focused (or first remaining) session's theme
       if (workspace.viewMode === 'focus') {
         const wsSessionIds = collectSessionIds(workspace.root);
-        const focused = sessions.find(s => s.id === workspace.focusedSessionId)
-          ?? sessions.find(s => wsSessionIds.includes(s.id));
+        const focused = (workspace.focusedSessionId
+          ? sessionById.get(workspace.focusedSessionId)
+          : null)
+          ?? wsSessionIds.map((id) => sessionById.get(id)).find(Boolean);
         return focused ? resolveTheme(focused) : null;
       }
       // Split mode: require all sessions to share the same theme
       const sessionIds = collectSessionIds(workspace.root);
-      const wsSessions = sessionIds.map(id => sessions.find(s => s.id === id)).filter(Boolean) as TerminalSession[];
+      const wsSessions = sessionIds
+        .map((id) => sessionById.get(id))
+        .filter(Boolean) as TerminalSession[];
       if (wsSessions.length === 0) return null;
       const firstTheme = resolveTheme(wsSessions[0]);
       const allSame = wsSessions.every(s => resolveTheme(s).id === firstTheme.id);
@@ -317,10 +336,10 @@ function App({ settings }: { settings: SettingsState }) {
     }
 
     // Single session tab
-    const session = sessions.find(s => s.id === activeTabId);
+    const session = sessionById.get(activeTabId);
     if (!session) return null;
     return resolveTheme(session);
-  }, [activeTabId, sessions, workspaces, hosts, currentTerminalTheme, customThemes]);
+  }, [activeTabId, currentTerminalTheme, hostById, sessionById, themeById, workspaceById]);
 
   useImmersiveMode({
     isImmersive: immersiveMode,
@@ -378,6 +397,144 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();
+  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (session?.workspaceId) {
+      setActiveTabId(session.workspaceId);
+      setWorkspaceFocusedSession(session.workspaceId, sessionId);
+      return;
+    }
+    setActiveTabId(sessionId);
+  });
+  const _handleTrayTogglePortForward = useEffectEvent((ruleId: string, start: boolean) => {
+    const rule = portForwardingRules.find((item) => item.id === ruleId);
+    if (!rule) return;
+    const host = rule.hostId ? hosts.find((item) => item.id === rule.hostId) : undefined;
+    if (!host) {
+      toast.error(t("pf.error.hostNotFound"));
+      return;
+    }
+
+    if (start) {
+      void startTunnel(rule, host, hosts, keys, identities, (status, error) => {
+        if (status === "error" && error) toast.error(error);
+      }, rule.autoStart);
+      return;
+    }
+
+    void stopTunnel(ruleId);
+  });
+  const _handleTrayPanelConnect = useEffectEvent((hostId: string) => {
+    const host = hosts.find((item) => item.id === hostId);
+    if (!host) {
+      toast.error(t("pf.error.hostNotFound"));
+      return;
+    }
+
+    const { username, hostname: localHost } = systemInfoRef.current;
+    if (host.protocol === 'serial') {
+      const portName = host.hostname.split('/').pop() || host.hostname;
+      const sessionId = connectToHost(host);
+      addConnectionLog({
+        sessionId,
+        hostId: host.id,
+        hostLabel: host.label || `Serial: ${portName}`,
+        hostname: host.hostname,
+        username,
+        protocol: 'serial',
+        startTime: Date.now(),
+        localUsername: username,
+        localHostname: localHost,
+        saved: false,
+      });
+      return;
+    }
+
+    const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
+    const resolvedAuth = resolveHostAuth({ host, keys, identities });
+    const sessionId = connectToHost(host);
+    addConnectionLog({
+      sessionId,
+      hostId: host.id,
+      hostLabel: host.label,
+      hostname: host.hostname,
+      username: resolvedAuth.username || 'root',
+      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
+      startTime: Date.now(),
+      localUsername: username,
+      localHostname: localHost,
+      saved: false,
+    });
+  });
+  const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    const isMac = hotkeyScheme === 'mac';
+    const target = e.target as HTMLElement;
+    const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+    const isMonacoElement =
+      target instanceof HTMLElement &&
+      !!target.closest?.('.monaco-editor, .monaco-diff-editor, .monaco-inputbox');
+    const isXtermInput =
+      target instanceof HTMLElement &&
+      !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
+
+    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape') {
+      return;
+    }
+
+    const isTerminalElement =
+      target instanceof HTMLElement &&
+      !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
+    const isTerminalInPath = Boolean(
+      e.composedPath?.().some(
+        (node) =>
+          node instanceof HTMLElement &&
+          (node.classList.contains("xterm") ||
+            node.classList.contains("xterm-helper-textarea") ||
+            node.classList.contains("xterm-screen") ||
+            node.classList.contains("xterm-viewport") ||
+            node.hasAttribute("data-session-id")),
+      ),
+    );
+
+    for (const binding of keyBindings) {
+      const keyStr = isMac ? binding.mac : binding.pc;
+      if (!matchesKeyBinding(e, keyStr, isMac)) continue;
+      if (HOTKEY_DEBUG) console.log('[Hotkeys] Matched binding:', binding.action, keyStr);
+      if (binding.category === 'sftp') {
+        continue;
+      }
+      const terminalActions = ['copy', 'paste', 'selectAll', 'clearBuffer', 'searchTerminal'];
+      if (terminalActions.includes(binding.action)) {
+        if (isTerminalElement) {
+          return;
+        }
+        continue;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (HOTKEY_DEBUG) {
+        console.log('[Hotkeys] Global handle', {
+          action: binding.action,
+          key: e.key,
+          meta: e.metaKey,
+          ctrl: e.ctrlKey,
+          alt: e.altKey,
+          shift: e.shiftKey,
+          targetTag: target?.tagName,
+          isTerminalElement,
+          isTerminalInPath,
+        });
+      }
+      executeHotkeyAction(binding.action, e);
+      return;
+    }
+  });
+  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && isQuickSwitcherOpen) {
+      setIsQuickSwitcherOpen(false);
+    }
+  });
 
   // Show toast notification when update is available (only when auto-download is idle)
   useEffect(() => {
@@ -484,110 +641,34 @@ function App({ settings }: { settings: SettingsState }) {
     if (!bridge?.onTrayFocusSession || !bridge?.onTrayTogglePortForward) return;
 
     const unsubscribeFocus = bridge.onTrayFocusSession((sessionId) => {
-      // Find the session to check if it belongs to a workspace
-      const session = sessions.find((s) => s.id === sessionId);
-      if (session?.workspaceId) {
-        // Session is in a workspace - navigate to workspace and focus the session
-        setActiveTabId(session.workspaceId);
-        setWorkspaceFocusedSession(session.workspaceId, sessionId);
-      } else {
-        // Standalone session or session not found - just set tab
-        setActiveTabId(sessionId);
-      }
+      _handleTrayJumpToSession(sessionId);
     });
-
     const unsubscribeToggle = bridge.onTrayTogglePortForward((ruleId, start) => {
-      const rule = portForwardingRules.find((r) => r.id === ruleId);
-      if (!rule) return;
-      const host = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
-      if (!host) {
-        toast.error(t("pf.error.hostNotFound"));
-        return;
-      }
-
-      if (start) {
-        void startTunnel(rule, host, hosts, keys, identities, (status, error) => {
-          if (status === "error" && error) toast.error(error);
-        }, rule.autoStart);
-      } else {
-        void stopTunnel(ruleId);
-      }
+      _handleTrayTogglePortForward(ruleId, start);
     });
 
     return () => {
       unsubscribeFocus?.();
       unsubscribeToggle?.();
     };
-  }, [hosts, identities, keys, portForwardingRules, sessions, setActiveTabId, setWorkspaceFocusedSession, startTunnel, stopTunnel, t]);
+  }, []);
 
   // Tray panel actions (from main process)
   useEffect(() => {
-    const handlerJump = (sessionId: string) => {
-      // Find the session to check if it belongs to a workspace
-      const session = sessions.find((s) => s.id === sessionId);
-      if (session?.workspaceId) {
-        // Session is in a workspace - navigate to workspace and focus the session
-        setActiveTabId(session.workspaceId);
-        setWorkspaceFocusedSession(session.workspaceId, sessionId);
-      } else {
-        // Standalone session or session not found - just set tab
-        setActiveTabId(sessionId);
-      }
-    };
-
-    const handlerConnect = (hostId: string) => {
-      const host = hosts.find((h) => h.id === hostId);
-      if (!host) {
-        toast.error(t("pf.error.hostNotFound"));
-        return;
-      }
-
-      const { username, hostname: localHost } = systemInfoRef.current;
-      if (host.protocol === 'serial') {
-        const portName = host.hostname.split('/').pop() || host.hostname;
-        const sessionId = connectToHost(host);
-        addConnectionLog({
-          sessionId,
-          hostId: host.id,
-          hostLabel: host.label || `Serial: ${portName}`,
-          hostname: host.hostname,
-          username,
-          protocol: 'serial',
-          startTime: Date.now(),
-          localUsername: username,
-          localHostname: localHost,
-          saved: false,
-        });
-        return;
-      }
-
-      const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
-      const resolvedAuth = resolveHostAuth({ host, keys, identities });
-      const sessionId = connectToHost(host);
-      addConnectionLog({
-        sessionId,
-        hostId: host.id,
-        hostLabel: host.label,
-        hostname: host.hostname,
-        username: resolvedAuth.username || 'root',
-        protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
-        startTime: Date.now(),
-        localUsername: username,
-        localHostname: localHost,
-        saved: false,
-      });
-    };
-
     const bridge = netcattyBridge.get();
     if (!bridge?.onTrayPanelJumpToSession || !bridge?.onTrayPanelConnectToHost) return;
 
-    const unsubscribeJump = bridge.onTrayPanelJumpToSession(handlerJump);
-    const unsubscribeConnect = bridge.onTrayPanelConnectToHost(handlerConnect);
+    const unsubscribeJump = bridge.onTrayPanelJumpToSession((sessionId) => {
+      _handleTrayJumpToSession(sessionId);
+    });
+    const unsubscribeConnect = bridge.onTrayPanelConnectToHost((hostId) => {
+      _handleTrayPanelConnect(hostId);
+    });
     return () => {
       unsubscribeJump?.();
       unsubscribeConnect?.();
     };
-  }, [addConnectionLog, connectToHost, hosts, identities, keys, sessions, setActiveTabId, setWorkspaceFocusedSession, t]);
+  }, []);
 
   // Keyboard-interactive authentication (2FA/MFA) event listener
   useEffect(() => {
@@ -904,100 +985,27 @@ function App({ settings }: { settings: SettingsState }) {
   useEffect(() => {
     if (hotkeyScheme === 'disabled' || isHotkeyRecording) return;
 
-    const isMac = hotkeyScheme === 'mac';
-    if (HOTKEY_DEBUG) {
-      console.log('[Hotkeys] Registering global hotkey handler, scheme:', hotkeyScheme, 'bindings count:', keyBindings.length);
-    }
-
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Don't handle if we're in an input or textarea (except for Escape)
-      // Note: xterm terminal handles its own key interception via attachCustomKeyEventHandler
-      const target = e.target as HTMLElement;
-      const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-      const isMonacoElement =
-        target instanceof HTMLElement &&
-        !!target.closest?.('.monaco-editor, .monaco-diff-editor, .monaco-inputbox');
-      const isXtermInput =
-        target instanceof HTMLElement &&
-        !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
-
-      // Monaco is not always contentEditable/input, so treat it as an editor surface.
-      if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape') {
-        return;
-      }
-
-      const isTerminalElement =
-        target instanceof HTMLElement &&
-        !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
-      const isTerminalInPath = Boolean(
-        e.composedPath?.().some(
-          (node) =>
-            node instanceof HTMLElement &&
-            (node.classList.contains("xterm") ||
-              node.classList.contains("xterm-helper-textarea") ||
-              node.classList.contains("xterm-screen") ||
-              node.classList.contains("xterm-viewport") ||
-              node.hasAttribute("data-session-id")),
-        ),
-      );
-
-      // Check each key binding
-      for (const binding of keyBindings) {
-        const keyStr = isMac ? binding.mac : binding.pc;
-        if (matchesKeyBinding(e, keyStr, isMac)) {
-          if (HOTKEY_DEBUG) console.log('[Hotkeys] Matched binding:', binding.action, keyStr);
-          // SFTP shortcuts are handled by SFTP-specific hooks.
-          if (binding.category === 'sftp') {
-            continue;
-          }
-          // Terminal-specific actions should be handled by the terminal
-          // Don't handle them at app level
-          const terminalActions = ['copy', 'paste', 'selectAll', 'clearBuffer', 'searchTerminal'];
-          if (terminalActions.includes(binding.action)) {
-            if (isTerminalElement) {
-              return; // Let terminal handle it
-            }
-            continue; // Ignore terminal actions outside terminal
-          }
-
-          e.preventDefault();
-          e.stopPropagation();
-          if (HOTKEY_DEBUG) {
-            console.log('[Hotkeys] Global handle', {
-              action: binding.action,
-              key: e.key,
-              meta: e.metaKey,
-              ctrl: e.ctrlKey,
-              alt: e.altKey,
-              shift: e.shiftKey,
-              targetTag: target?.tagName,
-              isTerminalElement,
-              isTerminalInPath,
-            });
-          }
-          executeHotkeyAction(binding.action, e);
-          return;
-        }
-      }
+      _handleGlobalHotkeyKeyDown(e);
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown, true);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-  }, [hotkeyScheme, keyBindings, isHotkeyRecording, executeHotkeyAction]);
+  }, [hotkeyScheme, isHotkeyRecording]);
+
+  const deferredQuickSearch = useDeferredValue(quickSearch);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isQuickSwitcherOpen) {
-        setIsQuickSwitcherOpen(false);
-      }
+      _handleEscapeKeyDown(e);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isQuickSwitcherOpen]);
+  }, []);
 
   const quickResults = useMemo(() => {
     if (!isQuickSwitcherOpen) return [];
-    const term = quickSearch.trim().toLowerCase();
+    const term = deferredQuickSearch.trim().toLowerCase();
     const filtered = term
       ? hosts.filter(h =>
         h.label.toLowerCase().includes(term) ||
@@ -1006,7 +1014,7 @@ function App({ settings }: { settings: SettingsState }) {
       )
       : hosts;
     return filtered;
-  }, [hosts, quickSearch, isQuickSwitcherOpen]);
+  }, [deferredQuickSearch, hosts, isQuickSwitcherOpen]);
 
   const handleDeleteHost = useCallback((hostId: string) => {
     const target = hosts.find(h => h.id === hostId);

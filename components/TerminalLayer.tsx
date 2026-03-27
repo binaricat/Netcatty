@@ -730,12 +730,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const startWidth = sidePanelWidth;
 
     let lastWidth = startWidth;
+    let rafId: number | null = null;
     const onMouseMove = (ev: MouseEvent) => {
       const delta = ev.clientX - startX;
       lastWidth = Math.max(280, Math.min(800, startWidth + (sidePanelPosition === 'left' ? delta : -delta)));
-      setSidePanelWidth(lastWidth);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        setSidePanelWidth(lastWidth);
+      });
     };
     const onMouseUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       sftpResizingRef.current = false;
       persistSidePanelWidth(lastWidth);
       window.removeEventListener('mousemove', onMouseMove);
@@ -819,6 +825,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const validSessionActivityIds = useMemo(() => {
     return getValidSessionActivityIds(sessions);
   }, [sessions]);
+  const activityTrackedSessions = useMemo(
+    () =>
+      sessions.filter(
+        (session) =>
+          session.status !== 'disconnected' &&
+          shouldMarkSessionActivity(activeTabId, session),
+      ),
+    [activeTabId, sessions],
+  );
 
   const onSplitSessionRef = useRef(onSplitSession);
   onSplitSessionRef.current = onSplitSession;
@@ -1035,37 +1050,43 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   useEffect(() => {
     if (!resizing) return;
+    let rafId: number | null = null;
     const onMove = (e: MouseEvent) => {
-      const dimension = resizing.direction === 'vertical' ? resizing.startArea.w : resizing.startArea.h;
-      if (dimension <= 0) return;
-      const total = resizing.startSizes.reduce((acc, n) => acc + n, 0) || 1;
-      const pxSizes = resizing.startSizes.map(s => (s / total) * dimension);
-      const i = resizing.index;
-      const delta = (resizing.direction === 'vertical' ? e.clientX - resizing.startClient.x : e.clientY - resizing.startClient.y);
-      let a = pxSizes[i] + delta;
-      let b = pxSizes[i + 1] - delta;
-      const minPx = Math.min(120, dimension / 2);
-      if (a < minPx) {
-        const diff = minPx - a;
-        a = minPx;
-        b -= diff;
-      }
-      if (b < minPx) {
-        const diff = minPx - b;
-        b = minPx;
-        a -= diff;
-      }
-      const newPxSizes = [...pxSizes];
-      newPxSizes[i] = Math.max(minPx, a);
-      newPxSizes[i + 1] = Math.max(minPx, b);
-      const totalPx = newPxSizes.reduce((acc, n) => acc + n, 0) || 1;
-      const newSizes = newPxSizes.map(n => n / totalPx);
-      onUpdateSplitSizes(resizing.workspaceId, resizing.splitId, newSizes);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const dimension = resizing.direction === 'vertical' ? resizing.startArea.w : resizing.startArea.h;
+        if (dimension <= 0) return;
+        const total = resizing.startSizes.reduce((acc, n) => acc + n, 0) || 1;
+        const pxSizes = resizing.startSizes.map(s => (s / total) * dimension);
+        const i = resizing.index;
+        const delta = (resizing.direction === 'vertical' ? e.clientX - resizing.startClient.x : e.clientY - resizing.startClient.y);
+        let a = pxSizes[i] + delta;
+        let b = pxSizes[i + 1] - delta;
+        const minPx = Math.min(120, dimension / 2);
+        if (a < minPx) {
+          const diff = minPx - a;
+          a = minPx;
+          b -= diff;
+        }
+        if (b < minPx) {
+          const diff = minPx - b;
+          b = minPx;
+          a -= diff;
+        }
+        const newPxSizes = [...pxSizes];
+        newPxSizes[i] = Math.max(minPx, a);
+        newPxSizes[i + 1] = Math.max(minPx, b);
+        const totalPx = newPxSizes.reduce((acc, n) => acc + n, 0) || 1;
+        const newSizes = newPxSizes.map(n => n / totalPx);
+        onUpdateSplitSizes(resizing.workspaceId, resizing.splitId, newSizes);
+      });
     };
     const onUp = () => setResizing(null);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -1265,14 +1286,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [activeTabId, sessions]);
 
   useEffect(() => {
-    const unsubscribers = sessions.map((session) => {
+    const unsubscribers = activityTrackedSessions.map((session) => {
       const filter = new ChunkedEscapeFilter();
       return onSessionData(session.id, (chunk) => {
         if (!hasNotifiableTerminalOutput(filter, chunk)) return;
-
-        if (!shouldMarkSessionActivity(activeTabIdRef.current, session)) {
-          return;
-        }
 
         sessionActivityStore.setTabActive(session.id, true);
       });
@@ -1283,7 +1300,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         unsubscribe();
       }
     };
-  }, [onSessionData, sessions]);
+  }, [activityTrackedSessions, onSessionData]);
 
   // Execute snippet on the focused terminal session
   const handleSnippetClickForFocusedSession = useCallback((command: string, noAutoRun?: boolean) => {
@@ -1613,6 +1630,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       || customThemes.find((theme) => theme.id === themeId)
       || terminalTheme;
   }, [activeThemePreviewId, customThemes, focusedThemeId, terminalTheme]);
+  const sessionLogConfig = useMemo(
+    () =>
+      sessionLogsEnabled && sessionLogsDir
+        ? { enabled: true as const, directory: sessionLogsDir, format: sessionLogsFormat || 'txt' }
+        : undefined,
+    [sessionLogsDir, sessionLogsEnabled, sessionLogsFormat],
+  );
 
   // Resolve the effective theme for the compose bar in workspace mode
   const composeBarThemeColors = useMemo(() => {
@@ -1712,7 +1736,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [activeWorkspace]);
 
   const workspaceSessions = useMemo(() => {
-    return sessions.filter(s => workspaceSessionIds.includes(s.id));
+    const idSet = new Set(workspaceSessionIds);
+    return sessions.filter(s => idSet.has(s.id));
   }, [sessions, workspaceSessionIds]);
 
   // Render focus mode sidebar
@@ -2152,7 +2177,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
                   onBroadcastInput={inActiveWorkspace && activeWorkspace && isBroadcastEnabled?.(activeWorkspace.id) ? handleBroadcastInput : undefined}
                   onSnippetExecutorChange={handleSnippetExecutorChange}
-                  sessionLog={sessionLogsEnabled && sessionLogsDir ? { enabled: true, directory: sessionLogsDir, format: sessionLogsFormat || 'txt' } : undefined}
+                  sessionLog={sessionLogConfig}
                 />
               </div>
             );

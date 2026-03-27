@@ -98,13 +98,17 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
 
   // Reset state when opening
   useEffect(() => {
-    if (isOpen) {
-      setSelectedIndex(0);
-      // Auto focus the input after a short delay
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    }
+    if (!isOpen) return;
+
+    const focusTimer = window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+
+    setSelectedIndex(0);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+    };
   }, [isOpen]);
 
   // Handle clicks outside the container
