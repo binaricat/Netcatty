@@ -86,6 +86,7 @@ export function useServerStats({
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
+  const hasFetchedRef = useRef(false);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
@@ -106,6 +107,7 @@ export function useServerStats({
       if (!isMountedRef.current) return;
 
       if (result.success && result.stats) {
+        hasFetchedRef.current = true;
         setStats({
           cpu: result.stats.cpu,
           cpuCores: result.stats.cpuCores,
@@ -187,10 +189,8 @@ export function useServerStats({
       };
     }
 
-    // Initial fetch with a small delay to let the connection stabilize
-    const initialTimer = setTimeout(() => {
-      fetchStats();
-    }, 2000);
+    // Fetch immediately when resuming from hidden, or with a delay on first connect
+    const initialTimer = setTimeout(fetchStats, hasFetchedRef.current ? 0 : 2000);
 
     // Set up periodic refresh
     const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
