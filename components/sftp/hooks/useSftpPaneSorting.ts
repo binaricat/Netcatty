@@ -75,6 +75,7 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    lastClientXRef.current = e.clientX;
     resizingRef.current = {
       field,
       startX: e.clientX,
