@@ -1920,7 +1920,7 @@ function registerHandlers(ipcMain) {
         `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
         `Call get_environment first to discover available sessions and their IDs. ` +
         `For normal shell commands, use terminal_execute so you receive command output. ` +
-        `For serial/raw sessions (network devices), commands are sent as-is without shell wrapping and exit codes are unavailable.]\n\n${prompt}`;
+        `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`;
 
       // Build message content: text + optional attachments
       // ACP provider only supports image/* and audio/* inline via `type: "file"`.

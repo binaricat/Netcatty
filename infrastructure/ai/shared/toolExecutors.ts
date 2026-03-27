@@ -79,11 +79,12 @@ export async function executeTerminalExecute(
     return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
   }
   // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-  // disables an interface on Cisco). Skip for serial sessions. The bridge layer
-  // (handleExec / netcatty:ai:exec) also has its own session-aware check.
+  // disables an interface on Cisco). Skip for serial and network device sessions.
+  // The bridge layer (handleExec / netcatty:ai:exec) also has its own session-aware check.
   const resolved = resolveContext(context);
   const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
-  if (targetSession?.protocol !== 'serial') {
+  const isNetworkDevice = targetSession?.protocol === 'serial' || targetSession?.deviceType === 'network';
+  if (!isNetworkDevice) {
     const safety = checkCommandSafety(command, commandBlocklist);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };

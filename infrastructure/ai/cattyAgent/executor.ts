@@ -39,6 +39,7 @@ export interface ExecutorContext {
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
   // Workspace info
