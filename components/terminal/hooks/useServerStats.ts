@@ -203,6 +203,10 @@ export function useServerStats({
       };
     }
 
+    // Invalidate any in-flight request from a previous visible/hidden cycle
+    // so stale responses don't overwrite the reset network stats below.
+    fetchGenerationRef.current++;
+
     // Fetch immediately when resuming from hidden, or with a delay on first connect.
     // When resuming, reset delta-based network stats (both aggregate and per-interface)
     // so the first sample doesn't show averaged-over-hidden-interval throughput.
