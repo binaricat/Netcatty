@@ -82,7 +82,8 @@ export interface CloudSyncHook {
     redirectUri: string
   ) => Promise<void>;
   disconnectProvider: (provider: CloudProvider) => Promise<void>;
-  
+  resetProviderStatus: (provider: CloudProvider) => void;
+
   // Sync Actions
   syncNow: (payload: SyncPayload) => Promise<Map<CloudProvider, SyncResult>>;
   syncToProvider: (provider: CloudProvider, payload: SyncPayload) => Promise<SyncResult>;
