@@ -88,27 +88,27 @@ export function useServerStats({
   const isMountedRef = useRef(true);
   const hasFetchedRef = useRef(false);
   const connectedAtRef = useRef(0);
-  const fetchInFlightRef = useRef(false);
+  const fetchGenerationRef = useRef(0);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
       return;
     }
-    if (fetchInFlightRef.current) return;
 
     const bridge = netcattyBridge.get();
     if (!bridge?.getServerStats) {
       return;
     }
 
-    fetchInFlightRef.current = true;
+    const generation = ++fetchGenerationRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await bridge.getServerStats(sessionId);
 
-      if (!isMountedRef.current) return;
+      // Discard stale responses from before a hide/show cycle or reconnect
+      if (!isMountedRef.current || generation !== fetchGenerationRef.current) return;
 
       if (result.success && result.stats) {
         hasFetchedRef.current = true;
@@ -137,12 +137,11 @@ export function useServerStats({
         setError(result.error);
       }
     } catch (err) {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && generation === fetchGenerationRef.current) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       }
     } finally {
-      fetchInFlightRef.current = false;
-      if (isMountedRef.current) {
+      if (isMountedRef.current && generation === fetchGenerationRef.current) {
         setIsLoading(false);
       }
     }
@@ -162,7 +161,7 @@ export function useServerStats({
       // Reset stats and fetch state when disabled or not connected
       hasFetchedRef.current = false;
       connectedAtRef.current = 0;
-      fetchInFlightRef.current = false;
+
       setStats({
         cpu: null,
         cpuCores: null,
@@ -196,7 +195,7 @@ export function useServerStats({
     if (!isVisible) {
       return () => {
         isMountedRef.current = false;
-        fetchInFlightRef.current = false;
+  
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
