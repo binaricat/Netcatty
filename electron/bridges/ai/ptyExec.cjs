@@ -454,6 +454,7 @@ function execViaRawPty(serialPort, command, options) {
     trackForCancellation = null,
     chatSessionId,
     abortSignal,
+    encoding = "latin1", // latin1 for serial ports; callers should pass "utf8" for SSH PTY streams
   } = options || {};
 
   // Simple incrementing key for the cancellation map (no markers sent to device)
@@ -537,8 +538,8 @@ function execViaRawPty(serialPort, command, options) {
     const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
 
     const onData = (data) => {
-      // Use latin1 to match the terminal display decoder in terminalBridge.cjs.
-      const chunk = data.toString("latin1");
+      // latin1 for serial ports (matches terminalBridge.cjs decoder); utf8 for SSH PTY streams.
+      const chunk = typeof data === "string" ? data : data.toString(encoding);
       chunkCount++;
       // Cancel the no-response fallback on first data
       if (noResponseTimer) {

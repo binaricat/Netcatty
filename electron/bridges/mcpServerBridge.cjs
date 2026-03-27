@@ -570,6 +570,7 @@ function handleExec(params) {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
       chatSessionId: params?.chatSessionId,
+      encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
     });
   }
 

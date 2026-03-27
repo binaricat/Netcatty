@@ -925,6 +925,7 @@ function registerHandlers(ipcMain) {
           timeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
+          encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
         });
       }
 
