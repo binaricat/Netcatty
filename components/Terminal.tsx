@@ -1356,6 +1356,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!termRef.current) return;
     cleanupSession();
     auth.resetForRetry();
+    terminalDataCapturedRef.current = false;
     hasRunStartupCommandRef.current = false;
     setIsDisconnectedDialogDismissed(false);
     setStatus("connecting");

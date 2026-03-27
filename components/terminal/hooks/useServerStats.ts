@@ -87,6 +87,7 @@ export function useServerStats({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
   const hasFetchedRef = useRef(false);
+  const connectedAtRef = useRef(0);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
@@ -156,6 +157,7 @@ export function useServerStats({
     if (!enabled || !isSupportedOs || !isConnected) {
       // Reset stats and fetch state when disabled or not connected
       hasFetchedRef.current = false;
+      connectedAtRef.current = 0;
       setStats({
         cpu: null,
         cpuCores: null,
@@ -190,6 +192,11 @@ export function useServerStats({
       };
     }
 
+    // Track when the connection became available for delay calculation
+    if (connectedAtRef.current === 0) {
+      connectedAtRef.current = Date.now();
+    }
+
     // Fetch immediately when resuming from hidden, or with a delay on first connect.
     // When resuming, reset delta-based network stats (both aggregate and per-interface)
     // so the first sample doesn't show averaged-over-hidden-interval throughput.
@@ -201,10 +208,11 @@ export function useServerStats({
         netInterfaces: prev.netInterfaces.map(iface => ({ ...iface, rxSpeed: 0, txSpeed: 0 })),
       }));
     }
-    // Use short delay (100ms) for first-time fetch if connection was already established
-    // before the tab became visible, full 2s only on truly fresh connections.
-    const delay = hasFetchedRef.current ? 0 : 2000;
-    const initialTimer = setTimeout(fetchStats, delay);
+    // Skip the warmup delay if the connection has been established long enough
+    // (e.g., tab was hidden while connected and is now becoming visible).
+    const connectionAge = Date.now() - connectedAtRef.current;
+    const needsWarmup = !hasFetchedRef.current && connectionAge < 2000;
+    const initialTimer = setTimeout(fetchStats, needsWarmup ? 2000 : 0);
 
     // Set up periodic refresh
     const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
