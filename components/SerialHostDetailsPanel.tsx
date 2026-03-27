@@ -66,6 +66,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
   const [flowControl, setFlowControl] = useState<SerialFlowControl>(initialData.serialConfig?.flowControl || 'none');
   const [localEcho, setLocalEcho] = useState(initialData.serialConfig?.localEcho || false);
   const [lineMode, setLineMode] = useState(initialData.serialConfig?.lineMode || false);
+  const [charset, setCharset] = useState(initialData.charset || 'UTF-8');
   const [tags, setTags] = useState<string[]>(initialData.tags || []);
   const [group, setGroup] = useState(initialData.group || '');
 
@@ -107,6 +108,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
       port: baudRate,
       tags,
       group,
+      charset,
       serialConfig: config,
     };
 
@@ -390,6 +392,20 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
                   checked={lineMode}
                   onChange={(e) => setLineMode(e.target.checked)}
                   className="h-4 w-4 rounded border-input"
+                />
+              </div>
+
+              {/* Charset */}
+              <div className="space-y-1">
+                <Label htmlFor="serial-charset" className="text-sm font-medium">
+                  {t('serial.field.charset')}
+                </Label>
+                <Input
+                  id="serial-charset"
+                  placeholder={t("hostDetails.charset.placeholder")}
+                  value={charset}
+                  onChange={(e) => setCharset(e.target.value)}
+                  className="h-9"
                 />
               </div>
             </div>

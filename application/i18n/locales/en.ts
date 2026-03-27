@@ -1537,6 +1537,7 @@ const en: Messages = {
   'serial.field.localEchoDesc': 'Echo typed characters locally (for devices without remote echo)',
   'serial.field.lineMode': 'Line Mode',
   'serial.field.lineModeDesc': 'Buffer input and send on Enter (instead of character-by-character)',
+  'serial.field.charset': 'Charset',
   'serial.connectionError': 'Failed to connect to serial port',
   'serial.field.baudRatePlaceholder': 'Select or enter baud rate...',
   'serial.field.baudRateEmpty': 'Enter a custom baud rate',

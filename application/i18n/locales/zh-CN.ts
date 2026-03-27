@@ -1551,6 +1551,7 @@ const zhCN: Messages = {
   'serial.field.localEchoDesc': '本地回显输入字符（用于没有远程回显的设备）',
   'serial.field.lineMode': '行模式',
   'serial.field.lineModeDesc': '缓冲输入，按回车后发送（而不是逐字符发送）',
+  'serial.field.charset': '字符编码',
   'serial.connectionError': '连接串口失败',
   'serial.field.baudRatePlaceholder': '选择或输入波特率...',
   'serial.field.baudRateEmpty': '输入自定义波特率',
