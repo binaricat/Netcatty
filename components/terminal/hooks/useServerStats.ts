@@ -196,6 +196,7 @@ export function useServerStats({
     if (!isVisible) {
       return () => {
         isMountedRef.current = false;
+        fetchInFlightRef.current = false;
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
