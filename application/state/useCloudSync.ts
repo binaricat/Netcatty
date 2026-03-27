@@ -357,6 +357,10 @@ export const useCloudSync = (): CloudSyncHook => {
     await manager.disconnectProvider(provider);
   }, []);
 
+  const resetProviderStatus = useCallback((provider: CloudProvider): void => {
+    manager.resetProviderStatus(provider);
+  }, []);
+
   const connectWebDAV = useCallback(async (config: WebDAVConfig): Promise<void> => {
     await manager.connectConfigProvider('webdav', config);
   }, []);
@@ -463,7 +467,8 @@ export const useCloudSync = (): CloudSyncHook => {
     connectS3,
     completePKCEAuth,
     disconnectProvider,
-    
+    resetProviderStatus,
+
     // Sync Actions
     syncNow: syncNowWithUnlock,
     syncToProvider: syncToProviderWithUnlock,

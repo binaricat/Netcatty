@@ -801,8 +801,8 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         } catch (error) {
             setIsPollingGitHub(false);
             setShowGitHubModal(false);
-            // Reset provider status so button is clickable again
-            await sync.disconnectProvider('github').catch(() => {});
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('github');
             const message = getNetworkErrorMessage(error, t('common.unknownError'));
             toast.error(message, t('cloudSync.connect.github.failedTitle'));
         }
@@ -816,8 +816,8 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             // Note: Auth flow is handled automatically by oauthBridge
             toast.info(t('cloudSync.connect.browserContinue'));
         } catch (error) {
-            // Reset provider status so button is clickable again
-            await sync.disconnectProvider('google').catch(() => {});
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('google');
             const msg = error instanceof Error ? error.message : t('common.unknownError');
             // Don't show toast for user-initiated cancellation (popup closed)
             if (!msg.includes('cancelled')) {
@@ -834,8 +834,8 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             // Note: Auth flow is handled automatically by oauthBridge
             toast.info(t('cloudSync.connect.browserContinue'));
         } catch (error) {
-            // Reset provider status so button is clickable again
-            await sync.disconnectProvider('onedrive').catch(() => {});
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('onedrive');
             const msg = error instanceof Error ? error.message : t('common.unknownError');
             // Don't show toast for user-initiated cancellation (popup closed)
             if (!msg.includes('cancelled')) {
