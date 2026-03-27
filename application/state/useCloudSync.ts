@@ -268,11 +268,11 @@ export const useCloudSync = (): CloudSyncHook => {
       // Start callback server and open browser
       const callbackPromise = startCallback(expectedState);
 
-      // Open browser after starting server — omit noopener so we can track the popup
+      // Open browser after starting server — omit noopener/noreferrer so we can track the popup
       let popup: Window | null = null;
       let popupPollTimer: ReturnType<typeof setInterval> | null = null;
       setTimeout(() => {
-        popup = window.open(data.url, "_blank", "width=600,height=700,noreferrer");
+        popup = window.open(data.url, "_blank", "width=600,height=700");
         // Poll for popup closure — if user closes it, cancel the OAuth flow
         if (popup) {
           popupPollTimer = setInterval(() => {
@@ -316,11 +316,11 @@ export const useCloudSync = (): CloudSyncHook => {
       // Start callback server and open browser
       const callbackPromise = startCallback(expectedState);
 
-      // Open browser after starting server — omit noopener so we can track the popup
+      // Open browser after starting server — omit noopener/noreferrer so we can track the popup
       let popup: Window | null = null;
       let popupPollTimer: ReturnType<typeof setInterval> | null = null;
       setTimeout(() => {
-        popup = window.open(data.url, "_blank", "width=600,height=700,noreferrer");
+        popup = window.open(data.url, "_blank", "width=600,height=700");
         // Poll for popup closure — if user closes it, cancel the OAuth flow
         if (popup) {
           popupPollTimer = setInterval(() => {
