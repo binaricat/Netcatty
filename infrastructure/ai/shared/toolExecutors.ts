@@ -66,7 +66,7 @@ function isObserver(mode: AIPermissionMode): boolean {
 export async function executeTerminalExecute(
   deps: ToolDeps,
   args: { sessionId: string; command: string },
-): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number }>> {
+): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number | null }>> {
   const { bridge, context, commandBlocklist, permissionMode } = deps;
   const { sessionId, command } = args;
 
@@ -83,7 +83,9 @@ export async function executeTerminalExecute(
   // The bridge layer (handleExec / netcatty:ai:exec) also has its own session-aware check.
   const resolved = resolveContext(context);
   const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
-  const isNetworkDevice = targetSession?.protocol === 'serial' || targetSession?.deviceType === 'network';
+  const proto = targetSession?.protocol || '';
+  const isSshOrSerial = proto === 'ssh' || proto === 'serial';
+  const isNetworkDevice = proto === 'serial' || (targetSession?.deviceType === 'network' && isSshOrSerial);
   if (!isNetworkDevice) {
     const safety = checkCommandSafety(command, commandBlocklist);
     if (safety.blocked) {

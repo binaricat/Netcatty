@@ -894,7 +894,7 @@ function registerHandlers(ipcMain) {
     // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
     const meta = mcpServerBridge.getSessionMeta(sessionId, chatSessionId) || {};
     const sessionProtocol = session.protocol || session.type || meta.protocol || "";
-    const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial" || sessionProtocol === "";
+    const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
     const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
 
     // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"

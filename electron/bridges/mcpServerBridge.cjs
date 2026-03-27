@@ -530,7 +530,7 @@ function handleExec(params) {
   // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
   // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
   const sessionProtocol = session.protocol || session.type || meta.protocol || "";
-  const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial" || sessionProtocol === "";
+  const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
   const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
 
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that

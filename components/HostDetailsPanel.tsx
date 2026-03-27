@@ -1516,7 +1516,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           <ToggleRow
             label="Mosh"
             enabled={!!form.moshEnabled}
-            onToggle={() => update("moshEnabled", !form.moshEnabled)}
+            onToggle={() => {
+              const enabling = !form.moshEnabled;
+              if (enabling && form.deviceType === 'network') {
+                // Network device mode is incompatible with Mosh — clear it
+                setForm(prev => ({ ...prev, moshEnabled: true, deviceType: undefined }));
+              } else {
+                update("moshEnabled", enabling);
+              }
+            }}
           />
         </Card>
 
