@@ -271,7 +271,7 @@ export const useCloudSync = (): CloudSyncHook => {
       // Open browser after starting server — omit noopener/noreferrer so we can track the popup
       let popup: Window | null = null;
       let popupPollTimer: ReturnType<typeof setInterval> | null = null;
-      setTimeout(() => {
+      const openTimer = setTimeout(() => {
         popup = window.open(data.url, "_blank", "width=600,height=700");
         // Poll for popup closure — if user closes it, cancel the OAuth flow
         if (popup) {
@@ -291,6 +291,7 @@ export const useCloudSync = (): CloudSyncHook => {
         // Complete auth with the received code
         await manager.completePKCEAuth('google', code, data.redirectUri);
       } finally {
+        clearTimeout(openTimer);
         if (popupPollTimer) clearInterval(popupPollTimer);
       }
     }
@@ -319,7 +320,7 @@ export const useCloudSync = (): CloudSyncHook => {
       // Open browser after starting server — omit noopener/noreferrer so we can track the popup
       let popup: Window | null = null;
       let popupPollTimer: ReturnType<typeof setInterval> | null = null;
-      setTimeout(() => {
+      const openTimer = setTimeout(() => {
         popup = window.open(data.url, "_blank", "width=600,height=700");
         // Poll for popup closure — if user closes it, cancel the OAuth flow
         if (popup) {
@@ -339,6 +340,7 @@ export const useCloudSync = (): CloudSyncHook => {
         // Complete auth with the received code
         await manager.completePKCEAuth('onedrive', code, data.redirectUri);
       } finally {
+        clearTimeout(openTimer);
         if (popupPollTimer) clearInterval(popupPollTimer);
       }
     }
