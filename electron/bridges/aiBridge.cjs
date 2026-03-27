@@ -962,6 +962,7 @@ function registerHandlers(ipcMain) {
           timeoutMs: serialTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
+          encoding: session.serialEncoding || "utf8",
         });
       }
 

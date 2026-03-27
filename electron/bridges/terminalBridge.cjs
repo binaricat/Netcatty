@@ -19,6 +19,20 @@ const { trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
 let sessions = null;
 let electronModule = null;
 
+// Map user-facing charset names to Node.js StringDecoder/Buffer encoding names.
+// Falls back to utf8 for unrecognized charsets (StringDecoder only supports a
+// small set; for CJK encodings like GB18030/Big5 we'd need iconv-lite, which
+// is out of scope for this change — utf8 is still the safer default).
+function charsetToNodeEncoding(charset) {
+  if (!charset) return 'utf8';
+  const normalized = String(charset).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['utf8', 'utf-8'].includes(normalized)) return 'utf8';
+  if (['latin1', 'iso88591', 'iso-8859-1', 'binary'].includes(normalized)) return 'latin1';
+  if (normalized === 'ascii') return 'ascii';
+  if (['utf16le', 'ucs2'].includes(normalized)) return 'utf16le';
+  return 'utf8';
+}
+
 const DEFAULT_UTF8_LOCALE = "en_US.UTF-8";
 const LOGIN_SHELLS = new Set(["bash", "zsh", "fish", "ksh"]);
 const POWERSHELL_SHELLS = new Set(["powershell", "powershell.exe", "pwsh", "pwsh.exe"]);
@@ -513,16 +527,6 @@ async function startTelnetSession(event, options) {
       resolve({ sessionId });
     });
 
-    const charsetToNodeEncoding = (charset) => {
-      if (!charset) return 'utf8';
-      const normalized = String(charset).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (['utf8', 'utf-8'].includes(normalized)) return 'utf8';
-      if (['latin1', 'iso88591', 'iso-8859-1', 'binary'].includes(normalized)) return 'latin1';
-      if (normalized === 'ascii') return 'ascii';
-      if (['utf16le', 'ucs2'].includes(normalized)) return 'utf16le';
-      return 'utf8';
-    };
-
     const telnetDecoder = new StringDecoder(charsetToNodeEncoding(options.charset));
 
     const telnetWebContentsId = event.sender.id;
@@ -767,6 +771,7 @@ async function startSerialSession(event, options) {
           type: 'serial',
           protocol: 'serial',
           shellKind: 'raw',
+          serialEncoding: serialEncoding,
           webContentsId: event.sender.id,
         };
         sessions.set(sessionId, session);
@@ -782,7 +787,8 @@ async function startSerialSession(event, options) {
           });
         }
 
-        const serialDecoder = new StringDecoder('latin1');
+        const serialEncoding = charsetToNodeEncoding(options.charset);
+        const serialDecoder = new StringDecoder(serialEncoding);
 
         serialPort.on('data', (data) => {
           const decoded = serialDecoder.write(data);

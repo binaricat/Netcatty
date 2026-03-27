@@ -854,6 +854,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         stopBits: ctx.serialConfig.stopBits,
         parity: ctx.serialConfig.parity,
         flowControl: ctx.serialConfig.flowControl,
+        charset: ctx.host.charset,
         sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
       });
 

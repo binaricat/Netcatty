@@ -599,6 +599,7 @@ function handleExec(params) {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
       chatSessionId: params?.chatSessionId,
+      encoding: session.serialEncoding || "utf8",
     });
   }
 

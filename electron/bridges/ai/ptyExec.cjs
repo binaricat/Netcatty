@@ -454,7 +454,7 @@ function execViaRawPty(serialPort, command, options) {
     trackForCancellation = null,
     chatSessionId,
     abortSignal,
-    encoding = "latin1", // latin1 for serial ports; callers should pass "utf8" for SSH PTY streams
+    encoding = "utf8", // Callers should pass the session's resolved encoding
   } = options || {};
 
   // Simple incrementing key for the cancellation map (no markers sent to device)
