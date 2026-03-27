@@ -525,7 +525,10 @@ function handleExec(params) {
   // Look up device type from metadata (set by renderer from Host.deviceType).
   const chatSessionId = params?.chatSessionId || null;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
-  const isNetworkDevice = meta.deviceType === "network" || session.protocol === "serial";
+  // Mosh sessions use a shell-backed PTY and cannot connect to vendor CLIs,
+  // so network device mode only applies to SSH and serial sessions.
+  const sessionProtocol = meta.protocol || session.protocol || session.type || "";
+  const isNetworkDevice = (meta.deviceType === "network" && sessionProtocol !== "mosh") || session.protocol === "serial";
 
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
