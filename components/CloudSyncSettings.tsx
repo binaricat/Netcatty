@@ -1259,6 +1259,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 onClose={() => {
                     setShowGitHubModal(false);
                     setIsPollingGitHub(false);
+                    // Reset provider status so button is clickable again.
+                    // The background polling will continue until expiry but is harmless.
+                    sync.resetProviderStatus('github');
                 }}
             />
 
