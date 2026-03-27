@@ -185,6 +185,7 @@ declare global {
       stopBits?: 1 | 1.5 | 2;
       parity?: 'none' | 'even' | 'odd' | 'mark' | 'space';
       flowControl?: 'none' | 'xon/xoff' | 'rts/cts';
+      charset?: string;
       sessionLog?: { enabled: boolean; directory: string; format: string };
     }): Promise<string>;
     listSerialPorts?(): Promise<Array<{
