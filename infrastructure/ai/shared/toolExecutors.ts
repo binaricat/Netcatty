@@ -128,6 +128,7 @@ export function executeWorkspaceGetInfo(
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
 }> {
@@ -145,6 +146,7 @@ export function executeWorkspaceGetInfo(
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
+        deviceType: s.deviceType,
         connected: s.connected,
       })),
     },

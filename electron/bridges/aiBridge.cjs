@@ -942,6 +942,11 @@ function registerHandlers(ipcMain) {
         });
       }
 
+      // Network devices require an interactive PTY for raw command execution.
+      if (isNetworkDevice) {
+        return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
+      }
+
       // Fallback: SSH exec channel (invisible to terminal)
       const sshClient = session.sshClient || session.conn;
       if (sshClient && typeof sshClient.exec === "function") {

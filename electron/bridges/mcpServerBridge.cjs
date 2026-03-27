@@ -584,6 +584,12 @@ function handleExec(params) {
     });
   }
 
+  // Network devices require an interactive PTY for raw command execution.
+  // If we got here, ptyStream wasn't writable — there's no usable channel.
+  if (isNetworkDevice) {
+    return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
+  }
+
   // Fallback: SSH exec channel (invisible to terminal).
   // At this point ptyStream is not writable (already returned above if it was).
   if (sshClient && typeof sshClient.exec === "function") {
