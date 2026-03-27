@@ -766,12 +766,15 @@ async function startSerialSession(event, options) {
 
         console.log(`[Serial] Connected to ${portPath}`);
 
+        const serialEncoding = charsetToNodeEncoding(options.charset);
+        const serialDecoder = new StringDecoder(serialEncoding);
+
         const session = {
           serialPort,
           type: 'serial',
           protocol: 'serial',
           shellKind: 'raw',
-          serialEncoding: serialEncoding,
+          serialEncoding,
           webContentsId: event.sender.id,
         };
         sessions.set(sessionId, session);
@@ -786,9 +789,6 @@ async function startSerialSession(event, options) {
             startTime: Date.now(),
           });
         }
-
-        const serialEncoding = charsetToNodeEncoding(options.charset);
-        const serialDecoder = new StringDecoder(serialEncoding);
 
         serialPort.on('data', (data) => {
           const decoded = serialDecoder.write(data);
