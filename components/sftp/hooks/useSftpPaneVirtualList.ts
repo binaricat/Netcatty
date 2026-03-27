@@ -3,6 +3,7 @@ import type { SftpFileEntry } from "../../../types";
 
 interface UseSftpPaneVirtualListParams {
   isActive: boolean;
+  enabled?: boolean;
   sortedDisplayFiles: SftpFileEntry[];
 }
 
@@ -17,6 +18,7 @@ interface UseSftpPaneVirtualListResult {
 
 export const useSftpPaneVirtualList = ({
   isActive,
+  enabled = true,
   sortedDisplayFiles,
 }: UseSftpPaneVirtualListParams): UseSftpPaneVirtualListResult => {
   const fileListRef = useRef<HTMLDivElement>(null);
@@ -27,7 +29,7 @@ export const useSftpPaneVirtualList = ({
 
   useLayoutEffect(() => {
     const container = fileListRef.current;
-    if (!container || !isActive) return;
+    if (!container || !isActive || !enabled) return;
     const update = () => setViewportHeight(container.clientHeight);
     update();
     const raf = window.requestAnimationFrame(update);
@@ -37,11 +39,11 @@ export const useSftpPaneVirtualList = ({
       resizeObserver.disconnect();
       window.cancelAnimationFrame(raf);
     };
-  }, [isActive, sortedDisplayFiles.length]);
+  }, [enabled, isActive, sortedDisplayFiles.length]);
 
   useLayoutEffect(() => {
     const container = fileListRef.current;
-    if (!container || !isActive || sortedDisplayFiles.length === 0) return;
+    if (!container || !isActive || !enabled || sortedDisplayFiles.length === 0) return;
     const raf = window.requestAnimationFrame(() => {
       const rowElement = container.querySelector(
         '[data-sftp-row="true"]',
@@ -53,7 +55,7 @@ export const useSftpPaneVirtualList = ({
       }
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [isActive, rowHeight, sortedDisplayFiles.length]);
+  }, [enabled, isActive, rowHeight, sortedDisplayFiles.length]);
 
   useEffect(() => {
     return () => {
@@ -65,7 +67,7 @@ export const useSftpPaneVirtualList = ({
 
   const handleFileListScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
-      if (!isActive) return;
+      if (!isActive || !enabled) return;
       const nextTop = e.currentTarget.scrollTop;
       if (scrollFrameRef.current !== null) return;
       scrollFrameRef.current = window.requestAnimationFrame(() => {
@@ -73,12 +75,12 @@ export const useSftpPaneVirtualList = ({
         setScrollTop(nextTop);
       });
     },
-    [isActive],
+    [enabled, isActive],
   );
 
   const { shouldVirtualize, totalHeight, visibleRows } = useMemo(() => {
     const overscan = 6;
-    const canVirtualize = isActive && viewportHeight > 0 && rowHeight > 0;
+    const canVirtualize = enabled && isActive && viewportHeight > 0 && rowHeight > 0;
     const shouldVirtualizeLocal = canVirtualize && sortedDisplayFiles.length > 50;
     const totalHeightLocal = shouldVirtualizeLocal
       ? sortedDisplayFiles.length * rowHeight
@@ -111,7 +113,7 @@ export const useSftpPaneVirtualList = ({
       totalHeight: totalHeightLocal,
       visibleRows: visibleRowsLocal,
     };
-  }, [isActive, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
+  }, [enabled, isActive, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
 
   return {
     fileListRef,

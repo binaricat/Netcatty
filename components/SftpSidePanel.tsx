@@ -37,6 +37,7 @@ interface SftpSidePanelProps {
   keys: SSHKey[];
   identities: Identity[];
   updateHosts: (hosts: Host[]) => void;
+  sftpDefaultViewMode: "list" | "tree";
   /** The host to connect to (follows focused terminal) */
   activeHost: Host | null;
   initialLocation?: { hostId: string; path: string } | null;
@@ -65,6 +66,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   keys,
   identities,
   updateHosts,
+  sftpDefaultViewMode,
   activeHost,
   initialLocation,
   showWorkspaceHostHeader = false,
@@ -548,6 +550,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
                 <SftpPaneView
                   side="left"
                   pane={pane}
+                  sftpDefaultViewMode={sftpDefaultViewMode}
                   showHeader
                   showEmptyHeader
                   onToggleShowHiddenFiles={() => handleToggleHiddenFiles(pane.id)}
@@ -610,6 +613,7 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.keys === next.keys &&
   prev.identities === next.identities &&
   prev.updateHosts === next.updateHosts &&
+  prev.sftpDefaultViewMode === next.sftpDefaultViewMode &&
   prev.activeHost === next.activeHost &&
   prev.showWorkspaceHostHeader === next.showWorkspaceHostHeader &&
   prev.isVisible === next.isVisible &&

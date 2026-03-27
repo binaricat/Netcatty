@@ -31,7 +31,7 @@ import type { SftpPane } from '../../application/state/sftp/types';
 import { getParentPath, joinPath } from '../../application/state/sftp/utils';
 import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory, sortSftpEntries, type ColumnWidths, type SortField, type SortOrder } from './utils';
 import type { SftpTransferSource } from './SftpContext';
-import { sftpTreeSelectionStore, useSftpTreeSelectionState, useIsTreeNodeSelected } from './hooks/useSftpTreeSelectionStore';
+import { sftpTreeSelectionStore, useSftpTreeSelectionState } from './hooks/useSftpTreeSelectionStore';
 import { sftpTreeEnterStore } from './hooks/useSftpKeyboardShortcuts';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -70,11 +70,11 @@ interface SftpPaneTreeViewProps {
 // ── Simplified TreeNode (no per-node ContextMenu) ────────────────────
 
 interface TreeNodeProps {
-  paneId: string;
   entry: SftpFileEntry;
   entryPath: string;
   depth: number;
   columnTemplate: string;
+  isSelected: boolean;
   isExpanded: boolean;
   isLoading: boolean;
   isDragOver: boolean;
@@ -92,7 +92,7 @@ interface TreeNodeProps {
 const TREE_ROW_HEIGHT = 28;
 
 const TreeNode = React.memo<TreeNodeProps>(({
-  paneId, entry, entryPath, depth, columnTemplate,
+  entry, entryPath, depth, columnTemplate, isSelected,
   isExpanded, isLoading, isDragOver,
   onToggleExpand, onNodeClick, onOpenEntry, onDragStart, onDragEnd,
   onDragOverEntry, onDropEntry, onDragLeaveEntry,
@@ -100,7 +100,6 @@ const TreeNode = React.memo<TreeNodeProps>(({
 }) => {
   const { t } = useI18n();
   const isParentEntry = entry.name === '..';
-  const isSelected = useIsTreeNodeSelected(paneId, entryPath);
   const isDir = isNavigableDirectory(entry);
   const icon = isDir
       ? (isExpanded
@@ -428,6 +427,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     dispatchTreePaths({ type: 'EXPAND', path: entryPath });
   }, [loadChildrenForPath]);
 
+  const reloadExpandedPaths = useCallback(async (paths: string[]) => {
+    for (const path of paths) {
+      await loadChildrenForPath(path);
+    }
+  }, [loadChildrenForPath]);
+
   useEffect(() => {
     const rootPath = pane.connection?.currentPath ?? '';
     const pathChanged = previousRootPathRef.current !== rootPath;
@@ -450,7 +455,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const expanded = Array.from(expandedPathsRef.current);
       invalidateTreeCache();
       if (expanded.length > 0) {
-        void Promise.all(expanded.map((path) => loadChildrenForPath(path)));
+        void reloadExpandedPaths(expanded);
       }
       return;
     }
@@ -464,9 +469,9 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       targetPath !== rootPath && expandedPathsRef.current.has(targetPath),
     );
     if (expandedTargets.length > 0) {
-      void Promise.all(expandedTargets.map((path) => loadChildrenForPath(path)));
+      void reloadExpandedPaths(expandedTargets);
     }
-  }, [invalidatePathCache, invalidateTreeCache, loadChildrenForPath, pane.connection?.currentPath, reloadRequest]);
+  }, [invalidatePathCache, invalidateTreeCache, pane.connection?.currentPath, reloadExpandedPaths, reloadRequest]);
 
   const flatVisibleNodesRef = useRef<Array<{ entry: SftpFileEntry; entryPath: string }>>([]);
 
@@ -527,7 +532,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   const handleTreeContainerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-    const items = flatVisibleNodesRef.current.filter(({ entry }) => entry.name !== '..');
+    const items = treeSelectionState.visibleItems;
     if (items.length === 0) return;
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -538,7 +543,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const currentSelected = [...selectedPathsRef.current];
       let currentIdx = -1;
       if (currentSelected.length === 1) {
-        currentIdx = items.findIndex((item) => item.entryPath === currentSelected[0]);
+        currentIdx = treeSelectionState.visibleIndexByPath.get(currentSelected[0]) ?? -1;
       }
 
       let nextIdx = currentIdx + delta;
@@ -549,13 +554,13 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         const anchorIdx = currentIdx >= 0 ? currentIdx : 0;
         const start = Math.min(anchorIdx, nextIdx);
         const end = Math.max(anchorIdx, nextIdx);
-        const paths = items.slice(start, end + 1).map((item) => item.entryPath);
+        const paths = items.slice(start, end + 1).map((item) => item.path);
         sftpTreeSelectionStore.setSelection(pane.id, paths);
       } else {
-        sftpTreeSelectionStore.setSelection(pane.id, [items[nextIdx].entryPath]);
+        sftpTreeSelectionStore.setSelection(pane.id, [items[nextIdx].path]);
       }
 
-      lastClickedPathRef.current = items[nextIdx].entryPath;
+      lastClickedPathRef.current = items[nextIdx].path;
       return;
     }
 
@@ -577,7 +582,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
 
       openTreeEntry(entry, item.path);
     }
-  }, [openTreeEntry, pane.id, toggleExpand]);
+  }, [openTreeEntry, pane.id, toggleExpand, treeSelectionState.visibleIndexByPath, treeSelectionState.visibleItems]);
 
   const { nodeDescriptors, flatVisibleNodes, entryByPath } = useMemo(() => {
     const flat: Array<{ entry: SftpFileEntry; entryPath: string }> = [];
@@ -844,11 +849,11 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       } else {
         content = (
           <TreeNode
-            paneId={pane.id}
             entry={descriptor.entry}
             entryPath={descriptor.entryPath}
             depth={descriptor.depth}
             columnTemplate={columnTemplate}
+            isSelected={selectedPaths.has(descriptor.entryPath)}
             isExpanded={descriptor.isExpanded}
             isLoading={descriptor.isLoading}
             isDragOver={dragOverNodePath === descriptor.entryPath}
@@ -885,8 +890,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   }, [
     visibleRange,
     nodeDescriptors,
-    pane.id,
     columnTemplate,
+    selectedPaths,
     dragOverNodePath,
     toggleExpand,
     handleNodeClick,

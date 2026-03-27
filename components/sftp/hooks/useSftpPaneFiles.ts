@@ -9,6 +9,7 @@ interface UseSftpPaneFilesParams {
   filter: string;
   connection: SftpPane["connection"] | null;
   showHiddenFiles: boolean;
+  enableListView: boolean;
   sortField: SortField;
   sortOrder: SortOrder;
 }
@@ -24,6 +25,7 @@ export const useSftpPaneFiles = ({
   filter,
   connection,
   showHiddenFiles,
+  enableListView,
   sortField,
   sortOrder,
 }: UseSftpPaneFilesParams): UseSftpPaneFilesResult => {
@@ -39,7 +41,9 @@ export const useSftpPaneFiles = ({
   }, [files, filter, showHiddenFiles]);
 
   const { displayFiles, sortedDisplayFiles } = useMemo(() => {
-    if (!connection) return { displayFiles: [] as SftpFileEntry[], sortedDisplayFiles: [] as SftpFileEntry[] };
+    if (!connection || !enableListView) {
+      return { displayFiles: [] as SftpFileEntry[], sortedDisplayFiles: [] as SftpFileEntry[] };
+    }
 
     const isRootPath =
       connection.currentPath === "/" ||
@@ -75,7 +79,7 @@ export const useSftpPaneFiles = ({
     const sortedDisplay = parentEntry ? [parentEntry, ...sorted] : sorted;
 
     return { displayFiles: display, sortedDisplayFiles: sortedDisplay };
-  }, [connection, filteredFiles, sortField, sortOrder]);
+  }, [connection, enableListView, filteredFiles, sortField, sortOrder]);
 
   return { filteredFiles, displayFiles, sortedDisplayFiles };
 };

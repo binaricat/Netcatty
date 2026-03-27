@@ -558,7 +558,9 @@ export const useSftpExternalOperations = (
         if (clearDirCacheEntry && targetPath) {
           clearDirCacheEntry(pane.connection.id, uploadTargetPath);
         }
-        await refresh(side, { tabId: uploadPaneId });
+        if (uploadTargetPath === pane.connection.currentPath) {
+          await refresh(side, { tabId: uploadPaneId });
+        }
         return results;
       } catch (error) {
         logger.error("[SFTP] Upload failed:", error);
@@ -642,7 +644,9 @@ export const useSftpExternalOperations = (
         if (clearDirCacheEntry) {
           clearDirCacheEntry(pane.connection.id, uploadTargetPath);
         }
-        await refresh(side, { tabId: uploadPaneId });
+        if (uploadTargetPath === pane.connection.currentPath) {
+          await refresh(side, { tabId: uploadPaneId });
+        }
         return results;
       } catch (error) {
         logger.error("[SFTP] Upload failed:", error);

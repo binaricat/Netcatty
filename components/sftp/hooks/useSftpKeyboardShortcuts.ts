@@ -162,7 +162,7 @@ export const useSftpKeyboardShortcuts = ({
           const currentSelected = [...treeState.selectedPaths];
           let currentIdx = -1;
           if (currentSelected.length === 1) {
-            currentIdx = items.findIndex(item => item.path === currentSelected[0]);
+            currentIdx = treeState.visibleIndexByPath.get(currentSelected[0]) ?? -1;
           }
           let nextIdx = currentIdx + delta;
           if (nextIdx < 0) nextIdx = 0;

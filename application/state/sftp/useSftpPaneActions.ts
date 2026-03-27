@@ -491,7 +491,9 @@ export const useSftpPaneActions = ({
           }
           await netcattyBridge.get()?.mkdirSftp(sftpId, fullPath, pane.filenameEncoding);
         }
-        await refresh(side);
+        if (pane.connection.currentPath === path) {
+          await refresh(side);
+        }
       } catch (err) {
         if (isSessionError(err)) {
           handleSessionError(side, err as Error);
@@ -544,7 +546,9 @@ export const useSftpPaneActions = ({
             throw new Error("No write method available");
           }
         }
-        await refresh(side);
+        if (pane.connection.currentPath === path) {
+          await refresh(side);
+        }
       } catch (err) {
         if (isSessionError(err)) {
           handleSessionError(side, err as Error);
@@ -718,6 +722,7 @@ export const useSftpPaneActions = ({
       if (!pane?.connection) return;
 
       const newPath = joinPath(getParentPath(oldPath), newName);
+      const parentPath = getParentPath(oldPath);
 
       try {
         if (pane.connection.isLocal) {
@@ -730,7 +735,9 @@ export const useSftpPaneActions = ({
           }
           await netcattyBridge.get()?.renameSftp?.(sftpId, oldPath, newPath, pane.filenameEncoding);
         }
-        await refresh(side);
+        if (pane.connection.currentPath === parentPath) {
+          await refresh(side);
+        }
       } catch (err) {
         if (isSessionError(err)) {
           handleSessionError(side, err as Error);
