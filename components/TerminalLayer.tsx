@@ -829,11 +829,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const activityTrackedSessions = useMemo(
     () =>
       sessions.filter(
-        (session) =>
-          session.status !== 'disconnected' &&
-          shouldMarkSessionActivity(activeTabId, session),
+        (session) => session.status !== 'disconnected',
       ),
-    [activeTabId, sessions],
+    [sessions],
   );
 
   const onSplitSessionRef = useRef(onSplitSession);
