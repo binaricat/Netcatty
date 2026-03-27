@@ -28,7 +28,7 @@ import { cn } from '../../lib/utils';
 import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import { getParentPath, joinPath } from '../../application/state/sftp/utils';
-import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
+import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory, sortSftpEntries, type SortField, type SortOrder } from './utils';
 import type { SftpTransferSource } from './SftpContext';
 import { sftpTreeSelectionStore, useSftpTreeSelectionState } from './hooks/useSftpTreeSelectionStore';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -55,6 +55,8 @@ interface SftpPaneTreeViewProps {
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
   openNewFolderDialog: (targetPath: string) => void;
   openNewFileDialog: (targetPath: string) => void;
+  sortField: SortField;
+  sortOrder: SortOrder;
   reloadVersion: number;
 }
 
@@ -224,6 +226,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   onEditPermissions,
   openNewFolderDialog,
   openNewFileDialog,
+  sortField,
+  sortOrder,
   reloadVersion,
 }) => {
   const { t } = useI18n();
@@ -402,7 +406,7 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
     const pathMap = new Map<string, SftpFileEntry>();
 
     const buildTree = (entries: SftpFileEntry[], parentPath: string, depth: number) => {
-      for (const entry of filterHiddenFiles(entries, pane.showHiddenFiles)) {
+      for (const entry of sortSftpEntries(filterHiddenFiles(entries, pane.showHiddenFiles), sortField, sortOrder)) {
         const entryPath = joinPath(parentPath, entry.name);
         flat.push({ entry, entryPath });
         pathMap.set(entryPath, entry);
@@ -432,6 +436,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
     pane.files,
     pane.connection?.currentPath,
     pane.showHiddenFiles,
+    sortField,
+    sortOrder,
     expandedPaths,
     loadingPaths,
     errorPaths,

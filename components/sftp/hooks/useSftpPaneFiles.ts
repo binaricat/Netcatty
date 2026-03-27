@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPane } from "../../../application/state/sftp/types";
 import type { SortField, SortOrder } from "../utils";
-import { filterHiddenFiles } from "../index";
+import { filterHiddenFiles, sortSftpEntries } from "../index";
 
 interface UseSftpPaneFilesParams {
   files: SftpFileEntry[];
@@ -58,39 +58,7 @@ export const useSftpPaneFiles = ({
 
     const parentEntry = displayFiles.find((f) => f.name === "..");
     const otherFiles = displayFiles.filter((f) => f.name !== "..");
-
-    const sorted = [...otherFiles].sort((a, b) => {
-      if (sortField !== "type") {
-        if (a.type === "directory" && b.type !== "directory") return -1;
-        if (a.type !== "directory" && b.type === "directory") return 1;
-      }
-
-      let cmp = 0;
-      switch (sortField) {
-        case "name":
-          cmp = a.name.localeCompare(b.name);
-          break;
-        case "size":
-          cmp = (a.size || 0) - (b.size || 0);
-          break;
-        case "modified":
-          cmp = (a.lastModified || 0) - (b.lastModified || 0);
-          break;
-        case "type": {
-          const extA =
-            a.type === "directory"
-              ? "folder"
-              : a.name.split(".").pop()?.toLowerCase() || "";
-          const extB =
-            b.type === "directory"
-              ? "folder"
-              : b.name.split(".").pop()?.toLowerCase() || "";
-          cmp = extA.localeCompare(extB);
-          break;
-        }
-      }
-      return sortOrder === "asc" ? cmp : -cmp;
-    });
+    const sorted = sortSftpEntries(otherFiles, sortField, sortOrder);
 
     return parentEntry ? [parentEntry, ...sorted] : sorted;
   }, [displayFiles, sortField, sortOrder]);

@@ -424,6 +424,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditPermissions={callbacks.onEditPermissions}
           openNewFolderDialog={openNewFolderDialogAtPath}
           openNewFileDialog={openNewFileDialogAtPath}
+          sortField={sortField}
+          sortOrder={sortOrder}
           reloadVersion={treeReloadVersion}
         />
       ) : (

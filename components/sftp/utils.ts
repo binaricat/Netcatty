@@ -180,6 +180,49 @@ export interface ColumnWidths {
     type: number;
 }
 
+export const sortSftpEntries = (
+    entries: SftpFileEntry[],
+    sortField: SortField,
+    sortOrder: SortOrder,
+): SftpFileEntry[] => {
+    if (!entries.length) return entries;
+
+    const sorted = [...entries].sort((a, b) => {
+        if (sortField !== 'type') {
+            if (a.type === 'directory' && b.type !== 'directory') return -1;
+            if (a.type !== 'directory' && b.type === 'directory') return 1;
+        }
+
+        let cmp = 0;
+        switch (sortField) {
+            case 'name':
+                cmp = a.name.localeCompare(b.name);
+                break;
+            case 'size':
+                cmp = (a.size || 0) - (b.size || 0);
+                break;
+            case 'modified':
+                cmp = (a.lastModified || 0) - (b.lastModified || 0);
+                break;
+            case 'type': {
+                const extA =
+                    a.type === 'directory'
+                        ? 'folder'
+                        : a.name.split('.').pop()?.toLowerCase() || '';
+                const extB =
+                    b.type === 'directory'
+                        ? 'folder'
+                        : b.name.split('.').pop()?.toLowerCase() || '';
+                cmp = extA.localeCompare(extB);
+                break;
+            }
+        }
+        return sortOrder === 'asc' ? cmp : -cmp;
+    });
+
+    return sorted;
+};
+
 /**
  * Check if an entry is navigable like a directory
  * This includes regular directories and symlinks that point to directories
