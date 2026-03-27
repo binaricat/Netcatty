@@ -742,6 +742,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     };
     const onMouseUp = () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      setSidePanelWidth(lastWidth);
       sftpResizingRef.current = false;
       persistSidePanelWidth(lastWidth);
       window.removeEventListener('mousemove', onMouseMove);
@@ -1051,38 +1052,46 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   useEffect(() => {
     if (!resizing) return;
     let rafId: number | null = null;
+    let lastDelta = 0;
+    const applySizes = () => {
+      const dimension = resizing.direction === 'vertical' ? resizing.startArea.w : resizing.startArea.h;
+      if (dimension <= 0) return;
+      const total = resizing.startSizes.reduce((acc, n) => acc + n, 0) || 1;
+      const pxSizes = resizing.startSizes.map(s => (s / total) * dimension);
+      const i = resizing.index;
+      let a = pxSizes[i] + lastDelta;
+      let b = pxSizes[i + 1] - lastDelta;
+      const minPx = Math.min(120, dimension / 2);
+      if (a < minPx) {
+        const diff = minPx - a;
+        a = minPx;
+        b -= diff;
+      }
+      if (b < minPx) {
+        const diff = minPx - b;
+        b = minPx;
+        a -= diff;
+      }
+      const newPxSizes = [...pxSizes];
+      newPxSizes[i] = Math.max(minPx, a);
+      newPxSizes[i + 1] = Math.max(minPx, b);
+      const totalPx = newPxSizes.reduce((acc, n) => acc + n, 0) || 1;
+      const newSizes = newPxSizes.map(n => n / totalPx);
+      onUpdateSplitSizes(resizing.workspaceId, resizing.splitId, newSizes);
+    };
     const onMove = (e: MouseEvent) => {
+      lastDelta = resizing.direction === 'vertical' ? e.clientX - resizing.startClient.x : e.clientY - resizing.startClient.y;
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const dimension = resizing.direction === 'vertical' ? resizing.startArea.w : resizing.startArea.h;
-        if (dimension <= 0) return;
-        const total = resizing.startSizes.reduce((acc, n) => acc + n, 0) || 1;
-        const pxSizes = resizing.startSizes.map(s => (s / total) * dimension);
-        const i = resizing.index;
-        const delta = (resizing.direction === 'vertical' ? e.clientX - resizing.startClient.x : e.clientY - resizing.startClient.y);
-        let a = pxSizes[i] + delta;
-        let b = pxSizes[i + 1] - delta;
-        const minPx = Math.min(120, dimension / 2);
-        if (a < minPx) {
-          const diff = minPx - a;
-          a = minPx;
-          b -= diff;
-        }
-        if (b < minPx) {
-          const diff = minPx - b;
-          b = minPx;
-          a -= diff;
-        }
-        const newPxSizes = [...pxSizes];
-        newPxSizes[i] = Math.max(minPx, a);
-        newPxSizes[i + 1] = Math.max(minPx, b);
-        const totalPx = newPxSizes.reduce((acc, n) => acc + n, 0) || 1;
-        const newSizes = newPxSizes.map(n => n / totalPx);
-        onUpdateSplitSizes(resizing.workspaceId, resizing.splitId, newSizes);
+        applySizes();
       });
     };
-    const onUp = () => setResizing(null);
+    const onUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      applySizes();
+      setResizing(null);
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
