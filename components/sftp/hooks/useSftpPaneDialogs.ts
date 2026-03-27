@@ -9,9 +9,9 @@ interface UseSftpPaneDialogsParams {
   onCreateDirectory: SftpPaneCallbacks["onCreateDirectory"];
   onCreateFile: SftpPaneCallbacks["onCreateFile"];
   onRenameFileAtPath: SftpPaneCallbacks["onRenameFileAtPath"];
-  onDeleteFiles: SftpPaneCallbacks["onDeleteFiles"];
   onDeleteFilesAtPath: SftpPaneCallbacks["onDeleteFilesAtPath"];
   onClearSelection: SftpPaneCallbacks["onClearSelection"];
+  onMutateSuccess?: () => void;
 }
 
 interface UseSftpPaneDialogsResult {
@@ -60,9 +60,9 @@ export const useSftpPaneDialogs = ({
   onCreateDirectory,
   onCreateFile,
   onRenameFileAtPath,
-  onDeleteFiles,
   onDeleteFilesAtPath,
   onClearSelection,
+  onMutateSuccess,
 }: UseSftpPaneDialogsParams): UseSftpPaneDialogsResult => {
   const [showHostPicker, setShowHostPicker] = useState(false);
   const [hostSearch, setHostSearch] = useState("");
@@ -153,6 +153,7 @@ export const useSftpPaneDialogs = ({
     setIsCreating(true);
     try {
       await onCreateDirectory(newFolderName.trim());
+      onMutateSuccess?.();
       setShowNewFolderDialog(false);
       setNewFolderName("");
     } catch {
@@ -187,6 +188,7 @@ export const useSftpPaneDialogs = ({
     setIsCreatingFile(true);
     try {
       await onCreateFile(trimmedName);
+      onMutateSuccess?.();
       setShowNewFileDialog(false);
       setShowOverwriteConfirm(false);
       setOverwriteTarget(null);
@@ -209,6 +211,7 @@ export const useSftpPaneDialogs = ({
     try {
       // renameTarget is always a full path; use the path-aware variant
       await onRenameFileAtPath(renameTarget, renameName.trim());
+      onMutateSuccess?.();
       setShowRenameDialog(false);
       setRenameTarget(null);
       setRenameName("");
@@ -233,17 +236,14 @@ export const useSftpPaneDialogs = ({
         list.push(name);
         byDir.set(dir, list);
       }
-      if (byDir.size === 1) {
-        const [[dir, names]] = byDir;
-        const connectionId = pane.connection?.id ?? "";
-        await onDeleteFilesAtPath(connectionId, dir, names);
-      } else {
-        // Fallback: basenames only (same-dir case is the common path)
-        await onDeleteFiles(deleteTargets.map((p) => {
-          const lastSlash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-          return p.slice(lastSlash + 1);
-        }));
+      const connectionId = pane.connection?.id;
+      if (!connectionId) {
+        throw new Error("Pane connection is no longer available");
       }
+      for (const [dir, names] of byDir) {
+        await onDeleteFilesAtPath(connectionId, dir, names);
+      }
+      onMutateSuccess?.();
       setShowDeleteConfirm(false);
       setDeleteTargets([]);
       onClearSelection();

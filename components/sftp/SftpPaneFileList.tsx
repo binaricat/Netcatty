@@ -12,6 +12,7 @@ import { cn } from "../../lib/utils";
 import { joinPath } from "../../application/state/sftp/utils";
 import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
+import type { SftpTransferSource } from "./SftpContext";
 import type { ColumnWidths, SortField, SortOrder } from "./utils";
 import { isNavigableDirectory } from "./index";
 import { isKnownBinaryFile } from "../../lib/sftpFileUtils";
@@ -32,7 +33,7 @@ interface SftpPaneFileListProps {
   totalHeight: number;
   sortedDisplayFiles: SftpFileEntry[];
   isDragOverPane: boolean;
-  draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
+  draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onRefresh: () => void;
   setShowNewFolderDialog: (open: boolean) => void;
   setShowNewFileDialog: (open: boolean) => void;
@@ -48,7 +49,7 @@ interface SftpPaneFileListProps {
   handleEntryDragOver: (entry: SftpFileEntry, e: React.DragEvent) => void;
   handleRowDragLeave: () => void;
   handleEntryDrop: (entry: SftpFileEntry, e: React.DragEvent) => void;
-  onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
+  onCopyToOtherPane: (files: SftpTransferSource[]) => void;
   onOpenFileWith?: (entry: SftpFileEntry) => void;
   onEditFile?: (entry: SftpFileEntry) => void;
   onDownloadFile?: (entry: SftpFileEntry) => void;
@@ -211,6 +212,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
                   return {
                     name: fileName,
                     isDirectory: file ? isNavigableDirectory(file) : false,
+                    sourceConnectionId: pane.connection?.id,
+                    sourcePath: pane.connection?.currentPath,
                   };
                 });
                 onCopyToOtherPane(fileData);

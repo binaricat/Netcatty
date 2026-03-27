@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
-import type { SftpDragCallbacks } from "../SftpContext";
+import type { SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 
 interface UseSftpViewPaneActionsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -9,7 +9,7 @@ interface UseSftpViewPaneActionsParams {
 
 interface UseSftpViewPaneActionsResult {
   dragCallbacks: SftpDragCallbacks;
-  draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
+  draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onConnectLeft: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
   onConnectRight: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
   onDisconnectLeft: () => void;
@@ -42,22 +42,22 @@ interface UseSftpViewPaneActionsResult {
   onRenameFileRight: (old: string, newName: string) => void;
   onRenameFileAtPathLeft: (oldPath: string, newName: string) => void;
   onRenameFileAtPathRight: (oldPath: string, newName: string) => void;
-  onCopyToOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
-  onCopyToOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
-  onReceiveFromOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
-  onReceiveFromOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
+  onCopyToOtherPaneLeft: (files: SftpTransferSource[]) => void;
+  onCopyToOtherPaneRight: (files: SftpTransferSource[]) => void;
+  onReceiveFromOtherPaneLeft: (files: SftpTransferSource[]) => void;
+  onReceiveFromOtherPaneRight: (files: SftpTransferSource[]) => void;
 }
 
 export const useSftpViewPaneActions = ({
   sftpRef,
 }: UseSftpViewPaneActionsParams): UseSftpViewPaneActionsResult => {
   const [draggedFiles, setDraggedFiles] = useState<
-    { name: string; isDirectory: boolean; side: "left" | "right" }[] | null
+    (SftpTransferSource & { side: "left" | "right" })[] | null
   >(null);
 
   const handleDragStart = useCallback(
     (
-      files: { name: string; isDirectory: boolean }[],
+      files: SftpTransferSource[],
       side: "left" | "right",
     ) => {
       setDraggedFiles(files.map((f) => ({ ...f, side })));
@@ -69,25 +69,42 @@ export const useSftpViewPaneActions = ({
     setDraggedFiles(null);
   }, []);
 
-  const onCopyToOtherPaneLeft = useCallback(
-    (files: { name: string; isDirectory: boolean }[]) =>
-      sftpRef.current.startTransfer(files, "left", "right"),
+  const startGroupedTransfer = useCallback(
+    (files: SftpTransferSource[], sourceSide: "left" | "right", targetSide: "left" | "right") => {
+      const groups = new Map<string, SftpTransferSource[]>();
+      for (const file of files) {
+        const key = `${file.sourceConnectionId ?? ""}::${file.sourcePath ?? ""}`;
+        const group = groups.get(key) ?? [];
+        group.push(file);
+        groups.set(key, group);
+      }
+
+      for (const group of groups.values()) {
+        const [{ sourceConnectionId, sourcePath }] = group;
+        void sftpRef.current.startTransfer(group, sourceSide, targetSide, {
+          sourceConnectionId,
+          sourcePath,
+        });
+      }
+    },
     [sftpRef],
+  );
+
+  const onCopyToOtherPaneLeft = useCallback(
+    (files: SftpTransferSource[]) => startGroupedTransfer(files, "left", "right"),
+    [startGroupedTransfer],
   );
   const onCopyToOtherPaneRight = useCallback(
-    (files: { name: string; isDirectory: boolean }[]) =>
-      sftpRef.current.startTransfer(files, "right", "left"),
-    [sftpRef],
+    (files: SftpTransferSource[]) => startGroupedTransfer(files, "right", "left"),
+    [startGroupedTransfer],
   );
   const onReceiveFromOtherPaneLeft = useCallback(
-    (files: { name: string; isDirectory: boolean }[]) =>
-      sftpRef.current.startTransfer(files, "right", "left"),
-    [sftpRef],
+    (files: SftpTransferSource[]) => startGroupedTransfer(files, "right", "left"),
+    [startGroupedTransfer],
   );
   const onReceiveFromOtherPaneRight = useCallback(
-    (files: { name: string; isDirectory: boolean }[]) =>
-      sftpRef.current.startTransfer(files, "left", "right"),
-    [sftpRef],
+    (files: SftpTransferSource[]) => startGroupedTransfer(files, "left", "right"),
+    [startGroupedTransfer],
   );
 
   const onConnectLeft = useCallback(

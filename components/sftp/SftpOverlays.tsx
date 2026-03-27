@@ -114,17 +114,11 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = ({
         open={!!permissionsState}
         onOpenChange={(open) => !open && setPermissionsState(null)}
         file={permissionsState?.file ?? null}
-        onSave={(file, permissions) => {
+        onSave={(_file, permissions) => {
           if (permissionsState) {
-            const fullPath = sftp.joinPath(
-              permissionsState.side === "left"
-                ? sftp.leftPane.connection?.currentPath || ""
-                : sftp.rightPane.connection?.currentPath || "",
-              file.name,
-            );
             sftp.changePermissions(
               permissionsState.side,
-              fullPath,
+              permissionsState.fullPath,
               permissions,
             );
           }

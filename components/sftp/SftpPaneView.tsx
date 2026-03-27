@@ -16,6 +16,7 @@ import {
   useSftpUpdateHosts,
 } from "./index";
 import type { SftpPane } from "../../application/state/sftp/types";
+import { joinPath } from "../../application/state/sftp/utils";
 import type { Host } from "../../domain/models";
 import { useSftpPaneDialogs } from "./hooks/useSftpPaneDialogs";
 import { useSftpPaneDragAndSelect } from "./hooks/useSftpPaneDragAndSelect";
@@ -81,6 +82,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const [, startTransition] = useTransition();
   const [showFilterBar, setShowFilterBar] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
+  const [treeReloadVersion, setTreeReloadVersion] = useState(0);
   const filterInputRef = useRef<HTMLInputElement>(null);
 
   useRenderTracker(`SftpPaneView[${side}]`, {
@@ -215,9 +217,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     onCreateDirectory: callbacks.onCreateDirectory,
     onCreateFile: callbacks.onCreateFile,
     onRenameFileAtPath: callbacks.onRenameFileAtPath,
-    onDeleteFiles: callbacks.onDeleteFiles,
     onDeleteFilesAtPath: callbacks.onDeleteFilesAtPath,
     onClearSelection: callbacks.onClearSelection,
+    onMutateSuccess: () => setTreeReloadVersion((version) => version + 1),
   });
   const {
     dragOverEntry,
@@ -256,11 +258,22 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     sortedDisplayFiles,
   });
 
+  const toFullPath = useCallback(
+    (target: string) => {
+      const currentPath = pane.connection?.currentPath;
+      if (!currentPath || target.includes("/") || target.includes("\\")) {
+        return target;
+      }
+      return joinPath(currentPath, target);
+    },
+    [pane.connection?.currentPath],
+  );
+
   // Handle keyboard shortcut dialog actions
   const dialogActionHandlers = useMemo(
     () => ({
-      onRename: (fileName: string) => openRenameDialog(fileName),
-      onDelete: (fileNames: string[]) => openDeleteConfirm(fileNames),
+      onRename: (fileName: string) => openRenameDialog(toFullPath(fileName)),
+      onDelete: (fileNames: string[]) => openDeleteConfirm(fileNames.map(toFullPath)),
       onNewFolder: () => {
         setNewFolderName("");
         setShowNewFolderDialog(true);
@@ -277,6 +290,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       openDeleteConfirm,
       openRenameDialog,
       pane.files,
+      toFullPath,
       setFileNameError,
       setNewFileName,
       setNewFolderName,
@@ -291,11 +305,20 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     startTransition(() => handleSort(field));
   };
 
+  const handleRefresh = useCallback(() => {
+    callbacks.onRefresh();
+    if (viewMode === 'tree') {
+      setTreeReloadVersion((version) => version + 1);
+    }
+  }, [callbacks, viewMode]);
+
   const handleSetViewMode = useCallback((mode: 'list' | 'tree') => {
     setViewMode(mode);
     if (mode === 'tree') {
       setShowFilterBar(false);
       callbacks.onSetFilter('');
+      callbacks.onClearSelection();
+      setTreeReloadVersion((version) => version + 1);
     }
   }, [callbacks, setShowFilterBar]);
 
@@ -340,7 +363,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onNavigateTo={callbacks.onNavigateTo}
         onSetFilter={callbacks.onSetFilter}
         onSetFilenameEncoding={callbacks.onSetFilenameEncoding}
-        onRefresh={callbacks.onRefresh}
+        onRefresh={handleRefresh}
         showFilterBar={showFilterBar}
         setShowFilterBar={setShowFilterBar}
         filterInputRef={filterInputRef}
@@ -384,6 +407,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           pane={pane}
           side={side}
           onLoadChildren={callbacks.onListDirectory}
+          onRefresh={handleRefresh}
           onOpenEntry={callbacks.onOpenEntry}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
@@ -396,6 +420,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditPermissions={callbacks.onEditPermissions}
           setShowNewFolderDialog={setShowNewFolderDialog}
           setShowNewFileDialog={setShowNewFileDialog}
+          reloadVersion={treeReloadVersion}
         />
       ) : (
       <SftpPaneFileList
@@ -414,7 +439,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         sortedDisplayFiles={sortedDisplayFiles}
         isDragOverPane={isDragOverPane}
         draggedFiles={draggedFiles}
-        onRefresh={callbacks.onRefresh}
+        onRefresh={handleRefresh}
         setShowNewFolderDialog={setShowNewFolderDialog}
         setShowNewFileDialog={setShowNewFileDialog}
         getNextUntitledName={getNextUntitledName}

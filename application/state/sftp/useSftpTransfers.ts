@@ -636,8 +636,12 @@ export const useSftpTransfers = ({
               : "remote-to-remote";
 
         // Use cached metadata from the source pane's file list to avoid
-        // redundant stat calls over the network.
-        const fileEntry = sourcePane.files.find((f) => f.name === file.name);
+        // redundant stat calls over the network, but only when the transfer
+        // source matches the pane's currently listed directory.
+        const canReusePaneMetadata = sourcePath === sourcePane.connection.currentPath;
+        const fileEntry = canReusePaneMetadata
+          ? sourcePane.files.find((f) => f.name === file.name)
+          : undefined;
         const fileSize = file.isDirectory ? 0 : (fileEntry?.size ?? 0);
         const sourceLastModified = fileEntry?.lastModified ?? 0;
 

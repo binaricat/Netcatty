@@ -8,6 +8,7 @@ import { useSftpViewPaneActions } from "./useSftpViewPaneActions";
 import { useSftpViewFileOps } from "./useSftpViewFileOps";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { formatFileSize, formatDate } from '../../../application/state/sftp/utils';
+import { filterHiddenFiles } from "../utils";
 
 interface UseSftpViewPaneCallbacksParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -45,7 +46,7 @@ interface UseSftpViewPaneCallbacksParams {
     onError?: (error: string) => void
   ) => Promise<{ transferId: string; totalBytes?: number; error?: string }>;
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
-  listLocalFiles?: (path: string) => Promise<RemoteFile[]>;
+  listLocalFiles: (path: string) => Promise<RemoteFile[]>;
 }
 
 export const useSftpViewPaneCallbacks = ({
@@ -87,42 +88,33 @@ export const useSftpViewPaneCallbacks = ({
       if (!pane.connection) return [];
       const toSize = (raw: string) => parseInt(raw) || 0;
       const toTs = (raw: string) => new Date(raw).getTime();
+      const normalizeEntries = (rawFiles: RemoteFile[]) =>
+        filterHiddenFiles(
+          rawFiles.map(f => {
+            const s = toSize(f.size);
+            const ms = toTs(f.lastModified);
+            return {
+              name: f.name,
+              type: f.type as 'file' | 'directory' | 'symlink',
+              size: s,
+              sizeFormatted: formatFileSize(s),
+              lastModified: ms,
+              lastModifiedFormatted: formatDate(ms),
+              permissions: f.permissions,
+              linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
+              hidden: f.hidden,
+            };
+          }),
+          pane.showHiddenFiles,
+        );
       if (pane.connection.isLocal) {
-        const rawFiles = await listLocalFiles?.(path);
-        if (!rawFiles) return [];
-        return rawFiles.map(f => {
-          const s = toSize(f.size);
-          const ms = toTs(f.lastModified);
-          return {
-            name: f.name,
-            type: f.type as 'file' | 'directory' | 'symlink',
-            size: s,
-            sizeFormatted: formatFileSize(s),
-            lastModified: ms,
-            lastModifiedFormatted: formatDate(ms),
-            linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
-            hidden: f.hidden,
-          };
-        });
+        return normalizeEntries(await listLocalFiles(path));
       }
       const sftpId = getSftpIdForConnection?.(pane.connection.id);
       if (!sftpId) return [];
       const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
       if (!rawFiles) return [];
-      return rawFiles.map(f => {
-        const s = toSize(f.size);
-        const ms = toTs(f.lastModified);
-        return {
-          name: f.name,
-          type: f.type as 'file' | 'directory' | 'symlink',
-          size: s,
-          sizeFormatted: formatFileSize(s),
-          lastModified: ms,
-          lastModifiedFormatted: formatDate(ms),
-          linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
-          hidden: f.hidden,
-        };
-      });
+      return normalizeEntries(rawFiles);
     };
 
   /* eslint-disable react-hooks/exhaustive-deps -- Handlers use refs, so they are stable */

@@ -9,6 +9,19 @@
 import React, { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { Host, SftpFileEntry, SftpFilenameEncoding } from "../../types";
 
+export interface SftpTransferSource {
+    name: string;
+    isDirectory: boolean;
+    sourcePath?: string;
+    sourceConnectionId?: string;
+}
+
+export interface SftpTreeSelectionEntry {
+    path: string;
+    name: string;
+    isDirectory: boolean;
+}
+
 // Types for the context
 export interface SftpPaneCallbacks {
     onConnect: (host: Host | "local") => void;
@@ -17,7 +30,7 @@ export interface SftpPaneCallbacks {
     onNavigateUp: () => void;
     onRefresh: () => void;
     onSetFilenameEncoding: (encoding: SftpFilenameEncoding) => void;
-    onOpenEntry: (entry: SftpFileEntry) => void;
+    onOpenEntry: (entry: SftpFileEntry, fullPath?: string) => void;
     onToggleSelection: (fileName: string, multiSelect: boolean) => void;
     onRangeSelect: (fileNames: string[]) => void;
     onClearSelection: () => void;
@@ -28,21 +41,21 @@ export interface SftpPaneCallbacks {
     onDeleteFilesAtPath: (connectionId: string, path: string, fileNames: string[]) => Promise<void>;
     onRenameFile: (oldName: string, newName: string) => Promise<void>;
     onRenameFileAtPath: (oldPath: string, newName: string) => Promise<void>;
-    onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
-    onReceiveFromOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
-    onEditPermissions?: (file: SftpFileEntry) => void;
+    onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+    onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
+    onEditPermissions?: (file: SftpFileEntry, fullPath?: string) => void;
     // File operations
-    onEditFile?: (entry: SftpFileEntry) => void;
-    onOpenFile?: (entry: SftpFileEntry) => void;
-    onOpenFileWith?: (entry: SftpFileEntry) => void;  // Always show opener dialog
-    onDownloadFile?: (entry: SftpFileEntry) => void;  // Download to local filesystem
+    onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+    onOpenFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+    onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;  // Always show opener dialog
+    onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
     // External file upload (supports folders via DataTransfer)
     onUploadExternalFiles?: (dataTransfer: DataTransfer) => Promise<void>;
     onListDirectory: (path: string) => Promise<SftpFileEntry[]>;
 }
 
 export interface SftpDragCallbacks {
-    onDragStart: (files: { name: string; isDirectory: boolean }[], side: "left" | "right") => void;
+    onDragStart: (files: SftpTransferSource[], side: "left" | "right") => void;
     onDragEnd: () => void;
 }
 
@@ -51,11 +64,17 @@ type ActiveTabStore = {
     left: string | null;
     right: string | null;
 };
+type TreeSelectionStore = {
+    left: SftpTreeSelectionEntry[];
+    right: SftpTreeSelectionEntry[];
+};
 
 type ActiveTabListener = () => void;
 
 let activeTabState: ActiveTabStore = { left: null, right: null };
 const activeTabListeners = new Set<ActiveTabListener>();
+let treeSelectionState: TreeSelectionStore = { left: [], right: [] };
+const treeSelectionListeners = new Set<ActiveTabListener>();
 
 export const activeTabStore = {
     getSnapshot: () => activeTabState,
@@ -70,6 +89,24 @@ export const activeTabStore = {
     subscribe: (listener: ActiveTabListener) => {
         activeTabListeners.add(listener);
         return () => activeTabListeners.delete(listener);
+    },
+};
+
+export const treeSelectionStore = {
+    getSnapshot: () => treeSelectionState,
+    getSelection: (side: "left" | "right") => treeSelectionState[side],
+    setSelection: (side: "left" | "right", entries: SftpTreeSelectionEntry[]) => {
+        treeSelectionState = { ...treeSelectionState, [side]: entries };
+        treeSelectionListeners.forEach((listener) => listener());
+    },
+    clearSelection: (side: "left" | "right") => {
+        if (treeSelectionState[side].length === 0) return;
+        treeSelectionState = { ...treeSelectionState, [side]: [] };
+        treeSelectionListeners.forEach((listener) => listener());
+    },
+    subscribe: (listener: ActiveTabListener) => {
+        treeSelectionListeners.add(listener);
+        return () => treeSelectionListeners.delete(listener);
     },
 };
 
@@ -95,7 +132,7 @@ export interface SftpContextValue {
     updateHosts: (hosts: Host[]) => void;
 
     // Drag state (shared between panes)
-    draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
+    draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
     dragCallbacks: SftpDragCallbacks;
 
     // Callbacks for each side
@@ -143,7 +180,7 @@ export const useSftpUpdateHosts = () => {
 interface SftpContextProviderProps {
     hosts: Host[];
     updateHosts: (hosts: Host[]) => void;
-    draggedFiles: { name: string; isDirectory: boolean; side: "left" | "right" }[] | null;
+    draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
     dragCallbacks: SftpDragCallbacks;
     leftCallbacks: SftpPaneCallbacks;
     rightCallbacks: SftpPaneCallbacks;

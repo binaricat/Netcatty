@@ -8,11 +8,13 @@
 import { useCallback, useEffect } from "react";
 import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
+import { getParentPath } from "../../../application/state/sftp/utils";
 import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { filterHiddenFiles, isNavigableDirectory } from "../index";
+import { treeSelectionStore } from "../SftpContext";
 import { toast } from "../../ui/toast";
 
 // SFTP action names that we handle
@@ -94,9 +96,31 @@ export const useSftpKeyboardShortcuts = ({
         : sftp.rightTabs.tabs.find(p => p.id === sftp.rightTabs.activeTabId);
 
       if (!pane || !pane.connection) return;
+      const treeSelection = treeSelectionStore.getSelection(focusedSide);
 
       switch (action) {
         case "sftpCopy": {
+          if (treeSelection.length > 0) {
+            const parentPaths = new Set(treeSelection.map((entry) => getParentPath(entry.path)));
+            if (parentPaths.size !== 1) {
+              toast.info("Tree selection across multiple folders can't be copied with shortcuts yet.", "SFTP");
+              return;
+            }
+
+            const clipboardFiles: SftpClipboardFile[] = treeSelection.map((entry) => ({
+              name: entry.name,
+              isDirectory: entry.isDirectory,
+            }));
+
+            sftpClipboardStore.copy(
+              clipboardFiles,
+              Array.from(parentPaths)[0],
+              pane.connection.id,
+              focusedSide,
+            );
+            break;
+          }
+
           // Copy selected files to clipboard
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length === 0) return;
@@ -119,6 +143,27 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpCut": {
+          if (treeSelection.length > 0) {
+            const parentPaths = new Set(treeSelection.map((entry) => getParentPath(entry.path)));
+            if (parentPaths.size !== 1) {
+              toast.info("Tree selection across multiple folders can't be cut with shortcuts yet.", "SFTP");
+              return;
+            }
+
+            const clipboardFiles: SftpClipboardFile[] = treeSelection.map((entry) => ({
+              name: entry.name,
+              isDirectory: entry.isDirectory,
+            }));
+
+            sftpClipboardStore.cut(
+              clipboardFiles,
+              Array.from(parentPaths)[0],
+              pane.connection.id,
+              focusedSide,
+            );
+            break;
+          }
+
           // Cut selected files to clipboard
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length === 0) return;
@@ -250,6 +295,11 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpRename": {
+          if (treeSelection.length === 1) {
+            sftpDialogActionStore.trigger("rename", [treeSelection[0].path]);
+            break;
+          }
+
           // Trigger rename for the first selected file
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length !== 1) return;
@@ -258,6 +308,11 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpDelete": {
+          if (treeSelection.length > 0) {
+            sftpDialogActionStore.trigger("delete", treeSelection.map((entry) => entry.path));
+            break;
+          }
+
           // Delete selected files
           const selectedFiles = Array.from(pane.selectedFiles) as string[];
           if (selectedFiles.length === 0) return;

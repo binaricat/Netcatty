@@ -27,9 +27,9 @@ import {
 import { cn } from '../../lib/utils';
 import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
-import { isNavigableDirectory, getFileIcon, formatDate, formatBytes } from './utils';
-import { joinPath } from '../../application/state/sftp/utils';
-import { useSftpPaneCallbacks } from './SftpContext';
+import { getParentPath, joinPath } from '../../application/state/sftp/utils';
+import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
+import { treeSelectionStore, type SftpTransferSource } from './SftpContext';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
 
@@ -41,18 +41,20 @@ interface SftpPaneTreeViewProps {
   pane: SftpPane;
   side: 'left' | 'right';
   onLoadChildren: (path: string) => Promise<SftpFileEntry[]>;
-  onOpenEntry: (entry: SftpFileEntry) => void;
-  onDragStart: (files: { name: string; isDirectory: boolean }[], side: 'left' | 'right') => void;
+  onRefresh: () => void;
+  onOpenEntry: (entry: SftpFileEntry, fullPath?: string) => void;
+  onDragStart: (files: SftpTransferSource[], side: 'left' | 'right') => void;
   onDragEnd: () => void;
   openRenameDialog: (entryPath: string) => void;
   openDeleteConfirm: (targets: string[]) => void;
-  onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
-  onOpenFileWith?: (entry: SftpFileEntry) => void;
-  onEditFile?: (entry: SftpFileEntry) => void;
-  onDownloadFile?: (entry: SftpFileEntry) => void;
-  onEditPermissions?: (entry: SftpFileEntry) => void;
+  onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+  onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
   setShowNewFolderDialog: (open: boolean) => void;
   setShowNewFileDialog: (open: boolean) => void;
+  reloadVersion: number;
 }
 
 interface TreeNodeProps {
@@ -65,16 +67,16 @@ interface TreeNodeProps {
   isLocal: boolean | undefined;
   onToggleExpand: (entry: SftpFileEntry, entryPath: string) => void;
   onNodeClick: (entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => void;
-  onOpenEntry: (entry: SftpFileEntry) => void;
-  onDragStart: (entry: SftpFileEntry, isDir: boolean) => void;
+  onOpenEntry: (entry: SftpFileEntry, entryPath: string) => void;
+  onDragStart: (entry: SftpFileEntry, entryPath: string, isDir: boolean) => void;
   onDragEnd: () => void;
-  onCopyToOtherPane: (entry: SftpFileEntry, isDir: boolean) => void;
-  onOpenFileWith?: (entry: SftpFileEntry) => void;
-  onEditFile?: (entry: SftpFileEntry) => void;
-  onDownloadFile?: (entry: SftpFileEntry) => void;
-  onEditPermissions?: (entry: SftpFileEntry) => void;
+  onCopyToOtherPane: (entry: SftpFileEntry, entryPath: string, isDir: boolean) => void;
+  onOpenFileWith?: (entry: SftpFileEntry, entryPath: string) => void;
+  onEditFile?: (entry: SftpFileEntry, entryPath: string) => void;
+  onDownloadFile?: (entry: SftpFileEntry, entryPath: string) => void;
+  onEditPermissions?: (entry: SftpFileEntry, entryPath: string) => void;
   openRenameDialog: (entryPath: string) => void;
-  openDeleteConfirm: (targets: string[]) => void;
+  openDeleteConfirm: (entryPath: string) => void;
   onRefresh: () => void;
   setShowNewFolderDialog: (open: boolean) => void;
   setShowNewFileDialog: (open: boolean) => void;
@@ -108,10 +110,10 @@ const TreeNode = React.memo<TreeNodeProps>(({
           onClick={e => onNodeClick(entry, entryPath, e)}
           onDoubleClick={() => {
             if (isDir) void onToggleExpand(entry, entryPath);
-            else onOpenEntry(entry);
+            else onOpenEntry(entry, entryPath);
           }}
           draggable
-          onDragStart={() => onDragStart(entry, isDir)}
+          onDragStart={() => onDragStart(entry, entryPath, isDir)}
           onDragEnd={onDragEnd}
         >
           <span className="shrink-0 w-4 flex items-center justify-center">
@@ -144,29 +146,29 @@ const TreeNode = React.memo<TreeNodeProps>(({
         <ContextMenuContent>
           <ContextMenuItem onClick={() => {
             if (isDir) void onToggleExpand(entry, entryPath);
-            else onOpenEntry(entry);
+            else onOpenEntry(entry, entryPath);
           }}>
             {isDir
               ? <><Folder size={14} className="mr-2" />{t('sftp.context.open')}</>
               : <><ExternalLink size={14} className="mr-2" />{t('sftp.context.open')}</>}
           </ContextMenuItem>
           {!isDir && onOpenFileWith && (
-            <ContextMenuItem onClick={() => onOpenFileWith(entry)}>
+            <ContextMenuItem onClick={() => onOpenFileWith(entry, entryPath)}>
               <ExternalLink size={14} className="mr-2" />{t('sftp.context.openWith')}
             </ContextMenuItem>
           )}
           {!isDir && !isKnownBinaryFile(entry.name) && onEditFile && (
-            <ContextMenuItem onClick={() => onEditFile(entry)}>
+            <ContextMenuItem onClick={() => onEditFile(entry, entryPath)}>
               <Edit2 size={14} className="mr-2" />{t('sftp.context.edit')}
             </ContextMenuItem>
           )}
           {onDownloadFile && (!isDir || !isLocal) && (
-            <ContextMenuItem onClick={() => onDownloadFile(entry)}>
+            <ContextMenuItem onClick={() => onDownloadFile(entry, entryPath)}>
               <Download size={14} className="mr-2" />{t('sftp.context.download')}
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => onCopyToOtherPane(entry, isDir)}>
+          <ContextMenuItem onClick={() => onCopyToOtherPane(entry, entryPath, isDir)}>
             <Copy size={14} className="mr-2" />{t('sftp.context.copyToOtherPane')}
           </ContextMenuItem>
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(entryPath)}>
@@ -177,13 +179,13 @@ const TreeNode = React.memo<TreeNodeProps>(({
             <Pencil size={14} className="mr-2" />{t('common.rename')}
           </ContextMenuItem>
           {onEditPermissions && !isLocal && (
-            <ContextMenuItem onClick={() => onEditPermissions(entry)}>
+            <ContextMenuItem onClick={() => onEditPermissions(entry, entryPath)}>
               <Shield size={14} className="mr-2" />{t('sftp.context.permissions')}
             </ContextMenuItem>
           )}
           <ContextMenuItem
             className="text-destructive"
-            onClick={() => openDeleteConfirm([entryPath])}
+            onClick={() => openDeleteConfirm(entryPath)}
           >
             <Trash2 size={14} className="mr-2" />{t('action.delete')}
           </ContextMenuItem>
@@ -208,6 +210,7 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   pane,
   side,
   onLoadChildren,
+  onRefresh,
   onOpenEntry,
   onDragStart,
   onDragEnd,
@@ -220,20 +223,25 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   onEditPermissions,
   setShowNewFolderDialog,
   setShowNewFileDialog,
+  reloadVersion,
 }) => {
   const { t } = useI18n();
   const tRef = useRef(t);
   tRef.current = t;
-  const callbacks = useSftpPaneCallbacks(side);
 
   const childrenCacheRef = useRef<Map<string, SftpFileEntry[]>>(new Map());
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [errorPaths, setErrorPaths] = useState<Set<string>>(new Set());
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const lastClickedPathRef = useRef<string | null>(null);
+  const expandedPathsRef = useRef(expandedPaths);
+  expandedPathsRef.current = expandedPaths;
+  const selectedPathsRef = useRef(selectedPaths);
+  selectedPathsRef.current = selectedPaths;
+  const treeGenerationRef = useRef(0);
+  const previousRootPathRef = useRef(pane.connection?.currentPath ?? '');
 
-  // Stable refs for props that change identity on every parent render,
-  // so TreeNode's React.memo shallow comparison can actually bail out.
   const onOpenEntryRef = useRef(onOpenEntry);
   onOpenEntryRef.current = onOpenEntry;
   const onDragStartRef = useRef(onDragStart);
@@ -258,124 +266,139 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   setShowNewFolderDialogRef.current = setShowNewFolderDialog;
   const setShowNewFileDialogRef = useRef(setShowNewFileDialog);
   setShowNewFileDialogRef.current = setShowNewFileDialog;
-  // selectedFiles held in ref — prevents it from flowing into TreeNode props and
-  // causing full tree rebuilds on every selection change
-  const selectedFilesRef = useRef(pane.selectedFiles);
-  selectedFilesRef.current = pane.selectedFiles;
-  // callbacks held in ref — handleNodeClick and stableOnRefresh can have empty deps
-  const callbacksRef = useRef(callbacks);
-  callbacksRef.current = callbacks;
-  // onLoadChildren held in ref — toggleExpand can have empty deps
   const onLoadChildrenRef = useRef(onLoadChildren);
   onLoadChildrenRef.current = onLoadChildren;
-  // side is constant per pane instance — held in ref so stableOnDragStart has empty deps
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
   const sideRef = useRef(side);
   sideRef.current = side;
 
-  // Stable callbacks wrapping the refs — identity never changes
-  const stableOnOpenEntry = useCallback((e: SftpFileEntry) => onOpenEntryRef.current(e), []);
-  // Drag start resolves multi-selection via ref; side via ref so deps stay empty
-  const stableOnDragStart = useCallback((entry: SftpFileEntry, isDir: boolean) => {
-    const sel = selectedFilesRef.current;
-    const files = sel.has(entry.name)
-      ? Array.from(sel).map(name => ({ name, isDirectory: name === entry.name ? isDir : false }))
-      : [{ name: entry.name, isDirectory: isDir }];
-    onDragStartRef.current(files, sideRef.current);
-  }, []);
-  const stableOnDragEnd = useCallback(() => onDragEndRef.current(), []);
-  // Selection-aware copy: resolves multi-selection via ref so TreeNode never needs selectedFiles
-  const stableOnCopyToOtherPane = useCallback((entry: SftpFileEntry, isDir: boolean) => {
-    const sel = selectedFilesRef.current;
-    const files = sel.has(entry.name)
-      ? Array.from(sel).map(name => ({ name, isDirectory: name === entry.name ? isDir : false }))
-      : [{ name: entry.name, isDirectory: isDir }];
-    onCopyToOtherPaneRef.current(files);
-  }, []);
-  // Selection-aware delete: targets are full paths from TreeNode
-  const stableOpenDeleteConfirm = useCallback((targets: string[]) => {
-    openDeleteConfirmRef.current(targets);
-  }, []);
-  const stableOnOpenFileWith = useCallback((e: SftpFileEntry) => onOpenFileWithRef.current?.(e), []);
-  const stableOnEditFile = useCallback((e: SftpFileEntry) => onEditFileRef.current?.(e), []);
-  const stableOnDownloadFile = useCallback((e: SftpFileEntry) => onDownloadFileRef.current?.(e), []);
-  const stableOnEditPermissions = useCallback((e: SftpFileEntry) => onEditPermissionsRef.current?.(e), []);
-  const stableOpenRenameDialog = useCallback((entryPath: string) => openRenameDialogRef.current(entryPath), []);
-  const stableSetShowNewFolderDialog = useCallback((open: boolean) => setShowNewFolderDialogRef.current(open), []);
-  const stableSetShowNewFileDialog = useCallback((open: boolean) => setShowNewFileDialogRef.current(open), []);
-
-  // Mirror expandedPaths in a ref so toggleExpand doesn't need it as a dep
-  const expandedPathsRef = useRef(expandedPaths);
-  expandedPathsRef.current = expandedPaths;
-
-  // Reset tree state when the root path changes (navigation or refresh)
-  useEffect(() => {
+  const invalidateTreeCache = useCallback(() => {
+    treeGenerationRef.current += 1;
     childrenCacheRef.current.clear();
-    setExpandedPaths(new Set());
-    setLoadingPaths(new Set());
-    setErrorPaths(new Set());
-    lastClickedPathRef.current = null;
-  }, [pane.connection?.currentPath]);
+  }, []);
+
+  const loadChildrenForPath = useCallback(async (entryPath: string) => {
+    const generation = treeGenerationRef.current;
+    setLoadingPaths(prev => new Set(prev).add(entryPath));
+    setErrorPaths(prev => {
+      const next = new Set(prev);
+      next.delete(entryPath);
+      return next;
+    });
+
+    try {
+      const children = await onLoadChildrenRef.current(entryPath);
+      if (generation !== treeGenerationRef.current) {
+        return false;
+      }
+      childrenCacheRef.current.set(entryPath, children);
+      return true;
+    } catch {
+      if (generation === treeGenerationRef.current) {
+        setErrorPaths(prev => new Set(prev).add(entryPath));
+      }
+      return false;
+    } finally {
+      if (generation === treeGenerationRef.current) {
+        setLoadingPaths(prev => {
+          const next = new Set(prev);
+          next.delete(entryPath);
+          return next;
+        });
+      }
+    }
+  }, []);
 
   const toggleExpand = useCallback(async (entry: SftpFileEntry, entryPath: string) => {
     if (!isNavigableDirectory(entry)) return;
     if (expandedPathsRef.current.has(entryPath)) {
-      setExpandedPaths(prev => { const s = new Set(prev); s.delete(entryPath); return s; });
+      setExpandedPaths(prev => {
+        const next = new Set(prev);
+        next.delete(entryPath);
+        return next;
+      });
       return;
     }
-    if (childrenCacheRef.current.has(entryPath)) {
-      setExpandedPaths(prev => new Set(prev).add(entryPath));
-      return;
+    if (!childrenCacheRef.current.has(entryPath)) {
+      const loaded = await loadChildrenForPath(entryPath);
+      if (!loaded) return;
     }
-    setLoadingPaths(prev => new Set(prev).add(entryPath));
-    setErrorPaths(prev => { const s = new Set(prev); s.delete(entryPath); return s; });
-    try {
-      const children = await onLoadChildrenRef.current(entryPath);
-      childrenCacheRef.current.set(entryPath, children);
-      setExpandedPaths(prev => new Set(prev).add(entryPath));
-    } catch {
-      setErrorPaths(prev => new Set(prev).add(entryPath));
-    } finally {
-      setLoadingPaths(prev => { const s = new Set(prev); s.delete(entryPath); return s; });
-    }
-  }, []);
+    setExpandedPaths(prev => new Set(prev).add(entryPath));
+  }, [loadChildrenForPath]);
 
-  // Declared before handleNodeClick which references it in its closure
-  const flatVisibleNodesRef = useRef<{ entry: SftpFileEntry; parentPath: string }[]>([]);
+  useEffect(() => {
+    const rootPath = pane.connection?.currentPath ?? '';
+    const pathChanged = previousRootPathRef.current !== rootPath;
+    previousRootPathRef.current = rootPath;
+
+    if (pathChanged) {
+      invalidateTreeCache();
+      setExpandedPaths(new Set());
+      setLoadingPaths(new Set());
+      setErrorPaths(new Set());
+      setSelectedPaths(new Set());
+      lastClickedPathRef.current = null;
+      return;
+    }
+
+    const expanded = Array.from(expandedPathsRef.current);
+    if (expanded.length === 0) {
+      return;
+    }
+
+    invalidateTreeCache();
+    void Promise.all(expanded.map(path => loadChildrenForPath(path)));
+  }, [pane.connection?.currentPath, pane.files, pane.showHiddenFiles, invalidateTreeCache, loadChildrenForPath, reloadVersion]);
+
+  const flatVisibleNodesRef = useRef<Array<{ entry: SftpFileEntry; entryPath: string }>>([]);
 
   const handleNodeClick = useCallback((entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => {
-    if (e.shiftKey && lastClickedPathRef.current) {
-      const flat = flatVisibleNodesRef.current;
-      const lastIdx = flat.findIndex(n => joinPath(n.parentPath, n.entry.name) === lastClickedPathRef.current);
-      const currIdx = flat.findIndex(n => joinPath(n.parentPath, n.entry.name) === entryPath);
-      if (lastIdx !== -1 && currIdx !== -1) {
-        const parentPath = flat[currIdx].parentPath;
-        const start = Math.min(lastIdx, currIdx);
-        const end = Math.max(lastIdx, currIdx);
-        const names = flat.slice(start, end + 1)
-          .filter(n => n.parentPath === parentPath)
-          .map(n => n.entry.name);
-        callbacksRef.current.onRangeSelect(names);
+    if (entry.name === '..') return;
+
+    setSelectedPaths(prev => {
+      if (e.shiftKey && lastClickedPathRef.current) {
+        const flat = flatVisibleNodesRef.current;
+        const lastIdx = flat.findIndex(node => node.entryPath === lastClickedPathRef.current);
+        const currentIdx = flat.findIndex(node => node.entryPath === entryPath);
+        if (lastIdx !== -1 && currentIdx !== -1) {
+          const parentPath = getParentPath(entryPath);
+          const start = Math.min(lastIdx, currentIdx);
+          const end = Math.max(lastIdx, currentIdx);
+          return new Set(
+            flat
+              .slice(start, end + 1)
+              .filter(node => getParentPath(node.entryPath) === parentPath)
+              .map(node => node.entryPath),
+          );
+        }
       }
-    } else if (e.ctrlKey || e.metaKey) {
-      callbacksRef.current.onToggleSelection(entry.name, true);
-    } else {
-      callbacksRef.current.onToggleSelection(entry.name, false);
-    }
+
+      if (e.ctrlKey || e.metaKey) {
+        const next = new Set(prev);
+        if (next.has(entryPath)) next.delete(entryPath);
+        else next.add(entryPath);
+        return next;
+      }
+
+      return new Set([entryPath]);
+    });
+
     lastClickedPathRef.current = entryPath;
   }, []);
 
-  const stableOnRefresh = useCallback(() => callbacksRef.current.onRefresh(), []);
+  const stableOnRefresh = useCallback(() => onRefreshRef.current(), []);
 
-  // Stage 1: compute tree structure — does NOT depend on selectedFiles.
-  // Rebuilds only when files, expand/load/error state, or stable callbacks change.
-  const { nodeDescriptors, flatVisibleNodes } = useMemo(() => {
-    const flat: { entry: SftpFileEntry; parentPath: string }[] = [];
+  const { nodeDescriptors, flatVisibleNodes, entryByPath } = useMemo(() => {
+    const flat: Array<{ entry: SftpFileEntry; entryPath: string }> = [];
     const descriptors: NodeDescriptor[] = [];
+    const pathMap = new Map<string, SftpFileEntry>();
 
     const buildTree = (entries: SftpFileEntry[], parentPath: string, depth: number) => {
-      for (const entry of entries) {
+      for (const entry of filterHiddenFiles(entries, pane.showHiddenFiles)) {
         const entryPath = joinPath(parentPath, entry.name);
-        flat.push({ entry, parentPath });
+        flat.push({ entry, entryPath });
+        pathMap.set(entryPath, entry);
         descriptors.push({
           type: 'node',
           entry,
@@ -397,35 +420,130 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
     };
 
     buildTree(pane.files ?? [], pane.connection?.currentPath ?? '', 0);
-    return { nodeDescriptors: descriptors, flatVisibleNodes: flat };
-  // pane.connection?.currentPath is intentionally excluded: path changes trigger the
-  // useEffect above which resets the tree, so including it here would rebuild the
-  // entire node list twice on every navigation.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { nodeDescriptors: descriptors, flatVisibleNodes: flat, entryByPath: pathMap };
   }, [
     pane.files,
-    expandedPaths, loadingPaths, errorPaths,
+    pane.connection?.currentPath,
+    pane.showHiddenFiles,
+    expandedPaths,
+    loadingPaths,
+    errorPaths,
   ]);
 
-  // Stage 2: inject isSelected and render — only reruns when selection or structure changes.
+  flatVisibleNodesRef.current = flatVisibleNodes;
+  const entryByPathRef = useRef(entryByPath);
+  entryByPathRef.current = entryByPath;
+
+  useEffect(() => {
+    treeSelectionStore.setSelection(
+      side,
+      Array.from(selectedPaths)
+        .map(path => {
+          const entry = entryByPath.get(path);
+          if (!entry || entry.name === '..') return null;
+          return {
+            path,
+            name: entry.name,
+            isDirectory: isNavigableDirectory(entry),
+          };
+        })
+        .filter((entry): entry is { path: string; name: string; isDirectory: boolean } => entry !== null),
+    );
+
+    return () => {
+      treeSelectionStore.clearSelection(side);
+    };
+  }, [entryByPath, selectedPaths, side]);
+
+  const getActionPaths = useCallback((entryPath: string) => {
+    const selected = selectedPathsRef.current;
+    return selected.has(entryPath) ? Array.from(selected) : [entryPath];
+  }, []);
+
+  const toTransferSources = useCallback((paths: string[]): SftpTransferSource[] => {
+    const sources: SftpTransferSource[] = [];
+    for (const path of paths) {
+      const entry = entryByPathRef.current.get(path);
+      if (!entry || entry.name === '..') continue;
+      sources.push({
+        name: entry.name,
+        isDirectory: isNavigableDirectory(entry),
+        sourceConnectionId: pane.connection?.id,
+        sourcePath: getParentPath(path),
+      });
+    }
+    return sources;
+  }, [pane.connection?.id]);
+
+  const stableOnOpenEntry = useCallback((entry: SftpFileEntry, entryPath: string) => {
+    onOpenEntryRef.current(entry, entryPath);
+  }, []);
+
+  const stableOnDragStart = useCallback((entry: SftpFileEntry, entryPath: string, isDir: boolean) => {
+    const files = toTransferSources(getActionPaths(entryPath));
+    if (files.length === 0) {
+      files.push({
+        name: entry.name,
+        isDirectory: isDir,
+        sourceConnectionId: pane.connection?.id,
+        sourcePath: getParentPath(entryPath),
+      });
+    }
+    onDragStartRef.current(files, sideRef.current);
+  }, [getActionPaths, pane.connection?.id, toTransferSources]);
+
+  const stableOnDragEnd = useCallback(() => onDragEndRef.current(), []);
+
+  const stableOnCopyToOtherPane = useCallback((entry: SftpFileEntry, entryPath: string, isDir: boolean) => {
+    const files = toTransferSources(getActionPaths(entryPath));
+    if (files.length === 0) {
+      files.push({
+        name: entry.name,
+        isDirectory: isDir,
+        sourceConnectionId: pane.connection?.id,
+        sourcePath: getParentPath(entryPath),
+      });
+    }
+    onCopyToOtherPaneRef.current(files);
+  }, [getActionPaths, pane.connection?.id, toTransferSources]);
+
+  const stableOnOpenFileWith = useCallback((entry: SftpFileEntry, entryPath: string) => {
+    onOpenFileWithRef.current?.(entry, entryPath);
+  }, []);
+  const stableOnEditFile = useCallback((entry: SftpFileEntry, entryPath: string) => {
+    onEditFileRef.current?.(entry, entryPath);
+  }, []);
+  const stableOnDownloadFile = useCallback((entry: SftpFileEntry, entryPath: string) => {
+    onDownloadFileRef.current?.(entry, entryPath);
+  }, []);
+  const stableOnEditPermissions = useCallback((entry: SftpFileEntry, entryPath: string) => {
+    onEditPermissionsRef.current?.(entry, entryPath);
+  }, []);
+  const stableOpenRenameDialog = useCallback((entryPath: string) => openRenameDialogRef.current(entryPath), []);
+  const stableOpenDeleteConfirm = useCallback((entryPath: string) => {
+    openDeleteConfirmRef.current(getActionPaths(entryPath));
+  }, [getActionPaths]);
+  const stableSetShowNewFolderDialog = useCallback((open: boolean) => setShowNewFolderDialogRef.current(open), []);
+  const stableSetShowNewFileDialog = useCallback((open: boolean) => setShowNewFileDialogRef.current(open), []);
+
   const treeNodes = useMemo(() => {
-    return nodeDescriptors.map(d => {
-      if (d.type === 'loading') {
+    return nodeDescriptors.map(descriptor => {
+      if (descriptor.type === 'loading') {
         return (
           <div
-            key={d.key}
-            style={{ paddingLeft: (d.depth + 1) * 16 + 8 }}
+            key={descriptor.key}
+            style={{ paddingLeft: (descriptor.depth + 1) * 16 + 8 }}
             className="py-1 text-xs text-muted-foreground flex items-center gap-1"
           >
             <Loader2 size={12} className="animate-spin" /> {tRef.current('sftp.tree.loading')}
           </div>
         );
       }
-      if (d.type === 'error') {
+      if (descriptor.type === 'error') {
         return (
           <div
-            key={d.key}
-            style={{ paddingLeft: (d.depth + 1) * 16 + 8 }}
+            key={descriptor.key}
+            style={{ paddingLeft: (descriptor.depth + 1) * 16 + 8 }}
             className="py-1 text-xs text-destructive flex items-center gap-1"
           >
             <AlertCircle size={12} /> {tRef.current('sftp.tree.loadError')}
@@ -434,13 +552,13 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
       }
       return (
         <TreeNode
-          key={d.entryPath}
-          entry={d.entry}
-          entryPath={d.entryPath}
-          depth={d.depth}
-          isExpanded={d.isExpanded}
-          isLoading={d.isLoading}
-          isSelected={pane.selectedFiles.has(d.entry.name)}
+          key={descriptor.entryPath}
+          entry={descriptor.entry}
+          entryPath={descriptor.entryPath}
+          depth={descriptor.depth}
+          isExpanded={descriptor.isExpanded}
+          isLoading={descriptor.isLoading}
+          isSelected={selectedPaths.has(descriptor.entryPath)}
           isLocal={pane.connection?.isLocal}
           onToggleExpand={toggleExpand}
           onNodeClick={handleNodeClick}
@@ -461,16 +579,25 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
       );
     });
   }, [
-    nodeDescriptors, pane.selectedFiles, pane.connection?.isLocal,
-    toggleExpand, handleNodeClick,
-    stableOnOpenEntry, stableOnDragStart, stableOnDragEnd, stableOnCopyToOtherPane,
-    stableOnOpenFileWith, stableOnEditFile, stableOnDownloadFile, stableOnEditPermissions,
-    stableOpenRenameDialog, stableOpenDeleteConfirm, stableOnRefresh,
-    stableSetShowNewFolderDialog, stableSetShowNewFileDialog,
+    nodeDescriptors,
+    selectedPaths,
+    pane.connection?.isLocal,
+    toggleExpand,
+    handleNodeClick,
+    stableOnOpenEntry,
+    stableOnDragStart,
+    stableOnDragEnd,
+    stableOnCopyToOtherPane,
+    stableOnOpenFileWith,
+    stableOnEditFile,
+    stableOnDownloadFile,
+    stableOnEditPermissions,
+    stableOpenRenameDialog,
+    stableOpenDeleteConfirm,
+    stableOnRefresh,
+    stableSetShowNewFolderDialog,
+    stableSetShowNewFileDialog,
   ]);
-
-  // Keep flat list in sync for shift-click range selection
-  flatVisibleNodesRef.current = flatVisibleNodes;
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto text-sm">
