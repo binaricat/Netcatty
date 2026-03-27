@@ -1549,7 +1549,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           )}
         </Card>
 
-        {/* Network Device Mode */}
+        {/* Network Device Mode — only for SSH hosts (serial already uses raw mode) */}
+        {(!form.protocol || form.protocol === 'ssh') && (
         <Card className="p-3 space-y-2 bg-card border-border/80">
           <div className="flex items-center gap-2">
             <Router size={14} className="text-muted-foreground" />
@@ -1572,6 +1573,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             </div>
           )}
         </Card>
+        )}
 
         {/* Legacy Algorithms */}
         <Card className="p-3 space-y-2 bg-card border-border/80">
