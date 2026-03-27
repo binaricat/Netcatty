@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
 import { useImmersiveMode } from './application/state/useImmersiveMode';
@@ -993,8 +993,6 @@ function App({ settings }: { settings: SettingsState }) {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [hotkeyScheme, isHotkeyRecording]);
 
-  const deferredQuickSearch = useDeferredValue(quickSearch);
-
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       _handleEscapeKeyDown(e);
@@ -1005,7 +1003,7 @@ function App({ settings }: { settings: SettingsState }) {
 
   const quickResults = useMemo(() => {
     if (!isQuickSwitcherOpen) return [];
-    const term = deferredQuickSearch.trim().toLowerCase();
+    const term = quickSearch.trim().toLowerCase();
     const filtered = term
       ? hosts.filter(h =>
         h.label.toLowerCase().includes(term) ||
@@ -1014,7 +1012,7 @@ function App({ settings }: { settings: SettingsState }) {
       )
       : hosts;
     return filtered;
-  }, [deferredQuickSearch, hosts, isQuickSwitcherOpen]);
+  }, [quickSearch, hosts, isQuickSwitcherOpen]);
 
   const handleDeleteHost = useCallback((hostId: string) => {
     const target = hosts.find(h => h.id === hostId);
