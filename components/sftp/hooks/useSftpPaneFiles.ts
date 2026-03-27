@@ -32,13 +32,14 @@ export const useSftpPaneFiles = ({
   // Extract ".." once and process the remaining files through filter -> sort
   // in fewer passes, instead of repeatedly filtering/finding ".." entries.
   const filteredFiles = useMemo(() => {
+    if (!enableListView) return [] as SftpFileEntry[];
     const term = filter.trim().toLowerCase();
     let nextFiles = filterHiddenFiles(files, showHiddenFiles);
     if (!term) return nextFiles;
     return nextFiles.filter(
       (f) => f.name === ".." || f.name.toLowerCase().includes(term),
     );
-  }, [files, filter, showHiddenFiles]);
+  }, [enableListView, files, filter, showHiddenFiles]);
 
   const { displayFiles, sortedDisplayFiles } = useMemo(() => {
     if (!connection || !enableListView) {

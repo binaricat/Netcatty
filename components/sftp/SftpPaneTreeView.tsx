@@ -473,8 +473,6 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     }
   }, [invalidatePathCache, invalidateTreeCache, pane.connection?.currentPath, reloadExpandedPaths, reloadRequest]);
 
-  const flatVisibleNodesRef = useRef<Array<{ entry: SftpFileEntry; entryPath: string }>>([]);
-
   const focusTreeContainer = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -490,17 +488,17 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
 
     const nextSelection: string[] = (() => {
       if (e.shiftKey && lastClickedPathRef.current) {
-        const flat = flatVisibleNodesRef.current;
-        const lastIdx = flat.findIndex(node => node.entryPath === lastClickedPathRef.current);
-        const currentIdx = flat.findIndex(node => node.entryPath === entryPath);
+        const items = treeSelectionState.visibleItems;
+        const lastIdx = treeSelectionState.visibleIndexByPath.get(lastClickedPathRef.current) ?? -1;
+        const currentIdx = treeSelectionState.visibleIndexByPath.get(entryPath) ?? -1;
         if (lastIdx !== -1 && currentIdx !== -1) {
           const parentPath = getParentPath(entryPath);
           const start = Math.min(lastIdx, currentIdx);
           const end = Math.max(lastIdx, currentIdx);
-          return flat
+          return items
               .slice(start, end + 1)
-              .filter(node => getParentPath(node.entryPath) === parentPath)
-              .map(node => node.entryPath);
+              .filter(item => getParentPath(item.path) === parentPath)
+              .map(item => item.path);
         }
       }
 
@@ -517,7 +515,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     sftpTreeSelectionStore.setSelection(pane.id, nextSelection);
 
     lastClickedPathRef.current = entryPath;
-  }, [focusTreeContainer, pane.id]);
+  }, [focusTreeContainer, pane.id, treeSelectionState.visibleIndexByPath, treeSelectionState.visibleItems]);
 
   const openTreeEntry = useCallback((entry: SftpFileEntry, entryPath: string) => {
     if (entry.name === '..') {
@@ -665,7 +663,6 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     errorPaths,
   ]);
 
-  flatVisibleNodesRef.current = flatVisibleNodes;
   const entryByPathRef = useRef(entryByPath);
   entryByPathRef.current = entryByPath;
 

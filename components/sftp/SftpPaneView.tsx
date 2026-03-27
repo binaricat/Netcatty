@@ -176,7 +176,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     [hostBookmarks, globalBookmarks],
   );
 
-  const { filteredFiles, sortedDisplayFiles } = useSftpPaneFiles({
+  const { sortedDisplayFiles } = useSftpPaneFiles({
     files: pane.files,
     filter: pane.filter,
     connection: pane.connection,
@@ -202,7 +202,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     handlePathSubmit,
   } = useSftpPanePath({
     connection: pane.connection,
-    filteredFiles,
+    files: pane.files,
+    showHiddenFiles: pane.showHiddenFiles,
     onNavigateTo: callbacks.onNavigateTo,
   });
   const {
@@ -363,9 +364,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       setShowFilterBar(false);
       callbacks.onSetFilter('');
       callbacks.onClearSelection();
-      requestTreeReload(undefined, true);
     }
-  }, [callbacks, requestTreeReload, setShowFilterBar, saveHostViewMode]);
+  }, [callbacks, setShowFilterBar, saveHostViewMode]);
 
   useEffect(() => {
     if (viewMode === 'list') {

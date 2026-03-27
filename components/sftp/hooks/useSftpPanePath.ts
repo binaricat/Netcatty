@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPane } from "../../../application/state/sftp/types";
-import { isNavigableDirectory } from "../index";
+import { filterHiddenFiles, isNavigableDirectory } from "../index";
 
 interface UseSftpPanePathParams {
   connection: SftpPane["connection"] | null;
-  filteredFiles: SftpFileEntry[];
+  files: SftpFileEntry[];
+  showHiddenFiles: boolean;
   onNavigateTo: (path: string) => void;
 }
 
@@ -28,7 +29,8 @@ interface UseSftpPanePathResult {
 
 export const useSftpPanePath = ({
   connection,
-  filteredFiles,
+  files,
+  showHiddenFiles,
   onNavigateTo,
 }: UseSftpPanePathParams): UseSftpPanePathResult => {
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -43,7 +45,7 @@ export const useSftpPanePath = ({
     const currentValue = editingPathValue.trim().toLowerCase();
     const suggestions: { path: string; type: "folder" | "history" }[] = [];
 
-    const folders = filteredFiles.filter(
+    const folders = filterHiddenFiles(files, showHiddenFiles).filter(
       (f) => isNavigableDirectory(f) && f.name !== "..",
     );
     folders.forEach((f) => {
@@ -70,7 +72,7 @@ export const useSftpPanePath = ({
     });
 
     return suggestions.slice(0, 8);
-  }, [connection, editingPathValue, filteredFiles, isEditingPath]);
+  }, [connection, editingPathValue, files, isEditingPath, showHiddenFiles]);
 
   const handlePathDoubleClick = () => {
     if (!connection) return;
