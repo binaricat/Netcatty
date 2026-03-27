@@ -888,9 +888,13 @@ function registerHandlers(ipcMain) {
       return { ok: false, error: "Session not found" };
     }
 
+    // Look up device type from metadata (set by renderer from Host.deviceType).
+    const meta = mcpServerBridge.getSessionMeta(sessionId, chatSessionId) || {};
+    const isNetworkDevice = meta.deviceType === "network" || session.protocol === "serial";
+
     // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-    // disables an interface on Cisco). Skip for serial sessions.
-    if (session.protocol !== "serial") {
+    // disables an interface on Cisco). Skip for network devices and serial sessions.
+    if (!isNetworkDevice) {
       const safety = mcpServerBridge.checkCommandSafety(command);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
@@ -905,8 +909,21 @@ function registerHandlers(ipcMain) {
         };
       }
 
-      // Prefer PTY stream (visible in terminal)
       const ptyStream = session.stream || session.pty || session.proc;
+
+      // Network devices (switches/routers) connected via SSH: use raw execution.
+      // Their vendor CLIs don't run a POSIX shell, so shell-wrapped commands fail.
+      if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return execViaRawPty(ptyStream, command, {
+          timeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+        });
+      }
+
+      // Prefer PTY stream (visible in terminal)
       if (ptyStream && typeof ptyStream.write === "function") {
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return execViaPty(ptyStream, command, {

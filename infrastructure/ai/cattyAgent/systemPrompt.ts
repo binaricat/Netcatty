@@ -9,6 +9,7 @@ export interface SystemPromptContext {
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
@@ -91,6 +92,7 @@ function buildHostList(
       host.os ? `os: ${host.os}` : null,
       host.username ? `user: ${host.username}` : null,
       host.shellType ? `shell: ${host.shellType}` : null,
+      host.deviceType ? `deviceType: ${host.deviceType}` : null,
       `status: ${status}`,
     ]
       .filter(Boolean)

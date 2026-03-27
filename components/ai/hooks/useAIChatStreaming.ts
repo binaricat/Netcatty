@@ -689,6 +689,7 @@ export function useAIChatStreaming({
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
+        deviceType: s.deviceType,
         connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,

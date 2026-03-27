@@ -677,6 +677,7 @@ module.exports = {
   activePtyExecs,
   cancelAllPtyExecs,
   cancelPtyExecsForSession,
+  getSessionMeta,
   cleanupScopedMetadata,
   cleanup,
   setMainWindowGetter,
