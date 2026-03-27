@@ -88,17 +88,20 @@ export function useServerStats({
   const isMountedRef = useRef(true);
   const hasFetchedRef = useRef(false);
   const connectedAtRef = useRef(0);
+  const fetchInFlightRef = useRef(false);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
       return;
     }
+    if (fetchInFlightRef.current) return;
 
     const bridge = netcattyBridge.get();
     if (!bridge?.getServerStats) {
       return;
     }
 
+    fetchInFlightRef.current = true;
     setIsLoading(true);
     setError(null);
 
@@ -138,6 +141,7 @@ export function useServerStats({
         setError(err instanceof Error ? err.message : 'Unknown error');
       }
     } finally {
+      fetchInFlightRef.current = false;
       if (isMountedRef.current) {
         setIsLoading(false);
       }
@@ -182,6 +186,12 @@ export function useServerStats({
       return;
     }
 
+    // Track when the connection became available for delay calculation
+    // (must be before the isVisible check so hidden tabs record connection time)
+    if (connectedAtRef.current === 0) {
+      connectedAtRef.current = Date.now();
+    }
+
     if (!isVisible) {
       return () => {
         isMountedRef.current = false;
@@ -190,11 +200,6 @@ export function useServerStats({
           intervalRef.current = null;
         }
       };
-    }
-
-    // Track when the connection became available for delay calculation
-    if (connectedAtRef.current === 0) {
-      connectedAtRef.current = Date.now();
     }
 
     // Fetch immediately when resuming from hidden, or with a delay on first connect.
