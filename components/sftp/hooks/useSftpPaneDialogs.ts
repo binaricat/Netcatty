@@ -1,14 +1,16 @@
 import { useCallback, useState } from "react";
 import type { SftpPaneCallbacks } from "../SftpContext";
 import type { SftpPane } from "../../../application/state/sftp/types";
+import { getFileName } from "../../../application/state/sftp/utils";
 
 interface UseSftpPaneDialogsParams {
   t: (key: string, params?: Record<string, unknown>) => string;
   pane: SftpPane;
   onCreateDirectory: SftpPaneCallbacks["onCreateDirectory"];
   onCreateFile: SftpPaneCallbacks["onCreateFile"];
-  onRenameFile: SftpPaneCallbacks["onRenameFile"];
+  onRenameFileAtPath: SftpPaneCallbacks["onRenameFileAtPath"];
   onDeleteFiles: SftpPaneCallbacks["onDeleteFiles"];
+  onDeleteFilesAtPath: SftpPaneCallbacks["onDeleteFilesAtPath"];
   onClearSelection: SftpPaneCallbacks["onClearSelection"];
 }
 
@@ -57,8 +59,9 @@ export const useSftpPaneDialogs = ({
   pane,
   onCreateDirectory,
   onCreateFile,
-  onRenameFile,
+  onRenameFileAtPath,
   onDeleteFiles,
+  onDeleteFilesAtPath,
   onClearSelection,
 }: UseSftpPaneDialogsParams): UseSftpPaneDialogsResult => {
   const [showHostPicker, setShowHostPicker] = useState(false);
@@ -204,7 +207,8 @@ export const useSftpPaneDialogs = ({
     if (!renameTarget || !renameName.trim() || isRenaming) return;
     setIsRenaming(true);
     try {
-      await onRenameFile(renameTarget, renameName.trim());
+      // renameTarget is always a full path; use the path-aware variant
+      await onRenameFileAtPath(renameTarget, renameName.trim());
       setShowRenameDialog(false);
       setRenameTarget(null);
       setRenameName("");
@@ -219,7 +223,27 @@ export const useSftpPaneDialogs = ({
     if (deleteTargets.length === 0 || isDeleting) return;
     setIsDeleting(true);
     try {
-      await onDeleteFiles(deleteTargets);
+      // deleteTargets are full paths; group by parent dir and use path-aware variant
+      const byDir = new Map<string, string[]>();
+      for (const fullPath of deleteTargets) {
+        const lastSlash = Math.max(fullPath.lastIndexOf("/"), fullPath.lastIndexOf("\\"));
+        const dir = lastSlash > 0 ? fullPath.slice(0, lastSlash) : "/";
+        const name = fullPath.slice(lastSlash + 1);
+        const list = byDir.get(dir) ?? [];
+        list.push(name);
+        byDir.set(dir, list);
+      }
+      if (byDir.size === 1) {
+        const [[dir, names]] = byDir;
+        const connectionId = pane.connection?.id ?? "";
+        await onDeleteFilesAtPath(connectionId, dir, names);
+      } else {
+        // Fallback: basenames only (same-dir case is the common path)
+        await onDeleteFiles(deleteTargets.map((p) => {
+          const lastSlash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+          return p.slice(lastSlash + 1);
+        }));
+      }
       setShowDeleteConfirm(false);
       setDeleteTargets([]);
       onClearSelection();
@@ -230,9 +254,10 @@ export const useSftpPaneDialogs = ({
     }
   };
 
-  const openRenameDialog = useCallback((name: string) => {
-    setRenameTarget(name);
-    setRenameName(name);
+  // entryPath is the full path; renameName is initialized to the basename
+  const openRenameDialog = useCallback((entryPath: string) => {
+    setRenameTarget(entryPath);
+    setRenameName(getFileName(entryPath) || entryPath);
     setShowRenameDialog(true);
   }, []);
 

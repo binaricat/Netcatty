@@ -36,8 +36,12 @@ interface UseSftpViewPaneActionsResult {
   onCreateFileRight: (name: string) => void;
   onDeleteFilesLeft: (names: string[]) => void;
   onDeleteFilesRight: (names: string[]) => void;
+  onDeleteFilesAtPathLeft: (connectionId: string, path: string, names: string[]) => void;
+  onDeleteFilesAtPathRight: (connectionId: string, path: string, names: string[]) => void;
   onRenameFileLeft: (old: string, newName: string) => void;
   onRenameFileRight: (old: string, newName: string) => void;
+  onRenameFileAtPathLeft: (oldPath: string, newName: string) => void;
+  onRenameFileAtPathRight: (oldPath: string, newName: string) => void;
   onCopyToOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
   onCopyToOtherPaneRight: (files: { name: string; isDirectory: boolean }[]) => void;
   onReceiveFromOtherPaneLeft: (files: { name: string; isDirectory: boolean }[]) => void;
@@ -168,12 +172,30 @@ export const useSftpViewPaneActions = ({
     (names: string[]) => sftpRef.current.deleteFiles("right", names),
     [sftpRef],
   );
+  const onDeleteFilesAtPathLeft = useCallback(
+    (connectionId: string, path: string, names: string[]) =>
+      sftpRef.current.deleteFilesAtPath("left", connectionId, path, names),
+    [sftpRef],
+  );
+  const onDeleteFilesAtPathRight = useCallback(
+    (connectionId: string, path: string, names: string[]) =>
+      sftpRef.current.deleteFilesAtPath("right", connectionId, path, names),
+    [sftpRef],
+  );
   const onRenameFileLeft = useCallback(
     (old: string, newName: string) => sftpRef.current.renameFile("left", old, newName),
     [sftpRef],
   );
   const onRenameFileRight = useCallback(
     (old: string, newName: string) => sftpRef.current.renameFile("right", old, newName),
+    [sftpRef],
+  );
+  const onRenameFileAtPathLeft = useCallback(
+    (oldPath: string, newName: string) => sftpRef.current.renameFileAtPath("left", oldPath, newName),
+    [sftpRef],
+  );
+  const onRenameFileAtPathRight = useCallback(
+    (oldPath: string, newName: string) => sftpRef.current.renameFileAtPath("right", oldPath, newName),
     [sftpRef],
   );
 
@@ -214,8 +236,12 @@ export const useSftpViewPaneActions = ({
     onCreateFileRight,
     onDeleteFilesLeft,
     onDeleteFilesRight,
+    onDeleteFilesAtPathLeft,
+    onDeleteFilesAtPathRight,
     onRenameFileLeft,
     onRenameFileRight,
+    onRenameFileAtPathLeft,
+    onRenameFileAtPathRight,
     onCopyToOtherPaneLeft,
     onCopyToOtherPaneRight,
     onReceiveFromOtherPaneLeft,

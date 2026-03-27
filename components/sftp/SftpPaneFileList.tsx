@@ -228,7 +228,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
               {t("sftp.context.copyPath")}
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => openRenameDialog(entry.name)}>
+            <ContextMenuItem onClick={() => openRenameDialog(joinPath(pane.connection?.currentPath ?? "", entry.name))}>
               <Pencil size={14} className="mr-2" /> {t("common.rename")}
             </ContextMenuItem>
             {onEditPermissions && pane.connection && !pane.connection.isLocal && (
@@ -241,8 +241,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
               className="text-destructive"
               onClick={() => {
                 const files = pane.selectedFiles.has(entry.name)
-                  ? Array.from(pane.selectedFiles)
-                  : [entry.name];
+                  ? Array.from(pane.selectedFiles as Set<string>).map((n) => joinPath(pane.connection?.currentPath ?? "", n))
+                  : [joinPath(pane.connection?.currentPath ?? "", entry.name)];
                 openDeleteConfirm(files);
               }}
             >

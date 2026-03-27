@@ -214,8 +214,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     pane,
     onCreateDirectory: callbacks.onCreateDirectory,
     onCreateFile: callbacks.onCreateFile,
-    onRenameFile: callbacks.onRenameFile,
+    onRenameFileAtPath: callbacks.onRenameFileAtPath,
     onDeleteFiles: callbacks.onDeleteFiles,
+    onDeleteFilesAtPath: callbacks.onDeleteFilesAtPath,
     onClearSelection: callbacks.onClearSelection,
   });
   const {

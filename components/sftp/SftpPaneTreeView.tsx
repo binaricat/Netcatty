@@ -44,7 +44,7 @@ interface SftpPaneTreeViewProps {
   onOpenEntry: (entry: SftpFileEntry) => void;
   onDragStart: (files: { name: string; isDirectory: boolean }[], side: 'left' | 'right') => void;
   onDragEnd: () => void;
-  openRenameDialog: (name: string) => void;
+  openRenameDialog: (entryPath: string) => void;
   openDeleteConfirm: (targets: string[]) => void;
   onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
   onOpenFileWith?: (entry: SftpFileEntry) => void;
@@ -73,8 +73,8 @@ interface TreeNodeProps {
   onEditFile?: (entry: SftpFileEntry) => void;
   onDownloadFile?: (entry: SftpFileEntry) => void;
   onEditPermissions?: (entry: SftpFileEntry) => void;
-  openRenameDialog: (name: string) => void;
-  openDeleteConfirm: (entry: SftpFileEntry) => void;
+  openRenameDialog: (entryPath: string) => void;
+  openDeleteConfirm: (targets: string[]) => void;
   onRefresh: () => void;
   setShowNewFolderDialog: (open: boolean) => void;
   setShowNewFileDialog: (open: boolean) => void;
@@ -173,7 +173,7 @@ const TreeNode = React.memo<TreeNodeProps>(({
             <ClipboardCopy size={14} className="mr-2" />{t('sftp.context.copyPath')}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => openRenameDialog(entry.name)}>
+          <ContextMenuItem onClick={() => openRenameDialog(entryPath)}>
             <Pencil size={14} className="mr-2" />{t('common.rename')}
           </ContextMenuItem>
           {onEditPermissions && !isLocal && (
@@ -183,7 +183,7 @@ const TreeNode = React.memo<TreeNodeProps>(({
           )}
           <ContextMenuItem
             className="text-destructive"
-            onClick={() => openDeleteConfirm(entry)}
+            onClick={() => openDeleteConfirm([entryPath])}
           >
             <Trash2 size={14} className="mr-2" />{t('action.delete')}
           </ContextMenuItem>
@@ -291,16 +291,15 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
       : [{ name: entry.name, isDirectory: isDir }];
     onCopyToOtherPaneRef.current(files);
   }, []);
-  // Selection-aware delete: resolves multi-selection via ref so TreeNode never needs selectedFiles
-  const stableOpenDeleteConfirm = useCallback((entry: SftpFileEntry) => {
-    const sel = selectedFilesRef.current;
-    openDeleteConfirmRef.current(sel.has(entry.name) ? Array.from(sel) : [entry.name]);
+  // Selection-aware delete: targets are full paths from TreeNode
+  const stableOpenDeleteConfirm = useCallback((targets: string[]) => {
+    openDeleteConfirmRef.current(targets);
   }, []);
   const stableOnOpenFileWith = useCallback((e: SftpFileEntry) => onOpenFileWithRef.current?.(e), []);
   const stableOnEditFile = useCallback((e: SftpFileEntry) => onEditFileRef.current?.(e), []);
   const stableOnDownloadFile = useCallback((e: SftpFileEntry) => onDownloadFileRef.current?.(e), []);
   const stableOnEditPermissions = useCallback((e: SftpFileEntry) => onEditPermissionsRef.current?.(e), []);
-  const stableOpenRenameDialog = useCallback((name: string) => openRenameDialogRef.current(name), []);
+  const stableOpenRenameDialog = useCallback((entryPath: string) => openRenameDialogRef.current(entryPath), []);
   const stableSetShowNewFolderDialog = useCallback((open: boolean) => setShowNewFolderDialogRef.current(open), []);
   const stableSetShowNewFileDialog = useCallback((open: boolean) => setShowNewFileDialogRef.current(open), []);
 

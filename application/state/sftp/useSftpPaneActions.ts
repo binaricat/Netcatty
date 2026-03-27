@@ -49,6 +49,7 @@ interface UseSftpPaneActionsResult {
     fileNames: string[],
   ) => Promise<void>;
   renameFile: (side: "left" | "right", oldName: string, newName: string) => Promise<void>;
+  renameFileAtPath: (side: "left" | "right", oldPath: string, newName: string) => Promise<void>;
   changePermissions: (side: "left" | "right", filePath: string, mode: string) => Promise<void>;
 }
 
@@ -686,6 +687,38 @@ export const useSftpPaneActions = ({
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
   );
 
+  // Rename using a full source path (for tree view where entryPath is already absolute).
+  // newName is still a basename; the new path is built as joinPath(parent, newName).
+  const renameFileAtPath = useCallback(
+    async (side: "left" | "right", oldPath: string, newName: string) => {
+      const pane = getActivePane(side);
+      if (!pane?.connection) return;
+
+      const newPath = joinPath(getParentPath(oldPath), newName);
+
+      try {
+        if (pane.connection.isLocal) {
+          await netcattyBridge.get()?.renameLocalFile?.(oldPath, newPath);
+        } else {
+          const sftpId = sftpSessionsRef.current.get(pane.connection.id);
+          if (!sftpId) {
+            handleSessionError(side, new Error("SFTP session not found"));
+            return;
+          }
+          await netcattyBridge.get()?.renameSftp?.(sftpId, oldPath, newPath, pane.filenameEncoding);
+        }
+        await refresh(side);
+      } catch (err) {
+        if (isSessionError(err)) {
+          handleSessionError(side, err as Error);
+          return;
+        }
+        throw err;
+      }
+    },
+    [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
+  );
+
   const changePermissions = useCallback(
     async (
       side: "left" | "right",
@@ -734,6 +767,7 @@ export const useSftpPaneActions = ({
     deleteFiles,
     deleteFilesAtPath,
     renameFile,
+    renameFileAtPath,
     changePermissions,
   };
 };

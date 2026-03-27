@@ -25,7 +25,9 @@ export interface SftpPaneCallbacks {
     onCreateDirectory: (name: string) => Promise<void>;
     onCreateFile: (name: string) => Promise<void>;
     onDeleteFiles: (fileNames: string[]) => Promise<void>;
+    onDeleteFilesAtPath: (connectionId: string, path: string, fileNames: string[]) => Promise<void>;
     onRenameFile: (oldName: string, newName: string) => Promise<void>;
+    onRenameFileAtPath: (oldPath: string, newName: string) => Promise<void>;
     onCopyToOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
     onReceiveFromOtherPane: (files: { name: string; isDirectory: boolean }[]) => void;
     onEditPermissions?: (file: SftpFileEntry) => void;
