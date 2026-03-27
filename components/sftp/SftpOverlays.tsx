@@ -43,7 +43,7 @@ interface SftpOverlaysProps {
   handleSelectSystemApp: (systemApp: { path: string; name: string }) => void;
 }
 
-export const SftpOverlays: React.FC<SftpOverlaysProps> = ({
+export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
   hosts,
   sftp,
   visibleTransfers,
@@ -154,4 +154,4 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = ({
       />
     </>
   );
-};
+});

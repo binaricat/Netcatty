@@ -6,6 +6,9 @@ import { SftpPane } from "./types";
 import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
 import { buildCacheKey, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
+/** Shared empty set for navigation resets — never mutate this. */
+const EMPTY_SET = new Set<string>();
+
 interface UseSftpPaneActionsParams {
   hosts: Host[];
   getActivePane: (side: "left" | "right") => SftpPane | null;
@@ -149,7 +152,7 @@ export const useSftpPaneActions = ({
           connectionId,
           path,
           files: cached.files,
-          selectedFiles: new Set(),
+          selectedFiles: EMPTY_SET,
         });
         updateTab(side, targetTabId, (prev) => ({
           ...prev,
@@ -159,7 +162,7 @@ export const useSftpPaneActions = ({
           files: cached.files,
           loading: false,
           error: null,
-          selectedFiles: new Set(),
+          selectedFiles: EMPTY_SET,
         }));
         if (!pane.connection.isLocal) {
           // Use hostId as the shared cache key — this is safe because the
@@ -203,7 +206,7 @@ export const useSftpPaneActions = ({
         connection: prev.connection
           ? { ...prev.connection, currentPath: path }
           : null,
-        selectedFiles: new Set(),
+        selectedFiles: EMPTY_SET,
         loading: true,
         error: null,
       }));
@@ -273,7 +276,7 @@ export const useSftpPaneActions = ({
           connectionId,
           path,
           files,
-          selectedFiles: new Set(),
+          selectedFiles: EMPTY_SET,
         });
 
         updateTab(side, targetTabId, (prev) => ({
@@ -283,7 +286,7 @@ export const useSftpPaneActions = ({
             : null,
           files,
           loading: false,
-          selectedFiles: new Set(),
+          selectedFiles: EMPTY_SET,
         }));
         if (!pane.connection.isLocal) {
           setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId, pane.connection.id), {
@@ -440,7 +443,7 @@ export const useSftpPaneActions = ({
   );
 
   const clearSelection = useCallback((side: "left" | "right") => {
-    updateActiveTab(side, (prev) => ({ ...prev, selectedFiles: new Set() }));
+    updateActiveTab(side, (prev) => ({ ...prev, selectedFiles: EMPTY_SET }));
   }, [updateActiveTab]);
 
   const selectAll = useCallback(

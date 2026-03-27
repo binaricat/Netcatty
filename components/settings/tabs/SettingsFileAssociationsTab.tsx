@@ -29,7 +29,7 @@ const getOpenerLabel = (
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
   const { getAllAssociations, removeAssociation, setOpenerForExtension } = useSftpFileAssociations();
-  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar } = useSettingsState();
+  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar, sftpDefaultViewMode, setSftpDefaultViewMode } = useSettingsState();
   const associations = getAllAssociations();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
 
@@ -123,6 +123,76 @@ export default function SettingsFileAssociationsTab() {
                   </Label>
                   <p className="text-sm text-muted-foreground">
                     {t('settings.sftp.doubleClickBehavior.transferDesc')}
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Default view mode section */}
+        <div className="space-y-4">
+          <SectionHeader title={t('settings.sftp.defaultViewMode')} />
+          <p className="text-sm text-muted-foreground">
+            {t('settings.sftp.defaultViewMode.desc')}
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => setSftpDefaultViewMode('list')}
+              className={cn(
+                "w-full text-left p-4 rounded-lg border-2 transition-colors",
+                sftpDefaultViewMode === 'list'
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-secondary/50"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0",
+                  sftpDefaultViewMode === 'list'
+                    ? "border-primary"
+                    : "border-muted-foreground/30"
+                )}>
+                  {sftpDefaultViewMode === 'list' && (
+                    <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-medium cursor-pointer">
+                    {t('settings.sftp.defaultViewMode.list')}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t('settings.sftp.defaultViewMode.listDesc')}
+                  </p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setSftpDefaultViewMode('tree')}
+              className={cn(
+                "w-full text-left p-4 rounded-lg border-2 transition-colors",
+                sftpDefaultViewMode === 'tree'
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-secondary/50"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0",
+                  sftpDefaultViewMode === 'tree'
+                    ? "border-primary"
+                    : "border-muted-foreground/30"
+                )}>
+                  {sftpDefaultViewMode === 'tree' && (
+                    <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-medium cursor-pointer">
+                    {t('settings.sftp.defaultViewMode.tree')}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t('settings.sftp.defaultViewMode.treeDesc')}
                   </p>
                 </div>
               </div>

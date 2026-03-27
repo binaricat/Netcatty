@@ -46,7 +46,7 @@ export interface SftpPaneCallbacks {
     onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;  // Always show opener dialog
     onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
     // External file upload (supports folders via DataTransfer)
-    onUploadExternalFiles?: (dataTransfer: DataTransfer) => Promise<void>;
+    onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
     onListDirectory: (path: string) => Promise<SftpFileEntry[]>;
 }
 
@@ -103,16 +103,18 @@ export interface SftpContextValue {
     // Host updater for bookmark persistence
     updateHosts: (hosts: Host[]) => void;
 
-    // Drag state (shared between panes)
-    draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
-    dragCallbacks: SftpDragCallbacks;
-
     // Callbacks for each side
     leftCallbacks: SftpPaneCallbacks;
     rightCallbacks: SftpPaneCallbacks;
 }
 
+export interface SftpDragContextValue {
+    draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
+    dragCallbacks: SftpDragCallbacks;
+}
+
 const SftpContext = createContext<SftpContextValue | null>(null);
+const SftpDragContext = createContext<SftpDragContextValue | null>(null);
 
 export const useSftpContext = () => {
     const context = useContext(SftpContext);
@@ -128,13 +130,19 @@ export const useSftpPaneCallbacks = (side: "left" | "right"): SftpPaneCallbacks 
     return side === "left" ? context.leftCallbacks : context.rightCallbacks;
 };
 
-// Hook to get drag-related values
+// Hook to get drag-related values (reads from separate SftpDragContext)
 export const useSftpDrag = () => {
-    const context = useSftpContext();
-    return {
-        draggedFiles: context.draggedFiles,
-        ...context.dragCallbacks,
-    };
+    const context = useContext(SftpDragContext);
+    if (!context) {
+        throw new Error("useSftpDrag must be used within SftpContextProvider");
+    }
+    return useMemo(
+        () => ({
+            draggedFiles: context.draggedFiles,
+            ...context.dragCallbacks,
+        }),
+        [context.draggedFiles, context.dragCallbacks],
+    );
 };
 
 // Hook to get hosts
@@ -168,19 +176,29 @@ export const SftpContextProvider: React.FC<SftpContextProviderProps> = ({
     rightCallbacks,
     children,
 }) => {
-    // Memoize the context value to prevent unnecessary re-renders
-    // Note: The callbacks objects should be stable (created with useMemo in parent)
+    // Memoize the main context value (no drag state, so drag changes won't cause re-renders here)
     const value = useMemo<SftpContextValue>(
         () => ({
             hosts,
             updateHosts,
-            draggedFiles,
-            dragCallbacks,
             leftCallbacks,
             rightCallbacks,
         }),
-        [hosts, updateHosts, draggedFiles, dragCallbacks, leftCallbacks, rightCallbacks],
+        [hosts, updateHosts, leftCallbacks, rightCallbacks],
     );
 
-    return <SftpContext.Provider value={value}>{children}</SftpContext.Provider>;
+    // Memoize drag context separately so only drag consumers re-render on drag state changes
+    const dragValue = useMemo<SftpDragContextValue>(
+        () => ({
+            draggedFiles,
+            dragCallbacks,
+        }),
+        [draggedFiles, dragCallbacks],
+    );
+
+    return (
+        <SftpContext.Provider value={value}>
+            <SftpDragContext.Provider value={dragValue}>{children}</SftpDragContext.Provider>
+        </SftpContext.Provider>
+    );
 };

@@ -55,6 +55,8 @@ export const STORAGE_KEY_SFTP_AUTO_SYNC = 'netcatty_sftp_auto_sync_v1';
 export const STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES = 'netcatty_sftp_show_hidden_files_v1';
 export const STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD = 'netcatty_sftp_use_compressed_upload_v1';
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
+export const STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE = 'netcatty_sftp_default_view_mode_v1';
+export const STORAGE_KEY_SFTP_HOST_VIEW_MODES = 'netcatty_sftp_host_view_modes_v1';
 
 // Editor Settings
 export const STORAGE_KEY_EDITOR_WORD_WRAP = 'netcatty_editor_word_wrap_v1';

@@ -22,6 +22,7 @@ import {
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
+  STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
   STORAGE_KEY_EDITOR_WORD_WRAP,
   STORAGE_KEY_SESSION_LOGS_ENABLED,
   STORAGE_KEY_SESSION_LOGS_DIR,
@@ -65,6 +66,7 @@ const DEFAULT_SFTP_AUTO_SYNC = false;
 const DEFAULT_SFTP_SHOW_HIDDEN_FILES = false;
 const DEFAULT_SFTP_USE_COMPRESSED_UPLOAD = true;
 const DEFAULT_SFTP_AUTO_OPEN_SIDEBAR = false;
+const DEFAULT_SFTP_DEFAULT_VIEW_MODE: 'list' | 'tree' = 'list';
 
 // Editor defaults
 const DEFAULT_EDITOR_WORD_WRAP = false;
@@ -238,6 +240,10 @@ export const useSettingsState = () => {
   const [sftpAutoOpenSidebar, setSftpAutoOpenSidebar] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
     return stored === 'true' ? true : DEFAULT_SFTP_AUTO_OPEN_SIDEBAR;
+  });
+  const [sftpDefaultViewMode, setSftpDefaultViewMode] = useState<'list' | 'tree'>(() => {
+    const stored = readStoredString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE);
+    return (stored === 'list' || stored === 'tree') ? stored : DEFAULT_SFTP_DEFAULT_VIEW_MODE;
   });
 
   // Editor Settings
@@ -433,6 +439,8 @@ export const useSettingsState = () => {
     if (storedCompress === 'true' || storedCompress === 'false') setSftpUseCompressedUpload(storedCompress === 'true');
     const storedAutoOpenSidebar = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
     if (storedAutoOpenSidebar === 'true' || storedAutoOpenSidebar === 'false') setSftpAutoOpenSidebar(storedAutoOpenSidebar === 'true');
+    const storedDefaultViewMode = readStoredString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE);
+    if (storedDefaultViewMode === 'list' || storedDefaultViewMode === 'tree') setSftpDefaultViewMode(storedDefaultViewMode);
 
     // Immersive mode
     const storedImmersive = readStoredString(STORAGE_KEY_IMMERSIVE_MODE);
@@ -585,6 +593,11 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR && typeof value === 'boolean') {
         setSftpAutoOpenSidebar((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE && typeof value === 'string') {
+        if (value === 'list' || value === 'tree') {
+          setSftpDefaultViewMode((prev) => (prev === value ? prev : value));
+        }
+      }
       if (key === STORAGE_KEY_IMMERSIVE_MODE && typeof value === 'boolean') {
         setImmersiveModeState((prev) => (prev === value ? prev : value));
       }
@@ -623,7 +636,7 @@ export const useSettingsState = () => {
     customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage,
     terminalThemeId, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
-    sftpUseCompressedUpload, sftpAutoOpenSidebar,
+    sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
     globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   });
@@ -632,7 +645,7 @@ export const useSettingsState = () => {
     customCSS, uiFontFamilyId, hotkeyScheme, uiLanguage,
     terminalThemeId, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
-    sftpUseCompressedUpload, sftpAutoOpenSidebar,
+    sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
     globalHotkeyEnabled, autoUpdateEnabled, immersiveMode,
   };
@@ -783,6 +796,12 @@ export const useSettingsState = () => {
           setSftpAutoOpenSidebar(newValue);
         }
       }
+      // Sync SFTP default view mode from other windows
+      if (e.key === STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE && e.newValue) {
+        if ((e.newValue === 'list' || e.newValue === 'tree') && e.newValue !== s.sftpDefaultViewMode) {
+          setSftpDefaultViewMode(e.newValue);
+        }
+      }
       // Sync global hotkey enabled setting from other windows
       if (e.key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && e.newValue !== null) {
         const newValue = e.newValue === 'true';
@@ -910,6 +929,13 @@ export const useSettingsState = () => {
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, sftpAutoOpenSidebar);
   }, [sftpAutoOpenSidebar, notifySettingsChanged]);
+
+  // Persist SFTP default view mode
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE, sftpDefaultViewMode);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE, sftpDefaultViewMode);
+  }, [sftpDefaultViewMode, notifySettingsChanged]);
 
   // Persist Session Logs settings
   useEffect(() => {
@@ -1145,6 +1171,8 @@ export const useSettingsState = () => {
     setSftpUseCompressedUpload,
     sftpAutoOpenSidebar,
     setSftpAutoOpenSidebar,
+    sftpDefaultViewMode,
+    setSftpDefaultViewMode,
     // Editor Settings
     editorWordWrap,
     setEditorWordWrap: useCallback((enabled: boolean) => {
@@ -1180,7 +1208,7 @@ export const useSettingsState = () => {
       uiFontFamilyId, uiLanguage, customCSS,
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
-      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar,
+      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
       customThemes, immersiveMode,
     ]),
   };

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 export interface SftpTreeSelectionItem {
   path: string;
@@ -9,12 +9,16 @@ export interface SftpTreeSelectionItem {
 
 interface SftpTreeSelectionState {
   visibleItems: SftpTreeSelectionItem[];
-  selectedPaths: string[];
+  visiblePathsSet: Set<string>;
+  selectedPaths: Set<string>;
 }
+
+const EMPTY_PATHS = new Set<string>();
 
 const EMPTY_STATE: SftpTreeSelectionState = {
   visibleItems: [],
-  selectedPaths: [],
+  visiblePathsSet: new Set(),
+  selectedPaths: EMPTY_PATHS,
 };
 
 type Listener = () => void;
@@ -36,7 +40,7 @@ const setPaneState = (
   const prev = getPaneState(paneId);
   const next = updater(prev);
   if (next === prev) return;
-  if (next.visibleItems.length === 0 && next.selectedPaths.length === 0) {
+  if (next.visibleItems.length === 0 && next.selectedPaths.size === 0) {
     paneStates.delete(paneId);
   } else {
     paneStates.set(paneId, next);
@@ -50,37 +54,44 @@ export const sftpTreeSelectionStore = {
   getSelectedItems: (paneId: string): SftpTreeSelectionItem[] => {
     const state = getPaneState(paneId);
     const visibleByPath = new Map(state.visibleItems.map((item) => [item.path, item]));
-    return state.selectedPaths
-      .map((path) => visibleByPath.get(path))
-      .filter((item): item is SftpTreeSelectionItem => Boolean(item));
+    const result: SftpTreeSelectionItem[] = [];
+    for (const path of state.selectedPaths) {
+      const item = visibleByPath.get(path);
+      if (item) result.push(item);
+    }
+    return result;
   },
 
   setVisibleItems: (paneId: string, visibleItems: SftpTreeSelectionItem[]) => {
-    const visiblePaths = new Set(visibleItems.map((item) => item.path));
-    setPaneState(paneId, (state) => ({
-      visibleItems,
-      selectedPaths: state.selectedPaths.filter((path) => visiblePaths.has(path)),
-    }));
-  },
-
-  setSelection: (paneId: string, selectedPaths: Iterable<string>) => {
+    const visiblePathsSet = new Set(visibleItems.map((item) => item.path));
     setPaneState(paneId, (state) => {
-      const visiblePaths = new Set(state.visibleItems.map((item) => item.path));
+      const newSelected = new Set([...state.selectedPaths].filter((p) => visiblePathsSet.has(p)));
+      const changed =
+        newSelected.size !== state.selectedPaths.size ||
+        [...newSelected].some((p) => !state.selectedPaths.has(p));
       return {
-        ...state,
-        selectedPaths: Array.from(selectedPaths).filter((path) => visiblePaths.has(path)),
+        visibleItems,
+        visiblePathsSet,
+        selectedPaths: changed ? newSelected : state.selectedPaths,
       };
     });
   },
 
+  setSelection: (paneId: string, selectedPaths: Iterable<string>) => {
+    setPaneState(paneId, (state) => ({
+      ...state,
+      selectedPaths: new Set(Array.from(selectedPaths).filter((path) => state.visiblePathsSet.has(path))),
+    }));
+  },
+
   clearSelection: (paneId: string) => {
-    setPaneState(paneId, (state) => ({ ...state, selectedPaths: [] }));
+    setPaneState(paneId, (state) => ({ ...state, selectedPaths: EMPTY_PATHS }));
   },
 
   selectAllVisible: (paneId: string) => {
     setPaneState(paneId, (state) => ({
       ...state,
-      selectedPaths: state.visibleItems.map((item) => item.path),
+      selectedPaths: new Set(state.visibleItems.map((item) => item.path)),
     }));
   },
 
@@ -105,9 +116,26 @@ export const sftpTreeSelectionStore = {
   },
 };
 
-export const useSftpTreeSelectionState = (paneId: string): SftpTreeSelectionState =>
-  useSyncExternalStore(
-    (listener) => sftpTreeSelectionStore.subscribe(paneId, listener),
+export const useSftpTreeSelectionState = (paneId: string): SftpTreeSelectionState => {
+  const subscribe = useCallback(
+    (listener: () => void) => sftpTreeSelectionStore.subscribe(paneId, listener),
+    [paneId],
+  );
+  return useSyncExternalStore(
+    subscribe,
     () => sftpTreeSelectionStore.getPaneState(paneId),
     () => sftpTreeSelectionStore.getPaneState(paneId),
   );
+};
+
+export function useIsTreeNodeSelected(paneId: string, path: string): boolean {
+  const getSnapshot = useCallback(
+    () => sftpTreeSelectionStore.getPaneState(paneId).selectedPaths.has(path),
+    [paneId, path],
+  );
+  const subscribe = useCallback(
+    (listener: () => void) => sftpTreeSelectionStore.subscribe(paneId, listener),
+    [paneId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
+}

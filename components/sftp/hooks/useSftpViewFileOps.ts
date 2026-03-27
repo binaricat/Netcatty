@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
 import { getParentPath, joinPath as joinFsPath } from "../../../application/state/sftp/utils";
@@ -101,8 +101,8 @@ interface UseSftpViewFileOpsResult {
   onOpenFileWithRight: (file: SftpFileEntry, fullPath?: string) => void;
   onDownloadFileLeft: (file: SftpFileEntry, fullPath?: string) => void;
   onDownloadFileRight: (file: SftpFileEntry, fullPath?: string) => void;
-  onUploadExternalFilesLeft: (dataTransfer: DataTransfer) => void;
-  onUploadExternalFilesRight: (dataTransfer: DataTransfer) => void;
+  onUploadExternalFilesLeft: (dataTransfer: DataTransfer, targetPath?: string) => void;
+  onUploadExternalFilesRight: (dataTransfer: DataTransfer, targetPath?: string) => void;
 }
 
 export const useSftpViewFileOps = ({
@@ -145,6 +145,12 @@ export const useSftpViewFileOps = ({
     side: "left" | "right";
     fullPath: string;
   } | null>(null);
+
+  // Refs for frequently-changing state used inside stable callbacks
+  const fileOpenerTargetRef = useRef(fileOpenerTarget);
+  fileOpenerTargetRef.current = fileOpenerTarget;
+  const textEditorTargetRef = useRef(textEditorTarget);
+  textEditorTargetRef.current = textEditorTarget;
 
   const onEditPermissionsLeft = useCallback(
     (file: SftpFileEntry, fullPath?: string) => {
@@ -232,23 +238,24 @@ export const useSftpViewFileOps = ({
 
   const handleFileOpenerSelect = useCallback(
     async (openerType: FileOpenerType, setAsDefault: boolean, systemApp?: SystemAppInfo) => {
-      if (!fileOpenerTarget) return;
+      const target = fileOpenerTargetRef.current;
+      if (!target) return;
 
       if (setAsDefault) {
-        const ext = getFileExtension(fileOpenerTarget.file.name);
+        const ext = getFileExtension(target.file.name);
         setOpenerForExtension(ext, openerType, systemApp);
       }
 
       setShowFileOpenerDialog(false);
 
       if (openerType === "builtin-editor") {
-        handleEditFileForSide(fileOpenerTarget.side, fileOpenerTarget.file, fileOpenerTarget.fullPath);
+        handleEditFileForSide(target.side, target.file, target.fullPath);
       } else if (openerType === "system-app" && systemApp) {
         try {
           await sftpRef.current.downloadToTempAndOpen(
-            fileOpenerTarget.side,
-            fileOpenerTarget.fullPath,
-            fileOpenerTarget.file.name,
+            target.side,
+            target.fullPath,
+            target.file.name,
             systemApp.path,
             { enableWatch: autoSyncRef.current },
           );
@@ -259,7 +266,7 @@ export const useSftpViewFileOps = ({
 
       setFileOpenerTarget(null);
     },
-    [fileOpenerTarget, setOpenerForExtension, handleEditFileForSide, autoSyncRef, sftpRef],
+    [setOpenerForExtension, handleEditFileForSide, autoSyncRef, sftpRef],
   );
 
   const handleSelectSystemApp = useCallback(async (): Promise<SystemAppInfo | null> => {
@@ -272,7 +279,8 @@ export const useSftpViewFileOps = ({
 
   const handleSaveTextFile = useCallback(
     async (content: string) => {
-      if (!textEditorTarget) return;
+      const target = textEditorTargetRef.current;
+      if (!target) return;
 
       // Verify the SFTP connection hasn't switched to a different host.
       // We check hostId (not connectionId) because auto-reconnect after a
@@ -280,20 +288,20 @@ export const useSftpViewFileOps = ({
       // endpoint.  The auto-connect effect in SftpSidePanel blocks
       // host-switching while the editor is open, so a hostId mismatch here
       // reliably indicates a genuinely different endpoint.
-      const currentPane = textEditorTarget.side === "left"
+      const currentPane = target.side === "left"
         ? sftpRef.current.leftPane
         : sftpRef.current.rightPane;
-      if (textEditorTarget.hostId && currentPane.connection?.hostId !== textEditorTarget.hostId) {
+      if (target.hostId && currentPane.connection?.hostId !== target.hostId) {
         throw new Error("SFTP connection changed while editing — file not saved to prevent writing to wrong host");
       }
 
       await sftpRef.current.writeTextFile(
-        textEditorTarget.side,
-        textEditorTarget.fullPath,
+        target.side,
+        target.fullPath,
         content,
       );
     },
-    [textEditorTarget, sftpRef],
+    [sftpRef],
   );
 
   const onEditFileLeft = useCallback(
@@ -335,9 +343,9 @@ export const useSftpViewFileOps = ({
   );
 
   const handleUploadExternalFilesForSide = useCallback(
-    async (side: "left" | "right", dataTransfer: DataTransfer) => {
+    async (side: "left" | "right", dataTransfer: DataTransfer, targetPath?: string) => {
       try {
-        const results = await sftpRef.current.uploadExternalFiles(side, dataTransfer);
+        const results = await sftpRef.current.uploadExternalFiles(side, dataTransfer, targetPath);
 
         // Check if upload was cancelled
         if (results.some((r) => r.cancelled)) {
@@ -376,12 +384,12 @@ export const useSftpViewFileOps = ({
   );
 
   const onUploadExternalFilesLeft = useCallback(
-    (dataTransfer: DataTransfer) => handleUploadExternalFilesForSide("left", dataTransfer),
+    (dataTransfer: DataTransfer, targetPath?: string) => handleUploadExternalFilesForSide("left", dataTransfer, targetPath),
     [handleUploadExternalFilesForSide],
   );
 
   const onUploadExternalFilesRight = useCallback(
-    (dataTransfer: DataTransfer) => handleUploadExternalFilesForSide("right", dataTransfer),
+    (dataTransfer: DataTransfer, targetPath?: string) => handleUploadExternalFilesForSide("right", dataTransfer, targetPath),
     [handleUploadExternalFilesForSide],
   );
 
@@ -464,10 +472,14 @@ export const useSftpViewFileOps = ({
           let estimatedTotalBytes = 0;
           let activeQueueTasks = 0;
 
-          const isTaskCancelled = () =>
-            sftpRef.current.transfers.some(
+          let cancelled = false;
+          const isTaskCancelled = () => {
+            if (cancelled) return true;
+            cancelled = sftpRef.current.transfers.some(
               (task) => task.id === transferId && task.status === "cancelled",
             );
+            return cancelled;
+          };
 
           const updateAggregateProgress = () => {
             let activeTransferredBytes = 0;

@@ -66,6 +66,10 @@ export const useSftpTransfers = ({
 
   // Track cancelled task IDs for checking during async operations
   const cancelledTasksRef = useRef<Set<string>>(new Set());
+  const transfersRef = useRef(transfers);
+  transfersRef.current = transfers;
+  const conflictsRef = useRef(conflicts);
+  conflictsRef.current = conflicts;
   const completionHandlersRef = useRef<Map<string, (result: TransferResult) => void | Promise<void>>>(new Map());
 
   const clearCancelledTask = useCallback((taskId: string) => {
@@ -109,25 +113,35 @@ export const useSftpTransfers = ({
       }
 
       let totalBytes = 0;
+      const subdirs: SftpFileEntry[] = [];
 
       for (const file of files) {
         if (file.name === "..") continue;
 
+        if (file.type === "directory") {
+          subdirs.push(file);
+        } else {
+          totalBytes += getEntrySize(file);
+        }
+      }
+
+      if (subdirs.length > 0) {
         if (cancelledTasksRef.current.has(rootTaskId)) {
           throw new Error("Transfer cancelled");
         }
 
-        if (file.type === "directory") {
-          totalBytes += await estimateDirectoryBytes(
-            joinPath(sourcePath, file.name),
-            sourceSftpId,
-            sourceIsLocal,
-            sourceEncoding,
-            rootTaskId,
-          );
-        } else {
-          totalBytes += getEntrySize(file);
-        }
+        const subResults = await Promise.all(
+          subdirs.map((subdir) =>
+            estimateDirectoryBytes(
+              joinPath(sourcePath, subdir.name),
+              sourceSftpId,
+              sourceIsLocal,
+              sourceEncoding,
+              rootTaskId,
+            ),
+          ),
+        );
+        totalBytes += subResults.reduce((sum, size) => sum + size, 0);
       }
 
       return totalBytes;
@@ -165,6 +179,7 @@ export const useSftpTransfers = ({
         targetEncoding: targetIsLocal ? undefined : targetEncoding,
       };
 
+      let lastProgressUpdate = 0;
       const onProgress = (
         transferred: number,
         total: number,
@@ -172,6 +187,11 @@ export const useSftpTransfers = ({
       ) => {
         // Bubble up streaming progress to parent (for directory transfers)
         onStreamProgress?.(transferred, total, speed);
+
+        // Throttle state updates to at most once per 100ms
+        const now = Date.now();
+        if (now - lastProgressUpdate < 100 && transferred < total) return;
+        lastProgressUpdate = now;
 
         setTransfers((prev) =>
           prev.map((t) => {
@@ -481,8 +501,16 @@ export const useSftpTransfers = ({
         // Track real progress for directory transfers:
         // completedBytes = sum of all finished child files
         // + currentFileTransferred = in-progress bytes of the currently transferring file
+        let lastChildProgressUpdate = 0;
         const onChildProgress = (completedBytes: number, currentFileTransferred: number, currentFileTotal: number, speed: number) => {
+          // Throttle state updates to at most once per 100ms
+          const now = Date.now();
           const totalProgress = completedBytes + currentFileTransferred;
+          if (now - lastChildProgressUpdate < 100 && totalProgress < (completedBytes + currentFileTotal)) {
+            return;
+          }
+          lastChildProgressUpdate = now;
+
           setTransfers((prev) =>
             prev.map((t) => {
               if (t.id !== task.id || t.status === "cancelled") return t;
@@ -627,6 +655,11 @@ export const useSftpTransfers = ({
 
       const newTasks: TransferTask[] = [];
 
+      const canReusePaneMetadata = sourcePath === sourcePane.connection.currentPath;
+      const fileEntryMap = canReusePaneMetadata
+        ? new Map(sourcePane.files.map(f => [f.name, f]))
+        : null;
+
       for (const file of sourceFiles) {
         const direction: TransferDirection =
           sourcePane.connection!.isLocal && !targetPane.connection!.isLocal
@@ -638,10 +671,7 @@ export const useSftpTransfers = ({
         // Use cached metadata from the source pane's file list to avoid
         // redundant stat calls over the network, but only when the transfer
         // source matches the pane's currently listed directory.
-        const canReusePaneMetadata = sourcePath === sourcePane.connection.currentPath;
-        const fileEntry = canReusePaneMetadata
-          ? sourcePane.files.find((f) => f.name === file.name)
-          : undefined;
+        const fileEntry = fileEntryMap?.get(file.name);
         const fileSize = file.isDirectory ? 0 : (fileEntry?.size ?? 0);
         const sourceLastModified = fileEntry?.lastModified ?? 0;
 
@@ -723,7 +753,7 @@ export const useSftpTransfers = ({
 
   const retryTransfer = useCallback(
     async (transferId: string) => {
-      const task = transfers.find((t) => t.id === transferId);
+      const task = transfersRef.current.find((t) => t.id === transferId);
       if (!task || task.retryable === false) return;
 
       const retriedTask: TransferTask = {
@@ -760,7 +790,7 @@ export const useSftpTransfers = ({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [transfers, getActivePane],
+    [getActivePane],
   );
 
   const clearCompletedTransfers = useCallback(() => {
@@ -815,12 +845,12 @@ export const useSftpTransfers = ({
 
   const resolveConflict = useCallback(
     async (conflictId: string, action: "replace" | "skip" | "duplicate") => {
-      const conflict = conflicts.find((c) => c.transferId === conflictId);
+      const conflict = conflictsRef.current.find((c) => c.transferId === conflictId);
       if (!conflict) return;
 
       setConflicts((prev) => prev.filter((c) => c.transferId !== conflictId));
 
-      const task = transfers.find((t) => t.id === conflictId);
+      const task = transfersRef.current.find((t) => t.id === conflictId);
       if (!task) return;
 
       if (action === "skip") {
@@ -890,8 +920,8 @@ export const useSftpTransfers = ({
         }, 100);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [conflicts, transfers, getActivePane],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline; transfers/conflicts accessed via refs
+    [getActivePane],
   );
 
   const activeTransfersCount = useMemo(() => transfers.filter(

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { RemoteFile, SftpFilenameEncoding } from "../../../types";
@@ -82,6 +82,16 @@ export const useSftpViewPaneCallbacks = ({
     getSftpIdForConnection,
   });
 
+  const listLocalFilesRef = useRef(listLocalFiles);
+  const listSftpRef = useRef(listSftp);
+  const getSftpIdForConnectionRef = useRef(getSftpIdForConnection);
+
+  useEffect(() => {
+    listLocalFilesRef.current = listLocalFiles;
+    listSftpRef.current = listSftp;
+    getSftpIdForConnectionRef.current = getSftpIdForConnection;
+  }, [listLocalFiles, listSftp, getSftpIdForConnection]);
+
   const makeListDirectory = (getPane: () => SftpPane) =>
     async (path: string) => {
       const pane = getPane();
@@ -108,11 +118,11 @@ export const useSftpViewPaneCallbacks = ({
           pane.showHiddenFiles,
         );
       if (pane.connection.isLocal) {
-        return normalizeEntries(await listLocalFiles(path));
+        return normalizeEntries(await listLocalFilesRef.current(path));
       }
-      const sftpId = getSftpIdForConnection?.(pane.connection.id);
+      const sftpId = getSftpIdForConnectionRef.current?.(pane.connection.id);
       if (!sftpId) return [];
-      const rawFiles = await listSftp?.(sftpId, path, pane.filenameEncoding);
+      const rawFiles = await listSftpRef.current?.(sftpId, path, pane.filenameEncoding);
       if (!rawFiles) return [];
       return normalizeEntries(rawFiles);
     };

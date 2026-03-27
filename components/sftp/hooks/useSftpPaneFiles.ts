@@ -27,6 +27,8 @@ export const useSftpPaneFiles = ({
   sortField,
   sortOrder,
 }: UseSftpPaneFilesParams): UseSftpPaneFilesResult => {
+  // Extract ".." once and process the remaining files through filter -> sort
+  // in fewer passes, instead of repeatedly filtering/finding ".." entries.
   const filteredFiles = useMemo(() => {
     const term = filter.trim().toLowerCase();
     let nextFiles = filterHiddenFiles(files, showHiddenFiles);
@@ -36,32 +38,44 @@ export const useSftpPaneFiles = ({
     );
   }, [files, filter, showHiddenFiles]);
 
-  const displayFiles = useMemo(() => {
-    if (!connection) return [];
+  const { displayFiles, sortedDisplayFiles } = useMemo(() => {
+    if (!connection) return { displayFiles: [] as SftpFileEntry[], sortedDisplayFiles: [] as SftpFileEntry[] };
+
     const isRootPath =
       connection.currentPath === "/" ||
       /^[A-Za-z]:[\\/]?$/.test(connection.currentPath);
-    if (isRootPath) return filteredFiles;
-    const parentEntry: SftpFileEntry = {
-      name: "..",
-      type: "directory",
-      size: 0,
-      sizeFormatted: "--",
-      lastModified: 0,
-      lastModifiedFormatted: "--",
-    };
-    return [parentEntry, ...filteredFiles.filter((f) => f.name !== "..")];
-  }, [connection, filteredFiles]);
 
-  const sortedDisplayFiles = useMemo(() => {
-    if (!displayFiles.length) return displayFiles;
+    // Split ".." from other files in a single pass
+    let parentEntry: SftpFileEntry | undefined;
+    const otherFiles: SftpFileEntry[] = [];
+    for (const f of filteredFiles) {
+      if (f.name === "..") {
+        parentEntry = f;
+      } else {
+        otherFiles.push(f);
+      }
+    }
 
-    const parentEntry = displayFiles.find((f) => f.name === "..");
-    const otherFiles = displayFiles.filter((f) => f.name !== "..");
-    const sorted = sortSftpEntries(otherFiles, sortField, sortOrder);
+    // For non-root paths, always ensure a ".." entry exists
+    if (!isRootPath && !parentEntry) {
+      parentEntry = {
+        name: "..",
+        type: "directory",
+        size: 0,
+        sizeFormatted: "--",
+        lastModified: 0,
+        lastModifiedFormatted: "--",
+      };
+    }
 
-    return parentEntry ? [parentEntry, ...sorted] : sorted;
-  }, [displayFiles, sortField, sortOrder]);
+    const display = parentEntry ? [parentEntry, ...otherFiles] : otherFiles;
+    const sorted = otherFiles.length
+      ? sortSftpEntries(otherFiles, sortField, sortOrder)
+      : otherFiles;
+    const sortedDisplay = parentEntry ? [parentEntry, ...sorted] : sorted;
+
+    return { displayFiles: display, sortedDisplayFiles: sortedDisplay };
+  }, [connection, filteredFiles, sortField, sortOrder]);
 
   return { filteredFiles, displayFiles, sortedDisplayFiles };
 };

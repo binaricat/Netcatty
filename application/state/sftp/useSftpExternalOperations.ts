@@ -45,7 +45,8 @@ interface SftpExternalOperationsResult {
   activeFileWatchCountRef: React.MutableRefObject<number>;
   uploadExternalFiles: (
     side: "left" | "right",
-    dataTransfer: DataTransfer
+    dataTransfer: DataTransfer,
+    targetPath?: string
   ) => Promise<UploadResult[]>;
   uploadExternalEntries: (
     side: "left" | "right",
@@ -505,7 +506,7 @@ export const useSftpExternalOperations = (
   }, []);
 
   const uploadExternalFiles = useCallback(
-    async (side: "left" | "right", dataTransfer: DataTransfer): Promise<UploadResult[]> => {
+    async (side: "left" | "right", dataTransfer: DataTransfer, targetPath?: string): Promise<UploadResult[]> => {
       const pane = getActivePane(side);
       if (!pane?.connection) {
         throw new Error("No active connection");
@@ -525,13 +526,14 @@ export const useSftpExternalOperations = (
       }
 
       const uploadPaneId = pane.id;
+      const uploadTargetPath = targetPath || pane.connection.currentPath;
       // Create a new upload controller for this upload
       const controller = new UploadController();
       uploadControllerRef.current = controller;
 
       const callbacks = createUploadCallbacks(
         pane.connection.id,
-        pane.connection.currentPath,
+        uploadTargetPath,
         pane.connection.isLocal ? undefined : pane.connection.hostId,
         pane.connection.isLocal ? undefined : connectionCacheKeyMapRef.current.get(pane.connection.id),
       );
@@ -540,7 +542,7 @@ export const useSftpExternalOperations = (
         const results = await uploadFromDataTransfer(
           dataTransfer,
           {
-            targetPath: pane.connection.currentPath,
+            targetPath: uploadTargetPath,
             sftpId,
             isLocal: pane.connection.isLocal,
             bridge: createUploadBridge,
@@ -551,6 +553,11 @@ export const useSftpExternalOperations = (
           controller
         );
 
+        // Invalidate cache for the upload target so returning to that path
+        // triggers a fresh listing.
+        if (clearDirCacheEntry && targetPath) {
+          clearDirCacheEntry(pane.connection.id, uploadTargetPath);
+        }
         await refresh(side, { tabId: uploadPaneId });
         return results;
       } catch (error) {
@@ -561,6 +568,7 @@ export const useSftpExternalOperations = (
       }
     },
     [
+      clearDirCacheEntry,
       connectionCacheKeyMapRef,
       getActivePane,
       refresh,

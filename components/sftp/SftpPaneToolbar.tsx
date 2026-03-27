@@ -62,7 +62,7 @@ interface SftpPaneToolbarProps {
 // always gets at least ~200px of space.
 const COLLAPSE_WIDTH = 400;
 
-export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
+export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   t,
   pane,
   onNavigateTo,
@@ -650,4 +650,4 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = ({
       )}
     </TooltipProvider>
   );
-};
+});

@@ -22,7 +22,159 @@ import {
     Terminal,
 } from 'lucide-react';
 import React from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { SftpFileEntry } from '../../types';
+
+// Pre-built icon maps for O(1) lookup in getFileIcon
+type IconDef = [LucideIcon, string?];
+
+const EXTENSION_ICON_MAP = new Map<string, IconDef>([
+    // Documents
+    ['doc', [FileText, "text-blue-500"]],
+    ['docx', [FileText, "text-blue-500"]],
+    ['rtf', [FileText, "text-blue-500"]],
+    ['odt', [FileText, "text-blue-500"]],
+    ['xls', [FileSpreadsheet, "text-green-500"]],
+    ['xlsx', [FileSpreadsheet, "text-green-500"]],
+    ['csv', [FileSpreadsheet, "text-green-500"]],
+    ['ods', [FileSpreadsheet, "text-green-500"]],
+    ['ppt', [FileType, "text-orange-500"]],
+    ['pptx', [FileType, "text-orange-500"]],
+    ['odp', [FileType, "text-orange-500"]],
+    ['pdf', [FileText, "text-red-500"]],
+    // Code/Scripts
+    ['js', [FileCode, "text-yellow-500"]],
+    ['jsx', [FileCode, "text-yellow-500"]],
+    ['ts', [FileCode, "text-yellow-500"]],
+    ['tsx', [FileCode, "text-yellow-500"]],
+    ['mjs', [FileCode, "text-yellow-500"]],
+    ['cjs', [FileCode, "text-yellow-500"]],
+    ['py', [FileCode, "text-blue-400"]],
+    ['pyc', [FileCode, "text-blue-400"]],
+    ['pyw', [FileCode, "text-blue-400"]],
+    ['sh', [Terminal, "text-green-400"]],
+    ['bash', [Terminal, "text-green-400"]],
+    ['zsh', [Terminal, "text-green-400"]],
+    ['fish', [Terminal, "text-green-400"]],
+    ['bat', [Terminal, "text-green-400"]],
+    ['cmd', [Terminal, "text-green-400"]],
+    ['ps1', [Terminal, "text-green-400"]],
+    ['c', [FileCode, "text-blue-600"]],
+    ['cpp', [FileCode, "text-blue-600"]],
+    ['h', [FileCode, "text-blue-600"]],
+    ['hpp', [FileCode, "text-blue-600"]],
+    ['cc', [FileCode, "text-blue-600"]],
+    ['cxx', [FileCode, "text-blue-600"]],
+    ['java', [FileCode, "text-orange-600"]],
+    ['class', [FileCode, "text-orange-600"]],
+    ['jar', [FileCode, "text-orange-600"]],
+    ['go', [FileCode, "text-cyan-500"]],
+    ['rs', [FileCode, "text-orange-400"]],
+    ['rb', [FileCode, "text-red-400"]],
+    ['php', [FileCode, "text-purple-500"]],
+    ['html', [Globe, "text-orange-500"]],
+    ['htm', [Globe, "text-orange-500"]],
+    ['xhtml', [Globe, "text-orange-500"]],
+    ['css', [FileCode, "text-blue-500"]],
+    ['scss', [FileCode, "text-blue-500"]],
+    ['sass', [FileCode, "text-blue-500"]],
+    ['less', [FileCode, "text-blue-500"]],
+    ['vue', [FileCode, "text-green-500"]],
+    ['svelte', [FileCode, "text-green-500"]],
+    // Config/Data
+    ['json', [FileCode, "text-yellow-600"]],
+    ['json5', [FileCode, "text-yellow-600"]],
+    ['xml', [FileCode, "text-orange-400"]],
+    ['xsl', [FileCode, "text-orange-400"]],
+    ['xslt', [FileCode, "text-orange-400"]],
+    ['yml', [Settings, "text-pink-400"]],
+    ['yaml', [Settings, "text-pink-400"]],
+    ['toml', [Settings, "text-gray-400"]],
+    ['ini', [Settings, "text-gray-400"]],
+    ['conf', [Settings, "text-gray-400"]],
+    ['cfg', [Settings, "text-gray-400"]],
+    ['config', [Settings, "text-gray-400"]],
+    ['env', [Lock, "text-yellow-500"]],
+    ['sql', [Database, "text-blue-400"]],
+    ['sqlite', [Database, "text-blue-400"]],
+    ['db', [Database, "text-blue-400"]],
+    // Images
+    ['jpg', [FileImage, "text-purple-400"]],
+    ['jpeg', [FileImage, "text-purple-400"]],
+    ['png', [FileImage, "text-purple-400"]],
+    ['gif', [FileImage, "text-purple-400"]],
+    ['bmp', [FileImage, "text-purple-400"]],
+    ['webp', [FileImage, "text-purple-400"]],
+    ['svg', [FileImage, "text-purple-400"]],
+    ['ico', [FileImage, "text-purple-400"]],
+    ['tiff', [FileImage, "text-purple-400"]],
+    ['tif', [FileImage, "text-purple-400"]],
+    ['heic', [FileImage, "text-purple-400"]],
+    ['heif', [FileImage, "text-purple-400"]],
+    ['avif', [FileImage, "text-purple-400"]],
+    // Videos
+    ['mp4', [FileVideo, "text-pink-500"]],
+    ['mkv', [FileVideo, "text-pink-500"]],
+    ['avi', [FileVideo, "text-pink-500"]],
+    ['mov', [FileVideo, "text-pink-500"]],
+    ['wmv', [FileVideo, "text-pink-500"]],
+    ['flv', [FileVideo, "text-pink-500"]],
+    ['webm', [FileVideo, "text-pink-500"]],
+    ['m4v', [FileVideo, "text-pink-500"]],
+    ['3gp', [FileVideo, "text-pink-500"]],
+    ['mpeg', [FileVideo, "text-pink-500"]],
+    ['mpg', [FileVideo, "text-pink-500"]],
+    // Audio
+    ['mp3', [FileAudio, "text-green-400"]],
+    ['wav', [FileAudio, "text-green-400"]],
+    ['flac', [FileAudio, "text-green-400"]],
+    ['aac', [FileAudio, "text-green-400"]],
+    ['ogg', [FileAudio, "text-green-400"]],
+    ['m4a', [FileAudio, "text-green-400"]],
+    ['wma', [FileAudio, "text-green-400"]],
+    ['opus', [FileAudio, "text-green-400"]],
+    ['aiff', [FileAudio, "text-green-400"]],
+    // Archives
+    ['zip', [FileArchive, "text-amber-500"]],
+    ['rar', [FileArchive, "text-amber-500"]],
+    ['7z', [FileArchive, "text-amber-500"]],
+    ['tar', [FileArchive, "text-amber-500"]],
+    ['gz', [FileArchive, "text-amber-500"]],
+    ['bz2', [FileArchive, "text-amber-500"]],
+    ['xz', [FileArchive, "text-amber-500"]],
+    ['tgz', [FileArchive, "text-amber-500"]],
+    ['tbz2', [FileArchive, "text-amber-500"]],
+    ['lz', [FileArchive, "text-amber-500"]],
+    ['lzma', [FileArchive, "text-amber-500"]],
+    ['cab', [FileArchive, "text-amber-500"]],
+    ['iso', [FileArchive, "text-amber-500"]],
+    ['dmg', [FileArchive, "text-amber-500"]],
+    // Executables
+    ['exe', [File, "text-red-400"]],
+    ['msi', [File, "text-red-400"]],
+    ['app', [File, "text-red-400"]],
+    ['deb', [File, "text-red-400"]],
+    ['rpm', [File, "text-red-400"]],
+    ['apk', [File, "text-red-400"]],
+    ['ipa', [File, "text-red-400"]],
+    ['dll', [File, "text-gray-500"]],
+    ['so', [File, "text-gray-500"]],
+    ['dylib', [File, "text-gray-500"]],
+    // Keys/Certs
+    ['pem', [Key, "text-yellow-400"]],
+    ['crt', [Key, "text-yellow-400"]],
+    ['cer', [Key, "text-yellow-400"]],
+    ['key', [Key, "text-yellow-400"]],
+    ['pub', [Key, "text-yellow-400"]],
+    ['ppk', [Key, "text-yellow-400"]],
+    // Text/Markdown
+    ['md', [FileText, "text-gray-400"]],
+    ['markdown', [FileText, "text-gray-400"]],
+    ['mdx', [FileText, "text-gray-400"]],
+    ['txt', [FileText, "text-muted-foreground"]],
+    ['log', [FileText, "text-muted-foreground"]],
+    ['text', [FileText, "text-muted-foreground"]],
+]);
 
 /**
  * Format bytes with appropriate unit (B, KB, MB, GB)
@@ -70,7 +222,8 @@ export const formatSpeed = (bytesPerSecond: number): string => {
 };
 
 /**
- * Comprehensive file icon helper - returns JSX element based on file type
+ * Comprehensive file icon helper - returns JSX element based on file type.
+ * Uses pre-built Map for O(1) extension lookup.
  */
 export const getFileIcon = (entry: SftpFileEntry): React.ReactElement => {
     if (entry.type === 'directory') return React.createElement(Folder, { size: 14 });
@@ -80,89 +233,13 @@ export const getFileIcon = (entry: SftpFileEntry): React.ReactElement => {
         return React.createElement(ExternalLink, { size: 14, className: "text-cyan-500" });
     }
 
-    const ext = entry.name.split('.').pop()?.toLowerCase() || '';
+    const ext = entry.name.includes('.') ? entry.name.split('.').pop()?.toLowerCase() ?? '' : '';
 
-    // Documents
-    if (['doc', 'docx', 'rtf', 'odt'].includes(ext))
-        return React.createElement(FileText, { size: 14, className: "text-blue-500" });
-    if (['xls', 'xlsx', 'csv', 'ods'].includes(ext))
-        return React.createElement(FileSpreadsheet, { size: 14, className: "text-green-500" });
-    if (['ppt', 'pptx', 'odp'].includes(ext))
-        return React.createElement(FileType, { size: 14, className: "text-orange-500" });
-    if (['pdf'].includes(ext))
-        return React.createElement(FileText, { size: 14, className: "text-red-500" });
-
-    // Code/Scripts
-    if (['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-yellow-500" });
-    if (['py', 'pyc', 'pyw'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-blue-400" });
-    if (['sh', 'bash', 'zsh', 'fish', 'bat', 'cmd', 'ps1'].includes(ext))
-        return React.createElement(Terminal, { size: 14, className: "text-green-400" });
-    if (['c', 'cpp', 'h', 'hpp', 'cc', 'cxx'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-blue-600" });
-    if (['java', 'class', 'jar'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-orange-600" });
-    if (['go'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-cyan-500" });
-    if (['rs'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-orange-400" });
-    if (['rb'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-red-400" });
-    if (['php'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-purple-500" });
-    if (['html', 'htm', 'xhtml'].includes(ext))
-        return React.createElement(Globe, { size: 14, className: "text-orange-500" });
-    if (['css', 'scss', 'sass', 'less'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-blue-500" });
-    if (['vue', 'svelte'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-green-500" });
-
-    // Config/Data
-    if (['json', 'json5'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-yellow-600" });
-    if (['xml', 'xsl', 'xslt'].includes(ext))
-        return React.createElement(FileCode, { size: 14, className: "text-orange-400" });
-    if (['yml', 'yaml'].includes(ext))
-        return React.createElement(Settings, { size: 14, className: "text-pink-400" });
-    if (['toml', 'ini', 'conf', 'cfg', 'config'].includes(ext))
-        return React.createElement(Settings, { size: 14, className: "text-gray-400" });
-    if (['env'].includes(ext))
-        return React.createElement(Lock, { size: 14, className: "text-yellow-500" });
-    if (['sql', 'sqlite', 'db'].includes(ext))
-        return React.createElement(Database, { size: 14, className: "text-blue-400" });
-
-    // Images
-    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif', 'heic', 'heif', 'avif'].includes(ext))
-        return React.createElement(FileImage, { size: 14, className: "text-purple-400" });
-
-    // Videos
-    if (['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', '3gp', 'mpeg', 'mpg'].includes(ext))
-        return React.createElement(FileVideo, { size: 14, className: "text-pink-500" });
-
-    // Audio
-    if (['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma', 'opus', 'aiff'].includes(ext))
-        return React.createElement(FileAudio, { size: 14, className: "text-green-400" });
-
-    // Archives
-    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz', 'tbz2', 'lz', 'lzma', 'cab', 'iso', 'dmg'].includes(ext))
-        return React.createElement(FileArchive, { size: 14, className: "text-amber-500" });
-
-    // Executables
-    if (['exe', 'msi', 'app', 'deb', 'rpm', 'apk', 'ipa'].includes(ext))
-        return React.createElement(File, { size: 14, className: "text-red-400" });
-    if (['dll', 'so', 'dylib'].includes(ext))
-        return React.createElement(File, { size: 14, className: "text-gray-500" });
-
-    // Keys/Certs
-    if (['pem', 'crt', 'cer', 'key', 'pub', 'ppk'].includes(ext))
-        return React.createElement(Key, { size: 14, className: "text-yellow-400" });
-
-    // Text/Markdown
-    if (['md', 'markdown', 'mdx'].includes(ext))
-        return React.createElement(FileText, { size: 14, className: "text-gray-400" });
-    if (['txt', 'log', 'text'].includes(ext))
-        return React.createElement(FileText, { size: 14, className: "text-muted-foreground" });
+    const iconDef = EXTENSION_ICON_MAP.get(ext);
+    if (iconDef) {
+        const [Icon, className] = iconDef;
+        return React.createElement(Icon, { size: 14, ...(className ? { className } : {}) });
+    }
 
     // Default
     return React.createElement(FileCode, { size: 14 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -13,6 +13,7 @@ import { joinPath } from "../../application/state/sftp/utils";
 import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpTransferSource } from "./SftpContext";
+import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
 import type { ColumnWidths, SortField, SortOrder } from "./utils";
 import { isNavigableDirectory } from "./index";
 import { isKnownBinaryFile } from "../../lib/sftpFileUtils";
@@ -100,7 +101,7 @@ const SftpErrorWithLogs: React.FC<{
   );
 };
 
-export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
+export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   t,
   pane,
   side,
@@ -148,6 +149,21 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
     return map;
   }, [sortedDisplayFiles]);
 
+  // Push sorted file names into the list order store for keyboard navigation
+  useEffect(() => {
+    const names = sortedDisplayFiles
+      .filter((f) => f.name !== "..")
+      .map((f) => f.name);
+    sftpListOrderStore.setItems(pane.id, names);
+    return () => sftpListOrderStore.clearPane(pane.id);
+  }, [sortedDisplayFiles, pane.id]);
+
+  // Use refs for frequently-changing values so renderRow stays stable
+  const selectedFilesRef = useRef(pane.selectedFiles);
+  selectedFilesRef.current = pane.selectedFiles;
+  const dragOverEntryRef = useRef(dragOverEntry);
+  dragOverEntryRef.current = dragOverEntry;
+
   const renderRow = useCallback(
     (entry: SftpFileEntry, index: number) => (
       <ContextMenu>
@@ -155,8 +171,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
           <SftpFileRow
             entry={entry}
             index={index}
-            isSelected={pane.selectedFiles.has(entry.name)}
-            isDragOver={dragOverEntry === entry.name}
+            isSelected={selectedFilesRef.current.has(entry.name)}
+            isDragOver={dragOverEntryRef.current === entry.name}
             columnWidths={columnWidths}
             onSelect={handleRowSelect}
             onOpen={handleRowOpen}
@@ -203,8 +219,9 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             <ContextMenuSeparator />
             <ContextMenuItem
               onClick={() => {
-                const files = pane.selectedFiles.has(entry.name)
-                  ? Array.from(pane.selectedFiles)
+                const currentSelected = selectedFilesRef.current;
+                const files = currentSelected.has(entry.name)
+                  ? Array.from(currentSelected)
                   : [entry.name];
                 const fileData = files.map((name) => {
                   const fileName = String(name);
@@ -243,8 +260,9 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             <ContextMenuItem
               className="text-destructive"
               onClick={() => {
-                const files = pane.selectedFiles.has(entry.name)
-                  ? Array.from(pane.selectedFiles as Set<string>).map((n) => joinPath(pane.connection?.currentPath ?? "", n))
+                const currentSelected = selectedFilesRef.current;
+                const files = currentSelected.has(entry.name)
+                  ? Array.from(currentSelected as Set<string>).map((n) => joinPath(pane.connection?.currentPath ?? "", n))
                   : [joinPath(pane.connection?.currentPath ?? "", entry.name)];
                 openDeleteConfirm(files);
               }}
@@ -267,7 +285,6 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
     ),
     [
       columnWidths,
-      dragOverEntry,
       filesByName,
       handleEntryDragOver,
       handleEntryDrop,
@@ -285,7 +302,6 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
       openDeleteConfirm,
       openRenameDialog,
       pane.connection,
-      pane.selectedFiles,
       setShowNewFolderDialog,
       setShowNewFileDialog,
       t,
@@ -309,7 +325,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
             {renderRow(entry, index)}
           </React.Fragment>
         )),
-    [renderRow, rowHeight, shouldVirtualize, sortedDisplayFiles, visibleRows],
+    [renderRow, rowHeight, shouldVirtualize, sortedDisplayFiles, visibleRows, pane.selectedFiles, dragOverEntry],
   );
 
   return (
@@ -460,7 +476,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
     <div className="h-9 shrink-0 px-4 flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/40 bg-secondary/30">
       <span>
         {t("sftp.itemsCount", {
-          count: sortedDisplayFiles.filter((f) => f.name !== "..").length,
+          count: sortedDisplayFiles.length - (sortedDisplayFiles[0]?.name === ".." ? 1 : 0),
         })}
         {pane.selectedFiles.size > 0 &&
           ` - ${t("sftp.selectedCount", { count: pane.selectedFiles.size })}`}
@@ -500,4 +516,4 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = ({
     )}
   </>
 );
-};
+});

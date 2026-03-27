@@ -796,6 +796,13 @@ const en: Messages = {
   'settings.sftp.autoOpenSidebar.enable': 'Enable auto-open sidebar',
   'settings.sftp.autoOpenSidebar.enableDesc': 'The SFTP sidebar will open automatically when a terminal session connects to a remote host',
 
+  'settings.sftp.defaultViewMode': 'Default View Mode',
+  'settings.sftp.defaultViewMode.desc': 'Choose the default view mode when opening a new SFTP tab. Per-host preferences override this setting.',
+  'settings.sftp.defaultViewMode.list': 'List View',
+  'settings.sftp.defaultViewMode.listDesc': 'Display files in a flat list for the current directory',
+  'settings.sftp.defaultViewMode.tree': 'Tree View',
+  'settings.sftp.defaultViewMode.treeDesc': 'Display files in a hierarchical tree structure',
+
   'sftp.autoSync.success': 'File synced to remote: {fileName}',
   'sftp.autoSync.error': 'Failed to sync file: {error}',
 

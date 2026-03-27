@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPaneCallbacks, SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 import { isNavigableDirectory } from "../index";
+import { joinPath } from "../../../application/state/sftp/utils";
 
 interface UseSftpPaneDragAndSelectParams {
   side: "left" | "right";
@@ -52,17 +53,17 @@ export const useSftpPaneDragAndSelect = ({
   const lastSelectedIndexRef = useRef<number | null>(null);
 
   const selectedFilesRef = useRef(pane.selectedFiles);
+  selectedFilesRef.current = pane.selectedFiles;
   const sortedFilesRef = useRef(sortedDisplayFiles);
+  sortedFilesRef.current = sortedDisplayFiles;
+  const draggedFilesRef = useRef(draggedFiles);
+  draggedFilesRef.current = draggedFiles;
+  const onReceiveRef = useRef(onReceiveFromOtherPane);
+  onReceiveRef.current = onReceiveFromOtherPane;
+  const onUploadRef = useRef(onUploadExternalFiles);
+  onUploadRef.current = onUploadExternalFiles;
 
-  useEffect(() => {
-    selectedFilesRef.current = pane.selectedFiles;
-  }, [pane.selectedFiles]);
-
-  useEffect(() => {
-    sortedFilesRef.current = sortedDisplayFiles;
-  }, [sortedDisplayFiles]);
-
-  const handlePaneDragOver = (e: React.DragEvent) => {
+  const handlePaneDragOver = useCallback((e: React.DragEvent) => {
     const hasFiles = e.dataTransfer.types.includes("Files");
 
     if (hasFiles) {
@@ -72,36 +73,36 @@ export const useSftpPaneDragAndSelect = ({
       return;
     }
 
-    if (!draggedFiles || draggedFiles[0]?.side === side) return;
+    if (!draggedFilesRef.current || draggedFilesRef.current[0]?.side === side) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     setIsDragOverPane(true);
-  };
+  }, [side]);
 
-  const handlePaneDragLeave = (e: React.DragEvent) => {
+  const handlePaneDragLeave = useCallback((e: React.DragEvent) => {
     const relatedTarget = e.relatedTarget as Node | null;
     if (relatedTarget && paneContainerRef.current?.contains(relatedTarget)) return;
     setIsDragOverPane(false);
     setDragOverEntry(null);
-  };
+  }, []);
 
-  const handlePaneDrop = async (e: React.DragEvent) => {
+  const handlePaneDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOverPane(false);
     setDragOverEntry(null);
 
-    if (draggedFiles && draggedFiles.length > 0) {
-      if (draggedFiles[0]?.side !== side) {
-        onReceiveFromOtherPane(draggedFiles);
+    if (draggedFilesRef.current && draggedFilesRef.current.length > 0) {
+      if (draggedFilesRef.current[0]?.side !== side) {
+        onReceiveRef.current(draggedFilesRef.current);
       }
       return;
     }
 
-    if (e.dataTransfer.items.length > 0 && onUploadExternalFiles) {
-      await onUploadExternalFiles(e.dataTransfer);
+    if (e.dataTransfer.items.length > 0 && onUploadRef.current) {
+      await onUploadRef.current(e.dataTransfer);
     }
-  };
+  }, [side]);
 
   const handleFileDragStart = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
@@ -138,28 +139,54 @@ export const useSftpPaneDragAndSelect = ({
 
   const handleEntryDragOver = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
-      if (!draggedFiles || draggedFiles[0]?.side === side) return;
-      if (isNavigableDirectory(entry) && entry.name !== "..") {
+      // Handle cross-pane internal drag
+      if (draggedFilesRef.current && draggedFilesRef.current[0]?.side !== side) {
+        if (isNavigableDirectory(entry) && entry.name !== "..") {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOverEntry(entry.name);
+        }
+        return;
+      }
+      // Handle external file drag (from OS file explorer)
+      const hasFiles = e.dataTransfer.types.includes("Files");
+      if (hasFiles && isNavigableDirectory(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
         setDragOverEntry(entry.name);
       }
     },
-    [draggedFiles, side],
+    [side],
   );
 
   const handleEntryDrop = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
-      if (!draggedFiles || draggedFiles[0]?.side === side) return;
-      if (isNavigableDirectory(entry) && entry.name !== "..") {
+      // Handle cross-pane internal drag
+      if (draggedFilesRef.current && draggedFilesRef.current[0]?.side !== side) {
+        if (isNavigableDirectory(entry) && entry.name !== "..") {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOverEntry(null);
+          setIsDragOverPane(false);
+          onReceiveRef.current(draggedFilesRef.current);
+        }
+        return;
+      }
+      // Handle external file drop on a directory entry
+      const hasFiles = e.dataTransfer.types.includes("Files");
+      if (hasFiles && isNavigableDirectory(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
         setDragOverEntry(null);
         setIsDragOverPane(false);
-        onReceiveFromOtherPane(draggedFiles);
+        if (onUploadRef.current && pane.connection?.currentPath) {
+          const targetPath = joinPath(pane.connection.currentPath, entry.name);
+          void onUploadRef.current(e.dataTransfer, targetPath);
+        }
       }
     },
-    [draggedFiles, onReceiveFromOtherPane, side],
+    [side, pane.connection?.currentPath],
   );
 
   const handleRowSelect = useCallback(
@@ -168,7 +195,7 @@ export const useSftpPaneDragAndSelect = ({
       if (e.shiftKey && lastSelectedIndexRef.current !== null) {
         const start = Math.min(lastSelectedIndexRef.current, index);
         const end = Math.max(lastSelectedIndexRef.current, index);
-        const selectedFileNames = sortedDisplayFiles
+        const selectedFileNames = sortedFilesRef.current
           .slice(start, end + 1)
           .filter((f) => f.name !== "..")
           .map((f) => f.name);
@@ -178,7 +205,7 @@ export const useSftpPaneDragAndSelect = ({
         lastSelectedIndexRef.current = index;
       }
     },
-    [onRangeSelect, onToggleSelection, sortedDisplayFiles],
+    [onRangeSelect, onToggleSelection],
   );
 
   const handleRowOpen = useCallback(
