@@ -255,7 +255,7 @@ export const useCloudSync = (): CloudSyncHook => {
       throw new Error('Unexpected auth type');
     }
     const data = result.data as { url: string; redirectUri: string };
-    
+
     // Start OAuth callback server in Electron and wait for authorization
     const bridge = netcattyBridge.get();
     const startCallback = bridge?.startOAuthCallback;
@@ -263,32 +263,47 @@ export const useCloudSync = (): CloudSyncHook => {
       // Get state from adapter for CSRF protection
       const adapter = manager.getAdapter('google') as { getPKCEState?: () => string | null } | undefined;
       const expectedState = adapter?.getPKCEState?.() || undefined;
-      
+
       // Start callback server and open browser
       const callbackPromise = startCallback(expectedState);
-      
-      // Open browser after starting server
+
+      // Open browser after starting server — omit noopener so we can track the popup
+      let popup: Window | null = null;
+      let popupPollTimer: ReturnType<typeof setInterval> | null = null;
       setTimeout(() => {
-        window.open(data.url, "_blank", "width=600,height=700,noopener,noreferrer");
+        popup = window.open(data.url, "_blank", "width=600,height=700,noreferrer");
+        // Poll for popup closure — if user closes it, cancel the OAuth flow
+        if (popup) {
+          popupPollTimer = setInterval(() => {
+            if (popup?.closed) {
+              if (popupPollTimer) clearInterval(popupPollTimer);
+              bridge?.cancelOAuthCallback?.();
+            }
+          }, 500);
+        }
       }, 100);
-      
-      // Wait for callback
-      const { code } = await callbackPromise;
-      
-      // Complete auth with the received code
-      await manager.completePKCEAuth('google', code, data.redirectUri);
+
+      try {
+        // Wait for callback
+        const { code } = await callbackPromise;
+
+        // Complete auth with the received code
+        await manager.completePKCEAuth('google', code, data.redirectUri);
+      } finally {
+        if (popupPollTimer) clearInterval(popupPollTimer);
+      }
     }
-    
+
     return data.url;
   }, []);
-  
+
   const connectOneDrive = useCallback(async (): Promise<string> => {
     const result = await manager.startProviderAuth('onedrive');
     if (result.type !== 'url') {
       throw new Error('Unexpected auth type');
     }
     const data = result.data as { url: string; redirectUri: string };
-    
+
     // Start OAuth callback server in Electron and wait for authorization
     const bridge = netcattyBridge.get();
     const startCallback = bridge?.startOAuthCallback;
@@ -296,22 +311,37 @@ export const useCloudSync = (): CloudSyncHook => {
       // Get state from adapter for CSRF protection
       const adapter = manager.getAdapter('onedrive') as { getPKCEState?: () => string | null } | undefined;
       const expectedState = adapter?.getPKCEState?.() || undefined;
-      
+
       // Start callback server and open browser
       const callbackPromise = startCallback(expectedState);
-      
-      // Open browser after starting server
+
+      // Open browser after starting server — omit noopener so we can track the popup
+      let popup: Window | null = null;
+      let popupPollTimer: ReturnType<typeof setInterval> | null = null;
       setTimeout(() => {
-        window.open(data.url, "_blank", "width=600,height=700,noopener,noreferrer");
+        popup = window.open(data.url, "_blank", "width=600,height=700,noreferrer");
+        // Poll for popup closure — if user closes it, cancel the OAuth flow
+        if (popup) {
+          popupPollTimer = setInterval(() => {
+            if (popup?.closed) {
+              if (popupPollTimer) clearInterval(popupPollTimer);
+              bridge?.cancelOAuthCallback?.();
+            }
+          }, 500);
+        }
       }, 100);
-      
-      // Wait for callback
-      const { code } = await callbackPromise;
-      
-      // Complete auth with the received code
-      await manager.completePKCEAuth('onedrive', code, data.redirectUri);
+
+      try {
+        // Wait for callback
+        const { code } = await callbackPromise;
+
+        // Complete auth with the received code
+        await manager.completePKCEAuth('onedrive', code, data.redirectUri);
+      } finally {
+        if (popupPollTimer) clearInterval(popupPollTimer);
+      }
     }
-    
+
     return data.url;
   }, []);
   
