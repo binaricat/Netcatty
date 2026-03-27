@@ -503,6 +503,7 @@ function handleGetContext(params) {
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
+      "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
     hostCount: hosts.length,
@@ -521,6 +522,11 @@ function handleExec(params) {
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
 
+  // Look up device type from metadata (set by renderer from Host.deviceType).
+  const chatSessionId = params?.chatSessionId || null;
+  const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  const isNetworkDevice = meta.deviceType === "network" || session.protocol === "serial";
+
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
   // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
@@ -532,7 +538,7 @@ function handleExec(params) {
   // Additionally, execViaRawPty sends commands without shell wrapping, so shell
   // metacharacters in blocklist patterns (eval, $(), backticks, pipes) cannot
   // actually be interpreted even if sent to a serial-connected shell.
-  if (session.protocol !== "serial") {
+  if (!isNetworkDevice) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
@@ -548,6 +554,18 @@ function handleExec(params) {
 
   const sshClient = session.conn || session.sshClient;
   const ptyStream = session.stream || session.pty || session.proc;
+
+  // Network devices (switches/routers) connected via SSH: use raw execution.
+  // Their vendor CLIs (Huawei VRP, Cisco IOS, etc.) don't run a POSIX shell,
+  // so shell-wrapped commands with markers would fail. Raw mode sends commands
+  // as-is with idle-timeout completion detection — same as serial sessions.
+  if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+    return execViaRawPty(ptyStream, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activePtyExecs,
+      chatSessionId: params?.chatSessionId,
+    });
+  }
 
   // Prefer the interactive PTY so the user sees command/output in-session.
   if (ptyStream && typeof ptyStream.write === "function") {
