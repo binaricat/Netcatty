@@ -138,18 +138,17 @@ const SftpViewMount: React.FC<SftpViewProps> = (props) => {
 const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   const isVisible = useIsTerminalLayerVisible(props.draggingSessionId);
   const [shouldMount, setShouldMount] = useState(isVisible);
-  const shouldPrewarm = props.sessions.length > 0 || props.workspaces.length > 0;
 
   useEffect(() => {
     if (isVisible) setShouldMount(true);
   }, [isVisible]);
 
   useEffect(() => {
-    if (shouldMount || !shouldPrewarm) return;
+    if (shouldMount) return;
     // Warm up the terminal layer shortly after first paint to reduce latency when opening a session.
     const id = window.setTimeout(() => setShouldMount(true), 1200);
     return () => window.clearTimeout(id);
-  }, [shouldMount, shouldPrewarm]);
+  }, [shouldMount]);
 
   if (!shouldMount) return null;
 

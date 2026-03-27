@@ -189,7 +189,12 @@ export function useServerStats({
       };
     }
 
-    // Fetch immediately when resuming from hidden, or with a delay on first connect
+    // Fetch immediately when resuming from hidden, or with a delay on first connect.
+    // When resuming, reset delta-based network stats so the first sample doesn't
+    // show an averaged-over-hidden-interval throughput.
+    if (hasFetchedRef.current) {
+      setStats(prev => ({ ...prev, netRxSpeed: 0, netTxSpeed: 0 }));
+    }
     const initialTimer = setTimeout(fetchStats, hasFetchedRef.current ? 0 : 2000);
 
     // Set up periodic refresh
