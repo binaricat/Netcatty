@@ -384,8 +384,6 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           side={side}
           onLoadChildren={callbacks.onListDirectory}
           onOpenEntry={callbacks.onOpenEntry}
-          onNavigateTo={callbacks.onNavigateTo}
-          draggedFiles={draggedFiles}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           openRenameDialog={openRenameDialog}
@@ -395,6 +393,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditFile={callbacks.onEditFile}
           onDownloadFile={callbacks.onDownloadFile}
           onEditPermissions={callbacks.onEditPermissions}
+          setShowNewFolderDialog={setShowNewFolderDialog}
+          setShowNewFileDialog={setShowNewFileDialog}
         />
       ) : (
       <SftpPaneFileList
