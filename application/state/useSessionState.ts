@@ -122,6 +122,7 @@ export const useSessionState = () => {
       protocol: host.protocol,
       port: host.port,
       moshEnabled: host.moshEnabled,
+      charset: host.charset,
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(newSession.id);
@@ -337,6 +338,7 @@ export const useSessionState = () => {
         protocol: host.protocol,
         port: host.port,
         moshEnabled: host.moshEnabled,
+        charset: host.charset,
       };
     });
 
@@ -568,6 +570,7 @@ export const useSessionState = () => {
       hostname: host.hostname,
       username: host.username,
       status: 'connecting' as const,
+      charset: host.charset,
       // workspaceId will be set after workspace is created
     }));
 
