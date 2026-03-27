@@ -496,8 +496,8 @@ export const useSftpConnections = ({
       !initialConnectDoneRef.current &&
       leftTabs.tabs.length === 0
     ) {
-      initialConnectDoneRef.current = true;
       const timer = window.setTimeout(() => {
+        initialConnectDoneRef.current = true;
         connect("left", "local");
       }, 0);
       return () => window.clearTimeout(timer);
