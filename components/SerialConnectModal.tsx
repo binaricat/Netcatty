@@ -166,7 +166,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Usb size={18} />
@@ -177,7 +177,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-4 py-2 overflow-y-auto flex-1 min-h-0">
           {/* Serial Port Selection */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
