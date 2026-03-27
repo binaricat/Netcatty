@@ -191,12 +191,20 @@ export function useServerStats({
     }
 
     // Fetch immediately when resuming from hidden, or with a delay on first connect.
-    // When resuming, reset delta-based network stats so the first sample doesn't
-    // show an averaged-over-hidden-interval throughput.
+    // When resuming, reset delta-based network stats (both aggregate and per-interface)
+    // so the first sample doesn't show averaged-over-hidden-interval throughput.
     if (hasFetchedRef.current) {
-      setStats(prev => ({ ...prev, netRxSpeed: 0, netTxSpeed: 0 }));
+      setStats(prev => ({
+        ...prev,
+        netRxSpeed: 0,
+        netTxSpeed: 0,
+        netInterfaces: prev.netInterfaces.map(iface => ({ ...iface, rxSpeed: 0, txSpeed: 0 })),
+      }));
     }
-    const initialTimer = setTimeout(fetchStats, hasFetchedRef.current ? 0 : 2000);
+    // Use short delay (100ms) for first-time fetch if connection was already established
+    // before the tab became visible, full 2s only on truly fresh connections.
+    const delay = hasFetchedRef.current ? 0 : 2000;
+    const initialTimer = setTimeout(fetchStats, delay);
 
     // Set up periodic refresh
     const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
