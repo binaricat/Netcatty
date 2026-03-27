@@ -99,13 +99,15 @@ export async function executeTerminalExecute(
     if (result.stderr) parts.push(`Stderr:\n${result.stderr}`);
     return { ok: false, error: parts.join('\n\n') };
   }
-  // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge
+  // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge.
+  // Network device / serial sessions return exitCode: null because vendor CLIs don't expose
+  // exit codes. Use 0 for those instead of -1 to avoid the model misinterpreting success as failure.
   return {
     ok: true,
     data: {
       stdout: result.stdout || '',
       stderr: result.stderr || '',
-      exitCode: result.exitCode ?? -1,
+      exitCode: result.exitCode ?? (isNetworkDevice ? 0 : -1),
     },
   };
 }

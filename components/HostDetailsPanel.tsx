@@ -1549,8 +1549,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
           )}
         </Card>
 
-        {/* Network Device Mode — only for SSH hosts (serial already uses raw mode) */}
-        {(!form.protocol || form.protocol === 'ssh') && (
+        {/* Network Device Mode — only for SSH hosts without Mosh (serial already uses raw mode) */}
+        {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && (
         <Card className="p-3 space-y-2 bg-card border-border/80">
           <div className="flex items-center gap-2">
             <Router size={14} className="text-muted-foreground" />
