@@ -16,12 +16,6 @@ export interface SftpTransferSource {
     sourceConnectionId?: string;
 }
 
-export interface SftpTreeSelectionEntry {
-    path: string;
-    name: string;
-    isDirectory: boolean;
-}
-
 // Types for the context
 export interface SftpPaneCallbacks {
     onConnect: (host: Host | "local") => void;
@@ -36,7 +30,9 @@ export interface SftpPaneCallbacks {
     onClearSelection: () => void;
     onSetFilter: (filter: string) => void;
     onCreateDirectory: (name: string) => Promise<void>;
+    onCreateDirectoryAtPath: (path: string, name: string) => Promise<void>;
     onCreateFile: (name: string) => Promise<void>;
+    onCreateFileAtPath: (path: string, name: string) => Promise<void>;
     onDeleteFiles: (fileNames: string[]) => Promise<void>;
     onDeleteFilesAtPath: (connectionId: string, path: string, fileNames: string[]) => Promise<void>;
     onRenameFile: (oldName: string, newName: string) => Promise<void>;
@@ -64,17 +60,11 @@ type ActiveTabStore = {
     left: string | null;
     right: string | null;
 };
-type TreeSelectionStore = {
-    left: SftpTreeSelectionEntry[];
-    right: SftpTreeSelectionEntry[];
-};
 
 type ActiveTabListener = () => void;
 
 let activeTabState: ActiveTabStore = { left: null, right: null };
 const activeTabListeners = new Set<ActiveTabListener>();
-let treeSelectionState: TreeSelectionStore = { left: [], right: [] };
-const treeSelectionListeners = new Set<ActiveTabListener>();
 
 export const activeTabStore = {
     getSnapshot: () => activeTabState,
@@ -89,24 +79,6 @@ export const activeTabStore = {
     subscribe: (listener: ActiveTabListener) => {
         activeTabListeners.add(listener);
         return () => activeTabListeners.delete(listener);
-    },
-};
-
-export const treeSelectionStore = {
-    getSnapshot: () => treeSelectionState,
-    getSelection: (side: "left" | "right") => treeSelectionState[side],
-    setSelection: (side: "left" | "right", entries: SftpTreeSelectionEntry[]) => {
-        treeSelectionState = { ...treeSelectionState, [side]: entries };
-        treeSelectionListeners.forEach((listener) => listener());
-    },
-    clearSelection: (side: "left" | "right") => {
-        if (treeSelectionState[side].length === 0) return;
-        treeSelectionState = { ...treeSelectionState, [side]: [] };
-        treeSelectionListeners.forEach((listener) => listener());
-    },
-    subscribe: (listener: ActiveTabListener) => {
-        treeSelectionListeners.add(listener);
-        return () => treeSelectionListeners.delete(listener);
     },
 };
 

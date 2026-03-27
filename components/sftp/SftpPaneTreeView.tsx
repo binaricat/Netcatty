@@ -29,7 +29,8 @@ import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import { getParentPath, joinPath } from '../../application/state/sftp/utils';
 import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
-import { treeSelectionStore, type SftpTransferSource } from './SftpContext';
+import type { SftpTransferSource } from './SftpContext';
+import { sftpTreeSelectionStore, useSftpTreeSelectionState } from './hooks/useSftpTreeSelectionStore';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
 
@@ -52,8 +53,8 @@ interface SftpPaneTreeViewProps {
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
-  setShowNewFolderDialog: (open: boolean) => void;
-  setShowNewFileDialog: (open: boolean) => void;
+  openNewFolderDialog: (targetPath: string) => void;
+  openNewFileDialog: (targetPath: string) => void;
   reloadVersion: number;
 }
 
@@ -78,8 +79,8 @@ interface TreeNodeProps {
   openRenameDialog: (entryPath: string) => void;
   openDeleteConfirm: (entryPath: string) => void;
   onRefresh: () => void;
-  setShowNewFolderDialog: (open: boolean) => void;
-  setShowNewFileDialog: (open: boolean) => void;
+  openNewFolderDialog: (targetPath: string) => void;
+  openNewFileDialog: (targetPath: string) => void;
 }
 
 const TreeNode = React.memo<TreeNodeProps>(({
@@ -88,7 +89,7 @@ const TreeNode = React.memo<TreeNodeProps>(({
   onToggleExpand, onNodeClick, onOpenEntry, onDragStart, onDragEnd,
   onCopyToOtherPane, onOpenFileWith, onEditFile, onDownloadFile, onEditPermissions,
   openRenameDialog, openDeleteConfirm, onRefresh,
-  setShowNewFolderDialog, setShowNewFileDialog,
+  openNewFolderDialog, openNewFileDialog,
 }) => {
   const { t } = useI18n();
   const isDir = isNavigableDirectory(entry);
@@ -193,10 +194,10 @@ const TreeNode = React.memo<TreeNodeProps>(({
           <ContextMenuItem onClick={onRefresh}>
             <RefreshCw size={14} className="mr-2" />{t('common.refresh')}
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => setShowNewFolderDialog(true)}>
+          <ContextMenuItem onClick={() => openNewFolderDialog(isDir ? entryPath : getParentPath(entryPath))}>
             <FolderPlus size={14} className="mr-2" />{t('sftp.newFolder')}
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => setShowNewFileDialog(true)}>
+          <ContextMenuItem onClick={() => openNewFileDialog(isDir ? entryPath : getParentPath(entryPath))}>
             <FilePlus size={14} className="mr-2" />{t('sftp.newFile')}
           </ContextMenuItem>
         </ContextMenuContent>
@@ -221,8 +222,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   onEditFile,
   onDownloadFile,
   onEditPermissions,
-  setShowNewFolderDialog,
-  setShowNewFileDialog,
+  openNewFolderDialog,
+  openNewFileDialog,
   reloadVersion,
 }) => {
   const { t } = useI18n();
@@ -233,7 +234,11 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
   const [errorPaths, setErrorPaths] = useState<Set<string>>(new Set());
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const treeSelectionState = useSftpTreeSelectionState(pane.id);
+  const selectedPaths = useMemo(
+    () => new Set(treeSelectionState.selectedPaths),
+    [treeSelectionState.selectedPaths],
+  );
   const lastClickedPathRef = useRef<string | null>(null);
   const expandedPathsRef = useRef(expandedPaths);
   expandedPathsRef.current = expandedPaths;
@@ -262,10 +267,10 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   openRenameDialogRef.current = openRenameDialog;
   const openDeleteConfirmRef = useRef(openDeleteConfirm);
   openDeleteConfirmRef.current = openDeleteConfirm;
-  const setShowNewFolderDialogRef = useRef(setShowNewFolderDialog);
-  setShowNewFolderDialogRef.current = setShowNewFolderDialog;
-  const setShowNewFileDialogRef = useRef(setShowNewFileDialog);
-  setShowNewFileDialogRef.current = setShowNewFileDialog;
+  const openNewFolderDialogRef = useRef(openNewFolderDialog);
+  openNewFolderDialogRef.current = openNewFolderDialog;
+  const openNewFileDialogRef = useRef(openNewFileDialog);
+  openNewFileDialogRef.current = openNewFileDialog;
   const onLoadChildrenRef = useRef(onLoadChildren);
   onLoadChildrenRef.current = onLoadChildren;
   const onRefreshRef = useRef(onRefresh);
@@ -337,7 +342,7 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
       setExpandedPaths(new Set());
       setLoadingPaths(new Set());
       setErrorPaths(new Set());
-      setSelectedPaths(new Set());
+      sftpTreeSelectionStore.clearSelection(pane.id);
       lastClickedPathRef.current = null;
       return;
     }
@@ -349,14 +354,14 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
 
     invalidateTreeCache();
     void Promise.all(expanded.map(path => loadChildrenForPath(path)));
-  }, [pane.connection?.currentPath, pane.files, pane.showHiddenFiles, invalidateTreeCache, loadChildrenForPath, reloadVersion]);
+  }, [pane.connection?.currentPath, pane.files, pane.id, pane.showHiddenFiles, invalidateTreeCache, loadChildrenForPath, reloadVersion]);
 
   const flatVisibleNodesRef = useRef<Array<{ entry: SftpFileEntry; entryPath: string }>>([]);
 
   const handleNodeClick = useCallback((entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => {
     if (entry.name === '..') return;
 
-    setSelectedPaths(prev => {
+    const nextSelection = (() => {
       if (e.shiftKey && lastClickedPathRef.current) {
         const flat = flatVisibleNodesRef.current;
         const lastIdx = flat.findIndex(node => node.entryPath === lastClickedPathRef.current);
@@ -375,17 +380,19 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
       }
 
       if (e.ctrlKey || e.metaKey) {
-        const next = new Set(prev);
+        const next = new Set(selectedPathsRef.current);
         if (next.has(entryPath)) next.delete(entryPath);
         else next.add(entryPath);
-        return next;
+        return Array.from(next);
       }
 
-      return new Set([entryPath]);
-    });
+      return [entryPath];
+    })();
+
+    sftpTreeSelectionStore.setSelection(pane.id, nextSelection);
 
     lastClickedPathRef.current = entryPath;
-  }, []);
+  }, [pane.id]);
 
   const stableOnRefresh = useCallback(() => onRefreshRef.current(), []);
 
@@ -435,25 +442,24 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   entryByPathRef.current = entryByPath;
 
   useEffect(() => {
-    treeSelectionStore.setSelection(
-      side,
-      Array.from(selectedPaths)
-        .map(path => {
-          const entry = entryByPath.get(path);
-          if (!entry || entry.name === '..') return null;
-          return {
-            path,
-            name: entry.name,
-            isDirectory: isNavigableDirectory(entry),
-          };
-        })
-        .filter((entry): entry is { path: string; name: string; isDirectory: boolean } => entry !== null),
+    sftpTreeSelectionStore.setVisibleItems(
+      pane.id,
+      flatVisibleNodes
+        .filter(({ entry }) => entry.name !== '..')
+        .map(({ entry, entryPath }) => ({
+          path: entryPath,
+          name: entry.name,
+          isDirectory: isNavigableDirectory(entry),
+          sourcePath: getParentPath(entryPath),
+        })),
     );
+  }, [flatVisibleNodes, pane.id]);
 
+  useEffect(() => {
     return () => {
-      treeSelectionStore.clearSelection(side);
+      sftpTreeSelectionStore.clearPane(pane.id);
     };
-  }, [entryByPath, selectedPaths, side]);
+  }, [pane.id]);
 
   const getActionPaths = useCallback((entryPath: string) => {
     const selected = selectedPathsRef.current;
@@ -523,8 +529,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
   const stableOpenDeleteConfirm = useCallback((entryPath: string) => {
     openDeleteConfirmRef.current(getActionPaths(entryPath));
   }, [getActionPaths]);
-  const stableSetShowNewFolderDialog = useCallback((open: boolean) => setShowNewFolderDialogRef.current(open), []);
-  const stableSetShowNewFileDialog = useCallback((open: boolean) => setShowNewFileDialogRef.current(open), []);
+  const stableOpenNewFolderDialog = useCallback((targetPath: string) => openNewFolderDialogRef.current(targetPath), []);
+  const stableOpenNewFileDialog = useCallback((targetPath: string) => openNewFileDialogRef.current(targetPath), []);
 
   const treeNodes = useMemo(() => {
     return nodeDescriptors.map(descriptor => {
@@ -573,8 +579,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
           openRenameDialog={stableOpenRenameDialog}
           openDeleteConfirm={stableOpenDeleteConfirm}
           onRefresh={stableOnRefresh}
-          setShowNewFolderDialog={stableSetShowNewFolderDialog}
-          setShowNewFileDialog={stableSetShowNewFileDialog}
+          openNewFolderDialog={stableOpenNewFolderDialog}
+          openNewFileDialog={stableOpenNewFileDialog}
         />
       );
     });
@@ -595,8 +601,8 @@ export const SftpPaneTreeView: React.FC<SftpPaneTreeViewProps> = ({
     stableOpenRenameDialog,
     stableOpenDeleteConfirm,
     stableOnRefresh,
-    stableSetShowNewFolderDialog,
-    stableSetShowNewFileDialog,
+    stableOpenNewFolderDialog,
+    stableOpenNewFileDialog,
   ]);
 
   return (

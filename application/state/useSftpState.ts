@@ -183,7 +183,9 @@ export const useSftpState = (
     selectAll,
     getFilteredFiles,
     createDirectory,
+    createDirectoryAtPath,
     createFile,
+    createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
     renameFile,
@@ -311,7 +313,9 @@ export const useSftpState = (
     setFilenameEncoding,
     setShowHiddenFiles,
     createDirectory,
+    createDirectoryAtPath,
     createFile,
+    createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
     renameFile,
@@ -359,7 +363,9 @@ export const useSftpState = (
     setFilenameEncoding,
     setShowHiddenFiles,
     createDirectory,
+    createDirectoryAtPath,
     createFile,
+    createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
     renameFile,
@@ -412,7 +418,11 @@ export const useSftpState = (
     setShowHiddenFiles: (...args: Parameters<typeof setShowHiddenFiles>) =>
       methodsRef.current.setShowHiddenFiles(...args),
     createDirectory: (...args: Parameters<typeof createDirectory>) => methodsRef.current.createDirectory(...args),
+    createDirectoryAtPath: (...args: Parameters<typeof createDirectoryAtPath>) =>
+      methodsRef.current.createDirectoryAtPath(...args),
     createFile: (...args: Parameters<typeof createFile>) => methodsRef.current.createFile(...args),
+    createFileAtPath: (...args: Parameters<typeof createFileAtPath>) =>
+      methodsRef.current.createFileAtPath(...args),
     deleteFiles: (...args: Parameters<typeof deleteFiles>) => methodsRef.current.deleteFiles(...args),
     deleteFilesAtPath: (...args: Parameters<typeof deleteFilesAtPath>) =>
       methodsRef.current.deleteFilesAtPath(...args),

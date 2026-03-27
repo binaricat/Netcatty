@@ -40,7 +40,9 @@ interface UseSftpPaneActionsResult {
   setFilter: (side: "left" | "right", filter: string) => void;
   getFilteredFiles: (pane: SftpPane) => SftpFileEntry[];
   createDirectory: (side: "left" | "right", name: string) => Promise<void>;
+  createDirectoryAtPath: (side: "left" | "right", path: string, name: string) => Promise<void>;
   createFile: (side: "left" | "right", name: string) => Promise<void>;
+  createFileAtPath: (side: "left" | "right", path: string, name: string) => Promise<void>;
   deleteFiles: (side: "left" | "right", fileNames: string[]) => Promise<void>;
   deleteFilesAtPath: (
     side: "left" | "right",
@@ -468,12 +470,12 @@ export const useSftpPaneActions = ({
     );
   }, []);
 
-  const createDirectory = useCallback(
-    async (side: "left" | "right", name: string) => {
+  const createDirectoryAtPath = useCallback(
+    async (side: "left" | "right", path: string, name: string) => {
       const pane = getActivePane(side);
       if (!pane?.connection) return;
 
-      const fullPath = joinPath(pane.connection.currentPath, name);
+      const fullPath = joinPath(path, name);
 
       try {
         if (pane.connection.isLocal) {
@@ -498,12 +500,21 @@ export const useSftpPaneActions = ({
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
   );
 
-  const createFile = useCallback(
+  const createDirectory = useCallback(
     async (side: "left" | "right", name: string) => {
       const pane = getActivePane(side);
       if (!pane?.connection) return;
+      await createDirectoryAtPath(side, pane.connection.currentPath, name);
+    },
+    [createDirectoryAtPath, getActivePane],
+  );
 
-      const fullPath = joinPath(pane.connection.currentPath, name);
+  const createFileAtPath = useCallback(
+    async (side: "left" | "right", path: string, name: string) => {
+      const pane = getActivePane(side);
+      if (!pane?.connection) return;
+
+      const fullPath = joinPath(path, name);
 
       try {
         if (pane.connection.isLocal) {
@@ -540,6 +551,15 @@ export const useSftpPaneActions = ({
       }
     },
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
+  );
+
+  const createFile = useCallback(
+    async (side: "left" | "right", name: string) => {
+      const pane = getActivePane(side);
+      if (!pane?.connection) return;
+      await createFileAtPath(side, pane.connection.currentPath, name);
+    },
+    [createFileAtPath, getActivePane],
   );
 
   const deleteFiles = useCallback(
@@ -763,7 +783,9 @@ export const useSftpPaneActions = ({
     setFilter,
     getFilteredFiles,
     createDirectory,
+    createDirectoryAtPath,
     createFile,
+    createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
     renameFile,

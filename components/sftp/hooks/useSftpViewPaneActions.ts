@@ -32,8 +32,12 @@ interface UseSftpViewPaneActionsResult {
   onSetFilterRight: (filter: string) => void;
   onCreateDirectoryLeft: (name: string) => void;
   onCreateDirectoryRight: (name: string) => void;
+  onCreateDirectoryAtPathLeft: (path: string, name: string) => void;
+  onCreateDirectoryAtPathRight: (path: string, name: string) => void;
   onCreateFileLeft: (name: string) => void;
   onCreateFileRight: (name: string) => void;
+  onCreateFileAtPathLeft: (path: string, name: string) => void;
+  onCreateFileAtPathRight: (path: string, name: string) => void;
   onDeleteFilesLeft: (names: string[]) => void;
   onDeleteFilesRight: (names: string[]) => void;
   onDeleteFilesAtPathLeft: (connectionId: string, path: string, names: string[]) => void;
@@ -173,12 +177,28 @@ export const useSftpViewPaneActions = ({
     (name: string) => sftpRef.current.createDirectory("right", name),
     [sftpRef],
   );
+  const onCreateDirectoryAtPathLeft = useCallback(
+    (path: string, name: string) => sftpRef.current.createDirectoryAtPath("left", path, name),
+    [sftpRef],
+  );
+  const onCreateDirectoryAtPathRight = useCallback(
+    (path: string, name: string) => sftpRef.current.createDirectoryAtPath("right", path, name),
+    [sftpRef],
+  );
   const onCreateFileLeft = useCallback(
     (name: string) => sftpRef.current.createFile("left", name),
     [sftpRef],
   );
   const onCreateFileRight = useCallback(
     (name: string) => sftpRef.current.createFile("right", name),
+    [sftpRef],
+  );
+  const onCreateFileAtPathLeft = useCallback(
+    (path: string, name: string) => sftpRef.current.createFileAtPath("left", path, name),
+    [sftpRef],
+  );
+  const onCreateFileAtPathRight = useCallback(
+    (path: string, name: string) => sftpRef.current.createFileAtPath("right", path, name),
     [sftpRef],
   );
   const onDeleteFilesLeft = useCallback(
@@ -249,8 +269,12 @@ export const useSftpViewPaneActions = ({
     onSetFilterRight,
     onCreateDirectoryLeft,
     onCreateDirectoryRight,
+    onCreateDirectoryAtPathLeft,
+    onCreateDirectoryAtPathRight,
     onCreateFileLeft,
     onCreateFileRight,
+    onCreateFileAtPathLeft,
+    onCreateFileAtPathRight,
     onDeleteFilesLeft,
     onDeleteFilesRight,
     onDeleteFilesAtPathLeft,

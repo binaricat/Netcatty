@@ -208,6 +208,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     handleConfirmOverwrite,
     handleRename,
     handleDelete,
+    openNewFolderDialogAtPath,
+    openNewFileDialogAtPath,
     openRenameDialog,
     openDeleteConfirm,
     getNextUntitledName,
@@ -215,7 +217,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     t,
     pane,
     onCreateDirectory: callbacks.onCreateDirectory,
+    onCreateDirectoryAtPath: callbacks.onCreateDirectoryAtPath,
     onCreateFile: callbacks.onCreateFile,
+    onCreateFileAtPath: callbacks.onCreateFileAtPath,
     onRenameFileAtPath: callbacks.onRenameFileAtPath,
     onDeleteFilesAtPath: callbacks.onDeleteFilesAtPath,
     onClearSelection: callbacks.onClearSelection,
@@ -418,8 +422,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditFile={callbacks.onEditFile}
           onDownloadFile={callbacks.onDownloadFile}
           onEditPermissions={callbacks.onEditPermissions}
-          setShowNewFolderDialog={setShowNewFolderDialog}
-          setShowNewFileDialog={setShowNewFileDialog}
+          openNewFolderDialog={openNewFolderDialogAtPath}
+          openNewFileDialog={openNewFileDialogAtPath}
           reloadVersion={treeReloadVersion}
         />
       ) : (

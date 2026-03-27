@@ -7,7 +7,9 @@ interface UseSftpPaneDialogsParams {
   t: (key: string, params?: Record<string, unknown>) => string;
   pane: SftpPane;
   onCreateDirectory: SftpPaneCallbacks["onCreateDirectory"];
+  onCreateDirectoryAtPath: SftpPaneCallbacks["onCreateDirectoryAtPath"];
   onCreateFile: SftpPaneCallbacks["onCreateFile"];
+  onCreateFileAtPath: SftpPaneCallbacks["onCreateFileAtPath"];
   onRenameFileAtPath: SftpPaneCallbacks["onRenameFileAtPath"];
   onDeleteFilesAtPath: SftpPaneCallbacks["onDeleteFilesAtPath"];
   onClearSelection: SftpPaneCallbacks["onClearSelection"];
@@ -49,6 +51,8 @@ interface UseSftpPaneDialogsResult {
   handleConfirmOverwrite: () => Promise<void>;
   handleRename: () => Promise<void>;
   handleDelete: () => Promise<void>;
+  openNewFolderDialogAtPath: (path: string) => void;
+  openNewFileDialogAtPath: (path: string) => void;
   openRenameDialog: (name: string) => void;
   openDeleteConfirm: (names: string[]) => void;
   getNextUntitledName: (existingFiles: string[]) => string;
@@ -58,7 +62,9 @@ export const useSftpPaneDialogs = ({
   t,
   pane,
   onCreateDirectory,
+  onCreateDirectoryAtPath,
   onCreateFile,
+  onCreateFileAtPath,
   onRenameFileAtPath,
   onDeleteFilesAtPath,
   onClearSelection,
@@ -66,10 +72,11 @@ export const useSftpPaneDialogs = ({
 }: UseSftpPaneDialogsParams): UseSftpPaneDialogsResult => {
   const [showHostPicker, setShowHostPicker] = useState(false);
   const [hostSearch, setHostSearch] = useState("");
-  const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
+  const [showNewFolderDialogState, setShowNewFolderDialogState] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [showNewFileDialog, setShowNewFileDialog] = useState(false);
+  const [showNewFileDialogState, setShowNewFileDialogState] = useState(false);
   const [newFileName, setNewFileName] = useState("");
+  const [createTargetPath, setCreateTargetPath] = useState<string | null>(null);
   const [fileNameError, setFileNameError] = useState<string | null>(null);
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
   const [overwriteTarget, setOverwriteTarget] = useState<string | null>(null);
@@ -152,9 +159,14 @@ export const useSftpPaneDialogs = ({
     if (!newFolderName.trim() || isCreating) return;
     setIsCreating(true);
     try {
-      await onCreateDirectory(newFolderName.trim());
+      if (createTargetPath) {
+        await onCreateDirectoryAtPath(createTargetPath, newFolderName.trim());
+      } else {
+        await onCreateDirectory(newFolderName.trim());
+      }
       onMutateSuccess?.();
-      setShowNewFolderDialog(false);
+      setShowNewFolderDialogState(false);
+      setCreateTargetPath(null);
       setNewFolderName("");
     } catch {
       /* Error handling */
@@ -173,7 +185,7 @@ export const useSftpPaneDialogs = ({
       return;
     }
 
-    if (!forceOverwrite) {
+    if (!forceOverwrite && (!createTargetPath || createTargetPath === pane.connection?.currentPath)) {
       const existingFile = pane.files.find(
         (f) =>
           f.name.toLowerCase() === trimmedName.toLowerCase() && f.type === "file",
@@ -187,11 +199,16 @@ export const useSftpPaneDialogs = ({
 
     setIsCreatingFile(true);
     try {
-      await onCreateFile(trimmedName);
+      if (createTargetPath) {
+        await onCreateFileAtPath(createTargetPath, trimmedName);
+      } else {
+        await onCreateFile(trimmedName);
+      }
       onMutateSuccess?.();
-      setShowNewFileDialog(false);
+      setShowNewFileDialogState(false);
       setShowOverwriteConfirm(false);
       setOverwriteTarget(null);
+      setCreateTargetPath(null);
       setNewFileName("");
       setFileNameError(null);
     } catch {
@@ -261,6 +278,33 @@ export const useSftpPaneDialogs = ({
     setShowRenameDialog(true);
   }, []);
 
+  const setShowNewFolderDialog = useCallback((open: boolean) => {
+    if (!open) {
+      setCreateTargetPath(null);
+    }
+    setShowNewFolderDialogState(open);
+  }, []);
+
+  const setShowNewFileDialog = useCallback((open: boolean) => {
+    if (!open) {
+      setCreateTargetPath(null);
+    }
+    setShowNewFileDialogState(open);
+  }, []);
+
+  const openNewFolderDialogAtPath = useCallback((path: string) => {
+    setCreateTargetPath(path);
+    setNewFolderName("");
+    setShowNewFolderDialogState(true);
+  }, []);
+
+  const openNewFileDialogAtPath = useCallback((path: string) => {
+    setCreateTargetPath(path);
+    setNewFileName("");
+    setFileNameError(null);
+    setShowNewFileDialogState(true);
+  }, []);
+
   const openDeleteConfirm = useCallback((names: string[]) => {
     setDeleteTargets(names);
     setShowDeleteConfirm(true);
@@ -269,9 +313,9 @@ export const useSftpPaneDialogs = ({
   return {
     showHostPicker,
     hostSearch,
-    showNewFolderDialog,
+    showNewFolderDialog: showNewFolderDialogState,
     newFolderName,
-    showNewFileDialog,
+    showNewFileDialog: showNewFileDialogState,
     newFileName,
     fileNameError,
     showOverwriteConfirm,
@@ -301,6 +345,8 @@ export const useSftpPaneDialogs = ({
     handleConfirmOverwrite,
     handleRename,
     handleDelete,
+    openNewFolderDialogAtPath,
+    openNewFileDialogAtPath,
     openRenameDialog,
     openDeleteConfirm,
     getNextUntitledName,

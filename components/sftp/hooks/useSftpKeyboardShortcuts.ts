@@ -12,9 +12,9 @@ import { getParentPath } from "../../../application/state/sftp/utils";
 import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
+import { sftpTreeSelectionStore } from "./useSftpTreeSelectionStore";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { filterHiddenFiles, isNavigableDirectory } from "../index";
-import { treeSelectionStore } from "../SftpContext";
 import { toast } from "../../ui/toast";
 
 // SFTP action names that we handle
@@ -96,7 +96,8 @@ export const useSftpKeyboardShortcuts = ({
         : sftp.rightTabs.tabs.find(p => p.id === sftp.rightTabs.activeTabId);
 
       if (!pane || !pane.connection) return;
-      const treeSelection = treeSelectionStore.getSelection(focusedSide);
+      const treeSelectionState = sftpTreeSelectionStore.getPaneState(pane.id);
+      const treeSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
 
       switch (action) {
         case "sftpCopy": {
@@ -279,6 +280,11 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpSelectAll": {
+          if (treeSelectionState.visibleItems.length > 0) {
+            sftpTreeSelectionStore.selectAllVisible(pane.id);
+            break;
+          }
+
           // Select all files in the current pane
           const term = pane.filter.trim().toLowerCase();
           let visibleFiles = filterHiddenFiles(pane.files, pane.showHiddenFiles);
