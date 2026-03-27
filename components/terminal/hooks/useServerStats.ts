@@ -162,6 +162,7 @@ export function useServerStats({
       // Reset stats and fetch state when disabled or not connected
       hasFetchedRef.current = false;
       connectedAtRef.current = 0;
+      fetchInFlightRef.current = false;
       setStats({
         cpu: null,
         cpuCores: null,
