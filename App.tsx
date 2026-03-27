@@ -299,7 +299,7 @@ function App({ settings }: { settings: SettingsState }) {
     [workspaces],
   );
   const themeById = useMemo(
-    () => new Map([...TERMINAL_THEMES, ...customThemes].map((theme) => [theme.id, theme])),
+    () => new Map([...customThemes, ...TERMINAL_THEMES].map((theme) => [theme.id, theme])),
     [customThemes],
   );
   const activeTerminalTheme = useMemo<TerminalTheme | null>(() => {
