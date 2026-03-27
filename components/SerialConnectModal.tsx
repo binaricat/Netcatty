@@ -35,7 +35,7 @@ interface SerialPort {
 interface SerialConnectModalProps {
   open: boolean;
   onClose: () => void;
-  onConnect: (config: SerialConfig) => void;
+  onConnect: (config: SerialConfig, options?: { charset?: string }) => void;
   onSaveHost?: (host: Host) => void;
 }
 
@@ -65,6 +65,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
   const [flowControl, setFlowControl] = useState<SerialFlowControl>('none');
   const [localEcho, setLocalEcho] = useState(false);
   const [lineMode, setLineMode] = useState(false);
+  const [charset, setCharset] = useState('UTF-8');
 
   // Save configuration state
   const [saveConfig, setSaveConfig] = useState(false);
@@ -131,12 +132,13 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
         tags: ['serial'],
         protocol: 'serial',
         createdAt: Date.now(),
+        charset,
         serialConfig: config, // Store full serial configuration for connection
       };
       onSaveHost(host);
     }
 
-    onConnect(config);
+    onConnect(config, { charset });
     onClose();
   };
 
@@ -164,7 +166,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Usb size={18} />
@@ -175,7 +177,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-4 py-2 overflow-y-auto flex-1 min-h-0">
           {/* Serial Port Selection */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -366,6 +368,20 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
                     checked={lineMode}
                     onChange={(e) => setLineMode(e.target.checked)}
                     className="h-4 w-4 rounded border-input"
+                  />
+                </div>
+
+                {/* Charset */}
+                <div className="space-y-1">
+                  <Label htmlFor="serial-charset" className="text-sm font-medium">
+                    {t('serial.field.charset')}
+                  </Label>
+                  <Input
+                    id="serial-charset"
+                    placeholder={t("hostDetails.charset.placeholder")}
+                    value={charset}
+                    onChange={(e) => setCharset(e.target.value)}
+                    className="h-9"
                   />
                 </div>
               </div>

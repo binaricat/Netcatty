@@ -66,7 +66,7 @@ function isObserver(mode: AIPermissionMode): boolean {
 export async function executeTerminalExecute(
   deps: ToolDeps,
   args: { sessionId: string; command: string },
-): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number }>> {
+): Promise<ToolExecResult<{ stdout: string; stderr: string; exitCode: number | null }>> {
   const { bridge, context, commandBlocklist, permissionMode } = deps;
   const { sessionId, command } = args;
 
@@ -79,11 +79,14 @@ export async function executeTerminalExecute(
     return { ok: false, error: 'Observer mode: command execution is disabled. Switch to Confirm or Auto mode to execute commands.' };
   }
   // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-  // disables an interface on Cisco). Skip for serial sessions. The bridge layer
-  // (handleExec / netcatty:ai:exec) also has its own session-aware check.
+  // disables an interface on Cisco). Skip for serial and network device sessions.
+  // The bridge layer (handleExec / netcatty:ai:exec) also has its own session-aware check.
   const resolved = resolveContext(context);
   const targetSession = resolved.sessions.find(s => s.sessionId === sessionId);
-  if (targetSession?.protocol !== 'serial') {
+  const proto = targetSession?.protocol || '';
+  const isSshOrSerial = proto === 'ssh' || proto === 'serial';
+  const isNetworkDevice = proto === 'serial' || (targetSession?.deviceType === 'network' && isSshOrSerial);
+  if (!isNetworkDevice) {
     const safety = checkCommandSafety(command, commandBlocklist);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
@@ -98,13 +101,16 @@ export async function executeTerminalExecute(
     if (result.stderr) parts.push(`Stderr:\n${result.stderr}`);
     return { ok: false, error: parts.join('\n\n') };
   }
-  // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge
+  // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge.
+  // Network device / serial sessions return exitCode: null because vendor CLIs don't expose
+  // exit codes. Preserve null so the model knows exit status is unavailable rather than
+  // seeing a misleading 0 (success) or -1 (failure).
   return {
     ok: true,
     data: {
       stdout: result.stdout || '',
       stderr: result.stderr || '',
-      exitCode: result.exitCode ?? -1,
+      exitCode: isNetworkDevice ? (result.exitCode ?? null) : (result.exitCode ?? -1),
     },
   };
 }
@@ -122,6 +128,7 @@ export function executeWorkspaceGetInfo(
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
 }> {
@@ -139,6 +146,7 @@ export function executeWorkspaceGetInfo(
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
+        deviceType: s.deviceType,
         connected: s.connected,
       })),
     },

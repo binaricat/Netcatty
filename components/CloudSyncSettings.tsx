@@ -800,6 +800,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             toast.success(t('cloudSync.connect.github.success'));
         } catch (error) {
             setIsPollingGitHub(false);
+            setShowGitHubModal(false);
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('github');
             const message = getNetworkErrorMessage(error, t('common.unknownError'));
             toast.error(message, t('cloudSync.connect.github.failedTitle'));
         }
@@ -813,10 +816,13 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             // Note: Auth flow is handled automatically by oauthBridge
             toast.info(t('cloudSync.connect.browserContinue'));
         } catch (error) {
-            toast.error(
-                error instanceof Error ? error.message : t('common.unknownError'),
-                t('cloudSync.connect.google.failedTitle'),
-            );
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('google');
+            const msg = error instanceof Error ? error.message : t('common.unknownError');
+            // Don't show toast for user-initiated cancellation (popup closed)
+            if (!msg.includes('cancelled')) {
+                toast.error(msg, t('cloudSync.connect.google.failedTitle'));
+            }
         }
     };
 
@@ -828,10 +834,13 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             // Note: Auth flow is handled automatically by oauthBridge
             toast.info(t('cloudSync.connect.browserContinue'));
         } catch (error) {
-            toast.error(
-                error instanceof Error ? error.message : t('common.unknownError'),
-                t('cloudSync.connect.onedrive.failedTitle'),
-            );
+            // Reset provider status so button is clickable again (without tearing down existing connections)
+            sync.resetProviderStatus('onedrive');
+            const msg = error instanceof Error ? error.message : t('common.unknownError');
+            // Don't show toast for user-initiated cancellation (popup closed)
+            if (!msg.includes('cancelled')) {
+                toast.error(msg, t('cloudSync.connect.onedrive.failedTitle'));
+            }
         }
     };
 
@@ -1250,6 +1259,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 onClose={() => {
                     setShowGitHubModal(false);
                     setIsPollingGitHub(false);
+                    // Reset provider status so button is clickable again.
+                    // The background polling will continue until expiry but is harmless.
+                    sync.resetProviderStatus('github');
                 }}
             />
 

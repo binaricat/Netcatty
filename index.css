@@ -391,6 +391,9 @@ body {
   padding: 0 !important;
   margin: 0 !important;
   overflow-x: auto !important;
+  overflow-y: hidden !important;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   font-size: 0 !important; /* collapse whitespace text nodes */
 }
 
@@ -399,11 +402,15 @@ body {
 }
 
 [data-streamdown="code-block"] pre {
+  display: block !important;
   margin: 0 !important;
   background: transparent !important;
   border: none !important;
   border-radius: 0 !important;
   padding: 0 12px 10px !important;
+  width: max-content !important;
+  min-width: 100% !important;
   font-size: 12px !important;
   line-height: 1.5 !important;
+  white-space: pre !important;
 }

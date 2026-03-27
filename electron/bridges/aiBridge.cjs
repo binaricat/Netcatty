@@ -229,7 +229,7 @@ function init(deps) {
   sessions = deps.sessions;
   sftpClients = deps.sftpClients;
   electronModule = deps.electronModule;
-  mcpServerBridge.init({ sessions, sftpClients });
+  mcpServerBridge.init({ sessions, sftpClients, electronModule });
 
   // Wire up main window getter for MCP approval IPC
   mcpServerBridge.setMainWindowGetter(() => {
@@ -888,9 +888,18 @@ function registerHandlers(ipcMain) {
       return { ok: false, error: "Session not found" };
     }
 
+    // Look up device type from metadata (set by renderer from Host.deviceType).
+    // Mosh sessions use a shell-backed PTY, so network device mode only applies to SSH/serial.
+    // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
+    // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
+    const meta = mcpServerBridge.getSessionMeta(sessionId, chatSessionId) || {};
+    const sessionProtocol = session.protocol || session.type || meta.protocol || "";
+    const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
+    const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
+
     // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-    // disables an interface on Cisco). Skip for serial sessions.
-    if (session.protocol !== "serial") {
+    // disables an interface on Cisco). Skip for network devices and serial sessions.
+    if (!isNetworkDevice) {
       const safety = mcpServerBridge.checkCommandSafety(command);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
@@ -905,8 +914,22 @@ function registerHandlers(ipcMain) {
         };
       }
 
-      // Prefer PTY stream (visible in terminal)
       const ptyStream = session.stream || session.pty || session.proc;
+
+      // Network devices (switches/routers) connected via SSH: use raw execution.
+      // Their vendor CLIs don't run a POSIX shell, so shell-wrapped commands fail.
+      if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return execViaRawPty(ptyStream, command, {
+          timeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+          encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
+        });
+      }
+
+      // Prefer PTY stream (visible in terminal)
       if (ptyStream && typeof ptyStream.write === "function") {
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return execViaPty(ptyStream, command, {
@@ -916,7 +939,21 @@ function registerHandlers(ipcMain) {
           shellKind: session.shellKind,
           chatSessionId,
           expectedPrompt: session.lastIdlePrompt || "",
+          typedInput: true,
+          echoCommand: (rawCommand) => {
+            const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
+            safeSend(contents, "netcatty:data", {
+              sessionId,
+              data: `${rawCommand}\r\n`,
+              syntheticEcho: true,
+            });
+          },
         });
+      }
+
+      // Network devices require an interactive PTY for raw command execution.
+      if (isNetworkDevice) {
+        return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
       }
 
       // Fallback: SSH exec channel (invisible to terminal)
@@ -939,6 +976,7 @@ function registerHandlers(ipcMain) {
           timeoutMs: serialTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
+          encoding: session.serialEncoding || "utf8",
         });
       }
 
@@ -1903,7 +1941,7 @@ function registerHandlers(ipcMain) {
         `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
         `Call get_environment first to discover available sessions and their IDs. ` +
         `For normal shell commands, use terminal_execute so you receive command output. ` +
-        `For serial/raw sessions (network devices), commands are sent as-is without shell wrapping and exit codes are unavailable.]\n\n${prompt}`;
+        `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`;
 
       // Build message content: text + optional attachments
       // ACP provider only supports image/* and audio/* inline via `type: "file"`.

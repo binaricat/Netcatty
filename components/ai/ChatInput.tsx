@@ -229,7 +229,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             value={value}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder={placeholder || defaultPlaceholder}
-            disabled={disabled || isStreaming}
+            disabled={disabled}
             className={expanded ? 'max-h-[220px]' : undefined}
           />
           <button

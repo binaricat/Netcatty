@@ -58,7 +58,7 @@ export const useSessionState = () => {
     return sessionId;
   }, [setActiveTabId]);
 
-  const createSerialSession = useCallback((config: SerialConfig) => {
+  const createSerialSession = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const sessionId = crypto.randomUUID();
     const serialHostId = `serial-${sessionId}`;
     const portName = config.path.split('/').pop() || config.path;
@@ -71,6 +71,7 @@ export const useSessionState = () => {
       status: 'connecting',
       protocol: 'serial',
       serialConfig: config,
+      charset: options?.charset,
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(sessionId);
@@ -103,6 +104,7 @@ export const useSessionState = () => {
         status: 'connecting',
         protocol: 'serial',
         serialConfig: serialConfig,
+        charset: host.charset,
       };
       setSessions(prev => [...prev, newSession]);
       setActiveTabId(sessionId);
@@ -120,6 +122,7 @@ export const useSessionState = () => {
       protocol: host.protocol,
       port: host.port,
       moshEnabled: host.moshEnabled,
+      charset: host.charset,
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(newSession.id);
@@ -321,6 +324,7 @@ export const useSessionState = () => {
           status: 'connecting',
           protocol: 'serial',
           serialConfig: serialConfig,
+          charset: host.charset,
         };
       }
 
@@ -334,6 +338,7 @@ export const useSessionState = () => {
         protocol: host.protocol,
         port: host.port,
         moshEnabled: host.moshEnabled,
+        charset: host.charset,
       };
     });
 
@@ -445,8 +450,9 @@ export const useSessionState = () => {
           port: session.port,
           moshEnabled: session.moshEnabled,
           shellType: nextShellType,
+          charset: session.charset,
         };
-        
+
         // Add pane to existing workspace
         const hint: SplitHint = {
           direction,
@@ -476,13 +482,14 @@ export const useSessionState = () => {
         port: session.port,
         moshEnabled: session.moshEnabled,
         shellType: nextShellType,
+        charset: session.charset,
       };
-      
+
       const hint: SplitHint = {
         direction,
         position: direction === 'horizontal' ? 'bottom' : 'right',
       };
-      
+
       const newWorkspace = createWorkspaceEntity(sessionId, newSession.id, hint);
       setWorkspaces(prev => [...prev, newWorkspace]);
       setActiveTabId(newWorkspace.id);
@@ -563,6 +570,7 @@ export const useSessionState = () => {
       hostname: host.hostname,
       username: host.username,
       status: 'connecting' as const,
+      charset: host.charset,
       // workspaceId will be set after workspace is created
     }));
 
@@ -649,6 +657,7 @@ export const useSessionState = () => {
         port: session.port,
         moshEnabled: session.moshEnabled,
         shellType: nextShellType,
+        charset: session.charset,
         serialConfig: session.serialConfig,
       };
 
@@ -682,9 +691,11 @@ export const useSessionState = () => {
       ...workspaces.map(w => w.id),
       ...logViews.map(lv => lv.id),
     ];
+    const allTabIdSet = new Set(allTabIds);
     // Filter tabOrder to only include existing tabs, then add any new tabs at the end
-    const orderedIds = tabOrder.filter(id => allTabIds.includes(id));
-    const newIds = allTabIds.filter(id => !orderedIds.includes(id));
+    const orderedIds = tabOrder.filter(id => allTabIdSet.has(id));
+    const orderedIdSet = new Set(orderedIds);
+    const newIds = allTabIds.filter(id => !orderedIdSet.has(id));
     return [...orderedIds, ...newIds];
   }, [orphanSessions, workspaces, logViews, tabOrder]);
 
@@ -698,10 +709,12 @@ export const useSessionState = () => {
         ...workspaces.map(w => w.id),
         ...logViews.map(lv => lv.id),
       ];
+      const allTabIdSet = new Set(allTabIds);
       
       // Build current effective order: existing order + new tabs at end
-      const orderedIds = prevTabOrder.filter(id => allTabIds.includes(id));
-      const newIds = allTabIds.filter(id => !orderedIds.includes(id));
+      const orderedIds = prevTabOrder.filter(id => allTabIdSet.has(id));
+      const orderedIdSet = new Set(orderedIds);
+      const newIds = allTabIds.filter(id => !orderedIdSet.has(id));
       const currentOrder = [...orderedIds, ...newIds];
       
       const draggedIndex = currentOrder.indexOf(draggedId);

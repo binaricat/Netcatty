@@ -13,11 +13,13 @@ const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
 const { execViaPty, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
+const { safeSend } = require("./ipcUtils.cjs");
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
+let electronModule = null;
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
@@ -161,9 +163,20 @@ function cancelPtyExecsForSession(chatSessionId) {
 
 function init(deps) {
   sessions = deps.sessions;
+  electronModule = deps.electronModule || null;
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
   }
+}
+
+function echoCommandToSession(session, sessionId, command) {
+  if (!electronModule || !session?.webContentsId || !command) return;
+  const contents = electronModule.webContents?.fromId?.(session.webContentsId);
+  safeSend(contents, "netcatty:data", {
+    sessionId,
+    data: `${command}\r\n`,
+    syntheticEcho: true,
+  });
 }
 
 function setCommandBlocklist(list) {
@@ -236,6 +249,7 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       username: s.username || "",
       protocol: s.protocol || "",
       shellType: s.shellType || "",
+      deviceType: s.deviceType || "",
       connected: s.connected !== false,
     });
   }
@@ -491,6 +505,7 @@ function handleGetContext(params) {
       username: meta.username || session.username || "",
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
+      deviceType: meta.deviceType || "",
       connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
     });
   }
@@ -501,6 +516,7 @@ function handleGetContext(params) {
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
+      "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Always prefer these tools over suggesting the user to do things manually.",
     hosts,
     hostCount: hosts.length,
@@ -519,6 +535,17 @@ function handleExec(params) {
   const session = sessions?.get(sessionId);
   if (!session) return { ok: false, error: "Session not found" };
 
+  // Look up device type from metadata (set by renderer from Host.deviceType).
+  const chatSessionId = params?.chatSessionId || null;
+  const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  // Mosh sessions use a shell-backed PTY and cannot connect to vendor CLIs,
+  // so network device mode only applies to SSH and serial sessions.
+  // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
+  // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
+  const sessionProtocol = session.protocol || session.type || meta.protocol || "";
+  const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
+  const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
+
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
   // commands like "shutdown" (disable an interface) are routine on Cisco/Huawei.
@@ -530,7 +557,7 @@ function handleExec(params) {
   // Additionally, execViaRawPty sends commands without shell wrapping, so shell
   // metacharacters in blocklist patterns (eval, $(), backticks, pipes) cannot
   // actually be interpreted even if sent to a serial-connected shell.
-  if (session.protocol !== "serial") {
+  if (!isNetworkDevice) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
@@ -547,6 +574,19 @@ function handleExec(params) {
   const sshClient = session.conn || session.sshClient;
   const ptyStream = session.stream || session.pty || session.proc;
 
+  // Network devices (switches/routers) connected via SSH: use raw execution.
+  // Their vendor CLIs (Huawei VRP, Cisco IOS, etc.) don't run a POSIX shell,
+  // so shell-wrapped commands with markers would fail. Raw mode sends commands
+  // as-is with idle-timeout completion detection — same as serial sessions.
+  if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+    return execViaRawPty(ptyStream, command, {
+      timeoutMs: commandTimeoutMs,
+      trackForCancellation: activePtyExecs,
+      chatSessionId: params?.chatSessionId,
+      encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
+    });
+  }
+
   // Prefer the interactive PTY so the user sees command/output in-session.
   if (ptyStream && typeof ptyStream.write === "function") {
     return execViaPty(ptyStream, command, {
@@ -554,7 +594,15 @@ function handleExec(params) {
       timeoutMs: commandTimeoutMs,
       shellKind: session.shellKind,
       expectedPrompt: session.lastIdlePrompt || "",
+      typedInput: true,
+      echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
     });
+  }
+
+  // Network devices require an interactive PTY for raw command execution.
+  // If we got here, ptyStream wasn't writable — there's no usable channel.
+  if (isNetworkDevice) {
+    return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
   }
 
   // Fallback: SSH exec channel (invisible to terminal).
@@ -572,6 +620,7 @@ function handleExec(params) {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
       chatSessionId: params?.chatSessionId,
+      encoding: session.serialEncoding || "utf8",
     });
   }
 
@@ -657,6 +706,7 @@ module.exports = {
   activePtyExecs,
   cancelAllPtyExecs,
   cancelPtyExecsForSession,
+  getSessionMeta,
   cleanupScopedMetadata,
   cleanup,
   setMainWindowGetter,

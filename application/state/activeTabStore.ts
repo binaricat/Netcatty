@@ -6,6 +6,7 @@ type Listener = () => void;
 class ActiveTabStore {
   private activeTabId: string = 'vault';
   private listeners = new Set<Listener>();
+  private pendingNotify = false;
 
   getActiveTabId = () => this.activeTabId;
 
@@ -13,7 +14,10 @@ class ActiveTabStore {
     if (this.activeTabId !== id) {
       this.activeTabId = id;
       // Defer listener notification to avoid "setState during render" if called from a render phase
+      if (this.pendingNotify) return;
+      this.pendingNotify = true;
       Promise.resolve().then(() => {
+        this.pendingNotify = false;
         this.listeners.forEach(listener => listener());
       });
     }

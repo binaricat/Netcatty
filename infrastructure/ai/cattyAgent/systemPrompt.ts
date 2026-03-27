@@ -9,6 +9,7 @@ export interface SystemPromptContext {
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
   permissionMode: 'observer' | 'confirm' | 'autonomous';
@@ -56,7 +57,7 @@ ${permissionRules}
 
 9. **Fetch URLs when provided.** When the user shares a URL or asks you to read a webpage, use \`url_fetch\` to retrieve its content.
 
-10. **Serial/raw sessions.** Sessions with \`protocol: serial\` and \`shell: raw\` are connected to network devices or embedded systems via serial port. They do NOT run a standard shell (bash/zsh/etc). Commands are sent as-is without shell wrapping. Do not use shell syntax (pipes, redirects, environment variables, subshells). Use the device's native CLI commands (e.g. Cisco IOS, Huawei VRP, Juniper JunOS). Exit codes are unavailable for serial sessions. Consider disabling pagination first (\`screen-length 0 temporary\` for Huawei, \`terminal length 0\` for Cisco). SFTP is not available for serial sessions.${webSearchEnabled ? `
+10. **Network device sessions.** Sessions with \`protocol: serial\` (shell: raw) or \`deviceType: network\` (SSH-connected network equipment) are connected to network devices or embedded systems. They do NOT run a standard shell (bash/zsh/etc). Commands are sent as-is without shell wrapping. Do not use shell syntax (pipes, redirects, environment variables, subshells). Use the device's native CLI commands (e.g. Cisco IOS, Huawei VRP, Juniper JunOS). Exit codes are unavailable. Consider disabling pagination first (\`screen-length 0 temporary\` for Huawei, \`terminal length 0\` for Cisco). SFTP is not available for serial sessions.${webSearchEnabled ? `
 
 11. **Search proactively.** You have access to \`web_search\`. Use it whenever you encounter something you are unsure about, don't fully understand, or need to verify — including unfamiliar commands, tools, error messages, configuration syntax, or any factual claims. Don't guess; search first. Also use it when the user asks about current events or recent information. Cite sources when presenting search results.` : ''}`;
 }
@@ -91,6 +92,7 @@ function buildHostList(
       host.os ? `os: ${host.os}` : null,
       host.username ? `user: ${host.username}` : null,
       host.shellType ? `shell: ${host.shellType}` : null,
+      host.deviceType ? `deviceType: ${host.deviceType}` : null,
       `status: ${status}`,
     ]
       .filter(Boolean)

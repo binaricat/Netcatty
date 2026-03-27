@@ -34,24 +34,41 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     }
   };
 
-  const handleResizeMove = useCallback((e: MouseEvent) => {
+  const rafIdRef = useRef<number | null>(null);
+  const lastClientXRef = useRef(0);
+
+  const applyColumnWidth = useCallback(() => {
     if (!resizingRef.current) return;
-    const diff = e.clientX - resizingRef.current.startX;
+    const { field, startX, startWidth } = resizingRef.current;
+    const diff = lastClientXRef.current - startX;
     const newWidth = Math.max(
       10,
-      Math.min(60, resizingRef.current.startWidth + diff / 5),
+      Math.min(60, startWidth + diff / 5),
     );
     setColumnWidths((prev) => ({
       ...prev,
-      [resizingRef.current!.field]: newWidth,
+      [field]: newWidth,
     }));
   }, []);
 
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingRef.current) return;
+    lastClientXRef.current = e.clientX;
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      applyColumnWidth();
+    });
+  }, [applyColumnWidth]);
+
   const handleResizeEnd = useCallback(() => {
+    if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    applyColumnWidth();
+    rafIdRef.current = null;
     resizingRef.current = null;
     document.removeEventListener("mousemove", handleResizeMove);
     document.removeEventListener("mouseup", handleResizeEnd);
-  }, [handleResizeMove]);
+  }, [applyColumnWidth, handleResizeMove]);
 
   const handleResizeStart = (
     field: keyof ColumnWidths,
@@ -59,6 +76,7 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    lastClientXRef.current = e.clientX;
     resizingRef.current = {
       field,
       startX: e.clientX,

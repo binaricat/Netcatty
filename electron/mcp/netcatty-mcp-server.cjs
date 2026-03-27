@@ -81,7 +81,7 @@ function guardWriteOperation(command, { skipBlocklist = false } = {}) {
     return 'Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.';
   }
   // When skipBlocklist is true, the caller relies on the TCP bridge layer for
-  // session-aware blocklist checks (e.g. serial sessions skip shell patterns).
+  // session-aware blocklist checks (e.g. serial and network device sessions skip shell patterns).
   if (!skipBlocklist && command) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
@@ -198,7 +198,7 @@ server.resource(
 // Tool: get_environment
 server.tool(
   "get_environment",
-  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, Mosh-backed shells, or serial port connections (network devices, embedded systems). Serial sessions have protocol 'serial' and shellType 'raw'. Call this first before executing commands.",
+  "Get information about the current Netcatty scope: all terminal sessions exposed by Netcatty, their session IDs, OS, shell hints, and connection status. Sessions may be remote hosts, a local terminal, Mosh-backed shells, or serial port connections (network devices, embedded systems). Serial sessions have protocol 'serial' and shellType 'raw'. SSH sessions with deviceType 'network' are network equipment (Huawei VRP, Cisco IOS, etc.) using vendor CLIs instead of a standard shell. Call this first before executing commands.",
   {},
   async () => {
     process.stderr.write(`[netcatty-mcp] get_environment called, SCOPED_SESSION_IDS: ${JSON.stringify(SCOPED_SESSION_IDS)}, CHAT_SESSION_ID: ${CHAT_SESSION_ID}\n`);
@@ -216,7 +216,7 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a command on a Netcatty terminal session. For shell sessions, the command runs in the session's shell. For serial/raw sessions (network devices), the command is sent as-is without shell wrapping and exit codes are unavailable.",
+  "Execute a command on a Netcatty terminal session. For shell sessions, the command runs in the session's shell. For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
     command: z.string().describe("The command to execute in the target session."),
@@ -234,7 +234,7 @@ server.tool(
     const parts = [];
     if (result.stdout) parts.push(result.stdout);
     if (result.stderr) parts.push(`[stderr] ${result.stderr}`);
-    // Serial/raw sessions return null exitCode (vendor CLIs have no exit codes)
+    // Serial/raw and network device sessions return null exitCode (vendor CLIs have no exit codes)
     if (result.exitCode != null) {
       parts.push(`[exit code: ${result.exitCode}]`);
     }

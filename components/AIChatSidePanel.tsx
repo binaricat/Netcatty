@@ -56,6 +56,7 @@ interface AIChatSidePanelProps {
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
+  retargetSessionScope: (sessionId: string, scope: AISessionScope) => void;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
   updateLastMessage: (
     sessionId: string,
@@ -103,6 +104,7 @@ interface AIChatSidePanelProps {
     username?: string;
     protocol?: string;
     shellType?: string;
+    deviceType?: string;
     connected: boolean;
   }>;
   resolveExecutorContext?: (scope: {
@@ -152,6 +154,27 @@ function buildAcpHistoryMessages(messages: ChatMessage[]): Array<{ role: 'user' 
   });
 }
 
+function getSessionScopeMatchRank(
+  session: AISession,
+  scopeType: 'terminal' | 'workspace',
+  scopeTargetId?: string,
+  scopeHostIds?: string[],
+  activeTerminalTargetIds?: Set<string>,
+): number {
+  if (session.scope.type !== scopeType) return 0;
+  if (session.scope.targetId === scopeTargetId) return 2;
+
+  if (scopeType !== 'terminal' || !scopeHostIds?.length || !session.scope.hostIds?.length) {
+    return 0;
+  }
+
+  if (session.scope.targetId && activeTerminalTargetIds?.has(session.scope.targetId)) {
+    return 0;
+  }
+
+  return session.scope.hostIds.some((hostId) => scopeHostIds.includes(hostId)) ? 1 : 0;
+}
+
 // -------------------------------------------------------------------
 // Component
 // -------------------------------------------------------------------
@@ -164,6 +187,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   deleteSession,
   updateSessionTitle,
   updateSessionExternalSessionId,
+  retargetSessionScope,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
@@ -227,21 +251,115 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
 
   // Per-scope active session ID
-  const activeSessionId = activeSessionIdMap[scopeKey] ?? null;
-  const isStreaming = activeSessionId ? streamingSessionIds.has(activeSessionId) : false;
+  const activeSessionIdForScope = activeSessionIdMap[scopeKey] ?? null;
   const setActiveSessionId = useCallback((id: string | null) => {
     setActiveSessionIdForScope(scopeKey, id);
   }, [scopeKey, setActiveSessionIdForScope]);
 
-  // Restore agent selector from active session when scope changes
-  useEffect(() => {
-    if (activeSessionId) {
-      const session = sessions.find((s) => s.id === activeSessionId);
-      if (session) {
-        setCurrentAgentId(session.agentId);
+  const activeTerminalTargetIds = useMemo(() => {
+    const targetIds = new Set<string>();
+    for (const [sessionScopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
+      if (!sessionScopeKey.startsWith('terminal:') || !sessionId) continue;
+      const targetId = sessionScopeKey.slice('terminal:'.length);
+      if (!targetId || targetId === scopeTargetId) continue;
+      targetIds.add(targetId);
+    }
+    return targetIds;
+  }, [activeSessionIdMap, scopeTargetId]);
+
+  const historySessions = useMemo(
+    () =>
+      sessions
+        .map((session) => ({
+          session,
+          matchRank: getSessionScopeMatchRank(session, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds),
+        }))
+        .filter(({ matchRank }) => matchRank > 0)
+        .sort((a, b) => b.matchRank - a.matchRank || b.session.updatedAt - a.session.updatedAt)
+        .map(({ session }) => session),
+    [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds],
+  );
+
+  const activeSession = useMemo(() => {
+    if (activeSessionIdForScope) {
+      const session = sessions.find((s) => s.id === activeSessionIdForScope);
+      if (session && getSessionScopeMatchRank(session, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds) > 0) {
+        return session;
       }
     }
-  }, [scopeKey, activeSessionId, sessions]);
+    return historySessions[0] ?? null;
+  }, [sessions, activeSessionIdForScope, historySessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds]);
+
+  const activeSessionId = activeSession?.id ?? activeSessionIdForScope;
+  const isStreaming = activeSessionId ? streamingSessionIds.has(activeSessionId) : false;
+
+  const shouldRetargetActiveSession = useMemo(() => {
+    if (!activeSession || scopeType !== 'terminal' || !scopeTargetId || !scopeHostIds?.length) {
+      return false;
+    }
+
+    if (activeSession.scope.type !== scopeType || activeSession.scope.targetId === scopeTargetId) {
+      return false;
+    }
+
+    // Don't retarget sessions that are actively owned by another terminal
+    if (activeSession.scope.targetId && activeTerminalTargetIds.has(activeSession.scope.targetId)) {
+      return false;
+    }
+
+    return activeSession.scope.hostIds?.some((hostId) => scopeHostIds.includes(hostId)) ?? false;
+  }, [activeSession, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds]);
+
+  useEffect(() => {
+    if (!activeSession) return;
+
+    if (shouldRetargetActiveSession && isVisible) {
+      // Full cleanup of any in-flight work — the session came from a disconnected
+      // terminal, so any active response, pending approvals, or exec is dead.
+      if (streamingSessionIds.has(activeSession.id)) {
+        const controller = abortControllersRef.current.get(activeSession.id);
+        if (controller) {
+          controller.abort();
+          abortControllersRef.current.delete(activeSession.id);
+        }
+        setStreamingForScope(activeSession.id, false);
+        clearAllPendingApprovals(activeSession.id);
+        const bridge = getNetcattyBridge();
+        bridge?.aiCattyCancelExec?.(activeSession.id);
+        bridge?.aiAcpCancel?.('', activeSession.id);
+      }
+      retargetSessionScope(activeSession.id, {
+        type: scopeType,
+        targetId: scopeTargetId,
+        hostIds: scopeHostIds,
+      });
+      return;
+    }
+
+    if (isVisible && activeSessionIdForScope !== activeSession.id) {
+      setActiveSessionId(activeSession.id);
+    }
+  }, [
+    activeSession,
+    activeSessionIdForScope,
+    retargetSessionScope,
+    isVisible,
+    scopeHostIds,
+    scopeTargetId,
+    scopeType,
+    setActiveSessionId,
+    setStreamingForScope,
+    shouldRetargetActiveSession,
+    streamingSessionIds,
+    abortControllersRef,
+  ]);
+
+  // Restore agent selector from active session when scope changes
+  useEffect(() => {
+    if (activeSession) {
+      setCurrentAgentId(activeSession.agentId);
+    }
+  }, [scopeKey, activeSession]);
 
   // Proactively sync terminal session metadata to main process whenever scope or sessions change
   useEffect(() => {
@@ -294,12 +412,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     [enableAgent, setExternalAgents],
   );
 
-  // Active session (scoped)
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId) ?? null,
-    [sessions, activeSessionId],
-  );
-
   const messages = activeSession?.messages ?? [];
 
   // ── Export hook ──
@@ -344,15 +456,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const handleAgentModelSelect = useCallback((modelId: string) => {
     setAgentModel(currentAgentId, modelId);
   }, [currentAgentId, setAgentModel]);
-
-  // Filtered sessions for history (matching current scope type)
-  const historySessions = useMemo(
-    () =>
-      sessions
-        .filter((s) => s.scope.type === scopeType && s.scope.targetId === scopeTargetId)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [sessions, scopeType, scopeTargetId],
-  );
 
   // -------------------------------------------------------------------
   // Handlers
@@ -420,14 +523,34 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   /** Ensure a session exists for the current scope and return its ID. */
   const ensureSession = useCallback((): string => {
-    if (activeSessionId && sessionsRef.current.some((session) => session.id === activeSessionId)) {
-      return activeSessionId;
+    if (activeSession && sessionsRef.current.some((session) => session.id === activeSession.id)) {
+      if (shouldRetargetActiveSession) {
+        retargetSessionScope(activeSession.id, {
+          type: scopeType,
+          targetId: scopeTargetId,
+          hostIds: scopeHostIds,
+        });
+      } else if (activeSessionIdForScope !== activeSession.id) {
+        setActiveSessionId(activeSession.id);
+      }
+      return activeSession.id;
     }
     const scope: AISessionScope = { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds };
     const session = createSession(scope, currentAgentId);
     setActiveSessionId(session.id);
     return session.id;
-  }, [activeSessionId, scopeType, scopeTargetId, scopeHostIds, currentAgentId, createSession, setActiveSessionId]);
+  }, [
+    activeSession,
+    activeSessionIdForScope,
+    createSession,
+    currentAgentId,
+    retargetSessionScope,
+    scopeHostIds,
+    scopeTargetId,
+    scopeType,
+    setActiveSessionId,
+    shouldRetargetActiveSession,
+  ]);
 
   // -------------------------------------------------------------------
   // Main send handler (thin orchestrator)
@@ -747,9 +870,12 @@ const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
               const timeStr = formatRelativeTime(time, t);
 
               return (
-                <button
+                <div
                   key={session.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelect(session.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(session.id); }}
                   className={cn(
                     'w-full flex items-center justify-between py-2.5 border-b border-border/20 text-left transition-colors cursor-pointer group',
                     isActive ? 'text-foreground' : 'text-foreground/70 hover:text-foreground',
@@ -770,7 +896,7 @@ const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                       <Trash2 size={12} />
                     </button>
                   </div>
-                </button>
+                </div>
               );
             })
           )}

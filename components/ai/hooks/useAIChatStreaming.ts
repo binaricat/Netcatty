@@ -126,6 +126,7 @@ export interface TerminalSessionInfo {
   username?: string;
   protocol?: string;
   shellType?: string;
+  deviceType?: string;
   connected: boolean;
 }
 
@@ -688,6 +689,7 @@ export function useAIChatStreaming({
         username: s.username,
         protocol: s.protocol,
         shellType: s.shellType,
+        deviceType: s.deviceType,
         connected: s.connected,
       })),
       permissionMode: context.globalPermissionMode,

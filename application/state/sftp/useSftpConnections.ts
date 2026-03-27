@@ -496,32 +496,39 @@ export const useSftpConnections = ({
       !initialConnectDoneRef.current &&
       leftTabs.tabs.length === 0
     ) {
-      initialConnectDoneRef.current = true;
-      setTimeout(() => {
+      const timer = window.setTimeout(() => {
+        initialConnectDoneRef.current = true;
         connect("left", "local");
       }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, [autoConnectLocalOnMount, connect, leftTabs.tabs.length]);
 
   useEffect(() => {
-    const attemptReconnect = async (side: "left" | "right") => {
+    const reconnectTimers: number[] = [];
+
+    const scheduleReconnect = (side: "left" | "right") => {
       const lastHost = lastConnectedHostRef.current[side];
-      if (lastHost && reconnectingRef.current[side]) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        if (reconnectingRef.current[side]) {
-          connect(side, lastHost);
-        }
-      }
+      if (!lastHost || !reconnectingRef.current[side]) return;
+
+      const timer = window.setTimeout(() => {
+        if (!reconnectingRef.current[side]) return;
+        void connect(side, lastHost);
+      }, 1000);
+      reconnectTimers.push(timer);
     };
 
     if (leftPane.reconnecting && reconnectingRef.current.left) {
-      attemptReconnect("left");
+      scheduleReconnect("left");
     }
     if (rightPane.reconnecting && reconnectingRef.current.right) {
-      attemptReconnect("right");
+      scheduleReconnect("right");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPane.reconnecting, rightPane.reconnecting, connect]);
+
+    return () => {
+      reconnectTimers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [leftPane.reconnecting, rightPane.reconnecting, connect, lastConnectedHostRef, reconnectingRef]);
 
   const disconnect = useCallback(
     async (side: "left" | "right") => {

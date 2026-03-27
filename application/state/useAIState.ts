@@ -47,27 +47,63 @@ function cleanupAcpSessions(sessionIds: string[]) {
   }
 }
 
+function isScopeKeyActive(scopeKey: string, activeTargetIds: Set<string>) {
+  const separatorIndex = scopeKey.indexOf(':');
+  if (separatorIndex === -1) return true;
+
+  const targetId = scopeKey.slice(separatorIndex + 1);
+  if (!targetId) return true;
+
+  return activeTargetIds.has(targetId);
+}
+
 export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   const currentSessions = latestAISessionsSnapshot
     ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
     ?? [];
-  const removedSessionIds = currentSessions
+  const orphanedSessionIds = currentSessions
     .filter((session) => session.scope.targetId && !activeTargetIds.has(session.scope.targetId))
     .map((session) => session.id);
 
-  if (removedSessionIds.length === 0) return;
+  if (orphanedSessionIds.length > 0) {
+    const orphanedSessionIdSet = new Set(orphanedSessionIds);
 
-  cleanupAcpSessions(removedSessionIds);
+    // Determine which sessions can be restored via host-based matching
+    const preservedIds = new Set<string>();
+    for (const session of currentSessions) {
+      if (!orphanedSessionIdSet.has(session.id)) continue;
+      // Only preserve remote terminal sessions with real hostIds
+      const isRestorable = session.scope.type === 'terminal'
+        && session.scope.hostIds?.length
+        && session.scope.hostIds.some((id) => !id.startsWith('local-') && !id.startsWith('serial-'));
+      if (isRestorable) {
+        preservedIds.add(session.id);
+      }
+    }
 
-  const removedSessionIdSet = new Set(removedSessionIds);
+    // Cleanup ACP sessions for all orphans (both deleted and preserved).
+    // Preserved sessions will get a new externalSessionId on next use,
+    // so cleaning the old one is safe and prevents subprocess leaks.
+    cleanupAcpSessions(orphanedSessionIds);
 
-  const nextSessions = currentSessions.filter((session) => {
-    if (!session.scope.targetId) return true;
-    return activeTargetIds.has(session.scope.targetId);
-  });
-  setLatestAISessionsSnapshot(nextSessions);
-  localStorageAdapter.write(STORAGE_KEY_AI_SESSIONS, pruneSessionsForStorage(nextSessions));
-  emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
+    const nextSessions = currentSessions
+      .filter((session) => !orphanedSessionIdSet.has(session.id) || preservedIds.has(session.id))
+      .map((session) => {
+        if (!preservedIds.has(session.id) || !session.externalSessionId) {
+          return session;
+        }
+        // Drop transient ACP session handles so the next turn starts cleanly.
+        return { ...session, externalSessionId: undefined };
+      });
+
+    const sessionsChanged = nextSessions.length !== currentSessions.length
+      || nextSessions.some((session, index) => session !== currentSessions[index]);
+    if (sessionsChanged) {
+      setLatestAISessionsSnapshot(nextSessions);
+      localStorageAdapter.write(STORAGE_KEY_AI_SESSIONS, pruneSessionsForStorage(nextSessions));
+      emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
+    }
+  }
 
   const activeSessionIdMap = latestAIActiveSessionMapSnapshot
     ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
@@ -75,11 +111,10 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   let activeSessionMapChanged = false;
   const nextActiveSessionIdMap = { ...activeSessionIdMap };
 
-  for (const [scopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
-    if (sessionId && removedSessionIdSet.has(sessionId)) {
-      nextActiveSessionIdMap[scopeKey] = null;
-      activeSessionMapChanged = true;
-    }
+  for (const scopeKey of Object.keys(activeSessionIdMap)) {
+    if (isScopeKeyActive(scopeKey, activeTargetIds)) continue;
+    delete nextActiveSessionIdMap[scopeKey];
+    activeSessionMapChanged = true;
   }
 
   if (activeSessionMapChanged) {
@@ -124,6 +159,19 @@ function setLatestAISessionsSnapshot(sessions: AISession[]) {
 
 function setLatestAIActiveSessionMapSnapshot(activeSessionIdMap: Record<string, string | null>) {
   latestAIActiveSessionMapSnapshot = activeSessionIdMap;
+}
+
+function buildScopeKey(scope: AISessionScope) {
+  return `${scope.type}:${scope.targetId ?? ''}`;
+}
+
+function areHostIdsEqual(left?: string[], right?: string[]) {
+  const leftIds = left ?? [];
+  const rightIds = right ?? [];
+  if (leftIds.length !== rightIds.length) return false;
+
+  const rightSet = new Set(rightIds);
+  return leftIds.every((hostId) => rightSet.has(hostId));
 }
 
 export function useAIState() {
@@ -598,6 +646,61 @@ export function useAIState() {
     });
   }, [debouncedPersistSessions]);
 
+  const retargetSessionScope = useCallback((sessionId: string, scope: AISessionScope) => {
+    const currentSession = sessionsRef.current.find((session) => session.id === sessionId);
+    if (!currentSession) return;
+
+    const currentScope = currentSession.scope;
+    const scopeChanged =
+      currentScope.type !== scope.type
+      || currentScope.targetId !== scope.targetId
+      || !areHostIdsEqual(currentScope.hostIds, scope.hostIds);
+
+    const nextScopeKey = buildScopeKey(scope);
+    const currentScopeKey = buildScopeKey(currentScope);
+
+    if (scopeChanged) {
+      setSessionsRaw((prev) => {
+        let changed = false;
+        const next = prev.map((session) => {
+          if (session.id !== sessionId) return session;
+          changed = true;
+          // Clear stale ACP handle — retarget may run before orphan cleanup
+          return { ...session, scope, externalSessionId: undefined };
+        });
+
+        if (!changed) return prev;
+
+        sessionsRef.current = next;
+        setLatestAISessionsSnapshot(next);
+        persistSessions(next);
+        return next;
+      });
+    }
+
+    setActiveSessionIdMapRaw((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      if (currentScopeKey !== nextScopeKey && next[currentScopeKey] === sessionId) {
+        delete next[currentScopeKey];
+        changed = true;
+      }
+
+      if (next[nextScopeKey] !== sessionId) {
+        next[nextScopeKey] = sessionId;
+        changed = true;
+      }
+
+      if (!changed) return prev;
+
+      setLatestAIActiveSessionMapSnapshot(next);
+      localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, next);
+      emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
+      return next;
+    });
+  }, [persistSessions]);
+
   // Maximum messages per session to prevent unbounded memory growth
   const MAX_MESSAGES_PER_SESSION = 500;
 
@@ -750,6 +853,7 @@ export function useAIState() {
     deleteSessionsByTarget,
     updateSessionTitle,
     updateSessionExternalSessionId,
+    retargetSessionScope,
     addMessageToSession,
     updateLastMessage,
     updateMessageById,

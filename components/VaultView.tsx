@@ -115,7 +115,7 @@ interface VaultViewProps {
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onCreateLocalTerminal: () => void;
-  onConnectSerial?: (config: SerialConfig) => void;
+  onConnectSerial?: (config: SerialConfig, options?: { charset?: string }) => void;
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
   onUpdateHosts: (hosts: Host[]) => void;
@@ -2548,9 +2548,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       <SerialConnectModal
         open={isSerialModalOpen}
         onClose={() => setIsSerialModalOpen(false)}
-        onConnect={(config) => {
+        onConnect={(config, options) => {
           if (onConnectSerial) {
-            onConnectSerial(config);
+            onConnectSerial(config, options);
           }
         }}
         onSaveHost={(host) => {

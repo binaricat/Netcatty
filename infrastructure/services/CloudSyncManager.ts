@@ -859,6 +859,19 @@ export class CloudSyncManager {
   }
 
   /**
+   * Reset provider status to disconnected without tearing down existing connections.
+   * Used when an auth attempt is cancelled/fails — avoids destroying a previously
+   * working connection if the user was re-authenticating.
+   */
+  resetProviderStatus(provider: CloudProvider): void {
+    // Only reset if currently 'connecting' — don't drop an already authenticated
+    // provider back to 'disconnected' (e.g., if auth succeeded but sync init failed).
+    if (this.state.providers[provider]?.status === 'connecting') {
+      this.updateProviderStatus(provider, 'disconnected');
+    }
+  }
+
+  /**
    * Disconnect a provider
    */
   async disconnectProvider(provider: CloudProvider): Promise<void> {

@@ -50,6 +50,7 @@ interface UseServerStatsOptions {
   refreshInterval: number;    // Refresh interval in seconds
   isSupportedOs: boolean;     // Only collect stats for Linux/macOS servers
   isConnected: boolean;       // Only collect when connected
+  isVisible: boolean;         // Pause background polling for hidden terminals
 }
 
 export function useServerStats({
@@ -58,6 +59,7 @@ export function useServerStats({
   refreshInterval,
   isSupportedOs,
   isConnected,
+  isVisible,
 }: UseServerStatsOptions) {
   const [stats, setStats] = useState<ServerStats>({
     cpu: null,
@@ -84,9 +86,12 @@ export function useServerStats({
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
+  const hasFetchedRef = useRef(false);
+  const connectedAtRef = useRef(0);
+  const fetchGenerationRef = useRef(0);
 
   const fetchStats = useCallback(async () => {
-    if (!enabled || !isSupportedOs || !isConnected || !sessionId) {
+    if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
       return;
     }
 
@@ -95,15 +100,18 @@ export function useServerStats({
       return;
     }
 
+    const generation = ++fetchGenerationRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await bridge.getServerStats(sessionId);
 
-      if (!isMountedRef.current) return;
+      // Discard stale responses from before a hide/show cycle or reconnect
+      if (!isMountedRef.current || generation !== fetchGenerationRef.current) return;
 
       if (result.success && result.stats) {
+        hasFetchedRef.current = true;
         setStats({
           cpu: result.stats.cpu,
           cpuCores: result.stats.cpuCores,
@@ -129,15 +137,15 @@ export function useServerStats({
         setError(result.error);
       }
     } catch (err) {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && generation === fetchGenerationRef.current) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       }
     } finally {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && generation === fetchGenerationRef.current) {
         setIsLoading(false);
       }
     }
-  }, [sessionId, enabled, isSupportedOs, isConnected]);
+  }, [sessionId, enabled, isSupportedOs, isConnected, isVisible]);
 
   // Initial fetch and periodic refresh
   useEffect(() => {
@@ -150,7 +158,10 @@ export function useServerStats({
     }
 
     if (!enabled || !isSupportedOs || !isConnected) {
-      // Reset stats when disabled or not connected
+      // Reset stats and fetch state when disabled or not connected
+      hasFetchedRef.current = false;
+      connectedAtRef.current = 0;
+
       setStats({
         cpu: null,
         cpuCores: null,
@@ -175,10 +186,43 @@ export function useServerStats({
       return;
     }
 
-    // Initial fetch with a small delay to let the connection stabilize
-    const initialTimer = setTimeout(() => {
-      fetchStats();
-    }, 2000);
+    // Track when the connection became available for delay calculation
+    // (must be before the isVisible check so hidden tabs record connection time)
+    if (connectedAtRef.current === 0) {
+      connectedAtRef.current = Date.now();
+    }
+
+    if (!isVisible) {
+      return () => {
+        isMountedRef.current = false;
+  
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      };
+    }
+
+    // Invalidate any in-flight request from a previous visible/hidden cycle
+    // so stale responses don't overwrite the reset network stats below.
+    fetchGenerationRef.current++;
+
+    // Fetch immediately when resuming from hidden, or with a delay on first connect.
+    // When resuming, reset delta-based network stats (both aggregate and per-interface)
+    // so the first sample doesn't show averaged-over-hidden-interval throughput.
+    if (hasFetchedRef.current) {
+      setStats(prev => ({
+        ...prev,
+        netRxSpeed: 0,
+        netTxSpeed: 0,
+        netInterfaces: prev.netInterfaces.map(iface => ({ ...iface, rxSpeed: 0, txSpeed: 0 })),
+      }));
+    }
+    // Skip the warmup delay if the connection has been established long enough
+    // (e.g., tab was hidden while connected and is now becoming visible).
+    const connectionAge = Date.now() - connectedAtRef.current;
+    const needsWarmup = !hasFetchedRef.current && connectionAge < 2000;
+    const initialTimer = setTimeout(fetchStats, needsWarmup ? 2000 : 0);
 
     // Set up periodic refresh
     const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
@@ -192,7 +236,7 @@ export function useServerStats({
         intervalRef.current = null;
       }
     };
-  }, [enabled, isSupportedOs, isConnected, refreshInterval, fetchStats]);
+  }, [enabled, isSupportedOs, isConnected, isVisible, refreshInterval, fetchStats]);
 
   // Manual refresh function
   const refresh = useCallback(() => {

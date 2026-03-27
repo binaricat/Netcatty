@@ -240,6 +240,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const sessionRef = useRef<string | null>(null);
   const hasConnectedRef = useRef(false);
   const hasRunStartupCommandRef = useRef(false);
+  const terminalDataCapturedRef = useRef(false);
+  const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const commandBufferRef = useRef<string>("");
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
@@ -247,6 +249,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
   const pendingOutputScrollRef = useRef(false);
@@ -494,6 +497,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     refreshInterval: terminalSettings?.serverStatsRefreshInterval ?? 5,
     isSupportedOs: host.os === 'linux' || host.os === 'macos',
     isConnected: status === 'connected',
+    isVisible,
   });
 
   useEffect(() => {
@@ -582,6 +586,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hasConnectedRef.current = next === "connected";
     onStatusChange?.(sessionId, next);
   };
+  const handleTerminalDataCaptureOnce = useCallback((capturedSessionId: string, data: string) => {
+    const captureHandler = onTerminalDataCaptureRef.current;
+    if (!captureHandler || terminalDataCapturedRef.current) return;
+    terminalDataCapturedRef.current = true;
+    captureHandler(capturedSessionId, data);
+  }, []);
 
   const cleanupSession = () => {
     disposeDataRef.current?.();
@@ -649,7 +659,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       }
     },
     onSessionExit,
-    onTerminalDataCapture,
+    onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onOsDetected,
     onCommandExecuted,
     sessionLog,
@@ -658,6 +668,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   useEffect(() => {
     let disposed = false;
+    terminalDataCapturedRef.current = false;
     setError(null);
     hasConnectedRef.current = false;
     pendingOutputScrollRef.current = false;
@@ -775,11 +786,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     return () => {
       disposed = true;
-      if (onTerminalDataCapture && serializeAddonRef.current) {
+      if (!terminalDataCapturedRef.current && serializeAddonRef.current) {
         try {
           const terminalData = serializeAddonRef.current.serialize();
           logger.info("[Terminal] Capturing data on unmount", { sessionId, dataLength: terminalData.length });
-          onTerminalDataCapture(sessionId, terminalData);
+          handleTerminalDataCaptureOnce(sessionId, terminalData);
         } catch (err) {
           logger.warn("Failed to serialize terminal data on unmount:", err);
         }
@@ -787,7 +798,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       teardown();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Effect only runs on host.id/sessionId change, internal functions are stable
-  }, [host.id, sessionId]);
+  }, [handleTerminalDataCaptureOnce, host.id, sessionId]);
 
   // Connection timeline and timeout visuals
   useEffect(() => {
@@ -1176,6 +1187,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [sessionId]);
 
   useEffect(() => {
+    if (!isVisible) return;
+
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const handler = () => {
@@ -1193,7 +1206,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (resizeTimeout) clearTimeout(resizeTimeout);
       window.removeEventListener("resize", handler);
     };
-  }, []);
+  }, [isVisible]);
 
   const disableBracketedPasteRef = useRef(terminalSettings?.disableBracketedPaste ?? false);
   disableBracketedPasteRef.current = terminalSettings?.disableBracketedPaste ?? false;
@@ -1343,6 +1356,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!termRef.current) return;
     cleanupSession();
     auth.resetForRetry();
+    terminalDataCapturedRef.current = false;
     hasRunStartupCommandRef.current = false;
     setIsDisconnectedDialogDismissed(false);
     setStatus("connecting");

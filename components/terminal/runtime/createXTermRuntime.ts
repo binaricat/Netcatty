@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -352,6 +353,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
   });
   term.loadAddon(webLinksAddon);
+
+  // Enable Unicode 11 for better Nerd Fonts / Powerline / CJK character width handling
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = '11';
 
   logRenderer();
 

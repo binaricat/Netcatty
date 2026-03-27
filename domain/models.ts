@@ -69,6 +69,9 @@ export interface Host {
   group?: string;
   tags: string[];
   os: 'linux' | 'windows' | 'macos';
+  // Device type: 'general' for standard servers, 'network' for switches/routers/firewalls.
+  // Network devices use raw command execution (no shell wrapping) for AI agent compatibility.
+  deviceType?: 'general' | 'network';
   identityFileId?: string; // Reference to SSHKey
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial'; // Default/primary protocol
   password?: string;
@@ -617,6 +620,7 @@ export interface TerminalSession {
   port?: number;
   moshEnabled?: boolean;
   shellType?: 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
+  charset?: string; // Connection-time charset override (e.g. for quick-connect serial)
   // Serial-specific connection settings
   serialConfig?: SerialConfig;
 }
