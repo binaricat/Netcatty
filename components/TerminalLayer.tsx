@@ -1300,6 +1300,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return onSessionData(session.id, (chunk) => {
         if (!hasNotifiableTerminalOutput(filter, chunk)) return;
 
+        if (!shouldMarkSessionActivity(activeTabIdRef.current, session)) {
+          return;
+        }
+
         sessionActivityStore.setTabActive(session.id, true);
       });
     });
