@@ -890,9 +890,11 @@ function registerHandlers(ipcMain) {
 
     // Look up device type from metadata (set by renderer from Host.deviceType).
     // Mosh sessions use a shell-backed PTY, so network device mode only applies to SSH/serial.
+    // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
+    // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
     const meta = mcpServerBridge.getSessionMeta(sessionId, chatSessionId) || {};
-    const sessionProtocol = meta.protocol || session.protocol || session.type || "";
-    const isNetworkDevice = (meta.deviceType === "network" && sessionProtocol !== "mosh") || session.protocol === "serial";
+    const sessionProtocol = session.protocol || session.type || meta.protocol || "";
+    const isNetworkDevice = (meta.deviceType === "network" && sessionProtocol !== "mosh") || sessionProtocol === "serial";
 
     // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
     // disables an interface on Cisco). Skip for network devices and serial sessions.

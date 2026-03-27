@@ -527,8 +527,10 @@ function handleExec(params) {
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   // Mosh sessions use a shell-backed PTY and cannot connect to vendor CLIs,
   // so network device mode only applies to SSH and serial sessions.
-  const sessionProtocol = meta.protocol || session.protocol || session.type || "";
-  const isNetworkDevice = (meta.deviceType === "network" && sessionProtocol !== "mosh") || session.protocol === "serial";
+  // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
+  // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
+  const sessionProtocol = session.protocol || session.type || meta.protocol || "";
+  const isNetworkDevice = (meta.deviceType === "network" && sessionProtocol !== "mosh") || sessionProtocol === "serial";
 
   // The blocklist targets shell-specific patterns (rm -rf, eval, $(), etc.) that
   // are meaningless on network device CLIs. Serial sessions skip the check because
