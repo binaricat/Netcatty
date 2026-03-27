@@ -101,13 +101,14 @@ export async function executeTerminalExecute(
   }
   // Command ran (even if exit code is non-zero) — always return stdout+exitCode for LLM to judge.
   // Network device / serial sessions return exitCode: null because vendor CLIs don't expose
-  // exit codes. Use 0 for those instead of -1 to avoid the model misinterpreting success as failure.
+  // exit codes. Preserve null so the model knows exit status is unavailable rather than
+  // seeing a misleading 0 (success) or -1 (failure).
   return {
     ok: true,
     data: {
       stdout: result.stdout || '',
       stderr: result.stderr || '',
-      exitCode: result.exitCode ?? (isNetworkDevice ? 0 : -1),
+      exitCode: isNetworkDevice ? (result.exitCode ?? null) : (result.exitCode ?? -1),
     },
   };
 }
