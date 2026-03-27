@@ -733,6 +733,7 @@ declare global {
       username?: string;
       protocol?: string;
       shellType?: string;
+      deviceType?: string;
       connected: boolean;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
     aiSpawnAgent?(agentId: string, command: string, args?: string[], env?: Record<string, string>, options?: { closeStdin?: boolean }): Promise<{ ok: boolean; pid?: number; error?: string }>;

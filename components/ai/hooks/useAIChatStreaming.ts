@@ -126,6 +126,7 @@ export interface TerminalSessionInfo {
   username?: string;
   protocol?: string;
   shellType?: string;
+  deviceType?: string;
   connected: boolean;
 }
 

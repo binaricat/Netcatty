@@ -236,6 +236,7 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       username: s.username || "",
       protocol: s.protocol || "",
       shellType: s.shellType || "",
+      deviceType: s.deviceType || "",
       connected: s.connected !== false,
     });
   }
@@ -491,6 +492,7 @@ function handleGetContext(params) {
       username: meta.username || session.username || "",
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
+      deviceType: meta.deviceType || "",
       connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
     });
   }

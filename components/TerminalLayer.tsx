@@ -204,6 +204,7 @@ type AITerminalSessionInfo = {
   username?: string;
   protocol?: string;
   shellType?: string;
+  deviceType?: string;
   connected: boolean;
 };
 
@@ -235,6 +236,7 @@ const buildAITerminalSessionInfo = (
     username: host?.username || session?.username,
     protocol,
     shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
+    deviceType: host?.deviceType,
     connected: session?.status === 'connected',
   };
 };
