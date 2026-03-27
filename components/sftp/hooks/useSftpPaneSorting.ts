@@ -39,14 +39,15 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
 
   const applyColumnWidth = useCallback(() => {
     if (!resizingRef.current) return;
-    const diff = lastClientXRef.current - resizingRef.current.startX;
+    const { field, startX, startWidth } = resizingRef.current;
+    const diff = lastClientXRef.current - startX;
     const newWidth = Math.max(
       10,
-      Math.min(60, resizingRef.current.startWidth + diff / 5),
+      Math.min(60, startWidth + diff / 5),
     );
     setColumnWidths((prev) => ({
       ...prev,
-      [resizingRef.current!.field]: newWidth,
+      [field]: newWidth,
     }));
   }, []);
 
