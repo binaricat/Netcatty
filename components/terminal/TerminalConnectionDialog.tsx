@@ -84,14 +84,21 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
             "absolute inset-0 z-20 flex items-center justify-center",
             needsAuth ? "bg-black" : "bg-black/30"
         )}>
-            <div className="w-[560px] max-w-[90vw] bg-background/95 border border-border/60 rounded-xl shadow-xl p-6 space-y-4">
+            <div
+                className="w-[480px] max-w-[88vw] rounded-xl shadow-xl p-4 space-y-3"
+                style={{
+                    backgroundColor: 'color-mix(in srgb, var(--terminal-ui-bg, var(--background)) 95%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 12%, var(--terminal-ui-bg, var(--background)) 88%)',
+                    color: 'var(--terminal-ui-fg, var(--foreground))',
+                }}
+            >
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-10 w-10 rounded-lg shrink-0" />
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <DistroAvatar host={host} fallback={host.label.slice(0, 2).toUpperCase()} className="h-8 w-8 rounded-md shrink-0" />
                         <div className="min-w-0">
                             {chainProgress ? (
                                 <>
-                                    <div className="text-sm font-semibold truncate">
+                                    <div className="text-xs font-semibold truncate">
                                         <span className="text-muted-foreground">
                                             {t('terminal.connection.chainOf', {
                                                 current: chainProgress.currentHop,
@@ -101,14 +108,20 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         </span>
                                         <span>{chainProgress.currentHostLabel}</span>
                                     </div>
-                                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                                    <div
+                                        className="text-[10px] font-mono truncate"
+                                        style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 58%, transparent)' }}
+                                    >
                                         {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
                             ) : (
                                 <>
-                                    <div className="text-lg font-semibold truncate">{host.label}</div>
-                                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                                    <div className="text-base font-semibold truncate">{host.label}</div>
+                                    <div
+                                        className="text-[10px] font-mono truncate"
+                                        style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 58%, transparent)' }}
+                                    >
                                         {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
                                     </div>
                                 </>
@@ -120,7 +133,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-8 text-xs"
+                                className="h-7 px-3 text-[11px]"
                                 onClick={() => setShowLogs(!showLogs)}
                             >
                                 {showLogs ? t('terminal.connection.hideLogs') : t('terminal.connection.showLogs')}
@@ -130,7 +143,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-8 text-xs"
+                                className="h-7 px-3 text-[11px]"
                                 onClick={progressProps.onCancelConnect}
                                 disabled={progressProps.isCancelling}
                             >
@@ -141,7 +154,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             <Button
                                 size="icon"
                                 variant="ghost"
-                                className="h-8 w-8"
+                                className="h-7 w-7"
                                 aria-label={t('terminal.connection.dismissDisconnectedDialog')}
                                 title={t('terminal.connection.dismissDisconnectedDialog')}
                                 onClick={onDismissDisconnected}
@@ -152,10 +165,10 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                     </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                     <div className="flex items-center gap-3">
                         <div className={cn(
-                            "h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                            "h-7 w-7 rounded-md flex items-center justify-center flex-shrink-0",
                             needsAuth
                                 ? "bg-primary text-primary-foreground"
                                 : hasError
@@ -164,7 +177,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         ? "bg-primary/15 text-primary"
                                         : "bg-muted text-muted-foreground"
                         )}>
-                            <Plug size={14} />
+                            <Plug size={13} />
                         </div>
                         <div className="flex-1 h-1.5 rounded-full bg-border/60 overflow-hidden relative">
                             <div
@@ -178,13 +191,13 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             />
                         </div>
                         <div className={cn(
-                            "h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                            "h-7 w-7 rounded-md flex items-center justify-center flex-shrink-0",
                             hasError ? "bg-destructive/20 text-destructive" : "bg-muted text-muted-foreground"
                         )}>
                             {isConnecting ? (
-                                <Loader2 size={14} className="animate-spin" />
+                                <Loader2 size={13} className="animate-spin" />
                             ) : (
-                                <TerminalSquare size={14} />
+                                <TerminalSquare size={13} />
                             )}
                         </div>
                     </div>

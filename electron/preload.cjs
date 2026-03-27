@@ -1275,6 +1275,19 @@ const api = {
 const figSpecApi = {
   listFigSpecs: () => ipcRenderer.invoke("netcatty:figspec:list"),
   loadFigSpec: (commandName) => ipcRenderer.invoke("netcatty:figspec:load", commandName),
+  listAutocompleteRemoteDir: (sessionId, dirPath, foldersOnly, filterPrefix, limit) => ipcRenderer.invoke("netcatty:ssh:listdir", {
+    sessionId,
+    path: dirPath,
+    foldersOnly,
+    filterPrefix,
+    limit,
+  }),
+  listAutocompleteLocalDir: (dirPath, foldersOnly, filterPrefix, limit) => ipcRenderer.invoke("netcatty:local:listdir", {
+    path: dirPath,
+    foldersOnly,
+    filterPrefix,
+    limit,
+  }),
 };
 
 // Merge with existing netcatty (if any) to avoid stale objects on hot reload

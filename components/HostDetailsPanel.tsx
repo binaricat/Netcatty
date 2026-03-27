@@ -30,7 +30,6 @@ import {
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
-import { useSettingsState } from "../application/state/useSettingsState";
 import { getEffectiveHostDistro, LINUX_DISTRO_OPTIONS } from "../domain/host";
 import { customThemeStore } from "../application/state/customThemeStore";
 import {
@@ -93,6 +92,8 @@ interface HostDetailsPanelProps {
   allTags?: string[]; // All available tags for autocomplete
   allHosts?: Host[]; // All hosts for chain selection
   defaultGroup?: string | null; // Default group for new hosts (from current navigation)
+  terminalThemeId: string;
+  terminalFontSize: number;
   onSave: (host: Host) => void;
   onCancel: () => void;
   onCreateGroup?: (groupPath: string) => void; // Callback to create a new group
@@ -108,6 +109,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   allTags = [],
   allHosts = [],
   defaultGroup,
+  terminalThemeId,
+  terminalFontSize,
   onSave,
   onCancel,
   onCreateGroup,
@@ -115,7 +118,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 }) => {
   const { t } = useI18n();
   const { checkSshAgent } = useApplicationBackend();
-  const { terminalThemeId, terminalFontSize } = useSettingsState();
   const [form, setForm] = useState<Host>(
     () =>
       initialData ||

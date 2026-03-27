@@ -8,14 +8,15 @@
  * - Input debouncing
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { GhostTextAddon } from "./GhostTextAddon";
 import { detectPrompt, type PromptDetectionResult } from "./promptDetector";
-import { getCompletions, type CompletionSuggestion } from "./completionEngine";
+import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import { recordCommand } from "./commandHistoryStore";
 import { preloadCommonSpecs } from "./figSpecLoader";
 import { getXTermCellDimensions } from "./xtermUtils";
+import { listDirectoryEntries, normalizePathTokenForLookup } from "./remotePathCompleter";
 
 export interface AutocompleteSettings {
   enabled: boolean;
@@ -44,15 +45,37 @@ const EMPTY_STATE: AutocompleteState = Object.freeze({
   selectedIndex: -1,
   popupVisible: false,
   popupPosition: { x: 0, y: 0 },
+  popupCursorLineTop: 0,
+  popupCursorLineBottom: 0,
   expandUpward: false,
+  subDirPanels: [],
+  subDirFocusLevel: -1,
 });
+
+export interface SubDirEntry {
+  name: string;
+  type: "file" | "directory" | "symlink";
+}
+
+export interface SubDirPanel {
+  entries: SubDirEntry[];
+  selectedIndex: number;
+  /** The absolute directory path this panel lists */
+  dirPath: string;
+}
 
 export interface AutocompleteState {
   suggestions: CompletionSuggestion[];
   selectedIndex: number;
   popupVisible: boolean;
   popupPosition: { x: number; y: number };
+  popupCursorLineTop: number;
+  popupCursorLineBottom: number;
   expandUpward: boolean;
+  /** Stack of sub-directory panels (cascading: panel 0 → panel 1 → ...) */
+  subDirPanels: SubDirPanel[];
+  /** Which level has focus: -1 = main panel, 0+ = sub-dir panel index */
+  subDirFocusLevel: number;
 }
 
 interface UseTerminalAutocompleteOptions {
@@ -63,6 +86,10 @@ interface UseTerminalAutocompleteOptions {
   settings?: Partial<AutocompleteSettings>;
   /** Callback to write text to the terminal session — replaces CustomEvent */
   onAcceptText?: (text: string) => void;
+  /** Connection protocol for path completion routing */
+  protocol?: string;
+  /** Get current working directory (from OSC 7 or other source) */
+  getCwd?: () => string | undefined;
 }
 
 export interface TerminalAutocompleteHandle {
@@ -71,6 +98,7 @@ export interface TerminalAutocompleteHandle {
   handleInput: (data: string) => void;
   handleKeyEvent: (e: KeyboardEvent) => boolean;
   selectSuggestion: (suggestion: CompletionSuggestion) => void;
+  repositionPopup: () => void;
   closePopup: () => void;
   dispose: () => void;
 }
@@ -78,11 +106,14 @@ export interface TerminalAutocompleteHandle {
 export function useTerminalAutocomplete(
   options: UseTerminalAutocompleteOptions,
 ): TerminalAutocompleteHandle {
-  const { termRef, sessionId, hostId, hostOs, settings: userSettings, onAcceptText } = options;
-
-  const settings: AutocompleteSettings = {
+  const { termRef, sessionId, hostId, hostOs, settings: userSettings, onAcceptText, protocol, getCwd } = options;
+  const rawSettings: AutocompleteSettings = {
     ...DEFAULT_AUTOCOMPLETE_SETTINGS,
     ...userSettings,
+  };
+  const settings: AutocompleteSettings = {
+    ...rawSettings,
+    showGhostText: rawSettings.showPopupMenu ? false : rawSettings.showGhostText,
   };
 
   // Use refs for values accessed in callbacks to avoid stale closures
@@ -96,6 +127,10 @@ export function useTerminalAutocomplete(
   hostOsRef.current = hostOs;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const protocolRef = useRef(protocol);
+  protocolRef.current = protocol;
+  const getCwdRef = useRef(getCwd);
+  getCwdRef.current = getCwd;
 
   const [state, setState] = useState<AutocompleteState>(EMPTY_STATE);
 
@@ -112,6 +147,8 @@ export function useTerminalAutocomplete(
   const fetchVersionRef = useRef(0);
   /** Last accepted suggestion text — for accurate history recording on fast Enter after accept */
   const lastAcceptedCommandRef = useRef<string | null>(null);
+  /** Monotonic counter to invalidate stale async sub-dir fetches */
+  const subDirFetchVersionRef = useRef(0);
 
   // Preload common specs on first mount (only if enabled)
   useEffect(() => {
@@ -180,10 +217,219 @@ export function useTerminalAutocomplete(
     ghostAddonRef.current?.hide();
     // Bump version to invalidate any in-flight async completions
     fetchVersionRef.current++;
+    subDirFetchVersionRef.current++;
     setState((prev) =>
       prev.popupVisible || prev.suggestions.length > 0 ? { ...EMPTY_STATE } : prev,
     );
   }, []);
+
+  /** Fetch directory listing via IPC. */
+  const fetchDirEntries = useCallback(async (dirPath: string): Promise<SubDirEntry[]> => {
+    return listDirectoryEntries(dirPath, {
+      sessionId: sessionIdRef.current,
+      protocol: protocolRef.current,
+      foldersOnly: false,
+      limit: 50,
+    });
+  }, []);
+
+  /** Fetch sub-dir entries for the main panel's selected item (level 0). */
+  const fetchSubDirForIndex = useCallback((index: number) => {
+    const s = stateRef.current;
+    if (index < 0 || index >= s.suggestions.length) return;
+    const item = s.suggestions[index];
+    if (item.source !== "path" || item.fileType !== "directory") {
+      subDirFetchVersionRef.current++;
+      setState((prev) => prev.subDirPanels.length > 0
+        ? { ...prev, subDirPanels: [], subDirFocusLevel: -1 }
+        : prev);
+      return;
+    }
+    const term = termRef.current;
+    const livePrompt = term ? detectPrompt(term) : null;
+    const activePrompt = livePrompt?.isAtPrompt ? livePrompt : lastPromptRef.current;
+    const activeWord = activePrompt?.isAtPrompt
+      ? parseCommandLine(activePrompt.userInput).currentWord
+      : parseCommandLine(item.text).currentWord;
+    const cwd = resolveAutocompleteCwd(
+      activePrompt?.promptText ?? "",
+      activeWord,
+      getCwdRef.current?.(),
+      hostOsRef.current,
+    );
+    const dirPath = normalizePathTokenForLookup(parseCommandLine(item.text).currentWord, cwd);
+    if (!dirPath) return;
+
+    const requestVersion = ++subDirFetchVersionRef.current;
+    fetchDirEntries(dirPath).then((entries) => {
+      if (requestVersion !== subDirFetchVersionRef.current) return;
+      startTransition(() => {
+        setState((prev) => {
+          if (prev.selectedIndex !== index) return prev;
+          const nextPanels = entries.length > 0 ? [{ entries, selectedIndex: -1, dirPath }] : [];
+          if (
+            prev.subDirFocusLevel === -1 &&
+            prev.subDirPanels.length === nextPanels.length &&
+            areSubDirPanelsEqual(prev.subDirPanels, nextPanels)
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            subDirPanels: nextPanels,
+            subDirFocusLevel: -1,
+          };
+        });
+      });
+    });
+  }, [fetchDirEntries, termRef]);
+
+  /** Expand a directory at the given panel level → fetch contents and push new panel.
+   *  Does NOT change focus level — use moveFocus param to override. */
+  const expandSubDir = useCallback((level: number, entry: SubDirEntry, moveFocus = false) => {
+    const s = stateRef.current;
+    const panel = s.subDirPanels[level];
+    if (!panel || entry.type !== "directory") return;
+
+    const parentPath = panel.dirPath.endsWith("/") ? panel.dirPath : panel.dirPath + "/";
+    const childPath = parentPath + entry.name + "/";
+
+    const requestVersion = ++subDirFetchVersionRef.current;
+    fetchDirEntries(childPath).then((entries) => {
+      if (requestVersion !== subDirFetchVersionRef.current || entries.length === 0) return;
+      startTransition(() => {
+        setState((prev) => {
+          const currentPanel = prev.subDirPanels[level];
+          if (!currentPanel || currentPanel.dirPath !== panel.dirPath) return prev;
+
+          const nextPanels = prev.subDirPanels.slice(0, level + 1);
+          nextPanels.push({ entries, selectedIndex: moveFocus ? 0 : -1, dirPath: childPath });
+          const nextFocusLevel = moveFocus ? level + 1 : prev.subDirFocusLevel;
+
+          if (
+            prev.subDirFocusLevel === nextFocusLevel &&
+            prev.subDirPanels.length === nextPanels.length &&
+            areSubDirPanelsEqual(prev.subDirPanels, nextPanels)
+          ) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            subDirPanels: nextPanels,
+            subDirFocusLevel: nextFocusLevel,
+          };
+        });
+      });
+
+      // When moving focus into a newly opened panel, the first item is auto-selected.
+      // If that first item is itself a directory, eagerly show its next level so the
+      // user doesn't need to move ↓↑ just to trigger the usual auto-expand behavior.
+      const firstEntry = moveFocus ? entries[0] : null;
+      if (firstEntry?.type !== "directory") return;
+
+      const nestedChildPath = `${childPath}${firstEntry.name}/`;
+      fetchDirEntries(nestedChildPath).then((nestedEntries) => {
+        if (requestVersion !== subDirFetchVersionRef.current || nestedEntries.length === 0) return;
+        startTransition(() => {
+          setState((prev) => {
+            const currentChildPanel = prev.subDirPanels[level + 1];
+            if (
+              !currentChildPanel ||
+              currentChildPanel.dirPath !== childPath ||
+              currentChildPanel.selectedIndex !== 0
+            ) {
+              return prev;
+            }
+
+            const nextPanels = prev.subDirPanels.slice(0, level + 2);
+            nextPanels.push({ entries: nestedEntries, selectedIndex: -1, dirPath: nestedChildPath });
+
+            if (
+              prev.subDirPanels.length === nextPanels.length &&
+              areSubDirPanelsEqual(prev.subDirPanels, nextPanels)
+            ) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              subDirPanels: nextPanels,
+            };
+          });
+        });
+      });
+    });
+  }, [fetchDirEntries]);
+
+  // Ref to fetchSuggestions (avoids circular dep — defined after fetchSuggestions)
+  const fetchSuggestionsRef = useRef<() => void>(() => {});
+
+  const repositionPopup = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+
+    setState((prev) => {
+      if (!prev.popupVisible || prev.suggestions.length === 0) return prev;
+      const { position, cursorLineTop, cursorLineBottom, expandUpward } = calculatePopupPosition(term, prev.suggestions.length);
+
+      // Force a re-render even when the relative cursor cell hasn't changed.
+      // The terminal container may have moved in the viewport after a fit/resize.
+      return {
+        ...prev,
+        popupPosition: position,
+        popupCursorLineTop: cursorLineTop,
+        popupCursorLineBottom: cursorLineBottom,
+        expandUpward,
+      };
+    });
+  }, [termRef]);
+
+  /** Handle selecting a file/directory from any sub-dir panel.
+   *  Builds the full path from the panel stack and replaces the current input. */
+  const handleSubDirSelect = useCallback((level: number, entry: SubDirEntry) => {
+    const s = stateRef.current;
+    const term = termRef.current;
+    if (!term) return;
+
+    // Build the full path: panel's dirPath + entry name
+    const panel = s.subDirPanels[level];
+    if (!panel) return;
+
+    // Get current prompt to know what command prefix to keep (e.g., "cd ")
+    const prompt = detectPrompt(term);
+    if (!prompt.isAtPrompt) return;
+
+    // Find the command part (everything before the path argument)
+    // e.g., userInput = "cd /usr/" → command prefix = "cd ", we replace the whole path
+    const parsedPrompt = parseCommandLine(prompt.userInput);
+    const cmdPrefix = parsedPrompt.tokens
+      .slice(0, parsedPrompt.wordIndex)
+      .join(" ") + (parsedPrompt.wordIndex > 0 ? " " : "");
+    const currentToken = parsedPrompt.currentWord;
+    const quotePrefix = currentToken.startsWith('"') || currentToken.startsWith("'")
+      ? currentToken[0]
+      : "";
+    const quoteSuffix = quotePrefix && currentToken.endsWith(quotePrefix) ? quotePrefix : "";
+    const suffix = entry.type === "directory" ? "/" : "";
+    const entryName = quotePrefix || !entry.name.includes(" ")
+      ? entry.name
+      : entry.name.replace(/ /g, "\\ ");
+    const fullPath = panel.dirPath + entryName + suffix;
+    const replacementPath = `${quotePrefix}${fullPath}${quoteSuffix}`;
+
+    // Clear current input and write: cmdPrefix + fullPath
+    const isWindows = hostOsRef.current === "windows";
+    const clearSeq = isWindows
+      ? "\b".repeat(prompt.userInput.length)
+      : "\x15";
+    writeToTerminal(clearSeq + cmdPrefix + replacementPath);
+    clearState();
+
+    if (entry.type === "directory") {
+      setTimeout(() => fetchSuggestionsRef.current(), 50);
+    }
+  }, [writeToTerminal, clearState, termRef]);
 
   /**
    * Fetch and display suggestions based on current input.
@@ -217,12 +463,22 @@ export function useTerminalAutocomplete(
     }
 
     const input = prompt.userInput;
+    const parsedInput = parseCommandLine(input);
+    const cwd = resolveAutocompleteCwd(
+      prompt.promptText,
+      parsedInput.currentWord,
+      getCwdRef.current?.(),
+      hostOsRef.current,
+    );
 
     // Single query for both ghost text and popup
     const completions = await getCompletions(input, {
       hostId: hostIdRef.current,
       os: hostOsRef.current,
       maxResults: settingsRef.current.maxSuggestions,
+      sessionId: sessionIdRef.current,
+      protocol: protocolRef.current,
+      cwd,
     });
 
     if (disposedRef.current || version !== fetchVersionRef.current) return;
@@ -243,22 +499,52 @@ export function useTerminalAutocomplete(
 
     // Popup
     if (settingsRef.current.showPopupMenu && completions.length > 0) {
-      const { position, expandUpward } = calculatePopupPosition(term, completions.length);
-      setState({
-        suggestions: completions,
-        selectedIndex: -1, // No item selected until user presses ↑/↓
-        popupVisible: true,
-        popupPosition: position,
-        expandUpward,
+      const { position, cursorLineTop, cursorLineBottom, expandUpward } = calculatePopupPosition(term, completions.length);
+      startTransition(() => {
+        setState((prev) => {
+          const nextState: AutocompleteState = {
+            suggestions: completions,
+            selectedIndex: -1,
+            popupVisible: true,
+            popupPosition: position,
+            popupCursorLineTop: cursorLineTop,
+            popupCursorLineBottom: cursorLineBottom,
+            expandUpward,
+            subDirPanels: [],
+            subDirFocusLevel: -1,
+          };
+
+          if (
+            prev.popupVisible &&
+            prev.selectedIndex === nextState.selectedIndex &&
+            prev.expandUpward === nextState.expandUpward &&
+            prev.popupPosition.x === nextState.popupPosition.x &&
+            prev.popupPosition.y === nextState.popupPosition.y &&
+            prev.popupCursorLineTop === nextState.popupCursorLineTop &&
+            prev.popupCursorLineBottom === nextState.popupCursorLineBottom &&
+            prev.subDirFocusLevel === -1 &&
+            prev.subDirPanels.length === 0 &&
+            areSuggestionsEqual(prev.suggestions, nextState.suggestions)
+          ) {
+            return prev;
+          }
+
+          return nextState;
+        });
       });
     } else {
-      setState((prev) =>
-        prev.popupVisible
-          ? { ...EMPTY_STATE }
-          : prev,
-      );
+      startTransition(() => {
+        setState((prev) =>
+          prev.popupVisible || prev.suggestions.length > 0
+            ? { ...EMPTY_STATE }
+            : prev,
+        );
+      });
     }
   }, [termRef, clearState]);
+
+  // Keep ref in sync so handleSubDirSelect can call it
+  fetchSuggestionsRef.current = fetchSuggestions;
 
   /**
    * Handle terminal input data. Called on every character.
@@ -327,7 +613,7 @@ export function useTerminalAutocomplete(
         // Still debounce, but with a longer delay to wait for typing to pause
         debounceTimerRef.current = setTimeout(() => {
           fetchSuggestions();
-        }, settingsRef.current.debounceMs * 2);
+        }, settingsRef.current.debounceMs * 3);
       } else {
         debounceTimerRef.current = setTimeout(() => {
           fetchSuggestions();
@@ -348,14 +634,32 @@ export function useTerminalAutocomplete(
       const s = stateRef.current;
       const ghost = ghostAddonRef.current;
 
-      // Right arrow: accept ghost text
-      if (e.key === "ArrowRight" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      // Right arrow: if popup has selected directory with sub-dir panel, enter it
+      // Skip this handler entirely when sub-dir panels are focused — let the
+      // sub-panel navigation block handle → for deeper expansion.
+      if (e.key === "ArrowRight" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && s.subDirFocusLevel < 0) {
+        if (s.popupVisible && s.selectedIndex >= 0 && s.subDirPanels.length > 0) {
+          const selected = s.suggestions[s.selectedIndex];
+          if (selected?.fileType === "directory") {
+            e.preventDefault();
+            const firstEntry = s.subDirPanels[0]?.entries[0];
+            setState((prev) => {
+              const panels = [...prev.subDirPanels];
+              if (panels[0]) panels[0] = { ...panels[0], selectedIndex: 0 };
+              return { ...prev, subDirPanels: panels, subDirFocusLevel: 0 };
+            });
+            if (firstEntry?.type === "directory") {
+              expandSubDir(0, firstEntry, false);
+            }
+            return false;
+          }
+        }
+        // Otherwise: accept ghost text
         if (ghost?.isVisible()) {
           e.preventDefault();
           const ghostText = ghost.getGhostText();
           if (ghostText) {
             writeToTerminal(ghostText);
-            // Track accepted command for accurate history recording on fast Enter
             lastAcceptedCommandRef.current = ghost.getSuggestion();
             ghost.hide();
             clearState();
@@ -387,7 +691,7 @@ export function useTerminalAutocomplete(
       }
 
       // Tab: accept selected popup suggestion, or accept ghost text
-      if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && s.subDirFocusLevel < 0) {
         if (s.popupVisible && s.suggestions.length > 0) {
           e.preventDefault();
           const selected = s.suggestions[Math.max(0, s.selectedIndex)];
@@ -407,32 +711,106 @@ export function useTerminalAutocomplete(
         }
       }
 
-      // Up/Down: navigate popup
+      // Up/Down/Left/Right: navigate popup + sub-dir panel
       if (s.popupVisible && s.suggestions.length > 0) {
+
+        const focusLevel = s.subDirFocusLevel;
+        const focusedPanel = focusLevel >= 0 ? s.subDirPanels[focusLevel] : null;
+
+        // Sub-dir panel focused: ↑↓ navigate, ← go back, → go deeper
+        if (focusLevel >= 0 && focusedPanel) {
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const newIdx = e.key === "ArrowUp"
+              ? (focusedPanel.selectedIndex <= 0 ? focusedPanel.entries.length - 1 : focusedPanel.selectedIndex - 1)
+              : (focusedPanel.selectedIndex >= focusedPanel.entries.length - 1 ? 0 : focusedPanel.selectedIndex + 1);
+            setState((prev) => {
+              const panels = [...prev.subDirPanels];
+              const p = panels[focusLevel];
+              if (!p) return prev;
+              panels[focusLevel] = { ...p, selectedIndex: newIdx };
+              return { ...prev, subDirPanels: panels.slice(0, focusLevel + 1) };
+            });
+            // Auto-expand next level if the newly selected item is a directory
+            const newEntry = focusedPanel.entries[newIdx];
+            if (newEntry?.type === "directory") {
+              expandSubDir(focusLevel, newEntry);
+            }
+            return false;
+          }
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            setState((prev) => ({
+              ...prev,
+              subDirPanels: prev.subDirPanels.slice(0, focusLevel + 1),
+              subDirFocusLevel: focusLevel - 1,
+            }));
+            return false;
+          }
+          if (e.key === "ArrowRight") {
+            const entry = focusedPanel.entries[focusedPanel.selectedIndex];
+            if (entry?.type === "directory") {
+              e.preventDefault();
+              expandSubDir(focusLevel, entry, true); // moveFocus = true
+              return false;
+            }
+          }
+          if (e.key === "Enter" || e.key === "Tab") {
+            const entry = focusedPanel.entries[focusedPanel.selectedIndex];
+            if (entry && focusedPanel.selectedIndex >= 0) {
+              e.preventDefault();
+              handleSubDirSelect(focusLevel, entry);
+              return false;
+            }
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            if (focusLevel > 0) {
+              setState((prev) => ({
+                ...prev,
+                subDirPanels: prev.subDirPanels.slice(0, focusLevel),
+                subDirFocusLevel: focusLevel - 1,
+              }));
+            } else {
+              setState((prev) => ({ ...prev, subDirPanels: [], subDirFocusLevel: -1 }));
+            }
+            return false;
+          }
+          if (
+            e.key.length === 1 ||
+            e.key === "Backspace" ||
+            e.key === "Delete" ||
+            e.key === "Home" ||
+            e.key === "End"
+          ) {
+            clearState();
+          }
+          return true;
+        }
+
+        // Main panel navigation
         if (e.key === "ArrowUp") {
           e.preventDefault();
           setState((prev) => ({
             ...prev,
-            selectedIndex: prev.selectedIndex <= 0
-              ? prev.suggestions.length - 1
-              : prev.selectedIndex - 1,
+            selectedIndex: prev.selectedIndex <= 0 ? prev.suggestions.length - 1 : prev.selectedIndex - 1,
+            subDirPanels: [], subDirFocusLevel: -1,
           }));
+          fetchSubDirForIndex(s.selectedIndex <= 0 ? s.suggestions.length - 1 : s.selectedIndex - 1);
           return false;
         }
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setState((prev) => ({
             ...prev,
-            selectedIndex: prev.selectedIndex >= prev.suggestions.length - 1
-              ? 0
-              : prev.selectedIndex + 1,
+            selectedIndex: prev.selectedIndex >= prev.suggestions.length - 1 ? 0 : prev.selectedIndex + 1,
+            subDirPanels: [], subDirFocusLevel: -1,
           }));
+          fetchSubDirForIndex(s.selectedIndex >= s.suggestions.length - 1 ? 0 : s.selectedIndex + 1);
           return false;
         }
 
-        // Enter on popup: only execute suggestion if user has actively selected
-        // an item via ↑/↓. If no selection (selectedIndex === -1), close popup
-        // and let Enter pass through to execute the user's own typed command.
+        // Enter on popup
         if (e.key === "Enter") {
           if (s.selectedIndex >= 0) {
             const selected = s.suggestions[s.selectedIndex];
@@ -442,7 +820,6 @@ export function useTerminalAutocomplete(
               return false;
             }
           }
-          // No selection — close popup, let Enter propagate to terminal
           clearState();
         }
       }
@@ -551,9 +928,122 @@ export function useTerminalAutocomplete(
     handleInput,
     handleKeyEvent,
     selectSuggestion,
+    repositionPopup,
     closePopup,
     dispose,
   };
+}
+
+function resolveAutocompleteCwd(
+  promptText: string,
+  currentWord: string,
+  fallbackCwd: string | undefined,
+  os: "linux" | "windows" | "macos",
+): string | undefined {
+  if (os === "windows") return fallbackCwd;
+
+  const normalizedWord = currentWord.trim().replace(/^['"]/, "");
+  const isRelativePathWord = normalizedWord.length > 0 &&
+    !normalizedWord.startsWith("/") &&
+    !normalizedWord.startsWith("~/") &&
+    !normalizedWord.startsWith("-");
+
+  if (!isRelativePathWord) {
+    return fallbackCwd;
+  }
+
+  const promptCwd = extractPosixCwdFromPrompt(promptText);
+  return chooseAutocompleteCwd(promptCwd, fallbackCwd);
+}
+
+function chooseAutocompleteCwd(
+  promptCwd: string | undefined,
+  fallbackCwd: string | undefined,
+): string | undefined {
+  if (!promptCwd) return fallbackCwd;
+  if (!fallbackCwd) return promptCwd;
+
+  if (promptCwd.startsWith("/")) {
+    return promptCwd;
+  }
+
+  if (promptCwd === "~" || promptCwd.startsWith("~/")) {
+    return fallbackCwd;
+  }
+
+  return promptCwd;
+}
+
+function extractPosixCwdFromPrompt(promptText: string): string | undefined {
+  const trimmed = promptText.trimEnd().replace(/[#$%>]\s*$/, "");
+  if (!trimmed) return undefined;
+
+  const patterns = [
+    /:(\/[^\s\]]*|~(?:\/[^\s\]]*)?)$/,
+    /\s(\/[^\s\]]*|~(?:\/[^\s\]]*)?)\]$/,
+    /(^|[\s:])(\/[^\s\]]*|~(?:\/[^\s\]]*)?)$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    const candidate = match[match.length - 1];
+    if (candidate === "/" || candidate.startsWith("/") || candidate === "~" || candidate.startsWith("~/")) {
+      return candidate;
+    }
+  }
+
+  const fallbackTokens = trimmed
+    .split(/\s+/)
+    .map((token) => token.replace(/^[([{:]+/, "").replace(/[\])}:]+$/, ""));
+
+  for (let index = fallbackTokens.length - 1; index >= 0; index--) {
+    const candidate = fallbackTokens[index];
+    if (candidate === "/" || candidate.startsWith("/") || candidate === "~" || candidate.startsWith("~/")) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function areSuggestionsEqual(
+  left: CompletionSuggestion[],
+  right: CompletionSuggestion[],
+): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i];
+    const b = right[i];
+    if (
+      a.text !== b.text ||
+      a.displayText !== b.displayText ||
+      a.description !== b.description ||
+      a.source !== b.source ||
+      a.score !== b.score ||
+      a.frequency !== b.frequency ||
+      a.fileType !== b.fileType
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areSubDirPanelsEqual(left: SubDirPanel[], right: SubDirPanel[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i];
+    const b = right[i];
+    if (a.dirPath !== b.dirPath || a.selectedIndex !== b.selectedIndex) return false;
+    if (a.entries.length !== b.entries.length) return false;
+    for (let j = 0; j < a.entries.length; j++) {
+      if (a.entries[j].name !== b.entries[j].name || a.entries[j].type !== b.entries[j].type) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -562,14 +1052,28 @@ export function useTerminalAutocomplete(
 function calculatePopupPosition(
   term: XTerm,
   itemCount: number,
-): { position: { x: number; y: number }; expandUpward: boolean } {
+): {
+  position: { x: number; y: number };
+  cursorLineTop: number;
+  cursorLineBottom: number;
+  expandUpward: boolean;
+} {
   const termElement = term.element;
-  if (!termElement) return { position: { x: 0, y: 0 }, expandUpward: false };
+  if (!termElement) {
+    return {
+      position: { x: 0, y: 0 },
+      cursorLineTop: 0,
+      cursorLineBottom: 0,
+      expandUpward: false,
+    };
+  }
 
   const dims = getXTermCellDimensions(term);
   const buffer = term.buffer.active;
   const cursorX = buffer.cursorX;
   const cursorY = buffer.cursorY;
+  const cursorLineTop = cursorY * dims.height;
+  const cursorLineBottom = (cursorY + 1) * dims.height;
 
   const estimatedPopupHeight = itemCount * 28 + 8;
   const totalRows = term.rows;
@@ -579,12 +1083,16 @@ function calculatePopupPosition(
   if (expandUpward) {
     return {
       position: { x: cursorX * dims.width, y: cursorY * dims.height },
+      cursorLineTop,
+      cursorLineBottom,
       expandUpward: true,
     };
   }
 
   return {
     position: { x: cursorX * dims.width, y: (cursorY + 1) * dims.height + 4 },
+    cursorLineTop,
+    cursorLineBottom,
     expandUpward: false,
   };
 }

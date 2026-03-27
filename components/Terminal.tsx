@@ -4,8 +4,8 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { Cpu, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-// flushSync removed - no longer needed
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { logger } from "../lib/logger";
 import { cn, normalizeLineEndings, wrapBracketedPaste } from "../lib/utils";
@@ -26,8 +26,6 @@ import {
   shouldScrollOnTerminalInput,
 } from "../domain/terminalScroll";
 import {
-  resolveHostTerminalFontFamilyId,
-  resolveHostTerminalFontSize,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
 import { resolveHostAuth } from "../domain/sshAuth";
@@ -111,7 +109,8 @@ interface TerminalProps {
   keys: SSHKey[];
   identities: Identity[];
   snippets: Snippet[];
-  allHosts?: Host[];
+  chainHosts?: Host[];
+  themePreviewId?: string;
   knownHosts?: KnownHost[];
   isVisible: boolean;
   inWorkspace?: boolean;
@@ -184,7 +183,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   keys,
   identities,
   snippets,
-  allHosts = [],
+  chainHosts = [],
+  themePreviewId,
   knownHosts: _knownHosts = [],
   isVisible,
   inWorkspace,
@@ -234,6 +234,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const xtermRuntimeRef = useRef<XTermRuntime | null>(null);
+  const knownCwdRef = useRef<string | undefined>(undefined);
   const disposeDataRef = useRef<(() => void) | null>(null);
   const disposeExitRef = useRef<(() => void) | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -300,6 +301,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Autocomplete handler refs (set after hook initialization)
   const autocompleteKeyEventRef = useRef<((e: KeyboardEvent) => boolean) | undefined>(undefined);
   const autocompleteInputRef = useRef<((data: string) => void) | undefined>(undefined);
+  const autocompleteRepositionRef = useRef<(() => void) | undefined>(undefined);
 
   const terminalBackend = useTerminalBackend();
   const { resizeSession, setSessionEncoding } = terminalBackend;
@@ -436,11 +438,50 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 8,
     } : undefined,
     onAcceptText: (text) => autocompleteAcceptTextRef.current?.(text),
+    protocol: host.protocol,
+    getCwd: () => knownCwdRef.current ?? xtermRuntimeRef.current?.currentCwd,
   });
 
   // Wire up autocomplete handler refs so createXTermRuntime can use them
   autocompleteKeyEventRef.current = autocomplete.handleKeyEvent;
   autocompleteInputRef.current = autocomplete.handleInput;
+  autocompleteRepositionRef.current = autocomplete.repositionPopup;
+  const autocompleteClosePopup = autocomplete.closePopup;
+
+  useEffect(() => {
+    knownCwdRef.current = undefined;
+  }, [sessionId, host.id]);
+
+  useEffect(() => {
+    if (host.protocol === "local" || host.protocol === "serial" || host.protocol === "telnet") {
+      return;
+    }
+    if (status !== "connected" || !sessionRef.current || knownCwdRef.current) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (!sessionRef.current) return;
+      try {
+        const result = await terminalBackend.getSessionPwd(sessionRef.current);
+        if (!cancelled && result.success && result.cwd) {
+          knownCwdRef.current = result.cwd;
+        }
+      } catch {
+        // Best effort only.
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [host.protocol, status, terminalBackend]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      autocompleteClosePopup();
+    }
+  }, [isVisible, autocompleteClosePopup]);
 
   // Check if this is a local or serial connection (doesn't need connection dialog during connecting)
   const isLocalConnection = host.protocol === "local";
@@ -506,21 +547,35 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   // Subscribe to custom theme changes so editing triggers re-render
   const customThemes = useCustomThemes();
+  const hasFontSizeOverride = host.fontSizeOverride === true || (host.fontSizeOverride === undefined && host.fontSize != null);
+  const hasFontFamilyOverride = host.fontFamilyOverride === true || (host.fontFamilyOverride === undefined && !!host.fontFamily);
+  const effectiveFontSize = useMemo(
+    () => (hasFontSizeOverride && host.fontSize != null ? host.fontSize : fontSize),
+    [fontSize, hasFontSizeOverride, host.fontSize],
+  );
+  const resolvedFontFamily = useMemo(() => {
+    const hostFontId = hasFontFamilyOverride && host.fontFamily
+      ? host.fontFamily
+      : fontFamilyId;
+    const resolvedFontId = hostFontId || "menlo";
+    return (availableFonts.find((f) => f.id === resolvedFontId) || availableFonts[0]).family;
+  }, [availableFonts, fontFamilyId, hasFontFamilyOverride, host.fontFamily]);
 
   const effectiveTheme = useMemo(() => {
-    const themeId = resolveHostTerminalThemeId(host, terminalTheme.id);
+    const themeId = themePreviewId ?? resolveHostTerminalThemeId(
+      { theme: host.theme, themeOverride: host.themeOverride } as Pick<Host, 'theme' | 'themeOverride'>,
+      terminalTheme.id,
+    );
     if (themeId) {
       const hostTheme = TERMINAL_THEMES.find((t) => t.id === themeId)
         || customThemes.find((t) => t.id === themeId);
       if (hostTheme) return hostTheme;
     }
     return terminalTheme;
-  }, [host, terminalTheme, customThemes]);
+  }, [customThemes, host.theme, host.themeOverride, terminalTheme, themePreviewId]);
 
   const resolvedChainHosts =
-    (host.hostChain?.hostIds
-      ?.map((id) => allHosts.find((h) => h.id === id))
-      .filter(Boolean) as Host[]) || [];
+    chainHosts;
 
   const updateStatus = (next: TerminalSession["status"]) => {
     setStatus(next);
@@ -639,6 +694,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           serialLocalEcho: serialConfig?.localEcho,
           serialLineMode: serialConfig?.lineMode,
           serialLineBufferRef,
+          onCwdChange: (cwd: string) => {
+            knownCwdRef.current = cwd;
+          },
           onOsc52ReadRequest: handleOsc52ReadRequest,
           // Autocomplete integration
           onAutocompleteKeyEvent: (e: KeyboardEvent) => autocompleteKeyEventRef.current?.(e) ?? true,
@@ -794,6 +852,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!options?.force) {
       const lastSize = lastFittedSizeRef.current;
       if (lastSize && lastSize.width === width && lastSize.height === height) {
+        autocompleteRepositionRef.current?.();
         return;
       }
     }
@@ -802,6 +861,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       try {
         lastFittedSizeRef.current = { width, height };
         fitAddon.fit();
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => {
+            autocompleteRepositionRef.current?.();
+          });
+        } else {
+          autocompleteRepositionRef.current?.();
+        }
       } catch (err) {
         logger.warn("Fit failed", err);
       }
@@ -817,15 +883,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   };
 
-  useEffect(() => {
+  // Sync xterm theme before browser paint so canvas + DOM CSS vars update in the same frame
+  useLayoutEffect(() => {
     if (termRef.current) {
-      const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
-      termRef.current.options.fontSize = effectiveFontSize;
-
       termRef.current.options.theme = {
         ...effectiveTheme.colors,
         selectionBackground: effectiveTheme.colors.selection,
       };
+    }
+  }, [effectiveTheme]);
+
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.options.fontSize = effectiveFontSize;
+      termRef.current.options.fontFamily = resolvedFontFamily;
 
       if (terminalSettings) {
         termRef.current.options.cursorStyle = terminalSettings.cursorShape;
@@ -878,27 +949,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
       }
 
-      setTimeout(() => safeFit({ force: true }), 50);
+      if (isVisibleRef.current) {
+        setTimeout(() => safeFit({ force: true, requireVisible: true }), 50);
+      } else {
+        lastFittedSizeRef.current = null;
+      }
     }
-  }, [fontSize, effectiveTheme, terminalSettings, host]);
-
-  useEffect(() => {
-    if (termRef.current) {
-      const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
-      termRef.current.options.fontSize = effectiveFontSize;
-
-      const hostFontId = resolveHostTerminalFontFamilyId(host, fontFamilyId) || "menlo";
-      const fontObj = availableFonts.find((f) => f.id === hostFontId) || availableFonts[0];
-      termRef.current.options.fontFamily = fontObj.family;
-
-      termRef.current.options.theme = {
-        ...effectiveTheme.colors,
-        selectionBackground: effectiveTheme.colors.selection,
-      };
-
-      setTimeout(() => safeFit({ force: true }), 50);
-    }
-  }, [host, fontFamilyId, fontSize, effectiveTheme, availableFonts]);
+  }, [effectiveFontSize, resolvedFontFamily, terminalSettings]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -946,7 +1003,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
         if (terminalSettings && termRef.current) {
           const fontFamily = termRef.current.options?.fontFamily || "";
-          const effectiveFontSize = resolveHostTerminalFontSize(host, fontSize);
           if (typeof document !== "undefined" && document.fonts?.check) {
             const weightSpec = `${terminalSettings.fontWeightBold} ${effectiveFontSize}px ${fontFamily}`;
             const resolvedBold = document.fonts.check(weightSpec)
@@ -982,7 +1038,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [host, fontFamilyId, fontSize, resizeSession, sessionId, terminalSettings]);
+  }, [effectiveFontSize, resizeSession, terminalSettings]);
 
   useEffect(() => {
     if (!isVisible || !containerRef.current || !fitAddonRef.current) return;
@@ -1420,6 +1476,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       : status === "connecting"
         ? "bg-amber-400"
         : "bg-rose-500";
+  const terminalPreviewVars = useMemo(() => ({
+    ['--terminal-ui-bg' as never]: `var(--terminal-preview-bg, ${effectiveTheme.colors.background})`,
+    ['--terminal-ui-fg' as never]: `var(--terminal-preview-fg, ${effectiveTheme.colors.foreground})`,
+    ['--terminal-ui-border' as never]: `var(--terminal-preview-border, color-mix(in srgb, ${effectiveTheme.colors.foreground} 8%, ${effectiveTheme.colors.background} 92%))`,
+    ['--terminal-ui-toolbar-btn' as never]: `var(--terminal-preview-toolbar-btn, color-mix(in srgb, ${effectiveTheme.colors.background} 88%, ${effectiveTheme.colors.foreground} 12%))`,
+    ['--terminal-ui-toolbar-btn-hover' as never]: `var(--terminal-preview-toolbar-btn-hover, color-mix(in srgb, ${effectiveTheme.colors.background} 78%, ${effectiveTheme.colors.foreground} 22%))`,
+    ['--terminal-ui-toolbar-btn-active' as never]: `var(--terminal-preview-toolbar-btn-active, color-mix(in srgb, ${effectiveTheme.colors.background} 68%, ${effectiveTheme.colors.foreground} 32%))`,
+  }), [effectiveTheme.colors.background, effectiveTheme.colors.foreground]);
 
   return (
     <TerminalContextMenu
@@ -1442,6 +1506,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           "relative h-full w-full flex overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]",
           isComposeBarOpen && !inWorkspace && "flex-col"
         )}
+        style={terminalPreviewVars}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -1472,14 +1537,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           <div
             className="flex items-center gap-1 px-2 py-0.5 backdrop-blur-md pointer-events-auto min-w-0 border-b-[0.5px]"
             style={{
-              backgroundColor: effectiveTheme.colors.background,
-              color: effectiveTheme.colors.foreground,
-              borderColor: `color-mix(in srgb, ${effectiveTheme.colors.foreground} 8%, ${effectiveTheme.colors.background} 92%)`,
-              ['--terminal-toolbar-fg' as never]: effectiveTheme.colors.foreground,
-              ['--terminal-toolbar-bg' as never]: effectiveTheme.colors.background,
-              ['--terminal-toolbar-btn' as never]: `color-mix(in srgb, ${effectiveTheme.colors.background} 88%, ${effectiveTheme.colors.foreground} 12%)`,
-              ['--terminal-toolbar-btn-hover' as never]: `color-mix(in srgb, ${effectiveTheme.colors.background} 78%, ${effectiveTheme.colors.foreground} 22%)`,
-              ['--terminal-toolbar-btn-active' as never]: `color-mix(in srgb, ${effectiveTheme.colors.background} 68%, ${effectiveTheme.colors.foreground} 32%)`,
+              backgroundColor: 'var(--terminal-ui-bg)',
+              color: 'var(--terminal-ui-fg)',
+              borderColor: 'var(--terminal-ui-border)',
+              ['--terminal-toolbar-fg' as never]: 'var(--terminal-ui-fg)',
+              ['--terminal-toolbar-bg' as never]: 'var(--terminal-ui-bg)',
+              ['--terminal-toolbar-btn' as never]: 'var(--terminal-ui-toolbar-btn)',
+              ['--terminal-toolbar-btn-hover' as never]: 'var(--terminal-ui-toolbar-btn-hover)',
+              ['--terminal-toolbar-btn-active' as never]: 'var(--terminal-ui-toolbar-btn-active)',
             }}
           >
             <div className="flex items-center gap-1 text-[11px] font-semibold">
@@ -1854,7 +1919,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
         <div
           className="h-full flex-1 min-w-0 relative overflow-hidden pt-8"
-          style={{ backgroundColor: effectiveTheme.colors.background }}
+          style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
         >
           <div
             ref={containerRef}
@@ -1862,32 +1927,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             style={{
               top: isSearchOpen ? "64px" : "30px",
               paddingLeft: 6,
-              backgroundColor: effectiveTheme.colors.background,
+              backgroundColor: 'var(--terminal-ui-bg)',
             }}
           />
 
-          {/* Autocomplete popup overlay — pointer-events-none so terminal stays interactive */}
-          {autocomplete.state.popupVisible && autocomplete.state.suggestions.length > 0 && (
-            <div
-              className="absolute inset-x-0 bottom-0 pointer-events-none"
-              style={{
-                top: isSearchOpen ? "64px" : "30px",
-                paddingLeft: 6,
-              }}
-            >
-              <div className="relative w-full h-full">
-                <AutocompletePopup
-                  suggestions={autocomplete.state.suggestions}
-                  selectedIndex={autocomplete.state.selectedIndex}
-                  position={autocomplete.state.popupPosition}
-                  visible={autocomplete.state.popupVisible}
-                  expandUpward={autocomplete.state.expandUpward}
-                  themeColors={effectiveTheme.colors}
-                  onSelect={autocomplete.selectSuggestion}
-                />
-              </div>
-            </div>
-          )}
+          {/* Autocomplete popup — rendered via Portal to escape overflow:hidden */}
+          {isVisible && autocomplete.state.popupVisible && autocomplete.state.suggestions.length > 0 &&
+            ReactDOM.createPortal(
+              <AutocompletePopup
+                suggestions={autocomplete.state.suggestions}
+                selectedIndex={autocomplete.state.selectedIndex}
+                position={autocomplete.state.popupPosition}
+                cursorLineTop={autocomplete.state.popupCursorLineTop}
+                cursorLineBottom={autocomplete.state.popupCursorLineBottom}
+                visible={autocomplete.state.popupVisible}
+                expandUpward={autocomplete.state.expandUpward}
+                themeColors={effectiveTheme.colors}
+                onSelect={autocomplete.selectSuggestion}
+                subDirPanels={autocomplete.state.subDirPanels}
+                subDirFocusLevel={autocomplete.state.subDirFocusLevel}
+                containerRef={containerRef}
+                onRequestReposition={autocomplete.repositionPopup}
+                searchBarOffset={isSearchOpen ? 64 : 30}
+              />,
+              document.body,
+            )
+          }
 
           {needsHostKeyVerification && pendingHostKeyInfo && (
             <div className="absolute inset-0 z-30 bg-background">

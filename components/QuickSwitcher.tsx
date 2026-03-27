@@ -2,7 +2,7 @@ import {
   Folder,
   LayoutGrid,
   Search,
-  Shield,
+  FolderLock,
   Terminal,
   TerminalSquare,
 } from "lucide-react";
@@ -287,7 +287,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                 const isSelected = idx === selectedIndex;
                 const icon =
                   tabId === "vault" ? (
-                    <Shield size={16} />
+                    <FolderLock size={16} />
                   ) : (
                     <Folder size={16} />
                   );

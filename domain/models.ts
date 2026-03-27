@@ -523,6 +523,9 @@ export const normalizeTerminalSettings = (
 
   return {
     ...mergedSettings,
+    autocompleteGhostText: mergedSettings.autocompletePopupMenu
+      ? false
+      : mergedSettings.autocompleteGhostText,
     keywordHighlightRules: normalizeKeywordHighlightRules(
       mergedSettings.keywordHighlightRules,
     ),
@@ -563,7 +566,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   autocompleteEnabled: true, // Autocomplete enabled by default
-  autocompleteGhostText: true, // Ghost text enabled by default
+  autocompleteGhostText: false, // Mutually exclusive with popup menu
   autocompletePopupMenu: true, // Popup menu enabled by default
   autocompleteDebounceMs: 100, // 100ms debounce
   autocompleteMinChars: 1, // Start suggesting after 1 character

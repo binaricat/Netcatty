@@ -19,10 +19,11 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
-import { useSettingsState } from "../application/state/useSettingsState";
+import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
+import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import { Host, Identity, SSHKey } from "../types";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { toast } from "./ui/toast";
@@ -49,21 +50,35 @@ interface SftpViewProps {
   keys: SSHKey[];
   identities: Identity[];
   updateHosts: (hosts: Host[]) => void;
+  sftpDoubleClickBehavior: "open" | "transfer";
+  sftpAutoSync: boolean;
+  sftpShowHiddenFiles: boolean;
+  sftpUseCompressedUpload: boolean;
+  hotkeyScheme: HotkeyScheme;
+  keyBindings: KeyBinding[];
+  editorWordWrap: boolean;
+  setEditorWordWrap: (enabled: boolean) => void;
 }
 
-const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updateHosts }) => {
+const SftpViewInner: React.FC<SftpViewProps> = ({
+  hosts,
+  keys,
+  identities,
+  updateHosts,
+  sftpDoubleClickBehavior,
+  sftpAutoSync,
+  sftpShowHiddenFiles,
+  sftpUseCompressedUpload,
+  hotkeyScheme,
+  keyBindings,
+  editorWordWrap,
+  setEditorWordWrap,
+}) => {
   const { t } = useI18n();
   const isActive = useIsSftpActive();
-  const {
-    sftpDoubleClickBehavior,
-    sftpAutoSync,
-    sftpShowHiddenFiles,
-    sftpUseCompressedUpload,
-    hotkeyScheme,
-    keyBindings,
-    editorWordWrap,
-    setEditorWordWrap,
-  } = useSettingsState();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useInstantThemeSwitch(rootRef);
 
   // File watch event handlers (stable refs to avoid re-creating the useSftpState options)
   const fileWatchHandlers = useMemo(() => ({
@@ -248,6 +263,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
       rightCallbacks={rightCallbacks}
     >
       <div
+        ref={rootRef}
         className={cn(
           "absolute inset-0 min-h-0 flex flex-col",
           isActive ? "z-20" : "",
@@ -410,7 +426,17 @@ const SftpViewInner: React.FC<SftpViewProps> = ({ hosts, keys, identities, updat
 };
 
 const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
-  prev.hosts === next.hosts && prev.keys === next.keys && prev.identities === next.identities;
+  prev.hosts === next.hosts &&
+  prev.keys === next.keys &&
+  prev.identities === next.identities &&
+  prev.sftpDoubleClickBehavior === next.sftpDoubleClickBehavior &&
+  prev.sftpAutoSync === next.sftpAutoSync &&
+  prev.sftpShowHiddenFiles === next.sftpShowHiddenFiles &&
+  prev.sftpUseCompressedUpload === next.sftpUseCompressedUpload &&
+  prev.hotkeyScheme === next.hotkeyScheme &&
+  prev.keyBindings === next.keyBindings &&
+  prev.editorWordWrap === next.editorWordWrap &&
+  prev.setEditorWordWrap === next.setEditorWordWrap;
 
 export const SftpView = memo(SftpViewInner, sftpViewAreEqual);
 SftpView.displayName = "SftpView";

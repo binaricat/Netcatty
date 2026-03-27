@@ -2,7 +2,7 @@
  * Terminal Authentication Dialog
  * Displays auth form with password/key selection for SSH connection
  */
-import { AlertCircle, BadgeCheck, ChevronDown, Eye, EyeOff, Key, Lock } from 'lucide-react';
+import { BadgeCheck, ChevronDown, Eye, EyeOff, Key, Lock, Unplug } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
@@ -80,38 +80,42 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
     return (
         <>
             {/* Auth method tabs */}
-            <div className="flex gap-1 p-1 bg-secondary/80 rounded-lg border border-border/60">
+            <div className="flex gap-1 p-1 bg-secondary/65 rounded-xl border border-border/50">
                 <button
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
+                        "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg transition-all",
                         authMethod === 'password'
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/40"
                     )}
                     onClick={() => setAuthMethod('password')}
                 >
-                    <Lock size={14} />
+                    <Lock size={13} />
                     {t("terminal.auth.password")}
                 </button>
                 <button
                     className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
+                        "flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg transition-all",
                         authMethod === 'key' || authMethod === 'certificate'
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/40"
                     )}
                     onClick={() => setAuthMethod('key')}
                 >
-                    <Key size={14} />
+                    <Key size={13} />
                     {t("terminal.auth.sshKey")}
                 </button>
             </div>
 
             {/* Auth retry error message */}
             {authRetryMessage && (
-                <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
-                    <AlertCircle size={16} />
-                    {authRetryMessage}
+                <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/7 px-3 py-2.5 text-xs text-foreground/90">
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive/12 text-destructive">
+                        <Unplug size={11} />
+                    </div>
+                    <div className="min-w-0 leading-4 text-destructive/95">
+                        {authRetryMessage}
+                    </div>
                 </div>
             )}
 

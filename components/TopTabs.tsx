@@ -1,6 +1,8 @@
-import { Bell, Copy, FileText, Folder, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Shield, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
+import { Bell, Copy, FileText, Folder, FolderLock, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
+import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
+import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { LogView } from '../application/state/useSessionState';
 import { useWindowControls } from '../application/state/useWindowControls';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -55,7 +57,7 @@ const localOsId = (() => {
 const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; protocol?: string }> = memo(({ host, isActive, protocol }) => {
   const boxBase = "shrink-0 h-4 w-4 rounded flex items-center justify-center";
   const iconSize = "h-2.5 w-2.5";
-  const fallbackIcon = cn(iconSize, isActive ? "text-accent" : "text-muted-foreground");
+  const fallbackStyle = { color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' };
 
   // Serial protocol → USB icon
   if (protocol === 'serial' || host?.protocol === 'serial') {
@@ -82,7 +84,7 @@ const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; prot
       );
     }
     return (
-      <div className={cn(boxBase, "bg-primary/15 text-primary")}>
+      <div className={boxBase} style={{ backgroundColor: 'color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 15%, transparent)', color: 'var(--top-tabs-accent, hsl(var(--accent)))' }}>
         <TerminalSquare className={iconSize} />
       </div>
     );
@@ -109,22 +111,33 @@ const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; prot
   // Fallback: generic server icon for remote, terminal for unknown
   if (host && host.protocol !== 'local') {
     return (
-      <div className={cn(boxBase, "bg-primary/15 text-primary")}>
+      <div className={boxBase} style={{ backgroundColor: 'color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 15%, transparent)', color: 'var(--top-tabs-accent, hsl(var(--accent)))' }}>
         <Server className={iconSize} />
       </div>
     );
   }
-  return <TerminalSquare className={fallbackIcon} />;
+  return <TerminalSquare className={iconSize} style={fallbackStyle} />;
 });
 SessionTabIcon.displayName = 'SessionTabIcon';
 
-const sessionStatusDot = (status: TerminalSession['status']) => {
+const sessionStatusDot = (status: TerminalSession['status'], hasActivity: boolean) => {
   const tone = status === 'connected'
     ? "bg-emerald-400"
     : status === 'connecting'
       ? "bg-amber-400"
       : "bg-rose-500";
-  return <span className={cn("inline-block h-2 w-2 rounded-full ring-2 ring-background/60", tone)} />;
+  return (
+    <span className="relative inline-flex h-2 w-2 shrink-0 items-center justify-center">
+      <span
+        className={cn(
+          "relative inline-block h-2 w-2 rounded-full ring-2",
+          tone,
+          hasActivity && "session-activity-dot",
+        )}
+        style={{ boxShadow: '0 0 0 2px color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 60%, transparent)' }}
+      />
+    </span>
+  );
 };
 
 // Custom window controls for Windows/Linux (frameless window)
@@ -168,14 +181,16 @@ const WindowControls: React.FC = memo(() => {
     <div className="flex items-center app-drag h-full">
       <button
         onClick={handleMinimize}
-        className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150 app-no-drag"
+        className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
+        style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
         title="Minimize"
       >
         <Minus size={16} />
       </button>
       <button
         onClick={handleMaximize}
-        className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-foreground/10 hover:text-foreground transition-all duration-150 app-no-drag"
+        className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
+        style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
         title={isMaximized ? "Restore" : "Maximize"}
       >
         {isMaximized ? (
@@ -227,6 +242,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   // Subscribe to activeTabId from external store
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
   const activeTabId = useActiveTabId();
+  const sessionActivityMap = useSessionActivityMap();
   const isVaultActive = activeTabId === 'vault';
   const isSftpActive = activeTabId === 'sftp';
   const onSelectTab = activeTabStore.setActiveTabId;
@@ -329,6 +345,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     for (const h of hosts) map.set(h.id, h);
     return map;
   }, [hosts]);
+
+  const workspaceActivityMap = useMemo(() => {
+    return buildWorkspaceActivityMap(sessions, sessionActivityMap);
+  }, [sessionActivityMap, sessions]);
 
   // Pre-compute session counts per workspace for O(1) access
   const workspacePaneCounts = useMemo(() => {
@@ -453,6 +473,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
       if (item.type === 'session') {
         const session = item.session;
+        const hasActivity = !!sessionActivityMap[session.id];
         const isBeingDragged = draggingSessionId === session.id;
         const shiftStyle = tabShiftStyles[session.id] || {};
         const showDropIndicatorBefore = dropIndicator?.tabId === session.id && dropIndicator.position === 'before';
@@ -472,30 +493,56 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 onDrop={(e) => handleTabDrop(e, session.id)}
                 className={cn(
                   "relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-                  "transition-all duration-150",
-                  activeTabId === session.id
-                    ? "bg-background text-foreground"
-                    : "text-muted-foreground hover:bg-background/40 hover:text-foreground",
+                  "transition-transform duration-150",
                   isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
                 )}
-                style={shiftStyle}
+                style={{
+                  ...shiftStyle,
+                  backgroundColor: activeTabId === session.id
+                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                    : 'transparent',
+                  color: activeTabId === session.id
+                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+                }}
+                onMouseEnter={(e) => {
+                  if (activeTabId !== session.id) {
+                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (activeTabId !== session.id) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+                  }
+                }}
               >
                 {/* Active tab top accent line */}
                 {activeTabId === session.id && (
-                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-accent" />
+                  <div
+                    className="absolute top-0 left-0 right-0 h-[2px]"
+                    style={{ backgroundColor: 'var(--top-tabs-fg, hsl(var(--foreground)))' }}
+                  />
                 )}
                 {/* Drop indicator line - before */}
                 {showDropIndicatorBefore && isDraggingForReorder && (
-                  <div className="absolute -left-0.5 top-1 bottom-1 w-0.5 bg-primary rounded-full shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                  <div
+                    className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+                  />
                 )}
                 {/* Drop indicator line - after */}
                 {showDropIndicatorAfter && isDraggingForReorder && (
-                  <div className="absolute -right-0.5 top-1 bottom-1 w-0.5 bg-primary rounded-full shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                  <div
+                    className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+                  />
                 )}
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <SessionTabIcon host={hostMap.get(session.hostId)} isActive={activeTabId === session.id} protocol={session.protocol} />
                   <span className="truncate">{session.hostLabel}</span>
-                  <div className="flex-shrink-0">{sessionStatusDot(session.status)}</div>
+                  <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
                 </div>
                 <button
                   onClick={(e) => onCloseSession(session.id, e)}
@@ -524,6 +571,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       if (item.type === 'workspace') {
         const workspace = item.workspace;
         const paneCount = item.paneCount;
+        const hasActivity = !!workspaceActivityMap.get(workspace.id);
         const isActive = activeTabId === workspace.id;
         const isBeingDragged = draggingSessionId === workspace.id;
         const shiftStyle = tabShiftStyles[workspace.id] || {};
@@ -544,32 +592,71 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 onDrop={(e) => handleTabDrop(e, workspace.id)}
                 className={cn(
                   "relative h-7 pl-3 pr-2 min-w-[150px] max-w-[260px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-                  "transition-all duration-150",
-                  isActive
-                    ? "bg-background text-foreground"
-                    : "text-muted-foreground hover:bg-background/40 hover:text-foreground",
+                  "transition-transform duration-150",
                   isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
                 )}
-                style={shiftStyle}
+                style={{
+                  ...shiftStyle,
+                  backgroundColor: isActive
+                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                    : 'transparent',
+                  color: isActive
+                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+                  }
+                }}
               >
                 {/* Active tab top accent line */}
                 {isActive && (
-                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-accent" />
+                  <div
+                    className="absolute top-0 left-0 right-0 h-[2px]"
+                    style={{ backgroundColor: 'var(--top-tabs-fg, hsl(var(--foreground)))' }}
+                  />
                 )}
                 {/* Drop indicator line - before */}
                 {showDropIndicatorBefore && isDraggingForReorder && (
-                  <div className="absolute -left-0.5 top-1 bottom-1 w-0.5 bg-primary rounded-full shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                  <div
+                    className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+                  />
                 )}
                 {/* Drop indicator line - after */}
                 {showDropIndicatorAfter && isDraggingForReorder && (
-                  <div className="absolute -right-0.5 top-1 bottom-1 w-0.5 bg-primary rounded-full shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                  <div
+                    className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+                  />
                 )}
                 <div className="flex items-center gap-2 truncate">
-                  <LayoutGrid size={14} className={cn("shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
+                  <LayoutGrid
+                    size={14}
+                    className="shrink-0"
+                    style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                  />
                   <span className="truncate">{workspace.title}</span>
                 </div>
-                <div className="text-[10px] px-1.5 py-0.5 rounded-full border border-border/70 bg-background/60 min-w-[22px] text-center">
-                  {paneCount}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {hasActivity && sessionStatusDot('connected', true)}
+                  <div
+                    className="text-[10px] px-1.5 py-0.5 rounded-full min-w-[22px] text-center"
+                    style={{
+                      border: '1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 18%, transparent)',
+                      backgroundColor: 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 60%, transparent)',
+                    }}
+                  >
+                    {paneCount}
+                  </div>
                 </div>
               </div>
             </ContextMenuTrigger>
@@ -597,18 +684,41 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onClick={() => onSelectTab(logView.id)}
             className={cn(
               "relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-              "transition-colors duration-150",
-              isActive
-                ? "bg-background text-foreground"
-                : "text-muted-foreground hover:bg-background/40 hover:text-foreground"
             )}
+            style={{
+              backgroundColor: isActive
+                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                : 'transparent',
+              color: isActive
+                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+              }
+            }}
           >
             {/* Active tab top accent line */}
             {isActive && (
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-accent" />
+              <div
+                className="absolute top-0 left-0 right-0 h-[2px]"
+                style={{ backgroundColor: 'var(--top-tabs-fg, hsl(var(--foreground)))' }}
+              />
             )}
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <FileText size={14} className={cn("shrink-0", isActive ? "text-accent" : "text-muted-foreground")} />
+              <FileText
+                size={14}
+                className="shrink-0"
+                style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+              />
               <span className="truncate">
                 {t('tabs.logPrefix')} {isLocal ? t('tabs.logLocal') : logView.log.hostname}
               </span>
@@ -642,8 +752,13 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
   return (
     <div
+      data-top-tabs-root
       className="relative w-full bg-secondary app-drag"
-      style={dragRegionNoSelect}
+      style={{
+        ...dragRegionNoSelect,
+        backgroundColor: 'var(--top-tabs-bg, hsl(var(--secondary)))',
+        color: 'var(--top-tabs-fg, hsl(var(--foreground)))',
+      }}
       onDoubleClick={handleTitleBarDoubleClick}
     >
       {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
@@ -658,25 +773,62 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onClick={() => onSelectTab('vault')}
             className={cn(
               "relative h-7 px-3 rounded text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
-              "transition-colors duration-150",
-              isVaultActive
-                ? "bg-foreground/10 text-foreground"
-                : "text-muted-foreground hover:bg-background/40 hover:text-foreground"
             )}
+            style={{
+              backgroundColor: isVaultActive
+                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                : 'transparent',
+              color: isVaultActive
+                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+            }}
+            onMouseEnter={(e) => {
+              if (!isVaultActive) {
+                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isVaultActive) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+              }
+            }}
           >
-            <Shield size={14} /> Vaults
+            <FolderLock size={14} /> Vaults
           </div>
           <div
             onClick={() => onSelectTab('sftp')}
             className={cn(
               "relative h-7 px-3 rounded-none text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
-              "transition-colors duration-150",
-              isSftpActive
-                ? "bg-background text-foreground"
-                : "text-muted-foreground hover:bg-background/40 hover:text-foreground"
             )}
+            style={{
+              backgroundColor: isSftpActive
+                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                : 'transparent',
+              color: isSftpActive
+                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSftpActive) {
+                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSftpActive) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+              }
+            }}
           >
-            {isSftpActive && <div className="absolute top-0 left-0 right-0 h-[2px] bg-accent" />}
+            {isSftpActive && (
+              <div
+                className="absolute top-0 left-0 right-0 h-[2px]"
+                style={{ backgroundColor: 'var(--top-tabs-fg, hsl(var(--foreground)))' }}
+              />
+            )}
             <Folder size={14} /> SFTP
           </div>
         </div>
@@ -698,7 +850,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {canScrollLeft && (
             <div
               className="absolute left-0 top-0 bottom-0 w-8 pointer-events-none z-10"
-              style={{ background: 'linear-gradient(to right, hsl(var(--secondary) / 0.9), transparent)' }}
+              style={{ background: 'linear-gradient(to right, var(--top-tabs-bg, hsl(var(--secondary))), transparent)' }}
             />
           )}
 
@@ -715,6 +867,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 flex-shrink-0 app-no-drag mb-0 rounded-none"
+                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                 onClick={onOpenQuickSwitcher}
                 title="Open quick switcher"
               >
@@ -729,7 +882,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {canScrollRight && (
             <div
               className="absolute right-0 top-0 bottom-0 w-8 pointer-events-none z-10"
-              style={{ background: 'linear-gradient(to left, hsl(var(--secondary) / 0.9), transparent)' }}
+              style={{ background: 'linear-gradient(to left, var(--top-tabs-bg, hsl(var(--secondary))), transparent)' }}
             />
           )}
         </div>
@@ -740,6 +893,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             variant="ghost"
             size="icon"
             className="h-7 w-7 flex-shrink-0 app-no-drag self-end rounded-none"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
             onClick={onOpenQuickSwitcher}
             title="More tabs"
           >
@@ -752,20 +906,22 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground app-no-drag"
+            className="h-6 w-6 app-no-drag"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
             title="AI Assistant"
             onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel'))}
           >
             <Sparkles size={16} />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground app-no-drag">
+          <Button variant="ghost" size="icon" className="h-6 w-6 app-no-drag" style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}>
             <Bell size={16} />
           </Button>
           <SyncStatusButton onOpenSettings={onOpenSettings} onSyncNow={onSyncNow} />
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground hover:text-foreground app-no-drag"
+            className="h-6 w-6 app-no-drag"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
             onClick={onToggleTheme}
             disabled={isImmersiveActive}
             title="Toggle theme"

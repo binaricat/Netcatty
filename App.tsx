@@ -177,6 +177,7 @@ function App({ settings }: { settings: SettingsState }) {
   const {
     setTheme,
     resolvedTheme,
+    terminalThemeId,
     setTerminalThemeId,
     currentTerminalTheme,
     terminalFontFamilyId,
@@ -1304,6 +1305,8 @@ function App({ settings }: { settings: SettingsState }) {
             sessions={sessions}
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
+            terminalThemeId={terminalThemeId}
+            terminalFontSize={terminalFontSize}
             onOpenSettings={handleOpenSettings}
             onOpenQuickSwitcher={handleOpenQuickSwitcher}
             onCreateLocalTerminal={handleCreateLocalTerminal}
@@ -1332,7 +1335,20 @@ function App({ settings }: { settings: SettingsState }) {
           />
         </VaultViewContainer>
 
-        <SftpViewMount hosts={hosts} keys={keys} identities={identities} updateHosts={updateHosts} />
+        <SftpViewMount
+          hosts={hosts}
+          keys={keys}
+          identities={identities}
+          updateHosts={updateHosts}
+          sftpDoubleClickBehavior={sftpDoubleClickBehavior}
+          sftpAutoSync={sftpAutoSync}
+          sftpShowHiddenFiles={sftpShowHiddenFiles}
+          sftpUseCompressedUpload={sftpUseCompressedUpload}
+          hotkeyScheme={hotkeyScheme}
+          keyBindings={keyBindings}
+          editorWordWrap={editorWordWrap}
+          setEditorWordWrap={setEditorWordWrap}
+        />
 
         <TerminalLayerMount
           hosts={hosts}

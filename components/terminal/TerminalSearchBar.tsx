@@ -73,12 +73,19 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
     return (
         <div
             className="flex items-center gap-1.5 px-2 pt-0 pb-2 bg-black/50 backdrop-blur-sm"
+            style={{
+                backgroundColor: 'color-mix(in srgb, var(--terminal-ui-bg, #000000) 86%, transparent)',
+            }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
         >
             {/* Search input */}
             <div className="relative flex-1">
-                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/40" />
+                <Search
+                    size={12}
+                    className="absolute left-2 top-1/2 -translate-y-1/2"
+                    style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 40%, transparent)' }}
+                />
                 <input
                     ref={inputRef}
                     type="text"
@@ -88,13 +95,20 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                     placeholder={t("terminal.search.placeholder")}
-                    className="w-full h-6 pl-7 pr-2 text-[11px] bg-white/5 border-none rounded text-white placeholder:text-white/30 focus:outline-none focus:bg-white/10"
+                    className="w-full h-6 pl-7 pr-2 text-[11px] border-none rounded placeholder:opacity-40 focus:outline-none"
+                    style={{
+                        backgroundColor: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 5%, transparent)',
+                        color: 'var(--terminal-ui-fg, #ffffff)',
+                    }}
                 />
             </div>
 
             {/* Match count indicator - only show when no results */}
             {searchTerm.length > 0 && matchCount?.total === 0 && (
-                <span className="text-[10px] text-white/50 flex-shrink-0">
+                <span
+                    className="text-[10px] flex-shrink-0"
+                    style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 50%, transparent)' }}
+                >
                     {t("terminal.search.noResults")}
                 </span>
             )}
@@ -105,7 +119,10 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                    className="h-6 w-6 disabled:opacity-30"
+                    style={{
+                        color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
+                    }}
                     onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -123,7 +140,10 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                    className="h-6 w-6 disabled:opacity-30"
+                    style={{
+                        color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
+                    }}
                     onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();

@@ -35,7 +35,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
 
     return (
         <>
-            <div className="flex items-start justify-between gap-3 text-xs text-muted-foreground">
+            <div className="flex items-start justify-between gap-3 text-[11px] text-muted-foreground">
                 <div className="flex min-w-0 items-start gap-2">
                     {status === 'connecting' ? (
                         <>
@@ -57,8 +57,8 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
 
             {showLogs && (
                 <div className="rounded-md border border-border/35 bg-background/40">
-                    <ScrollArea className="max-h-52 p-3">
-                        <div className="space-y-1 text-sm text-foreground/90">
+                    <ScrollArea className="max-h-44 p-2.5">
+                        <div className="space-y-1 text-xs text-foreground/90">
                             {progressLogs.map((line, idx) => (
                                 <div key={idx} className="flex items-start gap-2">
                                     <div className="mt-[0.4rem] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-500" />
@@ -79,11 +79,11 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
             <div className="flex justify-end gap-2">
                 {status !== 'connecting' && (
                     <>
-                        <Button variant="ghost" size="sm" className="h-8" onClick={onCloseSession}>
+                        <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px]" onClick={onCloseSession}>
                             {t('terminal.toolbar.closeSession')}
                         </Button>
-                        <Button size="sm" className="h-8" onClick={onRetry}>
-                            <Play className="h-3 w-3 mr-2" /> {t('terminal.progress.startOver')}
+                        <Button size="sm" className="h-7 px-3 text-[11px]" onClick={onRetry}>
+                            <Play className="h-3 w-3 mr-1.5" /> {t('terminal.progress.startOver')}
                         </Button>
                     </>
                 )}

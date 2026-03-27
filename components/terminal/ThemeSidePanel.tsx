@@ -39,16 +39,20 @@ const ThemeItem = memo(({
     onClick={() => onSelect(theme.id)}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(theme.id); } }}
     className={cn(
-      'w-full flex items-center gap-2.5 px-3 py-2 text-left group cursor-pointer',
-      isSelected
-        ? 'bg-accent/50'
-        : 'hover:bg-accent/50'
+      'w-full flex items-center gap-2.5 px-3 py-2 text-left group cursor-pointer'
     )}
+    style={{ backgroundColor: isSelected ? 'var(--terminal-panel-active)' : 'transparent' }}
+    onMouseEnter={(e) => {
+      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--terminal-panel-hover)';
+    }}
+    onMouseLeave={(e) => {
+      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+    }}
   >
     {/* Color swatch */}
     <div
-      className="w-6 h-6 rounded-md flex-shrink-0 flex flex-col justify-center items-start pl-0.5 gap-0.5 border border-border/50"
-      style={{ backgroundColor: theme.colors.background }}
+      className="h-6 w-8 rounded-[4px] flex-shrink-0 flex flex-col justify-center items-start pl-1 gap-0.5 border-[0.5px]"
+      style={{ backgroundColor: theme.colors.background, borderColor: 'var(--terminal-panel-border)' }}
     >
       <div className="h-0.5 w-2.5 rounded-full" style={{ backgroundColor: theme.colors.green }} />
       <div className="h-0.5 w-4 rounded-full" style={{ backgroundColor: theme.colors.blue }} />
@@ -58,7 +62,7 @@ const ThemeItem = memo(({
       <div className="text-xs font-medium truncate">
         {theme.name}
       </div>
-      <div className="text-[10px] text-muted-foreground capitalize">
+      <div className="text-[10px] capitalize" style={{ color: 'var(--terminal-panel-muted)' }}>
         {theme.type}
         {theme.isCustom && ' • custom'}
       </div>
@@ -69,13 +73,14 @@ const ThemeItem = memo(({
         tabIndex={0}
         onClick={(e) => { e.stopPropagation(); onEdit(theme.id); }}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onEdit(theme.id); } }}
-        className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 opacity-0 group-hover:opacity-100 transition-all"
+        className="w-5 h-5 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+        style={{ color: 'var(--terminal-panel-muted)' }}
       >
         <Pencil size={10} />
       </div>
     )}
     {isSelected && !onEdit && (
-      <Check size={12} className="text-primary flex-shrink-0" />
+      <Check size={12} className="flex-shrink-0" style={{ color: 'var(--terminal-panel-fg)' }} />
     )}
   </div>
 ));
@@ -94,11 +99,15 @@ const FontItem = memo(({
   <button
     onClick={() => onSelect(font.id)}
     className={cn(
-      'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors',
-      isSelected
-        ? 'bg-accent/50'
-        : 'hover:bg-accent/50'
+      'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors'
     )}
+    style={{ backgroundColor: isSelected ? 'var(--terminal-panel-active)' : 'transparent' }}
+    onMouseEnter={(e) => {
+      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--terminal-panel-hover)';
+    }}
+    onMouseLeave={(e) => {
+      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+    }}
   >
     <div className="flex-1 min-w-0">
       <div
@@ -107,10 +116,10 @@ const FontItem = memo(({
       >
         {font.name}
       </div>
-      <div className="text-[10px] text-muted-foreground truncate">{font.description}</div>
+      <div className="text-[10px] truncate" style={{ color: 'var(--terminal-panel-muted)' }}>{font.description}</div>
     </div>
     {isSelected && (
-      <Check size={12} className="text-primary flex-shrink-0" />
+      <Check size={12} className="flex-shrink-0" style={{ color: 'var(--terminal-panel-fg)' }} />
     )}
   </button>
 ));
@@ -132,6 +141,10 @@ interface ThemeSidePanelProps {
   onFontSizeChange: (fontSize: number) => void;
   onFontSizeReset?: () => void;
   isVisible?: boolean;
+  previewColors?: {
+    background: string;
+    foreground: string;
+  };
 }
 
 const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
@@ -150,6 +163,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   onFontSizeChange,
   onFontSizeReset,
   isVisible = true,
+  previewColors,
 }) => {
   const { t } = useI18n();
   const availableFonts = useAvailableFonts();
@@ -245,44 +259,57 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
   if (!isVisible) return null;
 
   const builtinThemes = TERMINAL_THEMES;
+  const panelVars = {
+    ['--terminal-panel-bg' as never]: previewColors?.background ?? 'var(--background)',
+    ['--terminal-panel-fg' as never]: previewColors?.foreground ?? 'var(--foreground)',
+    ['--terminal-panel-muted' as never]: 'color-mix(in srgb, var(--terminal-panel-fg) 58%, var(--terminal-panel-bg) 42%)',
+    ['--terminal-panel-border' as never]: 'color-mix(in srgb, var(--terminal-panel-fg) 12%, var(--terminal-panel-bg) 88%)',
+    ['--terminal-panel-hover' as never]: 'color-mix(in srgb, var(--terminal-panel-fg) 12%, var(--terminal-panel-bg) 88%)',
+    ['--terminal-panel-active' as never]: 'color-mix(in srgb, var(--terminal-panel-fg) 16%, var(--terminal-panel-bg) 84%)',
+  } as React.CSSProperties;
 
   return (
     <>
-      <div className="h-full flex flex-col bg-background overflow-hidden">
+      <div
+        className="h-full flex flex-col overflow-hidden"
+        style={{
+          ...panelVars,
+          backgroundColor: 'var(--terminal-panel-bg)',
+          color: 'var(--terminal-panel-fg)',
+          borderColor: 'var(--terminal-panel-border)',
+        }}
+      >
         {/* Tab Bar */}
-        <div className="flex p-1.5 gap-0.5 shrink-0 border-b border-border/50">
+        <div className="flex p-1.5 gap-0.5 shrink-0 border-b" style={{ borderColor: 'var(--terminal-panel-border)' }}>
           <button
             onClick={() => { setActiveTab('theme'); setEditingTheme(null); }}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all',
-              activeTab === 'theme'
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            )}
+            className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all"
+            style={{
+              backgroundColor: activeTab === 'theme' ? 'var(--terminal-panel-active)' : 'transparent',
+              color: activeTab === 'theme' ? 'var(--terminal-panel-fg)' : 'var(--terminal-panel-muted)',
+            }}
           >
             <Palette size={12} />
             {t('terminal.themeModal.tab.theme')}
           </button>
           <button
             onClick={() => setActiveTab('font')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all',
-              activeTab === 'font'
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            )}
+            className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all"
+            style={{
+              backgroundColor: activeTab === 'font' ? 'var(--terminal-panel-active)' : 'transparent',
+              color: activeTab === 'font' ? 'var(--terminal-panel-fg)' : 'var(--terminal-panel-muted)',
+            }}
           >
             <Type size={12} />
             {t('terminal.themeModal.tab.font')}
           </button>
           <button
             onClick={() => setActiveTab('custom')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all',
-              activeTab === 'custom'
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            )}
+            className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md text-[11px] font-medium transition-all"
+            style={{
+              backgroundColor: activeTab === 'custom' ? 'var(--terminal-panel-active)' : 'transparent',
+              color: activeTab === 'custom' ? 'var(--terminal-panel-fg)' : 'var(--terminal-panel-muted)',
+            }}
           >
             <Sparkles size={12} />
             {t('terminal.themeModal.tab.custom')}
@@ -304,7 +331,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 ))}
                 {customThemes.length > 0 && (
                   <>
-                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                    <div className="text-[9px] uppercase tracking-wider mt-2 mb-1 px-1 font-semibold" style={{ color: 'var(--terminal-panel-muted)' }}>
                       {t('terminal.customTheme.section')}
                     </div>
                     {customThemes.map(theme => (
@@ -320,7 +347,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 )}
                 {canResetTheme && (
                   <>
-                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                    <div className="text-[9px] uppercase tracking-wider mt-2 mb-1 px-1 font-semibold" style={{ color: 'var(--terminal-panel-muted)' }}>
                       {t('terminal.themeModal.globalTheme')}
                     </div>
                     <ThemeItem
@@ -344,7 +371,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 ))}
                 {canResetFontFamily && (
                   <>
-                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                    <div className="text-[9px] uppercase tracking-wider mt-2 mb-1 px-1 font-semibold" style={{ color: 'var(--terminal-panel-muted)' }}>
                       {t('terminal.themeModal.globalFont')}
                     </div>
                     <FontItem
@@ -360,26 +387,36 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
               <div>
                 <button
                   onClick={handleNewTheme}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-accent/50 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors"
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--terminal-panel-hover)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
-                  <div className="w-6 h-6 rounded-md flex items-center justify-center bg-primary/10 text-primary shrink-0">
-                    <Plus size={12} />
-                  </div>
+                    <div
+                      className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: 'color-mix(in srgb, var(--terminal-panel-fg) 10%, transparent)',
+                        color: 'var(--terminal-panel-fg)',
+                      }}
+                    >
+                      <Plus size={12} />
+                    </div>
                   <div>
-                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.new')}</div>
-                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.newDesc')}</div>
+                    <div className="text-xs font-medium">{t('terminal.customTheme.new')}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--terminal-panel-muted)' }}>{t('terminal.customTheme.newDesc')}</div>
                   </div>
                 </button>
                 <button
                   onClick={handleImportFile}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-accent/50 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors"
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--terminal-panel-hover)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
                   <div className="w-6 h-6 rounded-md flex items-center justify-center bg-blue-500/10 text-blue-500 shrink-0">
                     <Download size={12} />
                   </div>
                   <div>
-                    <div className="text-xs font-medium text-foreground">{t('terminal.customTheme.import')}</div>
-                    <div className="text-[10px] text-muted-foreground">{t('terminal.customTheme.importDesc')}</div>
+                    <div className="text-xs font-medium">{t('terminal.customTheme.import')}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--terminal-panel-muted)' }}>{t('terminal.customTheme.importDesc')}</div>
                   </div>
                 </button>
                 <input
@@ -391,7 +428,7 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
                 />
                 {customThemes.length > 0 && (
                   <>
-                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground mt-2 mb-1 px-1 font-semibold">
+                    <div className="text-[9px] uppercase tracking-wider mt-2 mb-1 px-1 font-semibold" style={{ color: 'var(--terminal-panel-muted)' }}>
                       {t('terminal.customTheme.yourThemes')}
                     </div>
                     {customThemes.map(theme => (
@@ -412,36 +449,47 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
 
         {/* Font Size Control (only in font tab) */}
         {activeTab === 'font' && (
-          <div className="p-2.5 border-t border-border/50 shrink-0">
+          <div className="p-2.5 border-t shrink-0" style={{ borderColor: 'var(--terminal-panel-border)' }}>
             <div className="flex items-center justify-between gap-2 mb-1.5">
-              <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <div className="text-[9px] uppercase tracking-wider font-semibold" style={{ color: 'var(--terminal-panel-muted)' }}>
                 {t('terminal.themeModal.fontSize')}
               </div>
               {canResetFontSize && (
                 <button
                   onClick={onFontSizeReset}
-                  className="text-[10px] font-medium text-primary hover:opacity-80 transition-opacity"
+                  className="text-[10px] font-medium hover:opacity-80 transition-opacity"
+                  style={{ color: 'var(--terminal-panel-fg)' }}
                 >
                   {t('common.useGlobal')}
                 </button>
               )}
             </div>
-            <div className="flex items-center justify-between gap-2 bg-muted/30 rounded-lg p-1.5">
+            <div className="flex items-center justify-between gap-2 rounded-lg p-1.5" style={{ backgroundColor: 'var(--terminal-panel-hover)' }}>
               <button
                 onClick={() => handleFontSizeChange(-1)}
                 disabled={currentFontSize <= MIN_FONT_SIZE}
-                className="w-7 h-7 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                className="w-7 h-7 rounded-md flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors border"
+                style={{
+                  backgroundColor: 'var(--terminal-panel-bg)',
+                  color: 'var(--terminal-panel-fg)',
+                  borderColor: 'var(--terminal-panel-border)',
+                }}
               >
                 <Minus size={12} />
               </button>
               <div className="flex items-baseline gap-1">
-                <span className="text-lg font-bold text-foreground tabular-nums">{currentFontSize}</span>
-                <span className="text-[9px] text-muted-foreground">px</span>
+                <span className="text-lg font-bold tabular-nums">{currentFontSize}</span>
+                <span className="text-[9px]" style={{ color: 'var(--terminal-panel-muted)' }}>px</span>
               </div>
               <button
                 onClick={() => handleFontSizeChange(1)}
                 disabled={currentFontSize >= MAX_FONT_SIZE}
-                className="w-7 h-7 rounded-md flex items-center justify-center bg-background hover:bg-accent text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors border border-border"
+                className="w-7 h-7 rounded-md flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors border"
+                style={{
+                  backgroundColor: 'var(--terminal-panel-bg)',
+                  color: 'var(--terminal-panel-fg)',
+                  borderColor: 'var(--terminal-panel-border)',
+                }}
               >
                 <Plus size={12} />
               </button>
@@ -450,8 +498,8 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
         )}
 
         {/* Current selection info */}
-        <div className="px-2.5 py-1.5 border-t border-border/50 shrink-0">
-          <div className="text-[9px] text-muted-foreground truncate">
+        <div className="px-2.5 py-1.5 border-t shrink-0" style={{ borderColor: 'var(--terminal-panel-border)' }}>
+          <div className="text-[9px] truncate" style={{ color: 'var(--terminal-panel-muted)' }}>
             {allThemes.find(t => t.id === currentThemeId)?.name ?? currentThemeId} • {availableFonts.find(f => f.id === currentFontFamilyId)?.name ?? currentFontFamilyId} • {currentFontSize}px
           </div>
         </div>

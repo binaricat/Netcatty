@@ -1834,6 +1834,141 @@ async function getSessionPwd(event, payload) {
 }
 
 /**
+ * List directory contents on remote machine for path autocomplete.
+ * Uses a separate exec channel — does not touch the interactive shell.
+ */
+async function listSessionDir(_event, payload) {
+  const {
+    sessionId,
+    path: dirPath,
+    foldersOnly,
+    filterPrefix = "",
+    limit = 100,
+  } = payload || {};
+  const session = sessions.get(sessionId);
+
+  if (!session || !session.conn) {
+    return { success: false, entries: [], error: 'Session not found' };
+  }
+
+  if (typeof dirPath !== "string" || dirPath.length === 0) {
+    return { success: false, entries: [], error: 'Invalid directory path' };
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let streamRef = null;
+    const resolveOnce = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      try {
+        streamRef?.close?.();
+        streamRef?.destroy?.();
+      } catch {}
+      resolveOnce({ success: false, entries: [], error: 'Timeout listing directory' });
+    }, 3000);
+
+    // Emit a NUL-delimited stream from plain POSIX shell/find so we don't depend on
+    // Python/Perl, while still preserving whitespace and newline characters in filenames.
+    const safePath = dirPath.replace(/'/g, "'\\''");
+    const tildePathSuffix = dirPath.startsWith("~/")
+      ? dirPath.slice(2).replace(/(["\\$`])/g, "\\$1")
+      : "";
+    const normalizedPrefix = typeof filterPrefix === "string" ? filterPrefix.toLowerCase() : "";
+    const safePrefix = normalizedPrefix.replace(/'/g, "'\\''");
+    const maxEntries = Number.isFinite(limit) ? Math.min(Math.max(1, Math.floor(limit)), 200) : 100;
+    const pathExpr = dirPath === "~"
+      ? '"$HOME"'
+      : dirPath.startsWith("~/")
+        ? `"$HOME/${tildePathSuffix}"`
+        : `'${safePath}'`;
+    const cmd = `find ${pathExpr} -mindepth 1 -maxdepth 1 -exec sh -c '
+      prefix="$1"
+      folders_only="$2"
+      limit="$3"
+      shift 3
+      count=0
+      for path do
+        name=\${path##*/}
+        lower_name=$(printf "%s" "$name" | tr "[:upper:]" "[:lower:]")
+        if [ -n "$prefix" ]; then
+          case "$lower_name" in
+            "$prefix"*) ;;
+            *) continue ;;
+          esac
+        fi
+        if [ "$folders_only" -eq 1 ] && [ ! -d "$path" ]; then
+          continue
+        fi
+        if [ -L "$path" ]; then
+          type="symlink"
+        elif [ -d "$path" ]; then
+          type="directory"
+        else
+          type="file"
+        fi
+        printf "%s\\0%s\\0" "$name" "$type"
+        count=$((count + 1))
+        if [ "$count" -ge "$limit" ]; then
+          break
+        fi
+      done
+    ' sh '${safePrefix}' ${foldersOnly ? 1 : 0} ${maxEntries} {} + 2>/dev/null`;
+
+    session.conn.exec(cmd, (err, stream) => {
+      if (err) {
+        resolveOnce({ success: false, entries: [], error: err.message });
+        return;
+      }
+      streamRef = stream;
+      const chunks = [];
+      let errOut = '';
+      stream.on('data', (d) => { chunks.push(Buffer.from(d)); });
+      stream.stderr?.on('data', (d) => { errOut += d.toString(); });
+      stream.on('close', () => {
+        if (settled) return;
+        try {
+          const output = Buffer.concat(chunks);
+          const entries = [];
+          let fieldStart = 0;
+          let pendingName = null;
+
+          for (let i = 0; i < output.length; i++) {
+            if (output[i] !== 0) continue;
+            const field = output.toString('utf8', fieldStart, i);
+            fieldStart = i + 1;
+            if (pendingName === null) {
+              pendingName = field;
+            } else {
+              entries.push({ name: pendingName, type: field });
+              pendingName = null;
+              if (entries.length >= maxEntries) break;
+            }
+          }
+
+          if (pendingName !== null) {
+            resolveOnce({ success: false, entries: [], error: 'Invalid directory listing response' });
+            return;
+          }
+
+          resolveOnce({ success: true, entries });
+        } catch {
+          resolveOnce({
+            success: false,
+            entries: [],
+            error: errOut.trim() || 'Failed to parse directory listing',
+          });
+        }
+      });
+    });
+  });
+}
+
+/**
  * Get server stats (CPU, Memory, Disk) from an active SSH session
  * Only works for Linux servers
  */
@@ -2241,6 +2376,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:start", startSSHSessionWrapper);
   ipcMain.handle("netcatty:ssh:exec", execCommand);
   ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
+  ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
   ipcMain.handle("netcatty:ssh:stats", getServerStats);
   ipcMain.handle("netcatty:key:generate", generateKeyPair);
   ipcMain.handle("netcatty:ssh:setEncoding", setSessionEncoding);

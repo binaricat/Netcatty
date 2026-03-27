@@ -114,6 +114,20 @@ export default function SettingsTerminalTab(props: {
       || TERMINAL_THEMES[0];
   }, [terminalThemeId, customThemes]);
 
+  const handleAutocompleteGhostTextChange = useCallback((enabled: boolean) => {
+    updateTerminalSetting("autocompleteGhostText", enabled);
+    if (enabled) {
+      updateTerminalSetting("autocompletePopupMenu", false);
+    }
+  }, [updateTerminalSetting]);
+
+  const handleAutocompletePopupMenuChange = useCallback((enabled: boolean) => {
+    updateTerminalSetting("autocompletePopupMenu", enabled);
+    if (enabled) {
+      updateTerminalSetting("autocompleteGhostText", false);
+    }
+  }, [updateTerminalSetting]);
+
   // Import .itermcolors file
   const importFileRef = useRef<HTMLInputElement>(null);
   const handleImportItermcolors = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -869,7 +883,7 @@ export default function SettingsTerminalTab(props: {
         >
           <Toggle
             checked={terminalSettings.autocompleteGhostText}
-            onChange={(v) => updateTerminalSetting("autocompleteGhostText", v)}
+            onChange={handleAutocompleteGhostTextChange}
             disabled={!terminalSettings.autocompleteEnabled}
           />
         </SettingRow>
@@ -879,7 +893,7 @@ export default function SettingsTerminalTab(props: {
         >
           <Toggle
             checked={terminalSettings.autocompletePopupMenu}
-            onChange={(v) => updateTerminalSetting("autocompletePopupMenu", v)}
+            onChange={handleAutocompletePopupMenuChange}
             disabled={!terminalSettings.autocompleteEnabled}
           />
         </SettingRow>

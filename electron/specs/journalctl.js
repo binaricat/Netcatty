@@ -1,0 +1,38 @@
+// journalctl spec — systemd journal query tool
+const completionSpec = {
+  name: "journalctl",
+  description: "Query the systemd journal",
+  options: [
+    { name: ["-f", "--follow"], description: "Follow new journal entries (like tail -f)" },
+    { name: ["-r", "--reverse"], description: "Show newest entries first" },
+    { name: ["-e", "--pager-end"], description: "Jump to the end of the journal" },
+    { name: "--no-pager", description: "Do not pipe output into a pager" },
+    { name: ["-a", "--all"], description: "Show all fields in full" },
+    { name: ["-n", "--lines"], description: "Number of journal entries to show", args: { name: "N", description: "Number of lines" } },
+    { name: ["-o", "--output"], description: "Change journal output mode", args: { name: "format", suggestions: ["short", "short-precise", "short-iso", "short-iso-precise", "short-full", "short-monotonic", "verbose", "export", "json", "json-pretty", "json-sse", "cat"] } },
+    { name: ["-x", "--catalog"], description: "Augment log lines with explanation texts" },
+    { name: ["-b", "--boot"], description: "Show messages from a specific boot", args: { name: "ID", isOptional: true } },
+    { name: ["-k", "--dmesg"], description: "Show kernel messages only" },
+    { name: ["-u", "--unit"], description: "Show messages for the specified unit", args: { name: "UNIT" } },
+    { name: "--user-unit", description: "Show messages for the specified user unit", args: { name: "UNIT" } },
+    { name: ["-t", "--identifier"], description: "Show messages with the specified syslog identifier", args: { name: "SYSLOG_IDENTIFIER" } },
+    { name: ["-p", "--priority"], description: "Filter by message priority", args: { name: "PRIORITY", suggestions: ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug", "0", "1", "2", "3", "4", "5", "6", "7"] } },
+    { name: ["-g", "--grep"], description: "Filter by message content (PCRE2 regex)", args: { name: "PATTERN" } },
+    { name: ["-S", "--since"], description: "Show entries on or newer than date", args: { name: "DATE", description: "e.g. '2023-01-01', 'yesterday', '1 hour ago'" } },
+    { name: ["-U", "--until"], description: "Show entries on or older than date", args: { name: "DATE" } },
+    { name: "--disk-usage", description: "Show total disk usage of all journal files" },
+    { name: "--vacuum-size", description: "Reduce disk usage below specified size", args: { name: "BYTES" } },
+    { name: "--vacuum-time", description: "Remove journal files older than specified time", args: { name: "TIME" } },
+    { name: "--list-boots", description: "Show a list of boots" },
+    { name: ["-D", "--directory"], description: "Show journal files from directory", args: { name: "DIR", template: "folders" } },
+    { name: "--file", description: "Operate on a specific journal file", args: { name: "FILE", template: "filepaths" } },
+    { name: "--no-hostname", description: "Suppress hostname field" },
+    { name: ["-q", "--quiet"], description: "Suppress info messages and privilege warning" },
+    { name: "--utc", description: "Express time in UTC" },
+    { name: "--system", description: "Show the system journal only" },
+    { name: "--user", description: "Show the user journal for the current user" },
+    { name: ["-h", "--help"], description: "Show help" },
+  ],
+};
+
+export default completionSpec;

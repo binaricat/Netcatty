@@ -132,14 +132,19 @@ function scoreEntryAt(entry: HistoryEntry, now: number): number {
 }
 
 export interface HistoryQueryOptions {
-  /** Filter by host ID */
+  /** Filter by host ID (strict isolation — only this host's history) */
   hostId?: string;
-  /** Also include entries from hosts with the same OS */
-  includeOsMatches?: boolean;
-  /** OS to match for cross-host suggestions */
-  os?: "linux" | "windows" | "macos";
   /** Maximum number of results */
   limit?: number;
+}
+
+export interface RecentHistoryQueryOptions extends HistoryQueryOptions {
+  /** Base command name, e.g. `cd` or `ls` */
+  commandName: string;
+  /** Exact command text to exclude from results */
+  excludeCommand?: string;
+  /** Optional path prefix to require on the current argument */
+  argumentPrefix?: string;
 }
 
 /**
@@ -150,7 +155,8 @@ export function queryHistory(
   prefix: string,
   options: HistoryQueryOptions = {},
 ): HistoryEntry[] {
-  const { hostId, includeOsMatches = true, os, limit = 20 } = options;
+  const { hostId, limit = 20 } = options;
+  if (limit <= 0) return [];
   const store = loadStore();
   const lowerPrefix = prefix.toLowerCase();
   const now = Date.now(); // Cache once per query
@@ -161,24 +167,15 @@ export function queryHistory(
     // Must not be identical to prefix
     if (entry.command === prefix) return false;
 
-    // Host filtering
+    // Host filtering: strict per-host isolation
     if (hostId) {
-      if (entry.hostId === hostId) return true;
-      if (includeOsMatches && os && entry.os === os) return true;
-      return false;
+      return entry.hostId === hostId;
     }
     return true;
   });
 
-  // Sort by: same host first, then by score
-  filtered.sort((a, b) => {
-    if (hostId) {
-      const aIsHost = a.hostId === hostId ? 1 : 0;
-      const bIsHost = b.hostId === hostId ? 1 : 0;
-      if (aIsHost !== bIsHost) return bIsHost - aIsHost;
-    }
-    return scoreEntryAt(b, now) - scoreEntryAt(a, now);
-  });
+  // Sort by score (frequency * recency)
+  filtered.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
 
   // Deduplicate by command text (keep highest scored)
   const seen = new Set<string>();
@@ -202,7 +199,8 @@ export function fuzzyQueryHistory(
   query: string,
   options: HistoryQueryOptions = {},
 ): HistoryEntry[] {
-  const { hostId, includeOsMatches = true, os, limit = 10 } = options;
+  const { hostId, limit = 10 } = options;
+  if (limit <= 0) return [];
   const store = loadStore();
   const lowerQuery = query.toLowerCase();
   const now = Date.now(); // Cache once per query
@@ -212,9 +210,7 @@ export function fuzzyQueryHistory(
   for (const entry of store.entries) {
     // Host filtering
     if (hostId) {
-      const isHost = entry.hostId === hostId;
-      const isOsMatch = includeOsMatches && os && entry.os === os;
-      if (!isHost && !isOsMatch) continue;
+      if (entry.hostId !== hostId) continue;
     }
 
     const matchScore = fuzzyScore(lowerQuery, entry.command.toLowerCase());
@@ -223,16 +219,9 @@ export function fuzzyQueryHistory(
     }
   }
 
-  scored.sort((a, b) => {
-    // Prefer same host
-    if (hostId) {
-      const aIsHost = a.entry.hostId === hostId ? 1 : 0;
-      const bIsHost = b.entry.hostId === hostId ? 1 : 0;
-      if (aIsHost !== bIsHost) return bIsHost - aIsHost;
-    }
-    // Then by fuzzy match quality * history score
-    return b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now);
-  });
+  scored.sort((a, b) =>
+    b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now),
+  );
 
   const seen = new Set<string>();
   const results: HistoryEntry[] = [];
@@ -244,6 +233,125 @@ export function fuzzyQueryHistory(
   }
 
   return results;
+}
+
+/**
+ * Query the most recently used history entries for the same command name.
+ * Useful when the user is currently completing a path argument and wants
+ * a few recent command-line examples (e.g. recent `cd ...` commands).
+ */
+export function queryRecentHistoryByCommand(
+  options: RecentHistoryQueryOptions,
+): HistoryEntry[] {
+  const {
+    commandName,
+    excludeCommand,
+    argumentPrefix,
+    hostId,
+    limit = 3,
+  } = options;
+  if (!commandName || limit <= 0) return [];
+
+  const store = loadStore();
+  const trimmedCommandName = commandName.trim().toLowerCase();
+  const commandPrefix = `${trimmedCommandName} `;
+  const normalizedArgumentPrefix = normalizeArgumentToken(argumentPrefix ?? "");
+
+  const filtered = store.entries.filter((entry) => {
+    const lowerCommand = entry.command.toLowerCase();
+    if (lowerCommand !== trimmedCommandName && !lowerCommand.startsWith(commandPrefix)) {
+      return false;
+    }
+    if (excludeCommand && entry.command === excludeCommand) return false;
+
+    if (normalizedArgumentPrefix) {
+      const currentToken = normalizeArgumentToken(getCurrentCommandToken(entry.command));
+      if (!currentToken.startsWith(normalizedArgumentPrefix)) {
+        return false;
+      }
+    }
+
+    if (hostId) {
+      return entry.hostId === hostId;
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+
+  const seen = new Set<string>();
+  const results: HistoryEntry[] = [];
+  for (const entry of filtered) {
+    if (seen.has(entry.command)) continue;
+    seen.add(entry.command);
+    results.push(entry);
+    if (results.length >= limit) break;
+  }
+
+  return results;
+}
+
+function getCurrentCommandToken(command: string): string {
+  const tokens = tokenizeShellLike(command);
+  return tokens.length > 0 ? (tokens[tokens.length - 1] || "") : "";
+}
+
+function normalizeArgumentToken(token: string): string {
+  return token
+    .trim()
+    .replace(/^['"]/, "")
+    .replace(/['"]$/, "")
+    .replace(/\\ /g, " ")
+    .toLowerCase();
+}
+
+function tokenizeShellLike(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      escaped = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      current += ch;
+      continue;
+    }
+
+    if (ch === " " && !inSingleQuote && !inDoubleQuote) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  tokens.push(current);
+  return tokens;
 }
 
 /**

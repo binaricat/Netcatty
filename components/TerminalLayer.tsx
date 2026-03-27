@@ -1,6 +1,12 @@
 import { Circle, FolderTree, LayoutGrid, MessageSquare, PanelLeft, PanelRight, Palette, Server, X, Zap } from 'lucide-react';
-import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
+import {
+  getSessionActivityIdsToClear,
+  getValidSessionActivityIds,
+  shouldMarkSessionActivity,
+} from '../application/state/sessionActivity';
+import { sessionActivityStore } from '../application/state/sessionActivityStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
 import { SplitDirection } from '../domain/workspace';
@@ -69,6 +75,78 @@ type PendingSftpUpload = {
 
 type SnippetExecutor = (command: string, noAutoRun?: boolean) => void;
 
+function hexToHslToken(hex: string): string {
+  const normalized = hex.startsWith('#') ? hex : `#${hex}`;
+  const r = parseInt(normalized.slice(1, 3), 16) / 255;
+  const g = parseInt(normalized.slice(3, 5), 16) / 255;
+  const b = parseInt(normalized.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        break;
+      case g:
+        h = ((b - r) / d + 2) / 6;
+        break;
+      default:
+        h = ((r - g) / d + 4) / 6;
+        break;
+    }
+  }
+
+  return `${Math.round(h * 3600) / 10} ${Math.round(s * 1000) / 10}% ${Math.round(l * 1000) / 10}%`;
+}
+
+function adjustLightnessToken(hsl: string, delta: number): string {
+  const parts = hsl.split(/\s+/);
+  const newL = Math.max(0, Math.min(100, parseFloat(parts[2]) + delta));
+  return `${parts[0]} ${parts[1]} ${Math.round(newL * 10) / 10}%`;
+}
+
+function adjustSaturationToken(hsl: string, factor: number): string {
+  const parts = hsl.split(/\s+/);
+  const newS = Math.max(0, Math.min(100, parseFloat(parts[1]) * factor));
+  return `${parts[0]} ${Math.round(newS * 10) / 10}% ${parts[2]}`;
+}
+
+const clearTerminalPreviewVars = (sessionId: string | null) => {
+  if (!sessionId || typeof document === 'undefined') return;
+  const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
+  if (!pane) return;
+  pane.style.removeProperty('--terminal-preview-bg');
+  pane.style.removeProperty('--terminal-preview-fg');
+  pane.style.removeProperty('--terminal-preview-border');
+  pane.style.removeProperty('--terminal-preview-toolbar-btn');
+  pane.style.removeProperty('--terminal-preview-toolbar-btn-hover');
+  pane.style.removeProperty('--terminal-preview-toolbar-btn-active');
+};
+
+const clearTopTabsPreviewVars = () => {
+  if (typeof document === 'undefined') return;
+  const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
+  if (!tabsRoot) return;
+  tabsRoot.style.removeProperty('--top-tabs-bg');
+  tabsRoot.style.removeProperty('--top-tabs-fg');
+  tabsRoot.style.removeProperty('--top-tabs-muted');
+  tabsRoot.style.removeProperty('--top-tabs-active-bg');
+  tabsRoot.style.removeProperty('--top-tabs-accent');
+  tabsRoot.style.removeProperty('--background');
+  tabsRoot.style.removeProperty('--foreground');
+  tabsRoot.style.removeProperty('--accent');
+  tabsRoot.style.removeProperty('--primary');
+  tabsRoot.style.removeProperty('--secondary');
+  tabsRoot.style.removeProperty('--border');
+  tabsRoot.style.removeProperty('--muted-foreground');
+};
+
 const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<string, T> => {
   let changed = false;
   const next = new Map<string, T>();
@@ -80,6 +158,41 @@ const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<s
     }
   }
   return changed ? next : source;
+};
+
+// eslint-disable-next-line no-control-regex
+const TERMINAL_OSC_SEQUENCE_REGEX = new RegExp('\\u001B\\][^\\u0007\\u001B]*(?:\\u0007|\\u001B\\\\)', 'g');
+// eslint-disable-next-line no-control-regex
+const TERMINAL_ESCAPE_SEQUENCE_REGEX = new RegExp('\\u001B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])', 'g');
+// eslint-disable-next-line no-control-regex
+const TERMINAL_CONTROL_CHAR_REGEX = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F]', 'g');
+// eslint-disable-next-line no-control-regex
+const INCOMPLETE_ESCAPE_TAIL_REGEX = new RegExp('\\u001B(?:\\][^\\u0007\\u001B]*(?:\\u001B)?|\\[[0-?]*[ -/]*)?$');
+
+const stripTerminalControlSequences = (data: string): string => {
+  return data
+    .replace(TERMINAL_OSC_SEQUENCE_REGEX, '')
+    .replace(TERMINAL_ESCAPE_SEQUENCE_REGEX, '')
+    .replace(TERMINAL_CONTROL_CHAR_REGEX, '');
+};
+
+class ChunkedEscapeFilter {
+  private pending = '';
+
+  feed(chunk: string): string {
+    const data = this.pending + chunk;
+    const tailMatch = INCOMPLETE_ESCAPE_TAIL_REGEX.exec(data);
+    if (tailMatch) {
+      this.pending = tailMatch[0];
+      return stripTerminalControlSequences(data.slice(0, tailMatch.index));
+    }
+    this.pending = '';
+    return stripTerminalControlSequences(data);
+  }
+}
+
+const hasNotifiableTerminalOutput = (filter: ChunkedEscapeFilter, chunk: string): boolean => {
+  return filter.feed(chunk).trim().length > 0;
 };
 
 type AITerminalSessionInfo = {
@@ -424,11 +537,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     snippetExecutorsRef.current.delete(sessionId);
   }, []);
 
+  const onSessionData = terminalBackend.onSessionData;
+
   const [workspaceArea, setWorkspaceArea] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const workspaceOuterRef = useRef<HTMLDivElement>(null);
   const workspaceInnerRef = useRef<HTMLDivElement>(null);
   const workspaceOverlayRef = useRef<HTMLDivElement>(null);
   const [dropHint, setDropHint] = useState<SplitHint>(null);
+  const [themePreview, setThemePreview] = useState<{ targetSessionId: string | null; themeId: string | null }>({
+    targetSessionId: null,
+    themeId: null,
+  });
+  const themeCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [resizing, setResizing] = useState<{
     workspaceId: string;
     splitId: string;
@@ -638,15 +758,24 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     for (const session of sessions) {
       const existingHost = hostMap.get(session.hostId);
       if (existingHost) {
-        // Apply session-time protocol overrides to the host
-        const hostWithOverrides: Host = {
-          ...existingHost,
-          // Use session protocol settings if provided (from connection-time selection)
-          protocol: session.protocol ?? existingHost.protocol,
-          port: session.port ?? existingHost.port,
-          moshEnabled: session.moshEnabled ?? existingHost.moshEnabled,
-        };
-        map.set(session.id, hostWithOverrides);
+        const protocol = session.protocol ?? existingHost.protocol;
+        const port = session.port ?? existingHost.port;
+        const moshEnabled = session.moshEnabled ?? existingHost.moshEnabled;
+
+        if (
+          protocol === existingHost.protocol &&
+          port === existingHost.port &&
+          moshEnabled === existingHost.moshEnabled
+        ) {
+          map.set(session.id, existingHost);
+        } else {
+          map.set(session.id, {
+            ...existingHost,
+            protocol,
+            port,
+            moshEnabled,
+          });
+        }
       } else {
         // Create stable fallback host object
         map.set(session.id, {
@@ -665,6 +794,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     return map;
   }, [sessions, hostMap]);
+  const sessionChainHostsMap = useMemo(() => {
+    const map = new Map<string, Host[]>();
+    for (const session of sessions) {
+      const host = sessionHostsMap.get(session.id);
+      if (!host?.hostChain?.hostIds?.length) continue;
+      map.set(
+        session.id,
+        host.hostChain.hostIds
+          .map((hostId) => hostMap.get(hostId))
+          .filter((value): value is Host => Boolean(value)),
+      );
+    }
+    return map;
+  }, [sessions, sessionHostsMap, hostMap]);
 
   const validTerminalTabIds = useMemo(() => {
     const ids = new Set<string>();
@@ -672,6 +815,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     for (const workspace of workspaces) ids.add(workspace.id);
     return ids;
   }, [sessions, workspaces]);
+
+  const validSessionActivityIds = useMemo(() => {
+    return getValidSessionActivityIds(sessions);
+  }, [sessions]);
 
   const onSplitSessionRef = useRef(onSplitSession);
   onSplitSessionRef.current = onSplitSession;
@@ -747,7 +894,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpHostForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpInitialLocationForTab(prev => filterTabsMap(prev, validTerminalTabIds));
     setSftpPendingUploadsForTab(prev => filterTabsMap(prev, validTerminalTabIds));
-  }, [validTerminalTabIds]);
+    sessionActivityStore.prune(validSessionActivityIds);
+  }, [validSessionActivityIds, validTerminalTabIds]);
 
   useEffect(() => {
     cleanupOrphanedAISessions(validTerminalTabIds);
@@ -1105,6 +1253,38 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return () => window.removeEventListener('netcatty:toggle-ai-panel', handler);
   }, [handleOpenAI]);
 
+  useEffect(() => {
+    const sessionIdsToClear = getSessionActivityIdsToClear(activeTabId, sessions);
+    if (sessionIdsToClear.length === 1) {
+      sessionActivityStore.clearTab(sessionIdsToClear[0]);
+      return;
+    }
+    if (sessionIdsToClear.length > 1) {
+      sessionActivityStore.clearTabs(sessionIdsToClear);
+    }
+  }, [activeTabId, sessions]);
+
+  useEffect(() => {
+    const unsubscribers = sessions.map((session) => {
+      const filter = new ChunkedEscapeFilter();
+      return onSessionData(session.id, (chunk) => {
+        if (!hasNotifiableTerminalOutput(filter, chunk)) return;
+
+        if (!shouldMarkSessionActivity(activeTabIdRef.current, session)) {
+          return;
+        }
+
+        sessionActivityStore.setTabActive(session.id, true);
+      });
+    });
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
+  }, [onSessionData, sessions]);
+
   // Execute snippet on the focused terminal session
   const handleSnippetClickForFocusedSession = useCallback((command: string, noAutoRun?: boolean) => {
     const sessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id;
@@ -1138,51 +1318,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isFocusedHostLocal = useMemo(() => {
     return focusedHost?.protocol === 'local' || !!focusedHost?.id?.startsWith('local-');
   }, [focusedHost]);
-
-  const handleThemeChangeForFocusedSession = useCallback((themeId: string) => {
-    if (isFocusedHostLocal) {
-      onUpdateTerminalThemeId?.(themeId);
-      return;
-    }
-    if (focusedHost) {
-      onUpdateHost({ ...focusedHost, theme: themeId, themeOverride: true });
-    }
-  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalThemeId, onUpdateHost]);
-
-  const handleThemeResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
-    onUpdateHost(clearHostThemeOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
-
-  const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
-    if (isFocusedHostLocal) {
-      onUpdateTerminalFontFamilyId?.(fontFamilyId);
-      return;
-    }
-    if (focusedHost) {
-      onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
-    }
-  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontFamilyId, onUpdateHost]);
-
-  const handleFontFamilyResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
-    onUpdateHost(clearHostFontFamilyOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
-
-  const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
-    if (isFocusedHostLocal) {
-      onUpdateTerminalFontSize?.(newFontSize);
-      return;
-    }
-    if (focusedHost) {
-      onUpdateHost({ ...focusedHost, fontSize: newFontSize, fontSizeOverride: true });
-    }
-  }, [focusedHost, isFocusedHostLocal, onUpdateTerminalFontSize, onUpdateHost]);
-
-  const handleFontSizeResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
-    onUpdateHost(clearHostFontSizeOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+  const previewTargetSessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id ?? null;
+  const activeThemePreviewId = themePreview.targetSessionId === previewTargetSessionId
+    ? themePreview.themeId
+    : null;
 
   // Current theme/font/size for the focused session (for ThemeSidePanel)
   const focusedThemeId = resolveHostTerminalThemeId(focusedHost, terminalTheme.id);
@@ -1191,6 +1330,190 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const focusedThemeOverridden = hasHostThemeOverride(focusedHost);
   const focusedFontFamilyOverridden = hasHostFontFamilyOverride(focusedHost);
   const focusedFontSizeOverridden = hasHostFontSizeOverride(focusedHost);
+  const activeTopTabsThemeId = activeSidePanelTab === 'theme' && previewTargetSessionId
+    ? (activeThemePreviewId ?? focusedThemeId)
+    : null;
+  const appliedPreviewSessionRef = useRef<string | null>(null);
+  const customThemes = useCustomThemes();
+  const applyTerminalPreviewVars = useCallback((sessionId: string | null, themeId: string | null) => {
+    if (!sessionId || !themeId || typeof document === 'undefined') {
+      clearTerminalPreviewVars(sessionId);
+      return;
+    }
+    const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
+    const theme = TERMINAL_THEMES.find((entry) => entry.id === themeId)
+      || customThemes.find((entry) => entry.id === themeId);
+    if (!pane || !theme) {
+      clearTerminalPreviewVars(sessionId);
+      return;
+    }
+
+    pane.style.setProperty('--terminal-preview-bg', theme.colors.background);
+    pane.style.setProperty('--terminal-preview-fg', theme.colors.foreground);
+    pane.style.setProperty('--terminal-preview-border', `color-mix(in srgb, ${theme.colors.foreground} 8%, ${theme.colors.background} 92%)`);
+    pane.style.setProperty('--terminal-preview-toolbar-btn', `color-mix(in srgb, ${theme.colors.background} 88%, ${theme.colors.foreground} 12%)`);
+    pane.style.setProperty('--terminal-preview-toolbar-btn-hover', `color-mix(in srgb, ${theme.colors.background} 78%, ${theme.colors.foreground} 22%)`);
+    pane.style.setProperty('--terminal-preview-toolbar-btn-active', `color-mix(in srgb, ${theme.colors.background} 68%, ${theme.colors.foreground} 32%)`);
+  }, [customThemes]);
+  const applyTopTabsPreviewVars = useCallback((themeId: string | null) => {
+    if (!themeId || typeof document === 'undefined') {
+      clearTopTabsPreviewVars();
+      return;
+    }
+    const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
+    const theme = TERMINAL_THEMES.find((entry) => entry.id === themeId)
+      || customThemes.find((entry) => entry.id === themeId);
+    if (!tabsRoot || !theme) {
+      clearTopTabsPreviewVars();
+      return;
+    }
+    const bg = hexToHslToken(theme.colors.background);
+    const fg = hexToHslToken(theme.colors.foreground);
+    const accent = fg;
+    const isDark = theme.type === 'dark';
+    const secondary = adjustLightnessToken(bg, isDark ? 6 : -5);
+    const border = adjustLightnessToken(bg, isDark ? 12 : -10);
+    const mutedFg = adjustSaturationToken(adjustLightnessToken(fg, isDark ? -20 : 20), 0.5);
+
+    tabsRoot.style.setProperty('--background', bg);
+    tabsRoot.style.setProperty('--foreground', fg);
+    tabsRoot.style.setProperty('--accent', accent);
+    tabsRoot.style.setProperty('--primary', accent);
+    tabsRoot.style.setProperty('--secondary', secondary);
+    tabsRoot.style.setProperty('--border', border);
+    tabsRoot.style.setProperty('--muted-foreground', mutedFg);
+    tabsRoot.style.setProperty('--top-tabs-bg', 'hsl(var(--secondary))');
+    tabsRoot.style.setProperty('--top-tabs-fg', 'hsl(var(--foreground))');
+    tabsRoot.style.setProperty('--top-tabs-muted', 'hsl(var(--muted-foreground))');
+    tabsRoot.style.setProperty('--top-tabs-active-bg', 'hsl(var(--background))');
+    tabsRoot.style.setProperty('--top-tabs-accent', 'hsl(var(--foreground))');
+  }, [customThemes]);
+
+  useEffect(() => {
+    return () => {
+      if (themeCommitTimerRef.current) {
+        clearTimeout(themeCommitTimerRef.current);
+      }
+      clearTerminalPreviewVars(appliedPreviewSessionRef.current);
+      clearTopTabsPreviewVars();
+    };
+  }, []);
+
+  useEffect(() => {
+    const appliedSessionId = appliedPreviewSessionRef.current;
+    if (
+      appliedSessionId &&
+      (appliedSessionId !== themePreview.targetSessionId || !themePreview.themeId)
+    ) {
+      clearTerminalPreviewVars(appliedSessionId);
+      appliedPreviewSessionRef.current = null;
+    }
+
+    if (themePreview.targetSessionId && themePreview.themeId) {
+      applyTerminalPreviewVars(themePreview.targetSessionId, themePreview.themeId);
+      appliedPreviewSessionRef.current = themePreview.targetSessionId;
+    }
+  }, [applyTerminalPreviewVars, themePreview]);
+
+  useEffect(() => {
+    if (activeTopTabsThemeId) {
+      applyTopTabsPreviewVars(activeTopTabsThemeId);
+      return;
+    }
+    clearTopTabsPreviewVars();
+  }, [activeTopTabsThemeId, applyTopTabsPreviewVars]);
+
+  useEffect(() => {
+    const shouldKeepPreview =
+      activeSidePanelTab === 'theme' &&
+      !!previewTargetSessionId &&
+      !!themePreview.targetSessionId &&
+      !!themePreview.themeId;
+
+    if (shouldKeepPreview) return;
+
+    const appliedSessionId = appliedPreviewSessionRef.current;
+    if (appliedSessionId) {
+      clearTerminalPreviewVars(appliedSessionId);
+      appliedPreviewSessionRef.current = null;
+    }
+    clearTopTabsPreviewVars();
+
+    if (themePreview.targetSessionId || themePreview.themeId) {
+      setThemePreview({ targetSessionId: null, themeId: null });
+    }
+  }, [activeSidePanelTab, previewTargetSessionId, themePreview.targetSessionId, themePreview.themeId]);
+
+  useEffect(() => {
+    if (
+      themePreview.targetSessionId === previewTargetSessionId &&
+      themePreview.themeId &&
+      themePreview.themeId === focusedThemeId
+    ) {
+      setThemePreview({ targetSessionId: null, themeId: null });
+    }
+  }, [focusedThemeId, previewTargetSessionId, themePreview]);
+
+  const handleThemeChangeForFocusedSession = useCallback((themeId: string) => {
+    if (!focusedHost || themeId === focusedThemeId) return;
+    applyTerminalPreviewVars(previewTargetSessionId, themeId);
+    applyTopTabsPreviewVars(themeId);
+    setThemePreview({ targetSessionId: previewTargetSessionId, themeId });
+    if (themeCommitTimerRef.current) {
+      clearTimeout(themeCommitTimerRef.current);
+    }
+    themeCommitTimerRef.current = setTimeout(() => {
+      startTransition(() => {
+        if (isFocusedHostLocal) {
+          onUpdateTerminalThemeId?.(themeId);
+          return;
+        }
+        onUpdateHost({ ...focusedHost, theme: themeId, themeOverride: true });
+      });
+    }, 160);
+  }, [applyTerminalPreviewVars, applyTopTabsPreviewVars, focusedHost, focusedThemeId, isFocusedHostLocal, onUpdateTerminalThemeId, onUpdateHost, previewTargetSessionId]);
+
+  const handleThemeResetForFocusedSession = useCallback(() => {
+    if (themeCommitTimerRef.current) {
+      clearTimeout(themeCommitTimerRef.current);
+    }
+    clearTerminalPreviewVars(previewTargetSessionId);
+    setThemePreview({ targetSessionId: null, themeId: null });
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostThemeOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost, previewTargetSessionId]);
+
+  const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
+    if (!focusedHost || fontFamilyId === focusedFontFamilyId) return;
+    startTransition(() => {
+      if (isFocusedHostLocal) {
+        onUpdateTerminalFontFamilyId?.(fontFamilyId);
+        return;
+      }
+      onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
+    });
+  }, [focusedHost, focusedFontFamilyId, isFocusedHostLocal, onUpdateTerminalFontFamilyId, onUpdateHost]);
+
+  const handleFontFamilyResetForFocusedSession = useCallback(() => {
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostFontFamilyOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+
+  const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
+    if (!focusedHost || newFontSize === focusedFontSize) return;
+    startTransition(() => {
+      if (isFocusedHostLocal) {
+        onUpdateTerminalFontSize?.(newFontSize);
+        return;
+      }
+      onUpdateHost({ ...focusedHost, fontSize: newFontSize, fontSizeOverride: true });
+    });
+  }, [focusedHost, focusedFontSize, isFocusedHostLocal, onUpdateTerminalFontSize, onUpdateHost]);
+
+  const handleFontSizeResetForFocusedSession = useCallback(() => {
+    if (!focusedHost || isFocusedHostLocal) return;
+    onUpdateHost(clearHostFontSizeOverride(focusedHost));
+  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
 
   // Keep MCP/ACP approval IPC listener alive for the entire terminal lifecycle.
   // Must live here (TerminalLayer), not inside the AI panel subtree, so closing
@@ -1284,20 +1607,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     };
   }, []);
 
-  // Subscribe to custom theme changes so editing triggers re-render
-  const customThemes = useCustomThemes();
+  const resolvedPreviewTheme = useMemo(() => {
+    const themeId = activeThemePreviewId ?? focusedThemeId;
+    return TERMINAL_THEMES.find((theme) => theme.id === themeId)
+      || customThemes.find((theme) => theme.id === themeId)
+      || terminalTheme;
+  }, [activeThemePreviewId, customThemes, focusedThemeId, terminalTheme]);
 
   // Resolve the effective theme for the compose bar in workspace mode
   const composeBarThemeColors = useMemo(() => {
     if (!activeWorkspace || !focusedSessionId) return terminalTheme.colors;
-    const focusedHost = sessionHostsMap.get(focusedSessionId);
-    if (focusedHost?.theme) {
-      const hostTheme = TERMINAL_THEMES.find(t => t.id === focusedHost.theme)
-        || customThemes.find(t => t.id === focusedHost.theme);
-      if (hostTheme) return hostTheme.colors;
-    }
-    return terminalTheme.colors;
-  }, [activeWorkspace, focusedSessionId, sessionHostsMap, terminalTheme, customThemes]);
+    return resolvedPreviewTheme.colors;
+  }, [activeWorkspace, focusedSessionId, resolvedPreviewTheme, terminalTheme.colors]);
 
   // Handle compose bar send for workspace mode
   const handleComposeSend = useCallback((text: string) => {
@@ -1335,14 +1656,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Track previous focusedSessionId to detect changes
   const prevFocusedSessionIdRef = useRef<string | undefined>(undefined);
 
-  // When focusedSessionId changes in split view, focus the corresponding terminal
+  // When focusedSessionId changes or terminal layer becomes visible,
+  // focus the corresponding terminal to restore :focus-within CSS state
   useEffect(() => {
     // Only handle split view mode (not focus mode)
     if (isFocusMode || !focusedSessionId || !activeWorkspace) return;
 
-    // Only trigger when focusedSessionId actually changes
-    if (prevFocusedSessionIdRef.current === focusedSessionId) return;
-    const prevFocusedId = prevFocusedSessionIdRef.current;
+    // Trigger on focusedSessionId change OR when layer becomes visible again
+    const sessionChanged = prevFocusedSessionIdRef.current !== focusedSessionId;
+    if (!sessionChanged && !isTerminalLayerVisible) return;
+    const prevFocusedId = sessionChanged ? prevFocusedSessionIdRef.current : undefined;
     prevFocusedSessionIdRef.current = focusedSessionId;
 
     // First, blur the currently focused terminal immediately
@@ -1380,7 +1703,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       clearTimeout(timer2);
       clearTimeout(timer3);
     };
-  }, [focusedSessionId, isFocusMode, activeWorkspace]);
+  }, [focusedSessionId, isFocusMode, activeWorkspace, isTerminalLayerVisible]);
 
   // Get sessions for the active workspace in focus mode
   const workspaceSessionIds = useMemo(() => {
@@ -1468,7 +1791,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       <div
         ref={workspaceOuterRef}
         className="absolute inset-0 bg-background flex flex-col"
-        style={{ display: isTerminalLayerVisible ? 'flex' : 'none', zIndex: isTerminalLayerVisible ? 10 : 0 }}
+        style={{
+          visibility: isTerminalLayerVisible ? 'visible' : 'hidden',
+          pointerEvents: isTerminalLayerVisible ? 'auto' : 'none',
+          zIndex: isTerminalLayerVisible ? 10 : 0,
+        }}
       >
         <div className={cn("flex-1 flex min-h-0 relative", sidePanelPosition === 'right' && "flex-row-reverse")}>
         {/* Side panel with tab header + content (SFTP / Scripts / Theme) */}
@@ -1494,19 +1821,32 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   "h-full flex flex-col overflow-hidden",
                   !isSidePanelOpenForCurrentTab && "pointer-events-none",
                 )}
-              >
+                style={{
+                    ['--terminal-sidepanel-bg' as never]: resolvedPreviewTheme.colors.background,
+                    ['--terminal-sidepanel-fg' as never]: resolvedPreviewTheme.colors.foreground,
+                    ['--terminal-sidepanel-muted' as never]: `color-mix(in srgb, ${resolvedPreviewTheme.colors.foreground} 62%, ${resolvedPreviewTheme.colors.background} 38%)`,
+                    ['--terminal-sidepanel-border' as never]: `color-mix(in srgb, ${resolvedPreviewTheme.colors.foreground} 12%, ${resolvedPreviewTheme.colors.background} 88%)`,
+                    backgroundColor: 'var(--terminal-sidepanel-bg)',
+                    color: 'var(--terminal-sidepanel-fg)',
+                    borderColor: 'var(--terminal-sidepanel-border)',
+                  }}
+                >
                 {isSidePanelOpenForCurrentTab && (
-                  <div className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1">
+                  <div
+                    className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1"
+                    style={{
+                      borderBottom: '1px solid var(--terminal-sidepanel-border)',
+                    }}
+                  >
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0",
-                        activeSidePanelTab === 'sftp'
-                          ? "text-foreground opacity-100"
-                          : "text-muted-foreground opacity-70 hover:opacity-100",
-                        "hover:bg-transparent",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: activeSidePanelTab === 'sftp'
+                          ? 'var(--terminal-sidepanel-fg)'
+                          : 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={handleToggleSftpFromBar}
                       title="SFTP"
                     >
@@ -1515,13 +1855,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0",
-                        activeSidePanelTab === 'scripts'
-                          ? "text-foreground opacity-100"
-                          : "text-muted-foreground opacity-70 hover:opacity-100",
-                        "hover:bg-transparent",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: activeSidePanelTab === 'scripts'
+                          ? 'var(--terminal-sidepanel-fg)'
+                          : 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={handleOpenScripts}
                       title="Scripts"
                     >
@@ -1530,13 +1869,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0",
-                        activeSidePanelTab === 'theme'
-                          ? "text-foreground opacity-100"
-                          : "text-muted-foreground opacity-70 hover:opacity-100",
-                        "hover:bg-transparent",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: activeSidePanelTab === 'theme'
+                          ? 'var(--terminal-sidepanel-fg)'
+                          : 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={handleOpenTheme}
                       title="Theme"
                     >
@@ -1545,13 +1883,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0",
-                        activeSidePanelTab === 'ai'
-                          ? "text-foreground opacity-100"
-                          : "text-muted-foreground opacity-70 hover:opacity-100",
-                        "hover:bg-transparent",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: activeSidePanelTab === 'ai'
+                          ? 'var(--terminal-sidepanel-fg)'
+                          : 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={handleOpenAI}
                       title="AI Chat"
                     >
@@ -1561,10 +1898,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0 text-muted-foreground",
-                        "hover:bg-transparent hover:text-foreground",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={() => setSidePanelPosition(p => p === 'left' ? 'right' : 'left')}
                       title={sidePanelPosition === 'left' ? 'Move panel to right' : 'Move panel to left'}
                     >
@@ -1573,10 +1910,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-7 w-7 rounded-md p-0 text-muted-foreground",
-                        "hover:bg-transparent hover:text-foreground",
-                      )}
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{
+                        color: 'var(--terminal-sidepanel-muted)',
+                      }}
                       onClick={handleCloseSidePanel}
                       title="Close panel"
                     >
@@ -1632,7 +1969,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   {activeSidePanelTab === 'theme' && (
                     <div className="absolute inset-0 z-10">
                       <ThemeSidePanel
-                        currentThemeId={focusedThemeId}
+                        currentThemeId={activeThemePreviewId ?? focusedThemeId}
                         globalThemeId={terminalTheme.id}
                         currentFontFamilyId={focusedFontFamilyId}
                         globalFontFamilyId={terminalFontFamilyId}
@@ -1646,6 +1983,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                         onFontFamilyReset={handleFontFamilyResetForFocusedSession}
                         onFontSizeChange={handleFontSizeChangeForFocusedSession}
                         onFontSizeReset={handleFontSizeResetForFocusedSession}
+                        previewColors={resolvedPreviewTheme.colors}
                       />
                     </div>
                   )}
@@ -1732,7 +2070,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             const style: React.CSSProperties = { ...layoutStyle };
 
             if (!isVisible) {
-              style.display = 'none';
+              style.visibility = 'hidden';
+              style.pointerEvents = 'none';
+              // Use absolute offscreen position instead of display:none to preserve
+              // xterm canvas state in memory and avoid full re-render on tab switch.
+              style.left = '-9999px';
+              style.top = '-9999px';
             }
 
             // Check if this pane is the focused one in the workspace
@@ -1754,7 +2097,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   "absolute bg-background",
                   inActiveWorkspace && "workspace-pane",
                   isVisible && "z-10",
-                  isFocusedPane && "ring-1 ring-primary/50 ring-inset"
+                  // Focus indicator is handled by CSS .workspace-pane:not(:focus-within)
                 )}
                 style={style}
                 tabIndex={-1}
@@ -1770,7 +2113,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                   keys={keys}
                   identities={identities}
                   snippets={snippets}
-                  allHosts={hosts}
+                  chainHosts={sessionChainHostsMap.get(session.id)}
+                  themePreviewId={session.id === previewTargetSessionId ? activeThemePreviewId ?? undefined : undefined}
                   knownHosts={knownHosts}
                   isVisible={isVisible}
                   inWorkspace={inActiveWorkspace}

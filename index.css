@@ -101,6 +101,13 @@ body {
   color: hsl(var(--foreground));
 }
 
+[data-instant-theme-switch="true"],
+[data-instant-theme-switch="true"] *,
+[data-instant-theme-switch="true"] *::before,
+[data-instant-theme-switch="true"] *::after {
+  transition: none !important;
+}
+
 .dark {
   color-scheme: dark;
 }
@@ -193,6 +200,23 @@ body {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border) / 0.8);
   box-shadow: 0 4px 12px hsl(var(--foreground) / 0.06);
+}
+
+@keyframes session-activity-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.1);
+    opacity: 0.18;
+  }
+}
+
+.session-activity-dot {
+  animation: session-activity-breathe 1.4s ease-in-out infinite;
 }
 
 .card-highlight {
@@ -311,20 +335,9 @@ body {
   overflow: visible;
 }
 
-.workspace-pane::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 0;
-  border: 2px solid hsl(var(--primary));
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 120ms ease, box-shadow 120ms ease;
-  z-index: 40;
-}
-
-.workspace-pane:focus-within::after {
-  opacity: 1;
+/* Dim terminal text in unfocused workspace panes */
+.workspace-pane:not(:focus-within) .xterm-screen {
+  opacity: 0.65;
 }
 
 /* ── Streamdown code block overrides ── */

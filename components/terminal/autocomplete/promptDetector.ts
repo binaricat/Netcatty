@@ -124,19 +124,24 @@ const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "�
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
-  // Scan for prompt boundary. Complex prompts like Starship "➜  repo git:(main) $ "
-  // have multiple prompt chars, so we take the LAST candidate — but only within the
-  // first half of the line to avoid matching shell syntax like "> " in "echo foo > bar".
+  // Scan for prompt boundary. Take the LAST candidate.
+  // For ambiguous chars like >, limit scan to first 60% to avoid matching redirections.
+  // For unambiguous prompt chars ($, #), scan the full line since they're rarely
+  // confused with shell syntax in a prompt position.
   const lineLen = lineText.trimEnd().length;
   const scanLimit = Math.min(lineLen, 200);
-  // Only search the first 60% of the line — prompt can't be in the tail half
-  const promptScanLimit = Math.min(scanLimit, Math.max(40, Math.floor(lineLen * 0.6)));
   let lastBoundary = -1;
 
-  for (let i = 0; i < promptScanLimit; i++) {
+  // Ambiguous chars (>) only scan first 60% to avoid matching redirections
+  const ambiguousScanLimit = Math.min(scanLimit, Math.max(40, Math.floor(lineLen * 0.6)));
+
+  for (let i = 0; i < scanLimit; i++) {
     const ch = lineText[i];
 
     if (!PROMPT_CHARS.has(ch)) continue;
+
+    // For ambiguous prompt chars like >, only accept in the first 60% of the line
+    if ((ch === ">" || ch === "›") && i >= ambiguousScanLimit) continue;
 
     // Must be followed by a space or end-of-line.
     const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;

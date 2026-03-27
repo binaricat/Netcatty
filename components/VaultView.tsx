@@ -27,7 +27,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import React, { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
@@ -37,6 +37,7 @@ import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/v
 import type { VaultImportFormat } from "../domain/vaultImport";
 import { STORAGE_KEY_VAULT_HOSTS_VIEW_MODE, STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED, STORAGE_KEY_VAULT_SIDEBAR_COLLAPSED } from "../infrastructure/config/storageKeys";
 import { cn } from "../lib/utils";
+import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import {
   ConnectionLog,
   GroupNode,
@@ -109,6 +110,8 @@ interface VaultViewProps {
   sessions: TerminalSession[];
   hotkeyScheme: HotkeyScheme;
   keyBindings: KeyBinding[];
+  terminalThemeId: string;
+  terminalFontSize: number;
   onOpenSettings: () => void;
   onOpenQuickSwitcher: () => void;
   onCreateLocalTerminal: () => void;
@@ -151,6 +154,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   sessions,
   hotkeyScheme,
   keyBindings,
+  terminalThemeId,
+  terminalFontSize,
   onOpenSettings,
   onOpenQuickSwitcher,
   onCreateLocalTerminal,
@@ -178,6 +183,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onNavigateToSectionHandled,
 }) => {
   const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
   const [currentSection, setCurrentSection] = useState<VaultSection>("hosts");
   const [search, setSearch] = useState("");
   const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(
@@ -195,6 +201,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [isDeleteGroupOpen, setIsDeleteGroupOpen] = useState(false);
   const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null);
   const [deleteGroupWithHosts, setDeleteGroupWithHosts] = useState(false);
+
+  useInstantThemeSwitch(rootRef);
 
   // Sidebar collapsed state with localStorage persistence
   const [sidebarCollapsed, setSidebarCollapsed] = useStoredBoolean(
@@ -1272,7 +1280,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Component no longer handles visibility - that's done by VaultViewWrapper
   return (
-    <div className="absolute inset-0 min-h-0 flex">
+    <div ref={rootRef} className="absolute inset-0 min-h-0 flex">
       {/* Sidebar */}
       <TooltipProvider delayDuration={100}>
         <div className={cn(
@@ -2302,6 +2310,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           allTags={allTags}
           allHosts={hosts}
           defaultGroup={editingHost ? undefined : (newHostGroupPath || selectedGroupPath)}
+          terminalThemeId={terminalThemeId}
+          terminalFontSize={terminalFontSize}
           onSave={(host) => {
             // Check if host already exists in the list (for updates vs. new/duplicate)
             const hostExists = hosts.some((h) => h.id === host.id);
@@ -2567,7 +2577,9 @@ const vaultViewAreEqual = (
     prev.shellHistory === next.shellHistory &&
     prev.connectionLogs === next.connectionLogs &&
     prev.sessions === next.sessions &&
-    prev.managedSources === next.managedSources;
+    prev.managedSources === next.managedSources &&
+    prev.terminalThemeId === next.terminalThemeId &&
+    prev.terminalFontSize === next.terminalFontSize;
 
   return isEqual;
 };
