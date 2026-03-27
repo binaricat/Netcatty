@@ -1095,10 +1095,10 @@ function App({ settings }: { settings: SettingsState }) {
   }, [addConnectionLog, connectToHost, identities, keys]);
 
   // Wrapper to create serial session with logging
-  const handleConnectSerial = useCallback((config: SerialConfig) => {
+  const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const { username, hostname } = systemInfoRef.current;
     const portName = config.path.split('/').pop() || config.path;
-    const sessionId = createSerialSession(config);
+    const sessionId = createSerialSession(config, options);
     addConnectionLog({
       sessionId,
       hostId: '',

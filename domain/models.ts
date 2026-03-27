@@ -620,6 +620,7 @@ export interface TerminalSession {
   port?: number;
   moshEnabled?: boolean;
   shellType?: 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
+  charset?: string; // Connection-time charset override (e.g. for quick-connect serial)
   // Serial-specific connection settings
   serialConfig?: SerialConfig;
 }

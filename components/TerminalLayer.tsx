@@ -793,6 +793,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           tags: [],
           protocol: session.protocol ?? 'local' as const,
           moshEnabled: session.moshEnabled,
+          charset: session.charset,
         });
       }
     }

@@ -58,7 +58,7 @@ export const useSessionState = () => {
     return sessionId;
   }, [setActiveTabId]);
 
-  const createSerialSession = useCallback((config: SerialConfig) => {
+  const createSerialSession = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const sessionId = crypto.randomUUID();
     const serialHostId = `serial-${sessionId}`;
     const portName = config.path.split('/').pop() || config.path;
@@ -71,6 +71,7 @@ export const useSessionState = () => {
       status: 'connecting',
       protocol: 'serial',
       serialConfig: config,
+      charset: options?.charset,
     };
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(sessionId);
