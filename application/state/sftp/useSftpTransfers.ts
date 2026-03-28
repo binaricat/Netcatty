@@ -310,7 +310,7 @@ export const useSftpTransfers = ({
     return count;
   };
 
-  const MAX_DIRECTORY_DEPTH = 64;
+  const MAX_SYMLINK_DEPTH = 32;
 
   const transferDirectory = async (
     task: TransferTask,
@@ -321,27 +321,29 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
-    depth = 0,
+    symlinkDepth = 0,
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
       throw new Error("Transfer cancelled");
     }
 
-    // Guard against symlink loops and excessively deep directory trees
-    if (depth > MAX_DIRECTORY_DEPTH) {
-      throw new Error(`Directory depth exceeds limit (${MAX_DIRECTORY_DEPTH}), possible symlink cycle: ${task.sourcePath}`);
+    // Guard against symlink directory cycles (only counts symlink hops, not real directories)
+    if (symlinkDepth > MAX_SYMLINK_DEPTH) {
+      throw new Error(`Symlink depth exceeds limit (${MAX_SYMLINK_DEPTH}), possible cycle: ${task.sourcePath}`);
     }
 
     if (targetIsLocal) {
       try {
         await netcattyBridge.get()?.mkdirLocal?.(task.targetPath);
       } catch (mkdirErr: unknown) {
-        // If a file (not directory) already exists at the target path,
-        // the mkdir fails with EEXIST. Ignore it — the directory may
-        // already exist from a previous partial download.
         const isEEXIST = mkdirErr instanceof Error && mkdirErr.message.includes("EEXIST");
         if (!isEEXIST) throw mkdirErr;
+        // EEXIST: verify the existing path is actually a directory, not a file
+        const stat = await netcattyBridge.get()?.statLocal?.(task.targetPath);
+        if (stat && stat.type !== 'directory') {
+          throw new Error(`Target path exists as a file: ${task.targetPath}`);
+        }
       }
     } else if (targetSftpId) {
       await netcattyBridge.get()?.mkdirSftp(targetSftpId, task.targetPath, targetEncoding);
@@ -378,6 +380,8 @@ export const useSftpTransfers = ({
         parentTaskId: task.id,
       };
 
+      // Only increment symlink depth when entering a symlink directory
+      const isSymlink = dir.type === "symlink";
       await transferDirectory(
         childTask,
         sourceSftpId,
@@ -387,7 +391,7 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
-        depth + 1,
+        isSymlink ? symlinkDepth + 1 : symlinkDepth,
       );
     }
 
