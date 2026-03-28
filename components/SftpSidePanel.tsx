@@ -436,6 +436,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // Filter transfers to those relevant to the active connection's host,
     // so workspace focus switches don't show transfers from other hosts.
     const filtered = sftp.transfers.filter((t) => {
+      if (t.parentTaskId) return false; // Child tasks rendered by SftpTransferQueue
       if (connection.isLocal) {
         return t.sourceConnectionId === connection.id || t.targetConnectionId === connection.id;
       }
@@ -563,6 +564,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         <SftpTransferQueue
           sftp={sftp}
           visibleTransfers={visibleTransfers}
+          allTransfers={sftp.transfers}
           canRevealTransferTarget={canRevealTransferTarget}
           onRevealTransferTarget={handleRevealTransferTarget}
         />

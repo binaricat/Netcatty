@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Button } from "../ui/button";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import type { useSftpState } from "../../application/state/useSftpState";
@@ -10,6 +10,8 @@ type SftpState = ReturnType<typeof useSftpState>;
 interface SftpTransferQueueProps {
   sftp: SftpState;
   visibleTransfers: SftpState["transfers"];
+  /** All transfers (unfiltered) — needed to find child tasks for visible parents */
+  allTransfers: SftpState["transfers"];
   canRevealTransferTarget?: (task: TransferTask) => boolean;
   onRevealTransferTarget?: (task: TransferTask) => void | Promise<void>;
 }
@@ -17,10 +19,30 @@ interface SftpTransferQueueProps {
 export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   sftp,
   visibleTransfers,
+  allTransfers,
   canRevealTransferTarget,
   onRevealTransferTarget,
 }) => {
   const { t } = useI18n();
+
+  // Build a map of parentId -> active child tasks
+  const activeChildrenByParent = useMemo(() => {
+    const map = new Map<string, TransferTask[]>();
+    for (const task of allTransfers) {
+      if (task.parentTaskId && task.status === "transferring") {
+        const children = map.get(task.parentTaskId) || [];
+        children.push(task);
+        map.set(task.parentTaskId, children);
+      }
+    }
+    return map;
+  }, [allTransfers]);
+
+  // Only show top-level tasks (no parentTaskId)
+  const topLevelTransfers = useMemo(
+    () => visibleTransfers.filter((t) => !t.parentTaskId),
+    [visibleTransfers],
+  );
 
   if (sftp.transfers.length === 0) {
     return null;
@@ -51,27 +73,39 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
         )}
       </div>
       <div className="max-h-40 overflow-auto">
-        {visibleTransfers.map((task) => (
-          <SftpTransferItem
-            key={task.id}
-            task={task}
-            onCancel={() => {
-              if (task.sourceConnectionId === "external") {
-                sftp.cancelExternalUpload();
+        {topLevelTransfers.map((task) => (
+          <React.Fragment key={task.id}>
+            <SftpTransferItem
+              task={task}
+              onCancel={() => {
+                if (task.sourceConnectionId === "external") {
+                  sftp.cancelExternalUpload();
+                }
+                sftp.cancelTransfer(task.id);
+              }}
+              onRetry={() => sftp.retryTransfer(task.id)}
+              onDismiss={() => sftp.dismissTransfer(task.id)}
+              canRevealTarget={canRevealTransferTarget?.(task) ?? false}
+              onRevealTarget={
+                onRevealTransferTarget
+                  ? () => {
+                      void onRevealTransferTarget(task);
+                    }
+                  : undefined
               }
-              sftp.cancelTransfer(task.id);
-            }}
-            onRetry={() => sftp.retryTransfer(task.id)}
-            onDismiss={() => sftp.dismissTransfer(task.id)}
-            canRevealTarget={canRevealTransferTarget?.(task) ?? false}
-            onRevealTarget={
-              onRevealTransferTarget
-                ? () => {
-                    void onRevealTransferTarget(task);
-                  }
-                : undefined
-            }
-          />
+            />
+            {/* Render active child file transfers under the parent */}
+            {activeChildrenByParent.get(task.id)?.map((child) => (
+              <SftpTransferItem
+                key={child.id}
+                task={child}
+                isChild
+                onCancel={() => sftp.cancelTransfer(child.id)}
+                onRetry={() => {}}
+                onDismiss={() => {}}
+              />
+            ))}
+          </React.Fragment>
         ))}
       </div>
     </div>

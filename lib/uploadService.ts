@@ -7,6 +7,7 @@
  */
 
 import { extractDropEntries, DropEntry, getPathForFile } from "./sftpFileUtils";
+import { logger } from "./logger";
 
 // ============================================================================
 // Types
@@ -323,12 +324,14 @@ export async function uploadFromDataTransfer(
   const scanningTaskId = crypto.randomUUID();
   callbacks?.onScanningStart?.(scanningTaskId);
 
+  const scanT0 = performance.now();
   let entries: DropEntry[];
   try {
     entries = await extractDropEntries(dataTransfer);
   } finally {
     callbacks?.onScanningEnd?.(scanningTaskId);
   }
+  logger.debug(`[SFTP:perf] extractDropEntries — ${entries.length} entries — ${(performance.now() - scanT0).toFixed(0)}ms`);
 
   if (entries.length === 0) {
     return [];
@@ -509,8 +512,42 @@ async function uploadEntries(
   const rootFolders = detectRootFolders(entries);
   const sortedEntries = sortEntries(entries);
 
+  // Pre-create all needed directories in batch before file transfers
+  const uploadT0 = performance.now();
+  logger.debug(`[SFTP:perf] uploadEntries START — ${sortedEntries.length} entries, ${sortedEntries.filter(e => !e.isDirectory).length} files`);
+  const allDirPaths = new Set<string>();
+  for (const entry of sortedEntries) {
+    if (entry.isDirectory) {
+      allDirPaths.add(joinPath(targetPath, entry.relativePath));
+    } else {
+      const pathParts = entry.relativePath.split('/');
+      if (pathParts.length > 1) {
+        let parentPath = targetPath;
+        for (let i = 0; i < pathParts.length - 1; i++) {
+          parentPath = joinPath(parentPath, pathParts[i]);
+          allDirPaths.add(parentPath);
+        }
+      }
+    }
+  }
+  // Create directories in sorted order (parents before children) with limited concurrency
+  const sortedDirPaths = Array.from(allDirPaths).sort();
+  // Group by depth and create each depth level in parallel
+  const dirsByDepth = new Map<number, string[]>();
+  for (const dirPath of sortedDirPaths) {
+    const depth = dirPath.split('/').length;
+    const group = dirsByDepth.get(depth) || [];
+    group.push(dirPath);
+    dirsByDepth.set(depth, group);
+  }
+  const sortedDepths = Array.from(dirsByDepth.keys()).sort((a, b) => a - b);
+  for (const depth of sortedDepths) {
+    const dirs = dirsByDepth.get(depth)!;
+    await Promise.all(dirs.map(d => ensureDirectory(d)));
+  }
+  logger.debug(`[SFTP:perf] batch mkdir done — ${allDirPaths.size} dirs — ${(performance.now() - uploadT0).toFixed(0)}ms`);
+
   let wasCancelled = false;
-  const yieldToMain = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
   // Track bundled task progress
   const bundleProgress = new Map<string, {
@@ -579,255 +616,233 @@ async function uploadEntries(
     return null;
   };
 
-  try {
-    for (const entry of sortedEntries) {
-      await yieldToMain();
+  // Track per-file in-flight progress for concurrent uploads within bundles
+  const inFlightByBundle = new Map<string, Map<string, number>>(); // bundleTaskId -> (fileKey -> transferred)
 
-      if (controller?.isCancelled()) {
-        wasCancelled = true;
-        // Mark all created tasks as cancelled before breaking
-        for (const [, bundleTaskId] of bundleTaskIds) {
-          const progress = bundleProgress.get(bundleTaskId);
-          if (progress && progress.completedCount < progress.fileCount) {
-            callbacks?.onTaskCancelled?.(bundleTaskId);
-          }
-        }
-        break;
-      }
+  const reportBundleProgress = (bundleTaskId: string, speed: number) => {
+    const progress = bundleProgress.get(bundleTaskId);
+    if (!progress || !callbacks?.onTaskProgress) return;
+    const inFlight = inFlightByBundle.get(bundleTaskId);
+    let inFlightBytes = 0;
+    if (inFlight) {
+      for (const v of inFlight.values()) inFlightBytes += v;
+    }
+    const newTransferred = progress.completedFilesBytes + inFlightBytes;
+    progress.transferredBytes = newTransferred;
+    progress.currentSpeed = speed;
+    const percent = progress.totalBytes > 0 ? (newTransferred / progress.totalBytes) * 100 : 0;
+    const displayPercent = progress.completedCount >= progress.fileCount ? percent : Math.min(percent, 99.9);
+    callbacks.onTaskProgress(bundleTaskId, {
+      transferred: newTransferred,
+      total: progress.totalBytes,
+      speed,
+      percent: displayPercent,
+    });
+  };
 
-      const entryTargetPath = joinPath(targetPath, entry.relativePath);
-      const bundleTaskId = getBundleTaskId(entry);
-      let standaloneTransferId = "";
-      let fileTotalBytes = 0;
+  // Upload a single file entry — returns result and handles progress
+  const uploadSingleFile = async (
+    entry: DropEntry,
+    entryTargetPath: string,
+    bundleTaskId: string | null,
+    standaloneTransferId: string,
+    fileTotalBytes: number,
+  ): Promise<{ cancelled?: boolean; error?: string }> => {
+    const fileKey = entry.relativePath;
+    const localFilePath = (entry.file as File & { path?: string }).path;
 
-      try {
-        if (entry.isDirectory) {
-          await ensureDirectory(entryTargetPath);
-        } else if (entry.file) {
-          fileTotalBytes = entry.file.size;
+    // Progress callback factory for both stream and memory paths
+    const makeOnProgress = () => {
+      let pendingProgressUpdate: { transferred: number; total: number; speed: number } | null = null;
+      let rafScheduled = false;
 
-          // For standalone files (not in a folder), create individual task
-          if (!bundleTaskId) {
-            standaloneTransferId = crypto.randomUUID();
+      return (transferred: number, total: number, speed: number) => {
+        if (controller?.isCancelled()) return;
+        pendingProgressUpdate = { transferred, total, speed };
 
-            if (callbacks?.onTaskCreated) {
-              callbacks.onTaskCreated({
-                id: standaloneTransferId,
-                fileName: entry.relativePath,
-                displayName: entry.relativePath,
-                isDirectory: false,
-                totalBytes: fileTotalBytes,
-                transferredBytes: 0,
-                speed: 0,
-                fileCount: 1,
-                completedCount: 0,
+        if (!rafScheduled) {
+          rafScheduled = true;
+          requestAnimationFrame(() => {
+            rafScheduled = false;
+            const update = pendingProgressUpdate;
+            pendingProgressUpdate = null;
+            if (!update || controller?.isCancelled() || !callbacks?.onTaskProgress) return;
+
+            if (bundleTaskId) {
+              const inFlight = inFlightByBundle.get(bundleTaskId);
+              if (inFlight) inFlight.set(fileKey, update.transferred);
+              reportBundleProgress(bundleTaskId, update.speed);
+            } else if (standaloneTransferId) {
+              callbacks.onTaskProgress(standaloneTransferId, {
+                transferred: update.transferred,
+                total: update.total,
+                speed: update.speed,
+                percent: update.total > 0 ? (update.transferred / update.total) * 100 : 0,
               });
             }
-          }
+          });
+        }
+      };
+    };
 
-          // Ensure parent directories exist
-          const pathParts = entry.relativePath.split('/');
-          if (pathParts.length > 1) {
-            let parentPath = targetPath;
-            for (let i = 0; i < pathParts.length - 1; i++) {
-              parentPath = joinPath(parentPath, pathParts[i]);
-              await ensureDirectory(parentPath);
-            }
-          }
+    // Register in-flight tracking for bundle
+    if (bundleTaskId) {
+      let inFlight = inFlightByBundle.get(bundleTaskId);
+      if (!inFlight) {
+        inFlight = new Map();
+        inFlightByBundle.set(bundleTaskId, inFlight);
+      }
+      inFlight.set(fileKey, 0);
+    }
 
-          // Check if file has a local path (Electron provides file.path for dropped files)
-          const localFilePath = (entry.file as File & { path?: string }).path;
+    try {
+      if (localFilePath && bridge.startStreamTransfer && sftpId && !isLocal) {
+        const onProgress = makeOnProgress();
+        const fileTransferId = crypto.randomUUID();
+        controller?.addActiveTransfer(fileTransferId);
 
-          // Use stream transfer if available and we have a local file path (avoids loading file into memory)
-          if (localFilePath && bridge.startStreamTransfer && sftpId && !isLocal) {
-            let pendingProgressUpdate: { transferred: number; total: number; speed: number } | null = null;
-            let rafScheduled = false;
+        let streamResult: { transferId: string; totalBytes?: number; error?: string; cancelled?: boolean } | undefined;
+        try {
+          streamResult = await bridge.startStreamTransfer(
+            {
+              transferId: fileTransferId,
+              sourcePath: localFilePath,
+              targetPath: entryTargetPath,
+              sourceType: 'local',
+              targetType: 'sftp',
+              targetSftpId: sftpId,
+              totalBytes: fileTotalBytes,
+            },
+            onProgress,
+            undefined,
+            undefined
+          );
+        } finally {
+          controller?.removeActiveTransfer(fileTransferId);
+        }
 
-            const onProgress = (transferred: number, total: number, speed: number) => {
-              if (controller?.isCancelled()) return;
+        if (streamResult?.cancelled || streamResult?.error?.includes('cancelled')) {
+          return { cancelled: true };
+        }
+        if (streamResult?.error) {
+          return { error: streamResult.error };
+        }
+      } else {
+        const arrayBuffer = await entry.file!.arrayBuffer();
 
-              pendingProgressUpdate = { transferred, total, speed };
-
-              if (!rafScheduled) {
-                rafScheduled = true;
-                requestAnimationFrame(() => {
-                  rafScheduled = false;
-                  const update = pendingProgressUpdate;
-                  pendingProgressUpdate = null;
-
-                  if (update && !controller?.isCancelled() && callbacks?.onTaskProgress) {
-                    if (bundleTaskId) {
-                      const progress = bundleProgress.get(bundleTaskId);
-                      if (progress) {
-                        // For bundled tasks, only update the current file's progress
-                        // Don't add to completedFilesBytes until the file is fully completed
-                        const newTransferred = progress.completedFilesBytes + update.transferred;
-                        progress.transferredBytes = newTransferred;
-                        progress.currentSpeed = update.speed;
-                        const percent = progress.totalBytes > 0 ? (newTransferred / progress.totalBytes) * 100 : 0;
-                        // Ensure progress doesn't exceed 99.9% until all files are completed
-                        const displayPercent = progress.completedCount >= progress.fileCount ? percent : Math.min(percent, 99.9);
-                        callbacks.onTaskProgress(bundleTaskId, {
-                          transferred: newTransferred,
-                          total: progress.totalBytes,
-                          speed: update.speed,
-                          percent: displayPercent,
-                        });
-                      }
-                    } else if (standaloneTransferId) {
-                      callbacks.onTaskProgress(standaloneTransferId, {
-                        transferred: update.transferred,
-                        total: update.total,
-                        speed: update.speed,
-                        percent: update.total > 0 ? (update.transferred / update.total) * 100 : 0,
-                      });
-                    }
-                  }
-                });
-              }
-            };
-
+        if (isLocal) {
+          if (!bridge.writeLocalFile) throw new Error("writeLocalFile not available");
+          await bridge.writeLocalFile(entryTargetPath, arrayBuffer);
+        } else if (sftpId) {
+          if (bridge.writeSftpBinaryWithProgress) {
+            const onProgress = makeOnProgress();
             const fileTransferId = crypto.randomUUID();
             controller?.addActiveTransfer(fileTransferId);
 
-            let streamResult: { transferId: string; totalBytes?: number; error?: string; cancelled?: boolean } | undefined;
+            let result;
             try {
-              streamResult = await bridge.startStreamTransfer(
-                {
-                  transferId: fileTransferId,
-                  sourcePath: localFilePath,
-                  targetPath: entryTargetPath,
-                  sourceType: 'local',
-                  targetType: 'sftp',
-                  targetSftpId: sftpId,
-                  totalBytes: fileTotalBytes,
-                },
+              result = await bridge.writeSftpBinaryWithProgress(
+                sftpId,
+                entryTargetPath,
+                arrayBuffer,
+                fileTransferId,
                 onProgress,
-                undefined,
-                undefined
+                () => {},
+                () => {}
               );
             } finally {
               controller?.removeActiveTransfer(fileTransferId);
             }
 
-            if (streamResult?.cancelled || streamResult?.error?.includes('cancelled')) {
-              wasCancelled = true;
-              const taskId = bundleTaskId || standaloneTransferId;
-              if (taskId) {
-                callbacks?.onTaskCancelled?.(taskId);
-              }
-              break;
+            if (result?.cancelled) {
+              return { cancelled: true };
             }
-
-            if (streamResult?.error) {
-              throw new Error(streamResult.error);
-            }
-          } else {
-            // Fallback: load file into memory (for small files or when stream transfer is not available)
-            const arrayBuffer = await entry.file.arrayBuffer();
-
-            if (isLocal) {
-              if (!bridge.writeLocalFile) {
-                throw new Error("writeLocalFile not available");
-              }
-              await bridge.writeLocalFile(entryTargetPath, arrayBuffer);
-            } else if (sftpId) {
-              if (bridge.writeSftpBinaryWithProgress) {
-                let pendingProgressUpdate: { transferred: number; total: number; speed: number } | null = null;
-                let rafScheduled = false;
-
-                const onProgress = (transferred: number, total: number, speed: number) => {
-                  if (controller?.isCancelled()) return;
-
-                  pendingProgressUpdate = { transferred, total, speed };
-
-                  if (!rafScheduled) {
-                    rafScheduled = true;
-                    requestAnimationFrame(() => {
-                      rafScheduled = false;
-                      const update = pendingProgressUpdate;
-                      pendingProgressUpdate = null;
-
-                      if (update && !controller?.isCancelled() && callbacks?.onTaskProgress) {
-                        if (bundleTaskId) {
-                          const progress = bundleProgress.get(bundleTaskId);
-                          if (progress) {
-                            const newTransferred = progress.completedFilesBytes + update.transferred;
-                            progress.transferredBytes = newTransferred;
-                            progress.currentSpeed = update.speed;
-                            const percent = progress.totalBytes > 0 ? (newTransferred / progress.totalBytes) * 100 : 0;
-                            // Ensure progress doesn't show 100% until all files are completed
-                            const displayPercent = progress.completedCount >= progress.fileCount ? percent : Math.min(percent, 99.9);
-                            callbacks.onTaskProgress(bundleTaskId, {
-                              transferred: newTransferred,
-                              total: progress.totalBytes,
-                              speed: update.speed,
-                              percent: displayPercent,
-                            });
-                          }
-                        } else if (standaloneTransferId) {
-                          callbacks.onTaskProgress(standaloneTransferId, {
-                            transferred: update.transferred,
-                            total: update.total,
-                            speed: update.speed,
-                            percent: update.total > 0 ? (update.transferred / update.total) * 100 : 0,
-                          });
-                        }
-                      }
-                    });
-                  }
-                };
-
-                // Use unique file transfer ID for backend cancellation tracking
-                const fileTransferId = crypto.randomUUID();
-                controller?.addActiveTransfer(fileTransferId);
-
-                let result;
-                try {
-                  result = await bridge.writeSftpBinaryWithProgress(
-                    sftpId,
-                    entryTargetPath,
-                    arrayBuffer,
-                    fileTransferId,
-                    onProgress,
-                    () => {
-                      // File upload completed successfully
-                    },
-                    (error) => {
-                      // File upload failed - error is handled by the caller
-                      void error;
-                    }
-                  );
-                } finally {
-                  controller?.removeActiveTransfer(fileTransferId);
-                }
-
-                if (result?.cancelled) {
-                  wasCancelled = true;
-                  const taskId = bundleTaskId || standaloneTransferId;
-                  if (taskId) {
-                    callbacks?.onTaskCancelled?.(taskId);
-                  }
-                  break;
-                }
-
-                if (!result || result.success === false) {
-                  if (bridge.writeSftpBinary) {
-                    await bridge.writeSftpBinary(sftpId, entryTargetPath, arrayBuffer);
-                  } else {
-                    throw new Error("Upload failed and no fallback method available");
-                  }
-                }
-              } else if (bridge.writeSftpBinary) {
+            if (!result || result.success === false) {
+              if (bridge.writeSftpBinary) {
                 await bridge.writeSftpBinary(sftpId, entryTargetPath, arrayBuffer);
               } else {
-                throw new Error("No SFTP write method available");
+                return { error: "Upload failed and no fallback method available" };
               }
             }
+          } else if (bridge.writeSftpBinary) {
+            await bridge.writeSftpBinary(sftpId, entryTargetPath, arrayBuffer);
+          } else {
+            return { error: "No SFTP write method available" };
+          }
+        }
+      }
+      return {};
+    } finally {
+      // Clean up in-flight tracking
+      if (bundleTaskId) {
+        const inFlight = inFlightByBundle.get(bundleTaskId);
+        if (inFlight) inFlight.delete(fileKey);
+      }
+    }
+  };
+
+  // Filter to only file entries (directories are pre-created above)
+  const fileEntries = sortedEntries.filter(e => !e.isDirectory && e.file);
+
+  // Create standalone task entries upfront so they're visible immediately
+  const standaloneTaskIds = new Map<string, string>(); // relativePath -> taskId
+  for (const entry of fileEntries) {
+    const bundleTaskId = getBundleTaskId(entry);
+    if (!bundleTaskId) {
+      const taskId = crypto.randomUUID();
+      standaloneTaskIds.set(entry.relativePath, taskId);
+      if (callbacks?.onTaskCreated) {
+        callbacks.onTaskCreated({
+          id: taskId,
+          fileName: entry.relativePath,
+          displayName: entry.relativePath,
+          isDirectory: false,
+          totalBytes: entry.file!.size,
+          transferredBytes: 0,
+          speed: 0,
+          fileCount: 1,
+          completedCount: 0,
+        });
+      }
+    }
+  }
+
+  const UPLOAD_CONCURRENCY = 4;
+
+  try {
+    let entryIndex = 0;
+
+    const worker = async () => {
+      while (entryIndex < fileEntries.length) {
+        if (controller?.isCancelled() || wasCancelled) break;
+
+        const idx = entryIndex++;
+        const entry = fileEntries[idx];
+        const entryTargetPath = joinPath(targetPath, entry.relativePath);
+        const bundleTaskId = getBundleTaskId(entry);
+        const standaloneTransferId = standaloneTaskIds.get(entry.relativePath) || "";
+        const fileTotalBytes = entry.file!.size;
+
+        try {
+          const uploadResult = await uploadSingleFile(
+            entry,
+            entryTargetPath,
+            bundleTaskId,
+            standaloneTransferId,
+            fileTotalBytes,
+          );
+
+          if (uploadResult.cancelled) {
+            wasCancelled = true;
+            const taskId = bundleTaskId || standaloneTransferId;
+            if (taskId) callbacks?.onTaskCancelled?.(taskId);
+            break;
           }
 
-          // File processing completed (both stream transfer and fallback paths)
-          controller?.clearCurrentTransfer();
+          if (uploadResult.error) {
+            throw new Error(uploadResult.error);
+          }
+
           results.push({ fileName: entry.relativePath, success: true });
 
           // Update progress tracking
@@ -836,66 +851,53 @@ async function uploadEntries(
             if (progress) {
               progress.completedCount++;
               progress.completedFilesBytes += fileTotalBytes;
-              // Set transferredBytes to completedFilesBytes to avoid double counting
               progress.transferredBytes = progress.completedFilesBytes;
 
               if (progress.completedCount >= progress.fileCount) {
-                // All files completed - set final progress to 100% and mark as completed
                 callbacks?.onTaskProgress?.(bundleTaskId, {
                   transferred: progress.totalBytes,
                   total: progress.totalBytes,
                   speed: 0,
                   percent: 100,
                 });
-                // Call completion callback synchronously
                 callbacks?.onTaskCompleted?.(bundleTaskId, progress.totalBytes);
-              } else if (callbacks?.onTaskProgress) {
-                const percent = progress.totalBytes > 0 ? (progress.completedFilesBytes / progress.totalBytes) * 100 : 0;
-                // Ensure progress doesn't exceed 99.9% until all files are completed
-                const displayPercent = Math.min(percent, 99.9);
-                callbacks.onTaskProgress(bundleTaskId, {
-                  transferred: progress.completedFilesBytes,
-                  total: progress.totalBytes,
-                  speed: 0,
-                  percent: displayPercent,
-                });
+              } else {
+                reportBundleProgress(bundleTaskId, 0);
               }
             }
           } else if (standaloneTransferId) {
             callbacks?.onTaskCompleted?.(standaloneTransferId, fileTotalBytes);
           }
-        }
-      } catch (error) {
-        controller?.clearCurrentTransfer();
-
-        // Check if this was a cancellation
-        if (controller?.isCancelled()) {
-          wasCancelled = true;
-          const taskId = bundleTaskId || standaloneTransferId;
-          if (taskId) {
-            callbacks?.onTaskCancelled?.(taskId);
+        } catch (error) {
+          if (controller?.isCancelled()) {
+            wasCancelled = true;
+            const taskId = bundleTaskId || standaloneTransferId;
+            if (taskId) callbacks?.onTaskCancelled?.(taskId);
+            break;
           }
-          break;
-        }
 
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        if (!entry.isDirectory) {
-          results.push({
-            fileName: entry.relativePath,
-            success: false,
-            error: errorMessage,
-          });
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          results.push({ fileName: entry.relativePath, success: false, error: errorMessage });
 
           const taskId = bundleTaskId || standaloneTransferId;
-          if (taskId) {
-            callbacks?.onTaskFailed?.(taskId, errorMessage);
-          }
+          if (taskId) callbacks?.onTaskFailed?.(taskId, errorMessage);
         }
+      }
+    };
 
-        // Any error stops the entire upload - fail fast approach
-        // Note: We don't set wasCancelled here because this is an error, not a cancellation
-        break;
+    const workers = Array.from(
+      { length: Math.min(UPLOAD_CONCURRENCY, fileEntries.length || 1) },
+      () => worker(),
+    );
+    await Promise.all(workers);
+
+    // Mark any remaining incomplete bundles as cancelled if upload was cancelled
+    if (wasCancelled) {
+      for (const [, bundleTaskId] of bundleTaskIds) {
+        const progress = bundleProgress.get(bundleTaskId);
+        if (progress && progress.completedCount < progress.fileCount) {
+          callbacks?.onTaskCancelled?.(bundleTaskId);
+        }
       }
     }
   } finally {

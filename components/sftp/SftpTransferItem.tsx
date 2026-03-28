@@ -22,6 +22,7 @@ import { formatSpeed, formatTransferBytes } from './utils';
 
 interface SftpTransferItemProps {
     task: TransferTask;
+    isChild?: boolean;
     onCancel: () => void;
     onRetry: () => void;
     onDismiss: () => void;
@@ -31,6 +32,7 @@ interface SftpTransferItemProps {
 
 const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     task,
+    isChild = false,
     onCancel,
     onRetry,
     onDismiss,
@@ -38,17 +40,21 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     onRevealTarget,
 }) => {
     const { t } = useI18n();
-    const hasKnownTotal = task.totalBytes > 0;
-    const progress = task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0;
-    // Show indeterminate state when transferring but no real progress received yet
-    const isIndeterminate = task.status === 'transferring' && hasKnownTotal && task.transferredBytes === 0;
+
+    // For directory parent tasks: totalBytes = total file count, transferredBytes = completed file count
+    const isDirParent = task.isDirectory && !task.parentTaskId;
+    const hasKnownTotal = isDirParent ? task.totalBytes > 0 : task.totalBytes > 0;
+    const progress = isDirParent
+        ? (task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0)
+        : (task.totalBytes > 0 ? Math.min((task.transferredBytes / task.totalBytes) * 100, 100) : 0);
+    const isIndeterminate = task.status === 'transferring' && !isDirParent && hasKnownTotal && task.transferredBytes === 0;
 
     // Calculate remaining time from backend-reported sliding-window speed
-    const remainingBytes = task.totalBytes - task.transferredBytes;
+    const remainingBytes = isDirParent ? 0 : task.totalBytes - task.transferredBytes;
     const effectiveSpeed = task.status === 'transferring'
         ? (Number.isFinite(task.speed) && task.speed > 0 ? task.speed : 0)
         : 0;
-    const remainingTime = hasKnownTotal && effectiveSpeed > 0
+    const remainingTime = !isDirParent && hasKnownTotal && effectiveSpeed > 0
         ? Math.ceil(remainingBytes / effectiveSpeed)
         : 0;
     const remainingFormatted = remainingTime > 60
@@ -58,12 +64,21 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
             : '';
 
     // Format bytes transferred / total
-    const bytesDisplay = task.status === 'transferring' && task.totalBytes > 0
-        ? `${formatTransferBytes(task.transferredBytes)} / ${formatTransferBytes(task.totalBytes)}`
-        : task.status === 'transferring'
-            ? formatTransferBytes(task.transferredBytes)
-        : task.status === 'completed' && task.totalBytes > 0
-            ? formatTransferBytes(task.totalBytes)
+    const bytesDisplay = isDirParent
+        ? ''
+        : task.status === 'transferring' && task.totalBytes > 0
+            ? `${formatTransferBytes(task.transferredBytes)} / ${formatTransferBytes(task.totalBytes)}`
+            : task.status === 'transferring'
+                ? formatTransferBytes(task.transferredBytes)
+            : task.status === 'completed' && task.totalBytes > 0
+                ? formatTransferBytes(task.totalBytes)
+                : '';
+
+    // Directory parent file count display
+    const fileCountDisplay = isDirParent && task.status === 'transferring'
+        ? (task.totalBytes > 0 ? `${task.transferredBytes}/${task.totalBytes} files` : `${task.transferredBytes} files done`)
+        : isDirParent && task.status === 'completed' && task.totalBytes > 0
+            ? `${task.totalBytes} files`
             : '';
 
     const speedFormatted = effectiveSpeed > 0 ? formatSpeed(effectiveSpeed) : '';
@@ -144,19 +159,19 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         </span>
                     </div>
                 )}
-                {task.status === 'transferring' && bytesDisplay && (
+                {task.status === 'transferring' && (bytesDisplay || fileCountDisplay) && (
                     <div className="text-[9px] text-muted-foreground mt-0.5 font-mono">
-                        {bytesDisplay}
+                        {bytesDisplay || fileCountDisplay}
                     </div>
                 )}
-                {task.status === 'transferring' && !hasKnownTotal && (
+                {task.status === 'transferring' && !hasKnownTotal && !isDirParent && (
                     <div className="text-[9px] text-muted-foreground mt-0.5">
                         {t('sftp.transfers.calculatingTotal')}
                     </div>
                 )}
-                {task.status === 'completed' && bytesDisplay && (
+                {task.status === 'completed' && (bytesDisplay || fileCountDisplay) && (
                     <div className="text-[10px] text-green-600 mt-0.5">
-                        Completed - {bytesDisplay}
+                        Completed{bytesDisplay ? ` - ${bytesDisplay}` : fileCountDisplay ? ` - ${fileCountDisplay}` : ''}
                     </div>
                 )}
                 {task.status === 'failed' && task.error && (
@@ -167,7 +182,10 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     );
 
     return (
-        <div className="flex items-center gap-2.5 px-3 py-2 bg-background/60 border-t border-border/40 backdrop-blur-sm">
+        <div className={cn(
+            "flex items-center gap-2.5 py-2 bg-background/60 border-t border-border/40 backdrop-blur-sm",
+            isChild ? "pl-7 pr-3" : "px-3",
+        )}>
             {canRevealTarget && onRevealTarget ? (
                 <button
                     type="button"
@@ -222,6 +240,7 @@ const arePropsEqual = (
     if (prev.targetPath !== next.targetPath) return false;
     if (prev.totalBytes !== next.totalBytes) return false;
     if ((prevProps.canRevealTarget ?? false) !== (nextProps.canRevealTarget ?? false)) return false;
+    if ((prevProps.isChild ?? false) !== (nextProps.isChild ?? false)) return false;
 
     // For transferring status, allow frequent re-renders for smooth progress bar
     if (next.status === 'transferring') {

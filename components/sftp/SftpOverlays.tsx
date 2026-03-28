@@ -101,7 +101,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
       />
 
       {showTransferQueue && (
-        <SftpTransferQueue sftp={sftp} visibleTransfers={visibleTransfers} />
+        <SftpTransferQueue sftp={sftp} visibleTransfers={visibleTransfers} allTransfers={sftp.transfers} />
       )}
 
       <SftpConflictDialog

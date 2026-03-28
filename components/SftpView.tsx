@@ -212,7 +212,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   });
 
   const visibleTransfers = useMemo(
-    () => [...sftp.transfers].reverse().slice(0, 5),
+    () => [...sftp.transfers].filter((t) => !t.parentTaskId).reverse().slice(0, 5),
     [sftp.transfers],
   );
 
