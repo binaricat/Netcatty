@@ -251,12 +251,6 @@ export const useSettingsState = () => {
     const stored = localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY);
     return stored != null && stored >= 1 && stored <= 16 ? stored : 4;
   });
-  const setSftpTransferConcurrency = useCallback((value: number) => {
-    const clamped = Math.max(1, Math.min(16, Math.round(value)));
-    setSftpTransferConcurrencyState(clamped);
-    localStorageAdapter.writeString(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY, String(clamped));
-    notifySettingsChanged(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY, clamped);
-  }, [notifySettingsChanged]);
 
   // Editor Settings
   const [editorWordWrap, setEditorWordWrapState] = useState<boolean>(() => {
@@ -359,6 +353,13 @@ export const useSettingsState = () => {
     setImmersiveModeState(enabled);
     localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(enabled));
     notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, enabled);
+  }, [notifySettingsChanged]);
+
+  const setSftpTransferConcurrency = useCallback((value: number) => {
+    const clamped = Math.max(1, Math.min(16, Math.round(value)));
+    setSftpTransferConcurrencyState(clamped);
+    localStorageAdapter.writeString(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY, String(clamped));
+    notifySettingsChanged(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY, clamped);
   }, [notifySettingsChanged]);
 
   const [workspaceFocusStyle, setWorkspaceFocusStyleState] = useState<'dim' | 'border'>(() => {
