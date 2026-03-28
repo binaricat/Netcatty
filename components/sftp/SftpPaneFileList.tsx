@@ -369,7 +369,15 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             {renderRow(entry, index)}
           </React.Fragment>
         )),
-    [renderRow, rowHeight, shouldVirtualize, sortedDisplayFiles, visibleRows],
+    [
+      renderRow,
+      rowHeight,
+      shouldVirtualize,
+      sortedDisplayFiles,
+      visibleRows,
+      pane.selectedFiles,
+      dragOverEntry,
+    ],
   );
 
   return (
