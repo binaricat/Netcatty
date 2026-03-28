@@ -71,8 +71,12 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
     }
   }, [childTasks.length, contentTop, scrollContainerRef, scrollTop, viewportHeight]);
 
-  const shouldVirtualize =
-    childTasks.length > CHILD_VIRTUALIZE_THRESHOLD && viewportHeight > 0;
+  const needsVirtualization = childTasks.length > CHILD_VIRTUALIZE_THRESHOLD;
+  // Use a fallback viewport height when not yet measured to avoid rendering
+  // all children on the first frame. This caps the initial render to ~15 rows
+  // instead of potentially thousands.
+  const effectiveViewportHeight = viewportHeight > 0 ? viewportHeight : MAX_PANEL_HEIGHT;
+  const shouldVirtualize = needsVirtualization;
 
   const { startIndex, visibleTasks } = useMemo(() => {
     if (!shouldVirtualize) {
@@ -83,7 +87,7 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
     }
 
     const relativeTop = Math.max(0, scrollTop - contentTop);
-    const relativeBottom = Math.max(0, scrollTop + viewportHeight - contentTop);
+    const relativeBottom = Math.max(0, scrollTop + effectiveViewportHeight - contentTop);
     const start = Math.max(0, Math.floor(relativeTop / CHILD_ROW_HEIGHT) - CHILD_OVERSCAN);
     const end = Math.min(
       childTasks.length - 1,
@@ -94,7 +98,7 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
       startIndex: start,
       visibleTasks: childTasks.slice(start, end + 1),
     };
-  }, [childTasks, contentTop, scrollTop, shouldVirtualize, viewportHeight]);
+  }, [childTasks, contentTop, effectiveViewportHeight, scrollTop, shouldVirtualize]);
 
   return (
     <div
