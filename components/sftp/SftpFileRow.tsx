@@ -73,10 +73,8 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             onClick={handleSelect}
             onDoubleClick={handleOpen}
             className={cn(
-                "px-4 py-2 items-center cursor-pointer text-sm border-l-4",
-                isSelected
-                    ? "border-primary bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary-foreground)/0.15)]"
-                    : "border-transparent hover:bg-secondary/40",
+                "px-4 py-2 items-center cursor-pointer text-sm hover:bg-accent/50",
+                isSelected && "bg-accent text-accent-foreground",
                 isDragOver && isNavDir && "bg-primary/25 ring-1 ring-primary/50"
             )}
             style={{ display: 'grid', gridTemplateColumns: buildSftpColumnTemplate(columnWidths) }}
@@ -85,7 +83,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                 <div className={cn(
                     "h-7 w-7 rounded flex items-center justify-center shrink-0 relative",
                     isSelected
-                        ? "bg-primary-foreground/15 text-primary-foreground"
+                        ? "bg-accent-foreground/10 text-accent-foreground"
                         : isNavDir
                             ? "bg-primary/10 text-primary"
                             : "bg-secondary/60 text-muted-foreground"
@@ -97,7 +95,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                             size={8}
                             className={cn(
                                 "absolute -bottom-0.5 -right-0.5",
-                                isSelected ? "text-primary-foreground/80" : "text-muted-foreground",
+                                isSelected ? "text-accent-foreground/80" : "text-muted-foreground",
                             )}
                             aria-hidden="true"
                         />
@@ -115,11 +113,11 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                     {entry.type === 'symlink' && <span className="sr-only"> (symbolic link)</span>}
                 </span>
             </div>
-            <span className={cn("text-xs truncate", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
-            <span className={cn("text-xs truncate text-right", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>
+            <span className={cn("text-xs truncate", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
+            <span className={cn("text-xs truncate text-right", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>
                 {isNavDir ? '--' : sizeLabel}
             </span>
-            <span className={cn("text-xs truncate capitalize text-right", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>
+            <span className={cn("text-xs truncate capitalize text-right", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>
                 {isSymlinkToDirectory ? 'link → folder' : entry.type === 'directory' ? 'folder' : entry.type === 'symlink' ? 'link' : entry.name.split('.').pop()?.toLowerCase() || 'file'}
             </span>
         </div>
