@@ -94,12 +94,11 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const { hostViewMode, setHostViewMode: saveHostViewMode } = useSftpHostViewMode(hostId);
   const [, startTransition] = useTransition();
   const [showFilterBar, setShowFilterBar] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'tree'>(() =>
-    hostViewMode ?? sftpDefaultViewMode ?? 'list'
-  );
+  const initialViewMode = hostViewMode ?? sftpDefaultViewMode ?? 'list';
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>(initialViewMode);
   const [treeReloadRequest, setTreeReloadRequest] = useState<TreeReloadRequest>({ token: 0, full: true });
   // Lazy-mount: only render the tree component once tree mode has been activated
-  const [treeEverMounted, setTreeEverMounted] = useState(() => (hostViewMode ?? sftpDefaultViewMode ?? 'list') === 'tree');
+  const [treeEverMounted, setTreeEverMounted] = useState(initialViewMode === 'tree');
   useEffect(() => {
     if (viewMode === 'tree' && !treeEverMounted) setTreeEverMounted(true);
   }, [viewMode, treeEverMounted]);
@@ -362,15 +361,20 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     }
   }, [callbacks, requestTreeReload, viewMode]);
 
+  const onSetFilterRef = useRef(callbacks.onSetFilter);
+  onSetFilterRef.current = callbacks.onSetFilter;
+  const onClearSelectionRef = useRef(callbacks.onClearSelection);
+  onClearSelectionRef.current = callbacks.onClearSelection;
+
   const handleSetViewMode = useCallback((mode: 'list' | 'tree') => {
     setViewMode(mode);
     saveHostViewMode(mode);
     if (mode === 'tree') {
       setShowFilterBar(false);
-      callbacks.onSetFilter('');
-      callbacks.onClearSelection();
+      onSetFilterRef.current('');
+      onClearSelectionRef.current();
     }
-  }, [callbacks, setShowFilterBar, saveHostViewMode]);
+  }, [saveHostViewMode]);
 
   useEffect(() => {
     if (viewMode === 'list') {
@@ -384,7 +388,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const prevHostIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (hostId && hostId !== prevHostIdRef.current) {
-      setViewMode(hostViewMode ?? sftpDefaultViewMode ?? 'list');
+      setViewMode(hostViewMode ?? sftpDefaultViewMode);
     }
     prevHostIdRef.current = hostId;
   }, [hostId, hostViewMode, sftpDefaultViewMode]);

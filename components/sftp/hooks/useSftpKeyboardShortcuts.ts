@@ -243,7 +243,7 @@ export const useSftpKeyboardShortcuts = ({
       if (!pane || !pane.connection) return;
       const treeSelectionState = sftpTreeSelectionStore.getPaneState(pane.id);
       const treeSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
-      const treeActionSelection = treeSelection.filter((entry) => !entry.isParentNavigation);
+      const treeActionSelection = treeSelection.filter((entry) => entry.name !== '..');
 
       switch (action) {
         case "sftpCopy": {

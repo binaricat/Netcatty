@@ -421,16 +421,13 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         return false;
       }
       childrenCacheRef.current.set(entryPath, children);
+      dispatchTreePaths({ type: 'FINISH_LOADING', path: entryPath });
       return true;
     } catch {
       if (generation === treeGenerationRef.current) {
         dispatchTreePaths({ type: 'LOAD_ERROR', path: entryPath });
       }
       return false;
-    } finally {
-      if (generation === treeGenerationRef.current) {
-        dispatchTreePaths({ type: 'FINISH_LOADING', path: entryPath });
-      }
     }
   }, []);
 
@@ -593,7 +590,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const entry = entryByPathRef.current.get(item.path);
       if (!entry) return;
 
-      if (item.isParentNavigation || entry.name === '..') {
+      if (entry.name === '..') {
         openTreeEntry(entry, item.path);
         return;
       }
@@ -712,7 +709,6 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           path: entryPath,
           name: entry.name,
           isDirectory: isNavigableDirectory(entry),
-          isParentNavigation: entry.name === '..',
           sourcePath: getParentPath(entryPath),
         })),
     );

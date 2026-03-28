@@ -4,7 +4,6 @@ export interface SftpTreeSelectionItem {
   path: string;
   name: string;
   isDirectory: boolean;
-  isParentNavigation?: boolean;
   sourcePath: string;
 }
 
@@ -104,9 +103,7 @@ export const sftpTreeSelectionStore = {
     setPaneState(paneId, (state) => ({
       ...state,
       selectedPaths: new Set(
-        state.visibleItems
-          .filter((item) => !item.isParentNavigation)
-          .map((item) => item.path),
+        state.visibleItems.map((item) => item.path),
       ),
     }));
   },

@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { SftpPaneCallbacks } from "../SftpContext";
 import type { SftpPane } from "../../../application/state/sftp/types";
 import { getFileName, getParentPath } from "../../../application/state/sftp/utils";
+import { logger } from "../../../lib/logger";
 
 const INVALID_FILENAME_CHARS = /[/\\:*?"<>|]/;
 const RESERVED_NAMES = new Set([
@@ -185,8 +186,8 @@ export const useSftpPaneDialogs = ({
       setShowNewFolderDialogState(false);
       setCreateTargetPath(null);
       setNewFolderName("");
-    } catch {
-      /* Error handling */
+    } catch (err) {
+      logger.warn("Failed to create folder", err);
     } finally {
       setIsCreating(false);
     }
@@ -230,8 +231,8 @@ export const useSftpPaneDialogs = ({
       setCreateTargetPath(null);
       setNewFileName("");
       setFileNameError(null);
-    } catch {
-      /* Error handling */
+    } catch (err) {
+      logger.warn("Failed to create file", err);
     } finally {
       setIsCreatingFile(false);
     }
@@ -251,8 +252,8 @@ export const useSftpPaneDialogs = ({
       setShowRenameDialog(false);
       setRenameTarget(null);
       setRenameName("");
-    } catch {
-      /* Error handling */
+    } catch (err) {
+      logger.warn("Failed to rename file", err);
     } finally {
       setIsRenaming(false);
     }
@@ -282,8 +283,8 @@ export const useSftpPaneDialogs = ({
       setShowDeleteConfirm(false);
       setDeleteTargets([]);
       onClearSelection();
-    } catch {
-      /* Error handling */
+    } catch (err) {
+      logger.warn("Failed to delete files", err);
     } finally {
       setIsDeleting(false);
     }
