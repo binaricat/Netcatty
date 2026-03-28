@@ -84,10 +84,11 @@ export const useSftpViewPaneActions = ({
       }
 
       for (const group of groups.values()) {
-        const [{ sourceConnectionId, sourcePath }] = group;
+        const [{ sourceConnectionId, sourcePath, targetPath }] = group;
         void sftpRef.current.startTransfer(group, sourceSide, targetSide, {
           sourceConnectionId,
           sourcePath,
+          targetPath,
         });
       }
     },

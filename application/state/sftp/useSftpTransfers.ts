@@ -33,6 +33,7 @@ interface UseSftpTransfersResult {
       sourcePane?: SftpPane;
       sourcePath?: string;
       sourceConnectionId?: string;
+      targetPath?: string;
       onTransferComplete?: (result: TransferResult) => void | Promise<void>;
     },
   ) => Promise<TransferResult[]>;
@@ -643,6 +644,7 @@ export const useSftpTransfers = ({
         sourcePane?: SftpPane;
         sourcePath?: string;
         sourceConnectionId?: string;
+        targetPath?: string;
         onTransferComplete?: (result: TransferResult) => void | Promise<void>;
       },
     ) => {
@@ -652,7 +654,7 @@ export const useSftpTransfers = ({
       if (!sourcePane?.connection || !targetPane?.connection) return [];
 
       const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
-      const targetPath = targetPane.connection.currentPath;
+      const targetPath = options?.targetPath ?? targetPane.connection.currentPath;
       const sourceConnectionId = options?.sourceConnectionId ?? sourcePane.connection.id;
 
       const newTasks: TransferTask[] = [];

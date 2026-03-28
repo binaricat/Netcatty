@@ -169,7 +169,12 @@ export const useSftpPaneDragAndSelect = ({
           e.stopPropagation();
           setDragOverEntry(null);
           setIsDragOverPane(false);
-          onReceiveRef.current(draggedFilesRef.current);
+          const targetPath = pane.connection?.currentPath
+            ? joinPath(pane.connection.currentPath, entry.name)
+            : undefined;
+          onReceiveRef.current(
+            draggedFilesRef.current.map((file) => ({ ...file, targetPath })),
+          );
         }
         return;
       }

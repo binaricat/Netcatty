@@ -56,6 +56,7 @@ interface SftpPaneTreeViewProps {
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
+  draggedFiles: (SftpTransferSource & { side: 'left' | 'right' })[] | null;
   openNewFolderDialog: (targetPath: string) => void;
   openNewFileDialog: (targetPath: string) => void;
   onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
@@ -257,6 +258,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onEditFile,
   onDownloadFile,
   onEditPermissions,
+  draggedFiles,
   openNewFolderDialog,
   openNewFileDialog,
   onUploadExternalFiles,
@@ -364,6 +366,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onRefreshRef.current = onRefresh;
   const sideRef = useRef(side);
   sideRef.current = side;
+  const draggedFilesRef = useRef(draggedFiles);
+  draggedFilesRef.current = draggedFiles;
 
   const invalidateTreeCache = useCallback(() => {
     treeGenerationRef.current += 1;
@@ -764,6 +768,14 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     const entry = entryByPathRef.current.get(entryPath);
     if (!entry) return;
     const isDir = isNavigableDirectory(entry);
+    const isInternalDrag = draggedFilesRef.current && draggedFilesRef.current[0]?.side !== sideRef.current;
+    if (isInternalDrag && isDir && entry.name !== '..') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragOverNodePath(entryPath);
+      return;
+    }
     const hasFiles = e.dataTransfer.types.includes('Files');
     if (hasFiles && isDir && entry.name !== '..') {
       e.preventDefault();
@@ -778,6 +790,16 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     if (!entry) return;
     const isDir = isNavigableDirectory(entry);
     const hasFiles = e.dataTransfer.types.includes('Files');
+    const isInternalDrag = draggedFilesRef.current && draggedFilesRef.current[0]?.side !== sideRef.current;
+    if (isInternalDrag && isDir && entry.name !== '..') {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverNodePath(null);
+      onCopyToOtherPaneRef.current(
+        draggedFilesRef.current.map((file) => ({ ...file, targetPath: entryPath })),
+      );
+      return;
+    }
     if (hasFiles && isDir && entry.name !== '..') {
       e.preventDefault();
       e.stopPropagation();

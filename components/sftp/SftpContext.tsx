@@ -14,6 +14,7 @@ export interface SftpTransferSource {
     isDirectory: boolean;
     sourcePath?: string;
     sourceConnectionId?: string;
+    targetPath?: string;
 }
 
 // Types for the context
