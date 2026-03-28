@@ -372,68 +372,6 @@ export const useSftpTransfers = ({
       ? "auto"
       : targetPane.filenameEncoding || "auto";
 
-    let actualFileSize = task.totalBytes;
-    let prescanCancelled = false;
-    if (task.isDirectory) {
-      try {
-        const sourceSftpId = sourcePane.connection?.isLocal
-          ? null
-          : sftpSessionsRef.current.get(sourcePane.connection!.id);
-
-        actualFileSize = await estimateDirectoryBytes(
-          task.sourcePath,
-          sourceSftpId,
-          sourcePane.connection!.isLocal,
-          sourceEncoding,
-          task.id,
-        );
-      } catch (err) {
-        if (isTransferCancelledError(err)) {
-          prescanCancelled = true;
-        }
-        // Fall back to the existing estimate below if size discovery fails.
-      }
-    } else if (actualFileSize === 0) {
-      // Fallback stat when file wasn't in the pane's file list (e.g., filtered view)
-      try {
-        const sourceSftpId = sourcePane.connection?.isLocal
-          ? null
-          : sftpSessionsRef.current.get(sourcePane.connection!.id);
-
-        if (sourcePane.connection?.isLocal) {
-          const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
-          if (stat) {
-            actualFileSize = stat.size;
-            if (!task.sourceLastModified && stat.lastModified) {
-              task.sourceLastModified = stat.lastModified;
-            }
-          }
-        } else if (sourceSftpId) {
-          const stat = await netcattyBridge.get()?.statSftp?.(
-            sourceSftpId,
-            task.sourcePath,
-            sourceEncoding,
-          );
-          if (stat) {
-            actualFileSize = stat.size;
-            if (!task.sourceLastModified && stat.lastModified) {
-              task.sourceLastModified = stat.lastModified;
-            }
-          }
-        }
-      } catch {
-        // Ignore stat errors
-      }
-    }
-
-    const estimatedSize =
-      actualFileSize > 0
-        ? actualFileSize
-        : task.isDirectory
-          ? 1024 * 1024
-          : 256 * 1024;
-
-
     const sourceSftpId = sourcePane.connection?.isLocal
       ? null
       : sftpSessionsRef.current.get(sourcePane.connection!.id);
@@ -452,17 +390,73 @@ export const useSftpTransfers = ({
       throw new Error("Target SFTP session not found");
     }
 
-    try {
-      if (prescanCancelled) {
-        throw new Error("Transfer cancelled");
-      }
+    const discoverTransferSize = async () => {
+      try {
+        if (task.isDirectory) {
+          const discoveredSize = await estimateDirectoryBytes(
+            task.sourcePath,
+            sourceSftpId,
+            sourcePane.connection!.isLocal,
+            sourceEncoding,
+            task.id,
+          );
+          if (cancelledTasksRef.current.has(task.id)) return;
+          updateTask({
+            totalBytes: Math.max(discoveredSize, 0),
+          });
+          return;
+        }
 
+        if (task.totalBytes > 0) return;
+
+        if (sourcePane.connection?.isLocal) {
+          const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
+          if (stat) {
+            if (!task.sourceLastModified && stat.lastModified) {
+              task.sourceLastModified = stat.lastModified;
+            }
+            if (!cancelledTasksRef.current.has(task.id)) {
+              updateTask({
+                totalBytes: stat.size,
+              });
+            }
+          }
+          return;
+        }
+
+        if (sourceSftpId) {
+          const stat = await netcattyBridge.get()?.statSftp?.(
+            sourceSftpId,
+            task.sourcePath,
+            sourceEncoding,
+          );
+          if (stat) {
+            if (!task.sourceLastModified && stat.lastModified) {
+              task.sourceLastModified = stat.lastModified;
+            }
+            if (!cancelledTasksRef.current.has(task.id)) {
+              updateTask({
+                totalBytes: stat.size,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        if (!isTransferCancelledError(err)) {
+          logger.debug?.("[SFTP] Deferred transfer size discovery failed", err);
+        }
+      }
+    };
+
+    try {
       updateTask({
         status: "transferring",
-        totalBytes: estimatedSize,
+        totalBytes: Math.max(task.totalBytes, 0),
         transferredBytes: 0,
         startTime: Date.now(),
       });
+
+      void discoverTransferSize();
 
       if (!task.skipConflictCheck && !task.isDirectory && targetPane.connection) {
         let targetExists = false;
@@ -508,14 +502,14 @@ export const useSftpTransfers = ({
             sourcePath: task.sourcePath,
             targetPath: task.targetPath,
             existingSize: existingStat.size,
-            newSize: sourceStat?.size || estimatedSize,
+            newSize: sourceStat?.size || task.totalBytes || 0,
             existingModified: existingStat.mtime,
             newModified: sourceStat?.mtime || Date.now(),
           };
           setConflicts((prev) => [...prev, newConflict]);
           updateTask({
             status: "pending",
-            totalBytes: sourceStat?.size || estimatedSize,
+            totalBytes: sourceStat?.size || task.totalBytes || 0,
           });
           return "pending";
         }
