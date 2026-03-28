@@ -147,7 +147,7 @@ export const useSftpPaneDragAndSelect = ({
             side,
           },
         ];
-      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.effectAllowed = "copyMove";
       e.dataTransfer.setData("text/plain", files.map((f) => f.name).join("\n"));
       onDragStart(files, side);
     },

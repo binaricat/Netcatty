@@ -67,6 +67,7 @@ SftpPaneWrapper.displayName = "SftpPaneWrapper";
 interface SftpPaneViewProps {
   side: "left" | "right";
   pane: SftpPane;
+  isPaneFocused: boolean;
   sftpDefaultViewMode: 'list' | 'tree';
   showHeader?: boolean;
   showEmptyHeader?: boolean;
@@ -77,6 +78,7 @@ interface SftpPaneViewProps {
 const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   side,
   pane,
+  isPaneFocused,
   sftpDefaultViewMode,
   showHeader = true,
   showEmptyHeader = true,
@@ -527,6 +529,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         t={t}
         pane={pane}
         side={side}
+        isPaneFocused={isPaneFocused}
         columnWidths={columnWidths}
         sortField={sortField}
         sortOrder={sortOrder}
@@ -617,6 +620,7 @@ const sftpPaneViewAreEqual = (
 ): boolean => {
   if (prev.pane !== next.pane) return false;
   if (prev.side !== next.side) return false;
+  if (prev.isPaneFocused !== next.isPaneFocused) return false;
   if (prev.showHeader !== next.showHeader) return false;
   if (prev.showEmptyHeader !== next.showEmptyHeader) return false;
   if (prev.sftpDefaultViewMode !== next.sftpDefaultViewMode) return false;

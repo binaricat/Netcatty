@@ -23,6 +23,7 @@ interface SftpPaneFileListProps {
   t: (key: string, params?: Record<string, unknown>) => string;
   pane: SftpPane;
   side: "left" | "right";
+  isPaneFocused: boolean;
   columnWidths: ColumnWidths;
   sortField: SortField;
   sortOrder: SortOrder;
@@ -107,6 +108,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   t,
   pane,
   side,
+  isPaneFocused,
   columnWidths,
   sortField,
   sortOrder,
@@ -189,6 +191,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             entry={entry}
             index={index}
             isSelected={selectedFilesRef.current.has(entry.name)}
+            showSelectionHighlight={isPaneFocused}
             isDragOver={dragOverEntryRef.current === entry.name}
             columnWidths={columnWidths}
             onSelect={handleRowSelect}
@@ -377,6 +380,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       visibleRows,
       pane.selectedFiles,
       dragOverEntry,
+      isPaneFocused,
     ],
   );
 

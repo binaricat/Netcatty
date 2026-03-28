@@ -12,6 +12,7 @@ interface SftpFileRowProps {
     entry: SftpFileEntry;
     index: number;
     isSelected: boolean;
+    showSelectionHighlight: boolean;
     isDragOver: boolean;
     columnWidths: ColumnWidths;
     onSelect: (entry: SftpFileEntry, index: number, e: React.MouseEvent) => void;
@@ -27,6 +28,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
     entry,
     index,
     isSelected,
+    showSelectionHighlight,
     isDragOver,
     columnWidths,
     onSelect,
@@ -58,6 +60,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
     const handleDrop = useCallback((e: React.DragEvent) => {
         onDrop(entry, e);
     }, [entry, onDrop]);
+    const isSelectionVisible = isSelected && showSelectionHighlight;
 
     return (
         <div
@@ -74,7 +77,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             onDoubleClick={handleOpen}
             className={cn(
                 "px-4 py-2 items-center cursor-pointer text-sm hover:bg-accent/50",
-                isSelected && "bg-accent text-accent-foreground",
+                isSelectionVisible && "bg-accent text-accent-foreground",
                 isDragOver && isNavDir && "bg-primary/25 ring-1 ring-primary/50"
             )}
             style={{ display: 'grid', gridTemplateColumns: buildSftpColumnTemplate(columnWidths) }}
@@ -82,7 +85,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             <div className="flex items-center gap-3 min-w-0">
                 <div className={cn(
                     "h-7 w-7 rounded flex items-center justify-center shrink-0 relative",
-                    isSelected
+                    isSelectionVisible
                         ? "bg-accent-foreground/10 text-accent-foreground"
                         : isNavDir
                             ? "bg-primary/10 text-primary"
@@ -95,7 +98,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                             size={8}
                             className={cn(
                                 "absolute -bottom-0.5 -right-0.5",
-                                isSelected ? "text-accent-foreground/80" : "text-muted-foreground",
+                                isSelectionVisible ? "text-accent-foreground/80" : "text-muted-foreground",
                             )}
                             aria-hidden="true"
                         />
@@ -105,7 +108,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                     className={cn(
                         "truncate",
                         entry.type === 'symlink' && "italic pr-1",
-                        isSelected && "font-medium",
+                        isSelectionVisible && "font-medium",
                     )}
                     title={entry.name}
                 >
@@ -113,11 +116,11 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                     {entry.type === 'symlink' && <span className="sr-only"> (symbolic link)</span>}
                 </span>
             </div>
-            <span className={cn("text-xs truncate", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
-            <span className={cn("text-xs truncate text-right", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>
+            <span className={cn("text-xs truncate", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
+            <span className={cn("text-xs truncate text-right", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>
                 {isNavDir ? '--' : sizeLabel}
             </span>
-            <span className={cn("text-xs truncate capitalize text-right", isSelected ? "text-accent-foreground/85" : "text-muted-foreground")}>
+            <span className={cn("text-xs truncate capitalize text-right", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>
                 {isSymlinkToDirectory ? 'link → folder' : entry.type === 'directory' ? 'folder' : entry.type === 'symlink' ? 'link' : entry.name.split('.').pop()?.toLowerCase() || 'file'}
             </span>
         </div>

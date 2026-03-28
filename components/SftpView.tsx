@@ -313,6 +313,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                   <SftpPaneView
                     side="left"
                     pane={pane}
+                    isPaneFocused={focusedSide === "left"}
                     sftpDefaultViewMode={sftpDefaultViewMode}
                     showHeader
                     showEmptyHeader={false}
@@ -371,6 +372,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                   <SftpPaneView
                     side="right"
                     pane={pane}
+                    isPaneFocused={focusedSide === "right"}
                     sftpDefaultViewMode={sftpDefaultViewMode}
                     showHeader
                     showEmptyHeader={false}
