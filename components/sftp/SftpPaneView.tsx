@@ -544,6 +544,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         draggedFiles={draggedFiles}
         onRefresh={handleRefresh}
         onNavigateTo={callbacks.onNavigateTo}
+        onClearSelection={callbacks.onClearSelection}
         setShowNewFolderDialog={setShowNewFolderDialog}
         setShowNewFileDialog={setShowNewFileDialog}
         getNextUntitledName={getNextUntitledName}

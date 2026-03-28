@@ -38,6 +38,7 @@ interface SftpPaneFileListProps {
   draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onRefresh: () => void;
   onNavigateTo: (path: string) => void;
+  onClearSelection: () => void;
   setShowNewFolderDialog: (open: boolean) => void;
   setShowNewFileDialog: (open: boolean) => void;
   getNextUntitledName: (existingNames: string[]) => string;
@@ -123,6 +124,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   draggedFiles,
   onRefresh,
   onNavigateTo,
+  onClearSelection,
   setShowNewFolderDialog,
   setShowNewFileDialog,
   getNextUntitledName,
@@ -177,11 +179,16 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     row?.scrollIntoView({ block: "nearest" });
   }, [fileListRef, pane.selectedFiles]);
 
-  // Use refs for frequently-changing values so renderRow stays stable
+  // Use refs for frequently-changing values in context-menu actions
   const selectedFilesRef = useRef(pane.selectedFiles);
   selectedFilesRef.current = pane.selectedFiles;
-  const dragOverEntryRef = useRef(dragOverEntry);
-  dragOverEntryRef.current = dragOverEntry;
+
+  const handleBackgroundClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-sftp-row="true"]')) return;
+    if (pane.selectedFiles.size === 0) return;
+    onClearSelection();
+  }, [onClearSelection, pane.selectedFiles.size]);
 
   const renderRow = useCallback(
     (entry: SftpFileEntry, index: number) => (
@@ -190,9 +197,9 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
           <SftpFileRow
             entry={entry}
             index={index}
-            isSelected={selectedFilesRef.current.has(entry.name)}
+            isSelected={pane.selectedFiles.has(entry.name)}
             showSelectionHighlight={isPaneFocused}
-            isDragOver={dragOverEntryRef.current === entry.name}
+            isDragOver={dragOverEntry === entry.name}
             columnWidths={columnWidths}
             onSelect={handleRowSelect}
             onOpen={handleRowOpen}
@@ -337,7 +344,10 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       handleRowDragLeave,
       handleRowOpen,
       handleRowSelect,
+      dragOverEntry,
+      isPaneFocused,
       onCopyToOtherPane,
+      onClearSelection,
       onMoveEntriesToPath,
       onDownloadFile,
       onDragEnd,
@@ -349,6 +359,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       openDeleteConfirm,
       openRenameDialog,
       pane.connection,
+      pane.selectedFiles,
       setShowNewFolderDialog,
       setShowNewFileDialog,
       t,
@@ -378,9 +389,6 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       shouldVirtualize,
       sortedDisplayFiles,
       visibleRows,
-      pane.selectedFiles,
-      dragOverEntry,
-      isPaneFocused,
     ],
   );
 
@@ -461,6 +469,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             "flex-1 min-h-0 overflow-y-auto relative",
             isDragOverPane && "ring-2 ring-primary/30 ring-inset",
           )}
+          onClick={handleBackgroundClick}
           onScroll={handleFileListScroll}
         >
           {pane.loading && sortedDisplayFiles.length === 0 ? (
