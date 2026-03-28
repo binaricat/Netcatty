@@ -62,6 +62,10 @@ function getSnapshot() {
   return snapshotRef;
 }
 
+/** Key used to store the global default opener — uses a reserved prefix to avoid
+ *  collisions with real file extensions (e.g. a file named "foo.*"). */
+const DEFAULT_OPENER_KEY = '__default__';
+
 export function useSftpFileAssociations() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const associations = snapshot.associations;
@@ -83,14 +87,14 @@ export function useSftpFileAssociations() {
    */
   const getOpenerForFile = useCallback((fileName: string): FileAssociationEntry | null => {
     const ext = getFileExtension(fileName);
-    return associations[ext] || associations['*'] || null;
+    return associations[ext] || associations[DEFAULT_OPENER_KEY] || null;
   }, [associations]);
 
   /**
    * Get the default (fallback) opener, if set.
    */
   const getDefaultOpener = useCallback((): FileAssociationEntry | null => {
-    return associations['*'] || null;
+    return associations[DEFAULT_OPENER_KEY] || null;
   }, [associations]);
 
   /**
@@ -99,7 +103,7 @@ export function useSftpFileAssociations() {
   const setDefaultOpener = useCallback((openerType: FileOpenerType, systemApp?: SystemAppInfo) => {
     updateAssociations({
       ...snapshotRef.associations,
-      '*': { openerType, systemApp },
+      [DEFAULT_OPENER_KEY]: { openerType, systemApp },
     });
   }, []);
 
@@ -108,7 +112,7 @@ export function useSftpFileAssociations() {
    */
   const removeDefaultOpener = useCallback(() => {
     const next = { ...snapshotRef.associations };
-    delete next['*'];
+    delete next[DEFAULT_OPENER_KEY];
     updateAssociations(next);
   }, []);
 
@@ -140,7 +144,7 @@ export function useSftpFileAssociations() {
    */
   const getAllAssociations = useCallback((): FileAssociation[] => {
     return Object.entries(associations)
-      .filter(([ext]) => ext !== '*')
+      .filter(([ext]) => ext !== DEFAULT_OPENER_KEY)
       .map(([extension, entry]: [string, FileAssociationEntry]) => ({
         extension,
         openerType: entry.openerType,
