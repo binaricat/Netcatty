@@ -330,8 +330,7 @@ export const useSftpTransfers = ({
 
     // Guard against symlink loops and excessively deep directory trees
     if (depth > MAX_DIRECTORY_DEPTH) {
-      logger.warn(`[SFTP] Skipping directory exceeding max depth (${MAX_DIRECTORY_DEPTH}): ${task.sourcePath}`);
-      return;
+      throw new Error(`Directory depth exceeds limit (${MAX_DIRECTORY_DEPTH}), possible symlink cycle: ${task.sourcePath}`);
     }
 
     if (targetIsLocal) {
@@ -1122,6 +1121,7 @@ export const useSftpTransfers = ({
         startTime: Date.now(),
         isDirectory: params.isDirectory,
         progressMode: params.isDirectory ? "files" : "bytes",
+        retryable: false,
       };
 
       setTransfers((prev) => [...prev, task]);
