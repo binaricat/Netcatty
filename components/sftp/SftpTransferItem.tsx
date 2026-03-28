@@ -4,6 +4,7 @@
 
 import {
     ArrowDown,
+    ArrowRight,
     CheckCircle2,
     FolderUp,
     Loader2,
@@ -82,23 +83,24 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
             </div>
 
             <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <span className="text-[13px] leading-5 truncate font-medium">{task.fileName}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[12px] leading-5 truncate font-medium">{task.fileName}</span>
+                    <ArrowRight size={11} className="shrink-0 text-muted-foreground/70" />
+                    <span
+                        className={cn(
+                            "min-w-0 truncate text-[11px]",
+                            canRevealTarget ? "text-primary/80" : "text-muted-foreground",
+                        )}
+                        title={targetDirectoryPath}
+                    >
+                        {targetDirectoryPath}
+                    </span>
                     {task.status === 'transferring' && !isIndeterminate && speedFormatted && (
                         <span className="text-[10px] text-primary/80 font-mono transition-opacity duration-300">{speedFormatted}</span>
                     )}
                     {task.status === 'transferring' && !isIndeterminate && remainingFormatted && (
                         <span className="text-[10px] text-muted-foreground transition-opacity duration-300">{remainingFormatted}</span>
                     )}
-                </div>
-                <div
-                    className={cn(
-                        "text-[9px] mt-0.5 truncate",
-                        canRevealTarget ? "text-primary/80" : "text-muted-foreground",
-                    )}
-                    title={targetDirectoryPath}
-                >
-                    {targetDirectoryPath}
                 </div>
                 {(task.status === 'transferring' || task.status === 'pending') && (
                     <div className="flex items-center gap-2 mt-1">
@@ -153,7 +155,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                     </div>
                 )}
                 {task.status === 'completed' && bytesDisplay && (
-                    <div className="text-[9px] text-green-600 mt-0.5">
+                    <div className="text-[10px] text-green-600 mt-0.5">
                         Completed - {bytesDisplay}
                     </div>
                 )}
