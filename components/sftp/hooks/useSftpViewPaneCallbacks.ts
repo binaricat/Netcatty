@@ -25,8 +25,6 @@ interface UseSftpViewPaneCallbacksParams {
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
   listSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<RemoteFile[]>;
-  mkdirLocal?: (path: string) => Promise<unknown>;
-  deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   startStreamTransfer?: (
@@ -58,8 +56,6 @@ export const useSftpViewPaneCallbacks = ({
   setOpenerForExtension,
   t,
   listSftp,
-  mkdirLocal,
-  deleteLocalFile,
   showSaveDialog,
   selectDirectory,
   startStreamTransfer,
@@ -74,9 +70,6 @@ export const useSftpViewPaneCallbacks = ({
     getOpenerForFileRef,
     setOpenerForExtension,
     t,
-    listSftp,
-    mkdirLocal,
-    deleteLocalFile,
     showSaveDialog,
     selectDirectory,
     startStreamTransfer,
