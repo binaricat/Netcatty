@@ -73,7 +73,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             onClick={handleSelect}
             onDoubleClick={handleOpen}
             className={cn(
-                "px-4 py-2 items-center cursor-pointer text-sm transition-colors border-l-4",
+                "px-4 py-2 items-center cursor-pointer text-sm border-l-4",
                 isSelected
                     ? "border-primary bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary-foreground)/0.15)]"
                     : "border-transparent hover:bg-secondary/40",
