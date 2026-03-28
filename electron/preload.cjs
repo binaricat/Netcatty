@@ -112,10 +112,6 @@ function _deliverToListeners(sessionId, data) {
 ipcRenderer.on("netcatty:data", (_event, payload) => {
   const set = dataListeners.get(payload.sessionId);
   if (!set) return;
-  if (payload?.syntheticEcho) {
-    _deliverToListeners(payload.sessionId, payload.data);
-    return;
-  }
   const data = filterMcpChunk(payload.sessionId, payload.data);
   if (data) {
     set.forEach((cb) => {
