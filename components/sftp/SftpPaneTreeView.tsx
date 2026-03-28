@@ -66,6 +66,7 @@ interface SftpPaneTreeViewProps {
   openRenameDialog: (entryPath: string) => void;
   openDeleteConfirm: (targets: string[]) => void;
   onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+  onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
@@ -267,6 +268,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   openRenameDialog,
   openDeleteConfirm,
   onCopyToOtherPane,
+  onReceiveFromOtherPane,
   onOpenFileWith,
   onEditFile,
   onDownloadFile,
@@ -380,6 +382,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onDragEndRef.current = onDragEnd;
   const onCopyToOtherPaneRef = useRef(onCopyToOtherPane);
   onCopyToOtherPaneRef.current = onCopyToOtherPane;
+  const onReceiveFromOtherPaneRef = useRef(onReceiveFromOtherPane);
+  onReceiveFromOtherPaneRef.current = onReceiveFromOtherPane;
   const onOpenFileWithRef = useRef(onOpenFileWith);
   onOpenFileWithRef.current = onOpenFileWith;
   const onEditFileRef = useRef(onEditFile);
@@ -1022,7 +1026,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       e.preventDefault();
       e.stopPropagation();
       setDragOverNodePath(null);
-      onCopyToOtherPaneRef.current(
+      onReceiveFromOtherPaneRef.current(
         draggedFilesRef.current.map((file) => ({ ...file, targetPath: entryPath })),
       );
       return;
