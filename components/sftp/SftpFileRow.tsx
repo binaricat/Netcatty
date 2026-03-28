@@ -71,9 +71,9 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             onClick={handleSelect}
             onDoubleClick={handleOpen}
             className={cn(
-                "px-4 py-2 items-center cursor-pointer text-sm transition-colors border-l-2",
+                "px-4 py-2 items-center cursor-pointer text-sm transition-colors border-l-4",
                 isSelected
-                    ? "border-primary bg-primary/20 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]"
+                    ? "border-primary bg-primary text-primary-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary-foreground)/0.15)]"
                     : "border-transparent hover:bg-secondary/40",
                 isDragOver && isNavDir && "bg-primary/25 ring-1 ring-primary/50"
             )}
@@ -82,24 +82,42 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
             <div className="flex items-center gap-3 min-w-0">
                 <div className={cn(
                     "h-7 w-7 rounded flex items-center justify-center shrink-0 relative",
-                    isNavDir ? "bg-primary/10 text-primary" : "bg-secondary/60 text-muted-foreground"
+                    isSelected
+                        ? "bg-primary-foreground/15 text-primary-foreground"
+                        : isNavDir
+                            ? "bg-primary/10 text-primary"
+                            : "bg-secondary/60 text-muted-foreground"
                 )}>
                     {isNavDir ? <Folder size={14} /> : getFileIcon(entry)}
                     {/* Show link indicator for symlinks */}
                     {entry.type === 'symlink' && (
-                        <Link size={8} className="absolute -bottom-0.5 -right-0.5 text-muted-foreground" aria-hidden="true" />
+                        <Link
+                            size={8}
+                            className={cn(
+                                "absolute -bottom-0.5 -right-0.5",
+                                isSelected ? "text-primary-foreground/80" : "text-muted-foreground",
+                            )}
+                            aria-hidden="true"
+                        />
                     )}
                 </div>
-                <span className={cn("truncate", entry.type === 'symlink' && "italic pr-1")} title={entry.name}>
+                <span
+                    className={cn(
+                        "truncate",
+                        entry.type === 'symlink' && "italic pr-1",
+                        isSelected && "font-medium",
+                    )}
+                    title={entry.name}
+                >
                     {entry.name}
                     {entry.type === 'symlink' && <span className="sr-only"> (symbolic link)</span>}
                 </span>
             </div>
-            <span className="text-xs text-muted-foreground truncate">{modifiedLabel}</span>
-            <span className="text-xs text-muted-foreground truncate text-right">
+            <span className={cn("text-xs truncate", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
+            <span className={cn("text-xs truncate text-right", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>
                 {isNavDir ? '--' : sizeLabel}
             </span>
-            <span className="text-xs text-muted-foreground truncate capitalize text-right">
+            <span className={cn("text-xs truncate capitalize text-right", isSelected ? "text-primary-foreground/85" : "text-muted-foreground")}>
                 {isSymlinkToDirectory ? 'link → folder' : entry.type === 'directory' ? 'folder' : entry.type === 'symlink' ? 'link' : entry.name.split('.').pop()?.toLowerCase() || 'file'}
             </span>
         </div>
