@@ -270,6 +270,7 @@ export const useSftpState = (
     getActivePane,
     getPaneByConnectionId,
     refresh,
+    clearCacheForConnection,
     sftpSessionsRef,
     listLocalFiles,
     listRemoteFiles,

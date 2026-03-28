@@ -16,6 +16,7 @@ interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
+  clearCacheForConnection: (connectionId: string) => void;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
@@ -59,6 +60,7 @@ export const useSftpTransfers = ({
   getActivePane,
   getPaneByConnectionId,
   refresh,
+  clearCacheForConnection,
   sftpSessionsRef,
   listLocalFiles,
   listRemoteFiles,
@@ -570,6 +572,11 @@ export const useSftpTransfers = ({
           };
         }),
       );
+
+      // Target contents may have been cached before this transfer started,
+      // especially when dropping into a subdirectory like "/tmp" from its parent.
+      // Clear the target connection cache so the next navigation reloads fresh data.
+      clearCacheForConnection(task.targetConnectionId);
 
       // Refresh the specific target tab, not whichever tab happens to be
       // active now — focus may have switched during the transfer.
