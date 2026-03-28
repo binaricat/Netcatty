@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
+import type { SftpFileEntry, SftpFilenameEncoding } from "../../../types";
 import { getParentPath, joinPath as joinFsPath } from "../../../application/state/sftp/utils";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { logger } from "../../../lib/logger";
@@ -21,8 +21,6 @@ interface UseSftpViewFileOpsParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
-  listSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<RemoteFile[]>;
-  mkdirLocal?: (path: string) => Promise<unknown>;
   deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
@@ -112,8 +110,6 @@ export const useSftpViewFileOps = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
-  listSftp,
-  mkdirLocal,
   deleteLocalFile,
   showSaveDialog,
   selectDirectory,
@@ -575,8 +571,6 @@ export const useSftpViewFileOps = ({
     [
       sftpRef,
       t,
-      listSftp,
-      mkdirLocal,
       deleteLocalFile,
       showSaveDialog,
       selectDirectory,
