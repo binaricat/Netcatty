@@ -163,8 +163,11 @@ export const useSftpTransfers = ({
 
         if (file.type === "directory") {
           subdirs.push({ entry: file, nextDepth: symlinkDepth });
-        } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
-          subdirs.push({ entry: file, nextDepth: symlinkDepth + 1 });
+        } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory") {
+          if (symlinkDepth < MAX_SYMLINK_DEPTH) {
+            subdirs.push({ entry: file, nextDepth: symlinkDepth + 1 });
+          }
+          // Skip at max depth — consistent with transferDirectory
         } else {
           totalBytes += getEntrySize(file);
         }
@@ -311,10 +314,14 @@ export const useSftpTransfers = ({
         subdirPromises.push(
           countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth, followSymlinks),
         );
-      } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
-        subdirPromises.push(
-          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth + 1, followSymlinks),
-        );
+      } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory") {
+        // Only recurse if within depth limit; skip entirely at max depth
+        // (consistent with transferDirectory which also skips these)
+        if (symlinkDepth < MAX_SYMLINK_DEPTH) {
+          subdirPromises.push(
+            countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth + 1, followSymlinks),
+          );
+        }
       } else {
         count++;
       }
@@ -765,6 +772,9 @@ export const useSftpTransfers = ({
             ...t,
             status: finalStatus,
             error: dirPartialFailure ? "Some files failed to transfer" : undefined,
+            // Disable retry for partial failures — retrying replays the entire
+            // directory without conflict checks, overwriting already-copied files
+            retryable: dirPartialFailure ? false : t.retryable,
             endTime: Date.now(),
             transferredBytes: dirPartialFailure ? t.transferredBytes : t.totalBytes,
             speed: 0,
