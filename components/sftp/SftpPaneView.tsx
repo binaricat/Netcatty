@@ -113,12 +113,11 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   }, []);
 
   const requestNestedTreeReload = useCallback((paths?: string[]) => {
-    const currentPath = pane.connection?.currentPath;
-    const nestedPaths = (paths ?? []).filter((path) => path && path !== currentPath);
-    if (nestedPaths.length > 0) {
-      requestTreeReload(nestedPaths);
+    const targets = Array.from(new Set((paths ?? []).filter(Boolean)));
+    if (targets.length > 0) {
+      requestTreeReload(targets);
     }
-  }, [pane.connection?.currentPath, requestTreeReload]);
+  }, [requestTreeReload]);
 
   useRenderTracker(`SftpPaneView[${side}]`, {
     side,

@@ -480,6 +480,18 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     await Promise.all(paths.map((path) => loadChildrenForPath(path)));
   }, [loadChildrenForPath]);
 
+  const reloadRootPath = useCallback(async (rootPath: string) => {
+    try {
+      const children = await onLoadChildrenRef.current(rootPath);
+      if ((pane.connection?.currentPath ?? '') !== rootPath) return;
+      setResolvedRootPath(rootPath);
+      setRootEntries(children);
+      sortedChildrenCacheRef.current.delete(rootPath);
+    } catch {
+      // Keep the previous root listing if the reload fails.
+    }
+  }, [pane.connection?.currentPath]);
+
   useEffect(() => {
     const rootPath = pane.connection?.currentPath ?? '';
     const connectionId = pane.connection?.id ?? null;
@@ -515,13 +527,18 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       invalidatePathCache(targetPath);
     }
 
+    const shouldReloadRoot = targets.includes(rootPath);
+    if (shouldReloadRoot) {
+      void reloadRootPath(rootPath);
+    }
+
     const expandedTargets = targets.filter((targetPath) =>
       targetPath !== rootPath && expandedPathsRef.current.has(targetPath),
     );
     if (expandedTargets.length > 0) {
       void reloadExpandedPaths(expandedTargets);
     }
-  }, [invalidatePathCache, invalidateTreeCache, pane.connection?.currentPath, reloadExpandedPaths, reloadRequest]);
+  }, [invalidatePathCache, invalidateTreeCache, pane.connection?.currentPath, reloadExpandedPaths, reloadRequest, reloadRootPath]);
 
   const focusTreeContainer = useCallback(() => {
     const container = scrollContainerRef.current;
