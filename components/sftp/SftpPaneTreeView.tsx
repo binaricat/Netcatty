@@ -1221,15 +1221,20 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           <ClipboardCopy size={14} className="mr-2" />{tRef.current('sftp.context.copyPath')}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        {getParentPath(entryPath) !== (pane.connection?.currentPath ?? '') && (
+        {(() => {
+          const sourceParent = getParentPath(entryPath);
+          const targetParent = getParentPath(sourceParent);
+          if (sourceParent === targetParent) return null;
+
+          return (
           <ContextMenuItem onClick={() => {
             const paths = getActionPaths(entryPath);
-            const parentOfParent = getParentPath(getParentPath(entryPath));
-            void executeMoveAction(paths, parentOfParent);
+            void executeMoveAction(paths, targetParent);
           }}>
             <ArrowUp size={14} className="mr-2" />{tRef.current('sftp.context.moveToParent')}
           </ContextMenuItem>
-        )}
+          );
+        })()}
         <ContextMenuItem onClick={() => {
           setMoveTargetPaths(getActionPaths(entryPath));
           setMoveToPath('');

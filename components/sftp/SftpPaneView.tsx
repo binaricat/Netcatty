@@ -554,6 +554,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         handleRowDragLeave={handleRowDragLeave}
         handleEntryDrop={handleEntryDrop}
         onCopyToOtherPane={callbacks.onCopyToOtherPane}
+        onMoveEntriesToPath={handleMoveEntriesToPath}
         onOpenFileWith={callbacks.onOpenFileWith}
         onEditFile={callbacks.onEditFile}
         onDownloadFile={callbacks.onDownloadFile}

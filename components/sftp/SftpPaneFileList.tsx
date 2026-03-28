@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowRight, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -9,7 +9,7 @@ import {
   ContextMenuTrigger,
 } from "../ui/context-menu";
 import { cn } from "../../lib/utils";
-import { joinPath } from "../../application/state/sftp/utils";
+import { getParentPath, joinPath } from "../../application/state/sftp/utils";
 import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpTransferSource } from "./SftpContext";
@@ -52,6 +52,7 @@ interface SftpPaneFileListProps {
   handleRowDragLeave: () => void;
   handleEntryDrop: (entry: SftpFileEntry, e: React.DragEvent) => void;
   onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+  onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
   onOpenFileWith?: (entry: SftpFileEntry) => void;
   onEditFile?: (entry: SftpFileEntry) => void;
   onDownloadFile?: (entry: SftpFileEntry) => void;
@@ -134,6 +135,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   handleRowDragLeave,
   handleEntryDrop,
   onCopyToOtherPane,
+  onMoveEntriesToPath,
   onOpenFileWith,
   onEditFile,
   onDownloadFile,
@@ -255,6 +257,26 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
               {t("sftp.context.copyPath")}
             </ContextMenuItem>
             <ContextMenuSeparator />
+            {(() => {
+              const sourceParent = getParentPath(joinPath(pane.connection?.currentPath ?? "", entry.name));
+              const targetParent = getParentPath(sourceParent);
+              if (sourceParent === targetParent) return null;
+
+              return (
+                <ContextMenuItem
+                  onClick={() => {
+                    const currentSelected = selectedFilesRef.current;
+                    const sourcePaths = currentSelected.has(entry.name)
+                      ? Array.from(currentSelected as Set<string>).map((n) => joinPath(pane.connection?.currentPath ?? "", n))
+                      : [joinPath(pane.connection?.currentPath ?? "", entry.name)];
+                    void onMoveEntriesToPath(sourcePaths, targetParent);
+                  }}
+                >
+                  <ArrowUp size={14} className="mr-2" />{" "}
+                  {t("sftp.context.moveToParent")}
+                </ContextMenuItem>
+              );
+            })()}
             <ContextMenuItem onClick={() => openRenameDialog(joinPath(pane.connection?.currentPath ?? "", entry.name))}>
               <Pencil size={14} className="mr-2" /> {t("common.rename")}
             </ContextMenuItem>
@@ -300,6 +322,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       handleRowOpen,
       handleRowSelect,
       onCopyToOtherPane,
+      onMoveEntriesToPath,
       onDownloadFile,
       onDragEnd,
       onEditFile,
