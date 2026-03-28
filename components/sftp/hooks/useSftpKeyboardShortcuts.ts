@@ -148,7 +148,7 @@ export const useSftpKeyboardShortcuts = ({
             const end = Math.max(anchorIdx, nextIdx);
             sftp.rangeSelect(focusedSide, listItems.slice(start, end + 1));
           } else {
-            sftp.toggleSelection(focusedSide, nextName, false);
+            sftp.rangeSelect(focusedSide, [nextName]);
           }
           return;
         }
