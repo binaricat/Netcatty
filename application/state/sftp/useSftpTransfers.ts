@@ -369,15 +369,24 @@ export const useSftpTransfers = ({
 
     // Filter both "." and ".." — some SFTP servers include "." in readdir
     const filtered = files.filter((f) => f.name !== ".." && f.name !== ".");
-    // Recurse into real directories and symlink directories (with depth guard)
-    const dirs = filtered.filter((f) => {
-      if (f.type === "directory") return true;
-      if (f.type === "symlink" && f.linkTarget === "directory") {
-        return symlinkDepth < MAX_SYMLINK_DEPTH;
+    // Recurse into real directories and symlink directories (with depth guard).
+    // Symlink directories that exceed the depth limit are skipped entirely
+    // (not treated as files — transferFile cannot handle directories).
+    const dirs: SftpFileEntry[] = [];
+    const regularFiles: SftpFileEntry[] = [];
+    for (const f of filtered) {
+      if (f.type === "directory") {
+        dirs.push(f);
+      } else if (f.type === "symlink" && f.linkTarget === "directory") {
+        if (symlinkDepth < MAX_SYMLINK_DEPTH) {
+          dirs.push(f);
+        } else {
+          logger.warn(`[SFTP] Skipping symlink directory at max depth: ${joinPath(task.sourcePath, f.name)}`);
+        }
+      } else {
+        regularFiles.push(f);
       }
-      return false;
-    });
-    const regularFiles = filtered.filter((f) => !dirs.includes(f));
+    }
 
     // Process subdirectories first
     for (const dir of dirs) {
