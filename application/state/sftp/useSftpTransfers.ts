@@ -155,7 +155,7 @@ export const useSftpTransfers = ({
       const subdirs: SftpFileEntry[] = [];
 
       for (const file of files) {
-        if (file.name === "..") continue;
+        if (file.name === ".." || file.name === ".") continue;
 
         if (file.type === "directory") {
           subdirs.push(file);
@@ -296,7 +296,7 @@ export const useSftpTransfers = ({
     let count = 0;
     const subdirPromises: Promise<number>[] = [];
     for (const file of files) {
-      if (file.name === "..") continue;
+      if (file.name === ".." || file.name === ".") continue;
       if (file.type === "directory") {
         subdirPromises.push(
           countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId),
@@ -312,6 +312,8 @@ export const useSftpTransfers = ({
     return count;
   };
 
+  const MAX_SYMLINK_DEPTH = 32;
+
   /** Returns number of failed child file transfers */
   const transferDirectory = async (
     task: TransferTask,
@@ -322,6 +324,7 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
+    symlinkDepth = 0,
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -355,11 +358,17 @@ export const useSftpTransfers = ({
       throw new Error("No source connection");
     }
 
-    const filtered = files.filter((f) => f.name !== "..");
-    // Only recurse into real directories — symlink directories are transferred
-    // as regular files to avoid cycle risks (symlink -> ancestor loops).
-    const dirs = filtered.filter((f) => f.type === "directory");
-    const regularFiles = filtered.filter((f) => f.type !== "directory");
+    // Filter both "." and ".." — some SFTP servers include "." in readdir
+    const filtered = files.filter((f) => f.name !== ".." && f.name !== ".");
+    // Recurse into real directories and symlink directories (with depth guard)
+    const dirs = filtered.filter((f) => {
+      if (f.type === "directory") return true;
+      if (f.type === "symlink" && f.linkTarget === "directory") {
+        return symlinkDepth < MAX_SYMLINK_DEPTH;
+      }
+      return false;
+    });
+    const regularFiles = filtered.filter((f) => !dirs.includes(f));
 
     // Process subdirectories first
     for (const dir of dirs) {
@@ -379,6 +388,7 @@ export const useSftpTransfers = ({
         parentTaskId: task.id,
       };
 
+      const isSymlink = dir.type === "symlink";
       const subdirErrors = await transferDirectory(
         childTask,
         sourceSftpId,
@@ -388,6 +398,7 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
+        isSymlink ? symlinkDepth + 1 : symlinkDepth,
       );
       totalErrors += subdirErrors;
     }
