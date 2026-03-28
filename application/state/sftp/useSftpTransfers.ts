@@ -157,7 +157,7 @@ export const useSftpTransfers = ({
       for (const file of files) {
         if (file.name === "..") continue;
 
-        if (file.type === "directory") {
+        if (isNavigableDirectory(file)) {
           subdirs.push(file);
         } else {
           totalBytes += getEntrySize(file);
@@ -1209,7 +1209,7 @@ export const useSftpTransfers = ({
                   status: finalStatus,
                   error: hasFailedChildren ? "Some files failed to transfer" : undefined,
                   endTime: Date.now(),
-                  transferredBytes: t.totalBytes,
+                  transferredBytes: hasFailedChildren ? t.transferredBytes : t.totalBytes,
                 }
               : t,
           );
