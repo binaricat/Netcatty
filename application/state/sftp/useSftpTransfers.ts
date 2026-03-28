@@ -390,41 +390,40 @@ export const useSftpTransfers = ({
       }
     }
 
-    // Process subdirectories concurrently to preserve cross-directory throughput
-    if (dirs.length > 0) {
-      const subdirResults = await Promise.all(
-        dirs.map(async (dir) => {
-          if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
-            throw new Error("Transfer cancelled");
-          }
+    // Process subdirectories sequentially to avoid unbounded concurrent SFTP
+    // requests from nested Promise.all + worker pools across the tree.
+    // File-level concurrency within each directory is still governed by
+    // getTransferConcurrency().
+    for (const dir of dirs) {
+      if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
+        throw new Error("Transfer cancelled");
+      }
 
-          const childTask: TransferTask = {
-            ...task,
-            id: crypto.randomUUID(),
-            fileName: dir.name,
-            originalFileName: dir.name,
-            sourcePath: joinPath(task.sourcePath, dir.name),
-            targetPath: joinPath(task.targetPath, dir.name),
-            isDirectory: true,
-            progressMode: "files",
-            parentTaskId: task.id,
-          };
+      const childTask: TransferTask = {
+        ...task,
+        id: crypto.randomUUID(),
+        fileName: dir.name,
+        originalFileName: dir.name,
+        sourcePath: joinPath(task.sourcePath, dir.name),
+        targetPath: joinPath(task.targetPath, dir.name),
+        isDirectory: true,
+        progressMode: "files",
+        parentTaskId: task.id,
+      };
 
-          const isSymlink = dir.type === "symlink";
-          return transferDirectory(
-            childTask,
-            sourceSftpId,
-            targetSftpId,
-            sourceIsLocal,
-            targetIsLocal,
-            sourceEncoding,
-            targetEncoding,
-            rootTaskId,
-            isSymlink ? symlinkDepth + 1 : symlinkDepth,
-          );
-        }),
+      const isSymlink = dir.type === "symlink";
+      const subdirErrors = await transferDirectory(
+        childTask,
+        sourceSftpId,
+        targetSftpId,
+        sourceIsLocal,
+        targetIsLocal,
+        sourceEncoding,
+        targetEncoding,
+        rootTaskId,
+        isSymlink ? symlinkDepth + 1 : symlinkDepth,
       );
-      totalErrors += subdirResults.reduce((sum, n) => sum + n, 0);
+      totalErrors += subdirErrors;
     }
 
     // Transfer files in parallel with concurrency limit
@@ -723,7 +722,7 @@ export const useSftpTransfers = ({
           }
         }).catch(() => {});
 
-        await transferDirectory(
+        const dirErrors = await transferDirectory(
           task,
           sourceSftpId,
           targetSftpId,
@@ -733,6 +732,24 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
         );
+
+        const dirStatus: TransferStatus = dirErrors > 0 ? "failed" : "completed";
+        setTransfers((prev) => prev.map((t) => {
+          if (t.id !== task.id) return t;
+          return {
+            ...t,
+            status: dirStatus,
+            error: dirErrors > 0 ? "Some files failed to transfer" : undefined,
+            endTime: Date.now(),
+            transferredBytes: dirErrors > 0 ? t.transferredBytes : t.totalBytes,
+            speed: 0,
+          };
+        }));
+
+        if (dirErrors > 0) {
+          activeChildIdsRef.current.delete(task.id);
+          return "failed";
+        }
       } else {
         await transferFile(
           task,
