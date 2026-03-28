@@ -331,16 +331,26 @@ export const useSftpTransfers = ({
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
     symlinkDepth = 0,
+    ancestorPaths?: Set<string>, // Track recursion stack for cycle detection
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
       throw new Error("Transfer cancelled");
     }
 
-    // Guard against symlink directory cycles (only counts symlink hops, not real directories)
+    // Guard against symlink directory cycles:
+    // 1. Depth limit as hard backstop
     if (symlinkDepth > MAX_SYMLINK_DEPTH) {
       throw new Error(`Symlink depth exceeds limit (${MAX_SYMLINK_DEPTH}), possible cycle: ${task.sourcePath}`);
     }
+    // 2. Ancestor path check — if this path is already in the recursion
+    //    stack, we have a direct cycle (e.g. dir/link -> ancestor)
+    const ancestors = ancestorPaths ?? new Set<string>();
+    if (ancestors.has(task.sourcePath)) {
+      logger.warn(`[SFTP] Skipping symlink cycle: ${task.sourcePath}`);
+      return 0;
+    }
+    ancestors.add(task.sourcePath);
 
     let totalErrors = 0;
 
@@ -403,6 +413,7 @@ export const useSftpTransfers = ({
         targetEncoding,
         rootTaskId,
         isSymlink ? symlinkDepth + 1 : symlinkDepth,
+        ancestors,
       );
       totalErrors += subdirErrors;
     }
@@ -509,6 +520,7 @@ export const useSftpTransfers = ({
       }
     }
 
+    ancestors.delete(task.sourcePath);
     return totalErrors;
   };
 
