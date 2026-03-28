@@ -274,9 +274,12 @@ export const sortSftpEntries = (
     if (!entries.length) return entries;
 
     const sorted = [...entries].sort((a, b) => {
+        const aIsDir = isNavigableDirectory(a);
+        const bIsDir = isNavigableDirectory(b);
+
         if (sortField !== 'type') {
-            if (a.type === 'directory' && b.type !== 'directory') return -1;
-            if (a.type !== 'directory' && b.type === 'directory') return 1;
+            if (aIsDir && !bIsDir) return -1;
+            if (!aIsDir && bIsDir) return 1;
         }
 
         let cmp = 0;
@@ -291,14 +294,12 @@ export const sortSftpEntries = (
                 cmp = (a.lastModified || 0) - (b.lastModified || 0);
                 break;
             case 'type': {
-                const extA =
-                    a.type === 'directory'
-                        ? 'folder'
-                        : a.name.split('.').pop()?.toLowerCase() || '';
-                const extB =
-                    b.type === 'directory'
-                        ? 'folder'
-                        : b.name.split('.').pop()?.toLowerCase() || '';
+                const extA = aIsDir
+                    ? 'folder'
+                    : a.name.split('.').pop()?.toLowerCase() || '';
+                const extB = bIsDir
+                    ? 'folder'
+                    : b.name.split('.').pop()?.toLowerCase() || '';
                 cmp = extA.localeCompare(extB);
                 break;
             }
