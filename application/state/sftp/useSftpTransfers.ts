@@ -135,11 +135,13 @@ export const useSftpTransfers = ({
       sourceIsLocal: boolean,
       sourceEncoding: SftpFilenameEncoding,
       rootTaskId: string,
+      symlinkDepth = 0,
     ): Promise<number> => {
       const estT0 = performance.now();
       if (cancelledTasksRef.current.has(rootTaskId)) {
         throw new Error("Transfer cancelled");
       }
+      if (symlinkDepth > MAX_SYMLINK_DEPTH) return 0;
 
       const files = sourceIsLocal
         ? await listLocalFiles(sourcePath)
@@ -177,6 +179,7 @@ export const useSftpTransfers = ({
               sourceIsLocal,
               sourceEncoding,
               rootTaskId,
+              subdir.type === "symlink" ? symlinkDepth + 1 : symlinkDepth,
             ),
           ),
         );
@@ -283,8 +286,10 @@ export const useSftpTransfers = ({
     sourceIsLocal: boolean,
     sourceEncoding: SftpFilenameEncoding,
     rootTaskId: string,
+    symlinkDepth = 0,
   ): Promise<number> => {
     if (cancelledTasksRef.current.has(rootTaskId)) return 0;
+    if (symlinkDepth > MAX_SYMLINK_DEPTH) return 0;
 
     const files = sourceIsLocal
       ? await listLocalFiles(sourcePath)
@@ -298,8 +303,9 @@ export const useSftpTransfers = ({
     for (const file of files) {
       if (file.name === "..") continue;
       if (isNavigableDirectory(file)) {
+        const nextDepth = file.type === "symlink" ? symlinkDepth + 1 : symlinkDepth;
         subdirPromises.push(
-          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId),
+          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, nextDepth),
         );
       } else {
         count++;
