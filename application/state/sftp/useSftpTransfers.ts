@@ -1108,7 +1108,7 @@ export const useSftpTransfers = ({
           ? task.fileName.slice(0, task.fileName.lastIndexOf("."))
           : task.fileName;
         const newName = `${baseName} (copy)${ext}`;
-        const newTargetPath = task.targetPath.replace(task.fileName, newName);
+        const newTargetPath = joinPath(getParentPath(task.targetPath), newName);
         updatedTask = {
           ...task,
           fileName: newName,
