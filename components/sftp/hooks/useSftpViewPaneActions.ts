@@ -46,6 +46,8 @@ interface UseSftpViewPaneActionsResult {
   onRenameFileRight: (old: string, newName: string) => void;
   onRenameFileAtPathLeft: (oldPath: string, newName: string) => void;
   onRenameFileAtPathRight: (oldPath: string, newName: string) => void;
+  onMoveEntriesToPathLeft: (sourcePaths: string[], targetPath: string) => void;
+  onMoveEntriesToPathRight: (sourcePaths: string[], targetPath: string) => void;
   onCopyToOtherPaneLeft: (files: SftpTransferSource[]) => void;
   onCopyToOtherPaneRight: (files: SftpTransferSource[]) => void;
   onReceiveFromOtherPaneLeft: (files: SftpTransferSource[]) => void;
@@ -236,6 +238,14 @@ export const useSftpViewPaneActions = ({
     (oldPath: string, newName: string) => sftpRef.current.renameFileAtPath("right", oldPath, newName),
     [sftpRef],
   );
+  const onMoveEntriesToPathLeft = useCallback(
+    (sourcePaths: string[], targetPath: string) => sftpRef.current.moveEntriesToPath("left", sourcePaths, targetPath),
+    [sftpRef],
+  );
+  const onMoveEntriesToPathRight = useCallback(
+    (sourcePaths: string[], targetPath: string) => sftpRef.current.moveEntriesToPath("right", sourcePaths, targetPath),
+    [sftpRef],
+  );
 
   const dragCallbacks = useMemo<SftpDragCallbacks>(
     () => ({
@@ -284,6 +294,8 @@ export const useSftpViewPaneActions = ({
     onRenameFileRight,
     onRenameFileAtPathLeft,
     onRenameFileAtPathRight,
+    onMoveEntriesToPathLeft,
+    onMoveEntriesToPathRight,
     onCopyToOtherPaneLeft,
     onCopyToOtherPaneRight,
     onReceiveFromOtherPaneLeft,

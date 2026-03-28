@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowRight,
+  ArrowUp,
   ChevronRight,
   ClipboardCopy,
   CornerUpLeft,
@@ -10,6 +12,7 @@ import {
   ExternalLink,
   FilePlus,
   Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
   Loader2,
@@ -18,6 +21,15 @@ import {
   Shield,
   Trash2,
 } from 'lucide-react';
+import { Button } from '../ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
+import { Input } from '../ui/input';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -29,7 +41,7 @@ import { cn } from '../../lib/utils';
 import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import { getParentPath, joinPath } from '../../application/state/sftp/utils';
-import { filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory, sortSftpEntries, type ColumnWidths, type SortField, type SortOrder } from './utils';
+import { buildSftpColumnTemplate, filterHiddenFiles, formatBytes, formatDate, getFileIcon, isNavigableDirectory, sortSftpEntries, type ColumnWidths, type SortField, type SortOrder } from './utils';
 import type { SftpTransferSource } from './SftpContext';
 import { sftpTreeSelectionStore, useSftpTreeSelectionState } from './hooks/useSftpTreeSelectionStore';
 import { sftpTreeEnterStore } from './hooks/useSftpKeyboardShortcuts';
@@ -44,7 +56,9 @@ interface SftpPaneTreeViewProps {
   pane: SftpPane;
   side: 'left' | 'right';
   onLoadChildren: (path: string) => Promise<SftpFileEntry[]>;
+  onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
   onNavigateUp: () => void;
+  onNavigateTo: (path: string) => void;
   onRefresh: () => void;
   onOpenEntry: (entry: SftpFileEntry, fullPath?: string) => void;
   onDragStart: (files: SftpTransferSource[], side: 'left' | 'right') => void;
@@ -82,7 +96,7 @@ interface TreeNodeProps {
   onToggleExpand: (entry: SftpFileEntry, entryPath: string) => void;
   onNodeClick: (entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => void;
   onOpenEntry: (entry: SftpFileEntry, entryPath: string) => void;
-  onDragStart: (entry: SftpFileEntry, entryPath: string, isDir: boolean) => void;
+  onDragStart: (entry: SftpFileEntry, entryPath: string, isDir: boolean, e: React.DragEvent) => void;
   onDragEnd: () => void;
   onDragOverEntry: (entryPath: string, e: React.DragEvent) => void;
   onDropEntry: (entryPath: string, e: React.DragEvent) => void;
@@ -128,7 +142,7 @@ const TreeNode = React.memo<TreeNodeProps>(({
         }
       }}
       draggable={!isParentEntry}
-      onDragStart={() => { if (!isParentEntry) onDragStart(entry, entryPath, isDir); }}
+      onDragStart={e => { if (!isParentEntry) onDragStart(entry, entryPath, isDir, e); }}
       onDragEnd={onDragEnd}
       onDragOver={e => onDragOverEntry(entryPath, e)}
       onDrop={e => onDropEntry(entryPath, e)}
@@ -243,7 +257,9 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   pane,
   side,
   onLoadChildren,
+  onMoveEntriesToPath,
   onNavigateUp,
+  onNavigateTo,
   onRefresh,
   onOpenEntry,
   onDragStart,
@@ -267,7 +283,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   reloadRequest,
 }) => {
   const { t } = useI18n();
-  const columnTemplate = `${columnWidths.name}% ${columnWidths.modified}% ${columnWidths.size}% ${columnWidths.type}%`;
+  const columnTemplate = buildSftpColumnTemplate(columnWidths);
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -317,6 +333,17 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   // ── Shared context menu state ────────────────────────────────────
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null);
 
+  // ── Move-to dialog state ────────────────────────────────────────
+  const [showMoveToDialog, setShowMoveToDialog] = useState(false);
+  const [moveToPath, setMoveToPath] = useState('');
+  const [moveTargetPaths, setMoveTargetPaths] = useState<string[]>([]);
+  const [moveToError, setMoveToError] = useState<string | null>(null);
+  const [isMoving, setIsMoving] = useState(false);
+  const [moveToSuggestions, setMoveToSuggestions] = useState<string[]>([]);
+  const [moveToSuggestionIndex, setMoveToSuggestionIndex] = useState(-1);
+  const moveToInputRef = useRef<HTMLInputElement>(null);
+  const moveToSuggestionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Tree data state ──────────────────────────────────────────────
   const childrenCacheRef = useRef<Map<string, SftpFileEntry[]>>(new Map());
   const sortedChildrenCacheRef = useRef<Map<string, SftpFileEntry[]>>(new Map());
@@ -335,14 +362,18 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   treeSelectionStateRef.current = treeSelectionState;
   const treeGenerationRef = useRef(0);
   const previousRootPathRef = useRef(pane.connection?.currentPath ?? '');
+  const previousConnectionIdRef = useRef(pane.connection?.id ?? null);
+  const [rootEntries, setRootEntries] = useState<SftpFileEntry[]>(pane.files ?? []);
   const [resolvedRootPath, setResolvedRootPath] = useState(pane.connection?.currentPath ?? '');
-  const currentRootPath = pane.connection?.currentPath ?? '';
-  const visibleRootPath = pane.loading ? resolvedRootPath : currentRootPath;
 
   const onOpenEntryRef = useRef(onOpenEntry);
   onOpenEntryRef.current = onOpenEntry;
   const onNavigateUpRef = useRef(onNavigateUp);
   onNavigateUpRef.current = onNavigateUp;
+  const onNavigateToRef = useRef(onNavigateTo);
+  onNavigateToRef.current = onNavigateTo;
+  const onMoveEntriesToPathRef = useRef(onMoveEntriesToPath);
+  onMoveEntriesToPathRef.current = onMoveEntriesToPath;
   const onDragStartRef = useRef(onDragStart);
   onDragStartRef.current = onDragStart;
   const onDragEndRef = useRef(onDragEnd);
@@ -394,22 +425,21 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     sortedChildrenCacheRef.current.clear();
   }
 
-  useEffect(() => {
-    const rootPath = pane.connection?.currentPath;
-    if (!rootPath) return;
-    sortedChildrenCacheRef.current.delete(rootPath);
-  }, [pane.connection?.currentPath, pane.files]);
-
+  // Atomically sync rootEntries and resolvedRootPath together so the tree
+  // never renders new-path + old-files or vice versa.
   useEffect(() => {
     const currentPath = pane.connection?.currentPath ?? '';
     if (!currentPath) {
       setResolvedRootPath('');
+      setRootEntries([]);
       return;
     }
     if (!pane.loading) {
       setResolvedRootPath(currentPath);
+      setRootEntries(pane.files ?? []);
+      sortedChildrenCacheRef.current.delete(currentPath);
     }
-  }, [pane.connection?.currentPath, pane.loading]);
+  }, [pane.connection?.currentPath, pane.loading, pane.files]);
 
   const loadChildrenForPath = useCallback(async (entryPath: string) => {
     const generation = treeGenerationRef.current;
@@ -452,16 +482,19 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
 
   useEffect(() => {
     const rootPath = pane.connection?.currentPath ?? '';
+    const connectionId = pane.connection?.id ?? null;
     const pathChanged = previousRootPathRef.current !== rootPath;
+    const connectionChanged = previousConnectionIdRef.current !== connectionId;
     previousRootPathRef.current = rootPath;
+    previousConnectionIdRef.current = connectionId;
 
-    if (pathChanged) {
+    if (pathChanged || connectionChanged) {
       invalidateTreeCache();
       dispatchTreePaths({ type: 'RESET' });
       sftpTreeSelectionStore.clearSelection(pane.id);
       lastClickedPathRef.current = null;
     }
-  }, [pane.connection?.currentPath, pane.id, invalidateTreeCache]);
+  }, [pane.connection?.currentPath, pane.connection?.id, pane.id, invalidateTreeCache]);
 
   useEffect(() => {
     if (!reloadRequest.token) return;
@@ -610,10 +643,10 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     const pathMap = new Map<string, SftpFileEntry>();
 
     // Prepend ".." entry for parent navigation when not at root
-    const currentPath = visibleRootPath;
+    const currentPath = resolvedRootPath;
     const isRootPath = currentPath === '/' || /^[A-Za-z]:[\\/]?$/.test(currentPath);
     if (!isRootPath && currentPath) {
-      const files = pane.files ?? [];
+      const files = rootEntries;
       let parentEntry = files.find(f => f.name === '..');
       if (!parentEntry) {
         parentEntry = {
@@ -672,11 +705,11 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       }
     };
 
-    buildTree(pane.files ?? [], currentPath, 0);
+    buildTree(rootEntries, currentPath, 0);
     return { nodeDescriptors: descriptors, flatVisibleNodes: flat, entryByPath: pathMap };
   }, [
-    pane.files,
-    visibleRootPath,
+    rootEntries,
+    resolvedRootPath,
     pane.showHiddenFiles,
     sortField,
     sortOrder,
@@ -766,7 +799,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     openTreeEntry(entry, entryPath);
   }, [openTreeEntry]);
 
-  const stableOnDragStart = useCallback((entry: SftpFileEntry, entryPath: string, isDir: boolean) => {
+  const stableOnDragStart = useCallback((entry: SftpFileEntry, entryPath: string, isDir: boolean, e: React.DragEvent) => {
     const files = toTransferSources(getActionPaths(entryPath));
     if (files.length === 0) {
       files.push({
@@ -776,16 +809,148 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         sourcePath: getParentPath(entryPath),
       });
     }
+    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.setData('text/plain', files.map((f) => f.name).join('\n'));
     onDragStartRef.current(files, sideRef.current);
   }, [getActionPaths, pane.connection?.id, toTransferSources]);
 
   const stableOnDragEnd = useCallback(() => onDragEndRef.current(), []);
+
+  const applyLocalMoveMutation = useCallback((
+    sourceParentPaths: string[],
+    targetPath: string,
+    movedEntries: SftpFileEntry[],
+  ) => {
+    if (movedEntries.length === 0) return;
+
+    const currentPath = pane.connection?.currentPath ?? '';
+    const movedNameSet = new Set(movedEntries.map((entry) => entry.name));
+    const uniqueSourceParents = Array.from(new Set(sourceParentPaths));
+
+    if (currentPath) {
+      if (uniqueSourceParents.includes(currentPath)) {
+        setRootEntries((prev) => prev.filter((entry) => !movedNameSet.has(entry.name)));
+      } else if (currentPath === targetPath) {
+        setRootEntries((prev) => {
+          const next = [...prev];
+          for (const entry of movedEntries) {
+            if (!next.some((candidate) => candidate.name === entry.name)) {
+              next.push(entry);
+            }
+          }
+          return next;
+        });
+      }
+    }
+
+    for (const sourceParent of uniqueSourceParents) {
+      if (sourceParent === currentPath) continue;
+      const cached = childrenCacheRef.current.get(sourceParent);
+      if (!cached) continue;
+      childrenCacheRef.current.set(
+        sourceParent,
+        cached.filter((entry) => !movedNameSet.has(entry.name)),
+      );
+      sortedChildrenCacheRef.current.delete(sourceParent);
+    }
+
+    if (targetPath !== currentPath) {
+      const targetCache = childrenCacheRef.current.get(targetPath);
+      if (targetCache) {
+        const next = [...targetCache];
+        for (const entry of movedEntries) {
+          if (!next.some((candidate) => candidate.name === entry.name)) {
+            next.push(entry);
+          }
+        }
+        childrenCacheRef.current.set(targetPath, next);
+        sortedChildrenCacheRef.current.delete(targetPath);
+      }
+    }
+  }, [pane.connection?.currentPath]);
+
+  const executeMoveAction = useCallback(async (sourcePaths: string[], targetPath: string) => {
+    try {
+      await onMoveEntriesToPathRef.current(sourcePaths, targetPath);
+      const sourceParents = sourcePaths.map((p) => getParentPath(p));
+      const movedEntries = sourcePaths
+        .map((p) => entryByPathRef.current.get(p))
+        .filter((e): e is SftpFileEntry => Boolean(e));
+      applyLocalMoveMutation(sourceParents, targetPath, movedEntries);
+      const syncTargets = Array.from(new Set(
+        [targetPath, ...sourceParents].filter((p) => p && expandedPathsRef.current.has(p)),
+      ));
+      if (syncTargets.length > 0) void reloadExpandedPaths(syncTargets);
+    } catch {
+      throw new Error('Move failed');
+    }
+  }, [applyLocalMoveMutation, reloadExpandedPaths]);
+
+  const fetchMoveToSuggestions = useCallback((inputPath: string) => {
+    if (moveToSuggestionsTimerRef.current) clearTimeout(moveToSuggestionsTimerRef.current);
+    if (!inputPath.trim()) {
+      setMoveToSuggestions([]);
+      return;
+    }
+    const parentDir = inputPath.endsWith('/') || inputPath.endsWith('\\') ? inputPath : getParentPath(inputPath);
+    const prefix = inputPath.endsWith('/') || inputPath.endsWith('\\') ? '' : inputPath.split(/[/\\]/).pop()?.toLowerCase() ?? '';
+    moveToSuggestionsTimerRef.current = setTimeout(async () => {
+      try {
+        const entries = await onLoadChildrenRef.current(parentDir);
+        const dirs = entries
+          .filter((e) => isNavigableDirectory(e) && e.name !== '..')
+          .map((e) => joinPath(parentDir, e.name))
+          .filter((p) => !prefix || p.split(/[/\\]/).pop()!.toLowerCase().startsWith(prefix));
+        setMoveToSuggestions(dirs.slice(0, 8));
+      } catch {
+        setMoveToSuggestions([]);
+      }
+    }, 200);
+  }, []);
+
+  const handleMoveToSubmit = useCallback(async () => {
+    const target = moveToPath.trim();
+    if (!target || isMoving) return;
+    setIsMoving(true);
+    setMoveToError(null);
+    try {
+      // Validate the target directory exists by listing it
+      await onLoadChildrenRef.current(target);
+      await executeMoveAction(moveTargetPaths, target);
+      setShowMoveToDialog(false);
+    } catch {
+      setMoveToError(tRef.current('sftp.moveTo.pathNotFound'));
+    } finally {
+      setIsMoving(false);
+    }
+  }, [moveToPath, isMoving, executeMoveAction, moveTargetPaths]);
+
+  const getSamePaneDragPaths = useCallback((): string[] | null => {
+    const dragged = draggedFilesRef.current;
+    if (!dragged || dragged.length === 0) return null;
+    if (dragged[0]?.side !== sideRef.current) return null;
+
+    const currentConnectionId = pane.connection?.id;
+    const paths = dragged
+      .filter((file) => file.sourceConnectionId === currentConnectionId && file.sourcePath)
+      .map((file) => joinPath(file.sourcePath!, file.name));
+
+    return paths.length > 0 ? paths : null;
+  }, [pane.connection?.id]);
 
   // ── External file drag-over/drop handlers for tree directory nodes ──
   const handleNodeDragOver = useCallback((entryPath: string, e: React.DragEvent) => {
     const entry = entryByPathRef.current.get(entryPath);
     if (!entry) return;
     const isDir = isNavigableDirectory(entry);
+    const samePaneDragPaths = getSamePaneDragPaths();
+    if (samePaneDragPaths && isDir && entry.name !== '..') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverNodePath(entryPath);
+      return;
+    }
     const isInternalDrag = draggedFilesRef.current && draggedFilesRef.current[0]?.side !== sideRef.current;
     if (isInternalDrag && isDir && entry.name !== '..') {
       e.preventDefault();
@@ -801,12 +966,39 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       e.dataTransfer.dropEffect = 'copy';
       setDragOverNodePath(entryPath);
     }
-  }, []);
+  }, [getSamePaneDragPaths]);
 
   const handleNodeDrop = useCallback((entryPath: string, e: React.DragEvent) => {
     const entry = entryByPathRef.current.get(entryPath);
     if (!entry) return;
     const isDir = isNavigableDirectory(entry);
+    const samePaneDragPaths = getSamePaneDragPaths();
+    if (samePaneDragPaths && isDir && entry.name !== '..') {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverNodePath(null);
+      const movedEntries = samePaneDragPaths
+        .map((path) => entryByPathRef.current.get(path))
+        .filter((value): value is SftpFileEntry => Boolean(value));
+      const sourceParents = samePaneDragPaths.map((path) => getParentPath(path));
+      void (async () => {
+        try {
+          await onMoveEntriesToPathRef.current(samePaneDragPaths, entryPath);
+          applyLocalMoveMutation(sourceParents, entryPath, movedEntries);
+          const syncTargets = Array.from(
+            new Set(
+              [entryPath, ...sourceParents].filter((path) => path && expandedPathsRef.current.has(path)),
+            ),
+          );
+          if (syncTargets.length > 0) {
+            void reloadExpandedPaths(syncTargets);
+          }
+        } catch {
+          // Leave the tree untouched when the move fails.
+        }
+      })();
+      return;
+    }
     const hasFiles = e.dataTransfer.types.includes('Files');
     const isInternalDrag = draggedFilesRef.current && draggedFilesRef.current[0]?.side !== sideRef.current;
     if (isInternalDrag && isDir && entry.name !== '..') {
@@ -826,7 +1018,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         void onUploadExternalFilesRef.current(e.dataTransfer, entryPath);
       }
     }
-  }, []);
+  }, [applyLocalMoveMutation, getSamePaneDragPaths, reloadExpandedPaths]);
 
   const handleNodeDragLeave = useCallback(() => {
     setDragOverNodePath(null);
@@ -980,6 +1172,11 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
             ? <><Folder size={14} className="mr-2" />{tRef.current('sftp.context.open')}</>
             : <><ExternalLink size={14} className="mr-2" />{tRef.current('sftp.context.open')}</>}
         </ContextMenuItem>
+        {isDir && (
+          <ContextMenuItem onClick={() => onNavigateToRef.current(entryPath)}>
+            <ArrowRight size={14} className="mr-2" />{tRef.current('sftp.context.navigateTo')}
+          </ContextMenuItem>
+        )}
         {!isDir && onOpenFileWithRef.current && (
           <ContextMenuItem onClick={() => onOpenFileWithRef.current?.(entry, entryPath)}>
             <ExternalLink size={14} className="mr-2" />{tRef.current('sftp.context.openWith')}
@@ -1003,6 +1200,26 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           <ClipboardCopy size={14} className="mr-2" />{tRef.current('sftp.context.copyPath')}
         </ContextMenuItem>
         <ContextMenuSeparator />
+        {getParentPath(entryPath) !== (pane.connection?.currentPath ?? '') && (
+          <ContextMenuItem onClick={() => {
+            const paths = getActionPaths(entryPath);
+            const parentOfParent = getParentPath(getParentPath(entryPath));
+            void executeMoveAction(paths, parentOfParent);
+          }}>
+            <ArrowUp size={14} className="mr-2" />{tRef.current('sftp.context.moveToParent')}
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem onClick={() => {
+          setMoveTargetPaths(getActionPaths(entryPath));
+          setMoveToPath('');
+          setMoveToError(null);
+          setMoveToSuggestions([]);
+          setMoveToSuggestionIndex(-1);
+          setIsMoving(false);
+          setShowMoveToDialog(true);
+        }}>
+          <FolderInput size={14} className="mr-2" />{tRef.current('sftp.context.moveTo')}
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => openRenameDialogRef.current(entryPath)}>
           <Pencil size={14} className="mr-2" />{tRef.current('common.rename')}
         </ContextMenuItem>
@@ -1033,11 +1250,14 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     contextTarget,
     pane.connection?.isLocal,
     pane.connection?.id,
+    pane.connection?.currentPath,
     toggleExpand,
     stableOnOpenEntry,
     stableOnRefresh,
     getActionPaths,
     toTransferSources,
+    applyLocalMoveMutation,
+    reloadExpandedPaths,
   ]);
 
   return (
@@ -1047,12 +1267,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         style={{ display: 'grid', gridTemplateColumns: columnTemplate }}
       >
         <div
-          className="flex items-center gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0"
+          className="flex items-center gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0 overflow-hidden"
           onClick={() => handleSort('name')}
         >
-          <span>{t('sftp.columns.name')}</span>
+          <span className="truncate whitespace-nowrap">{t('sftp.columns.name')}</span>
           {sortField === 'name' && (
-            <span className="text-primary">
+            <span className="shrink-0 text-primary">
               {sortOrder === 'asc' ? '↑' : '↓'}
             </span>
           )}
@@ -1062,12 +1282,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           />
         </div>
         <div
-          className="flex items-center gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0"
+          className="flex items-center gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0 overflow-hidden"
           onClick={() => handleSort('modified')}
         >
-          <span>{t('sftp.columns.modified')}</span>
+          <span className="truncate whitespace-nowrap">{t('sftp.columns.modified')}</span>
           {sortField === 'modified' && (
-            <span className="text-primary">
+            <span className="shrink-0 text-primary">
               {sortOrder === 'asc' ? '↑' : '↓'}
             </span>
           )}
@@ -1077,30 +1297,30 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           />
         </div>
         <div
-          className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0"
+          className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0 overflow-hidden"
           onClick={() => handleSort('size')}
         >
           {sortField === 'size' && (
-            <span className="text-primary">
+            <span className="shrink-0 text-primary">
               {sortOrder === 'asc' ? '↑' : '↓'}
             </span>
           )}
-          <span>{t('sftp.columns.size')}</span>
+          <span className="truncate whitespace-nowrap">{t('sftp.columns.size')}</span>
           <div
             className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors"
             onMouseDown={(e) => handleResizeStart('size', e)}
           />
         </div>
         <div
-          className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground min-w-0"
+          className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground min-w-0 overflow-hidden"
           onClick={() => handleSort('type')}
         >
           {sortField === 'type' && (
-            <span className="text-primary">
+            <span className="shrink-0 text-primary">
               {sortOrder === 'asc' ? '↑' : '↓'}
             </span>
           )}
-          <span>{t('sftp.columns.kind')}</span>
+          <span className="truncate whitespace-nowrap">{t('sftp.columns.kind')}</span>
         </div>
       </div>
       <ContextMenu>
@@ -1113,12 +1333,23 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
             onKeyDown={handleTreeContainerKeyDown}
             onMouseDown={focusTreeContainer}
           >
-            <div
-              className={visibleRange.virtualized ? 'relative' : undefined}
-              style={visibleRange.virtualized ? { height: totalHeight } : undefined}
-            >
-              {treeRows}
-            </div>
+            {pane.error && !pane.reconnecting && pane.files.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
+                <AlertCircle size={28} className="text-destructive/70" />
+                <span className="max-w-xs text-xs leading-relaxed">{t(pane.error)}</span>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={stableOnRefresh}>
+                  <RefreshCw size={14} className="mr-2" />
+                  {t('sftp.retry')}
+                </Button>
+              </div>
+            ) : (
+              <div
+                className={visibleRange.virtualized ? 'relative' : undefined}
+                style={visibleRange.virtualized ? { height: totalHeight } : undefined}
+              >
+                {treeRows}
+              </div>
+            )}
           </div>
         </ContextMenuTrigger>
         {contextMenuContent}
@@ -1150,6 +1381,105 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           </div>
         </div>
       )}
+
+      <Dialog open={showMoveToDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowMoveToDialog(false);
+          setMoveToSuggestions([]);
+          setMoveToSuggestionIndex(-1);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('sftp.moveTo.title')}</DialogTitle>
+          </DialogHeader>
+          <div className="relative">
+            <Input
+              ref={moveToInputRef}
+              value={moveToPath}
+              onChange={(e) => {
+                const val = e.target.value;
+                setMoveToPath(val);
+                setMoveToError(null);
+                setMoveToSuggestionIndex(-1);
+                fetchMoveToSuggestions(val);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' && moveToSuggestions.length > 0) {
+                  e.preventDefault();
+                  setMoveToSuggestionIndex((i) => i < moveToSuggestions.length - 1 ? i + 1 : 0);
+                } else if (e.key === 'ArrowUp' && moveToSuggestions.length > 0) {
+                  e.preventDefault();
+                  setMoveToSuggestionIndex((i) => i > 0 ? i - 1 : moveToSuggestions.length - 1);
+                } else if (e.key === 'Tab' && moveToSuggestionIndex >= 0) {
+                  e.preventDefault();
+                  const selected = moveToSuggestions[moveToSuggestionIndex];
+                  setMoveToPath(selected);
+                  setMoveToError(null);
+                  fetchMoveToSuggestions(selected);
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (moveToSuggestionIndex >= 0 && moveToSuggestions[moveToSuggestionIndex]) {
+                    const selected = moveToSuggestions[moveToSuggestionIndex];
+                    setMoveToPath(selected);
+                    setMoveToSuggestionIndex(-1);
+                    setMoveToSuggestions([]);
+                    setMoveToError(null);
+                  } else {
+                    void handleMoveToSubmit();
+                  }
+                } else if (e.key === 'Escape') {
+                  if (moveToSuggestions.length > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMoveToSuggestions([]);
+                    setMoveToSuggestionIndex(-1);
+                  }
+                  // When no suggestions, let the Dialog handle ESC to close itself
+                }
+              }}
+              placeholder={t('sftp.moveTo.placeholder')}
+              autoFocus
+              className={moveToError ? 'border-destructive' : undefined}
+            />
+            {moveToSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border bg-popover shadow-md max-h-48 overflow-y-auto">
+                {moveToSuggestions.map((suggestion, i) => (
+                  <div
+                    key={suggestion}
+                    className={cn(
+                      'px-3 py-1.5 text-sm cursor-pointer truncate',
+                      i === moveToSuggestionIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
+                    )}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setMoveToPath(suggestion);
+                      setMoveToSuggestions([]);
+                      setMoveToSuggestionIndex(-1);
+                      setMoveToError(null);
+                    }}
+                  >
+                    <Folder size={12} className="inline mr-2 text-yellow-500" />
+                    {suggestion}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {moveToError && (
+            <p className="text-xs text-destructive">{moveToError}</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShowMoveToDialog(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button size="sm" disabled={!moveToPath.trim() || isMoving} onClick={() => void handleMoveToSubmit()}>
+              {isMoving && <Loader2 size={14} className="mr-2 animate-spin" />}
+              {t('sftp.moveTo.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });

@@ -108,6 +108,17 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
 }) => {
   const outerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [displayPath, setDisplayPath] = useState(pane.connection?.currentPath ?? "");
+  const prevDisplayConnectionIdRef = useRef(pane.connection?.id);
+
+  useEffect(() => {
+    const connectionChanged = pane.connection?.id !== prevDisplayConnectionIdRef.current;
+    prevDisplayConnectionIdRef.current = pane.connection?.id;
+    // Sync immediately on connection change; otherwise defer until loading completes
+    if (connectionChanged || !pane.loading) {
+      setDisplayPath(pane.connection?.currentPath ?? "");
+    }
+  }, [pane.connection?.currentPath, pane.connection?.id, pane.loading]);
 
   // Observe the overall toolbar width to decide whether to collapse action buttons
   useEffect(() => {
@@ -470,7 +481,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             title={t("sftp.path.doubleClickToEdit")}
           >
             <SftpBreadcrumb
-              path={pane.connection.currentPath}
+              path={displayPath}
               onNavigate={onNavigateTo}
               onHome={() =>
                 pane.connection?.homeDir &&

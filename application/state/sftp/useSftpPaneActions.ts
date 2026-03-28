@@ -3,7 +3,7 @@ import type { Host, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
-import { getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
+import { getFileName, getParentPath, isNavigableDirectory, isWindowsRoot, joinPath } from "./utils";
 import { buildCacheKey, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 
 /** Shared empty set for navigation resets — never mutate this. */
@@ -55,6 +55,7 @@ interface UseSftpPaneActionsResult {
   ) => Promise<void>;
   renameFile: (side: "left" | "right", oldName: string, newName: string) => Promise<void>;
   renameFileAtPath: (side: "left" | "right", oldPath: string, newName: string) => Promise<void>;
+  moveEntriesToPath: (side: "left" | "right", sourcePaths: string[], targetPath: string) => Promise<void>;
   changePermissions: (side: "left" | "right", filePath: string, mode: string) => Promise<void>;
 }
 
@@ -79,6 +80,36 @@ export const useSftpPaneActions = ({
   isSessionError,
   dirCacheTtlMs,
 }: UseSftpPaneActionsParams): UseSftpPaneActionsResult => {
+  const normalizePathForCompare = useCallback((path: string): string => {
+    if (isWindowsRoot(path)) return path.replace(/\//g, "\\").toLowerCase();
+    if (/^[A-Za-z]:/.test(path)) {
+      return path.replace(/\//g, "\\").replace(/[\\]+$/, "").toLowerCase();
+    }
+    if (path === "/") return "/";
+    return path.replace(/\/+$/, "");
+  }, []);
+
+  const isSamePath = useCallback((a: string, b: string): boolean => {
+    return normalizePathForCompare(a) === normalizePathForCompare(b);
+  }, [normalizePathForCompare]);
+
+  const isDescendantPath = useCallback((candidate: string, parent: string): boolean => {
+    const normalizedCandidate = normalizePathForCompare(candidate);
+    const normalizedParent = normalizePathForCompare(parent);
+    if (normalizedCandidate === normalizedParent) return false;
+
+    if (/^[a-z]:\\$/.test(normalizedParent)) {
+      return normalizedCandidate.startsWith(normalizedParent);
+    }
+
+    if (normalizedParent === "/") {
+      return normalizedCandidate.startsWith("/");
+    }
+
+    const separator = normalizedParent.includes("\\") ? "\\" : "/";
+    return normalizedCandidate.startsWith(`${normalizedParent}${separator}`);
+  }, [normalizePathForCompare]);
+
   // Build the shared cache key for the active pane. Prefer the last connected
   // host (which includes session-time overrides), fall back to the vault hosts list.
   const hostsRef = useRef(hosts);
@@ -346,6 +377,25 @@ export const useSftpPaneActions = ({
         ? sideTabs.tabs.find((t) => t.id === options.tabId) ?? null
         : getActivePane(side);
       if (pane?.connection) {
+        const hasRemoteSession = pane.connection.isLocal || sftpSessionsRef.current.has(pane.connection.id);
+        if (!hasRemoteSession) {
+          if (options?.tabId) return;
+          const lastHost = lastConnectedHostRef.current[side];
+          if (lastHost && !reconnectingRef.current[side]) {
+            reconnectingRef.current[side] = true;
+            updateActiveTab(side, (prev) => ({
+              ...prev,
+              reconnecting: true,
+              error: "sftp.reconnecting.title",
+            }));
+          } else if (!lastHost) {
+            updateActiveTab(side, (prev) => ({
+              ...prev,
+              error: "sftp.error.connectionLostManual",
+            }));
+          }
+          return;
+        }
         await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId });
       } else if (!pane?.connection && pane?.error) {
         // For background tabs, don't trigger reconnection (it operates on
@@ -368,7 +418,7 @@ export const useSftpPaneActions = ({
         }
       }
     },
-    [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, reconnectingRef],
+    [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, reconnectingRef, sftpSessionsRef],
   );
 
   const navigateUp = useCallback(
@@ -749,6 +799,94 @@ export const useSftpPaneActions = ({
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
   );
 
+  const moveEntriesToPath = useCallback(
+    async (side: "left" | "right", sourcePaths: string[], targetPath: string) => {
+      const pane = getActivePane(side);
+      if (!pane?.connection || sourcePaths.length === 0) return;
+
+      const uniqueSources = Array.from(new Set(sourcePaths.filter(Boolean)));
+      const filteredSources = uniqueSources
+        .sort((a, b) => a.length - b.length)
+        .filter((path, index, arr) =>
+          !arr.slice(0, index).some((otherPath) => isSamePath(path, otherPath) || isDescendantPath(path, otherPath)),
+        );
+
+      const movableSources = filteredSources.filter((sourcePath) => {
+        if (isSamePath(sourcePath, targetPath)) return false;
+        if (isDescendantPath(targetPath, sourcePath)) return false;
+        const destinationPath = joinPath(targetPath, getFileName(sourcePath));
+        return !isSamePath(destinationPath, sourcePath);
+      });
+
+      if (movableSources.length === 0) return;
+
+      const sourceParentNames = new Map<string, string[]>();
+      for (const sourcePath of movableSources) {
+        const parentPath = getParentPath(sourcePath);
+        const names = sourceParentNames.get(parentPath) ?? [];
+        names.push(getFileName(sourcePath));
+        sourceParentNames.set(parentPath, names);
+      }
+
+      try {
+        if (pane.connection.isLocal) {
+          const renameLocalFile = netcattyBridge.get()?.renameLocalFile;
+          if (!renameLocalFile) {
+            throw new Error("Local rename unavailable");
+          }
+          for (const sourcePath of movableSources) {
+            const destinationPath = joinPath(targetPath, getFileName(sourcePath));
+            await renameLocalFile(sourcePath, destinationPath);
+          }
+        } else {
+          const sftpId = sftpSessionsRef.current.get(pane.connection.id);
+          if (!sftpId) {
+            handleSessionError(side, new Error("SFTP session not found"));
+            return;
+          }
+          const renameSftp = netcattyBridge.get()?.renameSftp;
+          if (!renameSftp) {
+            throw new Error("SFTP rename unavailable");
+          }
+          for (const sourcePath of movableSources) {
+            const destinationPath = joinPath(targetPath, getFileName(sourcePath));
+            await renameSftp(sftpId, sourcePath, destinationPath, pane.filenameEncoding);
+          }
+        }
+        clearCacheForConnection(pane.connection.id);
+        updateActiveTab(side, (prev) => {
+          if (!prev.connection || prev.connection.id !== pane.connection?.id) {
+            return prev;
+          }
+
+          const namesInCurrentPath = sourceParentNames.get(prev.connection.currentPath);
+          if (!namesInCurrentPath || namesInCurrentPath.length === 0) {
+            return prev;
+          }
+
+          const removeSet = new Set(namesInCurrentPath);
+          const nextSelection = new Set(prev.selectedFiles);
+          for (const name of removeSet) {
+            nextSelection.delete(name);
+          }
+
+          return {
+            ...prev,
+            files: prev.files.filter((file) => !removeSet.has(file.name)),
+            selectedFiles: nextSelection,
+          };
+        });
+      } catch (err) {
+        if (isSessionError(err)) {
+          handleSessionError(side, err as Error);
+          return;
+        }
+        throw err;
+      }
+    },
+    [clearCacheForConnection, getActivePane, handleSessionError, isDescendantPath, isSamePath, isSessionError, sftpSessionsRef, updateActiveTab],
+  );
+
   const changePermissions = useCallback(
     async (
       side: "left" | "right",
@@ -800,6 +938,7 @@ export const useSftpPaneActions = ({
     deleteFilesAtPath,
     renameFile,
     renameFileAtPath,
+    moveEntriesToPath,
     changePermissions,
   };
 };

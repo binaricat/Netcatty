@@ -269,6 +269,10 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       requestTreeReload([affectedPath]);
     }
   }, [callbacks, pane.connection?.currentPath, requestTreeReload]);
+
+  const handleMoveEntriesToPath = useCallback(async (sourcePaths: string[], targetPath: string) => {
+    await callbacks.onMoveEntriesToPath(sourcePaths, targetPath);
+  }, [callbacks]);
   const {
     dragOverEntry,
     isDragOverPane,
@@ -479,7 +483,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             pane={pane}
             side={side}
             onLoadChildren={callbacks.onListDirectory}
+            onMoveEntriesToPath={handleMoveEntriesToPath}
             onNavigateUp={callbacks.onNavigateUp}
+            onNavigateTo={callbacks.onNavigateTo}
             onRefresh={handleRefresh}
             onOpenEntry={callbacks.onOpenEntry}
             onDragStart={onDragStart}
@@ -522,6 +528,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         isDragOverPane={isDragOverPane}
         draggedFiles={draggedFiles}
         onRefresh={handleRefresh}
+        onNavigateTo={callbacks.onNavigateTo}
         setShowNewFolderDialog={setShowNewFolderDialog}
         setShowNewFileDialog={setShowNewFileDialog}
         getNextUntitledName={getNextUntitledName}

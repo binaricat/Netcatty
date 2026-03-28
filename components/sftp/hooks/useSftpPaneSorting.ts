@@ -13,10 +13,10 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>({
-    name: 45,
-    modified: 25,
-    size: 15,
-    type: 15,
+    name: 56,
+    modified: 28,
+    size: 7,
+    type: 9,
   });
 
   const resizingRef = useRef<{
@@ -41,9 +41,16 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     if (!resizingRef.current) return;
     const { field, startX, startWidth } = resizingRef.current;
     const diff = lastClientXRef.current - startX;
+    const limits: Record<keyof ColumnWidths, { min: number; max: number }> = {
+      name: { min: 36, max: 78 },
+      modified: { min: 18, max: 42 },
+      size: { min: 5, max: 16 },
+      type: { min: 6, max: 18 },
+    };
+    const { min, max } = limits[field];
     const newWidth = Math.max(
-      10,
-      Math.min(60, startWidth + diff / 5),
+      min,
+      Math.min(max, startWidth + diff / 8),
     );
     setColumnWidths((prev) => ({
       ...prev,

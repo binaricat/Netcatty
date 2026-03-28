@@ -88,6 +88,8 @@ export const useSftpConnections = ({
 
       if (!activeTabId) return;
 
+      const isReconnectAttempt = reconnectingRef.current[side];
+
       // Notify caller of the tab ID synchronously, before any async work.
       // This allows callers to map metadata (e.g. connection keys) to the tab
       // immediately, avoiding race conditions with deferred effects.
@@ -466,7 +468,11 @@ export const useSftpConnections = ({
                   error: err instanceof Error ? err.message : "Connection failed",
                 }
               : null,
-            error: err instanceof Error ? err.message : "Connection failed",
+            files: isReconnectAttempt ? [] : prev.files,
+            selectedFiles: isReconnectAttempt ? new Set<string>() : prev.selectedFiles,
+            error: isReconnectAttempt
+              ? "sftp.error.reconnectFailed"
+              : (err instanceof Error ? err.message : "Connection failed"),
             loading: false,
             reconnecting: false,
           }));

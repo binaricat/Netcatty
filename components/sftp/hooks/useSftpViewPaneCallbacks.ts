@@ -8,6 +8,7 @@ import { useSftpViewPaneActions } from "./useSftpViewPaneActions";
 import { useSftpViewFileOps } from "./useSftpViewFileOps";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { formatFileSize, formatDate } from '../../../application/state/sftp/utils';
+import { isSessionError } from "../../../application/state/sftp/errors";
 import { filterHiddenFiles } from "../utils";
 
 interface UseSftpViewPaneCallbacksParams {
@@ -92,7 +93,7 @@ export const useSftpViewPaneCallbacks = ({
     getSftpIdForConnectionRef.current = getSftpIdForConnection;
   }, [listLocalFiles, listSftp, getSftpIdForConnection]);
 
-  const makeListDirectory = (getPane: () => SftpPane) =>
+  const makeListDirectory = (side: "left" | "right", getPane: () => SftpPane) =>
     async (path: string) => {
       const pane = getPane();
       if (!pane.connection) return [];
@@ -121,8 +122,22 @@ export const useSftpViewPaneCallbacks = ({
         return normalizeEntries(await listLocalFilesRef.current(path));
       }
       const sftpId = getSftpIdForConnectionRef.current?.(pane.connection.id);
-      if (!sftpId) return [];
-      const rawFiles = await listSftpRef.current?.(sftpId, path, pane.filenameEncoding);
+      if (!sftpId) {
+        const error = new Error("SFTP session not found");
+        sftpRef.current.reportSessionError(side, error);
+        throw error;
+      }
+
+      let rawFiles: RemoteFile[] | undefined;
+      try {
+        rawFiles = await listSftpRef.current?.(sftpId, path, pane.filenameEncoding);
+      } catch (err) {
+        if (isSessionError(err)) {
+          sftpRef.current.reportSessionError(side, err as Error);
+        }
+        throw err;
+      }
+
       if (!rawFiles) return [];
       return normalizeEntries(rawFiles);
     };
@@ -149,6 +164,7 @@ export const useSftpViewPaneCallbacks = ({
       onDeleteFilesAtPath: paneActions.onDeleteFilesAtPathLeft,
       onRenameFile: paneActions.onRenameFileLeft,
       onRenameFileAtPath: paneActions.onRenameFileAtPathLeft,
+      onMoveEntriesToPath: paneActions.onMoveEntriesToPathLeft,
       onCopyToOtherPane: paneActions.onCopyToOtherPaneLeft,
       onReceiveFromOtherPane: paneActions.onReceiveFromOtherPaneLeft,
       onEditPermissions: fileOps.onEditPermissionsLeft,
@@ -157,7 +173,7 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithLeft,
       onDownloadFile: fileOps.onDownloadFileLeft,
       onUploadExternalFiles: fileOps.onUploadExternalFilesLeft,
-      onListDirectory: makeListDirectory(() => sftpRef.current.leftPane),
+      onListDirectory: makeListDirectory("left", () => sftpRef.current.leftPane),
     }),
     [],
   );
@@ -183,6 +199,7 @@ export const useSftpViewPaneCallbacks = ({
       onDeleteFilesAtPath: paneActions.onDeleteFilesAtPathRight,
       onRenameFile: paneActions.onRenameFileRight,
       onRenameFileAtPath: paneActions.onRenameFileAtPathRight,
+      onMoveEntriesToPath: paneActions.onMoveEntriesToPathRight,
       onCopyToOtherPane: paneActions.onCopyToOtherPaneRight,
       onReceiveFromOtherPane: paneActions.onReceiveFromOtherPaneRight,
       onEditPermissions: fileOps.onEditPermissionsRight,
@@ -191,7 +208,7 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithRight,
       onDownloadFile: fileOps.onDownloadFileRight,
       onUploadExternalFiles: fileOps.onUploadExternalFilesRight,
-      onListDirectory: makeListDirectory(() => sftpRef.current.rightPane),
+      onListDirectory: makeListDirectory("right", () => sftpRef.current.rightPane),
     }),
     [],
   );

@@ -38,6 +38,7 @@ export interface SftpPaneCallbacks {
     onDeleteFilesAtPath: (connectionId: string, path: string, fileNames: string[]) => Promise<void>;
     onRenameFile: (oldName: string, newName: string) => Promise<void>;
     onRenameFileAtPath: (oldPath: string, newName: string) => Promise<void>;
+    onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
     onCopyToOtherPane: (files: SftpTransferSource[]) => void;
     onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
     onEditPermissions?: (file: SftpFileEntry, fullPath?: string) => void;

@@ -6,7 +6,7 @@ import { Folder, Link } from 'lucide-react';
 import React, { memo, useCallback } from 'react';
 import { cn } from '../../lib/utils';
 import { SftpFileEntry } from '../../types';
-import { ColumnWidths, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
+import { buildSftpColumnTemplate, ColumnWidths, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
 
 interface SftpFileRowProps {
     entry: SftpFileEntry;
@@ -75,7 +75,7 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                 isSelected ? "bg-primary/15 text-foreground" : "hover:bg-secondary/40",
                 isDragOver && isNavDir && "bg-primary/25 ring-1 ring-primary/50"
             )}
-            style={{ display: 'grid', gridTemplateColumns: `${columnWidths.name}% ${columnWidths.modified}% ${columnWidths.size}% ${columnWidths.type}%` }}
+            style={{ display: 'grid', gridTemplateColumns: buildSftpColumnTemplate(columnWidths) }}
         >
             <div className="flex items-center gap-3 min-w-0">
                 <div className={cn(

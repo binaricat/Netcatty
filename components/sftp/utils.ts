@@ -257,6 +257,15 @@ export interface ColumnWidths {
     type: number;
 }
 
+export const buildSftpColumnTemplate = (columnWidths: ColumnWidths): string => {
+    return [
+        `minmax(140px, ${columnWidths.name}fr)`,
+        `minmax(0, ${columnWidths.modified}fr)`,
+        `minmax(52px, ${columnWidths.size}fr)`,
+        `minmax(64px, ${columnWidths.type}fr)`,
+    ].join(' ');
+};
+
 export const sortSftpEntries = (
     entries: SftpFileEntry[],
     sortField: SortField,

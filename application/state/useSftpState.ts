@@ -190,6 +190,7 @@ export const useSftpState = (
     deleteFilesAtPath,
     renameFile,
     renameFileAtPath,
+    moveEntriesToPath,
     changePermissions,
   } = useSftpPaneActions({
     hosts,
@@ -320,6 +321,7 @@ export const useSftpState = (
     deleteFilesAtPath,
     renameFile,
     renameFileAtPath,
+    moveEntriesToPath,
     changePermissions,
     readTextFile,
     readBinaryFile,
@@ -338,6 +340,7 @@ export const useSftpState = (
     dismissTransfer,
     resolveConflict,
     getSftpIdForConnection,
+    reportSessionError: handleSessionError,
   });
   methodsRef.current = {
     getFilteredFiles,
@@ -370,6 +373,7 @@ export const useSftpState = (
     deleteFilesAtPath,
     renameFile,
     renameFileAtPath,
+    moveEntriesToPath,
     changePermissions,
     readTextFile,
     readBinaryFile,
@@ -388,6 +392,7 @@ export const useSftpState = (
     dismissTransfer,
     resolveConflict,
     getSftpIdForConnection,
+    reportSessionError: handleSessionError,
   };
 
   // Create stable method wrappers that call through methodsRef
@@ -428,6 +433,7 @@ export const useSftpState = (
       methodsRef.current.deleteFilesAtPath(...args),
     renameFile: (...args: Parameters<typeof renameFile>) => methodsRef.current.renameFile(...args),
     renameFileAtPath: (...args: Parameters<typeof renameFileAtPath>) => methodsRef.current.renameFileAtPath(...args),
+    moveEntriesToPath: (...args: Parameters<typeof moveEntriesToPath>) => methodsRef.current.moveEntriesToPath(...args),
     changePermissions: (...args: Parameters<typeof changePermissions>) => methodsRef.current.changePermissions(...args),
     readTextFile: (...args: Parameters<typeof readTextFile>) => methodsRef.current.readTextFile(...args),
     readBinaryFile: (...args: Parameters<typeof readBinaryFile>) => methodsRef.current.readBinaryFile(...args),
@@ -447,6 +453,7 @@ export const useSftpState = (
     dismissTransfer: (...args: Parameters<typeof dismissTransfer>) => methodsRef.current.dismissTransfer(...args),
     resolveConflict: (...args: Parameters<typeof resolveConflict>) => methodsRef.current.resolveConflict(...args),
     getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
+    reportSessionError: (...args: Parameters<typeof handleSessionError>) => methodsRef.current.reportSessionError(...args),
     activeFileWatchCountRef,
   }), [activeFileWatchCountRef]); // activeFileWatchCountRef is a stable ref
 
