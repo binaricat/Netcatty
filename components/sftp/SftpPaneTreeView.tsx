@@ -326,10 +326,15 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   const lastClickedPathRef = useRef<string | null>(null);
   const expandedPathsRef = useRef(expandedPaths);
   expandedPathsRef.current = expandedPaths;
+  const loadingPathsRef = useRef(loadingPaths);
+  loadingPathsRef.current = loadingPaths;
   const selectedPathsRef = useRef(selectedPaths);
   selectedPathsRef.current = selectedPaths;
   const treeGenerationRef = useRef(0);
   const previousRootPathRef = useRef(pane.connection?.currentPath ?? '');
+  const [resolvedRootPath, setResolvedRootPath] = useState(pane.connection?.currentPath ?? '');
+  const currentRootPath = pane.connection?.currentPath ?? '';
+  const visibleRootPath = pane.loading ? resolvedRootPath : currentRootPath;
 
   const onOpenEntryRef = useRef(onOpenEntry);
   onOpenEntryRef.current = onOpenEntry;
@@ -392,6 +397,17 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     sortedChildrenCacheRef.current.delete(rootPath);
   }, [pane.connection?.currentPath, pane.files]);
 
+  useEffect(() => {
+    const currentPath = pane.connection?.currentPath ?? '';
+    if (!currentPath) {
+      setResolvedRootPath('');
+      return;
+    }
+    if (!pane.loading) {
+      setResolvedRootPath(currentPath);
+    }
+  }, [pane.connection?.currentPath, pane.loading]);
+
   const loadChildrenForPath = useCallback(async (entryPath: string) => {
     const generation = treeGenerationRef.current;
     dispatchTreePaths({ type: 'START_LOADING', path: entryPath });
@@ -421,6 +437,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       dispatchTreePaths({ type: 'COLLAPSE', path: entryPath });
       return;
     }
+    // Guard against concurrent loads for the same path
+    if (loadingPathsRef.current.has(entryPath)) return;
     if (!childrenCacheRef.current.has(entryPath)) {
       const loaded = await loadChildrenForPath(entryPath);
       if (!loaded) return;
@@ -592,7 +610,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     const pathMap = new Map<string, SftpFileEntry>();
 
     // Prepend ".." entry for parent navigation when not at root
-    const currentPath = pane.connection?.currentPath ?? '';
+    const currentPath = visibleRootPath;
     const isRootPath = currentPath === '/' || /^[A-Za-z]:[\\/]?$/.test(currentPath);
     if (!isRootPath && currentPath) {
       const files = pane.files ?? [];
@@ -658,7 +676,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     return { nodeDescriptors: descriptors, flatVisibleNodes: flat, entryByPath: pathMap };
   }, [
     pane.files,
-    pane.connection?.currentPath,
+    visibleRootPath,
     pane.showHiddenFiles,
     sortField,
     sortOrder,
@@ -1024,7 +1042,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   ]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col text-sm">
+    <div className="relative flex-1 min-h-0 flex flex-col text-sm">
       <div
         className="text-[11px] uppercase tracking-wide text-muted-foreground px-4 py-2 border-b border-border/40 bg-secondary/10 select-none shrink-0"
         style={{ display: 'grid', gridTemplateColumns: columnTemplate }}
@@ -1106,6 +1124,33 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         </ContextMenuTrigger>
         {contextMenuContent}
       </ContextMenu>
+
+      {pane.loading && !pane.reconnecting && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/40 backdrop-blur-[1px] z-10 pointer-events-none">
+          <Loader2 size={24} className="animate-spin text-muted-foreground" />
+          {pane.connectionLogs.length > 0 && (
+            <div className="w-full max-w-sm mt-2 space-y-0.5 px-4">
+              {pane.connectionLogs.map((log, i) => (
+                <div key={i} className="text-[11px] text-muted-foreground truncate">
+                  {log}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {pane.reconnecting && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-20">
+          <div className="flex flex-col items-center gap-3 p-6 rounded-xl bg-secondary/90 border border-border/60 shadow-lg">
+            <Loader2 size={32} className="animate-spin text-primary" />
+            <div className="text-center">
+              <div className="text-sm font-medium">{t('sftp.reconnecting.title')}</div>
+              <div className="text-xs text-muted-foreground mt-1">{t('sftp.reconnecting.desc')}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

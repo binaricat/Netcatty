@@ -167,6 +167,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             variant="ghost"
             size="icon"
             className={cn("h-6 w-6", viewMode === 'list' && "bg-secondary text-foreground")}
+            aria-pressed={viewMode === 'list'}
             onClick={() => onSetViewMode('list')}
           >
             <List size={14} />
@@ -180,6 +181,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             variant="ghost"
             size="icon"
             className={cn("h-6 w-6", viewMode === 'tree' && "bg-secondary text-foreground")}
+            aria-pressed={viewMode === 'tree'}
             onClick={() => onSetViewMode('tree')}
           >
             <ListTree size={14} />
@@ -314,6 +316,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
           viewMode === 'list' && "text-primary"
         )}
+        role="radio"
+        aria-checked={viewMode === 'list'}
         onClick={() => onSetViewMode('list')}
       >
         <List size={14} className="shrink-0" />
@@ -324,6 +328,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
           viewMode === 'tree' && "text-primary"
         )}
+        role="radio"
+        aria-checked={viewMode === 'tree'}
         onClick={() => onSetViewMode('tree')}
       >
         <ListTree size={14} className="shrink-0" />

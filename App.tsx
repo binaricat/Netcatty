@@ -193,6 +193,7 @@ function App({ settings }: { settings: SettingsState }) {
     sftpShowHiddenFiles,
     sftpUseCompressedUpload,
     sftpAutoOpenSidebar,
+    sftpDefaultViewMode,
     editorWordWrap,
     setEditorWordWrap,
     sessionLogsEnabled,

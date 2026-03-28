@@ -27,6 +27,17 @@ function persist(next: Record<string, ViewMode>) {
     for (const l of listeners) l();
 }
 
+// Sync across windows/tabs via storage events
+if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+        if (e.key !== STORAGE_KEY_SFTP_HOST_VIEW_MODES) return;
+        snapshot = e.newValue
+            ? (JSON.parse(e.newValue) as Record<string, ViewMode>)
+            : {};
+        for (const l of listeners) l();
+    });
+}
+
 /** Get the saved view mode for a specific host, or null if none saved. */
 export function getHostViewMode(hostId: string): ViewMode | null {
     return snapshot[hostId] ?? null;

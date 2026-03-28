@@ -98,6 +98,11 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     hostViewMode ?? sftpDefaultViewMode ?? 'list'
   );
   const [treeReloadRequest, setTreeReloadRequest] = useState<TreeReloadRequest>({ token: 0, full: true });
+  // Lazy-mount: only render the tree component once tree mode has been activated
+  const [treeEverMounted, setTreeEverMounted] = useState(() => (hostViewMode ?? sftpDefaultViewMode ?? 'list') === 'tree');
+  useEffect(() => {
+    if (viewMode === 'tree' && !treeEverMounted) setTreeEverMounted(true);
+  }, [viewMode, treeEverMounted]);
   const filterInputRef = useRef<HTMLInputElement>(null);
 
   const requestTreeReload = useCallback((paths?: string[], full = false) => {
@@ -464,35 +469,38 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onSetViewMode={handleSetViewMode}
       />
 
-      {viewMode === 'tree' ? (
-        <SftpPaneTreeView
-          pane={pane}
-          side={side}
-          onLoadChildren={callbacks.onListDirectory}
-          onNavigateUp={callbacks.onNavigateUp}
-          onRefresh={handleRefresh}
-          onOpenEntry={callbacks.onOpenEntry}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          openRenameDialog={openRenameDialog}
-          openDeleteConfirm={openDeleteConfirm}
-          onCopyToOtherPane={callbacks.onCopyToOtherPane}
-          onOpenFileWith={callbacks.onOpenFileWith}
-          onEditFile={callbacks.onEditFile}
-          onDownloadFile={callbacks.onDownloadFile}
-          onEditPermissions={callbacks.onEditPermissions}
-          draggedFiles={draggedFiles}
-          openNewFolderDialog={openNewFolderDialogAtPath}
-          openNewFileDialog={openNewFileDialogAtPath}
-          onUploadExternalFiles={handleUploadExternalFiles}
-          columnWidths={columnWidths}
-          handleSort={handleSortWithTransition}
-          handleResizeStart={handleResizeStart}
-          sortField={sortField}
-          sortOrder={sortOrder}
-          reloadRequest={treeReloadRequest}
-        />
-      ) : (
+      {treeEverMounted && (
+        <div className={viewMode === 'tree' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+          <SftpPaneTreeView
+            pane={pane}
+            side={side}
+            onLoadChildren={callbacks.onListDirectory}
+            onNavigateUp={callbacks.onNavigateUp}
+            onRefresh={handleRefresh}
+            onOpenEntry={callbacks.onOpenEntry}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            openRenameDialog={openRenameDialog}
+            openDeleteConfirm={openDeleteConfirm}
+            onCopyToOtherPane={callbacks.onCopyToOtherPane}
+            onOpenFileWith={callbacks.onOpenFileWith}
+            onEditFile={callbacks.onEditFile}
+            onDownloadFile={callbacks.onDownloadFile}
+            onEditPermissions={callbacks.onEditPermissions}
+            draggedFiles={draggedFiles}
+            openNewFolderDialog={openNewFolderDialogAtPath}
+            openNewFileDialog={openNewFileDialogAtPath}
+            onUploadExternalFiles={handleUploadExternalFiles}
+            columnWidths={columnWidths}
+            handleSort={handleSortWithTransition}
+            handleResizeStart={handleResizeStart}
+            sortField={sortField}
+            sortOrder={sortOrder}
+            reloadRequest={treeReloadRequest}
+          />
+        </div>
+      )}
+      <div className={viewMode === 'list' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
       <SftpPaneFileList
         t={t}
         pane={pane}
@@ -533,7 +541,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         rowHeight={rowHeight}
         visibleRows={visibleRows}
       />
-      )}
+      </div>
 
       <SftpPaneDialogs
         t={t}
