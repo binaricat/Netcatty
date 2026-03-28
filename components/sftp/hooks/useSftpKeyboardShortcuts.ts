@@ -243,17 +243,18 @@ export const useSftpKeyboardShortcuts = ({
       if (!pane || !pane.connection) return;
       const treeSelectionState = sftpTreeSelectionStore.getPaneState(pane.id);
       const treeSelection = sftpTreeSelectionStore.getSelectedItems(pane.id);
+      const treeActionSelection = treeSelection.filter((entry) => !entry.isParentNavigation);
 
       switch (action) {
         case "sftpCopy": {
-          if (treeSelection.length > 0) {
-            const parentPaths = new Set(treeSelection.map((entry) => getParentPath(entry.path)));
+          if (treeActionSelection.length > 0) {
+            const parentPaths = new Set(treeActionSelection.map((entry) => getParentPath(entry.path)));
             if (parentPaths.size !== 1) {
               toast.info("Tree selection across multiple folders can't be copied with shortcuts yet.", "SFTP");
               return;
             }
 
-            const clipboardFiles: SftpClipboardFile[] = treeSelection.map((entry) => ({
+            const clipboardFiles: SftpClipboardFile[] = treeActionSelection.map((entry) => ({
               name: entry.name,
               isDirectory: entry.isDirectory,
             }));
@@ -292,14 +293,14 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpCut": {
-          if (treeSelection.length > 0) {
-            const parentPaths = new Set(treeSelection.map((entry) => getParentPath(entry.path)));
+          if (treeActionSelection.length > 0) {
+            const parentPaths = new Set(treeActionSelection.map((entry) => getParentPath(entry.path)));
             if (parentPaths.size !== 1) {
               toast.info("Tree selection across multiple folders can't be cut with shortcuts yet.", "SFTP");
               return;
             }
 
-            const clipboardFiles: SftpClipboardFile[] = treeSelection.map((entry) => ({
+            const clipboardFiles: SftpClipboardFile[] = treeActionSelection.map((entry) => ({
               name: entry.name,
               isDirectory: entry.isDirectory,
             }));
@@ -456,8 +457,8 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpRename": {
-          if (treeSelection.length === 1) {
-            sftpDialogActionStore.trigger("rename", [treeSelection[0].path]);
+          if (treeActionSelection.length === 1) {
+            sftpDialogActionStore.trigger("rename", [treeActionSelection[0].path]);
             break;
           }
 
@@ -469,8 +470,8 @@ export const useSftpKeyboardShortcuts = ({
         }
 
         case "sftpDelete": {
-          if (treeSelection.length > 0) {
-            sftpDialogActionStore.trigger("delete", treeSelection.map((entry) => entry.path));
+          if (treeActionSelection.length > 0) {
+            sftpDialogActionStore.trigger("delete", treeActionSelection.map((entry) => entry.path));
             break;
           }
 

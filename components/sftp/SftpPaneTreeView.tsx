@@ -112,14 +112,11 @@ const TreeNode = React.memo<TreeNodeProps>(({
     <div
       className={cn(
         'grid items-center gap-x-1 px-2 cursor-pointer select-none hover:bg-accent/50 text-sm',
-        !isParentEntry && isSelected && 'bg-accent text-accent-foreground',
+        isSelected && 'bg-accent text-accent-foreground',
         isDragOver && 'ring-2 ring-primary/50 ring-inset bg-primary/10',
       )}
       style={{ gridTemplateColumns: columnTemplate, height: TREE_ROW_HEIGHT }}
-      onClick={e => {
-        if (isParentEntry) return;
-        onNodeClick(entry, entryPath, e);
-      }}
+      onClick={e => onNodeClick(entry, entryPath, e)}
       onDoubleClick={() => {
         if (isParentEntry) { onOpenEntry(entry, entryPath); return; }
         if (isDir) void onToggleExpand(entry, entryPath);
@@ -486,8 +483,6 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   }, []);
 
   const handleNodeClick = useCallback((entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => {
-    if (entry.name === '..') return;
-
     focusTreeContainer();
 
     const nextSelection: string[] = (() => {
@@ -576,6 +571,11 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const item = selected[0];
       const entry = entryByPathRef.current.get(item.path);
       if (!entry) return;
+
+      if (item.isParentNavigation || entry.name === '..') {
+        openTreeEntry(entry, item.path);
+        return;
+      }
 
       if (item.isDirectory) {
         void toggleExpand(entry, item.path);
@@ -691,6 +691,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           path: entryPath,
           name: entry.name,
           isDirectory: isNavigableDirectory(entry),
+          isParentNavigation: entry.name === '..',
           sourcePath: getParentPath(entryPath),
         })),
     );
