@@ -381,6 +381,8 @@ export const useSftpTransfers = ({
         if (symlinkDepth < MAX_SYMLINK_DEPTH) {
           dirs.push(f);
         } else {
+          // Count as an error so the parent task is marked failed
+          totalErrors++;
           logger.warn(`[SFTP] Skipping symlink directory at max depth: ${joinPath(task.sourcePath, f.name)}`);
         }
       } else {
@@ -388,37 +390,41 @@ export const useSftpTransfers = ({
       }
     }
 
-    // Process subdirectories first
-    for (const dir of dirs) {
-      if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
-        throw new Error("Transfer cancelled");
-      }
+    // Process subdirectories concurrently to preserve cross-directory throughput
+    if (dirs.length > 0) {
+      const subdirResults = await Promise.all(
+        dirs.map(async (dir) => {
+          if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
+            throw new Error("Transfer cancelled");
+          }
 
-      const childTask: TransferTask = {
-        ...task,
-        id: crypto.randomUUID(),
-        fileName: dir.name,
-        originalFileName: dir.name,
-        sourcePath: joinPath(task.sourcePath, dir.name),
-        targetPath: joinPath(task.targetPath, dir.name),
-        isDirectory: true,
-        progressMode: "files",
-        parentTaskId: task.id,
-      };
+          const childTask: TransferTask = {
+            ...task,
+            id: crypto.randomUUID(),
+            fileName: dir.name,
+            originalFileName: dir.name,
+            sourcePath: joinPath(task.sourcePath, dir.name),
+            targetPath: joinPath(task.targetPath, dir.name),
+            isDirectory: true,
+            progressMode: "files",
+            parentTaskId: task.id,
+          };
 
-      const isSymlink = dir.type === "symlink";
-      const subdirErrors = await transferDirectory(
-        childTask,
-        sourceSftpId,
-        targetSftpId,
-        sourceIsLocal,
-        targetIsLocal,
-        sourceEncoding,
-        targetEncoding,
-        rootTaskId,
-        isSymlink ? symlinkDepth + 1 : symlinkDepth,
+          const isSymlink = dir.type === "symlink";
+          return transferDirectory(
+            childTask,
+            sourceSftpId,
+            targetSftpId,
+            sourceIsLocal,
+            targetIsLocal,
+            sourceEncoding,
+            targetEncoding,
+            rootTaskId,
+            isSymlink ? symlinkDepth + 1 : symlinkDepth,
+          );
+        }),
       );
-      totalErrors += subdirErrors;
+      totalErrors += subdirResults.reduce((sum, n) => sum + n, 0);
     }
 
     // Transfer files in parallel with concurrency limit
