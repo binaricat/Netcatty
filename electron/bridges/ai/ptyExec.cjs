@@ -69,28 +69,24 @@ function escapeCmdForNestedShell(text) {
 function buildWrappedCommand(command, shellKind, marker) {
   switch (shellKind) {
     case "powershell": {
-      // __NCMCP_ prefix ensures the echo line is buffered/filtered even if
-      // the PTY delivers it in small chunks (the marker must appear early).
       const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
       const psEscaped = escapePowerShellSingleQuoted(command);
       return (
-        `$${marker}=0; $${marker}_cmd='${psEscaped}'; Write-Host '> ${psEscaped}'; & { Write-Output '${marker}_S'; ${psPager}$LASTEXITCODE=$null; try { Invoke-Expression $${marker}_cmd; $${marker}_rc = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 } } catch { $${marker}_rc = 1 }; Write-Output "${marker}_E:$${marker}_rc" }\r\n`
+        `$${marker}=0; $${marker}_cmd='${psEscaped}'; & { Write-Output '${marker}_S'; ${psPager}$LASTEXITCODE=$null; try { Invoke-Expression $${marker}_cmd; $${marker}_rc = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 } } catch { $${marker}_rc = 1 }; Write-Output "${marker}_E:$${marker}_rc" }\r\n`
       );
     }
 
     case "cmd": {
       const cmdEscaped = escapeCmdForNestedShell(command);
       return (
-        `set "${marker}=0" & set "${marker}_CMD=${cmdEscaped}" & call <nul set /p "=^> %%${marker}_CMD%%" & echo( & (echo ${marker}_S & set "PAGER=cat" & set "SYSTEMD_PAGER=" & set "GIT_PAGER=cat" & set "LESS=" & call cmd /d /s /c "%%${marker}_CMD%%" & call echo ${marker}_E:^%errorlevel^%)\r\n`
+        `set "${marker}=0" & set "${marker}_CMD=${cmdEscaped}" & (echo ${marker}_S & set "PAGER=cat" & set "SYSTEMD_PAGER=" & set "GIT_PAGER=cat" & set "LESS=" & call cmd /d /s /c "%%${marker}_CMD%%" & call echo ${marker}_E:^%errorlevel^%)\r\n`
       );
     }
 
     case "fish":
-      // set __NCMCP_... at the start ensures early marker presence in echo.
       return (
         `set ${marker} 0; function __ncmcp_int --on-signal INT; printf '%s\\n' '${marker}_E:130'; functions -e __ncmcp_int; end; ` +
-        // Clear the current terminal row before the user-visible echo.
-        `set -l ${marker}_cmd '${escapeFishSingleQuoted(command)}'; printf '\\r\\033[2K> %s\\n' '${escapeFishSingleQuoted(command)}'; ` +
+        `set -l ${marker}_cmd '${escapeFishSingleQuoted(command)}'; ` +
         `begin; set -gx PAGER cat; set -gx SYSTEMD_PAGER ''; set -gx GIT_PAGER cat; set -gx LESS ''; ` +
         `printf '%s\\n' '${marker}_S'; eval -- \$${marker}_cmd; set __NCMCP_rc $status; ` +
         `functions -e __ncmcp_int; printf '%s\\n' '${marker}_E:'\$__NCMCP_rc; end\n`
@@ -98,9 +94,9 @@ function buildWrappedCommand(command, shellKind, marker) {
 
     case "posix":
     default: {
-      // Single-line compound command with early marker & visible command echo.
+      // Single-line compound command with early marker.
       //
-      // Layout: __NCMCP_xxx=0; printf echo; { ... MARKER_S; eval command; MARKER_E; }
+      // Layout: __NCMCP_xxx=0; { ... MARKER_S; eval command; MARKER_E; }
       //
       // Key design decisions:
       //
@@ -111,24 +107,42 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    long echo line might not contain the marker and would leak
       //    through to the terminal as garbage.
       //
-      // 2) printf clears the current row and outputs "> command\n"
-      //    (no marker) → visible to user without prompt residue.
-      //
-      // 3) The user command is executed via eval on a quoted string. This
+      // 2) The user command is executed via eval on a quoted string. This
       //    keeps shell syntax errors inside the eval call so the wrapper
       //    can still emit the end marker and return a non-zero exit code.
       //
-      // 4) Single-line { ... } is parsed fully before execution, so SIGINT
+      // 3) Single-line { ... } is parsed fully before execution, so SIGINT
       //    cannot cause bash to flush the end marker from the input buffer.
       //    trap ':' INT lets child processes receive SIGINT normally while
       //    preventing the shell from aborting the compound command.
       const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
       const escaped = escapePosixSingleQuoted(command);
       return (
-        `${marker}=0; ${marker}_cmd='${escaped}'; printf '\\r\\033[2K> %s\\n' '${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
+        `${marker}=0; ${marker}_cmd='${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
       );
     }
   }
+}
+
+function findEndMarker(outputText, marker) {
+  const endPattern = marker + "_E:";
+  let searchFrom = 0;
+  while (searchFrom < outputText.length) {
+    const endIdx = outputText.indexOf(endPattern, searchFrom);
+    if (endIdx === -1) return null;
+
+    // Accept if at start of output, or preceded by \n or \r (line boundary)
+    if (endIdx === 0 || outputText[endIdx - 1] === "\n" || outputText[endIdx - 1] === "\r") {
+      const afterEnd = outputText.slice(endIdx + endPattern.length);
+      const codeMatch = afterEnd.match(/^(\d+)/);
+      const exitCode = codeMatch ? parseInt(codeMatch[1], 10) : null;
+      if (exitCode !== null) {
+        return { endIdx, exitCode };
+      }
+    }
+    searchFrom = endIdx + 1;
+  }
+  return null;
 }
 
 /**
@@ -145,6 +159,8 @@ function buildWrappedCommand(command, shellKind, marker) {
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
+ * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
+ * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
  */
 function execViaPty(ptyStream, command, options) {
   const {
@@ -155,6 +171,8 @@ function execViaPty(ptyStream, command, options) {
     chatSessionId,
     abortSignal,
     expectedPrompt,
+    typedInput = false,
+    echoCommand,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -168,6 +186,7 @@ function execViaPty(ptyStream, command, options) {
   return new Promise((resolve) => {
     let output = "";
     let foundStart = false;
+    let preStartOutput = "";
     let timeoutId = null;
     let promptFallbackTimer = null;
     let finished = false;
@@ -185,6 +204,7 @@ function execViaPty(ptyStream, command, options) {
       const text = data.toString();
 
       if (!foundStart) {
+        preStartOutput += text;
         const combined = pendingStart + text;
         pendingStart = "";
         const startMarker = marker + "_S";
@@ -211,8 +231,26 @@ function execViaPty(ptyStream, command, options) {
           pendingStart = lastNl === -1 ? combined : combined.slice(lastNl + 1);
         }
         if (foundStart) {
+          preStartOutput = "";
           schedulePromptFallback();
           checkEnd();
+          return;
+        }
+
+        // Fallback: if strict start-marker detection missed (e.g. due shell
+        // control sequence prefixes), still complete as soon as we observe a
+        // valid end marker with exit code.
+        const fallbackEnd = findEndMarker(preStartOutput, marker);
+        if (fallbackEnd) {
+          let stdout = preStartOutput.slice(0, fallbackEnd.endIdx);
+          const lastStartIdx = stdout.lastIndexOf(startMarker);
+          if (lastStartIdx !== -1) {
+            const nlAfterStart = stdout.indexOf("\n", lastStartIdx);
+            if (nlAfterStart !== -1) {
+              stdout = stdout.slice(nlAfterStart + 1);
+            }
+          }
+          finish(stdout, fallbackEnd.exitCode);
         }
         return;
       }
@@ -244,24 +282,10 @@ function execViaPty(ptyStream, command, options) {
     function checkEnd() {
       // Look for the end marker at a line boundary (actual printf output),
       // not inside the echo of the printf command argument.
-      const endPattern = marker + "_E:";
-      let searchFrom = 0;
-      while (searchFrom < output.length) {
-        const endIdx = output.indexOf(endPattern, searchFrom);
-        if (endIdx === -1) return;
-
-        // Accept if at start of output, or preceded by \n or \r (line boundary)
-        if (endIdx === 0 || output[endIdx - 1] === '\n' || output[endIdx - 1] === '\r') {
-          const afterEnd = output.slice(endIdx + endPattern.length);
-          const codeMatch = afterEnd.match(/^(\d+)/);
-          const exitCode = codeMatch ? parseInt(codeMatch[1], 10) : null;
-
-          const stdout = output.slice(0, endIdx);
-          finish(stdout, exitCode);
-          return;
-        }
-        searchFrom = endIdx + 1;
-      }
+      const found = findEndMarker(output, marker);
+      if (!found) return;
+      const stdout = output.slice(0, found.endIdx);
+      finish(stdout, found.exitCode);
     }
 
     function finish(stdout, exitCode, error) {
@@ -350,7 +374,15 @@ function execViaPty(ptyStream, command, options) {
       cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
     }
 
-    // Markers are filtered from terminal display by preload.cjs (MCP_MARKER_RE).
+    if (typedInput && typeof echoCommand === "function") {
+      try {
+        echoCommand(command);
+      } catch {
+        // Ignore synthetic echo failures.
+      }
+    }
+
+    // Markers are filtered from terminal display by preload.cjs.
     ptyStream.write(buildWrappedCommand(command, resolvedShellKind, marker));
   });
 }

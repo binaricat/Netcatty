@@ -13,11 +13,13 @@ const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
 const { execViaPty, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
+const { safeSend } = require("./ipcUtils.cjs");
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
+let electronModule = null;
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
@@ -161,9 +163,20 @@ function cancelPtyExecsForSession(chatSessionId) {
 
 function init(deps) {
   sessions = deps.sessions;
+  electronModule = deps.electronModule || null;
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
   }
+}
+
+function echoCommandToSession(session, sessionId, command) {
+  if (!electronModule || !session?.webContentsId || !command) return;
+  const contents = electronModule.webContents?.fromId?.(session.webContentsId);
+  safeSend(contents, "netcatty:data", {
+    sessionId,
+    data: `${command}\r\n`,
+    syntheticEcho: true,
+  });
 }
 
 function setCommandBlocklist(list) {
@@ -581,6 +594,8 @@ function handleExec(params) {
       timeoutMs: commandTimeoutMs,
       shellKind: session.shellKind,
       expectedPrompt: session.lastIdlePrompt || "",
+      typedInput: true,
+      echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
     });
   }
 

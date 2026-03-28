@@ -229,7 +229,7 @@ function init(deps) {
   sessions = deps.sessions;
   sftpClients = deps.sftpClients;
   electronModule = deps.electronModule;
-  mcpServerBridge.init({ sessions, sftpClients });
+  mcpServerBridge.init({ sessions, sftpClients, electronModule });
 
   // Wire up main window getter for MCP approval IPC
   mcpServerBridge.setMainWindowGetter(() => {
@@ -939,6 +939,15 @@ function registerHandlers(ipcMain) {
           shellKind: session.shellKind,
           chatSessionId,
           expectedPrompt: session.lastIdlePrompt || "",
+          typedInput: true,
+          echoCommand: (rawCommand) => {
+            const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
+            safeSend(contents, "netcatty:data", {
+              sessionId,
+              data: `${rawCommand}\r\n`,
+              syntheticEcho: true,
+            });
+          },
         });
       }
 
