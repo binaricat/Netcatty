@@ -10,7 +10,7 @@ import {
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
-import { getParentPath, joinPath } from "./utils";
+import { getParentPath, isNavigableDirectory, joinPath } from "./utils";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
 
@@ -340,8 +340,8 @@ export const useSftpTransfers = ({
     }
 
     const filtered = files.filter((f) => f.name !== "..");
-    const dirs = filtered.filter((f) => f.type === "directory");
-    const regularFiles = filtered.filter((f) => f.type !== "directory");
+    const dirs = filtered.filter((f) => isNavigableDirectory(f));
+    const regularFiles = filtered.filter((f) => !isNavigableDirectory(f));
 
     // Process subdirectories first
     for (const dir of dirs) {

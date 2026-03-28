@@ -21,7 +21,6 @@ interface UseSftpViewFileOpsParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
-  deleteLocalFile?: (path: string) => Promise<unknown>;
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   startStreamTransfer?: (
@@ -110,7 +109,6 @@ export const useSftpViewFileOps = ({
   getOpenerForFileRef,
   setOpenerForExtension,
   t,
-  deleteLocalFile,
   showSaveDialog,
   selectDirectory,
   startStreamTransfer,
@@ -571,7 +569,6 @@ export const useSftpViewFileOps = ({
     [
       sftpRef,
       t,
-      deleteLocalFile,
       showSaveDialog,
       selectDirectory,
       startStreamTransfer,
