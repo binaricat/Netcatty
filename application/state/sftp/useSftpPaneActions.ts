@@ -854,28 +854,38 @@ export const useSftpPaneActions = ({
           }
         }
         clearCacheForConnection(pane.connection.id);
-        updateActiveTab(side, (prev) => {
-          if (!prev.connection || prev.connection.id !== pane.connection?.id) {
-            return prev;
-          }
+        const currentPath = pane.connection.currentPath;
+        const sourceParents = Array.from(sourceParentNames.keys());
+        const currentPathAffected =
+          sourceParents.some((path) => isSamePath(path, currentPath)) ||
+          isSamePath(targetPath, currentPath);
 
-          const namesInCurrentPath = sourceParentNames.get(prev.connection.currentPath);
-          if (!namesInCurrentPath || namesInCurrentPath.length === 0) {
-            return prev;
-          }
+        if (currentPathAffected) {
+          await refresh(side);
+        } else {
+          updateActiveTab(side, (prev) => {
+            if (!prev.connection || prev.connection.id !== pane.connection?.id) {
+              return prev;
+            }
 
-          const removeSet = new Set(namesInCurrentPath);
-          const nextSelection = new Set(prev.selectedFiles);
-          for (const name of removeSet) {
-            nextSelection.delete(name);
-          }
+            const namesInCurrentPath = sourceParentNames.get(prev.connection.currentPath);
+            if (!namesInCurrentPath || namesInCurrentPath.length === 0) {
+              return prev;
+            }
 
-          return {
-            ...prev,
-            files: prev.files.filter((file) => !removeSet.has(file.name)),
-            selectedFiles: nextSelection,
-          };
-        });
+            const removeSet = new Set(namesInCurrentPath);
+            const nextSelection = new Set(prev.selectedFiles);
+            for (const name of removeSet) {
+              nextSelection.delete(name);
+            }
+
+            return {
+              ...prev,
+              files: prev.files.filter((file) => !removeSet.has(file.name)),
+              selectedFiles: nextSelection,
+            };
+          });
+        }
       } catch (err) {
         if (isSessionError(err)) {
           handleSessionError(side, err as Error);
@@ -884,7 +894,7 @@ export const useSftpPaneActions = ({
         throw err;
       }
     },
-    [clearCacheForConnection, getActivePane, handleSessionError, isDescendantPath, isSamePath, isSessionError, sftpSessionsRef, updateActiveTab],
+    [clearCacheForConnection, getActivePane, handleSessionError, isDescendantPath, isSamePath, isSessionError, refresh, sftpSessionsRef, updateActiveTab],
   );
 
   const changePermissions = useCallback(
