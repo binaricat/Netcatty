@@ -162,6 +162,19 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     return () => sftpListOrderStore.clearPane(pane.id);
   }, [sortedDisplayFiles, pane.id]);
 
+  useEffect(() => {
+    if (pane.selectedFiles.size !== 1) return;
+    const selectedName = Array.from(pane.selectedFiles)[0];
+    if (!selectedName) return;
+
+    const container = fileListRef.current;
+    if (!container) return;
+
+    const row = Array.from(container.querySelectorAll<HTMLElement>('[data-sftp-row="true"]'))
+      .find((element) => element.dataset.entryName === selectedName);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [fileListRef, pane.selectedFiles]);
+
   // Use refs for frequently-changing values so renderRow stays stable
   const selectedFilesRef = useRef(pane.selectedFiles);
   selectedFilesRef.current = pane.selectedFiles;
