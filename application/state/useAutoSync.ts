@@ -7,7 +7,7 @@
  * - Debounced sync to avoid too frequent API calls
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCloudSync } from './useCloudSync';
 import { useI18n } from '../i18n/I18nProvider';
 import { getCloudSyncManager } from '../../infrastructure/services/CloudSyncManager';
@@ -59,6 +59,14 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const isInitializedRef = useRef(false);
   const isSyncRunningRef = useRef(false);
   const skipNextSyncRef = useRef(false);
+
+  // Listen for SFTP bookmark changes to trigger auto-sync
+  const [bookmarksVersion, setBookmarksVersion] = useState(0);
+  useEffect(() => {
+    const handler = () => setBookmarksVersion((v) => v + 1);
+    window.addEventListener('sftp-bookmarks-changed', handler);
+    return () => window.removeEventListener('sftp-bookmarks-changed', handler);
+  }, []);
 
   const getSyncSnapshot = useCallback(() => {
     let effectivePFRules = config.portForwardingRules;
@@ -288,7 +296,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         clearTimeout(syncTimeoutRef.current);
       }
     };
-  }, [sync.hasAnyConnectedProvider, sync.autoSyncEnabled, sync.isUnlocked, sync.isSyncing, getDataHash, syncNow, config.settingsVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync.hasAnyConnectedProvider, sync.autoSyncEnabled, sync.isUnlocked, sync.isSyncing, getDataHash, syncNow, config.settingsVersion, bookmarksVersion]);
   
   // Check remote version on startup/unlock
   useEffect(() => {

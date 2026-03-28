@@ -198,6 +198,7 @@ export interface SyncPayload {
     sftpShowHiddenFiles?: boolean;
     sftpUseCompressedUpload?: boolean;
     sftpAutoOpenSidebar?: boolean;
+    sftpGlobalBookmarks?: import('./models').SftpBookmark[];
     // Immersive mode
     immersiveMode?: boolean;
   };

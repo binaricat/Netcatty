@@ -12,11 +12,13 @@ import type {
   Identity,
   KnownHost,
   PortForwardingRule,
+  SftpBookmark,
   Snippet,
   SSHKey,
 } from '../domain/models';
 import type { SyncPayload } from '../domain/sync';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { rehydrateGlobalBookmarks } from '../components/sftp/hooks/useGlobalSftpBookmarks';
 import {
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
@@ -37,6 +39,7 @@ import {
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
+  STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS,
   STORAGE_KEY_CUSTOM_THEMES,
   STORAGE_KEY_IMMERSIVE_MODE,
 } from '../infrastructure/config/storageKeys';
@@ -161,6 +164,10 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
   if (autoOpenSidebar === 'true' || autoOpenSidebar === 'false') settings.sftpAutoOpenSidebar = autoOpenSidebar === 'true';
 
+  // SFTP Bookmarks (global only — local bookmarks are device-specific)
+  const globalBookmarks = localStorageAdapter.read<SftpBookmark[]>(STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS);
+  if (globalBookmarks && Array.isArray(globalBookmarks)) settings.sftpGlobalBookmarks = globalBookmarks;
+
   // Immersive mode
   const immersive = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
   if (immersive === 'true' || immersive === 'false') settings.immersiveMode = immersive === 'true';
@@ -223,6 +230,9 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
+
+  // SFTP Bookmarks (global only)
+  if (settings.sftpGlobalBookmarks != null) localStorageAdapter.write(STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS, settings.sftpGlobalBookmarks);
 
   // Immersive mode
   if (settings.immersiveMode != null) localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(settings.immersiveMode));
@@ -298,6 +308,8 @@ export function applySyncPayload(
   // Apply synced settings
   if (payload.settings) {
     applySyncableSettings(payload.settings);
+    // Rehydrate in-memory bookmark snapshot after localStorage was updated
+    if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalBookmarks();
     importers.onSettingsApplied?.();
   }
 }
