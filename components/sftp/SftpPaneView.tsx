@@ -292,6 +292,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     draggedFiles,
     onDragStart,
     onReceiveFromOtherPane: callbacks.onReceiveFromOtherPane,
+    onMoveEntriesToPath: callbacks.onMoveEntriesToPath,
     onUploadExternalFiles: handleUploadExternalFiles,
     onOpenEntry: callbacks.onOpenEntry,
     onRangeSelect: callbacks.onRangeSelect,

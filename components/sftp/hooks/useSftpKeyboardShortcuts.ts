@@ -8,7 +8,7 @@
 import { useCallback, useEffect } from "react";
 import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
-import { getParentPath } from "../../../application/state/sftp/utils";
+import { getParentPath, joinPath } from "../../../application/state/sftp/utils";
 import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
@@ -201,8 +201,11 @@ export const useSftpKeyboardShortcuts = ({
           const fileName = selectedFiles[0];
           const entry = (pane.files as SftpFileEntry[]).find(f => f.name === fileName);
           if (entry) {
-            // For list view: navigate into dir or open file
-            sftp.openEntry(focusedSide, entry);
+            if (isNavigableDirectory(entry)) {
+              sftp.navigateTo(focusedSide, joinPath(pane.connection.currentPath, entry.name));
+            } else {
+              sftp.openEntry(focusedSide, entry);
+            }
           }
           return;
         }
