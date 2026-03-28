@@ -22,6 +22,7 @@ import {
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
+  STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
   STORAGE_KEY_EDITOR_WORD_WRAP,
   STORAGE_KEY_SESSION_LOGS_ENABLED,
@@ -246,6 +247,15 @@ export const useSettingsState = () => {
     const stored = readStoredString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE);
     return (stored === 'list' || stored === 'tree') ? stored : DEFAULT_SFTP_DEFAULT_VIEW_MODE;
   });
+  const [sftpTransferConcurrency, setSftpTransferConcurrencyState] = useState<number>(() => {
+    const stored = localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY);
+    return stored != null && stored >= 1 && stored <= 16 ? stored : 4;
+  });
+  const setSftpTransferConcurrency = useCallback((value: number) => {
+    const clamped = Math.max(1, Math.min(16, Math.round(value)));
+    setSftpTransferConcurrencyState(clamped);
+    localStorageAdapter.writeString(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY, String(clamped));
+  }, []);
 
   // Editor Settings
   const [editorWordWrap, setEditorWordWrapState] = useState<boolean>(() => {
@@ -1197,6 +1207,8 @@ export const useSettingsState = () => {
     setSftpAutoOpenSidebar,
     sftpDefaultViewMode,
     setSftpDefaultViewMode,
+    sftpTransferConcurrency,
+    setSftpTransferConcurrency,
     // Editor Settings
     editorWordWrap,
     setEditorWordWrap: useCallback((enabled: boolean) => {

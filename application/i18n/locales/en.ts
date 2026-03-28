@@ -790,6 +790,8 @@ const en: Messages = {
 
   // Settings > SFTP File Associations
   'settings.tab.sftpFileAssociations': 'SFTP',
+  'settings.sftp.transferConcurrency': 'Transfer Concurrency',
+  'settings.sftp.transferConcurrency.desc': 'Number of files to transfer in parallel when uploading or downloading folders. Higher values may improve speed but can overwhelm some servers.',
   'settings.sftp.defaultOpener': 'Default File Opener',
   'settings.sftp.defaultOpener.desc': 'Choose the default application for opening files without a specific file association',
   'settings.sftp.defaultOpener.ask': 'Always ask',

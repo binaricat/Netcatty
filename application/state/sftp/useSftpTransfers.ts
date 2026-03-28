@@ -11,6 +11,8 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
 import { getParentPath, joinPath } from "./utils";
+import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
+import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
 
 interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
@@ -257,7 +259,10 @@ export const useSftpTransfers = ({
     });
   };
 
-  const TRANSFER_CONCURRENCY = 4;
+  const getTransferConcurrency = () => {
+    const stored = localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY);
+    return stored != null && stored >= 1 && stored <= 16 ? stored : 4;
+  };
 
   /** Recursively count all files under a directory (for progress display). */
   const countDirectoryFiles = async (
@@ -437,8 +442,9 @@ export const useSftpTransfers = ({
         }
       };
 
+      const concurrency = getTransferConcurrency();
       const workers = Array.from(
-        { length: Math.min(TRANSFER_CONCURRENCY, regularFiles.length) },
+        { length: Math.min(concurrency, regularFiles.length) },
         () => worker(),
       );
       await Promise.all(workers);

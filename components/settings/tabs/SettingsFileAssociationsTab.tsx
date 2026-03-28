@@ -29,7 +29,7 @@ const getOpenerLabel = (
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
   const { getAllAssociations, removeAssociation, setOpenerForExtension, getDefaultOpener, setDefaultOpener, removeDefaultOpener } = useSftpFileAssociations();
-  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar, sftpDefaultViewMode, setSftpDefaultViewMode } = useSettingsState();
+  const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar, sftpDefaultViewMode, setSftpDefaultViewMode, sftpTransferConcurrency, setSftpTransferConcurrency } = useSettingsState();
   const associations = getAllAssociations();
   const defaultOpener = getDefaultOpener();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
@@ -376,6 +376,26 @@ export default function SettingsFileAssociationsTab() {
               </div>
             </div>
           </button>
+        </div>
+
+        {/* Transfer concurrency section */}
+        <div className="space-y-4">
+          <SectionHeader title={t('settings.sftp.transferConcurrency')} />
+          <p className="text-sm text-muted-foreground">
+            {t('settings.sftp.transferConcurrency.desc')}
+          </p>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={1}
+              max={16}
+              step={1}
+              value={sftpTransferConcurrency}
+              onChange={(e) => setSftpTransferConcurrency(Number(e.target.value))}
+              className="flex-1 accent-primary"
+            />
+            <span className="text-sm font-mono w-6 text-center">{sftpTransferConcurrency}</span>
+          </div>
         </div>
 
         {/* Default opener section */}
