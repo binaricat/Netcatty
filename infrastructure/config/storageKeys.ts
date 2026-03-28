@@ -42,6 +42,7 @@ export const STORAGE_KEY_AUTO_UPDATE_ENABLED = 'netcatty_auto_update_enabled_v1'
 
 // SFTP File Opener Associations
 export const STORAGE_KEY_SFTP_FILE_ASSOCIATIONS = 'netcatty_sftp_file_associations_v1';
+export const STORAGE_KEY_SFTP_DEFAULT_OPENER = 'netcatty_sftp_default_opener_v1';
 
 // SFTP Local Bookmarks
 export const STORAGE_KEY_SFTP_LOCAL_BOOKMARKS = 'netcatty_sftp_local_bookmarks_v1';
