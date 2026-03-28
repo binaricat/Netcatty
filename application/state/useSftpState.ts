@@ -120,6 +120,20 @@ export const useSftpState = (
     return null;
   }, [leftTabsRef, rightTabsRef]);
 
+  const getTabByConnectionId = useCallback((connectionId: string) => {
+    for (const tab of leftTabsRef.current.tabs) {
+      if (tab.connection?.id === connectionId) {
+        return { side: "left" as const, tabId: tab.id, pane: tab };
+      }
+    }
+    for (const tab of rightTabsRef.current.tabs) {
+      if (tab.connection?.id === connectionId) {
+        return { side: "right" as const, tabId: tab.id, pane: tab };
+      }
+    }
+    return null;
+  }, [leftTabsRef, rightTabsRef]);
+
   // Ref to track pending reconnections to avoid multiple reconnect attempts
   const reconnectingRef = useRef<{ left: boolean; right: boolean }>({
     left: false,
@@ -269,6 +283,8 @@ export const useSftpState = (
   } = useSftpTransfers({
     getActivePane,
     getPaneByConnectionId,
+    getTabByConnectionId,
+    updateTab,
     refresh,
     clearCacheForConnection,
     sftpSessionsRef,

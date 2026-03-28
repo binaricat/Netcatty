@@ -12,6 +12,7 @@ export interface SftpPane {
   filter: string;
   filenameEncoding: SftpFilenameEncoding;
   showHiddenFiles: boolean;
+  transferMutationToken: number;
 }
 
 // Multi-tab state for left and right sides
@@ -39,6 +40,7 @@ export const createEmptyPane = (
   filter: "",
   filenameEncoding: "auto",
   showHiddenFiles,
+  transferMutationToken: 0,
 });
 
 // File watch event types

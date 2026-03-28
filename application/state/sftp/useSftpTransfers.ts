@@ -15,6 +15,8 @@ import { getParentPath, joinPath } from "./utils";
 interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   getPaneByConnectionId: (connectionId: string) => SftpPane | null;
+  getTabByConnectionId: (connectionId: string) => { side: "left" | "right"; tabId: string; pane: SftpPane } | null;
+  updateTab: (side: "left" | "right", tabId: string, updater: (pane: SftpPane) => SftpPane) => void;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   clearCacheForConnection: (connectionId: string) => void;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
@@ -59,6 +61,8 @@ interface TransferResult {
 export const useSftpTransfers = ({
   getActivePane,
   getPaneByConnectionId,
+  getTabByConnectionId,
+  updateTab,
   refresh,
   clearCacheForConnection,
   sftpSessionsRef,
@@ -578,6 +582,14 @@ export const useSftpTransfers = ({
       // Clear the target connection cache so the next navigation reloads fresh data.
       clearCacheForConnection(task.targetConnectionId);
 
+      const targetTab = getTabByConnectionId(task.targetConnectionId);
+      if (targetTab) {
+        updateTab(targetTab.side, targetTab.tabId, (prev) => ({
+          ...prev,
+          transferMutationToken: prev.transferMutationToken + 1,
+        }));
+      }
+
       // Refresh the specific target tab, not whichever tab happens to be
       // active now — focus may have switched during the transfer.
       if (getParentPath(task.targetPath) === targetPane.connection!.currentPath) {
@@ -732,7 +744,7 @@ export const useSftpTransfers = ({
       return results;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, getPaneByConnectionId, sftpSessionsRef],
+    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab],
   );
 
   const cancelTransfer = useCallback(

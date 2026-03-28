@@ -404,6 +404,14 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     });
   }, [isActive, pane.id, side]);
 
+  useEffect(() => {
+    if (!pane.connection || pane.transferMutationToken === 0) return;
+    callbacks.onRefresh();
+    if (viewMode === 'tree') {
+      requestTreeReload(undefined, true);
+    }
+  }, [callbacks, pane.connection, pane.transferMutationToken, requestTreeReload, viewMode]);
+
   if (!pane.connection) {
     return (
       <SftpPaneEmptyState
