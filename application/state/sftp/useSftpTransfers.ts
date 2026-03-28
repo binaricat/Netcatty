@@ -14,6 +14,7 @@ import { getParentPath, joinPath } from "./utils";
 
 interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
+  getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
@@ -56,6 +57,7 @@ interface TransferResult {
 
 export const useSftpTransfers = ({
   getActivePane,
+  getPaneByConnectionId,
   refresh,
   sftpSessionsRef,
   listLocalFiles,
@@ -648,7 +650,9 @@ export const useSftpTransfers = ({
         onTransferComplete?: (result: TransferResult) => void | Promise<void>;
       },
     ) => {
-      const sourcePane = options?.sourcePane ?? getActivePane(sourceSide);
+      const sourcePane = options?.sourcePane
+        ?? (options?.sourceConnectionId ? getPaneByConnectionId(options.sourceConnectionId) : null)
+        ?? getActivePane(sourceSide);
       const targetPane = getActivePane(targetSide);
 
       if (!sourcePane?.connection || !targetPane?.connection) return [];
@@ -721,7 +725,7 @@ export const useSftpTransfers = ({
       return results;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, sftpSessionsRef],
+    [getActivePane, getPaneByConnectionId, sftpSessionsRef],
   );
 
   const cancelTransfer = useCallback(
