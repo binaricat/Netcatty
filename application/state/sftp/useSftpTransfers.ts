@@ -310,6 +310,8 @@ export const useSftpTransfers = ({
     return count;
   };
 
+  const MAX_DIRECTORY_DEPTH = 64;
+
   const transferDirectory = async (
     task: TransferTask,
     sourceSftpId: string | null,
@@ -319,23 +321,29 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
-    visitedPaths?: Set<string>, // Cycle detection for symlink directories
+    depth = 0,
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
       throw new Error("Transfer cancelled");
     }
 
-    // Cycle detection: skip directories already visited (symlink loops)
-    const visited = visitedPaths ?? new Set<string>();
-    if (visited.has(task.sourcePath)) {
-      logger.warn(`[SFTP] Skipping symlink cycle: ${task.sourcePath}`);
+    // Guard against symlink loops and excessively deep directory trees
+    if (depth > MAX_DIRECTORY_DEPTH) {
+      logger.warn(`[SFTP] Skipping directory exceeding max depth (${MAX_DIRECTORY_DEPTH}): ${task.sourcePath}`);
       return;
     }
-    visited.add(task.sourcePath);
 
     if (targetIsLocal) {
-      await netcattyBridge.get()?.mkdirLocal?.(task.targetPath);
+      try {
+        await netcattyBridge.get()?.mkdirLocal?.(task.targetPath);
+      } catch (mkdirErr: unknown) {
+        // If a file (not directory) already exists at the target path,
+        // the mkdir fails with EEXIST. Ignore it — the directory may
+        // already exist from a previous partial download.
+        const isEEXIST = mkdirErr instanceof Error && mkdirErr.message.includes("EEXIST");
+        if (!isEEXIST) throw mkdirErr;
+      }
     } else if (targetSftpId) {
       await netcattyBridge.get()?.mkdirSftp(targetSftpId, task.targetPath, targetEncoding);
     }
@@ -380,7 +388,7 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
-        visited,
+        depth + 1,
       );
     }
 
