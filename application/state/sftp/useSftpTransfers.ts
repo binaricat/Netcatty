@@ -703,6 +703,8 @@ export const useSftpTransfers = ({
 
       logger.debug(`[SFTP:perf] starting actual transfer — file=${task.fileName} isDir=${task.isDirectory} — ${(performance.now() - t0).toFixed(0)}ms since start`);
 
+      let dirPartialFailure = false;
+
       if (task.isDirectory) {
         // For directory transfers, parent task uses:
         //   totalBytes = total file count (discovered async)
@@ -734,18 +736,7 @@ export const useSftpTransfers = ({
         );
 
         if (dirErrors > 0) {
-          setTransfers((prev) => prev.map((t) => {
-            if (t.id !== task.id) return t;
-            return {
-              ...t,
-              status: "failed" as TransferStatus,
-              error: "Some files failed to transfer",
-              endTime: Date.now(),
-              speed: 0,
-            };
-          }));
-          activeChildIdsRef.current.delete(task.id);
-          return "failed";
+          dirPartialFailure = true;
         }
       } else {
         await transferFile(
@@ -760,14 +751,16 @@ export const useSftpTransfers = ({
         );
       }
 
+      const finalStatus: TransferStatus = dirPartialFailure ? "failed" : "completed";
       setTransfers((prev) => {
         return prev.map((t) => {
           if (t.id !== task.id) return t;
           return {
             ...t,
-            status: "completed" as TransferStatus,
+            status: finalStatus,
+            error: dirPartialFailure ? "Some files failed to transfer" : undefined,
             endTime: Date.now(),
-            transferredBytes: t.totalBytes,
+            transferredBytes: dirPartialFailure ? t.transferredBytes : t.totalBytes,
             speed: 0,
           };
         });
@@ -801,13 +794,13 @@ export const useSftpTransfers = ({
             id: task.id,
             fileName: task.fileName,
             originalFileName: task.originalFileName ?? task.fileName,
-            status: "completed",
+            status: finalStatus,
           });
         } finally {
           completionHandlersRef.current.delete(task.id);
         }
       }
-      return "completed";
+      return finalStatus;
     } catch (err) {
       activeChildIdsRef.current.delete(task.id);
       // Check if this was a cancellation
