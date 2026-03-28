@@ -48,6 +48,7 @@ interface UseSftpTransfersResult {
     sourcePath: string;
     targetPath: string;
     sftpId: string;
+    connectionId: string;
     sourceEncoding?: SftpFilenameEncoding;
     isDirectory: boolean;
     totalBytes?: number;
@@ -886,11 +887,21 @@ export const useSftpTransfers = ({
       setConflicts((prev) => prev.filter((c) => c.transferId !== transferId));
 
       if (netcattyBridge.get()?.cancelTransfer) {
-        try {
-          await netcattyBridge.get()!.cancelTransfer!(transferId);
-        } catch (err) {
-          logger.warn("Failed to cancel transfer at backend:", err);
+        // Cancel parent and all active child streams at the backend
+        const idsToCancel = [transferId];
+        const currentTransfers = transfersRef.current;
+        for (const t of currentTransfers) {
+          if (t.parentTaskId === transferId && (t.status === "transferring" || t.status === "pending")) {
+            idsToCancel.push(t.id);
+          }
         }
+        await Promise.all(
+          idsToCancel.map((id) =>
+            netcattyBridge.get()!.cancelTransfer!(id).catch((err) => {
+              logger.warn("Failed to cancel transfer at backend:", err);
+            }),
+          ),
+        );
       }
 
     },
@@ -1072,6 +1083,7 @@ export const useSftpTransfers = ({
       sourcePath: string;
       targetPath: string;
       sftpId: string;
+      connectionId: string;
       sourceEncoding?: SftpFilenameEncoding;
       isDirectory: boolean;
       totalBytes?: number;
@@ -1082,7 +1094,7 @@ export const useSftpTransfers = ({
         originalFileName: params.fileName,
         sourcePath: params.sourcePath,
         targetPath: params.targetPath,
-        sourceConnectionId: params.sftpId,
+        sourceConnectionId: params.connectionId,
         targetConnectionId: "local",
         direction: "download",
         status: "transferring",

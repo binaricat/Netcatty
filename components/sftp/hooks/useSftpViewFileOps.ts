@@ -447,6 +447,7 @@ export const useSftpViewFileOps = ({
               sourcePath: resolvedFullPath,
               targetPath,
               sftpId,
+              connectionId: pane.connection.id,
               sourceEncoding: pane.filenameEncoding,
               isDirectory: true,
             });
