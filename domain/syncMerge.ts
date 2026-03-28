@@ -411,6 +411,16 @@ export function mergeSyncPayloads(
   // Merge settings
   const settings = mergeSettings(b.settings, local.settings, remote.settings);
 
+  // Deduplicate global SFTP bookmarks by path (IDs are random per device)
+  if (settings?.sftpGlobalBookmarks && settings.sftpGlobalBookmarks.length > 0) {
+    const seenPaths = new Set<string>();
+    settings.sftpGlobalBookmarks = settings.sftpGlobalBookmarks.filter((bm) => {
+      if (seenPaths.has(bm.path)) return false;
+      seenPaths.add(bm.path);
+      return true;
+    });
+  }
+
   const payload: SyncPayload = {
     hosts: hosts.merged,
     keys: keys.merged,
