@@ -43,6 +43,15 @@ interface UseSftpTransfersResult {
       onTransferComplete?: (result: TransferResult) => void | Promise<void>;
     },
   ) => Promise<TransferResult[]>;
+  downloadToLocal: (params: {
+    fileName: string;
+    sourcePath: string;
+    targetPath: string;
+    sftpId: string;
+    sourceEncoding?: SftpFilenameEncoding;
+    isDirectory: boolean;
+    totalBytes?: number;
+  }) => Promise<TransferStatus>;
   addExternalUpload: (task: TransferTask) => void;
   updateExternalUpload: (taskId: string, updates: Partial<TransferTask>) => void;
   cancelTransfer: (transferId: string) => Promise<void>;
@@ -1057,11 +1066,113 @@ export const useSftpTransfers = ({
     (t) => (t.status === "pending" || t.status === "transferring") && !t.parentTaskId,
   ).length, [transfers]);
 
+  const downloadToLocal = useCallback(
+    async (params: {
+      fileName: string;
+      sourcePath: string;
+      targetPath: string;
+      sftpId: string;
+      sourceEncoding?: SftpFilenameEncoding;
+      isDirectory: boolean;
+      totalBytes?: number;
+    }): Promise<TransferStatus> => {
+      const task: TransferTask = {
+        id: crypto.randomUUID(),
+        fileName: params.fileName,
+        originalFileName: params.fileName,
+        sourcePath: params.sourcePath,
+        targetPath: params.targetPath,
+        sourceConnectionId: params.sftpId,
+        targetConnectionId: "local",
+        direction: "download",
+        status: "transferring",
+        totalBytes: params.totalBytes ?? 0,
+        transferredBytes: 0,
+        speed: 0,
+        startTime: Date.now(),
+        isDirectory: params.isDirectory,
+        progressMode: params.isDirectory ? "files" : "bytes",
+      };
+
+      setTransfers((prev) => [...prev, task]);
+
+      const sourceEncoding = params.sourceEncoding ?? "auto";
+
+      try {
+        if (params.isDirectory) {
+          // Count files for progress display
+          void countDirectoryFiles(
+            params.sourcePath,
+            params.sftpId,
+            false,
+            sourceEncoding,
+            task.id,
+          ).then((fileCount) => {
+            if (!cancelledTasksRef.current.has(task.id)) {
+              setTransfers((prev) =>
+                prev.map((t) => (t.id === task.id ? { ...t, totalBytes: fileCount } : t)),
+              );
+            }
+          }).catch(() => {});
+
+          await transferDirectory(
+            task,
+            params.sftpId,
+            null,       // targetSftpId = null (local)
+            false,       // sourceIsLocal = false
+            true,        // targetIsLocal = true
+            sourceEncoding,
+            "auto",      // targetEncoding
+            task.id,
+          );
+        } else {
+          await transferFile(
+            task,
+            params.sftpId,
+            null,
+            false,
+            true,
+            sourceEncoding,
+            "auto",
+            task.id,
+          );
+        }
+
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === task.id
+              ? { ...t, status: "completed" as TransferStatus, endTime: Date.now(), transferredBytes: t.totalBytes }
+              : t,
+          ),
+        );
+        return "completed";
+      } catch (err) {
+        const isCancelled = cancelledTasksRef.current.has(task.id);
+        setTransfers((prev) =>
+          prev.map((t) =>
+            t.id === task.id
+              ? {
+                  ...t,
+                  status: isCancelled ? ("cancelled" as TransferStatus) : ("failed" as TransferStatus),
+                  error: isCancelled ? undefined : (err instanceof Error ? err.message : String(err)),
+                  endTime: Date.now(),
+                }
+              : t,
+          ),
+        );
+        return isCancelled ? "cancelled" : "failed";
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sftpSessionsRef],
+  );
+
   return {
     transfers,
     conflicts,
     activeTransfersCount,
     startTransfer,
+    downloadToLocal,
     addExternalUpload,
     updateExternalUpload,
     cancelTransfer,
