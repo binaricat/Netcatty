@@ -10,7 +10,7 @@ import {
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
-import { getParentPath, isNavigableDirectory, joinPath } from "./utils";
+import { getParentPath, joinPath } from "./utils";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
 
@@ -135,13 +135,11 @@ export const useSftpTransfers = ({
       sourceIsLocal: boolean,
       sourceEncoding: SftpFilenameEncoding,
       rootTaskId: string,
-      symlinkDepth = 0,
     ): Promise<number> => {
       const estT0 = performance.now();
       if (cancelledTasksRef.current.has(rootTaskId)) {
         throw new Error("Transfer cancelled");
       }
-      if (symlinkDepth > MAX_SYMLINK_DEPTH) return 0;
 
       const files = sourceIsLocal
         ? await listLocalFiles(sourcePath)
@@ -159,7 +157,7 @@ export const useSftpTransfers = ({
       for (const file of files) {
         if (file.name === "..") continue;
 
-        if (isNavigableDirectory(file)) {
+        if (file.type === "directory") {
           subdirs.push(file);
         } else {
           totalBytes += getEntrySize(file);
@@ -179,7 +177,6 @@ export const useSftpTransfers = ({
               sourceIsLocal,
               sourceEncoding,
               rootTaskId,
-              subdir.type === "symlink" ? symlinkDepth + 1 : symlinkDepth,
             ),
           ),
         );
@@ -286,10 +283,8 @@ export const useSftpTransfers = ({
     sourceIsLocal: boolean,
     sourceEncoding: SftpFilenameEncoding,
     rootTaskId: string,
-    symlinkDepth = 0,
   ): Promise<number> => {
     if (cancelledTasksRef.current.has(rootTaskId)) return 0;
-    if (symlinkDepth > MAX_SYMLINK_DEPTH) return 0;
 
     const files = sourceIsLocal
       ? await listLocalFiles(sourcePath)
@@ -302,10 +297,9 @@ export const useSftpTransfers = ({
     const subdirPromises: Promise<number>[] = [];
     for (const file of files) {
       if (file.name === "..") continue;
-      if (isNavigableDirectory(file)) {
-        const nextDepth = file.type === "symlink" ? symlinkDepth + 1 : symlinkDepth;
+      if (file.type === "directory") {
         subdirPromises.push(
-          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, nextDepth),
+          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId),
         );
       } else {
         count++;
@@ -318,8 +312,6 @@ export const useSftpTransfers = ({
     return count;
   };
 
-  const MAX_SYMLINK_DEPTH = 32;
-
   /** Returns number of failed child file transfers */
   const transferDirectory = async (
     task: TransferTask,
@@ -330,27 +322,11 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
-    symlinkDepth = 0,
-    ancestorPaths?: Set<string>, // Track recursion stack for cycle detection
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
       throw new Error("Transfer cancelled");
     }
-
-    // Guard against symlink directory cycles:
-    // 1. Depth limit as hard backstop
-    if (symlinkDepth > MAX_SYMLINK_DEPTH) {
-      throw new Error(`Symlink depth exceeds limit (${MAX_SYMLINK_DEPTH}), possible cycle: ${task.sourcePath}`);
-    }
-    // 2. Ancestor path check — if this path is already in the recursion
-    //    stack, we have a direct cycle (e.g. dir/link -> ancestor)
-    const ancestors = ancestorPaths ?? new Set<string>();
-    if (ancestors.has(task.sourcePath)) {
-      logger.warn(`[SFTP] Skipping symlink cycle: ${task.sourcePath}`);
-      return 0;
-    }
-    ancestors.add(task.sourcePath);
 
     let totalErrors = 0;
 
@@ -380,8 +356,10 @@ export const useSftpTransfers = ({
     }
 
     const filtered = files.filter((f) => f.name !== "..");
-    const dirs = filtered.filter((f) => isNavigableDirectory(f));
-    const regularFiles = filtered.filter((f) => !isNavigableDirectory(f));
+    // Only recurse into real directories — symlink directories are transferred
+    // as regular files to avoid cycle risks (symlink -> ancestor loops).
+    const dirs = filtered.filter((f) => f.type === "directory");
+    const regularFiles = filtered.filter((f) => f.type !== "directory");
 
     // Process subdirectories first
     for (const dir of dirs) {
@@ -401,8 +379,6 @@ export const useSftpTransfers = ({
         parentTaskId: task.id,
       };
 
-      // Only increment symlink depth when entering a symlink directory
-      const isSymlink = dir.type === "symlink";
       const subdirErrors = await transferDirectory(
         childTask,
         sourceSftpId,
@@ -412,8 +388,6 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
-        isSymlink ? symlinkDepth + 1 : symlinkDepth,
-        ancestors,
       );
       totalErrors += subdirErrors;
     }
@@ -520,7 +494,6 @@ export const useSftpTransfers = ({
       }
     }
 
-    ancestors.delete(task.sourcePath);
     return totalErrors;
   };
 
@@ -769,6 +742,9 @@ export const useSftpTransfers = ({
       if (getParentPath(task.targetPath) === targetPane.connection!.currentPath) {
         await refresh(targetSide, { tabId: targetPane.id });
       }
+      // Clean up tracked child IDs for this transfer
+      activeChildIdsRef.current.delete(task.id);
+
       const completionHandler = completionHandlersRef.current.get(task.id);
       if (completionHandler) {
         try {
@@ -784,6 +760,7 @@ export const useSftpTransfers = ({
       }
       return "completed";
     } catch (err) {
+      activeChildIdsRef.current.delete(task.id);
       // Check if this was a cancellation
       const isCancelled = cancelledTasksRef.current.has(task.id) ||
         (err instanceof Error && err.message === "Transfer cancelled");
