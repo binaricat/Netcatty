@@ -319,11 +319,20 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
+    visitedPaths?: Set<string>, // Cycle detection for symlink directories
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
       throw new Error("Transfer cancelled");
     }
+
+    // Cycle detection: skip directories already visited (symlink loops)
+    const visited = visitedPaths ?? new Set<string>();
+    if (visited.has(task.sourcePath)) {
+      logger.warn(`[SFTP] Skipping symlink cycle: ${task.sourcePath}`);
+      return;
+    }
+    visited.add(task.sourcePath);
 
     if (targetIsLocal) {
       await netcattyBridge.get()?.mkdirLocal?.(task.targetPath);
@@ -371,6 +380,7 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
+        visited,
       );
     }
 
@@ -1150,14 +1160,25 @@ export const useSftpTransfers = ({
           );
         }
 
+        // Check if any child tasks failed
+        const hasFailedChildren = transfersRef.current.some(
+          (t) => t.parentTaskId === task.id && t.status === "failed",
+        );
+        const finalStatus: TransferStatus = hasFailedChildren ? "failed" : "completed";
         setTransfers((prev) =>
           prev.map((t) =>
             t.id === task.id
-              ? { ...t, status: "completed" as TransferStatus, endTime: Date.now(), transferredBytes: t.totalBytes }
+              ? {
+                  ...t,
+                  status: finalStatus,
+                  error: hasFailedChildren ? "Some files failed to transfer" : undefined,
+                  endTime: Date.now(),
+                  transferredBytes: t.totalBytes,
+                }
               : t,
           ),
         );
-        return "completed";
+        return finalStatus;
       } catch (err) {
         const isCancelled = cancelledTasksRef.current.has(task.id);
         setTransfers((prev) =>
