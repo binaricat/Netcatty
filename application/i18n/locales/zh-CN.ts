@@ -448,6 +448,7 @@ const zhCN: Messages = {
   'sftp.context.open': '打开',
   'sftp.context.download': '下载',
   'sftp.context.copyToOtherPane': '复制到另一侧',
+  'sftp.viewMode.label': '视图模式',
   'sftp.viewMode.list': '列表视图',
   'sftp.viewMode.tree': '树形视图',
   'sftp.tree.loadError': '加载目录失败',

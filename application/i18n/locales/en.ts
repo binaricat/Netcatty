@@ -633,6 +633,7 @@ const en: Messages = {
   'sftp.context.open': 'Open',
   'sftp.context.download': 'Download',
   'sftp.context.copyToOtherPane': 'Copy to other pane',
+  'sftp.viewMode.label': 'View mode',
   'sftp.viewMode.list': 'List view',
   'sftp.viewMode.tree': 'Tree view',
   'sftp.tree.loadError': 'Failed to load directory',

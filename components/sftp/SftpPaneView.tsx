@@ -595,6 +595,7 @@ const sftpPaneViewAreEqual = (
   if (prev.side !== next.side) return false;
   if (prev.showHeader !== next.showHeader) return false;
   if (prev.showEmptyHeader !== next.showEmptyHeader) return false;
+  if (prev.sftpDefaultViewMode !== next.sftpDefaultViewMode) return false;
 
   return true;
 };

@@ -721,8 +721,8 @@ export const useSftpPaneActions = ({
       const pane = getActivePane(side);
       if (!pane?.connection) return;
 
-      const newPath = joinPath(getParentPath(oldPath), newName);
       const parentPath = getParentPath(oldPath);
+      const newPath = joinPath(parentPath, newName);
 
       try {
         if (pane.connection.isLocal) {

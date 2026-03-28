@@ -304,12 +304,13 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     };
   }, []);
 
+  const pendingScrollTopRef = useRef(0);
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const nextTop = e.currentTarget.scrollTop;
+    pendingScrollTopRef.current = e.currentTarget.scrollTop;
     if (scrollFrameRef.current !== null) return;
     scrollFrameRef.current = window.requestAnimationFrame(() => {
       scrollFrameRef.current = null;
-      setScrollTop(nextTop);
+      setScrollTop(pendingScrollTopRef.current);
     });
   }, []);
 
@@ -330,6 +331,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   loadingPathsRef.current = loadingPaths;
   const selectedPathsRef = useRef(selectedPaths);
   selectedPathsRef.current = selectedPaths;
+  const treeSelectionStateRef = useRef(treeSelectionState);
+  treeSelectionStateRef.current = treeSelectionState;
   const treeGenerationRef = useRef(0);
   const previousRootPathRef = useRef(pane.connection?.currentPath ?? '');
   const [resolvedRootPath, setResolvedRootPath] = useState(pane.connection?.currentPath ?? '');
@@ -447,9 +450,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   }, [loadChildrenForPath]);
 
   const reloadExpandedPaths = useCallback(async (paths: string[]) => {
-    for (const path of paths) {
-      await loadChildrenForPath(path);
-    }
+    await Promise.all(paths.map((path) => loadChildrenForPath(path)));
   }, [loadChildrenForPath]);
 
   useEffect(() => {
@@ -503,11 +504,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   const handleNodeClick = useCallback((entry: SftpFileEntry, entryPath: string, e: React.MouseEvent) => {
     focusTreeContainer();
 
+    const state = treeSelectionStateRef.current;
     const nextSelection: string[] = (() => {
       if (e.shiftKey && lastClickedPathRef.current) {
-        const items = treeSelectionState.visibleItems;
-        const lastIdx = treeSelectionState.visibleIndexByPath.get(lastClickedPathRef.current) ?? -1;
-        const currentIdx = treeSelectionState.visibleIndexByPath.get(entryPath) ?? -1;
+        const items = state.visibleItems;
+        const lastIdx = state.visibleIndexByPath.get(lastClickedPathRef.current) ?? -1;
+        const currentIdx = state.visibleIndexByPath.get(entryPath) ?? -1;
         if (lastIdx !== -1 && currentIdx !== -1) {
           const parentPath = getParentPath(entryPath);
           const start = Math.min(lastIdx, currentIdx);
@@ -532,7 +534,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     sftpTreeSelectionStore.setSelection(pane.id, nextSelection);
 
     lastClickedPathRef.current = entryPath;
-  }, [focusTreeContainer, pane.id, treeSelectionState.visibleIndexByPath, treeSelectionState.visibleItems]);
+  }, [focusTreeContainer, pane.id]);
 
   const openTreeEntry = useCallback((entry: SftpFileEntry, entryPath: string) => {
     if (entry.name === '..') {
@@ -547,7 +549,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   const handleTreeContainerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-    const items = treeSelectionState.visibleItems;
+    const state = treeSelectionStateRef.current;
+    const items = state.visibleItems;
     if (items.length === 0) return;
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
@@ -558,7 +561,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const currentSelected = [...selectedPathsRef.current];
       let currentIdx = -1;
       if (currentSelected.length === 1) {
-        currentIdx = treeSelectionState.visibleIndexByPath.get(currentSelected[0]) ?? -1;
+        currentIdx = state.visibleIndexByPath.get(currentSelected[0]) ?? -1;
       }
 
       let nextIdx = currentIdx + delta;
@@ -602,7 +605,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
 
       openTreeEntry(entry, item.path);
     }
-  }, [openTreeEntry, pane.id, toggleExpand, treeSelectionState.visibleIndexByPath, treeSelectionState.visibleItems]);
+  }, [openTreeEntry, pane.id, toggleExpand]);
 
   const { nodeDescriptors, flatVisibleNodes, entryByPath } = useMemo(() => {
     const flat: Array<{ entry: SftpFileEntry; entryPath: string }> = [];

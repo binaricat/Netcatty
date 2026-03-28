@@ -265,9 +265,8 @@ export const useSftpPaneDialogs = ({
       // deleteTargets are full paths; group by parent dir and use path-aware variant
       const byDir = new Map<string, string[]>();
       for (const fullPath of deleteTargetsRef.current) {
-        const lastSlash = Math.max(fullPath.lastIndexOf("/"), fullPath.lastIndexOf("\\"));
-        const dir = lastSlash > 0 ? fullPath.slice(0, lastSlash) : "/";
-        const name = fullPath.slice(lastSlash + 1);
+        const dir = getParentPath(fullPath);
+        const name = getFileName(fullPath);
         const list = byDir.get(dir) ?? [];
         list.push(name);
         byDir.set(dir, list);

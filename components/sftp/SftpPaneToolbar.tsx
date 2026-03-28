@@ -168,6 +168,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             size="icon"
             className={cn("h-6 w-6", viewMode === 'list' && "bg-secondary text-foreground")}
             aria-pressed={viewMode === 'list'}
+            aria-label={t('sftp.viewMode.list')}
             onClick={() => onSetViewMode('list')}
           >
             <List size={14} />
@@ -182,6 +183,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             size="icon"
             className={cn("h-6 w-6", viewMode === 'tree' && "bg-secondary text-foreground")}
             aria-pressed={viewMode === 'tree'}
+            aria-label={t('sftp.viewMode.tree')}
             onClick={() => onSetViewMode('tree')}
           >
             <ListTree size={14} />
@@ -311,30 +313,32 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   // Overflow dropdown menu items (same collapsible actions as menu items)
   const overflowMenuItems = (
     <div className="flex flex-col min-w-[140px]">
-      <button
-        className={cn(
-          "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
-          viewMode === 'list' && "text-primary"
-        )}
-        role="radio"
-        aria-checked={viewMode === 'list'}
-        onClick={() => onSetViewMode('list')}
-      >
-        <List size={14} className="shrink-0" />
-        {t('sftp.viewMode.list')}
-      </button>
-      <button
-        className={cn(
-          "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
-          viewMode === 'tree' && "text-primary"
-        )}
-        role="radio"
-        aria-checked={viewMode === 'tree'}
-        onClick={() => onSetViewMode('tree')}
-      >
-        <ListTree size={14} className="shrink-0" />
-        {t('sftp.viewMode.tree')}
-      </button>
+      <div role="radiogroup" aria-label={t('sftp.viewMode.label')}>
+        <button
+          className={cn(
+            "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
+            viewMode === 'list' && "text-primary"
+          )}
+          role="radio"
+          aria-checked={viewMode === 'list'}
+          onClick={() => onSetViewMode('list')}
+        >
+          <List size={14} className="shrink-0" />
+          {t('sftp.viewMode.list')}
+        </button>
+        <button
+          className={cn(
+            "flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors w-full text-left",
+            viewMode === 'tree' && "text-primary"
+          )}
+          role="radio"
+          aria-checked={viewMode === 'tree'}
+          onClick={() => onSetViewMode('tree')}
+        >
+          <ListTree size={14} className="shrink-0" />
+          {t('sftp.viewMode.tree')}
+        </button>
+      </div>
       {isRemote && (
         <Popover>
           <PopoverTrigger asChild>

@@ -24,8 +24,8 @@ interface SftpOverlaysProps {
   setHostSearchRight: (value: string) => void;
   handleHostSelectLeft: (host: Host | "local") => void;
   handleHostSelectRight: (host: Host | "local") => void;
-  permissionsState: { file: SftpFileEntry; side: "left" | "right" } | null;
-  setPermissionsState: (state: { file: SftpFileEntry; side: "left" | "right" } | null) => void;
+  permissionsState: { file: SftpFileEntry; side: "left" | "right"; fullPath: string } | null;
+  setPermissionsState: (state: { file: SftpFileEntry; side: "left" | "right"; fullPath: string } | null) => void;
   showTextEditor: boolean;
   setShowTextEditor: (open: boolean) => void;
   textEditorTarget: { file: SftpFileEntry; side: "left" | "right"; fullPath: string } | null;

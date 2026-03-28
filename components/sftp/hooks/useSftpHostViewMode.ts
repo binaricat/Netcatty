@@ -31,9 +31,13 @@ function persist(next: Record<string, ViewMode>) {
 if (typeof window !== 'undefined') {
     window.addEventListener('storage', (e) => {
         if (e.key !== STORAGE_KEY_SFTP_HOST_VIEW_MODES) return;
-        snapshot = e.newValue
-            ? (JSON.parse(e.newValue) as Record<string, ViewMode>)
-            : {};
+        try {
+            snapshot = e.newValue
+                ? (JSON.parse(e.newValue) as Record<string, ViewMode>)
+                : {};
+        } catch {
+            snapshot = {};
+        }
         for (const l of listeners) l();
     });
 }
