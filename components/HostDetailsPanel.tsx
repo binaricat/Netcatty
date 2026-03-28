@@ -625,6 +625,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
     <AsidePanel
       open={true}
       onClose={onCancel}
+      width="w-[420px]"
       title={
         initialData ? t("hostDetails.title.details") : t("hostDetails.title.new")
       }
