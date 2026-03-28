@@ -297,7 +297,7 @@ export const useSftpTransfers = ({
     const subdirPromises: Promise<number>[] = [];
     for (const file of files) {
       if (file.name === "..") continue;
-      if (file.type === "directory") {
+      if (isNavigableDirectory(file)) {
         subdirPromises.push(
           countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId),
         );
@@ -1198,34 +1198,40 @@ export const useSftpTransfers = ({
         // to transfersRef yet).
         let finalStatus: TransferStatus = "completed";
         setTransfers((prev) => {
-          const hasFailedChildren = prev.some(
-            (t) => t.parentTaskId === task.id && t.status === "failed",
-          );
+          const children = prev.filter((t) => t.parentTaskId === task.id);
+          const hasFailedChildren = children.some((t) => t.status === "failed");
+          const completedCount = children.filter((t) => t.status === "completed").length;
           finalStatus = hasFailedChildren ? "failed" : "completed";
-          return prev.map((t) =>
-            t.id === task.id
-              ? {
-                  ...t,
-                  status: finalStatus,
-                  error: hasFailedChildren ? "Some files failed to transfer" : undefined,
-                  endTime: Date.now(),
-                  transferredBytes: hasFailedChildren ? t.transferredBytes : t.totalBytes,
-                }
-              : t,
-          );
+          return prev.map((t) => {
+            if (t.id !== task.id) return t;
+            // Use actual completed count as transferredBytes; if totalBytes
+            // hasn't been set by the background scan yet, use completedCount
+            // so the progress display is consistent.
+            const finalTotal = t.totalBytes > 0 ? t.totalBytes : completedCount;
+            return {
+              ...t,
+              status: finalStatus,
+              error: hasFailedChildren ? "Some files failed to transfer" : undefined,
+              endTime: Date.now(),
+              totalBytes: finalTotal,
+              transferredBytes: hasFailedChildren ? completedCount : finalTotal,
+            };
+          });
         });
         activeChildIdsRef.current.delete(task.id);
         return finalStatus;
       } catch (err) {
         activeChildIdsRef.current.delete(task.id);
-        const isCancelled = cancelledTasksRef.current.has(task.id);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isCancelled = cancelledTasksRef.current.has(task.id)
+          || errMsg.includes("cancelled") || errMsg.includes("canceled");
         setTransfers((prev) =>
           prev.map((t) =>
             t.id === task.id
               ? {
                   ...t,
                   status: isCancelled ? ("cancelled" as TransferStatus) : ("failed" as TransferStatus),
-                  error: isCancelled ? undefined : (err instanceof Error ? err.message : String(err)),
+                  error: isCancelled ? undefined : errMsg,
                   endTime: Date.now(),
                 }
               : t,
