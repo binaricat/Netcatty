@@ -27,6 +27,8 @@ export interface UploadTaskInfo {
   /** Display name for bundled tasks (e.g., "folder (5 files)") */
   displayName: string;
   isDirectory: boolean;
+  progressMode?: 'bytes' | 'files';
+  parentTaskId?: string;
   totalBytes: number;
   transferredBytes: number;
   speed: number;
@@ -328,12 +330,14 @@ export async function uploadFromDataTransfer(
   let entries: DropEntry[];
   try {
     entries = await extractDropEntries(dataTransfer);
-  } finally {
+  } catch (error) {
     callbacks?.onScanningEnd?.(scanningTaskId);
+    throw error;
   }
   logger.debug(`[SFTP:perf] extractDropEntries — ${entries.length} entries — ${(performance.now() - scanT0).toFixed(0)}ms`);
 
   if (entries.length === 0) {
+    callbacks?.onScanningEnd?.(scanningTaskId);
     return [];
   }
 
@@ -591,13 +595,14 @@ async function uploadEntries(
 
     // Notify task created
     if (callbacks?.onTaskCreated) {
-      const displayName = fileCount === 1 ? rootName : `${rootName} (${fileCount} files)`;
+      const displayName = rootName;
       callbacks.onTaskCreated({
         id: bundleTaskId,
         fileName: rootName,
         displayName,
         isDirectory: true,
-        totalBytes,
+        progressMode: 'files',
+        totalBytes: fileCount,
         transferredBytes: 0,
         speed: 0,
         fileCount,
@@ -616,39 +621,13 @@ async function uploadEntries(
     return null;
   };
 
-  // Track per-file in-flight progress for concurrent uploads within bundles
-  const inFlightByBundle = new Map<string, Map<string, number>>(); // bundleTaskId -> (fileKey -> transferred)
-
-  const reportBundleProgress = (bundleTaskId: string, speed: number) => {
-    const progress = bundleProgress.get(bundleTaskId);
-    if (!progress || !callbacks?.onTaskProgress) return;
-    const inFlight = inFlightByBundle.get(bundleTaskId);
-    let inFlightBytes = 0;
-    if (inFlight) {
-      for (const v of inFlight.values()) inFlightBytes += v;
-    }
-    const newTransferred = progress.completedFilesBytes + inFlightBytes;
-    progress.transferredBytes = newTransferred;
-    progress.currentSpeed = speed;
-    const percent = progress.totalBytes > 0 ? (newTransferred / progress.totalBytes) * 100 : 0;
-    const displayPercent = progress.completedCount >= progress.fileCount ? percent : Math.min(percent, 99.9);
-    callbacks.onTaskProgress(bundleTaskId, {
-      transferred: newTransferred,
-      total: progress.totalBytes,
-      speed,
-      percent: displayPercent,
-    });
-  };
-
   // Upload a single file entry — returns result and handles progress
   const uploadSingleFile = async (
     entry: DropEntry,
     entryTargetPath: string,
-    bundleTaskId: string | null,
     standaloneTransferId: string,
     fileTotalBytes: number,
   ): Promise<{ cancelled?: boolean; error?: string }> => {
-    const fileKey = entry.relativePath;
     const localFilePath = (entry.file as File & { path?: string }).path;
 
     // Progress callback factory for both stream and memory paths
@@ -668,11 +647,7 @@ async function uploadEntries(
             pendingProgressUpdate = null;
             if (!update || controller?.isCancelled() || !callbacks?.onTaskProgress) return;
 
-            if (bundleTaskId) {
-              const inFlight = inFlightByBundle.get(bundleTaskId);
-              if (inFlight) inFlight.set(fileKey, update.transferred);
-              reportBundleProgress(bundleTaskId, update.speed);
-            } else if (standaloneTransferId) {
+            if (standaloneTransferId) {
               callbacks.onTaskProgress(standaloneTransferId, {
                 transferred: update.transferred,
                 total: update.total,
@@ -685,18 +660,7 @@ async function uploadEntries(
       };
     };
 
-    // Register in-flight tracking for bundle
-    if (bundleTaskId) {
-      let inFlight = inFlightByBundle.get(bundleTaskId);
-      if (!inFlight) {
-        inFlight = new Map();
-        inFlightByBundle.set(bundleTaskId, inFlight);
-      }
-      inFlight.set(fileKey, 0);
-    }
-
-    try {
-      if (localFilePath && bridge.startStreamTransfer && sftpId && !isLocal) {
+    if (localFilePath && bridge.startStreamTransfer && sftpId && !isLocal) {
         const onProgress = makeOnProgress();
         const fileTransferId = crypto.randomUUID();
         controller?.addActiveTransfer(fileTransferId);
@@ -727,7 +691,7 @@ async function uploadEntries(
         if (streamResult?.error) {
           return { error: streamResult.error };
         }
-      } else {
+    } else {
         const arrayBuffer = await entry.file!.arrayBuffer();
 
         if (isLocal) {
@@ -770,15 +734,8 @@ async function uploadEntries(
             return { error: "No SFTP write method available" };
           }
         }
-      }
-      return {};
-    } finally {
-      // Clean up in-flight tracking
-      if (bundleTaskId) {
-        const inFlight = inFlightByBundle.get(bundleTaskId);
-        if (inFlight) inFlight.delete(fileKey);
-      }
     }
+    return {};
   };
 
   // Filter to only file entries (directories are pre-created above)
@@ -786,24 +743,29 @@ async function uploadEntries(
 
   // Create standalone task entries upfront so they're visible immediately
   const standaloneTaskIds = new Map<string, string>(); // relativePath -> taskId
+  const bundledChildTaskIds = new Map<string, string>(); // relativePath -> taskId
   for (const entry of fileEntries) {
     const bundleTaskId = getBundleTaskId(entry);
-    if (!bundleTaskId) {
-      const taskId = crypto.randomUUID();
+    const taskId = crypto.randomUUID();
+    if (bundleTaskId) {
+      bundledChildTaskIds.set(entry.relativePath, taskId);
+    } else {
       standaloneTaskIds.set(entry.relativePath, taskId);
-      if (callbacks?.onTaskCreated) {
-        callbacks.onTaskCreated({
-          id: taskId,
-          fileName: entry.relativePath,
-          displayName: entry.relativePath,
-          isDirectory: false,
-          totalBytes: entry.file!.size,
-          transferredBytes: 0,
-          speed: 0,
-          fileCount: 1,
-          completedCount: 0,
-        });
-      }
+    }
+    if (callbacks?.onTaskCreated) {
+      callbacks.onTaskCreated({
+        id: taskId,
+        fileName: entry.relativePath,
+        displayName: entry.relativePath,
+        isDirectory: false,
+        progressMode: 'bytes',
+        parentTaskId: bundleTaskId ?? undefined,
+        totalBytes: entry.file!.size,
+        transferredBytes: 0,
+        speed: 0,
+        fileCount: 1,
+        completedCount: 0,
+      });
     }
   }
 
@@ -820,6 +782,7 @@ async function uploadEntries(
         const entry = fileEntries[idx];
         const entryTargetPath = joinPath(targetPath, entry.relativePath);
         const bundleTaskId = getBundleTaskId(entry);
+        const bundledChildTaskId = bundledChildTaskIds.get(entry.relativePath) || "";
         const standaloneTransferId = standaloneTaskIds.get(entry.relativePath) || "";
         const fileTotalBytes = entry.file!.size;
 
@@ -827,15 +790,15 @@ async function uploadEntries(
           const uploadResult = await uploadSingleFile(
             entry,
             entryTargetPath,
-            bundleTaskId,
-            standaloneTransferId,
+            bundledChildTaskId || standaloneTransferId,
             fileTotalBytes,
           );
 
           if (uploadResult.cancelled) {
             wasCancelled = true;
-            const taskId = bundleTaskId || standaloneTransferId;
-            if (taskId) callbacks?.onTaskCancelled?.(taskId);
+            if (bundledChildTaskId) callbacks?.onTaskCancelled?.(bundledChildTaskId);
+            if (bundleTaskId) callbacks?.onTaskCancelled?.(bundleTaskId);
+            if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskCancelled?.(standaloneTransferId);
             break;
           }
 
@@ -848,21 +811,29 @@ async function uploadEntries(
           // Update progress tracking
           if (bundleTaskId) {
             const progress = bundleProgress.get(bundleTaskId);
+            if (bundledChildTaskId) {
+              callbacks?.onTaskCompleted?.(bundledChildTaskId, fileTotalBytes);
+            }
             if (progress) {
               progress.completedCount++;
               progress.completedFilesBytes += fileTotalBytes;
-              progress.transferredBytes = progress.completedFilesBytes;
+              progress.transferredBytes = progress.completedCount;
 
               if (progress.completedCount >= progress.fileCount) {
                 callbacks?.onTaskProgress?.(bundleTaskId, {
-                  transferred: progress.totalBytes,
-                  total: progress.totalBytes,
+                  transferred: progress.fileCount,
+                  total: progress.fileCount,
                   speed: 0,
                   percent: 100,
                 });
-                callbacks?.onTaskCompleted?.(bundleTaskId, progress.totalBytes);
+                callbacks?.onTaskCompleted?.(bundleTaskId, progress.fileCount);
               } else {
-                reportBundleProgress(bundleTaskId, 0);
+                callbacks?.onTaskProgress?.(bundleTaskId, {
+                  transferred: progress.completedCount,
+                  total: progress.fileCount,
+                  speed: 0,
+                  percent: progress.fileCount > 0 ? (progress.completedCount / progress.fileCount) * 100 : 0,
+                });
               }
             }
           } else if (standaloneTransferId) {
@@ -871,16 +842,17 @@ async function uploadEntries(
         } catch (error) {
           if (controller?.isCancelled()) {
             wasCancelled = true;
-            const taskId = bundleTaskId || standaloneTransferId;
-            if (taskId) callbacks?.onTaskCancelled?.(taskId);
+            if (bundledChildTaskId) callbacks?.onTaskCancelled?.(bundledChildTaskId);
+            if (bundleTaskId) callbacks?.onTaskCancelled?.(bundleTaskId);
+            if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskCancelled?.(standaloneTransferId);
             break;
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error);
           results.push({ fileName: entry.relativePath, success: false, error: errorMessage });
 
-          const taskId = bundleTaskId || standaloneTransferId;
-          if (taskId) callbacks?.onTaskFailed?.(taskId, errorMessage);
+          if (bundledChildTaskId) callbacks?.onTaskFailed?.(bundledChildTaskId, errorMessage);
+          if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskFailed?.(standaloneTransferId, errorMessage);
         }
       }
     };
@@ -1094,6 +1066,7 @@ async function uploadFoldersCompressed(
           fileName: folderName,
           displayName: `${folderName} (compressed)`,
           isDirectory: true,
+          progressMode: 'bytes',
           totalBytes,
           transferredBytes: 0,
           speed: 0,

@@ -378,6 +378,7 @@ export const useSftpExternalOperations = (
             speed: 0,
             startTime: Date.now(),
             isDirectory: true,
+            progressMode: "bytes",
           };
           addExternalUpload(scanningTask);
         }
@@ -405,6 +406,8 @@ export const useSftpExternalOperations = (
             speed: 0,
             startTime: Date.now(),
             isDirectory: task.isDirectory,
+            progressMode: task.progressMode ?? "bytes",
+            parentTaskId: task.parentTaskId,
           };
           addExternalUpload(transferTask);
         }

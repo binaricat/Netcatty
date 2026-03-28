@@ -712,6 +712,7 @@ export interface TransferTask {
   startTime: number;
   endTime?: number;
   isDirectory: boolean;
+  progressMode?: 'bytes' | 'files';
   childTasks?: string[]; // For directory transfers
   parentTaskId?: string;
   sourceLastModified?: number; // Cached from file list to avoid redundant stat

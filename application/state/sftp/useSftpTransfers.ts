@@ -343,6 +343,7 @@ export const useSftpTransfers = ({
         sourcePath: joinPath(task.sourcePath, dir.name),
         targetPath: joinPath(task.targetPath, dir.name),
         isDirectory: true,
+        progressMode: "files",
         parentTaskId: task.id,
       };
 
@@ -382,6 +383,7 @@ export const useSftpTransfers = ({
             sourcePath: joinPath(task.sourcePath, file.name),
             targetPath: joinPath(task.targetPath, file.name),
             isDirectory: false,
+            progressMode: "bytes",
             parentTaskId: rootTaskId,
             totalBytes: fileSize,
           };
@@ -502,7 +504,7 @@ export const useSftpTransfers = ({
           return;
         }
 
-        if (task.totalBytes > 0) return;
+        if (task.totalBytes > 0 || !!task.sourceLastModified) return;
 
         if (sourcePane.connection?.isLocal) {
           const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
@@ -662,9 +664,7 @@ export const useSftpTransfers = ({
       }
 
       setTransfers((prev) => {
-        // Remove completed child tasks, mark parent as completed
-        const cleaned = prev.filter((t) => t.parentTaskId !== task.id || t.status === "failed");
-        return cleaned.map((t) => {
+        return prev.map((t) => {
           if (t.id !== task.id) return t;
           return {
             ...t,
@@ -816,6 +816,7 @@ export const useSftpTransfers = ({
           speed: 0,
           startTime: Date.now(),
           isDirectory: file.isDirectory,
+          progressMode: file.isDirectory ? "files" : "bytes",
           sourceLastModified,
         });
       }
@@ -927,7 +928,7 @@ export const useSftpTransfers = ({
   }, []);
 
   const dismissTransfer = useCallback((transferId: string) => {
-    setTransfers((prev) => prev.filter((t) => t.id !== transferId));
+    setTransfers((prev) => prev.filter((t) => t.id !== transferId && t.parentTaskId !== transferId));
   }, []);
 
   const isTransferCancelled = useCallback((transferId: string) => {
