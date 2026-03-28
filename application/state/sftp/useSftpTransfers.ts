@@ -138,6 +138,7 @@ export const useSftpTransfers = ({
       sourceEncoding: SftpFilenameEncoding,
       rootTaskId: string,
       symlinkDepth = 0,
+      followSymlinks = false,
     ): Promise<number> => {
       const estT0 = performance.now();
       if (cancelledTasksRef.current.has(rootTaskId)) {
@@ -162,7 +163,7 @@ export const useSftpTransfers = ({
 
         if (file.type === "directory") {
           subdirs.push({ entry: file, nextDepth: symlinkDepth });
-        } else if (file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
+        } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
           subdirs.push({ entry: file, nextDepth: symlinkDepth + 1 });
         } else {
           totalBytes += getEntrySize(file);
@@ -183,6 +184,7 @@ export const useSftpTransfers = ({
               sourceEncoding,
               rootTaskId,
               nextDepth,
+              followSymlinks,
             ),
           ),
         );
@@ -290,6 +292,7 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     rootTaskId: string,
     symlinkDepth = 0,
+    followSymlinks = false,
   ): Promise<number> => {
     if (cancelledTasksRef.current.has(rootTaskId)) return 0;
 
@@ -306,11 +309,11 @@ export const useSftpTransfers = ({
       if (file.name === ".." || file.name === ".") continue;
       if (file.type === "directory") {
         subdirPromises.push(
-          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth),
+          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth, followSymlinks),
         );
-      } else if (file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
+      } else if (followSymlinks && file.type === "symlink" && file.linkTarget === "directory" && symlinkDepth < MAX_SYMLINK_DEPTH) {
         subdirPromises.push(
-          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth + 1),
+          countDirectoryFiles(joinPath(sourcePath, file.name), sourceSftpId, sourceIsLocal, sourceEncoding, rootTaskId, symlinkDepth + 1, followSymlinks),
         );
       } else {
         count++;
@@ -334,6 +337,7 @@ export const useSftpTransfers = ({
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
     symlinkDepth = 0,
+    followSymlinks = false, // Only true for downloadToLocal — uploads/copies treat symlinks as files
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -369,15 +373,16 @@ export const useSftpTransfers = ({
 
     // Filter both "." and ".." — some SFTP servers include "." in readdir
     const filtered = files.filter((f) => f.name !== ".." && f.name !== ".");
-    // Recurse into real directories and symlink directories (with depth guard).
-    // Symlink directories that exceed the depth limit are skipped entirely
-    // (not treated as files — transferFile cannot handle directories).
+    // Separate directories from files.
+    // Symlink directories are only followed when followSymlinks is true
+    // (downloadToLocal). Uploads/copies treat symlinks as regular entries
+    // to preserve existing behavior and avoid expanding symlinked trees.
     const dirs: SftpFileEntry[] = [];
     const regularFiles: SftpFileEntry[] = [];
     for (const f of filtered) {
       if (f.type === "directory") {
         dirs.push(f);
-      } else if (f.type === "symlink" && f.linkTarget === "directory") {
+      } else if (followSymlinks && f.type === "symlink" && f.linkTarget === "directory") {
         if (symlinkDepth < MAX_SYMLINK_DEPTH) {
           dirs.push(f);
         } else {
@@ -422,6 +427,7 @@ export const useSftpTransfers = ({
         targetEncoding,
         rootTaskId,
         isSymlink ? symlinkDepth + 1 : symlinkDepth,
+        followSymlinks,
       );
       totalErrors += subdirErrors;
     }
@@ -1212,6 +1218,8 @@ export const useSftpTransfers = ({
             false,
             sourceEncoding,
             task.id,
+            0,     // symlinkDepth
+            true,  // followSymlinks
           ).then((fileCount) => {
             if (!cancelledTasksRef.current.has(task.id)) {
               setTransfers((prev) =>
@@ -1229,6 +1237,8 @@ export const useSftpTransfers = ({
             sourceEncoding,
             "auto",      // targetEncoding
             task.id,
+            0,           // symlinkDepth
+            true,        // followSymlinks — download should expand symlink dirs
           );
         } else {
           await transferFile(
