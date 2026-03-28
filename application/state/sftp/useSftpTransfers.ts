@@ -85,6 +85,21 @@ export const useSftpTransfers = ({
     cancelledTasksRef.current.delete(taskId);
   }, []);
 
+  const resolveTaskEndpoints = useCallback((task: TransferTask) => {
+    const sourceTab = getTabByConnectionId(task.sourceConnectionId);
+    const targetTab = getTabByConnectionId(task.targetConnectionId);
+    if (!sourceTab?.pane.connection || !targetTab?.pane.connection) {
+      return null;
+    }
+
+    return {
+      sourceSide: sourceTab.side,
+      targetSide: targetTab.side,
+      sourcePane: sourceTab.pane,
+      targetPane: targetTab.pane,
+    };
+  }, [getTabByConnectionId]);
+
   const isTransferCancelledError = useCallback(
     (error: unknown): boolean =>
       error instanceof Error && error.message === "Transfer cancelled",
@@ -794,30 +809,27 @@ export const useSftpTransfers = ({
         endTime: undefined,
       };
 
-      const sourceSide = task.sourceConnectionId.startsWith("left") ? "left" : "right";
-      const targetSide = task.targetConnectionId.startsWith("left") ? "left" : "right";
-      const sourcePane = getActivePane(sourceSide as "left" | "right");
-      const targetPane = getActivePane(targetSide as "left" | "right");
+      const endpoints = resolveTaskEndpoints(task);
+      if (!endpoints) return;
+      const { targetSide, sourcePane, targetPane } = endpoints;
 
-      if (sourcePane?.connection && targetPane?.connection) {
-        const completionHandler = completionHandlersRef.current.get(transferId);
-        if (completionHandler) {
-          completionHandlersRef.current.set(retriedTask.id, completionHandler);
-          completionHandlersRef.current.delete(transferId);
-        }
-
-        setTransfers((prev) =>
-          prev.map((t) =>
-            t.id === transferId
-              ? retriedTask
-              : t,
-          ),
-        );
-        await processTransfer(retriedTask, sourcePane, targetPane, targetSide);
+      const completionHandler = completionHandlersRef.current.get(transferId);
+      if (completionHandler) {
+        completionHandlersRef.current.set(retriedTask.id, completionHandler);
+        completionHandlersRef.current.delete(transferId);
       }
+
+      setTransfers((prev) =>
+        prev.map((t) =>
+          t.id === transferId
+            ? retriedTask
+            : t,
+        ),
+      );
+      await processTransfer(retriedTask, sourcePane, targetPane, targetSide);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [getActivePane],
+    [resolveTaskEndpoints],
   );
 
   const clearCompletedTransfers = useCallback(() => {
@@ -936,19 +948,14 @@ export const useSftpTransfers = ({
         ),
       );
 
-      const sourceSide = updatedTask.sourceConnectionId.startsWith("left") ? "left" : "right";
-      const targetSide = updatedTask.targetConnectionId.startsWith("left") ? "left" : "right";
-      const sourcePane = getActivePane(sourceSide as "left" | "right");
-      const targetPane = getActivePane(targetSide as "left" | "right");
-
-      if (sourcePane?.connection && targetPane?.connection) {
-        setTimeout(async () => {
-          await processTransfer(updatedTask, sourcePane, targetPane, targetSide);
-        }, 100);
-      }
+      setTimeout(async () => {
+        const endpoints = resolveTaskEndpoints(updatedTask);
+        if (!endpoints) return;
+        await processTransfer(updatedTask, endpoints.sourcePane, endpoints.targetPane, endpoints.targetSide);
+      }, 100);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline; transfers/conflicts accessed via refs
-    [getActivePane],
+    [resolveTaskEndpoints],
   );
 
   const activeTransfersCount = useMemo(() => transfers.filter(

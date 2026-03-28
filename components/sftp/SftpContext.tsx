@@ -24,6 +24,7 @@ export interface SftpPaneCallbacks {
     onNavigateTo: (path: string) => void;
     onNavigateUp: () => void;
     onRefresh: () => void;
+    onRefreshTab: (tabId: string) => void;
     onSetFilenameEncoding: (encoding: SftpFilenameEncoding) => void;
     onOpenEntry: (entry: SftpFileEntry, fullPath?: string) => void;
     onToggleSelection: (fileName: string, multiSelect: boolean) => void;

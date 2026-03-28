@@ -409,11 +409,11 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     if (!pane.connection || pane.transferMutationToken === 0) return;
     if (pane.transferMutationToken === lastHandledTransferMutationTokenRef.current) return;
     lastHandledTransferMutationTokenRef.current = pane.transferMutationToken;
-    callbacks.onRefresh();
+    callbacks.onRefreshTab(pane.id);
     if (viewMode === 'tree') {
       requestTreeReload(undefined, true);
     }
-  }, [callbacks, pane.connection, pane.transferMutationToken, requestTreeReload, viewMode]);
+  }, [callbacks, pane.connection, pane.id, pane.transferMutationToken, requestTreeReload, viewMode]);
 
   if (!pane.connection) {
     return (

@@ -20,6 +20,8 @@ interface UseSftpViewPaneActionsResult {
   onNavigateUpRight: () => void;
   onRefreshLeft: () => void;
   onRefreshRight: () => void;
+  onRefreshTabLeft: (tabId: string) => void;
+  onRefreshTabRight: (tabId: string) => void;
   onSetFilenameEncodingLeft: (encoding: Parameters<SftpStateApi["setFilenameEncoding"]>[1]) => void;
   onSetFilenameEncodingRight: (encoding: Parameters<SftpStateApi["setFilenameEncoding"]>[1]) => void;
   onToggleSelectionLeft: (name: string, multi: boolean) => void;
@@ -136,6 +138,8 @@ export const useSftpViewPaneActions = ({
   const onNavigateUpRight = useCallback(() => sftpRef.current.navigateUp("right"), [sftpRef]);
   const onRefreshLeft = useCallback(() => sftpRef.current.refresh("left"), [sftpRef]);
   const onRefreshRight = useCallback(() => sftpRef.current.refresh("right"), [sftpRef]);
+  const onRefreshTabLeft = useCallback((tabId: string) => sftpRef.current.refresh("left", { tabId }), [sftpRef]);
+  const onRefreshTabRight = useCallback((tabId: string) => sftpRef.current.refresh("right", { tabId }), [sftpRef]);
   const onSetFilenameEncodingLeft = useCallback(
     (encoding: Parameters<SftpStateApi["setFilenameEncoding"]>[1]) =>
       sftpRef.current.setFilenameEncoding("left", encoding),
@@ -268,6 +272,8 @@ export const useSftpViewPaneActions = ({
     onNavigateUpRight,
     onRefreshLeft,
     onRefreshRight,
+    onRefreshTabLeft,
+    onRefreshTabRight,
     onSetFilenameEncodingLeft,
     onSetFilenameEncodingRight,
     onToggleSelectionLeft,

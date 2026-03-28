@@ -1276,14 +1276,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     contextTarget,
     pane.connection?.isLocal,
     pane.connection?.id,
-    pane.connection?.currentPath,
     toggleExpand,
     stableOnOpenEntry,
     stableOnRefresh,
     getActionPaths,
     toTransferSources,
-    applyLocalMoveMutation,
-    reloadExpandedPaths,
+    executeMoveAction,
   ]);
 
   return (
