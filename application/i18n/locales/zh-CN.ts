@@ -1119,6 +1119,13 @@ const zhCN: Messages = {
 
   // Settings > SFTP File Associations
   'settings.tab.sftpFileAssociations': 'SFTP',
+  'settings.sftp.defaultOpener': '默认文件打开方式',
+  'settings.sftp.defaultOpener.desc': '选择没有特定文件关联时的默认打开方式',
+  'settings.sftp.defaultOpener.ask': '每次询问',
+  'settings.sftp.defaultOpener.askDesc': '每次打开文件时弹出选择对话框',
+  'settings.sftp.defaultOpener.builtInDesc': '默认使用内置编辑器打开文本文件',
+  'settings.sftp.defaultOpener.systemApp': '选择应用程序...',
+  'settings.sftp.defaultOpener.systemAppDesc': '默认使用指定的外部应用程序打开文件',
   'settings.sftpFileAssociations.title': 'SFTP 文件关联',
   'settings.sftpFileAssociations.desc': '配置按扩展名打开文件的默认应用程序',
   'settings.sftpFileAssociations.extension': '扩展名',

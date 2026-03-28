@@ -783,6 +783,13 @@ const en: Messages = {
 
   // Settings > SFTP File Associations
   'settings.tab.sftpFileAssociations': 'SFTP',
+  'settings.sftp.defaultOpener': 'Default File Opener',
+  'settings.sftp.defaultOpener.desc': 'Choose the default application for opening files without a specific file association',
+  'settings.sftp.defaultOpener.ask': 'Always ask',
+  'settings.sftp.defaultOpener.askDesc': 'Show a dialog to choose an application each time',
+  'settings.sftp.defaultOpener.builtInDesc': 'Open text files in the built-in editor by default',
+  'settings.sftp.defaultOpener.systemApp': 'Choose Application...',
+  'settings.sftp.defaultOpener.systemAppDesc': 'Open files with a specific application by default',
   'settings.sftpFileAssociations.title': 'SFTP File Associations',
   'settings.sftpFileAssociations.desc': 'Configure default applications for opening files by extension',
   'settings.sftpFileAssociations.extension': 'Extension',

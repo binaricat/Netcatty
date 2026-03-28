@@ -28,16 +28,34 @@ const getOpenerLabel = (
 
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
-  const { getAllAssociations, removeAssociation, setOpenerForExtension } = useSftpFileAssociations();
+  const { getAllAssociations, removeAssociation, setOpenerForExtension, getDefaultOpener, setDefaultOpener, removeDefaultOpener } = useSftpFileAssociations();
   const { sftpDoubleClickBehavior, setSftpDoubleClickBehavior, sftpAutoSync, setSftpAutoSync, sftpShowHiddenFiles, setSftpShowHiddenFiles, sftpUseCompressedUpload, setSftpUseCompressedUpload, sftpAutoOpenSidebar, setSftpAutoOpenSidebar, sftpDefaultViewMode, setSftpDefaultViewMode } = useSettingsState();
   const associations = getAllAssociations();
+  const defaultOpener = getDefaultOpener();
   const [editingExtension, setEditingExtension] = useState<string | null>(null);
+  const [isSelectingDefaultApp, setIsSelectingDefaultApp] = useState(false);
 
   const handleRemove = useCallback((extension: string) => {
     if (confirm(t('settings.sftpFileAssociations.removeConfirm', { ext: extension === 'file' ? t('sftp.opener.noExtension') : extension }))) {
       removeAssociation(extension);
     }
   }, [removeAssociation, t]);
+
+  const handleSelectDefaultSystemApp = useCallback(async () => {
+    setIsSelectingDefaultApp(true);
+    try {
+      const bridge = netcattyBridge.get();
+      if (!bridge?.selectApplication) return;
+      const result = await bridge.selectApplication();
+      if (result) {
+        setDefaultOpener('system-app', { path: result.path, name: result.name });
+      }
+    } catch (e) {
+      console.error('Failed to select application:', e);
+    } finally {
+      setIsSelectingDefaultApp(false);
+    }
+  }, [setDefaultOpener]);
 
   const handleEdit = useCallback(async (extension: string) => {
     setEditingExtension(extension);
@@ -358,6 +376,97 @@ export default function SettingsFileAssociationsTab() {
               </div>
             </div>
           </button>
+        </div>
+
+        {/* Default opener section */}
+        <div className="space-y-4">
+          <SectionHeader title={t('settings.sftp.defaultOpener')} />
+          <p className="text-sm text-muted-foreground">
+            {t('settings.sftp.defaultOpener.desc')}
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => removeDefaultOpener()}
+              className={cn(
+                "w-full text-left p-4 rounded-lg border-2 transition-colors",
+                !defaultOpener
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-secondary/50"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0",
+                  !defaultOpener ? "border-primary" : "border-muted-foreground/30"
+                )}>
+                  {!defaultOpener && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-medium cursor-pointer">
+                    {t('settings.sftp.defaultOpener.ask')}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t('settings.sftp.defaultOpener.askDesc')}
+                  </p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setDefaultOpener('builtin-editor')}
+              className={cn(
+                "w-full text-left p-4 rounded-lg border-2 transition-colors",
+                defaultOpener?.openerType === 'builtin-editor'
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-secondary/50"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0",
+                  defaultOpener?.openerType === 'builtin-editor' ? "border-primary" : "border-muted-foreground/30"
+                )}>
+                  {defaultOpener?.openerType === 'builtin-editor' && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-medium cursor-pointer">
+                    {t('sftp.opener.builtInEditor')}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t('settings.sftp.defaultOpener.builtInDesc')}
+                  </p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={handleSelectDefaultSystemApp}
+              disabled={isSelectingDefaultApp}
+              className={cn(
+                "w-full text-left p-4 rounded-lg border-2 transition-colors",
+                defaultOpener?.openerType === 'system-app'
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-secondary/50"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "h-5 w-5 rounded-full border-2 flex items-center justify-center mt-0.5 shrink-0",
+                  defaultOpener?.openerType === 'system-app' ? "border-primary" : "border-muted-foreground/30"
+                )}>
+                  {defaultOpener?.openerType === 'system-app' && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                </div>
+                <div className="space-y-1">
+                  <Label className="font-medium cursor-pointer">
+                    {defaultOpener?.openerType === 'system-app' && defaultOpener.systemApp
+                      ? defaultOpener.systemApp.name
+                      : t('settings.sftp.defaultOpener.systemApp')}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t('settings.sftp.defaultOpener.systemAppDesc')}
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* File associations section */}

@@ -78,12 +78,39 @@ export function useSftpFileAssociations() {
   }, []);
 
   /**
-   * Get the opener entry for a file based on its extension
+   * Get the opener entry for a file based on its extension.
+   * Falls back to the default opener ("*") when no per-extension association exists.
    */
   const getOpenerForFile = useCallback((fileName: string): FileAssociationEntry | null => {
     const ext = getFileExtension(fileName);
-    return associations[ext] || null;
+    return associations[ext] || associations['*'] || null;
   }, [associations]);
+
+  /**
+   * Get the default (fallback) opener, if set.
+   */
+  const getDefaultOpener = useCallback((): FileAssociationEntry | null => {
+    return associations['*'] || null;
+  }, [associations]);
+
+  /**
+   * Set the default opener used when no per-extension association exists.
+   */
+  const setDefaultOpener = useCallback((openerType: FileOpenerType, systemApp?: SystemAppInfo) => {
+    updateAssociations({
+      ...snapshotRef.associations,
+      '*': { openerType, systemApp },
+    });
+  }, []);
+
+  /**
+   * Remove the default opener.
+   */
+  const removeDefaultOpener = useCallback(() => {
+    const next = { ...snapshotRef.associations };
+    delete next['*'];
+    updateAssociations(next);
+  }, []);
 
   /**
    * Set the opener type for a specific extension
@@ -109,14 +136,16 @@ export function useSftpFileAssociations() {
   }, []);
 
   /**
-   * Get all associations as an array
+   * Get all per-extension associations as an array (excludes the default opener).
    */
   const getAllAssociations = useCallback((): FileAssociation[] => {
-    return Object.entries(associations).map(([extension, entry]: [string, FileAssociationEntry]) => ({
-      extension,
-      openerType: entry.openerType,
-      systemApp: entry.systemApp,
-    }));
+    return Object.entries(associations)
+      .filter(([ext]) => ext !== '*')
+      .map(([extension, entry]: [string, FileAssociationEntry]) => ({
+        extension,
+        openerType: entry.openerType,
+        systemApp: entry.systemApp,
+      }));
   }, [associations]);
 
   /**
@@ -129,6 +158,9 @@ export function useSftpFileAssociations() {
   return {
     associations,
     getOpenerForFile,
+    getDefaultOpener,
+    setDefaultOpener,
+    removeDefaultOpener,
     setOpenerForExtension,
     removeAssociation,
     getAllAssociations,
