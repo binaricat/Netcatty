@@ -355,6 +355,13 @@ const en: Messages = {
   'settings.terminal.rendering.renderer.desc': 'Choose the terminal rendering technology. Auto will use Canvas on low-memory devices. Changes take effect on new terminal sessions.',
   'settings.terminal.rendering.auto': 'Auto',
 
+  // Settings > Terminal > Workspace Focus Indicator
+  'settings.terminal.section.workspaceFocus': 'Workspace Focus Indicator',
+  'settings.terminal.workspaceFocus.style': 'Focus indicator style',
+  'settings.terminal.workspaceFocus.style.desc': 'How to indicate which pane is focused in split view.',
+  'settings.terminal.workspaceFocus.dim': 'Dim unfocused panes',
+  'settings.terminal.workspaceFocus.border': 'Border on focused pane',
+
   // Settings > Terminal > Autocomplete
   'settings.terminal.section.autocomplete': 'Autocomplete',
   'settings.terminal.autocomplete.enabled': 'Enable autocomplete',

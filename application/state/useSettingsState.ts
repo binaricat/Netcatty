@@ -31,6 +31,7 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
+  STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_IMMERSIVE_MODE,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
@@ -349,6 +350,16 @@ export const useSettingsState = () => {
     notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, enabled);
   }, [notifySettingsChanged]);
 
+  const [workspaceFocusStyle, setWorkspaceFocusStyleState] = useState<'dim' | 'border'>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE);
+    return stored === 'border' ? 'border' : 'dim';
+  });
+  const setWorkspaceFocusStyle = useCallback((style: 'dim' | 'border') => {
+    setWorkspaceFocusStyleState(style);
+    localStorageAdapter.writeString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE, style);
+    notifySettingsChanged(STORAGE_KEY_WORKSPACE_FOCUS_STYLE, style);
+  }, [notifySettingsChanged]);
+
   const syncAppearanceFromStorage = useCallback(() => {
     const storedTheme = readStoredString(STORAGE_KEY_THEME);
     const nextTheme = storedTheme && isValidTheme(storedTheme) ? storedTheme : theme;
@@ -449,6 +460,10 @@ export const useSettingsState = () => {
       setImmersiveModeState(val);
       notifySettingsChanged(STORAGE_KEY_IMMERSIVE_MODE, val);
     }
+
+    // Workspace focus style
+    const storedFocusStyle = readStoredString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE);
+    if (storedFocusStyle === 'dim' || storedFocusStyle === 'border') setWorkspaceFocusStyleState(storedFocusStyle);
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
@@ -1201,6 +1216,8 @@ export const useSettingsState = () => {
     reapplyCurrentTheme,
     immersiveMode,
     setImmersiveMode,
+    workspaceFocusStyle,
+    setWorkspaceFocusStyle,
     // Opaque version that changes when any synced setting changes, used by useAutoSync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     settingsVersion: useMemo(() => Math.random(), [
@@ -1209,7 +1226,7 @@ export const useSettingsState = () => {
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
-      customThemes, immersiveMode,
+      customThemes, immersiveMode, workspaceFocusStyle,
     ]),
   };
 };

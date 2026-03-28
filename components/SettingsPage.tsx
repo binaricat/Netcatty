@@ -63,6 +63,8 @@ const SettingsTerminalTabContainer: React.FC<{ settings: SettingsState }> = ({ s
             terminalSettings={settings.terminalSettings}
             updateTerminalSetting={settings.updateTerminalSetting}
             availableFonts={availableFonts}
+            workspaceFocusStyle={settings.workspaceFocusStyle}
+            setWorkspaceFocusStyle={settings.setWorkspaceFocusStyle}
         />
     );
 };

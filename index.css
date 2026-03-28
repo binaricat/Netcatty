@@ -335,9 +335,25 @@ body {
   overflow: visible;
 }
 
-/* Dim terminal text in unfocused workspace panes */
+/* Dim terminal text in unfocused workspace panes (default) */
 .workspace-pane:not(:focus-within) .xterm-screen {
   opacity: 0.65;
+}
+/* Border-style focus indicator (opt-in via data attribute) */
+[data-workspace-focus="border"] .workspace-pane:not(:focus-within) .xterm-screen {
+  opacity: 1;
+}
+[data-workspace-focus="border"] .workspace-pane::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  pointer-events: none;
+  transition: border-color 120ms ease;
+  z-index: 40;
+}
+[data-workspace-focus="border"] .workspace-pane:focus-within::after {
+  border-color: hsl(var(--primary));
 }
 
 /* ── Streamdown code block overrides ── */

@@ -84,6 +84,8 @@ export default function SettingsTerminalTab(props: {
     value: TerminalSettings[K],
   ) => void;
   availableFonts: TerminalFont[];
+  workspaceFocusStyle: 'dim' | 'border';
+  setWorkspaceFocusStyle: (style: 'dim' | 'border') => void;
 }) {
   const {
     terminalThemeId,
@@ -95,6 +97,8 @@ export default function SettingsTerminalTab(props: {
     terminalSettings,
     updateTerminalSetting,
     availableFonts,
+    workspaceFocusStyle,
+    setWorkspaceFocusStyle,
   } = props;
   const { t } = useI18n();
 
@@ -866,6 +870,23 @@ export default function SettingsTerminalTab(props: {
         </SettingRow>
       </div>
       {/* Autocomplete */}
+      <SectionHeader title={t("settings.terminal.section.workspaceFocus")} />
+      <div className="space-y-1">
+        <SettingRow
+          label={t("settings.terminal.workspaceFocus.style")}
+          description={t("settings.terminal.workspaceFocus.style.desc")}
+        >
+          <Select
+            value={workspaceFocusStyle}
+            onChange={(v) => setWorkspaceFocusStyle(v as 'dim' | 'border')}
+            options={[
+              { value: 'dim', label: t("settings.terminal.workspaceFocus.dim") },
+              { value: 'border', label: t("settings.terminal.workspaceFocus.border") },
+            ]}
+          />
+        </SettingRow>
+      </div>
+
       <SectionHeader title={t("settings.terminal.section.autocomplete")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow

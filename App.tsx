@@ -201,7 +201,17 @@ function App({ settings }: { settings: SettingsState }) {
     sessionLogsFormat,
     reapplyCurrentTheme,
     immersiveMode,
+    workspaceFocusStyle,
   } = settings;
+
+  // Sync workspace focus indicator style to DOM for CSS targeting
+  useEffect(() => {
+    if (workspaceFocusStyle === 'border') {
+      document.documentElement.setAttribute('data-workspace-focus', 'border');
+    } else {
+      document.documentElement.removeAttribute('data-workspace-focus');
+    }
+  }, [workspaceFocusStyle]);
 
   const {
     hosts,
