@@ -616,6 +616,9 @@ export const useSettingsState = () => {
       if (key === STORAGE_KEY_IMMERSIVE_MODE && typeof value === 'boolean') {
         setImmersiveModeState((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_WORKSPACE_FOCUS_STYLE && (value === 'dim' || value === 'border')) {
+        setWorkspaceFocusStyleState((prev) => (prev === value ? prev : value));
+      }
     });
     return () => {
       try {
@@ -836,6 +839,12 @@ export const useSettingsState = () => {
         const newValue = e.newValue === 'true';
         if (newValue !== s.immersiveMode) {
           setImmersiveModeState(newValue);
+        }
+      }
+      // Sync workspace focus style from other windows
+      if (e.key === STORAGE_KEY_WORKSPACE_FOCUS_STYLE && e.newValue !== null) {
+        if (e.newValue === 'dim' || e.newValue === 'border') {
+          setWorkspaceFocusStyleState(e.newValue);
         }
       }
     };
