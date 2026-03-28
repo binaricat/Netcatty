@@ -320,6 +320,7 @@ export const useSftpTransfers = ({
 
   const MAX_SYMLINK_DEPTH = 32;
 
+  /** Returns number of failed child file transfers */
   const transferDirectory = async (
     task: TransferTask,
     sourceSftpId: string | null,
@@ -340,6 +341,8 @@ export const useSftpTransfers = ({
     if (symlinkDepth > MAX_SYMLINK_DEPTH) {
       throw new Error(`Symlink depth exceeds limit (${MAX_SYMLINK_DEPTH}), possible cycle: ${task.sourcePath}`);
     }
+
+    let totalErrors = 0;
 
     if (targetIsLocal) {
       try {
@@ -390,7 +393,7 @@ export const useSftpTransfers = ({
 
       // Only increment symlink depth when entering a symlink directory
       const isSymlink = dir.type === "symlink";
-      await transferDirectory(
+      const subdirErrors = await transferDirectory(
         childTask,
         sourceSftpId,
         targetSftpId,
@@ -401,6 +404,7 @@ export const useSftpTransfers = ({
         rootTaskId,
         isSymlink ? symlinkDepth + 1 : symlinkDepth,
       );
+      totalErrors += subdirErrors;
     }
 
     // Transfer files in parallel with concurrency limit
@@ -436,6 +440,9 @@ export const useSftpTransfers = ({
             progressMode: "bytes",
             parentTaskId: rootTaskId,
             totalBytes: fileSize,
+            // Inherit retryable from parent — downloadToLocal sets retryable: false
+            // because "local" targetConnectionId can't be resolved by retryTransfer
+            retryable: task.retryable,
           };
 
           // Register child in transfers array so UI can render it
@@ -496,10 +503,13 @@ export const useSftpTransfers = ({
       );
       await Promise.all(workers);
 
+      totalErrors += errors.length;
       if (errors.length > 0) {
         logger.debug?.("[SFTP] Some files in directory transfer failed", errors);
       }
     }
+
+    return totalErrors;
   };
 
   const processTransfer = async (
@@ -1158,6 +1168,9 @@ export const useSftpTransfers = ({
       setTransfers((prev) => [...prev, task]);
 
       const sourceEncoding = params.sourceEncoding ?? "auto";
+      // Mutable counter to track child failures outside React state,
+      // so the final status check doesn't depend on render timing.
+      let childFailureCount = 0;
 
       try {
         if (params.isDirectory) {
@@ -1176,7 +1189,7 @@ export const useSftpTransfers = ({
             }
           }).catch(() => {});
 
-          await transferDirectory(
+          childFailureCount = await transferDirectory(
             task,
             params.sftpId,
             null,       // targetSftpId = null (local)
@@ -1199,28 +1212,24 @@ export const useSftpTransfers = ({
           );
         }
 
-        // Determine final status inside the state updater so we see the
-        // latest child statuses (setTransfers batches may not have flushed
-        // to transfersRef yet).
-        let finalStatus: TransferStatus = "completed";
+        // Use childFailureCount (tracked outside React state) to determine
+        // final status reliably, regardless of render timing.
+        const hasFailures = childFailureCount > 0;
+        const finalStatus: TransferStatus = hasFailures ? "failed" : "completed";
         setTransfers((prev) => {
-          const children = prev.filter((t) => t.parentTaskId === task.id);
-          const hasFailedChildren = children.some((t) => t.status === "failed");
-          const completedCount = children.filter((t) => t.status === "completed").length;
-          finalStatus = hasFailedChildren ? "failed" : "completed";
+          const completedCount = prev.filter(
+            (t) => t.parentTaskId === task.id && t.status === "completed",
+          ).length;
           return prev.map((t) => {
             if (t.id !== task.id) return t;
-            // Use actual completed count as transferredBytes; if totalBytes
-            // hasn't been set by the background scan yet, use completedCount
-            // so the progress display is consistent.
             const finalTotal = t.totalBytes > 0 ? t.totalBytes : completedCount;
             return {
               ...t,
               status: finalStatus,
-              error: hasFailedChildren ? "Some files failed to transfer" : undefined,
+              error: hasFailures ? "Some files failed to transfer" : undefined,
               endTime: Date.now(),
               totalBytes: finalTotal,
-              transferredBytes: hasFailedChildren ? completedCount : finalTotal,
+              transferredBytes: hasFailures ? completedCount : finalTotal,
             };
           });
         });
