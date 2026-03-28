@@ -10,7 +10,7 @@
  * Used in TerminalLayer to provide SFTP alongside terminal sessions.
  */
 
-import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatHostPort } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
@@ -129,12 +129,14 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const autoSyncRef = useRef(sftpAutoSync);
   autoSyncRef.current = sftpAutoSync;
+  const panelRootRef = useRef<HTMLDivElement>(null);
+  const [hasPaneFocus, setHasPaneFocus] = useState(false);
 
   useSftpKeyboardShortcuts({
     keyBindings,
     hotkeyScheme,
     sftpRef,
-    isActive: isVisible,
+    isActive: isVisible && hasPaneFocus,
   });
 
   const { getOpenerForFile, setOpenerForExtension } = useSftpFileAssociations();
@@ -149,6 +151,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const handlePaneFocus = useCallback(() => {
     sftpFocusStore.setFocusedSide("left");
+    setHasPaneFocus(true);
   }, []);
 
   // NOTE: We intentionally do NOT sync to activeTabStore here.
@@ -156,9 +159,28 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // Writing to it here would corrupt SftpView's left pane visibility.
 
   useEffect(() => {
-    if (isVisible) {
-      sftpFocusStore.setFocusedSide("left");
+    if (!isVisible) {
+      setHasPaneFocus(false);
     }
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (panelRootRef.current?.contains(target)) {
+        sftpFocusStore.setFocusedSide("left");
+        setHasPaneFocus(true);
+      } else {
+        setHasPaneFocus(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
   }, [isVisible]);
 
   const {
@@ -533,6 +555,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       rightCallbacks={rightCallbacks}
     >
       <div
+        ref={panelRootRef}
         className="h-full flex flex-col bg-background overflow-hidden"
         style={isVisible ? undefined : { display: "none" }}
         aria-hidden={!isVisible}
@@ -576,7 +599,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
                 <SftpPaneView
                   side="left"
                   pane={pane}
-                  isPaneFocused={isVisible}
+                  isPaneFocused={isVisible && hasPaneFocus}
                   sftpDefaultViewMode={sftpDefaultViewMode}
                   showHeader
                   showEmptyHeader

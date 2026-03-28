@@ -171,7 +171,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                 )}
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-2">
-                <span className="truncate whitespace-nowrap text-[10px] font-medium text-foreground [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">
+                <span className="truncate whitespace-nowrap text-[10px] font-medium text-foreground">
                     {progressOverlayText}
                 </span>
             </div>
@@ -272,7 +272,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     return (
         <div className="border-t border-border/40 bg-background/60 px-3 py-2.5 backdrop-blur-sm">
             <div className="flex items-center gap-1">
-                <div className="flex h-5 w-5 items-center justify-center shrink-0">
+                <div className="flex h-5 w-5 items-center justify-center shrink-0 -translate-y-px">
                     {statusIcon}
                 </div>
 

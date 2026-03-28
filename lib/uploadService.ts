@@ -749,17 +749,35 @@ async function uploadEntries(
   // Filter to only file entries (directories are pre-created above)
   const fileEntries = sortedEntries.filter(e => !e.isDirectory && e.file);
 
-  // Create standalone task entries upfront so they're visible immediately
+  // Create standalone task entries upfront so they're visible immediately.
+  // Bundled child tasks are created lazily when upload actually starts, so
+  // large folder uploads don't flood React state before work begins.
   const standaloneTaskIds = new Map<string, string>(); // relativePath -> taskId
-  const bundledChildTaskIds = new Map<string, string>(); // relativePath -> taskId
   for (const entry of fileEntries) {
     const bundleTaskId = getBundleTaskId(entry);
-    const taskId = crypto.randomUUID();
-    if (bundleTaskId) {
-      bundledChildTaskIds.set(entry.relativePath, taskId);
-    } else {
+    if (!bundleTaskId) {
+      const taskId = crypto.randomUUID();
       standaloneTaskIds.set(entry.relativePath, taskId);
+      if (callbacks?.onTaskCreated) {
+        callbacks.onTaskCreated({
+          id: taskId,
+          fileName: entry.relativePath,
+          displayName: entry.relativePath,
+          isDirectory: false,
+          progressMode: 'bytes',
+          totalBytes: entry.file!.size,
+          transferredBytes: 0,
+          speed: 0,
+          fileCount: 1,
+          completedCount: 0,
+        });
+        pendingTaskIds.add(taskId);
+      }
     }
+  }
+
+  const createBundledChildTask = (entry: DropEntry, bundleTaskId: string): string => {
+    const taskId = crypto.randomUUID();
     if (callbacks?.onTaskCreated) {
       callbacks.onTaskCreated({
         id: taskId,
@@ -767,7 +785,7 @@ async function uploadEntries(
         displayName: entry.relativePath,
         isDirectory: false,
         progressMode: 'bytes',
-        parentTaskId: bundleTaskId ?? undefined,
+        parentTaskId: bundleTaskId,
         totalBytes: entry.file!.size,
         transferredBytes: 0,
         speed: 0,
@@ -776,7 +794,8 @@ async function uploadEntries(
       });
       pendingTaskIds.add(taskId);
     }
-  }
+    return taskId;
+  };
 
   const settleTask = (
     taskId: string,
@@ -800,7 +819,7 @@ async function uploadEntries(
         const entry = fileEntries[idx];
         const entryTargetPath = joinPath(targetPath, entry.relativePath);
         const bundleTaskId = getBundleTaskId(entry);
-        const bundledChildTaskId = bundledChildTaskIds.get(entry.relativePath) || "";
+        const bundledChildTaskId = bundleTaskId ? createBundledChildTask(entry, bundleTaskId) : "";
         const standaloneTransferId = standaloneTaskIds.get(entry.relativePath) || "";
         const fileTotalBytes = entry.file!.size;
 
