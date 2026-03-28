@@ -6,7 +6,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { STORAGE_KEY_SFTP_FILE_ASSOCIATIONS } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import type { FileAssociation, FileOpenerType, SystemAppInfo } from '../../lib/sftpFileUtils';
-import { getFileExtension } from '../../lib/sftpFileUtils';
+import { getFileExtension, isKnownBinaryFile } from '../../lib/sftpFileUtils';
 
 export interface FileAssociationEntry {
   openerType: FileOpenerType;
@@ -87,7 +87,13 @@ export function useSftpFileAssociations() {
    */
   const getOpenerForFile = useCallback((fileName: string): FileAssociationEntry | null => {
     const ext = getFileExtension(fileName);
-    return associations[ext] || associations[DEFAULT_OPENER_KEY] || null;
+    if (associations[ext]) return associations[ext];
+    // Fall back to default opener, but skip built-in editor for binary files
+    const fallback = associations[DEFAULT_OPENER_KEY];
+    if (fallback && fallback.openerType === 'builtin-editor' && isKnownBinaryFile(fileName)) {
+      return null;
+    }
+    return fallback || null;
   }, [associations]);
 
   /**
