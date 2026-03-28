@@ -341,6 +341,10 @@ export async function uploadFromDataTransfer(
     return [];
   }
 
+  if (!entries.some((entry) => !entry.isDirectory && entry.file)) {
+    callbacks?.onScanningEnd?.(scanningTaskId);
+  }
+
   // Check if this is a folder upload and compressed upload is enabled
   if (useCompressedUpload && !isLocal && sftpId) {
     const rootFolders = detectRootFolders(entries);
@@ -559,9 +563,11 @@ async function uploadEntries(
     transferredBytes: number;
     fileCount: number;
     completedCount: number;
+    failedCount: number;
     currentSpeed: number;
     completedFilesBytes: number;
   }>();
+  const pendingTaskIds = new Set<string>();
 
   // Create bundled tasks for each root folder
   const bundleTaskIds = new Map<string, string>(); // rootName -> bundleTaskId
@@ -589,6 +595,7 @@ async function uploadEntries(
       transferredBytes: 0,
       fileCount,
       completedCount: 0,
+      failedCount: 0,
       currentSpeed: 0,
       completedFilesBytes: 0,
     });
@@ -608,6 +615,7 @@ async function uploadEntries(
         fileCount,
         completedCount: 0,
       });
+      pendingTaskIds.add(bundleTaskId);
     }
   }
 
@@ -766,8 +774,18 @@ async function uploadEntries(
         fileCount: 1,
         completedCount: 0,
       });
+      pendingTaskIds.add(taskId);
     }
   }
+
+  const settleTask = (
+    taskId: string,
+    settle: (taskId: string) => void,
+  ) => {
+    if (!taskId) return;
+    if (!pendingTaskIds.delete(taskId)) return;
+    settle(taskId);
+  };
 
   const UPLOAD_CONCURRENCY = 4;
 
@@ -796,9 +814,9 @@ async function uploadEntries(
 
           if (uploadResult.cancelled) {
             wasCancelled = true;
-            if (bundledChildTaskId) callbacks?.onTaskCancelled?.(bundledChildTaskId);
-            if (bundleTaskId) callbacks?.onTaskCancelled?.(bundleTaskId);
-            if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskCancelled?.(standaloneTransferId);
+            settleTask(bundledChildTaskId, (taskId) => callbacks?.onTaskCancelled?.(taskId));
+            settleTask(bundleTaskId ?? "", (taskId) => callbacks?.onTaskCancelled?.(taskId));
+            settleTask(!bundleTaskId ? standaloneTransferId : "", (taskId) => callbacks?.onTaskCancelled?.(taskId));
             break;
           }
 
@@ -812,7 +830,7 @@ async function uploadEntries(
           if (bundleTaskId) {
             const progress = bundleProgress.get(bundleTaskId);
             if (bundledChildTaskId) {
-              callbacks?.onTaskCompleted?.(bundledChildTaskId, fileTotalBytes);
+              settleTask(bundledChildTaskId, (taskId) => callbacks?.onTaskCompleted?.(taskId, fileTotalBytes));
             }
             if (progress) {
               progress.completedCount++;
@@ -826,7 +844,7 @@ async function uploadEntries(
                   speed: 0,
                   percent: 100,
                 });
-                callbacks?.onTaskCompleted?.(bundleTaskId, progress.fileCount);
+                settleTask(bundleTaskId, (taskId) => callbacks?.onTaskCompleted?.(taskId, progress.fileCount));
               } else {
                 callbacks?.onTaskProgress?.(bundleTaskId, {
                   transferred: progress.completedCount,
@@ -837,22 +855,29 @@ async function uploadEntries(
               }
             }
           } else if (standaloneTransferId) {
-            callbacks?.onTaskCompleted?.(standaloneTransferId, fileTotalBytes);
+            settleTask(standaloneTransferId, (taskId) => callbacks?.onTaskCompleted?.(taskId, fileTotalBytes));
           }
         } catch (error) {
           if (controller?.isCancelled()) {
             wasCancelled = true;
-            if (bundledChildTaskId) callbacks?.onTaskCancelled?.(bundledChildTaskId);
-            if (bundleTaskId) callbacks?.onTaskCancelled?.(bundleTaskId);
-            if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskCancelled?.(standaloneTransferId);
+            settleTask(bundledChildTaskId, (taskId) => callbacks?.onTaskCancelled?.(taskId));
+            settleTask(bundleTaskId ?? "", (taskId) => callbacks?.onTaskCancelled?.(taskId));
+            settleTask(!bundleTaskId ? standaloneTransferId : "", (taskId) => callbacks?.onTaskCancelled?.(taskId));
             break;
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error);
           results.push({ fileName: entry.relativePath, success: false, error: errorMessage });
 
-          if (bundledChildTaskId) callbacks?.onTaskFailed?.(bundledChildTaskId, errorMessage);
-          if (!bundleTaskId && standaloneTransferId) callbacks?.onTaskFailed?.(standaloneTransferId, errorMessage);
+          if (bundleTaskId) {
+            const progress = bundleProgress.get(bundleTaskId);
+            if (progress) {
+              progress.failedCount++;
+            }
+          }
+
+          settleTask(bundledChildTaskId, (taskId) => callbacks?.onTaskFailed?.(taskId, errorMessage));
+          settleTask(!bundleTaskId ? standaloneTransferId : "", (taskId) => callbacks?.onTaskFailed?.(taskId, errorMessage));
         }
       }
     };
@@ -863,13 +888,25 @@ async function uploadEntries(
     );
     await Promise.all(workers);
 
-    // Mark any remaining incomplete bundles as cancelled if upload was cancelled
-    if (wasCancelled) {
-      for (const [, bundleTaskId] of bundleTaskIds) {
-        const progress = bundleProgress.get(bundleTaskId);
-        if (progress && progress.completedCount < progress.fileCount) {
-          callbacks?.onTaskCancelled?.(bundleTaskId);
+    if (!wasCancelled) {
+      for (const [bundleTaskId, progress] of bundleProgress) {
+        if (progress.failedCount > 0) {
+          settleTask(bundleTaskId, (taskId) => {
+            callbacks?.onTaskFailed?.(
+              taskId,
+              progress.failedCount === progress.fileCount
+                ? `All ${progress.fileCount} files failed`
+                : `${progress.failedCount} of ${progress.fileCount} files failed`,
+            );
+          });
         }
+      }
+    }
+
+    // Mark any remaining incomplete tasks as cancelled if upload was cancelled
+    if (wasCancelled) {
+      for (const pendingTaskId of Array.from(pendingTaskIds)) {
+        settleTask(pendingTaskId, (taskId) => callbacks?.onTaskCancelled?.(taskId));
       }
     }
   } finally {

@@ -574,16 +574,13 @@ export async function extractDropEntries(
   // Build a map of file/folder name to path from the original files in DataTransfer.files
   const filePathMap = new Map<string, string>();
   const filesWithPath = dataTransfer.files;
-  console.log('[extractDropEntries] DataTransfer.files count:', filesWithPath.length);
   for (let i = 0; i < filesWithPath.length; i++) {
     const f = filesWithPath[i];
     const path = getPathForFile(f);
-    console.log('[extractDropEntries] File:', { name: f.name, path, size: f.size });
     if (path) {
       filePathMap.set(f.name, path);
     }
   }
-  console.log('[extractDropEntries] filePathMap:', Object.fromEntries(filePathMap));
 
   // Check if webkitGetAsEntry is supported (for folder access)
   if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === 'function') {
@@ -611,13 +608,11 @@ export async function extractDropEntries(
         const directPath = getPathForFile(result.file);
         if (directPath) {
           (result.file as File & { path?: string }).path = directPath;
-          console.log('[extractDropEntries] Direct path for:', { relativePath: result.relativePath, path: directPath });
         } else {
           // Fallback: try to reconstruct from root folder path
           const pathParts = result.relativePath.split('/');
           const rootName = pathParts[0];
           const rootPath = filePathMap.get(rootName);
-          console.log('[extractDropEntries] Fallback matching:', { relativePath: result.relativePath, rootName, rootPath });
 
           if (rootPath) {
             if (pathParts.length === 1) {

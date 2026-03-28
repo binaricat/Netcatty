@@ -74,11 +74,10 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
   const shouldVirtualize =
     childTasks.length > CHILD_VIRTUALIZE_THRESHOLD && viewportHeight > 0;
 
-  const { startIndex, endIndex, visibleTasks } = useMemo(() => {
+  const { startIndex, visibleTasks } = useMemo(() => {
     if (!shouldVirtualize) {
       return {
         startIndex: 0,
-        endIndex: childTasks.length - 1,
         visibleTasks: childTasks,
       };
     }
@@ -93,7 +92,6 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
 
     return {
       startIndex: start,
-      endIndex: end,
       visibleTasks: childTasks.slice(start, end + 1),
     };
   }, [childTasks, contentTop, scrollTop, shouldVirtualize, viewportHeight]);
