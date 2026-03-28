@@ -87,6 +87,8 @@ export const useSftpTransfers = ({
 
   // Track cancelled task IDs for checking during async operations
   const cancelledTasksRef = useRef<Set<string>>(new Set());
+  // Track active child transfer IDs per parent (outside React state for immediate visibility)
+  const activeChildIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const transfersRef = useRef(transfers);
   transfersRef.current = transfers;
   const conflictsRef = useRef(conflicts);
@@ -411,6 +413,12 @@ export const useSftpTransfers = ({
           const fileId = crypto.randomUUID();
           const fileSize = getEntrySize(file);
 
+          // Track child ID outside React state for immediate cancellation visibility
+          if (!activeChildIdsRef.current.has(rootTaskId)) {
+            activeChildIdsRef.current.set(rootTaskId, new Set());
+          }
+          activeChildIdsRef.current.get(rootTaskId)!.add(fileId);
+
           const childTask: TransferTask = {
             ...task,
             id: fileId,
@@ -445,6 +453,7 @@ export const useSftpTransfers = ({
               rootTaskId,
             );
 
+            activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);
             // Mark child as completed & update parent file count
             setTransfers((prev) => {
               const updated = prev.map((t) => {
@@ -459,6 +468,7 @@ export const useSftpTransfers = ({
               return updated;
             });
           } catch (err) {
+            activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);
             // Mark child as failed
             setTransfers((prev) =>
               prev.map((t) =>
@@ -908,11 +918,22 @@ export const useSftpTransfers = ({
       setConflicts((prev) => prev.filter((c) => c.transferId !== transferId));
 
       if (netcattyBridge.get()?.cancelTransfer) {
-        // Cancel parent and all active child streams at the backend
+        // Cancel parent and all active child streams at the backend.
+        // Use activeChildIdsRef for immediate visibility (not subject to
+        // React state batching delays like transfersRef).
         const idsToCancel = [transferId];
+        const trackedChildren = activeChildIdsRef.current.get(transferId);
+        if (trackedChildren) {
+          for (const childId of trackedChildren) {
+            idsToCancel.push(childId);
+            cancelledTasksRef.current.add(childId);
+          }
+        }
+        // Also check rendered state as fallback for transfers started
+        // via other paths (e.g. startTransfer/processTransfer)
         const currentTransfers = transfersRef.current;
         for (const t of currentTransfers) {
-          if (t.parentTaskId === transferId && (t.status === "transferring" || t.status === "pending")) {
+          if (t.parentTaskId === transferId && (t.status === "transferring" || t.status === "pending") && !idsToCancel.includes(t.id)) {
             idsToCancel.push(t.id);
           }
         }
@@ -1172,13 +1193,16 @@ export const useSftpTransfers = ({
           );
         }
 
-        // Check if any child tasks failed
-        const hasFailedChildren = transfersRef.current.some(
-          (t) => t.parentTaskId === task.id && t.status === "failed",
-        );
-        const finalStatus: TransferStatus = hasFailedChildren ? "failed" : "completed";
-        setTransfers((prev) =>
-          prev.map((t) =>
+        // Determine final status inside the state updater so we see the
+        // latest child statuses (setTransfers batches may not have flushed
+        // to transfersRef yet).
+        let finalStatus: TransferStatus = "completed";
+        setTransfers((prev) => {
+          const hasFailedChildren = prev.some(
+            (t) => t.parentTaskId === task.id && t.status === "failed",
+          );
+          finalStatus = hasFailedChildren ? "failed" : "completed";
+          return prev.map((t) =>
             t.id === task.id
               ? {
                   ...t,
@@ -1188,10 +1212,12 @@ export const useSftpTransfers = ({
                   transferredBytes: t.totalBytes,
                 }
               : t,
-          ),
-        );
+          );
+        });
+        activeChildIdsRef.current.delete(task.id);
         return finalStatus;
       } catch (err) {
+        activeChildIdsRef.current.delete(task.id);
         const isCancelled = cancelledTasksRef.current.has(task.id);
         setTransfers((prev) =>
           prev.map((t) =>
