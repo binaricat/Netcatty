@@ -733,20 +733,17 @@ export const useSftpTransfers = ({
           task.id, // rootTaskId - this is the top-level task
         );
 
-        const dirStatus: TransferStatus = dirErrors > 0 ? "failed" : "completed";
-        setTransfers((prev) => prev.map((t) => {
-          if (t.id !== task.id) return t;
-          return {
-            ...t,
-            status: dirStatus,
-            error: dirErrors > 0 ? "Some files failed to transfer" : undefined,
-            endTime: Date.now(),
-            transferredBytes: dirErrors > 0 ? t.transferredBytes : t.totalBytes,
-            speed: 0,
-          };
-        }));
-
         if (dirErrors > 0) {
+          setTransfers((prev) => prev.map((t) => {
+            if (t.id !== task.id) return t;
+            return {
+              ...t,
+              status: "failed" as TransferStatus,
+              error: "Some files failed to transfer",
+              endTime: Date.now(),
+              speed: 0,
+            };
+          }));
           activeChildIdsRef.current.delete(task.id);
           return "failed";
         }
