@@ -70,6 +70,12 @@ function execSshCommandCancellable(sshClient, command, transfer) {
     sshClient.exec(command, (err, stream) => {
       if (err) return reject(err);
 
+      // If cancelled between exec() call and callback, kill immediately
+      if (transfer.cancelled) {
+        try { stream.close(); } catch { }
+        return reject(new Error('Transfer cancelled'));
+      }
+
       let stdout = '';
       let stderr = '';
 
