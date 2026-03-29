@@ -271,8 +271,9 @@ export const useCloudSync = (): CloudSyncHook => {
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
       // Race: if browser launch fails, surface the error immediately
+      let openTimer: ReturnType<typeof setTimeout> | null = null;
       const browserPromise = new Promise<never>((_resolve, reject) => {
-        setTimeout(async () => {
+        openTimer = setTimeout(async () => {
           try {
             await bridge?.openExternal(data.url);
           } catch (err) {
@@ -288,7 +289,7 @@ export const useCloudSync = (): CloudSyncHook => {
         // Complete auth with the received code
         await manager.completePKCEAuth('google', code, data.redirectUri);
       } finally {
-        // no cleanup needed
+        if (openTimer) clearTimeout(openTimer);
       }
     }
 
@@ -314,8 +315,9 @@ export const useCloudSync = (): CloudSyncHook => {
       const callbackPromise = startCallback(expectedState);
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
+      let openTimer: ReturnType<typeof setTimeout> | null = null;
       const browserPromise = new Promise<never>((_resolve, reject) => {
-        setTimeout(async () => {
+        openTimer = setTimeout(async () => {
           try {
             await bridge?.openExternal(data.url);
           } catch (err) {
@@ -331,7 +333,7 @@ export const useCloudSync = (): CloudSyncHook => {
         // Complete auth with the received code
         await manager.completePKCEAuth('onedrive', code, data.redirectUri);
       } finally {
-        // no cleanup needed
+        if (openTimer) clearTimeout(openTimer);
       }
     }
 
