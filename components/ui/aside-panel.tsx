@@ -218,7 +218,7 @@ export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
     return (
         <AsidePanelContext.Provider value={{ push, pop, replace, clear, canGoBack, currentItem }}>
             <div className={cn(
-                "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag",
+                "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
                 width,
                 className
             )}>
@@ -253,7 +253,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
 
     return (
         <div className={cn(
-            "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag",
+            "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
             width,
             className
         )}>
