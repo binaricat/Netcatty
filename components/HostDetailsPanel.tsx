@@ -984,9 +984,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             {!selectedIdentity && !form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
               <div className="space-y-1.5">
                 {form.identityFilePaths.map((keyPath, idx) => (
-                  <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
+                  <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60 min-w-0">
                     <FileKey size={14} className="text-primary shrink-0" />
-                    <span className="text-xs flex-1 truncate font-mono" title={keyPath}>
+                    <span className="text-xs flex-1 min-w-0 truncate font-mono" title={keyPath}>
                       {keyPath}
                     </span>
                     <Button
@@ -1179,10 +1179,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               selectedCredentialType === "localKeyFile" &&
               !form.identityFileId && (
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 min-w-0">
                     <input
                       type="text"
-                      className="flex-1 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
                       placeholder={t("hostDetails.credential.localKeyFilePlaceholder")}
                       value={newKeyFilePath}
                       onChange={(e) => setNewKeyFilePath(e.target.value)}
