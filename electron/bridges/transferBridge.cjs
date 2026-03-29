@@ -6,7 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel, execSshCommand } = require("./sftpBridge.cjs");
+const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel } = require("./sftpBridge.cjs");
 
 /**
  * Safely ensure a local directory exists.
@@ -740,14 +740,15 @@ async function startTransfer(event, payload, onProgress) {
             if (result.code === 0) {
               sendProgress(fileSize, fileSize);
               sameHostDone = true;
-            } else {
-              // cp not available on this remote — cache to skip future attempts
+            } else if (result.code === 127) {
+              // Exit 127 = command not found — cache to skip future attempts
               cpUnavailableSet.add(sourceSftpId);
             }
+            // Other non-zero exits (permission denied, disk full, etc.)
+            // fall through to download+upload without caching
           } catch (cpErr) {
             // If cancelled, re-throw; otherwise fall back to download+upload
             if (transfer.cancelled) throw cpErr;
-            cpUnavailableSet.add(sourceSftpId);
           }
         }
       }
@@ -843,6 +844,8 @@ async function sameHostCopyDirectory(event, payload) {
   }
 
   try {
+    if (cpUnavailableSet.has(sftpId)) return { success: false };
+
     const client = sftpClients.get(sftpId);
     if (!client) return { success: false };
 
@@ -867,6 +870,10 @@ async function sameHostCopyDirectory(event, payload) {
 
     try {
       const result = await execSshCommandCancellable(sshClient, command, transfer);
+      if (result.code === 127) {
+        cpUnavailableSet.add(sftpId);
+        return { success: false };
+      }
       if (result.code !== 0) {
         return { success: false };
       }
