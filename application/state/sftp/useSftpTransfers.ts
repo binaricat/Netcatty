@@ -748,12 +748,14 @@ export const useSftpTransfers = ({
         (!sourceEncoding || sourceEncoding === "utf-8") &&
         (!targetEncoding || targetEncoding === "utf-8");
 
+      // Try same-host directory optimization first; falls back to recursive transfer
+      // if remote cp is unavailable (e.g. Windows SSH servers).
+      let dirHandledBySameHost = false;
       if (task.isDirectory && sameHost && encodingSafeForExec && sourceSftpId) {
-        // Same-host directory optimization: single `cp -ra` command on the remote
         if (cancelledTasksRef.current.has(task.id)) {
           throw new Error("Transfer cancelled");
         }
-        await netcattyBridge.require().sameHostCopyDirectory!(
+        const result = await netcattyBridge.require().sameHostCopyDirectory!(
           sourceSftpId,
           task.sourcePath,
           task.targetPath,
@@ -763,7 +765,10 @@ export const useSftpTransfers = ({
         if (cancelledTasksRef.current.has(task.id)) {
           throw new Error("Transfer cancelled");
         }
-      } else if (task.isDirectory) {
+        dirHandledBySameHost = result.success;
+      }
+
+      if (task.isDirectory && !dirHandledBySameHost) {
         // For directory transfers, parent task uses:
         //   totalBytes = total file count (discovered async)
         //   transferredBytes = completed file count (incremented by child completions)

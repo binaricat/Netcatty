@@ -714,63 +714,67 @@ async function startTransfer(event, payload, onProgress) {
         readStream.pipe(writeStream);
       });
 
-    } else if (sourceType === 'sftp' && targetType === 'sftp' && sameHost
-      && (!sourceEncoding || sourceEncoding === 'utf-8')
-      && (!targetEncoding || targetEncoding === 'utf-8')) {
-      // Same-host optimization: use remote cp command instead of download+upload.
-      // Only safe for UTF-8 paths — non-UTF-8 encodings (e.g. gb18030) need
-      // encodePathForSession which exec() cannot use.
-      const sourceClient = sftpClients.get(sourceSftpId);
-      if (!sourceClient) throw new Error("Source SFTP session not found");
-
-      const sshClient = sourceClient.client;
-      if (!sshClient || typeof sshClient.exec !== 'function') {
-        throw new Error("SSH exec not available for same-host copy");
-      }
-
-      const dir = path.dirname(targetPath).replace(/\\/g, '/');
-      try { await ensureRemoteDirForSession(sourceSftpId, dir, targetEncoding || sourceEncoding); } catch { }
-
-      const escapedSource = sourcePath.replace(/'/g, "'\\''");
-      const escapedTarget = targetPath.replace(/'/g, "'\\''");
-      const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
-
-      const result = await execSshCommandCancellable(sshClient, command, transfer);
-      if (result.code !== 0) {
-        throw new Error(`Remote copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
-      }
-
-      sendProgress(fileSize, fileSize);
-
     } else if (sourceType === 'sftp' && targetType === 'sftp') {
-      const tempPath = path.join(os.tmpdir(), `netcatty-transfer-${transferId}`);
+      // Try same-host optimization first: remote cp via SSH exec.
+      // Falls back to download+upload if cp is unavailable (e.g. Windows SSH servers).
+      let sameHostDone = false;
+      if (sameHost
+        && (!sourceEncoding || sourceEncoding === 'utf-8')
+        && (!targetEncoding || targetEncoding === 'utf-8')) {
+        const srcClient = sftpClients.get(sourceSftpId);
+        const sshClient = srcClient?.client;
+        if (sshClient && typeof sshClient.exec === 'function') {
+          try {
+            const dir = path.dirname(targetPath).replace(/\\/g, '/');
+            try { await ensureRemoteDirForSession(sourceSftpId, dir, targetEncoding || sourceEncoding); } catch { }
 
-      const sourceClient = sftpClients.get(sourceSftpId);
-      const targetClient = sftpClients.get(targetSftpId);
-      if (!sourceClient) throw new Error("Source SFTP session not found");
-      if (!targetClient) throw new Error("Target SFTP session not found");
+            const escapedSource = sourcePath.replace(/'/g, "'\\''");
+            const escapedTarget = targetPath.replace(/'/g, "'\\''");
+            const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
 
-      const encodedSourcePath = encodePathForSession(sourceSftpId, sourcePath, sourceEncoding);
-      const downloadProgress = (transferred) => {
-        sendProgress(Math.floor(transferred / 2), fileSize);
-      };
-      await downloadFile(encodedSourcePath, tempPath, sourceClient, fileSize, transfer, downloadProgress);
-
-      if (transfer.cancelled) {
-        try { await fs.promises.unlink(tempPath); } catch { }
-        throw new Error('Transfer cancelled');
+            const result = await execSshCommandCancellable(sshClient, command, transfer);
+            if (result.code === 0) {
+              sendProgress(fileSize, fileSize);
+              sameHostDone = true;
+            }
+            // Non-zero exit: fall through to download+upload below
+          } catch (cpErr) {
+            // If cancelled, re-throw; otherwise fall back to download+upload
+            if (transfer.cancelled) throw cpErr;
+          }
+        }
       }
 
-      const dir = path.dirname(targetPath).replace(/\\/g, '/');
-      try { await ensureRemoteDirForSession(targetSftpId, dir, targetEncoding); } catch { }
+      if (!sameHostDone) {
+        const tempPath = path.join(os.tmpdir(), `netcatty-transfer-${transferId}`);
 
-      const encodedTargetPath = encodePathForSession(targetSftpId, targetPath, targetEncoding);
-      const uploadProgress = (transferred) => {
-        sendProgress(Math.floor(fileSize / 2) + Math.floor(transferred / 2), fileSize);
-      };
-      await uploadFile(tempPath, encodedTargetPath, targetClient, fileSize, transfer, uploadProgress);
+        const sourceClient = sftpClients.get(sourceSftpId);
+        const targetClient = sftpClients.get(targetSftpId);
+        if (!sourceClient) throw new Error("Source SFTP session not found");
+        if (!targetClient) throw new Error("Target SFTP session not found");
 
-      try { await fs.promises.unlink(tempPath); } catch { }
+        const encodedSourcePath = encodePathForSession(sourceSftpId, sourcePath, sourceEncoding);
+        const downloadProgress = (transferred) => {
+          sendProgress(Math.floor(transferred / 2), fileSize);
+        };
+        await downloadFile(encodedSourcePath, tempPath, sourceClient, fileSize, transfer, downloadProgress);
+
+        if (transfer.cancelled) {
+          try { await fs.promises.unlink(tempPath); } catch { }
+          throw new Error('Transfer cancelled');
+        }
+
+        const dir = path.dirname(targetPath).replace(/\\/g, '/');
+        try { await ensureRemoteDirForSession(targetSftpId, dir, targetEncoding); } catch { }
+
+        const encodedTargetPath = encodePathForSession(targetSftpId, targetPath, targetEncoding);
+        const uploadProgress = (transferred) => {
+          sendProgress(Math.floor(fileSize / 2) + Math.floor(transferred / 2), fileSize);
+        };
+        await uploadFile(tempPath, encodedTargetPath, targetClient, fileSize, transfer, uploadProgress);
+
+        try { await fs.promises.unlink(tempPath); } catch { }
+      }
 
     } else {
       throw new Error("Invalid transfer configuration");
@@ -833,11 +837,11 @@ async function sameHostCopyDirectory(event, payload) {
 
   try {
     const client = sftpClients.get(sftpId);
-    if (!client) throw new Error("SFTP session not found");
+    if (!client) return { success: false };
 
     const sshClient = client.client;
     if (!sshClient || typeof sshClient.exec !== 'function') {
-      throw new Error("SSH exec not available for same-host directory copy");
+      return { success: false };
     }
 
     if (transfer.cancelled) throw new Error("Transfer cancelled");
@@ -854,9 +858,14 @@ async function sameHostCopyDirectory(event, payload) {
     const escapedTarget = targetPath.replace(/'/g, "'\\''");
     const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
 
-    const result = await execSshCommandCancellable(sshClient, command, transfer);
-    if (result.code !== 0) {
-      throw new Error(`Remote directory copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
+    try {
+      const result = await execSshCommandCancellable(sshClient, command, transfer);
+      if (result.code !== 0) {
+        return { success: false };
+      }
+    } catch (cpErr) {
+      if (transfer.cancelled) throw cpErr;
+      return { success: false };
     }
 
     return { success: true };
