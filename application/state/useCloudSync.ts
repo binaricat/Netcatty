@@ -269,8 +269,12 @@ export const useCloudSync = (): CloudSyncHook => {
       const callbackPromise = startCallback(expectedState);
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
-      const openTimer = setTimeout(() => {
-        bridge?.openExternal(data.url);
+      const openTimer = setTimeout(async () => {
+        try {
+          await bridge?.openExternal(data.url);
+        } catch {
+          bridge?.cancelOAuthCallback?.();
+        }
       }, 100);
 
       try {
@@ -306,8 +310,12 @@ export const useCloudSync = (): CloudSyncHook => {
       const callbackPromise = startCallback(expectedState);
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
-      const openTimer = setTimeout(() => {
-        bridge?.openExternal(data.url);
+      const openTimer = setTimeout(async () => {
+        try {
+          await bridge?.openExternal(data.url);
+        } catch {
+          bridge?.cancelOAuthCallback?.();
+        }
       }, 100);
 
       try {
