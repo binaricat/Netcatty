@@ -802,7 +802,7 @@ export const useSftpTransfers = ({
         if (dirErrors > 0) {
           dirPartialFailure = true;
         }
-      } else {
+      } else if (!task.isDirectory) {
         await transferFile(
           task,
           sourceSftpId,
