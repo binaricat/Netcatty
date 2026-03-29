@@ -734,7 +734,7 @@ async function startTransfer(event, payload, onProgress) {
 
             const escapedSource = sourcePath.replace(/'/g, "'\\''");
             const escapedTarget = targetPath.replace(/'/g, "'\\''");
-            const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
+            const command = `cp -aL '${escapedSource}' '${escapedTarget}'`;
 
             const result = await execSshCommandCancellable(sshClient, command, transfer);
             if (result.code === 0) {
@@ -863,7 +863,7 @@ async function sameHostCopyDirectory(event, payload) {
     // Without "/.", `cp -ra source target` would create target/source/ when target exists.
     const escapedSource = sourcePath.replace(/'/g, "'\\''");
     const escapedTarget = targetPath.replace(/'/g, "'\\''");
-    const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
+    const command = `cp -raL '${escapedSource}/.' '${escapedTarget}/'`;
 
     try {
       const result = await execSshCommandCancellable(sshClient, command, transfer);
