@@ -986,7 +986,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 {form.identityFilePaths.map((keyPath, idx) => (
                   <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60 overflow-hidden">
                     <FileKey size={14} className="text-primary shrink-0" />
-                    <span className="text-xs flex-1 min-w-0 truncate font-mono" title={keyPath}>
+                    <span className="text-xs w-0 flex-1 truncate font-mono" title={keyPath}>
                       {keyPath}
                     </span>
                     <Button
