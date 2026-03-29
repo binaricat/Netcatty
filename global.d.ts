@@ -383,6 +383,7 @@ declare global {
         totalBytes?: number;
         sourceEncoding?: SftpFilenameEncoding;
         targetEncoding?: SftpFilenameEncoding;
+        sameHost?: boolean;
       },
       onProgress?: (transferred: number, total: number, speed: number) => void,
       onComplete?: () => void,

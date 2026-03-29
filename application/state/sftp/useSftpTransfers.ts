@@ -209,6 +209,7 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
+    sameHost?: boolean,
     onStreamProgress?: (transferred: number, total: number, speed: number) => void,
   ): Promise<void> => {
     // Check if task or root task was cancelled before starting
@@ -228,6 +229,7 @@ export const useSftpTransfers = ({
         totalBytes: task.totalBytes || undefined,
         sourceEncoding: sourceIsLocal ? undefined : sourceEncoding,
         targetEncoding: targetIsLocal ? undefined : targetEncoding,
+        sameHost: sameHost || undefined,
       };
 
       let lastProgressUpdate = 0;
@@ -343,6 +345,7 @@ export const useSftpTransfers = ({
     sourceEncoding: SftpFilenameEncoding,
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
+    sameHost?: boolean,
     symlinkDepth = 0,
     followSymlinks = false, // Only true for downloadToLocal — uploads/copies treat symlinks as files
   ) => {
@@ -433,6 +436,7 @@ export const useSftpTransfers = ({
         sourceEncoding,
         targetEncoding,
         rootTaskId,
+        sameHost,
         isSymlink ? symlinkDepth + 1 : symlinkDepth,
         followSymlinks,
       );
@@ -496,6 +500,7 @@ export const useSftpTransfers = ({
               sourceEncoding,
               targetEncoding,
               rootTaskId,
+              sameHost,
             );
 
             activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);
@@ -570,6 +575,14 @@ export const useSftpTransfers = ({
     const targetSftpId = targetPane.connection?.isLocal
       ? null
       : sftpSessionsRef.current.get(targetPane.connection!.id);
+
+    // Detect same-host: both sides connected to the same remote host
+    const sameHost = !!(
+      sourceSftpId && targetSftpId &&
+      !sourcePane.connection?.isLocal && !targetPane.connection?.isLocal &&
+      sourcePane.connection?.hostId && targetPane.connection?.hostId &&
+      sourcePane.connection.hostId === targetPane.connection.hostId
+    );
 
     if (!sourcePane.connection?.isLocal && !sourceSftpId) {
       const sourceSide = targetSide === "left" ? "right" : "left";
@@ -746,6 +759,7 @@ export const useSftpTransfers = ({
           sourceEncoding,
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
+          sameHost,
         );
 
         if (dirErrors > 0) {
@@ -761,6 +775,7 @@ export const useSftpTransfers = ({
           sourceEncoding,
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
+          sameHost,
         );
       }
 
@@ -1247,6 +1262,7 @@ export const useSftpTransfers = ({
             sourceEncoding,
             "auto",      // targetEncoding
             task.id,
+            false,       // sameHost
             0,           // symlinkDepth
             true,        // followSymlinks — download should expand symlink dirs
           );

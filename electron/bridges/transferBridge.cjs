@@ -6,7 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel } = require("./sftpBridge.cjs");
+const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel, execSshCommand } = require("./sftpBridge.cjs");
 
 /**
  * Safely ensure a local directory exists.
@@ -475,6 +475,7 @@ async function startTransfer(event, payload, onProgress) {
     totalBytes,
     sourceEncoding,
     targetEncoding,
+    sameHost,
   } = payload;
   const sender = event.sender;
 
@@ -672,6 +673,30 @@ async function startTransfer(event, payload, onProgress) {
         });
         readStream.pipe(writeStream);
       });
+
+    } else if (sourceType === 'sftp' && targetType === 'sftp' && sameHost) {
+      // Same-host optimization: use remote cp command instead of download+upload
+      const sourceClient = sftpClients.get(sourceSftpId);
+      if (!sourceClient) throw new Error("Source SFTP session not found");
+
+      const sshClient = sourceClient.client;
+      if (!sshClient || typeof sshClient.exec !== 'function') {
+        throw new Error("SSH exec not available for same-host copy");
+      }
+
+      const dir = path.dirname(targetPath).replace(/\\/g, '/');
+      try { await ensureRemoteDirForSession(sourceSftpId, dir, targetEncoding || sourceEncoding); } catch { }
+
+      const escapedSource = sourcePath.replace(/'/g, "'\\''");
+      const escapedTarget = targetPath.replace(/'/g, "'\\''");
+      const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
+
+      const result = await execSshCommand(sshClient, command);
+      if (result.code !== 0) {
+        throw new Error(`Remote copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
+      }
+
+      sendProgress(fileSize, fileSize);
 
     } else if (sourceType === 'sftp' && targetType === 'sftp') {
       const tempPath = path.join(os.tmpdir(), `netcatty-transfer-${transferId}`);

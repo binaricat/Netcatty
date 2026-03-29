@@ -1858,4 +1858,5 @@ module.exports = {
   renameSftp,
   statSftp,
   chmodSftp,
+  execSshCommand,
 };
