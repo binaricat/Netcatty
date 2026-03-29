@@ -270,22 +270,25 @@ export const useCloudSync = (): CloudSyncHook => {
       const callbackPromise = startCallback(expectedState);
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
-      const openTimer = setTimeout(async () => {
-        try {
-          await bridge?.openExternal(data.url);
-        } catch {
-          bridge?.cancelOAuthCallback?.();
-        }
-      }, 100);
+      // Race: if browser launch fails, surface the error immediately
+      const browserPromise = new Promise<never>((_resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            await bridge?.openExternal(data.url);
+          } catch (err) {
+            bridge?.cancelOAuthCallback?.();
+            reject(err instanceof Error ? err : new Error('Failed to open browser for authentication'));
+          }
+        }, 100);
+      });
 
       try {
-        // Wait for callback
-        const { code } = await callbackPromise;
+        const { code } = await Promise.race([callbackPromise, browserPromise]);
 
         // Complete auth with the received code
         await manager.completePKCEAuth('google', code, data.redirectUri);
       } finally {
-        clearTimeout(openTimer);
+        // no cleanup needed
       }
     }
 
@@ -311,22 +314,24 @@ export const useCloudSync = (): CloudSyncHook => {
       const callbackPromise = startCallback(expectedState);
 
       // Use system browser to avoid white-screen issues in popup windows (#563)
-      const openTimer = setTimeout(async () => {
-        try {
-          await bridge?.openExternal(data.url);
-        } catch {
-          bridge?.cancelOAuthCallback?.();
-        }
-      }, 100);
+      const browserPromise = new Promise<never>((_resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            await bridge?.openExternal(data.url);
+          } catch (err) {
+            bridge?.cancelOAuthCallback?.();
+            reject(err instanceof Error ? err : new Error('Failed to open browser for authentication'));
+          }
+        }, 100);
+      });
 
       try {
-        // Wait for callback
-        const { code } = await callbackPromise;
+        const { code } = await Promise.race([callbackPromise, browserPromise]);
 
         // Complete auth with the received code
         await manager.completePKCEAuth('onedrive', code, data.redirectUri);
       } finally {
-        clearTimeout(openTimer);
+        // no cleanup needed
       }
     }
 
