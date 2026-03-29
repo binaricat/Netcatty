@@ -50,6 +50,9 @@ let sftpClients = null;
 // Active transfers storage
 const activeTransfers = new Map();
 const isolatedDownloadChannelPools = new WeakMap();
+// Cache sftpIds where remote cp is known to be unavailable, so we skip
+// repeated failed exec attempts for each file in a multi-file transfer.
+const cpUnavailableSet = new Set();
 
 /**
  * Initialize the transfer bridge with dependencies
@@ -720,7 +723,8 @@ async function startTransfer(event, payload, onProgress) {
       let sameHostDone = false;
       if (sameHost
         && (!sourceEncoding || sourceEncoding === 'utf-8')
-        && (!targetEncoding || targetEncoding === 'utf-8')) {
+        && (!targetEncoding || targetEncoding === 'utf-8')
+        && !cpUnavailableSet.has(sourceSftpId)) {
         const srcClient = sftpClients.get(sourceSftpId);
         const sshClient = srcClient?.client;
         if (sshClient && typeof sshClient.exec === 'function') {
@@ -736,11 +740,14 @@ async function startTransfer(event, payload, onProgress) {
             if (result.code === 0) {
               sendProgress(fileSize, fileSize);
               sameHostDone = true;
+            } else {
+              // cp not available on this remote — cache to skip future attempts
+              cpUnavailableSet.add(sourceSftpId);
             }
-            // Non-zero exit: fall through to download+upload below
           } catch (cpErr) {
             // If cancelled, re-throw; otherwise fall back to download+upload
             if (transfer.cancelled) throw cpErr;
+            cpUnavailableSet.add(sourceSftpId);
           }
         }
       }
