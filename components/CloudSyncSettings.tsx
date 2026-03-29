@@ -279,6 +279,7 @@ interface ProviderCardProps {
     disabled?: boolean; // Disable connect button when another provider is connected
     onEdit?: () => void;
     onConnect: () => void;
+    onCancelConnect?: () => void;
     onDisconnect: () => void;
     onSync: () => void;
 }
@@ -296,6 +297,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
     disabled,
     onEdit,
     onConnect,
+    onCancelConnect,
     onDisconnect,
     onSync,
 }) => {
@@ -409,15 +411,27 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                         </Button>
                     </>
                 ) : (
-                    <Button
-                        size="sm"
-                        onClick={() => { onConnect(); }}
-                        className="gap-1"
-                        disabled={disabled || isConnecting}
-                    >
-                        {isConnecting ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-                        {isConnecting ? t('cloudSync.provider.connecting') : t('cloudSync.provider.connect')}
-                    </Button>
+                    {isConnecting && onCancelConnect ? (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={onCancelConnect}
+                            className="gap-1"
+                        >
+                            <X size={14} />
+                            {t('common.cancel')}
+                        </Button>
+                    ) : (
+                        <Button
+                            size="sm"
+                            onClick={() => { onConnect(); }}
+                            className="gap-1"
+                            disabled={disabled || isConnecting}
+                        >
+                            {isConnecting ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+                            {isConnecting ? t('cloudSync.provider.connecting') : t('cloudSync.provider.connect')}
+                        </Button>
+                    )}
                 )}
             </div>
         </div>
@@ -1088,6 +1102,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         error={sync.providers.google.error}
                         disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.google)}
                         onConnect={handleConnectGoogle}
+                        onCancelConnect={sync.cancelOAuthConnect}
                         onDisconnect={() => sync.disconnectProvider('google')}
                         onSync={() => handleSync('google')}
                     />
@@ -1104,6 +1119,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         error={sync.providers.onedrive.error}
                         disabled={sync.hasAnyConnectedProvider && !isProviderReadyForSync(sync.providers.onedrive)}
                         onConnect={handleConnectOneDrive}
+                        onCancelConnect={sync.cancelOAuthConnect}
                         onDisconnect={() => sync.disconnectProvider('onedrive')}
                         onSync={() => handleSync('onedrive')}
                     />

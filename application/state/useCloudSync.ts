@@ -81,6 +81,7 @@ export interface CloudSyncHook {
     code: string,
     redirectUri: string
   ) => Promise<void>;
+  cancelOAuthConnect: () => void;
   disconnectProvider: (provider: CloudProvider) => Promise<void>;
   resetProviderStatus: (provider: CloudProvider) => void;
 
@@ -356,6 +357,11 @@ export const useCloudSync = (): CloudSyncHook => {
     await manager.connectConfigProvider('s3', config);
   }, []);
   
+  const cancelOAuthConnect = useCallback(() => {
+    const bridge = netcattyBridge.get();
+    bridge?.cancelOAuthCallback?.();
+  }, []);
+
   // ========== Settings ==========
   
   const setAutoSync = useCallback((enabled: boolean, intervalMinutes?: number) => {
@@ -453,6 +459,7 @@ export const useCloudSync = (): CloudSyncHook => {
     connectWebDAV,
     connectS3,
     completePKCEAuth,
+    cancelOAuthConnect,
     disconnectProvider,
     resetProviderStatus,
 
