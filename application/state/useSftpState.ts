@@ -289,6 +289,7 @@ export const useSftpState = (
     refresh,
     clearCacheForConnection,
     sftpSessionsRef,
+    connectionCacheKeyMapRef,
     listLocalFiles,
     listRemoteFiles,
     handleSessionError,

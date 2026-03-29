@@ -22,6 +22,7 @@ interface UseSftpTransfersParams {
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   clearCacheForConnection: (connectionId: string) => void;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
+  connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
   handleSessionError: (side: "left" | "right", error: Error) => void;
@@ -78,6 +79,7 @@ export const useSftpTransfers = ({
   refresh,
   clearCacheForConnection,
   sftpSessionsRef,
+  connectionCacheKeyMapRef,
   listLocalFiles,
   listRemoteFiles,
   handleSessionError,
@@ -576,12 +578,20 @@ export const useSftpTransfers = ({
       ? null
       : sftpSessionsRef.current.get(targetPane.connection!.id);
 
-    // Detect same-host: both sides connected to the same remote host
+    // Detect same-host: both sides connected to the same remote endpoint.
+    // Use per-connection cache keys (hostname+port+protocol+sudo+username) instead of
+    // just hostId, because the same hostId can have different session-time overrides.
+    const sourceCacheKey = sourcePane.connection?.id
+      ? connectionCacheKeyMapRef.current.get(sourcePane.connection.id)
+      : undefined;
+    const targetCacheKey = targetPane.connection?.id
+      ? connectionCacheKeyMapRef.current.get(targetPane.connection.id)
+      : undefined;
     const sameHost = !!(
       sourceSftpId && targetSftpId &&
       !sourcePane.connection?.isLocal && !targetPane.connection?.isLocal &&
-      sourcePane.connection?.hostId && targetPane.connection?.hostId &&
-      sourcePane.connection.hostId === targetPane.connection.hostId
+      sourceCacheKey && targetCacheKey &&
+      sourceCacheKey === targetCacheKey
     );
 
     if (!sourcePane.connection?.isLocal && !sourceSftpId) {
@@ -731,7 +741,13 @@ export const useSftpTransfers = ({
 
       let dirPartialFailure = false;
 
-      if (task.isDirectory && sameHost && sourceSftpId) {
+      // Same-host exec-based paths are only safe for UTF-8 compatible encodings.
+      // Non-UTF-8 (e.g. gb18030) paths need encodePathForSession which exec() cannot use.
+      const encodingSafeForExec =
+        (!sourceEncoding || sourceEncoding === "utf-8" || sourceEncoding === "auto") &&
+        (!targetEncoding || targetEncoding === "utf-8" || targetEncoding === "auto");
+
+      if (task.isDirectory && sameHost && encodingSafeForExec && sourceSftpId) {
         // Same-host directory optimization: single `cp -ra` command on the remote
         await netcattyBridge.require().sameHostCopyDirectory!(
           sourceSftpId,

@@ -674,8 +674,12 @@ async function startTransfer(event, payload, onProgress) {
         readStream.pipe(writeStream);
       });
 
-    } else if (sourceType === 'sftp' && targetType === 'sftp' && sameHost) {
-      // Same-host optimization: use remote cp command instead of download+upload
+    } else if (sourceType === 'sftp' && targetType === 'sftp' && sameHost
+      && (!sourceEncoding || sourceEncoding === 'utf-8' || sourceEncoding === 'auto')
+      && (!targetEncoding || targetEncoding === 'utf-8' || targetEncoding === 'auto')) {
+      // Same-host optimization: use remote cp command instead of download+upload.
+      // Only safe for UTF-8 paths — non-UTF-8 encodings (e.g. gb18030) need
+      // encodePathForSession which exec() cannot use.
       const sourceClient = sftpClients.get(sourceSftpId);
       if (!sourceClient) throw new Error("Source SFTP session not found");
 
