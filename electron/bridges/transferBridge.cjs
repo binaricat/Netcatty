@@ -775,11 +775,43 @@ async function cancelTransfer(event, payload) {
 }
 
 /**
+ * Same-host directory copy: uses a single `cp -ra` command on the remote server
+ * instead of recursively transferring files one by one.
+ */
+async function sameHostCopyDirectory(event, payload) {
+  const { sftpId, sourcePath, targetPath, encoding } = payload;
+
+  const client = sftpClients.get(sftpId);
+  if (!client) throw new Error("SFTP session not found");
+
+  const sshClient = client.client;
+  if (!sshClient || typeof sshClient.exec !== 'function') {
+    throw new Error("SSH exec not available for same-host directory copy");
+  }
+
+  // Ensure target parent directory exists
+  const dir = path.dirname(targetPath).replace(/\\/g, '/');
+  try { await ensureRemoteDirForSession(sftpId, dir, encoding); } catch { }
+
+  const escapedSource = sourcePath.replace(/'/g, "'\\''");
+  const escapedTarget = targetPath.replace(/'/g, "'\\''");
+  const command = `cp -ra '${escapedSource}' '${escapedTarget}'`;
+
+  const result = await execSshCommand(sshClient, command);
+  if (result.code !== 0) {
+    throw new Error(`Remote directory copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
+  }
+
+  return { success: true };
+}
+
+/**
  * Register IPC handlers for transfer operations
  */
 function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:transfer:start", startTransfer);
   ipcMain.handle("netcatty:transfer:cancel", cancelTransfer);
+  ipcMain.handle("netcatty:transfer:same-host-copy-dir", sameHostCopyDirectory);
 }
 
 module.exports = {
@@ -787,4 +819,5 @@ module.exports = {
   registerHandlers,
   startTransfer,
   cancelTransfer,
+  sameHostCopyDirectory,
 };

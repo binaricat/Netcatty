@@ -741,6 +741,9 @@ const api = {
     cleanupTransferListeners(transferId);
     return ipcRenderer.invoke("netcatty:transfer:cancel", { transferId });
   },
+  sameHostCopyDirectory: async (sftpId, sourcePath, targetPath, encoding) => {
+    return ipcRenderer.invoke("netcatty:transfer:same-host-copy-dir", { sftpId, sourcePath, targetPath, encoding });
+  },
   // Compressed folder upload
   startCompressedUpload: async (options, onProgress, onComplete, onError) => {
     const { compressionId } = options;

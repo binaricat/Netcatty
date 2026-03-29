@@ -731,7 +731,15 @@ export const useSftpTransfers = ({
 
       let dirPartialFailure = false;
 
-      if (task.isDirectory) {
+      if (task.isDirectory && sameHost && sourceSftpId) {
+        // Same-host directory optimization: single `cp -ra` command on the remote
+        await netcattyBridge.require().sameHostCopyDirectory!(
+          sourceSftpId,
+          task.sourcePath,
+          task.targetPath,
+          sourceEncoding,
+        );
+      } else if (task.isDirectory) {
         // For directory transfers, parent task uses:
         //   totalBytes = total file count (discovered async)
         //   transferredBytes = completed file count (incremented by child completions)
