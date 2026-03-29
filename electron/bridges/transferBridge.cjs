@@ -58,6 +58,40 @@ function init(deps) {
   sftpClients = deps.sftpClients;
 }
 
+/**
+ * Execute an SSH command with cancellation support.
+ * Registers an abort hook on the transfer object that closes the exec stream,
+ * which sends SIGHUP to the remote process.
+ */
+function execSshCommandCancellable(sshClient, command, transfer) {
+  return new Promise((resolve, reject) => {
+    if (transfer.cancelled) return reject(new Error('Transfer cancelled'));
+
+    sshClient.exec(command, (err, stream) => {
+      if (err) return reject(err);
+
+      let stdout = '';
+      let stderr = '';
+
+      // Wire abort: closing the stream kills the remote process
+      const prevAbort = transfer.abort;
+      transfer.abort = () => {
+        try { stream.close(); } catch { }
+        if (typeof prevAbort === 'function') prevAbort();
+      };
+
+      stream.on('close', (code) => {
+        transfer.abort = prevAbort; // restore
+        if (transfer.cancelled) return reject(new Error('Transfer cancelled'));
+        resolve({ stdout, stderr, code });
+      });
+
+      stream.on('data', (data) => { stdout += data.toString(); });
+      stream.stderr.on('data', (data) => { stderr += data.toString(); });
+    });
+  });
+}
+
 async function openIsolatedSftpChannel(client) {
   const sshClient = client?.client;
   if (!sshClient || typeof sshClient.sftp !== "function") return null;
@@ -695,9 +729,7 @@ async function startTransfer(event, payload, onProgress) {
       const escapedTarget = targetPath.replace(/'/g, "'\\''");
       const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
 
-      if (transfer.cancelled) throw new Error('Transfer cancelled');
-      const result = await execSshCommand(sshClient, command);
-      if (transfer.cancelled) throw new Error('Transfer cancelled');
+      const result = await execSshCommandCancellable(sshClient, command, transfer);
       if (result.code !== 0) {
         throw new Error(`Remote copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
       }
@@ -809,8 +841,6 @@ async function sameHostCopyDirectory(event, payload) {
     const targetDir = targetPath.replace(/\\/g, '/');
     try { await ensureRemoteDirForSession(sftpId, targetDir, encoding); } catch { }
 
-    if (transfer.cancelled) throw new Error("Transfer cancelled");
-
     // Use "source/." to copy directory *contents* into target, preserving merge
     // semantics consistent with the recursive per-file transfer path.
     // Without "/.", `cp -ra source target` would create target/source/ when target exists.
@@ -818,8 +848,7 @@ async function sameHostCopyDirectory(event, payload) {
     const escapedTarget = targetPath.replace(/'/g, "'\\''");
     const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
 
-    const result = await execSshCommand(sshClient, command);
-    if (transfer.cancelled) throw new Error("Transfer cancelled");
+    const result = await execSshCommandCancellable(sshClient, command, transfer);
     if (result.code !== 0) {
       throw new Error(`Remote directory copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
     }
