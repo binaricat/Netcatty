@@ -279,9 +279,8 @@ function startOAuthCallback(expectedState) {
       res.end(
         renderOAuthPage({
           title: "Authorization Complete",
-          message: "You are signed in and ready to sync.",
+          message: "You are signed in and ready to sync. You can close this tab now.",
           status: "success",
-          autoClose: true,
         })
       );
 
