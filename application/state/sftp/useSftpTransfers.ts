@@ -741,20 +741,27 @@ export const useSftpTransfers = ({
 
       let dirPartialFailure = false;
 
-      // Same-host exec-based paths are only safe for UTF-8 compatible encodings.
-      // Non-UTF-8 (e.g. gb18030) paths need encodePathForSession which exec() cannot use.
+      // Same-host exec-based paths are only safe for explicit UTF-8 encodings.
+      // "auto" can resolve to non-UTF-8 (e.g. gb18030) at the session level,
+      // and non-UTF-8 paths need encodePathForSession which exec() cannot use.
       const encodingSafeForExec =
-        (!sourceEncoding || sourceEncoding === "utf-8" || sourceEncoding === "auto") &&
-        (!targetEncoding || targetEncoding === "utf-8" || targetEncoding === "auto");
+        (!sourceEncoding || sourceEncoding === "utf-8") &&
+        (!targetEncoding || targetEncoding === "utf-8");
 
       if (task.isDirectory && sameHost && encodingSafeForExec && sourceSftpId) {
         // Same-host directory optimization: single `cp -ra` command on the remote
+        if (cancelledTasksRef.current.has(task.id)) {
+          throw new Error("Transfer cancelled");
+        }
         await netcattyBridge.require().sameHostCopyDirectory!(
           sourceSftpId,
           task.sourcePath,
           task.targetPath,
           sourceEncoding,
         );
+        if (cancelledTasksRef.current.has(task.id)) {
+          throw new Error("Transfer cancelled");
+        }
       } else if (task.isDirectory) {
         // For directory transfers, parent task uses:
         //   totalBytes = total file count (discovered async)

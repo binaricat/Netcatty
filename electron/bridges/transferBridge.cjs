@@ -675,8 +675,8 @@ async function startTransfer(event, payload, onProgress) {
       });
 
     } else if (sourceType === 'sftp' && targetType === 'sftp' && sameHost
-      && (!sourceEncoding || sourceEncoding === 'utf-8' || sourceEncoding === 'auto')
-      && (!targetEncoding || targetEncoding === 'utf-8' || targetEncoding === 'auto')) {
+      && (!sourceEncoding || sourceEncoding === 'utf-8')
+      && (!targetEncoding || targetEncoding === 'utf-8')) {
       // Same-host optimization: use remote cp command instead of download+upload.
       // Only safe for UTF-8 paths — non-UTF-8 encodings (e.g. gb18030) need
       // encodePathForSession which exec() cannot use.
@@ -793,13 +793,17 @@ async function sameHostCopyDirectory(event, payload) {
     throw new Error("SSH exec not available for same-host directory copy");
   }
 
-  // Ensure target parent directory exists
-  const dir = path.dirname(targetPath).replace(/\\/g, '/');
-  try { await ensureRemoteDirForSession(sftpId, dir, encoding); } catch { }
+  // Ensure target directory itself exists (not just its parent),
+  // so cp copies contents into it rather than creating a nested subdirectory.
+  const targetDir = targetPath.replace(/\\/g, '/');
+  try { await ensureRemoteDirForSession(sftpId, targetDir, encoding); } catch { }
 
+  // Use "source/." to copy directory *contents* into target, preserving merge
+  // semantics consistent with the recursive per-file transfer path.
+  // Without "/.", `cp -ra source target` would create target/source/ when target exists.
   const escapedSource = sourcePath.replace(/'/g, "'\\''");
   const escapedTarget = targetPath.replace(/'/g, "'\\''");
-  const command = `cp -ra '${escapedSource}' '${escapedTarget}'`;
+  const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
 
   const result = await execSshCommand(sshClient, command);
   if (result.code !== 0) {
