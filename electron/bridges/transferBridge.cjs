@@ -695,7 +695,9 @@ async function startTransfer(event, payload, onProgress) {
       const escapedTarget = targetPath.replace(/'/g, "'\\''");
       const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
 
+      if (transfer.cancelled) throw new Error('Transfer cancelled');
       const result = await execSshCommand(sshClient, command);
+      if (transfer.cancelled) throw new Error('Transfer cancelled');
       if (result.code !== 0) {
         throw new Error(`Remote copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
       }
@@ -783,34 +785,51 @@ async function cancelTransfer(event, payload) {
  * instead of recursively transferring files one by one.
  */
 async function sameHostCopyDirectory(event, payload) {
-  const { sftpId, sourcePath, targetPath, encoding } = payload;
+  const { sftpId, sourcePath, targetPath, encoding, transferId } = payload;
 
-  const client = sftpClients.get(sftpId);
-  if (!client) throw new Error("SFTP session not found");
-
-  const sshClient = client.client;
-  if (!sshClient || typeof sshClient.exec !== 'function') {
-    throw new Error("SSH exec not available for same-host directory copy");
+  // Register in activeTransfers so cancelTransfer can flag it
+  const transfer = { cancelled: false };
+  if (transferId) {
+    activeTransfers.set(transferId, transfer);
   }
 
-  // Ensure target directory itself exists (not just its parent),
-  // so cp copies contents into it rather than creating a nested subdirectory.
-  const targetDir = targetPath.replace(/\\/g, '/');
-  try { await ensureRemoteDirForSession(sftpId, targetDir, encoding); } catch { }
+  try {
+    const client = sftpClients.get(sftpId);
+    if (!client) throw new Error("SFTP session not found");
 
-  // Use "source/." to copy directory *contents* into target, preserving merge
-  // semantics consistent with the recursive per-file transfer path.
-  // Without "/.", `cp -ra source target` would create target/source/ when target exists.
-  const escapedSource = sourcePath.replace(/'/g, "'\\''");
-  const escapedTarget = targetPath.replace(/'/g, "'\\''");
-  const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
+    const sshClient = client.client;
+    if (!sshClient || typeof sshClient.exec !== 'function') {
+      throw new Error("SSH exec not available for same-host directory copy");
+    }
 
-  const result = await execSshCommand(sshClient, command);
-  if (result.code !== 0) {
-    throw new Error(`Remote directory copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
+
+    // Ensure target directory itself exists (not just its parent),
+    // so cp copies contents into it rather than creating a nested subdirectory.
+    const targetDir = targetPath.replace(/\\/g, '/');
+    try { await ensureRemoteDirForSession(sftpId, targetDir, encoding); } catch { }
+
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
+
+    // Use "source/." to copy directory *contents* into target, preserving merge
+    // semantics consistent with the recursive per-file transfer path.
+    // Without "/.", `cp -ra source target` would create target/source/ when target exists.
+    const escapedSource = sourcePath.replace(/'/g, "'\\''");
+    const escapedTarget = targetPath.replace(/'/g, "'\\''");
+    const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
+
+    const result = await execSshCommand(sshClient, command);
+    if (transfer.cancelled) throw new Error("Transfer cancelled");
+    if (result.code !== 0) {
+      throw new Error(`Remote directory copy failed (exit ${result.code}): ${result.stderr || 'unknown error'}`);
+    }
+
+    return { success: true };
+  } finally {
+    if (transferId) {
+      activeTransfers.delete(transferId);
+    }
   }
-
-  return { success: true };
 }
 
 /**

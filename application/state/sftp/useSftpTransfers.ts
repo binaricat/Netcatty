@@ -758,6 +758,7 @@ export const useSftpTransfers = ({
           task.sourcePath,
           task.targetPath,
           sourceEncoding,
+          task.id,
         );
         if (cancelledTasksRef.current.has(task.id)) {
           throw new Error("Transfer cancelled");
