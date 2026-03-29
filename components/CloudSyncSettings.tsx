@@ -410,28 +410,26 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                             <CloudOff size={14} />
                         </Button>
                     </>
+                ) : isConnecting && onCancelConnect ? (
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onCancelConnect}
+                        className="gap-1"
+                    >
+                        <X size={14} />
+                        {t('common.cancel')}
+                    </Button>
                 ) : (
-                    {isConnecting && onCancelConnect ? (
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={onCancelConnect}
-                            className="gap-1"
-                        >
-                            <X size={14} />
-                            {t('common.cancel')}
-                        </Button>
-                    ) : (
-                        <Button
-                            size="sm"
-                            onClick={() => { onConnect(); }}
-                            className="gap-1"
-                            disabled={disabled || isConnecting}
-                        >
-                            {isConnecting ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-                            {isConnecting ? t('cloudSync.provider.connecting') : t('cloudSync.provider.connect')}
-                        </Button>
-                    )}
+                    <Button
+                        size="sm"
+                        onClick={() => { onConnect(); }}
+                        className="gap-1"
+                        disabled={disabled || isConnecting}
+                    >
+                        {isConnecting ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+                        {isConnecting ? t('cloudSync.provider.connecting') : t('cloudSync.provider.connect')}
+                    </Button>
                 )}
             </div>
         </div>
