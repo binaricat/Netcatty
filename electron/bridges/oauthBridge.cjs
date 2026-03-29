@@ -105,7 +105,6 @@ const renderOAuthPage = ({ title, message, detail, status, autoClose }) => {
     .logo {
       width: 36px;
       height: 36px;
-      color: hsl(var(--accent));
     }
     .brand {
       font-size: 16px;
@@ -162,14 +161,17 @@ const renderOAuthPage = ({ title, message, detail, status, autoClose }) => {
 <body>
   <div class="shell">
     <div class="header">
-      <svg class="logo" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <rect width="48" height="48" rx="12" fill="currentColor" fill-opacity="0.12" />
-        <path
-          d="M14 16C14 14.8954 14.8954 14 16 14H32C33.1046 14 34 14.8954 34 16V32C34 33.1046 33.1046 34 32 34H16C14.8954 34 14 33.1046 14 32V16Z"
-          stroke="currentColor" stroke-width="2" />
-        <path d="M18 22L22 26L18 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round" />
-        <path d="M26 30H30" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <svg class="logo" viewBox="0 0 56 56" aria-hidden="true">
+        <rect x="0" y="0" width="56" height="56" rx="12" fill="#2F7BFF"/>
+        <rect x="10" y="13" width="36" height="24" rx="4" fill="#FFFFFF" stroke="#1D4FCF" stroke-opacity="0.12"/>
+        <rect x="10" y="13" width="36" height="5" rx="4" fill="#E6EEFF"/>
+        <circle cx="14" cy="15.5" r="1" fill="#1E4FD1"/>
+        <circle cx="18" cy="15.5" r="1" fill="#1E4FD1" opacity="0.7"/>
+        <circle cx="22" cy="15.5" r="1" fill="#1E4FD1" opacity="0.5"/>
+        <path d="M16 28 L20 26 L16 24" stroke="#1E4FD1" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M24 30 H30" stroke="#1E4FD1" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M36 33 C40 36,42 38,42 42 C42 45,40 47,37 47" stroke="white" fill="none" stroke-width="3.2" stroke-linecap="round"/>
+        <rect x="34" y="44" width="6" height="5" rx="1" fill="white" stroke="#1E4FD1"/>
       </svg>
       <div>
         <div class="brand">Netcatty</div>
