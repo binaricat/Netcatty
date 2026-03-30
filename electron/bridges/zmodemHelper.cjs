@@ -59,7 +59,7 @@ function createZmodemSentry(opts) {
   // After aborting, suppress incoming data briefly so residual ZMODEM
   // protocol bytes from the remote don't flood the terminal as garbage.
   let cooldownUntil = 0;
-  const COOLDOWN_MS = 500;
+  const COOLDOWN_MS = 2000;
   const ECHO_TTL_MS = 1500;
   const ECHO_MAX_BYTES = 256;
 
@@ -326,18 +326,21 @@ function createZmodemSentry(opts) {
      * @param {Buffer|Uint8Array} data
      */
     consume(data) {
-      // During cooldown after abort, suppress residual ZMODEM bytes
-      // from the remote so they don't flood the terminal as garbage.
-      // As soon as the remote starts sending normal shell output again,
-      // end cooldown immediately so the prompt is not swallowed.
+      // During cooldown after abort, unconditionally suppress all incoming
+      // data.  sz can stream large amounts of file data that's still in
+      // SSH/TCP buffers after we send CAN; checking content doesn't help
+      // because the residual data contains arbitrary printable bytes.
       if (cooldownUntil) {
-        if (Date.now() < cooldownUntil) {
-          if (looksLikeResidualZmodemData(data)) return;
-          cooldownUntil = 0;
+        const now = Date.now();
+        if (now < cooldownUntil) {
+          // Keep sending CAN in case earlier ones were lost in the flood
+          if (now - (cooldownUntil - COOLDOWN_MS) > 200) {
+            sendExtraAbortBytes();
+          }
+          return; // drop everything during cooldown
         }
-      }
-      if (cooldownUntil) {
         cooldownUntil = 0;
+        // After cooldown, let this chunk through — it's likely the shell prompt
       }
 
       try {
