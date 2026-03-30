@@ -53,6 +53,7 @@ export function useZmodemTransfer(sessionId: string | null) {
           setState((prev) => ({
             ...prev,
             active: true,
+            transferType: event.transferType ?? prev.transferType,
             filename: event.filename ?? prev.filename,
             transferred: event.transferred ?? prev.transferred,
             total: event.total ?? prev.total,

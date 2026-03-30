@@ -527,8 +527,10 @@ async function handleUpload(zsession, opts) {
         const bytesRead = fs.readSync(fd, buf, 0, CHUNK_SIZE);
         if (bytesRead === 0) break;
 
-        // zmodem.js send() is synchronous. Yield afterward so inbound
-        // ZRPOS/ZRINIT control frames can be processed before we finish the file.
+        // zmodem.js send() is synchronous and triggers writeToRemote via
+        // the sentry's sender callback.  Yield after each chunk so the
+        // event loop can flush buffered writes and process inbound control
+        // frames, preventing unbounded memory growth on slow links.
         xfer.send(new Uint8Array(buf.buffer, buf.byteOffset, bytesRead));
         sent += bytesRead;
 
