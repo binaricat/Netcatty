@@ -1259,6 +1259,9 @@ async function startSSHSession(event, options) {
               writeToRemote(buf) {
                 try { stream.write(buf); } catch { /* ignore */ }
               },
+              interruptRemote() {
+                try { stream.signal?.("INT"); } catch { /* ignore */ }
+              },
               getWebContents() {
                 return event.sender;
               },
