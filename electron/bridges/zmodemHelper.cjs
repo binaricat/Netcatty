@@ -303,6 +303,7 @@ async function handleDownload(zsession, opts) {
 
   const downloadDir = result.filePaths[0];
   let fileIndex = 0;
+  const pendingStreams = [];
 
   await new Promise((resolve, reject) => {
     zsession.on("offer", (xfer) => {
@@ -325,9 +326,24 @@ async function handleDownload(zsession, opts) {
           transferType: "download",
         });
 
-        const ws = fs.createWriteStream(savePath);
+        // Avoid overwriting existing files — append (1), (2), etc.
+        let finalPath = savePath;
+        if (fs.existsSync(savePath)) {
+          const ext = path.extname(name);
+          const base = path.basename(name, ext);
+          let n = 1;
+          do {
+            finalPath = path.join(downloadDir, `${base} (${n})${ext}`);
+            n++;
+          } while (fs.existsSync(finalPath));
+        }
+
+        const ws = fs.createWriteStream(finalPath);
         let received = 0;
         let writeAborted = false;
+
+        // Track pending write streams so we can wait for flush at session end
+        pendingStreams.push(ws);
 
         ws.on("error", (err) => {
           writeAborted = true;
@@ -363,7 +379,19 @@ async function handleDownload(zsession, opts) {
       }
     });
 
-    zsession.on("session_end", () => resolve());
+    // Wait for all write streams to finish flushing before resolving.
+    zsession.on("session_end", async () => {
+      try {
+        await Promise.all(
+          pendingStreams.map((s) =>
+            s.writableFinished
+              ? Promise.resolve()
+              : new Promise((r) => s.on("finish", r))
+          )
+        );
+      } catch { /* ignore — error handler already called reject */ }
+      resolve();
+    });
 
     zsession.start();
   });
