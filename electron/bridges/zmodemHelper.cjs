@@ -117,26 +117,37 @@ function createZmodemSentry(opts) {
         const errMsg = String(err.message || err);
         console.error(`[ZMODEM][${label}] Sentry consume error:`, errMsg);
 
-        if (currentZSession) {
-          try { currentZSession.abort(); } catch { /* ignore */ }
-        }
         const wasActive = active;
-        active = false;
-        currentZSession = null;
 
         // ZFIN/OO mismatch: the file transfer completed (ZFIN exchanged)
         // but the shell prompt arrived before the "OO" end marker.  This
         // is common over SSH because sz exits and the shell resumes before
-        // the "OO" acknowledgement is sent.  Treat as successful transfer
-        // and forward the remaining data (shell prompt) to the terminal.
+        // the "OO" acknowledgement is sent.  Treat as successful transfer.
+        // Do NOT abort() here — that sends CAN bytes to the remote shell.
+        // Instead, manually clean up the sentry's internal session state.
         if (wasActive && errMsg.includes("ZFIN") && errMsg.includes("OO")) {
           console.log(`[ZMODEM][${label}] ZFIN/OO mismatch — treating as success`);
+          // Manually end the session without sending CAN to remote.
+          // _on_session_end fires session_end and sentry._after_session_end
+          // clears sentry._zsession so it returns to passthrough mode.
+          if (currentZSession) {
+            try { currentZSession._on_session_end(); } catch { /* ignore */ }
+          }
+          active = false;
+          currentZSession = null;
           safeSend(getWebContents(), "netcatty:zmodem:complete", { sessionId });
-          // Sentry session is cleared (abort → _after_session_end), so
-          // re-consuming forwards the shell prompt data to to_terminal.
+          // Re-consume: sentry is now in passthrough mode, so the shell
+          // prompt data that triggered the error goes to to_terminal.
           try { sentry.consume(data); } catch { /* ignore */ }
           return;
         }
+
+        // For all other errors, abort the session normally.
+        if (currentZSession) {
+          try { currentZSession.abort(); } catch { /* ignore */ }
+        }
+        active = false;
+        currentZSession = null;
 
         if (wasActive) {
           safeSend(getWebContents(), "netcatty:zmodem:error", {

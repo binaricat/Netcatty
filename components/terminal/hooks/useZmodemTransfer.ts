@@ -27,6 +27,8 @@ export function useZmodemTransfer(sessionId: string | null) {
   const [state, setState] = useState<ZmodemTransferState>(initialState);
   const disposeRef = useRef<(() => void) | null>(null);
 
+  const disposeExitRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     if (!sessionId) return;
 
@@ -71,9 +73,17 @@ export function useZmodemTransfer(sessionId: string | null) {
       }
     });
 
+    // If the session exits mid-transfer (disconnect, shell exit, etc.),
+    // reset state so the progress indicator doesn't stay stuck.
+    disposeExitRef.current = bridge.onSessionExit(sessionId, () => {
+      setState(initialState);
+    });
+
     return () => {
       disposeRef.current?.();
       disposeRef.current = null;
+      disposeExitRef.current?.();
+      disposeExitRef.current = null;
       setState(initialState);
     };
   }, [sessionId]);

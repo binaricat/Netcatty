@@ -331,10 +331,12 @@ function startLocalSession(event, payload) {
   });
   session.flushPendingData = flushLocal;
 
+  const localDecoder = new StringDecoder("utf8");
   const zmodemSentry = createZmodemSentry({
     sessionId,
     onData(buf) {
-      const str = buf.toString("utf8");
+      const str = localDecoder.write(buf);
+      if (!str) return;
       trackSessionIdlePrompt(session, str);
       bufferLocalData(str);
       sessionLogStreamManager.appendData(sessionId, str);
@@ -725,10 +727,12 @@ async function startMoshSession(event, options) {
     });
     session.flushPendingData = flushMosh;
 
+    const moshDecoder = new StringDecoder("utf8");
     const moshZmodemSentry = createZmodemSentry({
       sessionId,
       onData(buf) {
-        const str = buf.toString("utf8");
+        const str = moshDecoder.write(buf);
+        if (!str) return;
         trackSessionIdlePrompt(session, str);
         bufferMoshData(str);
         sessionLogStreamManager.appendData(sessionId, str);
