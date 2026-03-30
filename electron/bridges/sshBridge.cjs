@@ -24,6 +24,7 @@ const {
 } = require("./sshAuthHelper.cjs");
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const { trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
+const { createZmodemSentry } = require("./zmodemHelper.cjs");
 
 // Default SSH key names in priority order (preferred keys tried first)
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -1246,15 +1247,31 @@ async function startSSHSession(event, options) {
               }
             };
 
+            const sshZmodemSentry = createZmodemSentry({
+              sessionId,
+              onData(str) {
+                trackSessionIdlePrompt(session, str);
+                bufferData(str);
+                sessionLogStreamManager.appendData(sessionId, str);
+              },
+              writeToRemote(buf) {
+                try { stream.write(buf); } catch { /* ignore */ }
+              },
+              getWebContents() {
+                return event.sender;
+              },
+              label: "SSH",
+            });
+            session.zmodemSentry = sshZmodemSentry;
+
             stream.on("data", (data) => {
-              const decoder = getSessionDecoder(sessionId, "stdout");
-              const decoded = decoder.write(data);
-              trackSessionIdlePrompt(session, decoded);
-              bufferData(decoded);
-              sessionLogStreamManager.appendData(sessionId, decoded);
+              // data is Buffer from ssh2 — feed raw bytes to ZMODEM sentry.
+              // In normal mode, sentry's onData callback handles decoding and buffering.
+              sshZmodemSentry.consume(data);
             });
 
             stream.stderr?.on("data", (data) => {
+              // stderr is not used for ZMODEM — decode normally
               const decoder = getSessionDecoder(sessionId, "stderr");
               const decoded = decoder.write(data);
               bufferData(decoded);

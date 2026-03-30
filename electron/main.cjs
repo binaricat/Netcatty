@@ -505,6 +505,14 @@ const registerBridges = (win) => {
   aiBridge.registerHandlers(ipcMain);
   crashLogBridge.registerHandlers(ipcMain);
 
+  // ZMODEM cancel handler
+  ipcMain.on("netcatty:zmodem:cancel", (_event, payload) => {
+    const session = sessions.get(payload.sessionId);
+    if (session?.zmodemSentry) {
+      session.zmodemSentry.cancel();
+    }
+  });
+
   // Fig autocomplete spec loader — uses dynamic import() since @withfig/autocomplete is ESM
   ipcMain.handle("netcatty:figspec:list", async () => {
     try {

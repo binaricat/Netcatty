@@ -263,6 +263,22 @@ declare global {
     writeToSession(sessionId: string, data: string): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
     closeSession(sessionId: string): void;
+    // ZMODEM file transfer
+    onZmodemEvent?(
+      sessionId: string,
+      cb: (event: {
+        type: 'detect' | 'progress' | 'complete' | 'error';
+        sessionId: string;
+        transferType?: 'upload' | 'download';
+        filename?: string;
+        transferred?: number;
+        total?: number;
+        fileIndex?: number;
+        fileCount?: number;
+        error?: string;
+      }) => void
+    ): () => void;
+    cancelZmodem?(sessionId: string): void;
     onSessionData(sessionId: string, cb: (data: string) => void): () => void;
     onSessionExit(
       sessionId: string,
