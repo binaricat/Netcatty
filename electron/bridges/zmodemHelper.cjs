@@ -179,8 +179,8 @@ async function handleUpload(zsession, opts) {
   });
 
   if (result.canceled || !result.filePaths.length) {
-    // User cancelled – close the ZMODEM session gracefully.
-    try { await zsession.close(); } catch { /* ignore */ }
+    // User cancelled – abort the ZMODEM session so the sentry resets cleanly.
+    try { zsession.abort(); } catch { /* ignore */ }
     return;
   }
 
@@ -270,7 +270,7 @@ async function handleDownload(zsession, opts) {
   });
 
   if (result.canceled || !result.filePaths.length) {
-    try { await zsession.close(); } catch { /* ignore */ }
+    try { zsession.abort(); } catch { /* ignore */ }
     return;
   }
 
