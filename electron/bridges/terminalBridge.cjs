@@ -969,6 +969,7 @@ function closeSession(event, payload) {
   if (!session) return;
   
   try {
+    session.zmodemSentry?.cancel();
     session.flushPendingData?.();
     if (session.stream) {
       session.stream.close();

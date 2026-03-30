@@ -58,6 +58,11 @@ function createZmodemSentry(opts) {
     },
 
     on_detect(detection) {
+      if (active) {
+        console.warn(`[ZMODEM][${label}] Detection while transfer active; denying`);
+        detection.deny();
+        return;
+      }
       active = true;
       const zsession = detection.confirm();
       currentZSession = zsession;
@@ -106,9 +111,19 @@ function createZmodemSentry(opts) {
         sentry.consume(data);
       } catch (err) {
         console.error(`[ZMODEM][${label}] Sentry consume error:`, err.message || err);
-        // Reset state so the terminal doesn't stay stuck
+        if (currentZSession) {
+          try { currentZSession.abort(); } catch { /* ignore */ }
+        }
+        const wasActive = active;
         active = false;
         currentZSession = null;
+        // Notify renderer so the progress UI doesn't stay stuck
+        if (wasActive) {
+          safeSend(getWebContents(), "netcatty:zmodem:error", {
+            sessionId,
+            error: String(err.message || err),
+          });
+        }
       }
     },
 
@@ -124,6 +139,10 @@ function createZmodemSentry(opts) {
         try { currentZSession.abort(); } catch { /* ignore */ }
         active = false;
         currentZSession = null;
+        safeSend(getWebContents(), "netcatty:zmodem:error", {
+          sessionId,
+          error: "Transfer cancelled",
+        });
       }
     },
   };
@@ -254,7 +273,9 @@ async function handleDownload(zsession, opts) {
     zsession.on("offer", (xfer) => {
       try {
         const detail = xfer.get_details();
-        const name = detail.name || `untitled_${Date.now()}`;
+        // Sanitize filename to prevent path traversal attacks
+        const rawName = detail.name || `untitled_${Date.now()}`;
+        const name = path.basename(rawName);
         const size = detail.size || 0;
         const savePath = path.join(downloadDir, name);
         const currentIndex = fileIndex++;
