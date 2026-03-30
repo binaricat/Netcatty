@@ -477,10 +477,9 @@ async function handleUpload(zsession, opts) {
   });
 
   if (result.canceled || !result.filePaths.length) {
-    // User cancelled – abort the ZMODEM session so the sentry resets cleanly.
     try { zsession.abort(); } catch { /* ignore */ }
     abortRemoteProcess(opts.writeToRemote);
-    return;
+    throw new Error("Transfer cancelled");
   }
 
   const filePaths = result.filePaths;
@@ -693,7 +692,7 @@ async function handleDownload(zsession, opts) {
     try { zsession.abort(); } catch { /* ignore */ }
     abortRemoteProcess(opts.writeToRemote);
     void sessionPromise.catch(() => {});
-    return;
+    throw new Error("Transfer cancelled");
   }
 
   downloadDir = result.filePaths[0];
