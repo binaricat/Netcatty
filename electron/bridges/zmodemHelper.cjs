@@ -114,18 +114,34 @@ function createZmodemSentry(opts) {
       try {
         sentry.consume(data);
       } catch (err) {
-        console.error(`[ZMODEM][${label}] Sentry consume error:`, err.message || err);
+        const errMsg = String(err.message || err);
+        console.error(`[ZMODEM][${label}] Sentry consume error:`, errMsg);
+
         if (currentZSession) {
           try { currentZSession.abort(); } catch { /* ignore */ }
         }
         const wasActive = active;
         active = false;
         currentZSession = null;
-        // Notify renderer so the progress UI doesn't stay stuck
+
+        // ZFIN/OO mismatch: the file transfer completed (ZFIN exchanged)
+        // but the shell prompt arrived before the "OO" end marker.  This
+        // is common over SSH because sz exits and the shell resumes before
+        // the "OO" acknowledgement is sent.  Treat as successful transfer
+        // and forward the remaining data (shell prompt) to the terminal.
+        if (wasActive && errMsg.includes("ZFIN") && errMsg.includes("OO")) {
+          console.log(`[ZMODEM][${label}] ZFIN/OO mismatch — treating as success`);
+          safeSend(getWebContents(), "netcatty:zmodem:complete", { sessionId });
+          // Sentry session is cleared (abort → _after_session_end), so
+          // re-consuming forwards the shell prompt data to to_terminal.
+          try { sentry.consume(data); } catch { /* ignore */ }
+          return;
+        }
+
         if (wasActive) {
           safeSend(getWebContents(), "netcatty:zmodem:error", {
             sessionId,
-            error: String(err.message || err),
+            error: errMsg,
           });
         }
       }
