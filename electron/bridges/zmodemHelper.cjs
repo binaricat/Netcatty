@@ -79,10 +79,14 @@ function createZmodemSentry(opts) {
 
       handleTransfer(zsession, transferType, opts)
         .then(() => {
+          // If cancel() already cleaned up, skip duplicate notification
+          if (!currentZSession) return;
           console.log(`[ZMODEM][${label}] Transfer completed for session ${sessionId}`);
           safeSend(contents, "netcatty:zmodem:complete", { sessionId });
         })
         .catch((err) => {
+          // If cancel() already cleaned up, skip duplicate notification
+          if (!currentZSession) return;
           console.error(`[ZMODEM][${label}] Transfer error:`, err.message || err);
           try { zsession.abort(); } catch { /* ignore */ }
           safeSend(contents, "netcatty:zmodem:error", {
@@ -181,10 +185,11 @@ async function handleUpload(zsession, opts) {
   }
 
   const filePaths = result.filePaths;
+  const fileStats = filePaths.map((fp) => fs.statSync(fp));
 
   for (let i = 0; i < filePaths.length; i++) {
     const filePath = filePaths[i];
-    const stat = fs.statSync(filePath);
+    const stat = fileStats[i];
     const name = path.basename(filePath);
 
     safeSend(contents, "netcatty:zmodem:progress", {
@@ -197,12 +202,15 @@ async function handleUpload(zsession, opts) {
       transferType: "upload",
     });
 
+    let bytesRemaining = 0;
+    for (let j = i; j < fileStats.length; j++) bytesRemaining += fileStats[j].size;
+
     const xfer = await zsession.send_offer({
       name,
       size: stat.size,
       mtime: new Date(stat.mtimeMs),
       files_remaining: filePaths.length - i,
-      bytes_remaining: filePaths.slice(i).reduce((sum, fp) => sum + fs.statSync(fp).size, 0),
+      bytes_remaining: bytesRemaining,
     });
 
     if (!xfer) {
@@ -292,8 +300,10 @@ async function handleDownload(zsession, opts) {
 
         const ws = fs.createWriteStream(savePath);
         let received = 0;
+        let writeAborted = false;
 
         ws.on("error", (err) => {
+          writeAborted = true;
           console.error(`[ZMODEM] Write stream error for ${name}:`, err.message);
           ws.destroy();
           reject(err);
@@ -301,6 +311,7 @@ async function handleDownload(zsession, opts) {
 
         xfer.accept({
           on_input(payload) {
+            if (writeAborted) return;
             const chunk = Buffer.from(payload);
             ws.write(chunk);
             received += chunk.length;
