@@ -29,9 +29,9 @@ function getElectron() {
  *
  * @param {object} opts
  * @param {string} opts.sessionId
- * @param {(str: string) => void} opts.onData
- *   Called with decoded UTF-8 strings during normal (non-ZMODEM) operation.
- *   This replaces the previous direct call to bufferData / trackSessionIdlePrompt etc.
+ * @param {(data: Buffer) => void} opts.onData
+ *   Called with raw bytes during normal (non-ZMODEM) operation.
+ *   The caller is responsible for charset-aware decoding (UTF-8, iconv, etc.).
  * @param {(buf: Buffer) => void} opts.writeToRemote
  *   Write raw bytes back to the remote side (PTY / SSH stream / socket).
  * @param {() => import('electron').WebContents | null} opts.getWebContents
@@ -48,8 +48,8 @@ function createZmodemSentry(opts) {
 
   const sentry = new Zmodem.Sentry({
     to_terminal(octets) {
-      // Normal data – decode and forward to the existing string pipeline.
-      onData(Buffer.from(octets).toString("utf8"));
+      // Normal data – pass raw bytes to the caller for charset-aware decoding.
+      onData(Buffer.from(octets));
     },
 
     sender(octets) {

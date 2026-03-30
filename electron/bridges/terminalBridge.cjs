@@ -333,7 +333,8 @@ function startLocalSession(event, payload) {
 
   const zmodemSentry = createZmodemSentry({
     sessionId,
-    onData(str) {
+    onData(buf) {
+      const str = buf.toString("utf8");
       trackSessionIdlePrompt(session, str);
       bufferLocalData(str);
       sessionLogStreamManager.appendData(sessionId, str);
@@ -556,11 +557,13 @@ async function startTelnetSession(event, options) {
 
     const telnetZmodemSentry = createZmodemSentry({
       sessionId,
-      onData(str) {
+      onData(buf) {
+        const decoded = telnetDecoder.write(buf);
+        if (!decoded) return;
         const session = sessions.get(sessionId);
-        if (session) trackSessionIdlePrompt(session, str);
-        bufferTelnetData(str);
-        sessionLogStreamManager.appendData(sessionId, str);
+        if (session) trackSessionIdlePrompt(session, decoded);
+        bufferTelnetData(decoded);
+        sessionLogStreamManager.appendData(sessionId, decoded);
       },
       writeToRemote(buf) {
         try { socket.write(buf); } catch { /* ignore */ }
@@ -724,7 +727,8 @@ async function startMoshSession(event, options) {
 
     const moshZmodemSentry = createZmodemSentry({
       sessionId,
-      onData(str) {
+      onData(buf) {
+        const str = buf.toString("utf8");
         trackSessionIdlePrompt(session, str);
         bufferMoshData(str);
         sessionLogStreamManager.appendData(sessionId, str);
@@ -847,10 +851,12 @@ async function startSerialSession(event, options) {
 
         const serialZmodemSentry = createZmodemSentry({
           sessionId,
-          onData(str) {
+          onData(buf) {
+            const decoded = serialDecoder.write(buf);
+            if (!decoded) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
-            contents?.send("netcatty:data", { sessionId, data: str });
-            sessionLogStreamManager.appendData(sessionId, str);
+            contents?.send("netcatty:data", { sessionId, data: decoded });
+            sessionLogStreamManager.appendData(sessionId, decoded);
           },
           writeToRemote(buf) {
             try { serialPort.write(buf); } catch { /* ignore */ }

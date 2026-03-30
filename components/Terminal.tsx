@@ -44,6 +44,8 @@ import { TerminalToolbar } from "./terminal/TerminalToolbar";
 import { TerminalComposeBar } from "./terminal/TerminalComposeBar";
 import { TerminalContextMenu } from "./terminal/TerminalContextMenu";
 import { TerminalSearchBar } from "./terminal/TerminalSearchBar";
+import { ZmodemProgressIndicator } from "./terminal/ZmodemProgressIndicator";
+import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
 import { createTerminalSessionStarters, type PendingAuth } from "./terminal/runtime/createTerminalSessionStarters";
 import { createXTermRuntime, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
 import { XTERM_PERFORMANCE_CONFIG } from "../infrastructure/config/xtermPerformance";
@@ -499,6 +501,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isConnected: status === 'connected',
     isVisible,
   });
+
+  const zmodem = useZmodemTransfer(sessionId);
+
+  useEffect(() => {
+    if (!zmodem.active && zmodem.filename && !zmodem.error) {
+      toast.success(
+        `${zmodem.transferType === 'upload' ? 'Uploaded' : 'Downloaded'}: ${zmodem.filename}`,
+        'ZMODEM',
+      );
+    }
+    if (zmodem.error) {
+      toast.error(zmodem.error, 'ZMODEM');
+    }
+  }, [zmodem.active, zmodem.error]);
 
   useEffect(() => {
     if (!error) {
@@ -2048,6 +2064,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 }}
               />
             )}
+
+          {/* ZMODEM transfer progress indicator */}
+          {zmodem.active && (
+            <div className="absolute bottom-4 right-4 z-[25] pointer-events-auto">
+              <ZmodemProgressIndicator
+                transferType={zmodem.transferType}
+                filename={zmodem.filename}
+                transferred={zmodem.transferred}
+                total={zmodem.total}
+                fileIndex={zmodem.fileIndex}
+                fileCount={zmodem.fileCount}
+                onCancel={zmodem.cancel}
+              />
+            </div>
+          )}
         </div>
 
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}

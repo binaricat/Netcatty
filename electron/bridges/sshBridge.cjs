@@ -1249,10 +1249,12 @@ async function startSSHSession(event, options) {
 
             const sshZmodemSentry = createZmodemSentry({
               sessionId,
-              onData(str) {
-                trackSessionIdlePrompt(session, str);
-                bufferData(str);
-                sessionLogStreamManager.appendData(sessionId, str);
+              onData(buf) {
+                const decoder = getSessionDecoder(sessionId, "stdout");
+                const decoded = decoder.write(buf);
+                trackSessionIdlePrompt(session, decoded);
+                bufferData(decoded);
+                sessionLogStreamManager.appendData(sessionId, decoded);
               },
               writeToRemote(buf) {
                 try { stream.write(buf); } catch { /* ignore */ }
