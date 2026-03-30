@@ -435,6 +435,21 @@ function createZmodemSentry(opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helpers (module-level, usable from handleUpload / handleDownload)
+// ---------------------------------------------------------------------------
+
+/**
+ * Send CAN bytes + delayed Ctrl-C to kill the remote rz/sz process.
+ * Used from dialog-cancel paths that run outside the sentry closure.
+ */
+function abortRemoteProcess(writeToRemote) {
+  try { writeToRemote(Buffer.from([0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18])); } catch { /* ignore */ }
+  setTimeout(() => {
+    try { writeToRemote(Buffer.from("\x03")); } catch { /* ignore */ }
+  }, 150);
+}
+
+// ---------------------------------------------------------------------------
 // Transfer handlers
 // ---------------------------------------------------------------------------
 
@@ -464,12 +479,7 @@ async function handleUpload(zsession, opts) {
   if (result.canceled || !result.filePaths.length) {
     // User cancelled – abort the ZMODEM session so the sentry resets cleanly.
     try { zsession.abort(); } catch { /* ignore */ }
-    sendExtraAbortBytes();
-    // Debian's rz can stay attached after protocol cancel — send Ctrl+C
-    // to kill it so the shell regains control.
-    setTimeout(() => {
-      try { writeToRemote(Buffer.from("\x03")); } catch { /* ignore */ }
-    }, 150);
+    abortRemoteProcess(opts.writeToRemote);
     return;
   }
 
@@ -681,10 +691,7 @@ async function handleDownload(zsession, opts) {
 
   if (result.canceled || !result.filePaths.length) {
     try { zsession.abort(); } catch { /* ignore */ }
-    sendExtraAbortBytes();
-    setTimeout(() => {
-      try { writeToRemote(Buffer.from("\x03")); } catch { /* ignore */ }
-    }, 150);
+    abortRemoteProcess(opts.writeToRemote);
     void sessionPromise.catch(() => {});
     return;
   }
