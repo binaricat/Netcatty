@@ -380,14 +380,16 @@ async function handleDownload(zsession, opts) {
     });
 
     // Wait for all write streams to finish flushing before resolving.
+    // If a stream never received end() (e.g. transfer was cancelled),
+    // destroy it so the fd is released and finish/close can fire.
     zsession.on("session_end", async () => {
       try {
         await Promise.all(
-          pendingStreams.map((s) =>
-            s.writableFinished
-              ? Promise.resolve()
-              : new Promise((r) => s.on("finish", r))
-          )
+          pendingStreams.map((s) => {
+            if (s.writableFinished) return Promise.resolve();
+            if (!s.writableEnded) s.destroy();
+            return new Promise((r) => s.on("close", r));
+          })
         );
       } catch { /* ignore — error handler already called reject */ }
       resolve();
