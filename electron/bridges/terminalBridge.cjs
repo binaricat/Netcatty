@@ -352,9 +352,10 @@ function startLocalSession(event, payload) {
   session.zmodemSentry = zmodemSentry;
 
   proc.onData((data) => {
-    // data is Buffer (encoding: null) — feed raw bytes to ZMODEM sentry.
-    // Sentry calls onData(str) for normal terminal output.
-    zmodemSentry.consume(data);
+    // data is Buffer (encoding: null) on macOS/Linux. On Windows,
+    // node-pty may ignore encoding: null and still emit strings.
+    const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+    zmodemSentry.consume(buf);
   });
 
   proc.onExit((evt) => {
@@ -568,7 +569,24 @@ async function startTelnetSession(event, options) {
         sessionLogStreamManager.appendData(sessionId, decoded);
       },
       writeToRemote(buf) {
-        try { socket.write(buf); } catch { /* ignore */ }
+        // Escape 0xFF bytes as 0xFF 0xFF per Telnet spec so binary
+        // ZMODEM data passes through without being treated as IAC.
+        try {
+          let hasFF = false;
+          for (let i = 0; i < buf.length; i++) {
+            if (buf[i] === 0xff) { hasFF = true; break; }
+          }
+          if (hasFF) {
+            const escaped = [];
+            for (let i = 0; i < buf.length; i++) {
+              escaped.push(buf[i]);
+              if (buf[i] === 0xff) escaped.push(0xff);
+            }
+            socket.write(Buffer.from(escaped));
+          } else {
+            socket.write(buf);
+          }
+        } catch { /* ignore */ }
       },
       getWebContents() {
         return electronModule.webContents.fromId(telnetWebContentsId);
@@ -586,12 +604,15 @@ async function startTelnetSession(event, options) {
       const session = sessions.get(sessionId);
       if (!session) return;
 
-      const cleanData = handleTelnetNegotiation(data);
-
-      if (cleanData.length > 0) {
-        // Feed raw bytes to ZMODEM sentry for detection/transfer.
-        // In normal mode, sentry's onData callback handles terminal output.
-        telnetZmodemSentry.consume(cleanData);
+      if (telnetZmodemSentry.isActive()) {
+        // During ZMODEM transfer, bypass Telnet IAC negotiation to
+        // preserve binary data integrity (0xFF bytes are valid data).
+        telnetZmodemSentry.consume(data);
+      } else {
+        const cleanData = handleTelnetNegotiation(data);
+        if (cleanData.length > 0) {
+          telnetZmodemSentry.consume(cleanData);
+        }
       }
     });
 
@@ -748,7 +769,8 @@ async function startMoshSession(event, options) {
     session.zmodemSentry = moshZmodemSentry;
 
     proc.onData((data) => {
-      moshZmodemSentry.consume(data);
+      const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+      moshZmodemSentry.consume(buf);
     });
 
     proc.onExit((evt) => {
