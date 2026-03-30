@@ -45,6 +45,10 @@ function createZmodemSentry(opts) {
 
   let active = false;
   let currentZSession = null;
+  // After aborting, suppress incoming data briefly so residual ZMODEM
+  // protocol bytes from the remote don't flood the terminal as garbage.
+  let cooldownUntil = 0;
+  const COOLDOWN_MS = 500;
 
   const sentry = new Zmodem.Sentry({
     to_terminal(octets) {
@@ -111,6 +115,14 @@ function createZmodemSentry(opts) {
      * @param {Buffer|Uint8Array} data
      */
     consume(data) {
+      // During cooldown after abort, suppress residual ZMODEM bytes
+      // from the remote so they don't flood the terminal as garbage.
+      if (cooldownUntil) {
+        if (Date.now() < cooldownUntil) return;
+        cooldownUntil = 0;
+        // Cooldown expired — fall through to normal passthrough
+      }
+
       try {
         sentry.consume(data);
       } catch (err) {
@@ -127,27 +139,30 @@ function createZmodemSentry(opts) {
         // Instead, manually clean up the sentry's internal session state.
         if (wasActive && errMsg.includes("ZFIN") && errMsg.includes("OO")) {
           console.log(`[ZMODEM][${label}] ZFIN/OO mismatch — treating as success`);
-          // Manually end the session without sending CAN to remote.
-          // _on_session_end fires session_end and sentry._after_session_end
-          // clears sentry._zsession so it returns to passthrough mode.
           if (currentZSession) {
             try { currentZSession._on_session_end(); } catch { /* ignore */ }
           }
           active = false;
           currentZSession = null;
           safeSend(getWebContents(), "netcatty:zmodem:complete", { sessionId });
-          // Re-consume: sentry is now in passthrough mode, so the shell
-          // prompt data that triggered the error goes to to_terminal.
           try { sentry.consume(data); } catch { /* ignore */ }
           return;
         }
 
-        // For all other errors, abort the session normally.
+        // For all other errors, abort and send extra CAN sequences to
+        // ensure the remote rz/sz process stops transmitting.
         if (currentZSession) {
           try { currentZSession.abort(); } catch { /* ignore */ }
         }
+        // Send additional CAN bytes (8 x Ctrl-X) to force the remote end
+        // to stop even if the initial abort sequence was lost.
+        try { writeToRemote(Buffer.from([0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18])); } catch { /* ignore */ }
+
         active = false;
         currentZSession = null;
+        // Enter cooldown: discard incoming data briefly while the remote
+        // processes our CAN sequence and stops sending ZMODEM frames.
+        cooldownUntil = Date.now() + COOLDOWN_MS;
 
         if (wasActive) {
           safeSend(getWebContents(), "netcatty:zmodem:error", {
@@ -168,8 +183,10 @@ function createZmodemSentry(opts) {
       if (currentZSession) {
         console.log(`[ZMODEM][${label}] Cancelling transfer for session ${sessionId}`);
         try { currentZSession.abort(); } catch { /* ignore */ }
+        try { writeToRemote(Buffer.from([0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18])); } catch { /* ignore */ }
         active = false;
         currentZSession = null;
+        cooldownUntil = Date.now() + COOLDOWN_MS;
         safeSend(getWebContents(), "netcatty:zmodem:error", {
           sessionId,
           error: "Transfer cancelled",
