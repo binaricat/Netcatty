@@ -504,17 +504,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const zmodem = useZmodemTransfer(sessionId);
 
+  const zmodemToastedRef = useRef(false);
   useEffect(() => {
-    if (!zmodem.active && zmodem.filename && !zmodem.error) {
+    if (zmodem.active) {
+      zmodemToastedRef.current = false;
+      return;
+    }
+    if (zmodemToastedRef.current) return;
+    if (zmodem.error) {
+      zmodemToastedRef.current = true;
+      toast.error(zmodem.error, 'ZMODEM');
+    } else if (zmodem.filename) {
+      zmodemToastedRef.current = true;
       toast.success(
         `${zmodem.transferType === 'upload' ? 'Uploaded' : 'Downloaded'}: ${zmodem.filename}`,
         'ZMODEM',
       );
     }
-    if (zmodem.error) {
-      toast.error(zmodem.error, 'ZMODEM');
-    }
-  }, [zmodem.active, zmodem.error]);
+  }, [zmodem.active, zmodem.error, zmodem.filename, zmodem.transferType]);
 
   useEffect(() => {
     if (!error) {

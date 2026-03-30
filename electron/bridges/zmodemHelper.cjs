@@ -272,6 +272,12 @@ async function handleDownload(zsession, opts) {
         const ws = fs.createWriteStream(savePath);
         let received = 0;
 
+        ws.on("error", (err) => {
+          console.error(`[ZMODEM] Write stream error for ${name}:`, err.message);
+          ws.destroy();
+          reject(err);
+        });
+
         xfer.accept({
           on_input(payload) {
             const chunk = Buffer.from(payload);

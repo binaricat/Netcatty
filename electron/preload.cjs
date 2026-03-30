@@ -176,6 +176,7 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
   }
   dataListeners.delete(payload.sessionId);
   exitListeners.delete(payload.sessionId);
+  zmodemListeners.delete(payload.sessionId);
   const pendingTimer = _mcpFlushTimers.get(payload.sessionId);
   if (pendingTimer) {
     clearTimeout(pendingTimer);
