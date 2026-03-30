@@ -292,14 +292,13 @@ function createZmodemSentry(opts) {
 
       handleTransfer(zsession, transferType, opts)
         .then(() => {
-          // If cancel() already cleaned up, skip duplicate notification
-          if (!currentZSession) return;
+          // Only act if this is still the active session (not replaced by a new one)
+          if (currentZSession !== zsession) return;
           console.log(`[ZMODEM][${label}] Transfer completed for session ${sessionId}`);
           safeSend(contents, "netcatty:zmodem:complete", { sessionId });
         })
         .catch((err) => {
-          // If cancel() already cleaned up, skip duplicate notification
-          if (!currentZSession) return;
+          if (currentZSession !== zsession) return;
           console.error(`[ZMODEM][${label}] Transfer error:`, err.message || err);
           try { zsession.abort(); } catch { /* ignore */ }
           safeSend(contents, "netcatty:zmodem:error", {
@@ -308,8 +307,11 @@ function createZmodemSentry(opts) {
           });
         })
         .finally(() => {
-          active = false;
-          currentZSession = null;
+          // Only clear state if this is still the active session
+          if (currentZSession === zsession) {
+            active = false;
+            currentZSession = null;
+          }
         });
     },
 
@@ -611,8 +613,8 @@ async function handleDownload(zsession, opts) {
     let received = 0;
     let writeAborted = false;
 
-    // Track pending write streams so we can wait for flush at session end
-    pendingStreams.push(ws);
+    // Track pending write streams (and paths) for cleanup at session end
+    pendingStreams.push({ stream: ws, path: finalPath, completed: false });
 
     ws.on("error", (err) => {
       writeAborted = true;
@@ -650,6 +652,8 @@ async function handleDownload(zsession, opts) {
     });
 
     xfer.on("complete", () => {
+      const entry = pendingStreams.find((e) => e.stream === ws);
+      if (entry) entry.completed = true;
       ws.end();
     });
   };
@@ -670,10 +674,25 @@ async function handleDownload(zsession, opts) {
     zsession.on("session_end", async () => {
       try {
         await Promise.all(
-          pendingStreams.map((s) => {
-            if (s.writableFinished) return Promise.resolve();
+          pendingStreams.map((entry) => {
+            const { stream: s, path: filePath, completed } = entry;
+            if (s.writableFinished) {
+              // Delete partial files that never completed
+              if (!completed) {
+                try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+              }
+              return Promise.resolve();
+            }
             if (!s.writableEnded) s.destroy();
-            return new Promise((r) => s.on("close", r));
+            return new Promise((r) => {
+              s.on("close", () => {
+                // Clean up partial downloads
+                if (!completed) {
+                  try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+                }
+                r();
+              });
+            });
           })
         );
       } catch { /* ignore — error handler already called reject */ }
