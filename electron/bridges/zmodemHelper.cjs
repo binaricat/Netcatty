@@ -290,7 +290,11 @@ async function handleDownload(zsession, opts) {
 
   const win = contents ? BrowserWindow.fromWebContents(contents) : null;
 
-  // Ask user to pick a download directory
+  // Start the session BEFORE showing the dialog so lrzsz doesn't
+  // time out waiting for ZRINIT while the user browses for a folder.
+  // Offers are queued in the zsession until our "offer" handler runs.
+  zsession.start();
+
   const result = await dialog.showOpenDialog(win || undefined, {
     properties: ["openDirectory", "createDirectory"],
     title: "Select download directory (ZMODEM)",
@@ -304,6 +308,7 @@ async function handleDownload(zsession, opts) {
   const downloadDir = result.filePaths[0];
   let fileIndex = 0;
   const pendingStreams = [];
+  let lastProgressTime = 0;
 
   await new Promise((resolve, reject) => {
     zsession.on("offer", (xfer) => {
@@ -359,15 +364,21 @@ async function handleDownload(zsession, opts) {
             ws.write(chunk);
             received += chunk.length;
 
-            safeSend(contents, "netcatty:zmodem:progress", {
-              sessionId,
-              filename: name,
-              transferred: received,
-              total: size,
-              fileIndex: currentIndex,
-              fileCount: -1,
-              transferType: "download",
-            });
+            // Throttle progress IPC to ~10 updates/sec to avoid
+            // overwhelming the renderer on fast links.
+            const now = Date.now();
+            if (now - lastProgressTime >= 100) {
+              lastProgressTime = now;
+              safeSend(contents, "netcatty:zmodem:progress", {
+                sessionId,
+                filename: name,
+                transferred: received,
+                total: size,
+                fileIndex: currentIndex,
+                fileCount: -1,
+                transferType: "download",
+              });
+            }
           },
         });
 
@@ -394,8 +405,6 @@ async function handleDownload(zsession, opts) {
       } catch { /* ignore — error handler already called reject */ }
       resolve();
     });
-
-    zsession.start();
   });
 }
 
