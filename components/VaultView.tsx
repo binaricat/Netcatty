@@ -212,6 +212,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     false,
   );
 
+  const [isBreadcrumbDragOver, setIsBreadcrumbDragOver] = useState(false);
+
   const [showRecentHosts, setShowRecentHosts] = useStoredBoolean(
     STORAGE_KEY_SHOW_RECENT_HOSTS,
     true,
@@ -1675,8 +1677,24 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                   {viewMode !== "tree" && (
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <button
-                        className="text-primary hover:underline"
+                        className={cn(
+                          "text-primary hover:underline transition-all rounded px-1 -mx-1",
+                          isBreadcrumbDragOver && "ring-2 ring-primary bg-primary/10",
+                        )}
                         onClick={() => setSelectedGroupPath(null)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setIsBreadcrumbDragOver(true);
+                        }}
+                        onDragLeave={() => setIsBreadcrumbDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsBreadcrumbDragOver(false);
+                          const groupPath = e.dataTransfer.getData("group-path");
+                          const hostId = e.dataTransfer.getData("host-id");
+                          if (groupPath) moveGroup(groupPath, null);
+                          if (hostId) moveHostToGroup(hostId, null);
+                        }}
                       >
                         {t("vault.hosts.allHosts")}
                       </button>
