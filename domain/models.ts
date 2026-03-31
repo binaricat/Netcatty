@@ -120,6 +120,10 @@ export interface Host {
   // Local SSH key file paths (from SSH config IdentityFile or user-added)
   // Resolved at connection time — the app reads the file content when connecting.
   identityFilePaths?: string[];
+  // Pin host to top of All hosts view for quick access
+  pinned?: boolean;
+  // Timestamp of last successful connection, used for Recently Connected section
+  lastConnectedAt?: number;
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';

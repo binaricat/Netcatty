@@ -108,6 +108,9 @@ export const STORAGE_KEY_WORKSPACE_FOCUS_STYLE = 'netcatty_workspace_focus_style
 // Immersive Mode
 export const STORAGE_KEY_IMMERSIVE_MODE = 'netcatty_immersive_mode_v1';
 
+// Vault: Show Recently Connected hosts section
+export const STORAGE_KEY_SHOW_RECENT_HOSTS = 'netcatty_show_recent_hosts_v1';
+
 // Side Panel
 export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
 
