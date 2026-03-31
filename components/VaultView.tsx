@@ -2174,7 +2174,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                         }}
                                       >
                                         {host.pinned && viewMode === "grid" && (
-                                          <Pin size={10} className="absolute top-1.5 right-1.5 text-primary/50" />
+                                          <Pin size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
                                         )}
                                         <div className="flex items-center gap-3 h-full">
                                           {isMultiSelectMode && (
@@ -2315,7 +2315,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   }}
                                 >
                                   {host.pinned && viewMode === "grid" && (
-                                    <Pin size={10} className="absolute top-1.5 right-1.5 text-primary/50" />
+                                    <Pin size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
                                   )}
                                   <div className="flex items-center gap-3 h-full">
                                     {isMultiSelectMode && (
