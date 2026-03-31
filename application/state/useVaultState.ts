@@ -536,6 +536,20 @@ export const useVaultState = () => {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
+  const updateHostLastConnected = useCallback((hostId: string) => {
+    setHosts((prev) => {
+      const next = prev.map((h) =>
+        h.id === hostId ? { ...h, lastConnectedAt: Date.now() } : h,
+      );
+      const ver = ++hostsWriteVersion.current;
+      encryptHosts(next).then((enc) => {
+        if (ver === hostsWriteVersion.current)
+          localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
+      });
+      return next;
+    });
+  }, []);
+
   const updateHostDistro = useCallback((hostId: string, distro: string) => {
     const normalized = normalizeDistroId(distro);
     setHosts((prev) => {
@@ -620,6 +634,7 @@ export const useVaultState = () => {
     deleteConnectionLog,
     clearUnsavedConnectionLogs,
     updateHostDistro,
+    updateHostLastConnected,
     convertKnownHostToHost,
     exportData,
     importDataFromString,

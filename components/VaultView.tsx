@@ -876,7 +876,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Respects active search and tag filters
   const recentHosts = useMemo(() => {
     if (selectedGroupPath) return [];
-    let filtered = hosts.filter((h) => h.lastConnectedAt);
+    let filtered = hosts.filter((h) => h.lastConnectedAt && !h.pinned);
     if (search.trim()) {
       const s = search.toLowerCase();
       filtered = filtered.filter(

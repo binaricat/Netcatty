@@ -239,6 +239,7 @@ function App({ settings }: { settings: SettingsState }) {
     deleteConnectionLog,
     clearUnsavedConnectionLogs,
     updateHostDistro,
+    updateHostLastConnected,
     convertKnownHostToHost,
     importDataFromString,
   } = useVaultState();
@@ -1119,13 +1120,10 @@ function App({ settings }: { settings: SettingsState }) {
     if (status === 'connected') {
       const session = sessionById.get(sessionId);
       if (session?.hostId) {
-        // Use ref to read latest hosts and avoid overwriting concurrent changes
-        updateHosts(hostsRef.current.map((h) =>
-          h.id === session.hostId ? { ...h, lastConnectedAt: Date.now() } : h
-        ));
+        updateHostLastConnected(session.hostId);
       }
     }
-  }, [updateSessionStatus, sessionById, updateHosts]);
+  }, [updateSessionStatus, sessionById, updateHostLastConnected]);
 
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
