@@ -14,6 +14,7 @@ import { initializeFonts } from './application/state/fontStore';
 import { initializeUIFonts } from './application/state/uiFontStore';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
+import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { resolveHostAuth } from './domain/sshAuth';
 import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
 import { collectSessionIds } from './domain/workspace';
@@ -242,6 +243,8 @@ function App({ settings }: { settings: SettingsState }) {
     updateHostLastConnected,
     convertKnownHostToHost,
     importDataFromString,
+    groupConfigs,
+    updateGroupConfigs,
   } = useVaultState();
 
   const {
@@ -444,10 +447,16 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
+    // Apply group defaults before resolving auth
+    const groupDefaults = host.group
+      ? resolveGroupDefaults(host.group, groupConfigs)
+      : {};
+    const effectiveHost = applyGroupDefaults(host, groupDefaults);
+
     const { username, hostname: localHost } = systemInfoRef.current;
-    if (host.protocol === 'serial') {
+    if (effectiveHost.protocol === 'serial') {
       const portName = host.hostname.split('/').pop() || host.hostname;
-      const sessionId = connectToHost(host);
+      const sessionId = connectToHost(effectiveHost);
       addConnectionLog({
         sessionId,
         hostId: host.id,
@@ -463,9 +472,9 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
-    const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
-    const resolvedAuth = resolveHostAuth({ host, keys, identities });
-    const sessionId = connectToHost(host);
+    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
+    const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
+    const sessionId = connectToHost(effectiveHost);
     addConnectionLog({
       sessionId,
       hostId: host.id,
@@ -1080,10 +1089,16 @@ function App({ settings }: { settings: SettingsState }) {
   const handleConnectToHost = useCallback((host: Host) => {
     const { username, hostname: localHost } = systemInfoRef.current;
 
+    // Apply group defaults before resolving auth
+    const groupDefaults = host.group
+      ? resolveGroupDefaults(host.group, groupConfigs)
+      : {};
+    const effectiveHost = applyGroupDefaults(host, groupDefaults);
+
     // Handle serial hosts separately
-    if (host.protocol === 'serial') {
+    if (effectiveHost.protocol === 'serial') {
       const portName = host.hostname.split('/').pop() || host.hostname;
-      const sessionId = connectToHost(host);
+      const sessionId = connectToHost(effectiveHost);
       addConnectionLog({
         sessionId,
         hostId: host.id,
@@ -1099,9 +1114,9 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
-    const protocol = host.moshEnabled ? 'mosh' : (host.protocol || 'ssh');
-    const resolvedAuth = resolveHostAuth({ host, keys, identities });
-    const sessionId = connectToHost(host);
+    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
+    const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
+    const sessionId = connectToHost(effectiveHost);
     addConnectionLog({
       sessionId,
       hostId: host.id,
@@ -1114,7 +1129,7 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: localHost,
       saved: false,
     });
-  }, [addConnectionLog, connectToHost, identities, keys]);
+  }, [addConnectionLog, connectToHost, groupConfigs, identities, keys]);
 
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
@@ -1346,6 +1361,8 @@ function App({ settings }: { settings: SettingsState }) {
             onConnectSerial={handleConnectSerial}
             onDeleteHost={handleDeleteHost}
             onConnect={handleConnectToHost}
+            groupConfigs={groupConfigs}
+            onUpdateGroupConfigs={updateGroupConfigs}
             onUpdateHosts={updateHosts}
             onUpdateKeys={updateKeys}
             onUpdateIdentities={updateIdentities}
