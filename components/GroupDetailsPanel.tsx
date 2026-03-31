@@ -97,9 +97,13 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   // Protocol sections enabled state
   const hasSshFields = (c: Partial<GroupConfig>) =>
     c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
-    c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId;
+    c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId ||
+    !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.legacyAlgorithms !== undefined ||
+    (c.environmentVariables && c.environmentVariables.length > 0) ||
+    c.moshEnabled !== undefined || !!c.moshServerPath ||
+    (c.identityFilePaths && c.identityFilePaths.length > 0);
   const hasTelnetFields = (c: Partial<GroupConfig>) =>
-    c.telnetPort !== undefined || !!c.telnetUsername || !!c.telnetPassword;
+    c.telnetPort !== undefined || !!c.telnetUsername || !!c.telnetPassword || c.telnetEnabled === true;
 
   const [sshEnabled, setSshEnabled] = useState(() => hasSshFields(config || {}));
   const [telnetEnabled, setTelnetEnabled] = useState(() => hasTelnetFields(config || {}));
@@ -158,6 +162,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     setTelnetEnabled(false);
     setForm((prev) => {
       const next = { ...prev };
+      delete next.telnetEnabled;
       delete next.telnetPort;
       delete next.telnetUsername;
       delete next.telnetPassword;
@@ -307,6 +312,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       }),
       // Only include Telnet fields if Telnet section is enabled
       ...(telnetEnabled && {
+        telnetEnabled: true,
         ...(form.telnetPort !== undefined && { telnetPort: form.telnetPort }),
         ...(form.telnetUsername !== undefined && { telnetUsername: form.telnetUsername }),
         ...(form.telnetPassword !== undefined && { telnetPassword: form.telnetPassword }),
@@ -1003,7 +1009,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                 setForm((prev) => ({
                   ...prev,
                   theme: undefined,
-                  themeOverride: undefined,
+                  themeOverride: false,
                 }))
               }
             >
@@ -1032,7 +1038,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                 setForm((prev) => ({
                   ...prev,
                   fontFamily: undefined,
-                  fontFamilyOverride: undefined,
+                  fontFamilyOverride: false,
                 }))
               }
             >

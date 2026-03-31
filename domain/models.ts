@@ -203,6 +203,7 @@ export interface GroupConfig {
   charset?: string;
   moshEnabled?: boolean;
   moshServerPath?: string;
+  telnetEnabled?: boolean;
   telnetPort?: number;
   telnetUsername?: string;
   telnetPassword?: string;

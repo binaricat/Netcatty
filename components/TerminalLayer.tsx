@@ -826,12 +826,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       map.set(
         session.id,
         host.hostChain.hostIds
-          .map((hostId) => hostMap.get(hostId))
+          .map((hostId) => {
+            const rawChainHost = hostMap.get(hostId);
+            if (!rawChainHost) return undefined;
+            const chainGroupDefaults = rawChainHost.group
+              ? resolveGroupDefaults(rawChainHost.group, groupConfigs)
+              : {};
+            return applyGroupDefaults(rawChainHost, chainGroupDefaults);
+          })
           .filter((value): value is Host => Boolean(value)),
       );
     }
     return map;
-  }, [sessions, sessionHostsMap, hostMap]);
+  }, [sessions, sessionHostsMap, hostMap, groupConfigs]);
 
   const validTerminalTabIds = useMemo(() => {
     const ids = new Set<string>();
