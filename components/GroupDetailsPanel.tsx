@@ -6,9 +6,12 @@ import {
   Globe,
   Key,
   Link2,
+  MoreHorizontal,
   Palette,
+  Plus,
   Settings2,
   TerminalSquare,
+  Trash2,
   Variable,
   Wifi,
   X,
@@ -39,6 +42,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
+import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 
 type SubPanel = "none" | "proxy" | "chain" | "env-vars" | "theme-select";
@@ -49,9 +53,10 @@ interface GroupDetailsPanelProps {
   availableKeys: SSHKey[];
   identities: Identity[];
   allHosts: Host[];
+  groups: string[];
   terminalThemeId: string;
   terminalFontSize: number;
-  onSave: (config: GroupConfig, newName?: string) => void;
+  onSave: (config: GroupConfig, newName?: string, newParent?: string | null) => void;
   onCancel: () => void;
 }
 
@@ -61,6 +66,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   availableKeys,
   identities: _identities,
   allHosts,
+  groups,
   terminalThemeId,
   terminalFontSize,
   onSave,
@@ -71,7 +77,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   const originalName = groupPath.includes("/")
     ? groupPath.split("/").pop()!
     : groupPath;
-  const parentPath = groupPath.includes("/")
+  const originalParent = groupPath.includes("/")
     ? groupPath.substring(0, groupPath.lastIndexOf("/"))
     : "";
 
@@ -79,12 +85,24 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     () => config || {},
   );
   const [groupName, setGroupName] = useState<string>(originalName);
+  const [parentGroup, setParentGroup] = useState<string>(originalParent);
+
+  // Protocol sections enabled state
+  const hasSshFields = (c: Partial<GroupConfig>) =>
+    c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
+    c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId;
+  const hasTelnetFields = (c: Partial<GroupConfig>) =>
+    c.telnetPort !== undefined || !!c.telnetUsername || !!c.telnetPassword;
+
+  const [sshEnabled, setSshEnabled] = useState(() => hasSshFields(config || {}));
+  const [telnetEnabled, setTelnetEnabled] = useState(() => hasTelnetFields(config || {}));
 
   // Sub-panel state
   const [activeSubPanel, setActiveSubPanel] = useState<SubPanel>("none");
 
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
+  const [showTelnetPassword, setShowTelnetPassword] = useState(false);
 
   // Environment variables state
   const [newEnvName, setNewEnvName] = useState("");
@@ -92,6 +110,35 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
   const update = <K extends keyof GroupConfig>(key: K, value: GroupConfig[K] | undefined) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Remove SSH protocol section
+  const removeSsh = () => {
+    setSshEnabled(false);
+    setForm((prev) => {
+      const next = { ...prev };
+      delete next.port;
+      delete next.username;
+      delete next.password;
+      delete next.savePassword;
+      delete next.authMethod;
+      delete next.identityId;
+      delete next.identityFileId;
+      delete next.agentForwarding;
+      return next;
+    });
+  };
+
+  // Remove Telnet protocol section
+  const removeTelnet = () => {
+    setTelnetEnabled(false);
+    setForm((prev) => {
+      const next = { ...prev };
+      delete next.telnetPort;
+      delete next.telnetUsername;
+      delete next.telnetPassword;
+      return next;
+    });
   };
 
   // Proxy helpers
@@ -189,27 +236,46 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       }));
   }, [availableKeys]);
 
+  // Parent group options — exclude self and children
+  const parentGroupOptions = useMemo(() => {
+    const selfPath = groupPath;
+    return [
+      { value: "__root__", label: t("vault.groups.details.none") },
+      ...groups
+        .filter((g) => g !== selfPath && !g.startsWith(selfPath + "/"))
+        .map((g) => ({ value: g, label: g })),
+    ];
+  }, [groups, groupPath, t]);
+
   // Effective theme
   const effectiveThemeId = form.theme || terminalThemeId;
 
   // Save handler
   const handleSubmit = () => {
-    // Build the new path based on possible rename
-    const newPath = parentPath
-      ? `${parentPath}/${groupName.trim()}`
+    const newPath = parentGroup
+      ? `${parentGroup}/${groupName.trim()}`
       : groupName.trim();
 
     const result: GroupConfig = {
       path: newPath,
-      ...(form.username !== undefined && { username: form.username }),
-      ...(form.password !== undefined && { password: form.password }),
-      ...(form.savePassword !== undefined && { savePassword: form.savePassword }),
-      ...(form.authMethod !== undefined && { authMethod: form.authMethod }),
-      ...(form.identityId !== undefined && { identityId: form.identityId }),
-      ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
-      ...(form.port !== undefined && { port: form.port }),
-      ...(form.protocol !== undefined && { protocol: form.protocol }),
-      ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
+      // Only include SSH fields if SSH section is enabled
+      ...(sshEnabled && {
+        ...(form.port !== undefined && { port: form.port }),
+        ...(form.username !== undefined && { username: form.username }),
+        ...(form.password !== undefined && { password: form.password }),
+        ...(form.savePassword !== undefined && { savePassword: form.savePassword }),
+        ...(form.authMethod !== undefined && { authMethod: form.authMethod }),
+        ...(form.identityId !== undefined && { identityId: form.identityId }),
+        ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
+        ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
+      }),
+      // Only include Telnet fields if Telnet section is enabled
+      ...(telnetEnabled && {
+        ...(form.telnetPort !== undefined && { telnetPort: form.telnetPort }),
+        ...(form.telnetUsername !== undefined && { telnetUsername: form.telnetUsername }),
+        ...(form.telnetPassword !== undefined && { telnetPassword: form.telnetPassword }),
+      }),
+      // Advanced fields are always saved
       ...(form.proxyConfig !== undefined && { proxyConfig: form.proxyConfig }),
       ...(form.hostChain !== undefined && { hostChain: form.hostChain }),
       ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
@@ -218,9 +284,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       ...(form.charset !== undefined && { charset: form.charset }),
       ...(form.moshEnabled !== undefined && { moshEnabled: form.moshEnabled }),
       ...(form.moshServerPath !== undefined && { moshServerPath: form.moshServerPath }),
-      ...(form.telnetPort !== undefined && { telnetPort: form.telnetPort }),
-      ...(form.telnetUsername !== undefined && { telnetUsername: form.telnetUsername }),
-      ...(form.telnetPassword !== undefined && { telnetPassword: form.telnetPassword }),
       ...(form.theme !== undefined && { theme: form.theme }),
       ...(form.themeOverride !== undefined && { themeOverride: form.themeOverride }),
       ...(form.fontFamily !== undefined && { fontFamily: form.fontFamily }),
@@ -230,7 +293,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     };
 
     const nameChanged = groupName.trim() !== originalName;
-    onSave(result, nameChanged ? groupName.trim() : undefined);
+    const parentChanged = parentGroup !== originalParent;
+    onSave(
+      result,
+      nameChanged ? groupName.trim() : undefined,
+      parentChanged ? (parentGroup || null) : undefined,
+    );
   };
 
   // --- Sub-panel rendering ---
@@ -307,6 +375,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     );
   }
 
+  // Available protocols to add
+  const addableProtocols: { key: string; label: string }[] = [];
+  if (!sshEnabled) addableProtocols.push({ key: "ssh", label: "SSH" });
+  if (!telnetEnabled) addableProtocols.push({ key: "telnet", label: "Telnet" });
+
   // --- Main panel ---
   return (
     <AsidePanel
@@ -336,164 +409,232 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </p>
           </div>
           <Input
-            placeholder={t("vault.groups.details.general")}
+            placeholder={t("vault.groups.field.name")}
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             className="h-10"
           />
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-xs text-muted-foreground">
-              {t("vault.groups.details.parentGroup")}:
-            </span>
-            <span className="text-xs truncate">
-              {parentPath || t("vault.groups.details.none")}
-            </span>
-          </div>
+          <Combobox
+            options={parentGroupOptions}
+            value={parentGroup || "__root__"}
+            onValueChange={(val) => setParentGroup(val === "__root__" ? "" : val)}
+            placeholder={t("vault.groups.details.parentGroup")}
+            className="w-full"
+          />
         </Card>
 
-        {/* SSH Section */}
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.ssh")}
-            </p>
-          </div>
+        {/* SSH Section (if enabled) */}
+        {sshEnabled && (
+          <Card className="p-3 space-y-3 bg-card border-border/80">
+            <div className="flex items-center gap-2">
+              <TerminalSquare size={14} className="text-muted-foreground" />
+              <p className="text-xs font-semibold flex-1">
+                {t("vault.groups.details.ssh")}
+              </p>
+              <Dropdown>
+                <DropdownTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <MoreHorizontal size={14} />
+                  </Button>
+                </DropdownTrigger>
+                <DropdownContent align="end" className="min-w-[160px]">
+                  <button
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-secondary rounded-md transition-colors"
+                    onClick={removeSsh}
+                  >
+                    <Trash2 size={14} />
+                    Remove Protocol
+                  </button>
+                </DropdownContent>
+              </Dropdown>
+            </div>
 
-          {/* Protocol SSH + Port */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
-              <span className="text-xs text-muted-foreground">SSH on</span>
-              <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
-                <Input
-                  type="number"
-                  placeholder="22"
-                  value={form.port ?? ""}
-                  onChange={(e) =>
-                    update("port", e.target.value ? Number(e.target.value) : undefined)
-                  }
-                  className="h-8 flex-1 min-w-0 text-center"
-                />
-                <span className="text-xs text-muted-foreground">
-                  {t("hostDetails.port")}
-                </span>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
+                <span className="text-xs text-muted-foreground">SSH on</span>
+                <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
+                  <Input
+                    type="number"
+                    placeholder="22"
+                    value={form.port ?? ""}
+                    onChange={(e) =>
+                      update("port", e.target.value ? Number(e.target.value) : undefined)
+                    }
+                    className="h-8 flex-1 min-w-0 text-center"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {t("hostDetails.port")}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Username */}
-          <Input
-            placeholder={t("hostDetails.username.placeholder")}
-            value={form.username || ""}
-            onChange={(e) => update("username", e.target.value || undefined)}
-            className="h-10"
-          />
-
-          {/* Password with eye toggle */}
-          <div className="relative">
             <Input
-              placeholder={t("hostDetails.password.placeholder")}
-              type={showPassword ? "text" : "password"}
-              value={form.password || ""}
-              onChange={(e) => update("password", e.target.value || undefined)}
-              className="h-10 pr-10"
+              placeholder={t("hostDetails.username.placeholder")}
+              value={form.username || ""}
+              onChange={(e) => update("username", e.target.value || undefined)}
+              className="h-10"
             />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
 
-          {/* SSH Key selector */}
-          {form.identityFileId ? (
-            <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
-              <Key size={14} className="text-primary" />
-              <span className="text-sm flex-1 truncate">
-                {availableKeys.find((k) => k.id === form.identityFileId)?.label || "Key"}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => {
-                  update("identityFileId", undefined);
-                  update("authMethod", undefined);
-                }}
-              >
-                <X size={12} />
-              </Button>
-            </div>
-          ) : (
-            keyOptions.length > 0 && (
-              <Combobox
-                options={keyOptions}
-                value={form.identityFileId}
-                onValueChange={(val) => {
-                  update("identityFileId", val);
-                  update("authMethod", "key");
-                }}
-                placeholder={t("hostDetails.keys.search")}
-                emptyText={t("hostDetails.keys.empty")}
-                icon={<Key size={14} className="text-muted-foreground" />}
-                className="w-full"
+            <div className="relative">
+              <Input
+                placeholder={t("hostDetails.password.placeholder")}
+                type={showPassword ? "text" : "password"}
+                value={form.password || ""}
+                onChange={(e) => update("password", e.target.value || undefined)}
+                className="h-10 pr-10"
               />
-            )
-          )}
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
 
-          {/* Agent Forwarding */}
-          <ToggleRow
-            label={t("hostDetails.agentForwarding")}
-            enabled={!!form.agentForwarding}
-            onToggle={() => update("agentForwarding", !form.agentForwarding)}
-          />
-        </Card>
-
-        {/* Telnet Section */}
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Globe size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.telnet")}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
-              <span className="text-xs text-muted-foreground">Telnet on</span>
-              <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
-                <Input
-                  type="number"
-                  placeholder="23"
-                  value={form.telnetPort ?? ""}
-                  onChange={(e) =>
-                    update("telnetPort", e.target.value ? Number(e.target.value) : undefined)
-                  }
-                  className="h-8 flex-1 min-w-0 text-center"
-                />
-                <span className="text-xs text-muted-foreground">
-                  {t("hostDetails.port")}
+            {form.identityFileId ? (
+              <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
+                <Key size={14} className="text-primary" />
+                <span className="text-sm flex-1 truncate">
+                  {availableKeys.find((k) => k.id === form.identityFileId)?.label || "Key"}
                 </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => {
+                    update("identityFileId", undefined);
+                    update("authMethod", undefined);
+                  }}
+                >
+                  <X size={12} />
+                </Button>
+              </div>
+            ) : (
+              keyOptions.length > 0 && (
+                <Combobox
+                  options={keyOptions}
+                  value={form.identityFileId}
+                  onValueChange={(val) => {
+                    update("identityFileId", val);
+                    update("authMethod", "key");
+                  }}
+                  placeholder={t("hostDetails.keys.search")}
+                  emptyText={t("hostDetails.keys.empty")}
+                  icon={<Key size={14} className="text-muted-foreground" />}
+                  className="w-full"
+                />
+              )
+            )}
+
+            <ToggleRow
+              label={t("hostDetails.agentForwarding")}
+              enabled={!!form.agentForwarding}
+              onToggle={() => update("agentForwarding", !form.agentForwarding)}
+            />
+          </Card>
+        )}
+
+        {/* Telnet Section (if enabled) */}
+        {telnetEnabled && (
+          <Card className="p-3 space-y-3 bg-card border-border/80">
+            <div className="flex items-center gap-2">
+              <Globe size={14} className="text-muted-foreground" />
+              <p className="text-xs font-semibold flex-1">
+                {t("vault.groups.details.telnet")}
+              </p>
+              <Dropdown>
+                <DropdownTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <MoreHorizontal size={14} />
+                  </Button>
+                </DropdownTrigger>
+                <DropdownContent align="end" className="min-w-[160px]">
+                  <button
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-secondary rounded-md transition-colors"
+                    onClick={removeTelnet}
+                  >
+                    <Trash2 size={14} />
+                    Remove Protocol
+                  </button>
+                </DropdownContent>
+              </Dropdown>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
+                <span className="text-xs text-muted-foreground">Telnet on</span>
+                <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
+                  <Input
+                    type="number"
+                    placeholder="23"
+                    value={form.telnetPort ?? ""}
+                    onChange={(e) =>
+                      update("telnetPort", e.target.value ? Number(e.target.value) : undefined)
+                    }
+                    className="h-8 flex-1 min-w-0 text-center"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {t("hostDetails.port")}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <Input
-            placeholder={t("hostDetails.telnet.username")}
-            value={form.telnetUsername || ""}
-            onChange={(e) => update("telnetUsername", e.target.value || undefined)}
-            className="h-10"
-          />
-          <Input
-            placeholder={t("hostDetails.telnet.password")}
-            type="password"
-            value={form.telnetPassword || ""}
-            onChange={(e) => update("telnetPassword", e.target.value || undefined)}
-            className="h-10"
-          />
-        </Card>
+            <Input
+              placeholder={t("hostDetails.username.placeholder")}
+              value={form.telnetUsername || ""}
+              onChange={(e) => update("telnetUsername", e.target.value || undefined)}
+              className="h-10"
+            />
+            <div className="relative">
+              <Input
+                placeholder={t("hostDetails.password.placeholder")}
+                type={showTelnetPassword ? "text" : "password"}
+                value={form.telnetPassword || ""}
+                onChange={(e) => update("telnetPassword", e.target.value || undefined)}
+                className="h-10 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTelnetPassword(!showTelnetPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </Card>
+        )}
+
+        {/* Add Protocol Button */}
+        {addableProtocols.length > 0 && (
+          <Dropdown>
+            <DropdownTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full gap-2 h-10 border-dashed"
+              >
+                <Plus size={14} />
+                Add Protocol
+              </Button>
+            </DropdownTrigger>
+            <DropdownContent align="center" className="min-w-[160px]">
+              {addableProtocols.map(({ key, label }) => (
+                <button
+                  key={key}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary rounded-md transition-colors"
+                  onClick={() => {
+                    if (key === "ssh") setSshEnabled(true);
+                    if (key === "telnet") setTelnetEnabled(true);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </DropdownContent>
+          </Dropdown>
+        )}
 
         {/* Advanced Section */}
         <Card className="p-3 space-y-3 bg-card border-border/80">
@@ -504,7 +645,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </p>
           </div>
 
-          {/* Startup Command */}
           <Input
             placeholder={t("hostDetails.startupCommand.placeholder")}
             value={form.startupCommand || ""}
@@ -512,7 +652,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             className="h-10"
           />
 
-          {/* Charset */}
           <Input
             placeholder="UTF-8"
             value={form.charset || ""}
@@ -520,14 +659,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             className="h-10"
           />
 
-          {/* Legacy Algorithms */}
           <ToggleRow
             label={t("hostDetails.legacyAlgorithms")}
             enabled={!!form.legacyAlgorithms}
             onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
           />
 
-          {/* Proxy row */}
           <button
             type="button"
             className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
@@ -547,7 +684,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </div>
           </button>
 
-          {/* Host Chaining row */}
           <button
             type="button"
             className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
@@ -567,7 +703,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </div>
           </button>
 
-          {/* Environment Variables row */}
           <button
             type="button"
             className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
@@ -620,7 +755,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </p>
           </div>
 
-          {/* Theme Selection */}
           <button
             type="button"
             className="w-full flex items-center gap-3 p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
@@ -666,7 +800,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </Button>
           )}
 
-          {/* Font Family */}
           <Input
             placeholder={t("hostDetails.fontFamily") || "Font Family"}
             value={form.fontFamily || ""}
@@ -681,7 +814,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             className="h-10"
           />
 
-          {/* Font Size */}
           <Input
             type="number"
             placeholder={String(terminalFontSize)}

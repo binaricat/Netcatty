@@ -1224,52 +1224,50 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsGroupPanelOpen(true);
   }, []);
 
-  const handleSaveGroupConfig = useCallback((config: GroupConfig, newName?: string) => {
-    // Save config
-    const updatedConfigs = [...groupConfigs.filter(c => c.path !== editingGroupPath), config];
-    onUpdateGroupConfigs(updatedConfigs);
+  const handleSaveGroupConfig = useCallback((config: GroupConfig, _newName?: string, _newParent?: string | null) => {
+    const oldPath = editingGroupPath!;
+    const newPath = config.path; // Panel already computed the correct path
 
-    // Handle rename if name changed
-    if (newName && editingGroupPath) {
-      const oldPath = editingGroupPath;
-      const parts = oldPath.split('/').filter(Boolean);
-      parts[parts.length - 1] = newName;
-      const newPath = parts.join('/');
-      if (newPath !== oldPath) {
-        // Reuse existing rename logic — update groups, hosts, managed sources
-        const updatedGroups = customGroups.map((g) => {
-          if (g === oldPath) return newPath;
-          if (g.startsWith(oldPath + '/')) return g.replace(oldPath, newPath);
-          return g;
-        });
-        const updatedHosts = hosts.map((h) => {
-          const g = h.group || '';
-          if (g === oldPath) return { ...h, group: newPath };
-          if (g.startsWith(oldPath + '/')) return { ...h, group: g.replace(oldPath, newPath) };
-          return h;
-        });
-        const updatedManagedSources = managedSources.map((s) => {
-          if (s.groupName === oldPath) return { ...s, groupName: newPath };
-          if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: s.groupName.replace(oldPath, newPath) };
-          return s;
-        });
-        if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
-          onUpdateManagedSources(updatedManagedSources);
-        }
-        onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
-        onUpdateHosts(updatedHosts);
-        // Also update the config path
-        const finalConfigs = updatedConfigs.map(c => {
-          if (c.path === oldPath) return { ...c, path: newPath };
-          if (c.path.startsWith(oldPath + '/')) return { ...c, path: c.path.replace(oldPath, newPath) };
-          return c;
-        });
-        onUpdateGroupConfigs(finalConfigs);
-        if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
-        if (selectedGroupPath?.startsWith(oldPath + '/')) {
-          setSelectedGroupPath(selectedGroupPath.replace(oldPath, newPath));
-        }
+    // Save config (use new path)
+    const updatedConfigs = [...groupConfigs.filter(c => c.path !== oldPath), config];
+
+    // Handle path change (rename or parent change)
+    if (newPath !== oldPath) {
+      // Update groups, hosts, managed sources, and configs for path change
+      const updatedGroups = customGroups.map((g) => {
+        if (g === oldPath) return newPath;
+        if (g.startsWith(oldPath + '/')) return g.replace(oldPath, newPath);
+        return g;
+      });
+      const updatedHosts = hosts.map((h) => {
+        const g = h.group || '';
+        if (g === oldPath) return { ...h, group: newPath };
+        if (g.startsWith(oldPath + '/')) return { ...h, group: g.replace(oldPath, newPath) };
+        return h;
+      });
+      const updatedManagedSources = managedSources.map((s) => {
+        if (s.groupName === oldPath) return { ...s, groupName: newPath };
+        if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: s.groupName.replace(oldPath, newPath) };
+        return s;
+      });
+      if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
+        onUpdateManagedSources(updatedManagedSources);
       }
+      onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
+      onUpdateHosts(updatedHosts);
+      // Update child config paths too
+      const finalConfigs = updatedConfigs.map(c => {
+        if (c.path === oldPath) return { ...c, path: newPath };
+        if (c.path.startsWith(oldPath + '/')) return { ...c, path: c.path.replace(oldPath, newPath) };
+        return c;
+      });
+      onUpdateGroupConfigs(finalConfigs);
+      if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
+      if (selectedGroupPath?.startsWith(oldPath + '/')) {
+        setSelectedGroupPath(selectedGroupPath.replace(oldPath, newPath));
+      }
+    } else {
+      onUpdateGroupConfigs(updatedConfigs);
     }
 
     setIsGroupPanelOpen(false);
@@ -2698,6 +2696,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           availableKeys={keys}
           identities={identities}
           allHosts={hosts}
+          groups={allGroupPaths}
           terminalThemeId={terminalThemeId}
           terminalFontSize={terminalFontSize}
           onSave={handleSaveGroupConfig}
