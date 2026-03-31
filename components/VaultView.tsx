@@ -1322,6 +1322,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
     onUpdateCustomGroups(keepGroups);
     onUpdateHosts(keepHosts);
+    // Remove configs for deleted group and its children
+    const updatedGroupConfigs = groupConfigs.filter(
+      (c) => c.path !== path && !c.path.startsWith(path + '/')
+    );
+    if (updatedGroupConfigs.length !== groupConfigs.length) {
+      onUpdateGroupConfigs(updatedGroupConfigs);
+    }
     if (
       selectedGroupPath &&
       (selectedGroupPath === path || selectedGroupPath.startsWith(path + "/"))
@@ -1358,6 +1365,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     }
     onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
     onUpdateHosts(updatedHosts);
+    // Update group configs for moved paths
+    const updatedGroupConfigs = groupConfigs.map((c) => {
+      if (c.path === sourcePath) return { ...c, path: newPath };
+      if (c.path.startsWith(sourcePath + '/'))
+        return { ...c, path: c.path.replace(sourcePath, newPath) };
+      return c;
+    });
+    if (updatedGroupConfigs.some((c, i) => c !== groupConfigs[i])) {
+      onUpdateGroupConfigs(updatedGroupConfigs);
+    }
     if (
       selectedGroupPath &&
       (selectedGroupPath === sourcePath ||
