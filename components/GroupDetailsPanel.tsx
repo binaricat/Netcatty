@@ -10,6 +10,7 @@ import {
   Palette,
   Plus,
   Settings2,
+  Shield,
   TerminalSquare,
   Trash2,
   Variable,
@@ -43,6 +44,7 @@ import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { TerminalFontSelect } from "./settings/TerminalFontSelect";
 import { useAvailableFonts } from "../application/state/fontStore";
 
@@ -107,6 +109,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   const [showTelnetPassword, setShowTelnetPassword] = useState(false);
   const [addProtocolOpen, setAddProtocolOpen] = useState(false);
 
+  // Credential selection state
+  const [credentialPopoverOpen, setCredentialPopoverOpen] = useState(false);
+  const [selectedCredentialType, setSelectedCredentialType] =
+    useState<'key' | 'certificate' | null>(null);
+
   // Environment variables state
   const [newEnvName, setNewEnvName] = useState("");
   const [newEnvValue, setNewEnvValue] = useState("");
@@ -118,6 +125,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   // Remove SSH protocol section
   const removeSsh = () => {
     setSshEnabled(false);
+    setSelectedCredentialType(null);
     setForm((prev) => {
       const next = { ...prev };
       delete next.port;
@@ -234,16 +242,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     }));
   };
 
-  // Key options for combobox
-  const keyOptions = useMemo(() => {
-    return availableKeys
-      .filter((k) => k.category === "key")
-      .map((k) => ({
-        value: k.id,
-        label: k.label,
-        sublabel: `${k.type}${k.keySize ? ` ${k.keySize}` : ""}`,
-        icon: <Key size={14} className="text-muted-foreground" />,
-      }));
+  // Available keys by category
+  const keysByCategory = useMemo(() => {
+    return {
+      key: availableKeys.filter((k) => k.category === "key"),
+      certificate: availableKeys.filter((k) => k.category === "certificate"),
+    };
   }, [availableKeys]);
 
   // Parent group options — exclude self and children
@@ -503,9 +507,14 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               </button>
             </div>
 
-            {form.identityFileId ? (
+            {/* Selected credential display */}
+            {form.identityFileId && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
-                <Key size={14} className="text-primary" />
+                {form.authMethod === "certificate" ? (
+                  <Shield size={14} className="text-primary" />
+                ) : (
+                  <Key size={14} className="text-primary" />
+                )}
                 <span className="text-sm flex-1 truncate">
                   {availableKeys.find((k) => k.id === form.identityFileId)?.label || "Key"}
                 </span>
@@ -516,27 +525,136 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                   onClick={() => {
                     update("identityFileId", undefined);
                     update("authMethod", undefined);
+                    setSelectedCredentialType(null);
                   }}
                 >
                   <X size={12} />
                 </Button>
               </div>
-            ) : (
-              keyOptions.length > 0 && (
-                <Combobox
-                  options={keyOptions}
-                  value={form.identityFileId}
-                  onValueChange={(val) => {
-                    update("identityFileId", val);
-                    update("authMethod", "key");
-                  }}
-                  placeholder={t("hostDetails.keys.search")}
-                  emptyText={t("hostDetails.keys.empty")}
-                  icon={<Key size={14} className="text-muted-foreground" />}
-                  className="w-full"
-                />
-              )
             )}
+
+            {/* Credential type selection with inline popover - hidden when credential is selected */}
+            {!form.identityFileId &&
+              !selectedCredentialType && (
+                <Popover
+                  open={credentialPopoverOpen}
+                  onOpenChange={setCredentialPopoverOpen}
+                >
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+                    >
+                      <Plus size={12} />
+                      <span>{t("hostDetails.credential.keyCertificate")}</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-[200px] p-1"
+                    align="start"
+                    sideOffset={4}
+                  >
+                    <div className="space-y-0.5">
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          setSelectedCredentialType("key");
+                          setCredentialPopoverOpen(false);
+                        }}
+                      >
+                        <Key size={16} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {t("hostDetails.credential.key")}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          setSelectedCredentialType("certificate");
+                          setCredentialPopoverOpen(false);
+                        }}
+                      >
+                        <Shield size={16} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {t("hostDetails.credential.certificate")}
+                        </span>
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+
+            {/* Key selection combobox - appears after selecting "Key" type */}
+            {selectedCredentialType === "key" &&
+              !form.identityFileId && (
+                <div className="flex items-center gap-1">
+                  <Combobox
+                    options={keysByCategory.key.map((k) => ({
+                      value: k.id,
+                      label: k.label,
+                      sublabel: `${k.type}${k.keySize ? ` ${k.keySize}` : ""}`,
+                      icon: <Key size={14} className="text-muted-foreground" />,
+                    }))}
+                    value={form.identityFileId}
+                    onValueChange={(val) => {
+                      update("identityFileId", val);
+                      update("authMethod", "key");
+                      setSelectedCredentialType(null);
+                    }}
+                    placeholder={t("hostDetails.keys.search")}
+                    emptyText={t("hostDetails.keys.empty")}
+                    icon={<Key size={14} className="text-muted-foreground" />}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setSelectedCredentialType(null)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+              )}
+
+            {/* Certificate selection combobox - appears after selecting "Certificate" type */}
+            {selectedCredentialType === "certificate" &&
+              !form.identityFileId && (
+                <div className="flex items-center gap-1">
+                  <Combobox
+                    options={keysByCategory.certificate.map((k) => ({
+                      value: k.id,
+                      label: k.label,
+                      icon: (
+                        <Shield size={14} className="text-muted-foreground" />
+                      ),
+                    }))}
+                    value={form.identityFileId}
+                    onValueChange={(val) => {
+                      update("identityFileId", val);
+                      update("authMethod", "certificate");
+                      setSelectedCredentialType(null);
+                    }}
+                    placeholder={t("hostDetails.certs.search")}
+                    emptyText={t("hostDetails.certs.empty")}
+                    icon={
+                      <Shield size={14} className="text-muted-foreground" />
+                    }
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setSelectedCredentialType(null)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+              )}
 
             <ToggleRow
               label={t("hostDetails.agentForwarding")}
