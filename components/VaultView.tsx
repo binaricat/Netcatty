@@ -35,6 +35,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
+import { resolveGroupDefaults } from "../domain/groupConfig";
 import { getEffectiveHostDistro, sanitizeHost } from "../domain/host";
 import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/vaultImport";
 import type { VaultImportFormat } from "../domain/vaultImport";
@@ -255,6 +256,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Group panel state
   const [isGroupPanelOpen, setIsGroupPanelOpen] = useState(false);
   const [editingGroupPath, setEditingGroupPath] = useState<string | null>(null);
+
+  // Compute inherited group defaults for the host being edited
+  const editingHostGroupDefaults = useMemo(() => {
+    const group = editingHost?.group || newHostGroupPath || selectedGroupPath;
+    if (!group) return undefined;
+    return resolveGroupDefaults(group, groupConfigs);
+  }, [editingHost, newHostGroupPath, selectedGroupPath, groupConfigs]);
 
   // Quick connect state
   const [quickConnectTarget, setQuickConnectTarget] = useState<{
@@ -2713,6 +2721,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           defaultGroup={editingHost ? undefined : (newHostGroupPath || selectedGroupPath)}
           terminalThemeId={terminalThemeId}
           terminalFontSize={terminalFontSize}
+          groupDefaults={editingHostGroupDefaults}
           onSave={(host) => {
             // Check if host already exists in the list (for updates vs. new/duplicate)
             const hostExists = hosts.some((h) => h.id === host.id);

@@ -99,6 +99,7 @@ interface HostDetailsPanelProps {
   onCancel: () => void;
   onCreateGroup?: (groupPath: string) => void; // Callback to create a new group
   onCreateTag?: (tag: string) => void; // Callback to create a new tag
+  groupDefaults?: Partial<import('../domain/models').GroupConfig>;
 }
 
 const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
@@ -116,6 +117,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   onCancel,
   onCreateGroup,
   onCreateTag,
+  groupDefaults,
 }) => {
   const { t } = useI18n();
   const { checkSshAgent } = useApplicationBackend();
@@ -805,7 +807,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 if (!hasIdentities) {
                   return (
                     <Input
-                      placeholder={t("hostDetails.username.placeholder")}
+                      placeholder={groupDefaults?.username || t("hostDetails.username.placeholder")}
                       value={form.username}
                       onChange={(e) => update("username", e.target.value)}
                       className="h-10"
@@ -824,7 +826,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                     <PopoverTrigger asChild>
                       <div className="relative">
                         <Input
-                          placeholder={t("hostDetails.username.placeholder")}
+                          placeholder={groupDefaults?.username || t("hostDetails.username.placeholder")}
                           value={form.username}
                           onChange={(e) => {
                             const next = e.target.value;
@@ -1778,7 +1780,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             <p className="text-xs font-semibold">{t("hostDetails.startupCommand")}</p>
           </div>
           <Textarea
-            placeholder={t("hostDetails.startupCommand.placeholder")}
+            placeholder={groupDefaults?.startupCommand || t("hostDetails.startupCommand.placeholder")}
             value={form.startupCommand || ""}
             onChange={(e) => update("startupCommand", e.target.value)}
             className="min-h-[80px] font-mono text-sm"
@@ -1842,7 +1844,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 
             {/* Telnet Charset */}
             <Input
-              placeholder={t("hostDetails.charset.placeholder")}
+              placeholder={groupDefaults?.charset || t("hostDetails.charset.placeholder")}
               value={form.charset || "UTF-8"}
               onChange={(e) => update("charset", e.target.value)}
               className="h-10"
