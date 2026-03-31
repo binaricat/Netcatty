@@ -186,6 +186,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 }) => {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
   const [currentSection, setCurrentSection] = useState<VaultSection>("hosts");
   const [search, setSearch] = useState("");
   const [selectedGroupPath, setSelectedGroupPath] = useState<string | null>(
@@ -304,12 +306,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Handle host connect with protocol selection
   const handleHostConnect = useCallback(
     (host: Host) => {
-      // Update lastConnectedAt timestamp
+      // Update lastConnectedAt timestamp via ref to avoid stale closure over hosts
       const now = Date.now();
-      const updatedHosts = hosts.map((h) =>
+      onUpdateHosts(hostsRef.current.map((h) =>
         h.id === host.id ? { ...h, lastConnectedAt: now } : h
-      );
-      onUpdateHosts(updatedHosts);
+      ));
 
       if (hasMultipleProtocols(host)) {
         setProtocolSelectHost(host);
@@ -317,7 +318,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         onConnect(host);
       }
     },
-    [hasMultipleProtocols, onConnect, hosts, onUpdateHosts],
+    [hasMultipleProtocols, onConnect, onUpdateHosts],
   );
 
   // Handle protocol selection
@@ -459,11 +460,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, [identities, t]);
 
   const toggleHostPinned = useCallback((hostId: string) => {
-    const updatedHosts = hosts.map((h) =>
+    onUpdateHosts(hostsRef.current.map((h) =>
       h.id === hostId ? { ...h, pinned: !h.pinned } : h
-    );
-    onUpdateHosts(updatedHosts);
-  }, [hosts, onUpdateHosts]);
+    ));
+  }, [onUpdateHosts]);
 
   const toggleHostSelection = useCallback((hostId: string) => {
     setSelectedHostIds(prev => {
@@ -1740,7 +1740,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                           ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                           : "flex flex-col gap-0",
                       )}>
-                        {pinnedHosts.map((host) => {
+                        {pinnedHosts.map((host, idx) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
                           const distroBadge = {
@@ -1757,6 +1757,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                   )}
+                                  style={{ animation: `pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.04}s both` }}
                                   onClick={() => handleHostConnect(safeHost)}
                                 >
                                   <div className="flex items-center gap-3 h-full">

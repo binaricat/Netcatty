@@ -78,6 +78,23 @@
       opacity: 1;
     }
   }
+
+  @keyframes pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    50% {
+      transform: scale(1.04);
+    }
+    75% {
+      transform: scale(0.98);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
 
 :root {
