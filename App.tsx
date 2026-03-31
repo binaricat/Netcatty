@@ -1403,6 +1403,7 @@ function App({ settings }: { settings: SettingsState }) {
 
         <TerminalLayerMount
           hosts={hosts}
+          groupConfigs={groupConfigs}
           keys={keys}
           identities={identities}
           snippets={snippets}

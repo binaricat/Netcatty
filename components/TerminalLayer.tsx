@@ -29,7 +29,8 @@ import { useStoredNumber } from '../application/state/useStoredNumber';
 import { STORAGE_KEY_SIDE_PANEL_WIDTH } from '../infrastructure/config/storageKeys';
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
-import { Host, Identity, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
+import { GroupConfig, Host, Identity, KnownHost, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace, WorkspaceNode } from '../types';
+import { resolveGroupDefaults, applyGroupDefaults } from '../domain/groupConfig';
 import { DistroAvatar } from './DistroAvatar';
 import Terminal from './Terminal';
 import { SftpSidePanel } from './SftpSidePanel';
@@ -338,6 +339,7 @@ AIChatPanelsHost.displayName = 'AIChatPanelsHost';
 
 interface TerminalLayerProps {
   hosts: Host[];
+  groupConfigs: GroupConfig[];
   keys: SSHKey[];
   identities: Identity[];
   snippets: Snippet[];
@@ -391,6 +393,7 @@ interface TerminalLayerProps {
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   hosts,
+  groupConfigs,
   keys,
   identities,
   snippets,
@@ -770,8 +773,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMap = useMemo(() => {
     const map = new Map<string, Host>();
     for (const session of sessions) {
-      const existingHost = hostMap.get(session.hostId);
-      if (existingHost) {
+      const rawHost = hostMap.get(session.hostId);
+      if (rawHost) {
+        // Apply group config defaults so Terminal sees the merged host
+        const groupDefaults = rawHost.group
+          ? resolveGroupDefaults(rawHost.group, groupConfigs)
+          : {};
+        const existingHost = applyGroupDefaults(rawHost, groupDefaults);
+
         const protocol = session.protocol ?? existingHost.protocol;
         const port = session.port ?? existingHost.port;
         const moshEnabled = session.moshEnabled ?? existingHost.moshEnabled;
@@ -808,7 +817,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
     }
     return map;
-  }, [sessions, hostMap]);
+  }, [sessions, hostMap, groupConfigs]);
   const sessionChainHostsMap = useMemo(() => {
     const map = new Map<string, Host[]>();
     for (const session of sessions) {
