@@ -732,7 +732,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           </Dropdown>
         )}
 
-        {/* Charset (shared, not protocol-specific) */}
+        {/* Charset & Appearance — only when at least one protocol is added */}
+        {(sshEnabled || telnetEnabled) && (<>
         <Card className="p-3 space-y-3 bg-card border-border/80">
           <div className="flex items-center gap-2">
             <Globe size={14} className="text-muted-foreground" />
@@ -831,6 +832,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             className="h-10"
           />
         </Card>
+        </>)}
       </AsidePanelContent>
     </AsidePanel>
   );
