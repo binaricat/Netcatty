@@ -49,8 +49,8 @@ export default function SettingsAppearanceTab(props: {
     setUiLanguage,
     customCSS,
     setCustomCSS,
-    isImmersive,
-    onToggleImmersive,
+    isImmersive: _isImmersive,
+    onToggleImmersive: _onToggleImmersive,
   } = props;
 
   const [showRecentHosts, setShowRecentHosts] = useStoredBoolean(

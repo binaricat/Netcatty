@@ -214,7 +214,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   const [isBreadcrumbDragOver, setIsBreadcrumbDragOver] = useState(false);
 
-  const [showRecentHosts, setShowRecentHosts] = useStoredBoolean(
+  const [showRecentHosts, _setShowRecentHosts] = useStoredBoolean(
     STORAGE_KEY_SHOW_RECENT_HOSTS,
     true,
   );

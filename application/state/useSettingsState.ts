@@ -462,7 +462,7 @@ export const useSettingsState = () => {
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
-  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings, notifySettingsChanged]);
+  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
 
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
