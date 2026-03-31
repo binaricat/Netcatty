@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeDistroId, sanitizeHost } from "../../domain/host";
 import {
   ConnectionLog,
+  GroupConfig,
   Host,
   Identity,
   KeyCategory,
@@ -17,6 +18,7 @@ import {
 } from "../../infrastructure/config/defaultData";
 import {
   STORAGE_KEY_CONNECTION_LOGS,
+  STORAGE_KEY_GROUP_CONFIGS,
   STORAGE_KEY_GROUPS,
   STORAGE_KEY_HOSTS,
   STORAGE_KEY_IDENTITIES,
@@ -30,9 +32,11 @@ import {
 } from "../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import {
+  decryptGroupConfigs,
   decryptHosts,
   decryptIdentities,
   decryptKeys,
+  encryptGroupConfigs,
   encryptHosts,
   encryptIdentities,
   encryptKeys,
@@ -46,6 +50,7 @@ type ExportableVaultData = {
   customGroups: string[];
   snippetPackages?: string[];
   knownHosts?: KnownHost[];
+  groupConfigs?: GroupConfig[];
 };
 
 type LegacyKeyRecord = Record<string, unknown> & { id?: string; source?: string };
@@ -107,6 +112,7 @@ export const useVaultState = () => {
   const [shellHistory, setShellHistory] = useState<ShellHistoryEntry[]>([]);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [managedSources, setManagedSources] = useState<ManagedSource[]>([]);
+  const [groupConfigs, setGroupConfigs] = useState<GroupConfig[]>([]);
 
   // Write-version counters prevent out-of-order async writes from overwriting
   // newer data.  Each update bumps the counter; the .then() callback only
@@ -114,6 +120,7 @@ export const useVaultState = () => {
   const hostsWriteVersion = useRef(0);
   const keysWriteVersion = useRef(0);
   const identitiesWriteVersion = useRef(0);
+  const groupConfigsWriteVersion = useRef(0);
 
   // Read-sequence counters for cross-window storage events.  Each incoming
   // event bumps the counter; the async decrypt callback only applies state if
@@ -122,6 +129,7 @@ export const useVaultState = () => {
   const hostsReadSeq = useRef(0);
   const keysReadSeq = useRef(0);
   const identitiesReadSeq = useRef(0);
+  const groupConfigsReadSeq = useRef(0);
 
   const updateHosts = useCallback((data: Host[]) => {
     const cleaned = data.map(sanitizeHost);
@@ -176,6 +184,15 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_MANAGED_SOURCES, data);
   }, []);
 
+  const updateGroupConfigs = useCallback((data: GroupConfig[]) => {
+    setGroupConfigs(data);
+    const ver = ++groupConfigsWriteVersion.current;
+    encryptGroupConfigs(data).then((enc) => {
+      if (ver === groupConfigsWriteVersion.current)
+        localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
+    });
+  }, []);
+
   const clearVaultData = useCallback(() => {
     updateHosts([]);
     updateKeys([]);
@@ -185,6 +202,7 @@ export const useVaultState = () => {
     updateCustomGroups([]);
     updateKnownHosts([]);
     updateManagedSources([]);
+    updateGroupConfigs([]);
     localStorageAdapter.remove(STORAGE_KEY_LEGACY_KEYS);
   }, [
     updateHosts,
@@ -195,6 +213,7 @@ export const useVaultState = () => {
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
+    updateGroupConfigs,
   ]);
 
   const addShellHistoryEntry = useCallback(
@@ -430,6 +449,20 @@ export const useVaultState = () => {
         STORAGE_KEY_MANAGED_SOURCES,
       );
       if (savedManagedSources) setManagedSources(savedManagedSources);
+
+      // Load group configs
+      const savedGroupConfigs = localStorageAdapter.read<GroupConfig[]>(STORAGE_KEY_GROUP_CONFIGS);
+      if (savedGroupConfigs) {
+        const gcVer = ++groupConfigsWriteVersion.current;
+        const decryptedGC = await decryptGroupConfigs(savedGroupConfigs);
+        if (gcVer === groupConfigsWriteVersion.current) {
+          setGroupConfigs(decryptedGC);
+          encryptGroupConfigs(decryptedGC).then((enc) => {
+            if (gcVer === groupConfigsWriteVersion.current)
+              localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
+          });
+        }
+      }
     };
 
     init();
@@ -529,6 +562,19 @@ export const useVaultState = () => {
       if (key === STORAGE_KEY_MANAGED_SOURCES) {
         const next = safeParse<ManagedSource[]>(event.newValue) ?? [];
         setManagedSources(next);
+        return;
+      }
+
+      if (key === STORAGE_KEY_GROUP_CONFIGS) {
+        const next = safeParse<GroupConfig[]>(event.newValue) ?? [];
+        ++groupConfigsWriteVersion.current;
+        const seq = ++groupConfigsReadSeq.current;
+        const writeAtStart = groupConfigsWriteVersion.current;
+        decryptGroupConfigs(next).then((dec) => {
+          if (seq === groupConfigsReadSeq.current && writeAtStart === groupConfigsWriteVersion.current)
+            setGroupConfigs(dec);
+        });
+        return;
       }
     };
 
@@ -574,8 +620,9 @@ export const useVaultState = () => {
       customGroups,
       snippetPackages,
       knownHosts,
+      groupConfigs,
     }),
-    [hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts],
+    [hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts, groupConfigs],
   );
 
   const importData = useCallback(
@@ -587,6 +634,7 @@ export const useVaultState = () => {
       if (payload.customGroups) updateCustomGroups(payload.customGroups);
       if (payload.snippetPackages) updateSnippetPackages(payload.snippetPackages);
       if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
+      if (payload.groupConfigs) updateGroupConfigs(payload.groupConfigs);
     },
     [
       updateHosts,
@@ -596,6 +644,7 @@ export const useVaultState = () => {
       updateCustomGroups,
       updateSnippetPackages,
       updateKnownHosts,
+      updateGroupConfigs,
     ],
   );
 
@@ -618,6 +667,7 @@ export const useVaultState = () => {
     shellHistory,
     connectionLogs,
     managedSources,
+    groupConfigs,
     updateHosts,
     updateKeys,
     updateIdentities,
@@ -626,6 +676,7 @@ export const useVaultState = () => {
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
+    updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,
     addConnectionLog,
