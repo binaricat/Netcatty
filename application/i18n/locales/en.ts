@@ -475,6 +475,10 @@ const en: Messages = {
   'vault.groups.details.parentGroup': 'Parent Group',
   'vault.groups.details.none': 'None',
   'vault.groups.details.inherited': 'Inherited from group',
+  'vault.groups.details.addProtocol': 'Add Protocol',
+  'vault.groups.details.removeProtocol': 'Remove Protocol',
+  'vault.groups.details.fontFamily': 'Font Family',
+  'vault.groups.details.fontSize': 'Font Size',
   'vault.groups.errors.required': 'Group name is required.',
   'vault.groups.errors.invalidChars': "Group name cannot include '/' or '\\\\'.",
 

@@ -308,6 +308,10 @@ const zhCN: Messages = {
   'vault.groups.details.parentGroup': '父分组',
   'vault.groups.details.none': '无',
   'vault.groups.details.inherited': '继承自分组',
+  'vault.groups.details.addProtocol': '添加协议',
+  'vault.groups.details.removeProtocol': '移除协议',
+  'vault.groups.details.fontFamily': '字体',
+  'vault.groups.details.fontSize': '字号',
   'vault.groups.errors.required': '分组名称不能为空。',
   'vault.groups.errors.invalidChars': "分组名称不能包含 '/' 或 '\\\\'.",
 

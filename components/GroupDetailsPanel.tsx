@@ -450,7 +450,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                     onClick={removeSsh}
                   >
                     <Trash2 size={14} />
-                    Remove Protocol
+                    {t("vault.groups.details.removeProtocol")}
                   </button>
                 </DropdownContent>
               </Dropdown>
@@ -653,7 +653,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                     onClick={removeTelnet}
                   >
                     <Trash2 size={14} />
-                    Remove Protocol
+                    {t("vault.groups.details.removeProtocol")}
                   </button>
                 </DropdownContent>
               </Dropdown>
@@ -702,36 +702,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               </button>
             </div>
           </Card>
-        )}
-
-        {/* Add Protocol Button */}
-        {addableProtocols.length > 0 && (
-          <Dropdown open={addProtocolOpen} onOpenChange={setAddProtocolOpen}>
-            <DropdownTrigger asChild>
-              <Button
-                variant="outline"
-                className="w-full gap-2 h-10 border-dashed"
-              >
-                <Plus size={14} />
-                Add Protocol
-              </Button>
-            </DropdownTrigger>
-            <DropdownContent align="center" className="min-w-[160px]">
-              {addableProtocols.map(({ key, label }) => (
-                <button
-                  key={key}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary rounded-md transition-colors"
-                  onClick={() => {
-                    if (key === "ssh") setSshEnabled(true);
-                    if (key === "telnet") setTelnetEnabled(true);
-                    setAddProtocolOpen(false);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </DropdownContent>
-          </Dropdown>
         )}
 
         {/* Charset & Appearance — only when at least one protocol is added */}
@@ -806,7 +776,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           )}
 
           <Input
-            placeholder={t("hostDetails.fontFamily") || "Font Family"}
+            placeholder={t("vault.groups.details.fontFamily")}
             value={form.fontFamily || ""}
             onChange={(e) => {
               const val = e.target.value || undefined;
@@ -835,6 +805,36 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           />
         </Card>
         </>)}
+
+        {/* Add Protocol Button — always at the bottom */}
+        {addableProtocols.length > 0 && (
+          <Dropdown open={addProtocolOpen} onOpenChange={setAddProtocolOpen}>
+            <DropdownTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full gap-2 h-10 border-dashed"
+              >
+                <Plus size={14} />
+                {t("vault.groups.details.addProtocol")}
+              </Button>
+            </DropdownTrigger>
+            <DropdownContent align="center" className="min-w-[160px]">
+              {addableProtocols.map(({ key, label }) => (
+                <button
+                  key={key}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-secondary rounded-md transition-colors"
+                  onClick={() => {
+                    if (key === "ssh") setSshEnabled(true);
+                    if (key === "telnet") setTelnetEnabled(true);
+                    setAddProtocolOpen(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </DropdownContent>
+          </Dropdown>
+        )}
       </AsidePanelContent>
     </AsidePanel>
   );
