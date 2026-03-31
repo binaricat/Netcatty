@@ -1791,12 +1791,27 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   )}
                                   style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
                                   onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
-                                  onClick={() => handleHostConnect(safeHost)}
+                                  onClick={() => {
+                                    if (isMultiSelectMode) {
+                                      toggleHostSelection(host.id);
+                                    } else {
+                                      handleHostConnect(safeHost);
+                                    }
+                                  }}
                                 >
                                   {viewMode === "grid" && (
                                     <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
                                   )}
                                   <div className="flex items-center gap-3 h-full">
+                                    {isMultiSelectMode && (
+                                      <div className="shrink-0">
+                                        {selectedHostIds.has(host.id) ? (
+                                          <CheckSquare size={18} className="text-primary" />
+                                        ) : (
+                                          <Square size={18} className="text-muted-foreground" />
+                                        )}
+                                      </div>
+                                    )}
                                     <DistroAvatar host={safeHost} fallback={distroBadge.text} />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                       <span className="text-sm font-semibold truncate leading-5">
@@ -1869,9 +1884,24 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                   )}
-                                  onClick={() => handleHostConnect(safeHost)}
+                                  onClick={() => {
+                                    if (isMultiSelectMode) {
+                                      toggleHostSelection(host.id);
+                                    } else {
+                                      handleHostConnect(safeHost);
+                                    }
+                                  }}
                                 >
                                   <div className="flex items-center gap-3 h-full">
+                                    {isMultiSelectMode && (
+                                      <div className="shrink-0">
+                                        {selectedHostIds.has(host.id) ? (
+                                          <CheckSquare size={18} className="text-primary" />
+                                        ) : (
+                                          <Square size={18} className="text-muted-foreground" />
+                                        )}
+                                      </div>
+                                    )}
                                     <DistroAvatar host={safeHost} fallback={distroBadge.text} />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                       <span className="text-sm font-semibold truncate leading-5">

@@ -1090,10 +1090,6 @@ function App({ settings }: { settings: SettingsState }) {
         localHostname: localHost,
         saved: false,
       });
-      // Update lastConnectedAt after session is created
-      updateHosts(hosts.map((h) =>
-        h.id === host.id ? { ...h, lastConnectedAt: Date.now() } : h
-      ));
       return;
     }
 
@@ -1112,11 +1108,20 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: localHost,
       saved: false,
     });
-    // Update lastConnectedAt after session is created
-    updateHosts(hosts.map((h) =>
-      h.id === host.id ? { ...h, lastConnectedAt: Date.now() } : h
-    ));
-  }, [addConnectionLog, connectToHost, identities, keys, hosts, updateHosts]);
+  }, [addConnectionLog, connectToHost, identities, keys]);
+
+  // Wrap updateSessionStatus to track lastConnectedAt on successful connection
+  const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
+    updateSessionStatus(sessionId, status);
+    if (status === 'connected') {
+      const session = sessionById.get(sessionId);
+      if (session?.hostId) {
+        updateHosts(hosts.map((h) =>
+          h.id === session.hostId ? { ...h, lastConnectedAt: Date.now() } : h
+        ));
+      }
+    }
+  }, [updateSessionStatus, sessionById, hosts, updateHosts]);
 
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
@@ -1396,7 +1401,7 @@ function App({ settings }: { settings: SettingsState }) {
           onUpdateTerminalFontFamilyId={setTerminalFontFamilyId}
           onUpdateTerminalFontSize={setTerminalFontSize}
           onCloseSession={closeSession}
-          onUpdateSessionStatus={updateSessionStatus}
+          onUpdateSessionStatus={handleSessionStatusChange}
           onUpdateHostDistro={updateHostDistro}
           onUpdateHost={(host) => updateHosts(hosts.map(h => h.id === host.id ? host : h))}
           onAddKnownHost={(kh) => updateKnownHosts([...knownHosts, kh])}
