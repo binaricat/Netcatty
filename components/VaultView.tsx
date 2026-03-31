@@ -1802,6 +1802,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   )}
                                   style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
                                   onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
+                                  draggable={!isMultiSelectMode}
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.dataTransfer.setData("host-id", host.id);
+                                  }}
                                   onClick={() => {
                                     if (isMultiSelectMode) {
                                       toggleHostSelection(host.id);
@@ -1895,6 +1900,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                   )}
+                                  draggable={!isMultiSelectMode}
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.dataTransfer.setData("host-id", host.id);
+                                  }}
                                   onClick={() => {
                                     if (isMultiSelectMode) {
                                       toggleHostSelection(host.id);
@@ -2203,7 +2213,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                 {group.name || t("vault.groups.ungrouped")}
                               </span>
                               <span className="text-xs text-muted-foreground/60">
-                                ({group.hosts.length})
+                                ({selectedGroupPath ? group.hosts.length : group.hosts.filter((h) => !pinnedRecentIds.has(h.id)).length})
                               </span>
                             </div>
                             <div
