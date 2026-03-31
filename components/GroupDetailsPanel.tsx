@@ -102,6 +102,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
   const [showTelnetPassword, setShowTelnetPassword] = useState(false);
+  const [addProtocolOpen, setAddProtocolOpen] = useState(false);
 
   // Environment variables state
   const [newEnvName, setNewEnvName] = useState("");
@@ -705,7 +706,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
         {/* Add Protocol Button */}
         {addableProtocols.length > 0 && (
-          <Dropdown>
+          <Dropdown open={addProtocolOpen} onOpenChange={setAddProtocolOpen}>
             <DropdownTrigger asChild>
               <Button
                 variant="outline"
@@ -723,6 +724,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                   onClick={() => {
                     if (key === "ssh") setSshEnabled(true);
                     if (key === "telnet") setTelnetEnabled(true);
+                    setAddProtocolOpen(false);
                   }}
                 >
                   {label}
