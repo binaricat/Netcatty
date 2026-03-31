@@ -9,7 +9,7 @@
  * function degrades to a no-op — values pass through unmodified.
  */
 
-import type { Host, Identity, SSHKey } from "../../domain/models";
+import type { GroupConfig, Host, Identity, SSHKey } from "../../domain/models";
 import type { ProviderConnection, S3Config, WebDAVConfig } from "../../domain/sync";
 import { netcattyBridge } from "../services/netcattyBridge";
 
@@ -89,6 +89,38 @@ export async function decryptIdentitySecrets(identity: Identity): Promise<Identi
   const out = { ...identity };
   out.password = await decryptField(out.password);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// GroupConfig
+// ---------------------------------------------------------------------------
+
+export async function encryptGroupConfigSecrets(config: GroupConfig): Promise<GroupConfig> {
+  const out = { ...config };
+  out.password = await encryptField(out.password);
+  out.telnetPassword = await encryptField(out.telnetPassword);
+  if (out.proxyConfig?.password) {
+    out.proxyConfig = { ...out.proxyConfig, password: await encryptField(out.proxyConfig.password) };
+  }
+  return out;
+}
+
+export async function decryptGroupConfigSecrets(config: GroupConfig): Promise<GroupConfig> {
+  const out = { ...config };
+  out.password = await decryptField(out.password);
+  out.telnetPassword = await decryptField(out.telnetPassword);
+  if (out.proxyConfig?.password) {
+    out.proxyConfig = { ...out.proxyConfig, password: await decryptField(out.proxyConfig.password) };
+  }
+  return out;
+}
+
+export function encryptGroupConfigs(configs: GroupConfig[]): Promise<GroupConfig[]> {
+  return Promise.all(configs.map(encryptGroupConfigSecrets));
+}
+
+export function decryptGroupConfigs(configs: GroupConfig[]): Promise<GroupConfig[]> {
+  return Promise.all(configs.map(decryptGroupConfigSecrets));
 }
 
 // ---------------------------------------------------------------------------

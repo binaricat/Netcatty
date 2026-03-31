@@ -111,6 +111,9 @@ export const STORAGE_KEY_IMMERSIVE_MODE = 'netcatty_immersive_mode_v1';
 // Vault: Show Recently Connected hosts section
 export const STORAGE_KEY_SHOW_RECENT_HOSTS = 'netcatty_show_recent_hosts_v1';
 
+// Group Configurations (default settings inherited by hosts)
+export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';
+
 // Side Panel
 export const STORAGE_KEY_SIDE_PANEL_WIDTH = 'netcatty_side_panel_width';
 
