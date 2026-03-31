@@ -541,11 +541,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
             {/* Local key file paths display */}
             {!form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
-              <div className="space-y-1">
+              <div className="space-y-1 w-full overflow-hidden">
                 {form.identityFilePaths.map((keyPath, idx) => (
-                  <div key={idx} className="flex items-center gap-2 h-8 px-2 rounded-md bg-secondary/50 border border-border/60 min-w-0 overflow-hidden">
+                  <div key={idx} className="flex items-center gap-2 h-8 px-2 rounded-md bg-secondary/50 border border-border/60 w-full overflow-hidden">
                     <FileKey size={12} className="text-muted-foreground shrink-0" />
-                    <span className="text-xs font-mono flex-1 min-w-0 truncate">{keyPath}</span>
+                    <span className="text-xs font-mono overflow-hidden text-ellipsis whitespace-nowrap" style={{ maxWidth: 'calc(100% - 40px)' }}>{keyPath}</span>
                     <Button
                       variant="ghost"
                       size="icon"
