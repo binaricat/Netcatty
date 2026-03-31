@@ -196,6 +196,8 @@ const en: Messages = {
   'settings.application.github.subtitle': 'Source code',
   'settings.application.whatsNew': "What's new",
   'settings.application.whatsNew.subtitle': 'Show release notes',
+  'settings.vault.showRecentHosts': 'Show recently connected hosts',
+  'settings.vault.showRecentHostsDesc': 'Display a section of recently connected hosts at the top of the vault',
 
   // Update notifications
   'update.available.title': 'Update Available',
@@ -486,6 +488,10 @@ const en: Messages = {
   'vault.hosts.export.toast.successWithSkipped': 'Exported {count} hosts to CSV ({skipped} unsupported hosts skipped)',
   'vault.hosts.export.toast.noHosts': 'No hosts to export',
   'vault.hosts.allHosts': 'All hosts',
+  'vault.hosts.pinned': 'Pinned',
+  'vault.hosts.recentlyConnected': 'Recently Connected',
+  'vault.hosts.pinToTop': 'Pin to Top',
+  'vault.hosts.unpin': 'Unpin',
   'vault.hosts.copyCredentials': 'Copy Credentials',
   'vault.hosts.copyCredentials.toast.success': 'Credentials copied to clipboard',
   'vault.hosts.copyCredentials.toast.noPassword': 'No password saved for this host',

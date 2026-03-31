@@ -180,6 +180,8 @@ const zhCN: Messages = {
   'settings.application.github.subtitle': '源代码',
   'settings.application.whatsNew': '更新内容',
   'settings.application.whatsNew.subtitle': '查看发布说明',
+  'settings.vault.showRecentHosts': '显示最近连接的主机',
+  'settings.vault.showRecentHostsDesc': '在主机列表顶部显示最近连接过的主机',
 
   // Update notifications
   'update.available.title': '发现新版本',
@@ -319,6 +321,10 @@ const zhCN: Messages = {
   'vault.hosts.export.toast.successWithSkipped': '已导出 {count} 个主机到 CSV（跳过 {skipped} 个不支持的主机）',
   'vault.hosts.export.toast.noHosts': '没有主机可导出',
   'vault.hosts.allHosts': '全部主机',
+  'vault.hosts.pinned': '已置顶',
+  'vault.hosts.recentlyConnected': '最近连接',
+  'vault.hosts.pinToTop': '置顶',
+  'vault.hosts.unpin': '取消置顶',
   'vault.hosts.copyCredentials': '复制账密信息',
   'vault.hosts.copyCredentials.toast.success': '账密信息已复制到剪贴板',
   'vault.hosts.copyCredentials.toast.noPassword': '该主机未保存密码',
