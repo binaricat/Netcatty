@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronRight, Edit2, FileSymlink, Folder, FolderOpen, Monitor, Pin, Server, Square, Expand, Minimize2 } from 'lucide-react';
+import { CheckSquare, ChevronRight, Edit2, FileSymlink, Folder, FolderOpen, Monitor, Server, Square, Expand, Minimize2 } from 'lucide-react';
 import React, { useMemo } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useTreeExpandedState } from '../application/state/useTreeExpandedState';
@@ -32,7 +32,7 @@ interface HostTreeViewProps {
   moveGroup: (sourcePath: string, targetPath: string) => void;
   managedGroupPaths?: Set<string>;
   onUnmanageGroup?: (groupPath: string) => void;
-  onToggleHostPinned?: (hostId: string) => void;
+
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
@@ -57,7 +57,7 @@ interface TreeNodeProps {
   moveGroup: (sourcePath: string, targetPath: string) => void;
   managedGroupPaths?: Set<string>;
   onUnmanageGroup?: (groupPath: string) => void;
-  onToggleHostPinned?: (hostId: string) => void;
+
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
@@ -83,7 +83,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   moveGroup,
   managedGroupPaths,
   onUnmanageGroup,
-  onToggleHostPinned,
+
   isMultiSelectMode,
   selectedHostIds,
   toggleHostSelection,
@@ -238,7 +238,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               moveGroup={moveGroup}
               managedGroupPaths={managedGroupPaths}
               onUnmanageGroup={onUnmanageGroup}
-              onToggleHostPinned={onToggleHostPinned}
+
               isMultiSelectMode={isMultiSelectMode}
               selectedHostIds={selectedHostIds}
               toggleHostSelection={toggleHostSelection}
@@ -257,7 +257,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               onDeleteHost={onDeleteHost}
               onCopyCredentials={onCopyCredentials}
               moveHostToGroup={moveHostToGroup}
-              onToggleHostPinned={onToggleHostPinned}
+
               isMultiSelectMode={isMultiSelectMode}
               selectedHostIds={selectedHostIds}
               toggleHostSelection={toggleHostSelection}
@@ -278,7 +278,7 @@ interface HostTreeItemProps {
   onDeleteHost: (host: Host) => void;
   onCopyCredentials: (host: Host) => void;
   moveHostToGroup: (hostId: string, groupPath: string | null) => void;
-  onToggleHostPinned?: (hostId: string) => void;
+
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
@@ -293,7 +293,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   onDeleteHost,
   onCopyCredentials,
   moveHostToGroup: _moveHostToGroup,
-  onToggleHostPinned,
+
   isMultiSelectMode,
   selectedHostIds,
   toggleHostSelection,
@@ -389,9 +389,6 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
         <ContextMenuItem onClick={() => onCopyCredentials(host)}>
           <Server className="mr-2 h-4 w-4" /> {t("vault.hosts.copyCredentials")}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onToggleHostPinned?.(host.id)}>
-          <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
-        </ContextMenuItem>
         <ContextMenuItem
           onClick={() => onDeleteHost(host)}
           className="text-destructive focus:text-destructive"
@@ -424,7 +421,7 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   moveGroup,
   managedGroupPaths,
   onUnmanageGroup,
-  onToggleHostPinned,
+
   isMultiSelectMode,
   selectedHostIds,
   toggleHostSelection,

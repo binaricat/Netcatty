@@ -896,6 +896,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       .slice(0, 20);
   }, [hosts, selectedGroupPath, search, selectedTags]);
 
+  // IDs of hosts already shown in Pinned/Recent sections at root level,
+  // so the main host list can exclude them to avoid duplicates.
+  const pinnedRecentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const h of pinnedHosts) ids.add(h.id);
+    if (showRecentHosts) {
+      for (const h of recentHosts) ids.add(h.id);
+    }
+    return ids;
+  }, [pinnedHosts, recentHosts, showRecentHosts]);
+
   // For tree view: apply search, tag filter, and sorting, but not group filtering
   const treeViewHosts = useMemo(() => {
     let filtered = hosts;
@@ -2152,7 +2163,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       onDuplicateHost={handleDuplicateHost}
                       onDeleteHost={(host) => onDeleteHost(host.id)}
                       onCopyCredentials={handleCopyCredentials}
-                      onToggleHostPinned={toggleHostPinned}
+
                       onNewHost={(groupPath) => {
                         setEditingHost(null);
                         setNewHostGroupPath(groupPath || null);
@@ -2202,7 +2213,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   : "flex flex-col gap-0",
                               )}
                             >
-                              {group.hosts.map((host) => {
+                              {group.hosts.filter((h) => selectedGroupPath || !pinnedRecentIds.has(h.id)).map((host) => {
                                 const safeHost = sanitizeHost(host);
                                 const effectiveDistro = getEffectiveHostDistro(safeHost);
                                 const distroBadge = {
@@ -2343,7 +2354,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                           : "flex flex-col gap-0",
                       )}
                     >
-                      {displayedHosts.map((host) => {
+                      {displayedHosts.filter((h) => selectedGroupPath || !pinnedRecentIds.has(h.id)).map((host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
                           const distroBadge = {

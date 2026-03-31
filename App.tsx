@@ -1032,6 +1032,9 @@ function App({ settings }: { settings: SettingsState }) {
   }, [hosts, updateHosts, t]);
 
   // System info for connection logs
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
+
   const systemInfoRef = useRef<{ username: string; hostname: string }>({
     username: 'user',
     hostname: 'localhost',
@@ -1116,12 +1119,13 @@ function App({ settings }: { settings: SettingsState }) {
     if (status === 'connected') {
       const session = sessionById.get(sessionId);
       if (session?.hostId) {
-        updateHosts(hosts.map((h) =>
+        // Use ref to read latest hosts and avoid overwriting concurrent changes
+        updateHosts(hostsRef.current.map((h) =>
           h.id === session.hostId ? { ...h, lastConnectedAt: Date.now() } : h
         ));
       }
     }
-  }, [updateSessionStatus, sessionById, hosts, updateHosts]);
+  }, [updateSessionStatus, sessionById, updateHosts]);
 
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
