@@ -702,11 +702,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
             {/* Local key file path input - appears after selecting "Local Key File" type */}
             {!form.identityFileId && selectedCredentialType === "localKeyFile" && (
-              <div className="space-y-1.5 overflow-hidden">
-                <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 w-full">
                   <input
                     type="text"
-                    className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="flex-1 w-0 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
                     placeholder={t("hostDetails.credential.localKeyFilePlaceholder")}
                     value={newKeyFilePath}
                     onChange={(e) => setNewKeyFilePath(e.target.value)}
