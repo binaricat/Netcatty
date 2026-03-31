@@ -22,6 +22,7 @@ import {
   Search,
   Settings,
   Square,
+  Star,
   TerminalSquare,
   Trash2,
   Upload,
@@ -1767,6 +1768,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
                                   onClick={() => handleHostConnect(safeHost)}
                                 >
+                                  {viewMode === "grid" && (
+                                    <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
+                                  )}
                                   <div className="flex items-center gap-3 h-full">
                                     <DistroAvatar host={safeHost} fallback={distroBadge.text} />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
@@ -2174,7 +2178,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                         }}
                                       >
                                         {host.pinned && viewMode === "grid" && (
-                                          <Pin size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400 rotate-45" />
+                                          <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
                                         )}
                                         <div className="flex items-center gap-3 h-full">
                                           {isMultiSelectMode && (
@@ -2315,7 +2319,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   }}
                                 >
                                   {host.pinned && viewMode === "grid" && (
-                                    <Pin size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400 rotate-45" />
+                                    <Star size={10} className="absolute top-1.5 right-1.5 text-amber-400 fill-amber-400" />
                                   )}
                                   <div className="flex items-center gap-3 h-full">
                                     {isMultiSelectMode && (
