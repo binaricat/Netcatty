@@ -1942,6 +1942,20 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                     {t("vault.groups.hostsCount", { count: node.totalHostCount ?? node.hosts.length })}
                                   </div>
                                 </div>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRenameTargetPath(node.path);
+                                    setRenameGroupName(node.name);
+                                    setRenameGroupError(null);
+                                    setIsRenameGroupOpen(true);
+                                  }}
+                                >
+                                  <Edit2 size={14} />
+                                </Button>
                               </div>
                             </div>
                           </ContextMenuTrigger>
@@ -2053,6 +2067,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       onDuplicateHost={handleDuplicateHost}
                       onDeleteHost={(host) => onDeleteHost(host.id)}
                       onCopyCredentials={handleCopyCredentials}
+                      onToggleHostPinned={toggleHostPinned}
                       onNewHost={(groupPath) => {
                         setEditingHost(null);
                         setNewHostGroupPath(groupPath || null);
@@ -2167,21 +2182,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                               {safeHost.username}@{safeHost.hostname}
                                             </div>
                                           </div>
-                                          {viewMode === "list" && (
-                                            <>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleEditHost(host);
-                                                }}
-                                              >
-                                                <Edit2 size={14} />
-                                              </Button>
-                                            </>
-                                          )}
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleEditHost(host);
+                                            }}
+                                          >
+                                            <Edit2 size={14} />
+                                          </Button>
                                         </div>
                                       </div>
                                     </ContextMenuTrigger>
@@ -2205,6 +2216,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                         onClick={() => handleCopyCredentials(host)}
                                       >
                                         <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
+                                      </ContextMenuItem>
+                                      <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
+                                        <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
                                       </ContextMenuItem>
                                       <ContextMenuItem
                                         className="text-destructive"
@@ -2306,21 +2320,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                         {safeHost.username}@{safeHost.hostname}
                                       </div>
                                     </div>
-                                    {viewMode === "list" && (
-                                      <>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleEditHost(host);
-                                          }}
-                                        >
-                                          <Edit2 size={14} />
-                                        </Button>
-                                      </>
-                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditHost(host);
+                                      }}
+                                    >
+                                      <Edit2 size={14} />
+                                    </Button>
                                   </div>
                                 </div>
                               </ContextMenuTrigger>
@@ -2344,6 +2354,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   onClick={() => handleCopyCredentials(host)}
                                 >
                                   <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
+                                  <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
                                 </ContextMenuItem>
                                 <ContextMenuItem
                                   className="text-destructive"
