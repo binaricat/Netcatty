@@ -79,21 +79,26 @@
     }
   }
 
-  @keyframes pop-in {
-    0% {
-      opacity: 0;
-      transform: scale(0.85);
-    }
-    50% {
-      transform: scale(1.04);
-    }
-    75% {
-      transform: scale(0.98);
-    }
-    100% {
-      opacity: 1;
-      transform: scale(1);
-    }
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(6px);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.06) translateY(-2px);
+  }
+  72% {
+    transform: scale(0.97) translateY(1px);
+  }
+  88% {
+    transform: scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 }
 

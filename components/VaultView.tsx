@@ -29,7 +29,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import React, { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
@@ -459,10 +459,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     });
   }, [identities, t]);
 
+  const [pinnedAnimKey, setPinnedAnimKey] = useState(0);
   const toggleHostPinned = useCallback((hostId: string) => {
-    onUpdateHosts(hostsRef.current.map((h) =>
-      h.id === hostId ? { ...h, pinned: !h.pinned } : h
-    ));
+    startTransition(() => {
+      onUpdateHosts(hostsRef.current.map((h) =>
+        h.id === hostId ? { ...h, pinned: !h.pinned } : h
+      ));
+    });
+    setPinnedAnimKey((k) => k + 1);
   }, [onUpdateHosts]);
 
   const toggleHostSelection = useCallback((hostId: string) => {
@@ -1748,7 +1752,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                             label: effectiveDistro || safeHost.os || "Linux",
                           };
                           return (
-                            <ContextMenu key={host.id}>
+                            <ContextMenu key={`${host.id}-${pinnedAnimKey}`}>
                               <ContextMenuTrigger>
                                 <div
                                   className={cn(
@@ -1757,7 +1761,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                   )}
-                                  style={{ animation: `pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.04}s both` }}
+                                  style={{ animation: `pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.05}s both` }}
                                   onClick={() => handleHostConnect(safeHost)}
                                 >
                                   <div className="flex items-center gap-3 h-full">
