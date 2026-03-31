@@ -13,7 +13,6 @@ import {
   TerminalSquare,
   Trash2,
   Variable,
-  Wifi,
   X,
 } from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
@@ -125,6 +124,13 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       delete next.identityId;
       delete next.identityFileId;
       delete next.agentForwarding;
+      delete next.startupCommand;
+      delete next.legacyAlgorithms;
+      delete next.proxyConfig;
+      delete next.hostChain;
+      delete next.environmentVariables;
+      delete next.moshEnabled;
+      delete next.moshServerPath;
       return next;
     });
   };
@@ -268,6 +274,13 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         ...(form.identityId !== undefined && { identityId: form.identityId }),
         ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
         ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
+        ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
+        ...(form.legacyAlgorithms !== undefined && { legacyAlgorithms: form.legacyAlgorithms }),
+        ...(form.proxyConfig !== undefined && { proxyConfig: form.proxyConfig }),
+        ...(form.hostChain !== undefined && { hostChain: form.hostChain }),
+        ...(form.environmentVariables !== undefined && { environmentVariables: form.environmentVariables }),
+        ...(form.moshEnabled !== undefined && { moshEnabled: form.moshEnabled }),
+        ...(form.moshServerPath !== undefined && { moshServerPath: form.moshServerPath }),
       }),
       // Only include Telnet fields if Telnet section is enabled
       ...(telnetEnabled && {
@@ -275,15 +288,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         ...(form.telnetUsername !== undefined && { telnetUsername: form.telnetUsername }),
         ...(form.telnetPassword !== undefined && { telnetPassword: form.telnetPassword }),
       }),
-      // Advanced fields are always saved
-      ...(form.proxyConfig !== undefined && { proxyConfig: form.proxyConfig }),
-      ...(form.hostChain !== undefined && { hostChain: form.hostChain }),
-      ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
-      ...(form.legacyAlgorithms !== undefined && { legacyAlgorithms: form.legacyAlgorithms }),
-      ...(form.environmentVariables !== undefined && { environmentVariables: form.environmentVariables }),
+      // Shared fields (always saved)
       ...(form.charset !== undefined && { charset: form.charset }),
-      ...(form.moshEnabled !== undefined && { moshEnabled: form.moshEnabled }),
-      ...(form.moshServerPath !== undefined && { moshServerPath: form.moshServerPath }),
       ...(form.theme !== undefined && { theme: form.theme }),
       ...(form.themeOverride !== undefined && { themeOverride: form.themeOverride }),
       ...(form.fontFamily !== undefined && { fontFamily: form.fontFamily }),
@@ -533,6 +539,96 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               enabled={!!form.agentForwarding}
               onToggle={() => update("agentForwarding", !form.agentForwarding)}
             />
+
+            {/* Startup Command */}
+            <Input
+              placeholder={t("hostDetails.startupCommand.placeholder")}
+              value={form.startupCommand || ""}
+              onChange={(e) => update("startupCommand", e.target.value || undefined)}
+              className="h-10"
+            />
+
+            {/* Legacy Algorithms */}
+            <ToggleRow
+              label={t("hostDetails.legacyAlgorithms")}
+              enabled={!!form.legacyAlgorithms}
+              onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
+            />
+
+            {/* Proxy */}
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              onClick={() => setActiveSubPanel("proxy")}
+            >
+              <div className="flex items-center gap-2">
+                <Globe size={14} className="text-muted-foreground" />
+                <span className="text-sm">{t("hostDetails.proxy")}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {form.proxyConfig?.host && (
+                  <Badge variant="secondary" className="text-xs">
+                    {form.proxyConfig.type?.toUpperCase()} {form.proxyConfig.host}:{form.proxyConfig.port}
+                  </Badge>
+                )}
+                <ChevronRight size={14} className="text-muted-foreground" />
+              </div>
+            </button>
+
+            {/* Host Chaining */}
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              onClick={() => setActiveSubPanel("chain")}
+            >
+              <div className="flex items-center gap-2">
+                <Link2 size={14} className="text-muted-foreground" />
+                <span className="text-sm">{t("hostDetails.jumpHosts")}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {chainedHosts.length > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {t("hostDetails.jumpHosts.hops", { count: chainedHosts.length })}
+                  </Badge>
+                )}
+                <ChevronRight size={14} className="text-muted-foreground" />
+              </div>
+            </button>
+
+            {/* Environment Variables */}
+            <button
+              type="button"
+              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              onClick={() => setActiveSubPanel("env-vars")}
+            >
+              <div className="flex items-center gap-2">
+                <Variable size={14} className="text-muted-foreground" />
+                <span className="text-sm">{t("hostDetails.envVars")}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {(form.environmentVariables?.length || 0) > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {form.environmentVariables!.length}
+                  </Badge>
+                )}
+                <ChevronRight size={14} className="text-muted-foreground" />
+              </div>
+            </button>
+
+            {/* Mosh */}
+            <ToggleRow
+              label="Mosh"
+              enabled={!!form.moshEnabled}
+              onToggle={() => update("moshEnabled", !form.moshEnabled)}
+            />
+            {form.moshEnabled && (
+              <Input
+                placeholder={t("hostDetails.moshServerPath") || "mosh-server path"}
+                value={form.moshServerPath || ""}
+                onChange={(e) => update("moshServerPath", e.target.value || undefined)}
+                className="h-10"
+              />
+            )}
           </Card>
         )}
 
@@ -636,114 +732,20 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           </Dropdown>
         )}
 
-        {/* Advanced Section */}
+        {/* Charset (shared, not protocol-specific) */}
         <Card className="p-3 space-y-3 bg-card border-border/80">
           <div className="flex items-center gap-2">
-            <Settings2 size={14} className="text-muted-foreground" />
+            <Globe size={14} className="text-muted-foreground" />
             <p className="text-xs font-semibold">
               {t("vault.groups.details.advanced")}
             </p>
           </div>
-
-          <Input
-            placeholder={t("hostDetails.startupCommand.placeholder")}
-            value={form.startupCommand || ""}
-            onChange={(e) => update("startupCommand", e.target.value || undefined)}
-            className="h-10"
-          />
-
           <Input
             placeholder="UTF-8"
             value={form.charset || ""}
             onChange={(e) => update("charset", e.target.value || undefined)}
             className="h-10"
           />
-
-          <ToggleRow
-            label={t("hostDetails.legacyAlgorithms")}
-            enabled={!!form.legacyAlgorithms}
-            onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
-          />
-
-          <button
-            type="button"
-            className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
-            onClick={() => setActiveSubPanel("proxy")}
-          >
-            <div className="flex items-center gap-2">
-              <Globe size={14} className="text-muted-foreground" />
-              <span className="text-sm">{t("hostDetails.proxy")}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {form.proxyConfig?.host && (
-                <Badge variant="secondary" className="text-xs">
-                  {form.proxyConfig.type?.toUpperCase()} {form.proxyConfig.host}:{form.proxyConfig.port}
-                </Badge>
-              )}
-              <ChevronRight size={14} className="text-muted-foreground" />
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
-            onClick={() => setActiveSubPanel("chain")}
-          >
-            <div className="flex items-center gap-2">
-              <Link2 size={14} className="text-muted-foreground" />
-              <span className="text-sm">{t("hostDetails.jumpHosts")}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {chainedHosts.length > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {t("hostDetails.jumpHosts.hops", { count: chainedHosts.length })}
-                </Badge>
-              )}
-              <ChevronRight size={14} className="text-muted-foreground" />
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
-            onClick={() => setActiveSubPanel("env-vars")}
-          >
-            <div className="flex items-center gap-2">
-              <Variable size={14} className="text-muted-foreground" />
-              <span className="text-sm">{t("hostDetails.envVars")}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {(form.environmentVariables?.length || 0) > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {form.environmentVariables!.length}
-                </Badge>
-              )}
-              <ChevronRight size={14} className="text-muted-foreground" />
-            </div>
-          </button>
-        </Card>
-
-        {/* Mosh Section */}
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Wifi size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.mosh")}
-            </p>
-          </div>
-          <ToggleRow
-            label="Mosh"
-            enabled={!!form.moshEnabled}
-            onToggle={() => update("moshEnabled", !form.moshEnabled)}
-          />
-          {form.moshEnabled && (
-            <Input
-              placeholder={t("hostDetails.moshServerPath") || "mosh-server path"}
-              value={form.moshServerPath || ""}
-              onChange={(e) => update("moshServerPath", e.target.value || undefined)}
-              className="h-10"
-            />
-          )}
         </Card>
 
         {/* Appearance Section */}
