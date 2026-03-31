@@ -447,11 +447,7 @@ function App({ settings }: { settings: SettingsState }) {
       return;
     }
 
-    // Apply group defaults before resolving auth
-    const groupDefaults = host.group
-      ? resolveGroupDefaults(host.group, groupConfigs)
-      : {};
-    const effectiveHost = applyGroupDefaults(host, groupDefaults);
+    const effectiveHost = resolveEffectiveHost(host);
 
     const { username, hostname: localHost } = systemInfoRef.current;
     if (effectiveHost.protocol === 'serial') {
@@ -1085,15 +1081,17 @@ function App({ settings }: { settings: SettingsState }) {
     });
   }, [addConnectionLog, createLocalTerminalWithCurrentShell]);
 
+  const resolveEffectiveHost = useCallback((host: Host): Host => {
+    if (!host.group) return host;
+    const groupDefaults = resolveGroupDefaults(host.group, groupConfigs);
+    return applyGroupDefaults(host, groupDefaults);
+  }, [groupConfigs]);
+
   // Wrapper to connect to host with logging
   const handleConnectToHost = useCallback((host: Host) => {
     const { username, hostname: localHost } = systemInfoRef.current;
 
-    // Apply group defaults before resolving auth
-    const groupDefaults = host.group
-      ? resolveGroupDefaults(host.group, groupConfigs)
-      : {};
-    const effectiveHost = applyGroupDefaults(host, groupDefaults);
+    const effectiveHost = resolveEffectiveHost(host);
 
     // Handle serial hosts separately
     if (effectiveHost.protocol === 'serial') {
@@ -1129,7 +1127,7 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: localHost,
       saved: false,
     });
-  }, [addConnectionLog, connectToHost, groupConfigs, identities, keys]);
+  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
 
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {

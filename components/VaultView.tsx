@@ -1236,18 +1236,18 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       // Update groups, hosts, managed sources, and configs for path change
       const updatedGroups = customGroups.map((g) => {
         if (g === oldPath) return newPath;
-        if (g.startsWith(oldPath + '/')) return g.replace(oldPath, newPath);
+        if (g.startsWith(oldPath + '/')) return newPath + g.slice(oldPath.length);
         return g;
       });
       const updatedHosts = hosts.map((h) => {
         const g = h.group || '';
         if (g === oldPath) return { ...h, group: newPath };
-        if (g.startsWith(oldPath + '/')) return { ...h, group: g.replace(oldPath, newPath) };
+        if (g.startsWith(oldPath + '/')) return { ...h, group: newPath + g.slice(oldPath.length) };
         return h;
       });
       const updatedManagedSources = managedSources.map((s) => {
         if (s.groupName === oldPath) return { ...s, groupName: newPath };
-        if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: s.groupName.replace(oldPath, newPath) };
+        if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: newPath + s.groupName.slice(oldPath.length) };
         return s;
       });
       if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
@@ -1257,14 +1257,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       onUpdateHosts(updatedHosts);
       // Update child config paths too
       const finalConfigs = updatedConfigs.map(c => {
-        if (c.path === oldPath) return { ...c, path: newPath };
-        if (c.path.startsWith(oldPath + '/')) return { ...c, path: c.path.replace(oldPath, newPath) };
+        if (c.path.startsWith(oldPath + '/')) return { ...c, path: newPath + c.path.slice(oldPath.length) };
         return c;
       });
       onUpdateGroupConfigs(finalConfigs);
       if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
       if (selectedGroupPath?.startsWith(oldPath + '/')) {
-        setSelectedGroupPath(selectedGroupPath.replace(oldPath, newPath));
+        setSelectedGroupPath(newPath + selectedGroupPath.slice(oldPath.length));
       }
     } else {
       onUpdateGroupConfigs(updatedConfigs);
@@ -1349,21 +1348,21 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     if (newPath === sourcePath || newPath.startsWith(sourcePath + "/")) return;
     const updatedGroups = customGroups.map((g) => {
       if (g === sourcePath) return newPath;
-      if (g.startsWith(sourcePath + "/")) return g.replace(sourcePath, newPath);
+      if (g.startsWith(sourcePath + "/")) return newPath + g.slice(sourcePath.length);
       return g;
     });
     const updatedHosts = hosts.map((h) => {
       const g = h.group || "";
       if (g === sourcePath) return { ...h, group: newPath };
       if (g.startsWith(sourcePath + "/"))
-        return { ...h, group: g.replace(sourcePath, newPath) };
+        return { ...h, group: newPath + g.slice(sourcePath.length) };
       return h;
     });
     // Update managed sources if any match the moved group path
     const updatedManagedSources = managedSources.map((s) => {
       if (s.groupName === sourcePath) return { ...s, groupName: newPath };
       if (s.groupName.startsWith(sourcePath + "/"))
-        return { ...s, groupName: s.groupName.replace(sourcePath, newPath) };
+        return { ...s, groupName: newPath + s.groupName.slice(sourcePath.length) };
       return s;
     });
     if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
@@ -1375,7 +1374,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     const updatedGroupConfigs = groupConfigs.map((c) => {
       if (c.path === sourcePath) return { ...c, path: newPath };
       if (c.path.startsWith(sourcePath + '/'))
-        return { ...c, path: c.path.replace(sourcePath, newPath) };
+        return { ...c, path: newPath + c.path.slice(sourcePath.length) };
       return c;
     });
     if (updatedGroupConfigs.some((c, i) => c !== groupConfigs[i])) {
