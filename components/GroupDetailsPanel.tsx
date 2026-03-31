@@ -3,6 +3,8 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  FileKey,
+  FolderOpen,
   Globe,
   Key,
   Link2,
@@ -112,7 +114,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   // Credential selection state
   const [credentialPopoverOpen, setCredentialPopoverOpen] = useState(false);
   const [selectedCredentialType, setSelectedCredentialType] =
-    useState<'key' | 'certificate' | null>(null);
+    useState<'key' | 'certificate' | 'localKeyFile' | null>(null);
+  const [newKeyFilePath, setNewKeyFilePath] = useState('');
 
   // Environment variables state
   const [newEnvName, setNewEnvName] = useState("");
@@ -126,6 +129,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   const removeSsh = () => {
     setSshEnabled(false);
     setSelectedCredentialType(null);
+    setNewKeyFilePath('');
     setForm((prev) => {
       const next = { ...prev };
       delete next.port;
@@ -135,6 +139,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       delete next.authMethod;
       delete next.identityId;
       delete next.identityFileId;
+      delete next.identityFilePaths;
       delete next.agentForwarding;
       delete next.startupCommand;
       delete next.legacyAlgorithms;
@@ -281,6 +286,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         ...(form.authMethod !== undefined && { authMethod: form.authMethod }),
         ...(form.identityId !== undefined && { identityId: form.identityId }),
         ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
+        ...(form.identityFilePaths !== undefined && { identityFilePaths: form.identityFilePaths }),
         ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
         ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
         ...(form.legacyAlgorithms !== undefined && { legacyAlgorithms: form.legacyAlgorithms }),
@@ -533,6 +539,30 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               </div>
             )}
 
+            {/* Local key file paths display */}
+            {!form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
+              <div className="space-y-1">
+                {form.identityFilePaths.map((keyPath, idx) => (
+                  <div key={idx} className="flex items-center gap-2 h-8 px-2 rounded-md bg-secondary/50 border border-border/60">
+                    <FileKey size={12} className="text-muted-foreground shrink-0" />
+                    <span className="text-xs font-mono flex-1 truncate">{keyPath}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 shrink-0"
+                      onClick={() => {
+                        const paths = (form.identityFilePaths || []).filter((_, i) => i !== idx);
+                        update("identityFilePaths", paths.length > 0 ? paths : undefined);
+                        if (paths.length === 0) update("authMethod", undefined);
+                      }}
+                    >
+                      <X size={10} />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Credential type selection with inline popover - hidden when credential is selected */}
             {!form.identityFileId &&
               !selectedCredentialType && (
@@ -580,6 +610,20 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                         <Shield size={16} className="text-muted-foreground" />
                         <span className="text-sm font-medium">
                           {t("hostDetails.credential.certificate")}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
+                        onClick={() => {
+                          setSelectedCredentialType("localKeyFile");
+                          setCredentialPopoverOpen(false);
+                        }}
+                      >
+                        <FileKey size={16} className="text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {t("hostDetails.credential.localKeyFile")}
                         </span>
                       </button>
                     </div>
@@ -655,6 +699,62 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                   </Button>
                 </div>
               )}
+
+            {/* Local key file path input - appears after selecting "Local Key File" type */}
+            {!form.identityFileId && selectedCredentialType === "localKeyFile" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 min-w-0">
+                  <input
+                    type="text"
+                    className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border/60 rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder={t("hostDetails.credential.localKeyFilePlaceholder")}
+                    value={newKeyFilePath}
+                    onChange={(e) => setNewKeyFilePath(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newKeyFilePath.trim()) {
+                        e.preventDefault();
+                        const paths = [...(form.identityFilePaths || []), newKeyFilePath.trim()];
+                        update("identityFilePaths", paths);
+                        update("identityFileId", undefined);
+                        update("authMethod", "key");
+                        setNewKeyFilePath("");
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    title={t("hostDetails.credential.browseKeyFile")}
+                    onClick={async () => {
+                      const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+                      if (!bridge?.selectFile) return;
+                      const filePath = await bridge.selectFile(
+                        "Select SSH Private Key",
+                        undefined,
+                        [{ name: "All Files", extensions: ["*"] }]
+                      );
+                      if (filePath) {
+                        const paths = [...(form.identityFilePaths || []), filePath];
+                        update("identityFilePaths", paths);
+                        update("identityFileId", undefined);
+                        update("authMethod", "key");
+                      }
+                    }}
+                  >
+                    <FolderOpen size={14} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setSelectedCredentialType(null)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <ToggleRow
               label={t("hostDetails.agentForwarding")}
