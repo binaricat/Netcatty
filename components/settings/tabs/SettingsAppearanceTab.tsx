@@ -7,6 +7,8 @@ import { SUPPORTED_UI_LOCALES } from "../../../infrastructure/config/i18n";
 import { cn } from "../../../lib/utils";
 import { SectionHeader, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
 import { FontSelect } from "../FontSelect";
+import { STORAGE_KEY_SHOW_RECENT_HOSTS } from "../../../infrastructure/config/storageKeys";
+import { useStoredBoolean } from "../../../application/state/useStoredBoolean";
 
 export default function SettingsAppearanceTab(props: {
   theme: "dark" | "light" | "system";
@@ -50,6 +52,11 @@ export default function SettingsAppearanceTab(props: {
     isImmersive,
     onToggleImmersive,
   } = props;
+
+  const [showRecentHosts, setShowRecentHosts] = useStoredBoolean(
+    STORAGE_KEY_SHOW_RECENT_HOSTS,
+    true,
+  );
 
   const getHslStyle = useCallback((hsl: string) => ({ backgroundColor: `hsl(${hsl})` }), []);
 
@@ -255,6 +262,16 @@ export default function SettingsAppearanceTab(props: {
         </SettingRow>
         <SettingRow label={t("settings.appearance.themeColor.dark")}>
           {renderThemeSwatches(DARK_UI_THEMES, darkUiThemeId, setDarkUiThemeId)}
+        </SettingRow>
+      </div>
+
+      <SectionHeader title={t("settings.vault.title")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          label={t('settings.vault.showRecentHosts')}
+          description={t('settings.vault.showRecentHostsDesc')}
+        >
+          <Toggle checked={showRecentHosts} onChange={setShowRecentHosts} />
         </SettingRow>
       </div>
 

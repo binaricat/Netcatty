@@ -196,6 +196,7 @@ const en: Messages = {
   'settings.application.github.subtitle': 'Source code',
   'settings.application.whatsNew': "What's new",
   'settings.application.whatsNew.subtitle': 'Show release notes',
+  'settings.vault.title': 'Vault',
   'settings.vault.showRecentHosts': 'Show recently connected hosts',
   'settings.vault.showRecentHostsDesc': 'Display a section of recently connected hosts at the top of the vault',
 
