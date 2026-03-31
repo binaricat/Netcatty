@@ -851,19 +851,50 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, [hosts, selectedGroupPath, search, selectedTags, sortMode]);
 
   // Pinned hosts for root-level display (not inside a subgroup)
+  // Respects active search and tag filters
   const pinnedHosts = useMemo(() => {
     if (selectedGroupPath) return [];
-    return hosts.filter((h) => h.pinned).sort((a, b) => a.label.localeCompare(b.label));
-  }, [hosts, selectedGroupPath]);
+    let filtered = hosts.filter((h) => h.pinned);
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      filtered = filtered.filter(
+        (h) =>
+          h.label.toLowerCase().includes(s) ||
+          h.hostname.toLowerCase().includes(s) ||
+          h.tags.some((t) => t.toLowerCase().includes(s)),
+      );
+    }
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter((h) =>
+        selectedTags.some((t) => h.tags?.includes(t)),
+      );
+    }
+    return filtered.sort((a, b) => a.label.localeCompare(b.label));
+  }, [hosts, selectedGroupPath, search, selectedTags]);
 
   // Recently connected hosts for root-level display
+  // Respects active search and tag filters
   const recentHosts = useMemo(() => {
     if (selectedGroupPath) return [];
-    return hosts
-      .filter((h) => h.lastConnectedAt)
+    let filtered = hosts.filter((h) => h.lastConnectedAt);
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      filtered = filtered.filter(
+        (h) =>
+          h.label.toLowerCase().includes(s) ||
+          h.hostname.toLowerCase().includes(s) ||
+          h.tags.some((t) => t.toLowerCase().includes(s)),
+      );
+    }
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter((h) =>
+        selectedTags.some((t) => h.tags?.includes(t)),
+      );
+    }
+    return filtered
       .sort((a, b) => (b.lastConnectedAt || 0) - (a.lastConnectedAt || 0))
-      .slice(0, 20); // Keep a reasonable max, UI will show one row
-  }, [hosts, selectedGroupPath]);
+      .slice(0, 20);
+  }, [hosts, selectedGroupPath, search, selectedTags]);
 
   // For tree view: apply search, tag filter, and sorting, but not group filtering
   const treeViewHosts = useMemo(() => {

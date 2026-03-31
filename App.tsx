@@ -1072,11 +1072,6 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Wrapper to connect to host with logging
   const handleConnectToHost = useCallback((host: Host) => {
-    // Update lastConnectedAt timestamp for recently connected tracking
-    updateHosts(hosts.map((h) =>
-      h.id === host.id ? { ...h, lastConnectedAt: Date.now() } : h
-    ));
-
     const { username, hostname: localHost } = systemInfoRef.current;
 
     // Handle serial hosts separately
@@ -1095,6 +1090,10 @@ function App({ settings }: { settings: SettingsState }) {
         localHostname: localHost,
         saved: false,
       });
+      // Update lastConnectedAt after session is created
+      updateHosts(hosts.map((h) =>
+        h.id === host.id ? { ...h, lastConnectedAt: Date.now() } : h
+      ));
       return;
     }
 
@@ -1113,6 +1112,10 @@ function App({ settings }: { settings: SettingsState }) {
       localHostname: localHost,
       saved: false,
     });
+    // Update lastConnectedAt after session is created
+    updateHosts(hosts.map((h) =>
+      h.id === host.id ? { ...h, lastConnectedAt: Date.now() } : h
+    ));
   }, [addConnectionLog, connectToHost, identities, keys, hosts, updateHosts]);
 
   // Wrapper to create serial session with logging
