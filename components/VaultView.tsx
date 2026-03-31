@@ -307,19 +307,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Handle host connect with protocol selection
   const handleHostConnect = useCallback(
     (host: Host) => {
-      // Update lastConnectedAt timestamp via ref to avoid stale closure over hosts
-      const now = Date.now();
-      onUpdateHosts(hostsRef.current.map((h) =>
-        h.id === host.id ? { ...h, lastConnectedAt: now } : h
-      ));
-
       if (hasMultipleProtocols(host)) {
         setProtocolSelectHost(host);
       } else {
         onConnect(host);
       }
     },
-    [hasMultipleProtocols, onConnect, onUpdateHosts],
+    [hasMultipleProtocols, onConnect],
   );
 
   // Handle protocol selection
