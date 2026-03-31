@@ -2155,7 +2155,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                     <ContextMenuTrigger>
                                       <div
                                         className={cn(
-                                          "group cursor-pointer",
+                                          "group cursor-pointer relative",
                                           viewMode === "grid"
                                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
@@ -2173,6 +2173,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                           }
                                         }}
                                       >
+                                        {host.pinned && viewMode === "grid" && (
+                                          <Pin size={10} className="absolute top-1.5 right-1.5 text-primary/50" />
+                                        )}
                                         <div className="flex items-center gap-3 h-full">
                                           {isMultiSelectMode && (
                                             <div
@@ -2293,7 +2296,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                               <ContextMenuTrigger>
                                 <div
                                   className={cn(
-                                    "group cursor-pointer",
+                                    "group cursor-pointer relative",
                                     viewMode === "grid"
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
@@ -2311,6 +2314,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                     }
                                   }}
                                 >
+                                  {host.pinned && viewMode === "grid" && (
+                                    <Pin size={10} className="absolute top-1.5 right-1.5 text-primary/50" />
+                                  )}
                                   <div className="flex items-center gap-3 h-full">
                                     {isMultiSelectMode && (
                                       <div
