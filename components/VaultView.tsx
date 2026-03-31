@@ -459,14 +459,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     });
   }, [identities, t]);
 
-  const [pinnedAnimKey, setPinnedAnimKey] = useState(0);
+  const [lastPinnedId, setLastPinnedId] = useState<string | null>(null);
   const toggleHostPinned = useCallback((hostId: string) => {
+    const host = hostsRef.current.find((h) => h.id === hostId);
+    const isPinning = host && !host.pinned;
     startTransition(() => {
       onUpdateHosts(hostsRef.current.map((h) =>
         h.id === hostId ? { ...h, pinned: !h.pinned } : h
       ));
     });
-    setPinnedAnimKey((k) => k + 1);
+    setLastPinnedId(isPinning ? hostId : null);
   }, [onUpdateHosts]);
 
   const toggleHostSelection = useCallback((hostId: string) => {
@@ -1734,7 +1736,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                   )}
                   {/* Pinned hosts section - only at root level */}
                   {viewMode !== "tree" && !selectedGroupPath && pinnedHosts.length > 0 && (
-                    <section className="space-y-2">
+                    <section className="space-y-2 mb-4">
                       <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         <Pin size={14} />
                         {t("vault.hosts.pinned")}
@@ -1744,7 +1746,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                           ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                           : "flex flex-col gap-0",
                       )}>
-                        {pinnedHosts.map((host, idx) => {
+                        {pinnedHosts.map((host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
                           const distroBadge = {
@@ -1752,7 +1754,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                             label: effectiveDistro || safeHost.os || "Linux",
                           };
                           return (
-                            <ContextMenu key={`${host.id}-${pinnedAnimKey}`}>
+                            <ContextMenu key={host.id}>
                               <ContextMenuTrigger>
                                 <div
                                   className={cn(
@@ -1761,7 +1763,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                       ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                       : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
                                   )}
-                                  style={{ animation: `pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) ${idx * 0.05}s both` }}
+                                  style={lastPinnedId === host.id ? { animation: "pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both" } : undefined}
+                                  onAnimationEnd={() => { if (lastPinnedId === host.id) setLastPinnedId(null); }}
                                   onClick={() => handleHostConnect(safeHost)}
                                 >
                                   <div className="flex items-center gap-3 h-full">
@@ -1810,7 +1813,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                   )}
                   {/* Recently Connected section - only at root level, toggleable */}
                   {viewMode !== "tree" && !selectedGroupPath && showRecentHosts && recentHosts.length > 0 && (
-                    <section className="space-y-2">
+                    <section className="space-y-2 mb-4">
                       <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
                         <Clock size={14} />
                         {t("vault.hosts.recentlyConnected")}
