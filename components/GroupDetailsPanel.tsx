@@ -92,6 +92,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   );
   const [groupName, setGroupName] = useState<string>(originalName);
   const [parentGroup, setParentGroup] = useState<string>(originalParent);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   // Protocol sections enabled state
   const hasSshFields = (c: Partial<GroupConfig>) =>
@@ -271,9 +272,17 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
   // Save handler
   const handleSubmit = () => {
+    const trimmedName = groupName.trim();
+    if (!trimmedName) return;
+    if (trimmedName.includes('/') || trimmedName.includes('\\')) {
+      setNameError(t("vault.groups.errors.invalidChars"));
+      return;
+    }
+    setNameError(null);
+
     const newPath = parentGroup
-      ? `${parentGroup}/${groupName.trim()}`
-      : groupName.trim();
+      ? `${parentGroup}/${trimmedName}`
+      : trimmedName;
 
     const result: GroupConfig = {
       path: newPath,
@@ -312,11 +321,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       ...(form.fontSizeOverride !== undefined && { fontSizeOverride: form.fontSizeOverride }),
     };
 
-    const nameChanged = groupName.trim() !== originalName;
+    const nameChanged = trimmedName !== originalName;
     const parentChanged = parentGroup !== originalParent;
     onSave(
       result,
-      nameChanged ? groupName.trim() : undefined,
+      nameChanged ? trimmedName : undefined,
       parentChanged ? (parentGroup || null) : undefined,
     );
   };
@@ -431,9 +440,15 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           <Input
             placeholder={t("vault.groups.field.name")}
             value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
+            onChange={(e) => {
+              setGroupName(e.target.value);
+              if (nameError) setNameError(null);
+            }}
             className="h-10"
           />
+          {nameError && (
+            <p className="text-xs text-destructive">{nameError}</p>
+          )}
           <Combobox
             options={parentGroupOptions}
             value={parentGroup || "__root__"}

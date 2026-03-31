@@ -634,7 +634,7 @@ export const useVaultState = () => {
       if (payload.customGroups) updateCustomGroups(payload.customGroups);
       if (payload.snippetPackages) updateSnippetPackages(payload.snippetPackages);
       if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
-      if (payload.groupConfigs) updateGroupConfigs(payload.groupConfigs);
+      if (payload.groupConfigs !== undefined) updateGroupConfigs(payload.groupConfigs);
     },
     [
       updateHosts,
