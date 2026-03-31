@@ -27,7 +27,7 @@ export function resolveGroupDefaults(
 }
 
 const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
-  'username', 'password', 'savePassword', 'authMethod', 'identityId', 'identityFileId',
+  'username', 'password', 'savePassword', 'authMethod', 'identityId', 'identityFileId', 'identityFilePaths',
   'port', 'protocol', 'agentForwarding', 'proxyConfig', 'hostChain', 'startupCommand',
   'legacyAlgorithms', 'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
   'telnetPort', 'telnetUsername', 'telnetPassword',

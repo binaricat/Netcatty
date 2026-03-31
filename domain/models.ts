@@ -191,6 +191,7 @@ export interface GroupConfig {
   authMethod?: 'password' | 'key' | 'certificate';
   identityId?: string;
   identityFileId?: string;
+  identityFilePaths?: string[];
   port?: number;
   protocol?: 'ssh' | 'telnet';
   agentForwarding?: boolean;
