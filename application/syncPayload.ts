@@ -8,6 +8,7 @@
  */
 
 import type {
+  GroupConfig,
   Host,
   Identity,
   KnownHost,
@@ -58,6 +59,7 @@ export interface SyncableVaultData {
   customGroups: string[];
   snippetPackages?: string[];
   knownHosts: KnownHost[];
+  groupConfigs?: GroupConfig[];
 }
 
 /** Callbacks used by `applySyncPayload` to import data into local state. */
@@ -266,6 +268,7 @@ export function buildSyncPayload(
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
     knownHosts: vault.knownHosts,
+    groupConfigs: vault.groupConfigs,
     portForwardingRules,
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
@@ -298,6 +301,9 @@ export function applySyncPayload(
   }
   if (payload.knownHosts !== undefined) {
     vaultImport.knownHosts = payload.knownHosts;
+  }
+  if (payload.groupConfigs !== undefined) {
+    vaultImport.groupConfigs = payload.groupConfigs;
   }
 
   importers.importVaultData(JSON.stringify(vaultImport));

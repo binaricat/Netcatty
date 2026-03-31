@@ -165,6 +165,9 @@ export interface SyncPayload {
   customGroups: string[];
   snippetPackages?: string[];
 
+  // Group configs (connection defaults per host group)
+  groupConfigs?: import('./models').GroupConfig[];
+
   // Port forwarding rules
   portForwardingRules?: import('./models').PortForwardingRule[];
   

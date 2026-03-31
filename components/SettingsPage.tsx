@@ -113,6 +113,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
         customGroups,
         snippetPackages,
         knownHosts,
+        groupConfigs,
         importDataFromString,
         clearVaultData,
     } = useVaultState();
@@ -132,8 +133,8 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
     );
 
     const vault = useMemo(
-        () => ({ hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts }),
-        [hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts],
+        () => ({ hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts, groupConfigs }),
+        [hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts, groupConfigs],
     );
 
     return (
