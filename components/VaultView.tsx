@@ -4,6 +4,7 @@ import {
   CheckSquare,
   ChevronDown,
   ClipboardCopy,
+  Clock,
   Copy,
   Download,
   Edit2,
@@ -15,6 +16,7 @@ import {
   LayoutGrid,
   List,
   Network,
+  Pin,
   Plug,
   Plus,
   Search,
@@ -1707,6 +1709,156 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                             );
                           })}
                     </div>
+                  )}
+                  {/* Pinned hosts section - only at root level */}
+                  {viewMode !== "tree" && !selectedGroupPath && pinnedHosts.length > 0 && (
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
+                        <Pin size={14} />
+                        {t("vault.hosts.pinned")}
+                      </h3>
+                      <div className={cn(
+                        viewMode === "grid"
+                          ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          : "flex flex-col gap-0",
+                      )}>
+                        {pinnedHosts.map((host) => {
+                          const safeHost = sanitizeHost(host);
+                          const effectiveDistro = getEffectiveHostDistro(safeHost);
+                          const distroBadge = {
+                            text: (safeHost.os || "L")[0].toUpperCase(),
+                            label: effectiveDistro || safeHost.os || "Linux",
+                          };
+                          return (
+                            <ContextMenu key={host.id}>
+                              <ContextMenuTrigger>
+                                <div
+                                  className={cn(
+                                    "group cursor-pointer relative",
+                                    viewMode === "grid"
+                                      ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
+                                      : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
+                                  )}
+                                  onClick={() => handleHostConnect(safeHost)}
+                                >
+                                  <div className="flex items-center gap-3 h-full">
+                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} />
+                                    <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
+                                      <span className="text-sm font-semibold truncate leading-5">
+                                        {safeHost.label}
+                                      </span>
+                                      <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
+                                        {safeHost.username}@{safeHost.hostname}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditHost(host);
+                                      }}
+                                    >
+                                      <Edit2 size={14} />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem onClick={() => handleHostConnect(host)}>
+                                  <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleEditHost(host)}>
+                                  <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
+                                  <Pin className="mr-2 h-4 w-4" /> {t('vault.hosts.unpin')}
+                                </ContextMenuItem>
+                                <ContextMenuItem className="text-destructive" onClick={() => onDeleteHost(host.id)}>
+                                  <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
+                  {/* Recently Connected section - only at root level, toggleable */}
+                  {viewMode !== "tree" && !selectedGroupPath && showRecentHosts && recentHosts.length > 0 && (
+                    <section className="space-y-2">
+                      <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-1.5">
+                        <Clock size={14} />
+                        {t("vault.hosts.recentlyConnected")}
+                      </h3>
+                      <div className={cn(
+                        viewMode === "grid"
+                          ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          : "flex flex-col gap-0",
+                      )}>
+                        {recentHosts.map((host) => {
+                          const safeHost = sanitizeHost(host);
+                          const effectiveDistro = getEffectiveHostDistro(safeHost);
+                          const distroBadge = {
+                            text: (safeHost.os || "L")[0].toUpperCase(),
+                            label: effectiveDistro || safeHost.os || "Linux",
+                          };
+                          return (
+                            <ContextMenu key={host.id}>
+                              <ContextMenuTrigger>
+                                <div
+                                  className={cn(
+                                    "group cursor-pointer relative",
+                                    viewMode === "grid"
+                                      ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
+                                      : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
+                                  )}
+                                  onClick={() => handleHostConnect(safeHost)}
+                                >
+                                  <div className="flex items-center gap-3 h-full">
+                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} />
+                                    <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
+                                      <span className="text-sm font-semibold truncate leading-5">
+                                        {safeHost.label}
+                                      </span>
+                                      <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
+                                        {safeHost.username}@{safeHost.hostname}
+                                      </div>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditHost(host);
+                                      }}
+                                    >
+                                      <Edit2 size={14} />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem onClick={() => handleHostConnect(host)}>
+                                  <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleEditHost(host)}>
+                                  <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
+                                  <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
+                                </ContextMenuItem>
+                                <ContextMenuItem className="text-destructive" onClick={() => onDeleteHost(host.id)}>
+                                  <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          );
+                        })}
+                      </div>
+                    </section>
                   )}
                   {viewMode !== "tree" && displayedGroups.length > 0 && (
                     <div className="flex items-center justify-between">
