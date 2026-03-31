@@ -35,7 +35,7 @@ import { useTreeExpandedState } from "../application/state/useTreeExpandedState"
 import { getEffectiveHostDistro, sanitizeHost } from "../domain/host";
 import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/vaultImport";
 import type { VaultImportFormat } from "../domain/vaultImport";
-import { STORAGE_KEY_VAULT_HOSTS_VIEW_MODE, STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED, STORAGE_KEY_VAULT_SIDEBAR_COLLAPSED } from "../infrastructure/config/storageKeys";
+import { STORAGE_KEY_VAULT_HOSTS_VIEW_MODE, STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED, STORAGE_KEY_VAULT_SIDEBAR_COLLAPSED, STORAGE_KEY_SHOW_RECENT_HOSTS } from "../infrastructure/config/storageKeys";
 import { cn } from "../lib/utils";
 import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import {
@@ -210,6 +210,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     false,
   );
 
+  const [showRecentHosts, setShowRecentHosts] = useStoredBoolean(
+    STORAGE_KEY_SHOW_RECENT_HOSTS,
+    true,
+  );
+
   // Handle external navigation requests
   useEffect(() => {
     if (navigateToSection) {
@@ -295,13 +300,20 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Handle host connect with protocol selection
   const handleHostConnect = useCallback(
     (host: Host) => {
+      // Update lastConnectedAt timestamp
+      const now = Date.now();
+      const updatedHosts = hosts.map((h) =>
+        h.id === host.id ? { ...h, lastConnectedAt: now } : h
+      );
+      onUpdateHosts(updatedHosts);
+
       if (hasMultipleProtocols(host)) {
         setProtocolSelectHost(host);
       } else {
         onConnect(host);
       }
     },
-    [hasMultipleProtocols, onConnect],
+    [hasMultipleProtocols, onConnect, hosts, onUpdateHosts],
   );
 
   // Handle protocol selection
@@ -441,6 +453,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       toast.success(t('vault.hosts.copyCredentials.toast.success'));
     });
   }, [identities, t]);
+
+  const toggleHostPinned = useCallback((hostId: string) => {
+    const updatedHosts = hosts.map((h) =>
+      h.id === hostId ? { ...h, pinned: !h.pinned } : h
+    );
+    onUpdateHosts(updatedHosts);
+  }, [hosts, onUpdateHosts]);
 
   const toggleHostSelection = useCallback((hostId: string) => {
     setSelectedHostIds(prev => {
@@ -825,6 +844,21 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     });
     return filtered;
   }, [hosts, selectedGroupPath, search, selectedTags, sortMode]);
+
+  // Pinned hosts for root-level display (not inside a subgroup)
+  const pinnedHosts = useMemo(() => {
+    if (selectedGroupPath) return [];
+    return hosts.filter((h) => h.pinned).sort((a, b) => a.label.localeCompare(b.label));
+  }, [hosts, selectedGroupPath]);
+
+  // Recently connected hosts for root-level display
+  const recentHosts = useMemo(() => {
+    if (selectedGroupPath) return [];
+    return hosts
+      .filter((h) => h.lastConnectedAt)
+      .sort((a, b) => (b.lastConnectedAt || 0) - (a.lastConnectedAt || 0))
+      .slice(0, 20); // Keep a reasonable max, UI will show one row
+  }, [hosts, selectedGroupPath]);
 
   // For tree view: apply search, tag filter, and sorting, but not group filtering
   const treeViewHosts = useMemo(() => {
