@@ -42,6 +42,7 @@ import {
   STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS,
   STORAGE_KEY_CUSTOM_THEMES,
   STORAGE_KEY_IMMERSIVE_MODE,
+  STORAGE_KEY_SHOW_RECENT_HOSTS,
 } from '../infrastructure/config/storageKeys';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,9 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const immersive = localStorageAdapter.readString(STORAGE_KEY_IMMERSIVE_MODE);
   if (immersive === 'true' || immersive === 'false') settings.immersiveMode = immersive === 'true';
 
+  const showRecent = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_RECENT_HOSTS);
+  if (showRecent != null) settings.showRecentHosts = showRecent;
+
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
@@ -236,6 +240,7 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
 
   // Immersive mode
   if (settings.immersiveMode != null) localStorageAdapter.writeString(STORAGE_KEY_IMMERSIVE_MODE, String(settings.immersiveMode));
+  if (settings.showRecentHosts != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_RECENT_HOSTS, settings.showRecentHosts);
 }
 
 // ---------------------------------------------------------------------------

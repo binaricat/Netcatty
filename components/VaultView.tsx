@@ -371,6 +371,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       id: crypto.randomUUID(),
       label: `${host.label} (${t('action.copy')})`,
       createdAt: Date.now(),
+      pinned: undefined,
+      lastConnectedAt: undefined,
     };
     // Open the edit panel with the duplicated host for modification
     setEditingHost(duplicatedHost);

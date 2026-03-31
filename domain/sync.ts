@@ -201,6 +201,8 @@ export interface SyncPayload {
     sftpGlobalBookmarks?: import('./models').SftpBookmark[];
     // Immersive mode
     immersiveMode?: boolean;
+    // Vault: show recently connected hosts
+    showRecentHosts?: boolean;
   };
 
   // Sync metadata
