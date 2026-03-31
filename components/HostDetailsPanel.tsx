@@ -365,7 +365,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       label: finalLabel,
       group: finalGroup,
       tags: form.tags || [],
-      port: form.port || 22,
+      port: form.port ?? (groupDefaults?.port ? undefined as unknown as number : 22),
       // Clear password if savePassword is explicitly set to false
       password: form.savePassword === false ? undefined : form.password,
       managedSourceId: finalManagedSourceId,
