@@ -43,6 +43,7 @@ import { cn } from "../lib/utils";
 import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import {
   ConnectionLog,
+  GroupConfig,
   GroupNode,
   Host,
   HostProtocol,
@@ -57,6 +58,7 @@ import {
 } from "../types";
 import { AppLogo } from "./AppLogo";
 import { DistroAvatar } from "./DistroAvatar";
+import GroupDetailsPanel from "./GroupDetailsPanel";
 import HostDetailsPanel from "./HostDetailsPanel";
 import { HostTreeView } from "./HostTreeView";
 import KeychainManager from "./KeychainManager";
@@ -138,6 +140,8 @@ interface VaultViewProps {
   onClearUnsavedConnectionLogs: () => void;
   onOpenLogView: (log: ConnectionLog) => void;
   onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
+  groupConfigs: GroupConfig[];
+  onUpdateGroupConfigs: (configs: GroupConfig[]) => void;
   // Optional: navigate to a specific section on mount or when changed
   navigateToSection?: VaultSection | null;
   onNavigateToSectionHandled?: () => void;
@@ -182,6 +186,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onClearUnsavedConnectionLogs,
   onOpenLogView,
   onRunSnippet,
+  groupConfigs,
+  onUpdateGroupConfigs,
   navigateToSection,
   onNavigateToSectionHandled,
 }) => {
@@ -245,6 +251,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [newHostGroupPath, setNewHostGroupPath] = useState<string | null>(null);
+
+  // Group panel state
+  const [isGroupPanelOpen, setIsGroupPanelOpen] = useState(false);
+  const [editingGroupPath, setEditingGroupPath] = useState<string | null>(null);
 
   // Quick connect state
   const [quickConnectTarget, setQuickConnectTarget] = useState<{
@@ -1201,6 +1211,63 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsRenameGroupOpen(false);
   };
 
+  const handleEditGroupConfig = useCallback((groupPath: string) => {
+    setEditingGroupPath(groupPath);
+    setIsGroupPanelOpen(true);
+  }, []);
+
+  const handleSaveGroupConfig = useCallback((config: GroupConfig, newName?: string) => {
+    // Save config
+    const updatedConfigs = [...groupConfigs.filter(c => c.path !== editingGroupPath), config];
+    onUpdateGroupConfigs(updatedConfigs);
+
+    // Handle rename if name changed
+    if (newName && editingGroupPath) {
+      const oldPath = editingGroupPath;
+      const parts = oldPath.split('/').filter(Boolean);
+      parts[parts.length - 1] = newName;
+      const newPath = parts.join('/');
+      if (newPath !== oldPath) {
+        // Reuse existing rename logic — update groups, hosts, managed sources
+        const updatedGroups = customGroups.map((g) => {
+          if (g === oldPath) return newPath;
+          if (g.startsWith(oldPath + '/')) return g.replace(oldPath, newPath);
+          return g;
+        });
+        const updatedHosts = hosts.map((h) => {
+          const g = h.group || '';
+          if (g === oldPath) return { ...h, group: newPath };
+          if (g.startsWith(oldPath + '/')) return { ...h, group: g.replace(oldPath, newPath) };
+          return h;
+        });
+        const updatedManagedSources = managedSources.map((s) => {
+          if (s.groupName === oldPath) return { ...s, groupName: newPath };
+          if (s.groupName.startsWith(oldPath + '/')) return { ...s, groupName: s.groupName.replace(oldPath, newPath) };
+          return s;
+        });
+        if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
+          onUpdateManagedSources(updatedManagedSources);
+        }
+        onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
+        onUpdateHosts(updatedHosts);
+        // Also update the config path
+        const finalConfigs = updatedConfigs.map(c => {
+          if (c.path === oldPath) return { ...c, path: newPath };
+          if (c.path.startsWith(oldPath + '/')) return { ...c, path: c.path.replace(oldPath, newPath) };
+          return c;
+        });
+        onUpdateGroupConfigs(finalConfigs);
+        if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
+        if (selectedGroupPath?.startsWith(oldPath + '/')) {
+          setSelectedGroupPath(selectedGroupPath.replace(oldPath, newPath));
+        }
+      }
+    }
+
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
+  }, [groupConfigs, editingGroupPath, customGroups, hosts, managedSources, selectedGroupPath, onUpdateGroupConfigs, onUpdateCustomGroups, onUpdateHosts, onUpdateManagedSources]);
+
   const deleteGroupPath = async (path: string, deleteHosts: boolean = false) => {
     const keepGroups = customGroups.filter(
       (g) => !(g === path || g.startsWith(path + "/")),
@@ -2056,10 +2123,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                   className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setRenameTargetPath(node.path);
-                                    setRenameGroupName(node.name);
-                                    setRenameGroupError(null);
-                                    setIsRenameGroupOpen(true);
+                                    handleEditGroupConfig(node.path);
                                   }}
                                 >
                                   <Edit2 size={14} />
@@ -2078,14 +2142,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                               <FolderPlus className="mr-2 h-4 w-4" /> {t("vault.groups.newSubgroup")}
                             </ContextMenuItem>
                             <ContextMenuItem
-                              onClick={() => {
-                                setRenameTargetPath(node.path);
-                                setRenameGroupName(node.name);
-                                setRenameGroupError(null);
-                                setIsRenameGroupOpen(true);
-                              }}
+                              onClick={() => handleEditGroupConfig(node.path)}
                             >
-                              <Edit2 className="mr-2 h-4 w-4" /> {t("vault.groups.rename")}
+                              <Edit2 className="mr-2 h-4 w-4" /> {t("vault.groups.settings")}
                             </ContextMenuItem>
                             <ContextMenuItem
                               className="text-destructive"
@@ -2186,13 +2245,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                         setNewFolderName("");
                         setIsNewFolderOpen(true);
                       }}
-                      onEditGroup={(groupPath) => {
-                        setRenameTargetPath(groupPath);
-                        const groupName = groupPath.split('/').pop() || '';
-                        setRenameGroupName(groupName);
-                        setRenameGroupError(null);
-                        setIsRenameGroupOpen(true);
-                      }}
+                      onEditGroup={(groupPath) => handleEditGroupConfig(groupPath)}
                       onDeleteGroup={(groupPath) => {
                         setDeleteTargetPath(groupPath);
                         setIsDeleteGroupOpen(true);
@@ -2612,6 +2665,24 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         )}
       </div>
 
+      {/* Group Details Panel */}
+      {currentSection === "hosts" && isGroupPanelOpen && editingGroupPath && (
+        <GroupDetailsPanel
+          groupPath={editingGroupPath}
+          config={groupConfigs.find(c => c.path === editingGroupPath)}
+          availableKeys={keys}
+          identities={identities}
+          allHosts={hosts}
+          terminalThemeId={terminalThemeId}
+          terminalFontSize={terminalFontSize}
+          onSave={handleSaveGroupConfig}
+          onCancel={() => {
+            setIsGroupPanelOpen(false);
+            setEditingGroupPath(null);
+          }}
+        />
+      )}
+
       {/* Host Details Panel - positioned at VaultView root level for correct top alignment */}
       {currentSection === "hosts" && isHostPanelOpen && editingHost?.protocol !== 'serial' && (
         <HostDetailsPanel
@@ -2891,6 +2962,7 @@ const vaultViewAreEqual = (
     prev.connectionLogs === next.connectionLogs &&
     prev.sessions === next.sessions &&
     prev.managedSources === next.managedSources &&
+    prev.groupConfigs === next.groupConfigs &&
     prev.terminalThemeId === next.terminalThemeId &&
     prev.terminalFontSize === next.terminalFontSize;
 
