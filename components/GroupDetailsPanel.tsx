@@ -445,7 +445,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
         {/* SSH Section (if enabled) */}
         {sshEnabled && (
-          <Card className="p-3 space-y-3 bg-card border-border/80">
+          <Card className="p-3 space-y-3 bg-card border-border/80 overflow-hidden">
             <div className="flex items-center gap-2">
               <TerminalSquare size={14} className="text-muted-foreground" />
               <p className="text-xs font-semibold flex-1">
