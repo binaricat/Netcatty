@@ -43,6 +43,8 @@ import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
+import { TerminalFontSelect } from "./settings/TerminalFontSelect";
+import { useAvailableFonts } from "../application/state/fontStore";
 
 type SubPanel = "none" | "proxy" | "chain" | "env-vars" | "theme-select";
 
@@ -72,6 +74,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   onCancel,
 }) => {
   const { t } = useI18n();
+  const availableFonts = useAvailableFonts();
 
   const originalName = groupPath.includes("/")
     ? groupPath.split("/").pop()!
@@ -775,20 +778,36 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             </Button>
           )}
 
-          <Input
-            placeholder={t("vault.groups.details.fontFamily")}
-            value={form.fontFamily || ""}
-            onChange={(e) => {
-              const val = e.target.value || undefined;
+          <TerminalFontSelect
+            value={form.fontFamily || availableFonts[0]?.id || ""}
+            fonts={availableFonts}
+            onChange={(id) => {
               setForm((prev) => ({
                 ...prev,
-                fontFamily: val,
-                fontFamilyOverride: val ? true : undefined,
+                fontFamily: id,
+                fontFamilyOverride: true,
               }));
             }}
-            className="h-10"
+            className="w-full"
           />
+          {form.fontFamilyOverride && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-primary"
+              onClick={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  fontFamily: undefined,
+                  fontFamilyOverride: undefined,
+                }))
+              }
+            >
+              {t("common.useGlobal")}
+            </Button>
+          )}
 
+          {/* Font Size */}
           <Input
             type="number"
             placeholder={String(terminalFontSize)}
