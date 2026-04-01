@@ -35,7 +35,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
-import { resolveGroupDefaults } from "../domain/groupConfig";
+import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { getEffectiveHostDistro, sanitizeHost } from "../domain/host";
 import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/vaultImport";
 import type { VaultImportFormat } from "../domain/vaultImport";
@@ -308,30 +308,37 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     [isSearchQuickConnect, handleConnectClick],
   );
 
-  // Check if host has multiple protocols enabled
+  // Check if host has multiple protocols enabled (using effective/resolved host)
   const hasMultipleProtocols = useCallback((host: Host) => {
+    const effective = host.group
+      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs))
+      : host;
     let count = 0;
     // SSH is always available as base protocol (unless explicitly set to something else)
-    if (host.protocol === "ssh" || !host.protocol) count++;
+    if (effective.protocol === "ssh" || !effective.protocol) count++;
     // Mosh adds another option
-    if (host.moshEnabled) count++;
+    if (effective.moshEnabled) count++;
     // Telnet adds another option
-    if (host.telnetEnabled) count++;
+    if (effective.telnetEnabled) count++;
     // If protocol is explicitly telnet (not ssh), count it
-    if (host.protocol === "telnet" && !host.telnetEnabled) count++;
+    if (effective.protocol === "telnet" && !effective.telnetEnabled) count++;
     return count > 1;
-  }, []);
+  }, [groupConfigs]);
 
   // Handle host connect with protocol selection
   const handleHostConnect = useCallback(
     (host: Host) => {
       if (hasMultipleProtocols(host)) {
-        setProtocolSelectHost(host);
+        // Pass effective host to protocol dialog so it shows correct ports/protocols
+        const effective = host.group
+          ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs))
+          : host;
+        setProtocolSelectHost(effective);
       } else {
         onConnect(host);
       }
     },
-    [hasMultipleProtocols, onConnect],
+    [hasMultipleProtocols, onConnect, groupConfigs],
   );
 
   // Handle protocol selection
@@ -434,38 +441,42 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Copy host credentials to clipboard
   const handleCopyCredentials = useCallback((host: Host) => {
+    // Apply group defaults so inherited credentials are included
+    const effective = host.group
+      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs))
+      : host;
     // Only use telnet-specific port and credentials when protocol is explicitly telnet
     // Don't treat telnetEnabled as primary - that's just an optional protocol
-    const isTelnet = host.protocol === "telnet";
+    const isTelnet = effective.protocol === "telnet";
 
     const defaultPort = isTelnet ? 23 : 22;
     const effectivePort = isTelnet
-      ? (host.telnetPort ?? host.port ?? 23)
-      : (host.port ?? 22);
+      ? (effective.telnetPort ?? effective.port ?? 23)
+      : (effective.port ?? 22);
 
     // Bracket IPv6 addresses when appending non-default port
     let address: string;
     if (effectivePort !== defaultPort) {
-      const isIPv6 = host.hostname.includes(":") && !host.hostname.startsWith("[");
-      const hostname = isIPv6 ? `[${host.hostname}]` : host.hostname;
+      const isIPv6 = effective.hostname.includes(":") && !effective.hostname.startsWith("[");
+      const hostname = isIPv6 ? `[${effective.hostname}]` : effective.hostname;
       address = `${hostname}:${effectivePort}`;
     } else {
-      address = host.hostname;
+      address = effective.hostname;
     }
 
     // Resolve credentials from identity if configured, otherwise use host credentials
     // For telnet hosts, use telnet-specific credentials
-    const identity = host.identityId
-      ? identities.find((i) => i.id === host.identityId)
+    const identity = effective.identityId
+      ? identities.find((i) => i.id === effective.identityId)
       : undefined;
 
     const username = isTelnet
-      ? (host.telnetUsername?.trim() || host.username?.trim())
-      : (identity?.username?.trim() || host.username?.trim());
+      ? (effective.telnetUsername?.trim() || effective.username?.trim())
+      : (identity?.username?.trim() || effective.username?.trim());
 
     const password = isTelnet
-      ? (host.telnetPassword || host.password)
-      : (identity?.password || host.password);
+      ? (effective.telnetPassword || effective.password)
+      : (identity?.password || effective.password);
 
     if (!password) {
       toast.warning(t('vault.hosts.copyCredentials.toast.noPassword'));
@@ -476,7 +487,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     navigator.clipboard.writeText(text).then(() => {
       toast.success(t('vault.hosts.copyCredentials.toast.success'));
     });
-  }, [identities, t]);
+  }, [identities, groupConfigs, t]);
 
   const [lastPinnedId, setLastPinnedId] = useState<string | null>(null);
   const toggleHostPinned = useCallback((hostId: string) => {

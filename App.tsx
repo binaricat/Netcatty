@@ -1195,24 +1195,25 @@ function App({ settings }: { settings: SettingsState }) {
     }
   }, [sessions, connectionLogs, updateConnectionLog]);
 
-  // Check if host has multiple protocols enabled
+  // Check if host has multiple protocols enabled (using effective/resolved host)
   const hasMultipleProtocols = useCallback((host: Host) => {
+    const effective = resolveEffectiveHost(host);
     let count = 0;
     // SSH is always available as base protocol (unless explicitly set to something else)
-    if (host.protocol === 'ssh' || !host.protocol) count++;
+    if (effective.protocol === 'ssh' || !effective.protocol) count++;
     // Mosh adds another option
-    if (host.moshEnabled) count++;
+    if (effective.moshEnabled) count++;
     // Telnet adds another option
-    if (host.telnetEnabled) count++;
+    if (effective.telnetEnabled) count++;
     // If protocol is explicitly telnet (not ssh), count it
-    if (host.protocol === 'telnet' && !host.telnetEnabled) count++;
+    if (effective.protocol === 'telnet' && !effective.telnetEnabled) count++;
     return count > 1;
-  }, []);
+  }, [resolveEffectiveHost]);
 
   // Handle host connect with protocol selection (used by QuickSwitcher)
   const handleHostConnectWithProtocolCheck = useCallback((host: Host) => {
     if (hasMultipleProtocols(host)) {
-      setProtocolSelectHost(host);
+      setProtocolSelectHost(resolveEffectiveHost(host));
       setIsQuickSwitcherOpen(false);
       setQuickSearch('');
     } else {
@@ -1220,7 +1221,7 @@ function App({ settings }: { settings: SettingsState }) {
       setIsQuickSwitcherOpen(false);
       setQuickSearch('');
     }
-  }, [hasMultipleProtocols, handleConnectToHost]);
+  }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
 
   // Handle protocol selection from dialog
   const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => {
