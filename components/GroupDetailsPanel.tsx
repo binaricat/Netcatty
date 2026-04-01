@@ -96,6 +96,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
   // Protocol sections enabled state
   const hasSshFields = (c: Partial<GroupConfig>) =>
+    c.protocol === 'ssh' ||
     c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
     c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId ||
     !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.legacyAlgorithms !== undefined ||
@@ -151,6 +152,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       delete next.proxyConfig;
       delete next.hostChain;
       delete next.environmentVariables;
+      delete next.protocol;
       delete next.moshEnabled;
       delete next.moshServerPath;
       return next;
@@ -291,6 +293,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       path: newPath,
       // Only include SSH fields if SSH section is enabled
       ...(sshEnabled && {
+        protocol: 'ssh' as const,
         ...(form.port !== undefined && { port: form.port }),
         ...(form.username !== undefined && { username: form.username }),
         ...(form.password !== undefined && { password: form.password }),
