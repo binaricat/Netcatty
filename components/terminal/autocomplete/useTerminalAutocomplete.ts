@@ -943,15 +943,15 @@ function resolveAutocompleteCwd(
   if (os === "windows") return fallbackCwd;
 
   const normalizedWord = currentWord.trim().replace(/^['"]/, "");
-  const isRelativePathWord = normalizedWord.length > 0 &&
-    !normalizedWord.startsWith("/") &&
-    !normalizedWord.startsWith("~/") &&
-    !normalizedWord.startsWith("-");
 
-  if (!isRelativePathWord) {
+  // Absolute or home-relative paths don't depend on cwd
+  if (normalizedWord.startsWith("/") || normalizedWord.startsWith("~/")) {
     return fallbackCwd;
   }
 
+  // For empty word (e.g. "cd ") and relative paths, try prompt-based cwd
+  // extraction which reflects the current visible prompt — more up-to-date
+  // than fallbackCwd when OSC 7 is not supported.
   const promptCwd = extractPosixCwdFromPrompt(promptText);
   return chooseAutocompleteCwd(promptCwd, fallbackCwd);
 }
@@ -963,15 +963,16 @@ function chooseAutocompleteCwd(
   if (!promptCwd) return fallbackCwd;
   if (!fallbackCwd) return promptCwd;
 
-  if (promptCwd.startsWith("/")) {
+  // Prompt cwd is extracted from the currently visible prompt, so it tracks
+  // directory changes even when OSC 7 is not supported. Prefer it over
+  // fallbackCwd (which may be stale from initial connection) whenever it
+  // looks like a usable path.
+  if (promptCwd.startsWith("/") || promptCwd === "~" || promptCwd.startsWith("~/")) {
     return promptCwd;
   }
 
-  if (promptCwd === "~" || promptCwd.startsWith("~/")) {
-    return fallbackCwd;
-  }
-
-  return promptCwd;
+  // Bare directory name (e.g. "xunlong") can't be used as a path — fallback
+  return fallbackCwd;
 }
 
 function extractPosixCwdFromPrompt(promptText: string): string | undefined {
