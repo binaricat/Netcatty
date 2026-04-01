@@ -59,9 +59,10 @@ const AddCustomRuleDialog: React.FC<{
       setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
       return;
     }
-    // If editing and pattern unchanged, preserve all original patterns; otherwise use the new single pattern
-    const patternUnchanged = editRule && pattern === (editRule.patterns[0] || '');
-    const patterns = patternUnchanged ? editRule.patterns : [pattern];
+    // When editing, replace only the first pattern and keep any additional ones
+    const patterns = editRule
+      ? [pattern, ...editRule.patterns.slice(1)]
+      : [pattern];
     onAdd({ id: editRule?.id ?? crypto.randomUUID(), label: label.trim(), patterns, color, enabled: editRule?.enabled ?? true });
     reset();
     onOpenChange(false);
