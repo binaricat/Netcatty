@@ -111,48 +111,53 @@ const KeywordHighlightRulesEditor: React.FC<{
 
   return (
     <div className="space-y-2.5">
-      {rules.map((rule) => (
-        <div key={rule.id} className="flex items-center gap-2 group">
-          <button
-            type="button"
-            onClick={() => onChange(rules.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))}
-            className={cn(
-              "flex-shrink-0 w-3.5 h-3.5 rounded-sm border transition-colors cursor-pointer",
-              rule.enabled ? "bg-primary border-primary" : "bg-transparent border-muted-foreground/40",
-            )}
-          />
-          <div className="flex-1 min-w-0">
-            <span className={cn("text-sm", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
-              {rule.label}
-            </span>
-            {!isBuiltIn(rule.id) && (
-              <span className="ml-1.5 text-[10px] text-muted-foreground font-mono">{rule.patterns.join(', ')}</span>
+      {rules.map((rule) => {
+        const custom = !isBuiltIn(rule.id);
+        return (
+          <div key={rule.id} className="flex items-center gap-2 group">
+            <button
+              type="button"
+              onClick={() => onChange(rules.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))}
+              className={cn(
+                "flex-shrink-0 w-3.5 h-3.5 rounded-sm border transition-colors cursor-pointer",
+                rule.enabled ? "bg-primary border-primary" : "bg-transparent border-muted-foreground/40",
+              )}
+            />
+            <div className="flex-1 min-w-0">
+              <span className={cn("text-sm truncate block", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
+                {rule.label}
+              </span>
+              {custom && (
+                <span className="text-[10px] text-muted-foreground font-mono truncate block">{rule.patterns.join(', ')}</span>
+              )}
+            </div>
+            <label className="relative flex-shrink-0">
+              <input
+                type="color"
+                value={rule.color}
+                onChange={(e) => onChange(rules.map((r) => r.id === rule.id ? { ...r, color: e.target.value } : r))}
+                className="sr-only"
+              />
+              <span
+                className="block w-8 h-5 rounded cursor-pointer border border-border/50 hover:border-border transition-colors"
+                style={{ backgroundColor: rule.color }}
+              />
+            </label>
+            {custom ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
+              >
+                <Trash2 size={12} />
+              </Button>
+            ) : (
+              <div className="w-5 flex-shrink-0" />
             )}
           </div>
-          <label className="relative flex-shrink-0">
-            <input
-              type="color"
-              value={rule.color}
-              onChange={(e) => onChange(rules.map((r) => r.id === rule.id ? { ...r, color: e.target.value } : r))}
-              className="sr-only"
-            />
-            <span
-              className="block w-8 h-5 rounded cursor-pointer border border-border/50 hover:border-border transition-colors"
-              style={{ backgroundColor: rule.color }}
-            />
-          </label>
-          {!isBuiltIn(rule.id) && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
-            >
-              <Trash2 size={12} />
-            </Button>
-          )}
-        </div>
-      ))}
+        );
+      })}
 
       <div className="flex pt-2 mt-2 border-t border-border/50">
         <Button
