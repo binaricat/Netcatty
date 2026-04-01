@@ -1912,7 +1912,14 @@ async function listSessionDir(_event, payload) {
       : dirPath.startsWith("~/")
         ? `"$HOME/${tildePathSuffix}"`
         : `'${safePath}'`;
-    const cmd = `find ${pathExpr} -mindepth 1 -maxdepth 1 -exec sh -c '
+    // When dirPath is relative (not absolute and not ~/...), exec channels default
+    // to the user's home directory. Resolve the interactive shell's actual cwd first
+    // so that relative paths like "." or "src" are resolved correctly.
+    const needsCwdResolve = !dirPath.startsWith('/') && dirPath !== '~' && !dirPath.startsWith('~/');
+    const cwdResolveCmd = needsCwdResolve
+      ? `_sc_p=$(ps --ppid $PPID -o pid=,comm= 2>/dev/null | awk -v self=$$ '$1!=self && $2~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}'); [ -z "$_sc_p" ] && _sc_p=$(ps -e -o pid=,ppid=,comm= 2>/dev/null | awk -v pp=$PPID -v self=$$ '$1!=self && $2==pp && $3~/^(ba|z|fi|k|da)?sh$/{pid=$1}END{print pid}'); [ -n "$_sc_p" ] && { _sc_d=$(readlink /proc/$_sc_p/cwd 2>/dev/null); [ -n "$_sc_d" ] && cd "$_sc_d" 2>/dev/null; }; `
+      : '';
+    const cmd = `${cwdResolveCmd}find ${pathExpr} -mindepth 1 -maxdepth 1 -exec sh -c '
       prefix="$1"
       folders_only="$2"
       limit="$3"
