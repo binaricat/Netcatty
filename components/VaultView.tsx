@@ -372,12 +372,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   );
 
   const handleNewHost = useCallback(() => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
     setEditingHost(null);
     setNewHostGroupPath(null);
     setIsHostPanelOpen(true);
   }, []);
 
   const handleEditHost = useCallback((host: Host) => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
     setEditingHost(host);
     setIsHostPanelOpen(true);
   }, []);
@@ -1220,6 +1224,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   };
 
   const handleEditGroupConfig = useCallback((groupPath: string) => {
+    setIsHostPanelOpen(false);
+    setEditingHost(null);
     setEditingGroupPath(groupPath);
     setIsGroupPanelOpen(true);
   }, []);
@@ -1227,6 +1233,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const handleSaveGroupConfig = useCallback((config: GroupConfig, _newName?: string, _newParent?: string | null) => {
     const oldPath = editingGroupPath!;
     const newPath = config.path; // Panel already computed the correct path
+
+    // Validate no duplicate path on rename/reparent
+    if (newPath !== oldPath && customGroups.includes(newPath)) {
+      toast.error(t('vault.groups.errors.duplicatePath'));
+      return;
+    }
 
     // Save config (use new path)
     const updatedConfigs = [...groupConfigs.filter(c => c.path !== oldPath), config];
@@ -2656,6 +2668,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             identities={identities}
             customGroups={customGroups}
             managedSources={managedSources}
+            groupConfigs={groupConfigs}
             onSaveHost={(host) => onUpdateHosts([...hosts, host])}
             onCreateGroup={(groupPath) =>
               onUpdateCustomGroups(

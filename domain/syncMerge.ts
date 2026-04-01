@@ -384,8 +384,17 @@ export function mergeSyncPayloads(
     remote.portForwardingRules ?? [],
   );
 
+  // Merge group configs (keyed by path — wrap with virtual id for entity merge)
+  type GCWithId = import('./models').GroupConfig & { id: string };
+  const wrapGC = (arr: import('./models').GroupConfig[] | undefined): GCWithId[] =>
+    (arr ?? []).map(gc => ({ ...gc, id: gc.path }));
+  const unwrapGC = (arr: GCWithId[]): import('./models').GroupConfig[] =>
+    arr.map(({ id: _id, ...rest }) => rest as import('./models').GroupConfig);
+  const groupConfigsResult = mergeEntityArrays(wrapGC(b.groupConfigs), wrapGC(local.groupConfigs), wrapGC(remote.groupConfigs));
+
   // Aggregate stats
-  const entityResults = [hosts, keys, identities, snippets, knownHosts, portForwardingRules];
+  const entityResults: Pick<EntityMergeResult<unknown>, 'added' | 'deleted' | 'modified' | 'conflicts'>[] =
+    [hosts, keys, identities, snippets, knownHosts, portForwardingRules, groupConfigsResult];
   for (const r of entityResults) {
     summary.added.local += r.added.local;
     summary.added.remote += r.added.remote;
@@ -430,6 +439,7 @@ export function mergeSyncPayloads(
     snippetPackages,
     knownHosts: knownHosts.merged,
     portForwardingRules: portForwardingRules.merged,
+    groupConfigs: unwrapGC(groupConfigsResult.merged),
     settings,
     syncedAt: Date.now(),
   };

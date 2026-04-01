@@ -62,7 +62,7 @@ export interface Host {
   id: string;
   label: string;
   hostname: string;
-  port: number;
+  port?: number;
   username: string;
   // Optional reference to a reusable identity (username + auth) stored in Keychain.
   identityId?: string;

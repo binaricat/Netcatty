@@ -365,7 +365,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       label: finalLabel,
       group: finalGroup,
       tags: form.tags || [],
-      port: form.port ?? (groupDefaults?.port ? undefined as unknown as number : 22),
+      port: form.port ?? (groupDefaults?.port ? undefined : 22),
       // Clear password if savePassword is explicitly set to false
       password: form.savePassword === false ? undefined : form.password,
       managedSourceId: finalManagedSourceId,
@@ -754,8 +754,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
                 <Input
                   type="number"
-                  value={form.port}
-                  onChange={(e) => update("port", Number(e.target.value))}
+                  value={form.port ?? ""}
+                  onChange={(e) => update("port", e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder={groupDefaults?.port ? String(groupDefaults.port) : "22"}
                   className="h-8 flex-1 min-w-0 text-center"
                 />
                 <span className="text-xs text-muted-foreground">

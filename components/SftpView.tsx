@@ -25,6 +25,7 @@ import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
 import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import { Host, Identity, SSHKey } from "../types";
+import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { toast } from "./ui/toast";
 
@@ -51,6 +52,7 @@ interface SftpViewProps {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  groupConfigs?: import('../domain/models').GroupConfig[];
   updateHosts: (hosts: Host[]) => void;
   sftpDefaultViewMode: "list" | "tree";
   sftpDoubleClickBehavior: "open" | "transfer";
@@ -67,6 +69,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   hosts,
   keys,
   identities,
+  groupConfigs = [],
   updateHosts,
   sftpDefaultViewMode,
   sftpDoubleClickBehavior,
@@ -104,7 +107,17 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     defaultShowHiddenFiles: sftpShowHiddenFiles,
   }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles]);
 
-  const sftp = useSftpState(hosts, keys, identities, sftpOptions);
+  // Pre-resolve group defaults so SFTP connections inherit group config
+  const effectiveHosts = useMemo(() =>
+    hosts.map(h => {
+      if (!h.group) return h;
+      const defaults = resolveGroupDefaults(h.group, groupConfigs);
+      return applyGroupDefaults(h, defaults);
+    }),
+    [hosts, groupConfigs],
+  );
+
+  const sftp = useSftpState(effectiveHosts, keys, identities, sftpOptions);
 
   // Get backend helpers for file downloads and local filesystem writes.
   const {

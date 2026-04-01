@@ -481,6 +481,7 @@ const en: Messages = {
   'vault.groups.details.fontSize': 'Font Size',
   'vault.groups.errors.required': 'Group name is required.',
   'vault.groups.errors.invalidChars': "Group name cannot include '/' or '\\\\'.",
+  'vault.groups.errors.duplicatePath': 'A group with this name already exists at this location.',
 
   'vault.managedSource.unmanage': 'Unmanage',
   'vault.managedSource.unmanageSuccess': 'Successfully unmanaged group',

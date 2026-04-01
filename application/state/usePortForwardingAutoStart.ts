@@ -4,7 +4,8 @@
  * when the application starts, not when the user navigates to the port forwarding page.
  */
 import { useCallback, useEffect, useRef } from "react";
-import { Host, Identity, PortForwardingRule, SSHKey } from "../../domain/models";
+import { GroupConfig, Host, Identity, PortForwardingRule, SSHKey } from "../../domain/models";
+import { resolveGroupDefaults, applyGroupDefaults } from "../../domain/groupConfig";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import {
@@ -19,6 +20,7 @@ export interface UsePortForwardingAutoStartOptions {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  groupConfigs: GroupConfig[];
 }
 
 /**
@@ -29,11 +31,13 @@ export const usePortForwardingAutoStart = ({
   hosts,
   keys,
   identities,
+  groupConfigs,
 }: UsePortForwardingAutoStartOptions): void => {
   const autoStartExecutedRef = useRef(false);
   const hostsRef = useRef<Host[]>(hosts);
   const keysRef = useRef<SSHKey[]>(keys);
   const identitiesRef = useRef<Identity[]>(identities);
+  const groupConfigsRef = useRef<GroupConfig[]>(groupConfigs);
 
   const isHostAuthReady = useCallback((host: Host, seen = new Set<string>()): boolean => {
     if (!host || seen.has(host.id)) return true;
@@ -73,6 +77,16 @@ export const usePortForwardingAutoStart = ({
     identitiesRef.current = identities;
   }, [identities]);
 
+  useEffect(() => {
+    groupConfigsRef.current = groupConfigs;
+  }, [groupConfigs]);
+
+  const resolveEffectiveHost = useCallback((host: Host): Host => {
+    if (!host.group) return host;
+    const defaults = resolveGroupDefaults(host.group, groupConfigsRef.current);
+    return applyGroupDefaults(host, defaults);
+  }, []);
+
   // Set up the reconnect callback
   useEffect(() => {
     const handleReconnect = async (
@@ -89,11 +103,12 @@ export const usePortForwardingAutoStart = ({
         return { success: false, error: "Rule or host not found" };
       }
 
-      const host = hostsRef.current.find((h) => h.id === rule.hostId);
-      if (!host) {
+      const rawHost = hostsRef.current.find((h) => h.id === rule.hostId);
+      if (!rawHost) {
         return { success: false, error: "Host not found" };
       }
 
+      const host = resolveEffectiveHost(rawHost);
       return startPortForward(rule, host, hostsRef.current, keysRef.current, identitiesRef.current, onStatusChange, true);
     };
 
@@ -146,8 +161,9 @@ export const usePortForwardingAutoStart = ({
 
       // Start each auto-start rule
       for (const rule of autoStartRules) {
-        const host = hosts.find((h) => h.id === rule.hostId);
-        if (host) {
+        const rawHost = hosts.find((h) => h.id === rule.hostId);
+        if (rawHost) {
+          const host = resolveEffectiveHost(rawHost);
           void startPortForward(
             rule,
             host,

@@ -388,6 +388,7 @@ function App({ settings }: { settings: SettingsState }) {
     snippetPackages,
     portForwardingRules: portForwardingRulesForSync,
     knownHosts,
+    groupConfigs,
     settingsVersion: settings.settingsVersion,
     onApplyPayload: (payload) => {
       applySyncPayload(payload, {
@@ -432,7 +433,8 @@ function App({ settings }: { settings: SettingsState }) {
     }
 
     if (start) {
-      void startTunnel(rule, host, hosts, keys, identities, (status, error) => {
+      const effectiveHost = resolveEffectiveHost(host);
+      void startTunnel(rule, effectiveHost, hosts, keys, identities, (status, error) => {
         if (status === "error" && error) toast.error(error);
       }, rule.autoStart);
       return;
@@ -619,6 +621,7 @@ function App({ settings }: { settings: SettingsState }) {
     hosts,
     keys,
     identities,
+    groupConfigs,
   });
 
   // Sync tray menu data + handle tray actions
@@ -1387,6 +1390,7 @@ function App({ settings }: { settings: SettingsState }) {
           hosts={hosts}
           keys={keys}
           identities={identities}
+          groupConfigs={groupConfigs}
           updateHosts={updateHosts}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}

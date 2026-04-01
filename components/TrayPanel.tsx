@@ -10,6 +10,7 @@ import { I18nProvider } from "../application/i18n/I18nProvider";
 import { useSettingsState } from "../application/state/useSettingsState";
 import { useTrayPanelBackend } from "../application/state/useTrayPanelBackend";
 import { useActiveTabId } from "../application/state/activeTabStore";
+import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { X, Maximize2, ChevronRight, ChevronDown, Power } from "lucide-react";
 import { AppLogo } from "./AppLogo";
 
@@ -116,7 +117,7 @@ const TrayPanelContent: React.FC = () => {
     onTrayPanelMenuData,
   } = useTrayPanelBackend();
 
-  const { hosts, keys, identities } = useVaultState();
+  const { hosts, keys, identities, groupConfigs } = useVaultState();
   useSessionState();
   const { rules: portForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
   const activeTabId = useActiveTabId();
@@ -326,14 +327,17 @@ const TrayPanelContent: React.FC = () => {
                     disabled={isConnecting}
                     title={label}
                     onClick={() => {
-                      const host = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
-                      if (!host) {
+                      const rawHost = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
+                      if (!rawHost) {
                         toast.error(t("pf.error.hostNotFound"));
                         return;
                       }
                       if (isActive) {
                         void stopTunnel(rule.id);
                       } else {
+                        const host = rawHost.group
+                          ? applyGroupDefaults(rawHost, resolveGroupDefaults(rawHost.group, groupConfigs))
+                          : rawHost;
                         void startTunnel(rule, host, hosts, keys, identities, (status, error) => {
                           if (status === "error" && error) toast.error(error);
                         }, rule.autoStart);

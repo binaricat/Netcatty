@@ -314,6 +314,7 @@ const zhCN: Messages = {
   'vault.groups.details.fontSize': '字号',
   'vault.groups.errors.required': '分组名称不能为空。',
   'vault.groups.errors.invalidChars': "分组名称不能包含 '/' 或 '\\\\'.",
+  'vault.groups.errors.duplicatePath': '该位置已存在同名分组。',
 
   'vault.managedSource.unmanage': '取消托管',
   'vault.managedSource.unmanageSuccess': '已取消托管分组',

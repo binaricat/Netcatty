@@ -32,6 +32,7 @@ interface AutoSyncConfig {
   snippetPackages?: SyncPayload['snippetPackages'];
   portForwardingRules?: SyncPayload['portForwardingRules'];
   knownHosts?: SyncPayload['knownHosts'];
+  groupConfigs?: SyncPayload['groupConfigs'];
   /** Opaque token that changes whenever a synced setting changes. */
   settingsVersion?: number;
 
@@ -95,6 +96,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       snippetPackages: config.snippetPackages,
       portForwardingRules: effectivePFRules,
       knownHosts: effectiveKnownHosts,
+      groupConfigs: config.groupConfigs,
     };
   }, [
     config.hosts,
@@ -105,6 +107,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     config.snippetPackages,
     config.portForwardingRules,
     config.knownHosts,
+    config.groupConfigs,
   ]);
 
   // Build sync payload

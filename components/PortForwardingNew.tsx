@@ -14,12 +14,14 @@ import React, { useCallback, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
 import {
+  GroupConfig,
   Host,
   ManagedSource,
   PortForwardingRule,
   PortForwardingType,
   SSHKey,
 } from "../domain/models";
+import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { cn } from "../lib/utils";
 import SelectHostPanel from "./SelectHostPanel";
 import {
@@ -66,6 +68,7 @@ interface PortForwardingProps {
   identities?: import('../domain/models').Identity[];
   customGroups: string[];
   managedSources?: ManagedSource[];
+  groupConfigs?: GroupConfig[];
   onNewHost?: () => void;
   onSaveHost?: (host: Host) => void;
   onCreateGroup?: (groupPath: string) => void;
@@ -77,6 +80,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   identities = [],
   customGroups: _customGroups,
   managedSources = [],
+  groupConfigs = [],
   onNewHost: _onNewHost,
   onSaveHost,
   onCreateGroup: _onCreateGroup,
@@ -113,8 +117,8 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   // Start a port forwarding tunnel
   const handleStartTunnel = useCallback(
     async (rule: PortForwardingRule) => {
-      const _host = hosts.find((h) => h.id === rule.hostId);
-      if (!_host) {
+      const _rawHost = hosts.find((h) => h.id === rule.hostId);
+      if (!_rawHost) {
         setRuleStatus(rule.id, "error", t("pf.error.hostNotFound"));
         toast.error(
           t("pf.error.hostNotFound"),
@@ -122,6 +126,10 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         );
         return;
       }
+
+      const _host = _rawHost.group
+        ? applyGroupDefaults(_rawHost, resolveGroupDefaults(_rawHost.group, groupConfigs))
+        : _rawHost;
 
       setPendingOperations((prev) => new Set([...prev, rule.id]));
       let errorShown = false;
@@ -161,7 +169,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         });
       }
     },
-    [hosts, identities, keys, setRuleStatus, startTunnel, t],
+    [hosts, identities, keys, groupConfigs, setRuleStatus, startTunnel, t],
   );
 
   // Stop a port forwarding tunnel

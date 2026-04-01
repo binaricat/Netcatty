@@ -88,5 +88,17 @@ export const findSyncPayloadEncryptedCredentialPaths = (
     }
   });
 
+  payload.groupConfigs?.forEach((config, index) => {
+    if (isEncryptedCredentialPlaceholder(config.password)) {
+      issues.push(`groupConfigs[${index}].password`);
+    }
+    if (isEncryptedCredentialPlaceholder(config.telnetPassword)) {
+      issues.push(`groupConfigs[${index}].telnetPassword`);
+    }
+    if (isEncryptedCredentialPlaceholder(config.proxyConfig?.password)) {
+      issues.push(`groupConfigs[${index}].proxyConfig.password`);
+    }
+  });
+
   return issues;
 };
