@@ -329,6 +329,7 @@ const en: Messages = {
   'settings.terminal.keywordHighlight.title': 'Keyword highlighting',
   'settings.terminal.keywordHighlight.resetColors': 'Reset to default colors',
   'settings.terminal.keywordHighlight.addCustom': 'Add Custom Rule',
+  'settings.terminal.keywordHighlight.editCustom': 'Edit Rule',
   'settings.terminal.keywordHighlight.labelField': 'Label & Color',
   'settings.terminal.keywordHighlight.labelPlaceholder': 'Label (e.g., Down)',
   'settings.terminal.keywordHighlight.patternField': 'Regex Pattern',

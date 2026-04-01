@@ -1305,6 +1305,7 @@ const zhCN: Messages = {
   'settings.terminal.keywordHighlight.title': '关键字高亮',
   'settings.terminal.keywordHighlight.resetColors': '重置为默认颜色',
   'settings.terminal.keywordHighlight.addCustom': '添加自定义规则',
+  'settings.terminal.keywordHighlight.editCustom': '编辑规则',
   'settings.terminal.keywordHighlight.labelField': '标签与颜色',
   'settings.terminal.keywordHighlight.labelPlaceholder': '标签（如 Down）',
   'settings.terminal.keywordHighlight.patternField': '正则表达式',

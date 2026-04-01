@@ -30,8 +30,9 @@ const DEFAULT_NEW_RULE_COLOR = '#F87171';
 const AddCustomRuleDialog: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  editRule?: KeywordHighlightRule | null;
   onAdd: (rule: KeywordHighlightRule) => void;
-}> = ({ open, onOpenChange, onAdd }) => {
+}> = ({ open, onOpenChange, editRule, onAdd }) => {
   const { t } = useI18n();
   const [label, setLabel] = useState('');
   const [pattern, setPattern] = useState('');
@@ -40,13 +41,25 @@ const AddCustomRuleDialog: React.FC<{
 
   const reset = () => { setLabel(''); setPattern(''); setColor(DEFAULT_NEW_RULE_COLOR); setPatternError(null); };
 
+  // Populate form when editing
+  useEffect(() => {
+    if (open && editRule) {
+      setLabel(editRule.label);
+      setPattern(editRule.patterns[0] || '');
+      setColor(editRule.color);
+      setPatternError(null);
+    } else if (!open) {
+      reset();
+    }
+  }, [open, editRule]);
+
   const handleSubmit = () => {
     if (!label.trim() || !pattern.trim()) return;
     try { new RegExp(pattern, 'gi'); } catch {
       setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
       return;
     }
-    onAdd({ id: crypto.randomUUID(), label: label.trim(), patterns: [pattern.trim()], color, enabled: true });
+    onAdd({ id: editRule?.id ?? crypto.randomUUID(), label: label.trim(), patterns: [pattern.trim()], color, enabled: editRule?.enabled ?? true });
     reset();
     onOpenChange(false);
   };
@@ -55,7 +68,7 @@ const AddCustomRuleDialog: React.FC<{
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>{t('settings.terminal.keywordHighlight.addCustom')}</DialogTitle>
+          <DialogTitle>{editRule ? t('settings.terminal.keywordHighlight.editCustom') : t('settings.terminal.keywordHighlight.addCustom')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div className="space-y-1.5">
@@ -93,7 +106,7 @@ const AddCustomRuleDialog: React.FC<{
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => { reset(); onOpenChange(false); }}>{t('common.cancel')}</Button>
-          <Button onClick={handleSubmit} disabled={!label.trim() || !pattern.trim()}>{t('common.add')}</Button>
+          <Button onClick={handleSubmit} disabled={!label.trim() || !pattern.trim()}>{editRule ? t('common.save') : t('common.add')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -106,6 +119,7 @@ const KeywordHighlightRulesEditor: React.FC<{
 }> = ({ rules, onChange }) => {
   const { t } = useI18n();
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<KeywordHighlightRule | null>(null);
 
   const isBuiltIn = (id: string) => DEFAULT_KEYWORD_HIGHLIGHT_RULES.some((r) => r.id === id);
 
@@ -123,12 +137,29 @@ const KeywordHighlightRulesEditor: React.FC<{
                 rule.enabled ? "bg-primary border-primary" : "bg-transparent border-muted-foreground/40",
               )}
             />
-            <div className="flex-1 min-w-0">
-              <span className={cn("text-sm truncate block", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
+            <div className="flex-1 min-w-0 flex items-center gap-1.5">
+              <span className={cn("text-sm truncate", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
                 {rule.label}
               </span>
               {custom && (
-                <span className="text-[10px] text-muted-foreground font-mono truncate block">{rule.patterns.join(', ')}</span>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                    onClick={() => { setEditingRule(rule); setAddDialogOpen(true); }}
+                  >
+                    <Pencil size={10} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
+                  >
+                    <Trash2 size={10} />
+                  </Button>
+                </>
               )}
             </div>
             <label className="relative flex-shrink-0">
@@ -143,18 +174,6 @@ const KeywordHighlightRulesEditor: React.FC<{
                 style={{ backgroundColor: rule.color }}
               />
             </label>
-            {custom ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
-              >
-                <Trash2 size={12} />
-              </Button>
-            ) : (
-              <div className="w-5 flex-shrink-0" />
-            )}
           </div>
         );
       })}
@@ -187,8 +206,16 @@ const KeywordHighlightRulesEditor: React.FC<{
 
       <AddCustomRuleDialog
         open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onAdd={(rule) => onChange([...rules, rule])}
+        onOpenChange={(v) => { setAddDialogOpen(v); if (!v) setEditingRule(null); }}
+        editRule={editingRule}
+        onAdd={(rule) => {
+          if (editingRule) {
+            onChange(rules.map((r) => r.id === editingRule.id ? rule : r));
+          } else {
+            onChange([...rules, rule]);
+          }
+          setEditingRule(null);
+        }}
       />
     </div>
   );
