@@ -59,9 +59,7 @@ const AddCustomRuleDialog: React.FC<{
       setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
       return;
     }
-    const patterns = editRule
-      ? [pattern.trim(), ...editRule.patterns.slice(1)]
-      : [pattern.trim()];
+    const patterns = [pattern.trim()];
     onAdd({ id: editRule?.id ?? crypto.randomUUID(), label: label.trim(), patterns, color, enabled: editRule?.enabled ?? true });
     reset();
     onOpenChange(false);
