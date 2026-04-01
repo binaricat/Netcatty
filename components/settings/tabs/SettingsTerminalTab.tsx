@@ -7,7 +7,7 @@ import type {
   TerminalEmulationType,
   TerminalSettings,
 } from "../../../domain/models";
-import { DEFAULT_KEYWORD_HIGHLIGHT_RULES } from "../../../domain/models";
+import { DEFAULT_KEYWORD_HIGHLIGHT_RULES, type KeywordHighlightRule } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TerminalFont } from "../../../infrastructure/config/fonts";
 import { TERMINAL_THEMES } from "../../../infrastructure/config/terminalThemes";
@@ -22,6 +22,128 @@ import { ThemeSelectModal } from "../ThemeSelectModal";
 import { TerminalFontSelect } from "../TerminalFontSelect";
 import { CustomThemeModal } from "../../terminal/CustomThemeModal";
 import type { TerminalTheme } from "../../../domain/models";
+
+// Keyword highlight rules editor for global settings
+const DEFAULT_NEW_RULE_COLOR = '#F87171';
+
+const KeywordHighlightRulesEditor: React.FC<{
+  rules: KeywordHighlightRule[];
+  onChange: (rules: KeywordHighlightRule[]) => void;
+}> = ({ rules, onChange }) => {
+  const { t } = useI18n();
+  const [newLabel, setNewLabel] = useState('');
+  const [newPattern, setNewPattern] = useState('');
+  const [newColor, setNewColor] = useState(DEFAULT_NEW_RULE_COLOR);
+  const [patternError, setPatternError] = useState<string | null>(null);
+
+  const isBuiltIn = (id: string) => DEFAULT_KEYWORD_HIGHLIGHT_RULES.some((r) => r.id === id);
+
+  const handleAdd = () => {
+    if (!newLabel.trim() || !newPattern.trim()) return;
+    try { new RegExp(newPattern, 'gi'); } catch {
+      setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
+      return;
+    }
+    onChange([...rules, { id: crypto.randomUUID(), label: newLabel.trim(), patterns: [newPattern.trim()], color: newColor, enabled: true }]);
+    setNewLabel('');
+    setNewPattern('');
+    setNewColor(DEFAULT_NEW_RULE_COLOR);
+    setPatternError(null);
+  };
+
+  return (
+    <div className="space-y-2.5">
+      {rules.map((rule) => (
+        <div key={rule.id} className="flex items-center gap-2 group">
+          <button
+            type="button"
+            onClick={() => onChange(rules.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))}
+            className={cn(
+              "flex-shrink-0 w-3.5 h-3.5 rounded-sm border transition-colors cursor-pointer",
+              rule.enabled ? "bg-primary border-primary" : "bg-transparent border-muted-foreground/40",
+            )}
+          />
+          <div className="flex-1 min-w-0">
+            <span className={cn("text-sm", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
+              {rule.label}
+            </span>
+            {!isBuiltIn(rule.id) && (
+              <span className="ml-1.5 text-[10px] text-muted-foreground font-mono">{rule.patterns.join(', ')}</span>
+            )}
+          </div>
+          <label className="relative flex-shrink-0">
+            <input
+              type="color"
+              value={rule.color}
+              onChange={(e) => onChange(rules.map((r) => r.id === rule.id ? { ...r, color: e.target.value } : r))}
+              className="sr-only"
+            />
+            <span
+              className="block w-8 h-5 rounded cursor-pointer border border-border/50 hover:border-border transition-colors"
+              style={{ backgroundColor: rule.color }}
+            />
+          </label>
+          {!isBuiltIn(rule.id) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
+            >
+              <Trash2 size={12} />
+            </Button>
+          )}
+        </div>
+      ))}
+
+      {/* Add custom rule */}
+      <div className="pt-2 mt-2 border-t border-border/50 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">{t('settings.terminal.keywordHighlight.addCustom')}</span>
+        <div className="flex gap-1.5">
+          <Input
+            placeholder={t('settings.terminal.keywordHighlight.labelPlaceholder')}
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            className="h-7 text-xs flex-1"
+          />
+          <label className="relative flex-shrink-0">
+            <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="sr-only" />
+            <span className="block w-7 h-7 rounded cursor-pointer border border-border/50 hover:border-border" style={{ backgroundColor: newColor }} />
+          </label>
+        </div>
+        <div className="flex gap-1.5">
+          <Input
+            placeholder={t('settings.terminal.keywordHighlight.patternPlaceholder')}
+            value={newPattern}
+            onChange={(e) => { setNewPattern(e.target.value); if (patternError) setPatternError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+            className={cn("h-7 text-xs font-mono flex-1", patternError && "border-destructive")}
+          />
+          <Button variant="secondary" size="icon" className="h-7 w-7 flex-shrink-0" onClick={handleAdd} disabled={!newLabel.trim() || !newPattern.trim()}>
+            <Plus size={12} />
+          </Button>
+        </div>
+        {patternError && <div className="text-[10px] text-destructive">{patternError}</div>}
+      </div>
+
+      {/* Reset built-in colors */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full mt-1 text-muted-foreground hover:text-foreground"
+        onClick={() => {
+          onChange(rules.map((rule) => {
+            const def = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
+            return def ? { ...rule, color: def.color, enabled: true } : rule;
+          }));
+        }}
+      >
+        <RotateCcw size={14} className="mr-2" />
+        {t("settings.terminal.keywordHighlight.resetColors")}
+      </Button>
+    </div>
+  );
+};
 
 // Theme preview button component
 const ThemePreviewButton: React.FC<{
@@ -694,47 +816,10 @@ export default function SettingsTerminalTab(props: {
           />
         </div>
         {terminalSettings.keywordHighlightEnabled && (
-          <div className="space-y-2.5">
-            {terminalSettings.keywordHighlightRules.map((rule) => (
-              <div key={rule.id} className="flex items-center justify-between">
-                <span className="text-sm" style={{ color: rule.color }}>
-                  {rule.label}
-                </span>
-                <label className="relative">
-                  <input
-                    type="color"
-                    value={rule.color}
-                    onChange={(e) => {
-                      const newRules = terminalSettings.keywordHighlightRules.map((r) =>
-                        r.id === rule.id ? { ...r, color: e.target.value } : r,
-                      );
-                      updateTerminalSetting("keywordHighlightRules", newRules);
-                    }}
-                    className="sr-only"
-                  />
-                  <span
-                    className="block w-10 h-6 rounded-md cursor-pointer border border-border/50 hover:border-border transition-colors"
-                    style={{ backgroundColor: rule.color }}
-                  />
-                </label>
-              </div>
-            ))}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full mt-3 text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                const resetRules = terminalSettings.keywordHighlightRules.map((rule) => {
-                  const defaultRule = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
-                  return defaultRule ? { ...rule, color: defaultRule.color } : rule;
-                });
-                updateTerminalSetting("keywordHighlightRules", resetRules);
-              }}
-            >
-              <RotateCcw size={14} className="mr-2" />
-              {t("settings.terminal.keywordHighlight.resetColors")}
-            </Button>
-          </div>
+          <KeywordHighlightRulesEditor
+            rules={terminalSettings.keywordHighlightRules}
+            onChange={(rules) => updateTerminalSetting("keywordHighlightRules", rules)}
+          />
         )}
       </div>
 
