@@ -59,7 +59,10 @@ const AddCustomRuleDialog: React.FC<{
       setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
       return;
     }
-    onAdd({ id: editRule?.id ?? crypto.randomUUID(), label: label.trim(), patterns: [pattern.trim()], color, enabled: editRule?.enabled ?? true });
+    const patterns = editRule
+      ? [pattern.trim(), ...editRule.patterns.slice(1)]
+      : [pattern.trim()];
+    onAdd({ id: editRule?.id ?? crypto.randomUUID(), label: label.trim(), patterns, color, enabled: editRule?.enabled ?? true });
     reset();
     onOpenChange(false);
   };
@@ -181,7 +184,7 @@ const KeywordHighlightRulesEditor: React.FC<{
           onClick={() => {
             onChange(rules.map((rule) => {
               const def = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
-              return def ? { ...rule, color: def.color, enabled: true } : rule;
+              return def ? { ...rule, color: def.color } : rule;
             }));
           }}
         >
