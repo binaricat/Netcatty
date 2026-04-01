@@ -154,11 +154,11 @@ const KeywordHighlightRulesEditor: React.FC<{
         </div>
       ))}
 
-      <div className="flex gap-2 pt-2 mt-2 border-t border-border/50">
+      <div className="flex pt-2 mt-2 border-t border-border/50">
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="flex-1"
+          className="flex-1 text-muted-foreground hover:text-foreground"
           onClick={() => setAddDialogOpen(true)}
         >
           <Plus size={14} className="mr-1.5" />
@@ -167,7 +167,7 @@ const KeywordHighlightRulesEditor: React.FC<{
         <Button
           variant="ghost"
           size="sm"
-          className="text-muted-foreground hover:text-foreground"
+          className="flex-1 text-muted-foreground hover:text-foreground"
           onClick={() => {
             onChange(rules.map((rule) => {
               const def = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
