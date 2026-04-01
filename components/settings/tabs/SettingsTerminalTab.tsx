@@ -129,36 +129,22 @@ const KeywordHighlightRulesEditor: React.FC<{
         const custom = !isBuiltIn(rule.id);
         return (
           <div key={rule.id} className="flex items-center gap-2 group">
-            <button
-              type="button"
-              onClick={() => onChange(rules.map((r) => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))}
-              className={cn(
-                "flex-shrink-0 w-3.5 h-3.5 rounded-sm border transition-colors cursor-pointer",
-                rule.enabled ? "bg-primary border-primary" : "bg-transparent border-muted-foreground/40",
-              )}
-            />
             <div className="flex-1 min-w-0 flex items-center gap-1.5">
               <span className={cn("text-sm truncate", !rule.enabled && "text-muted-foreground line-through")} style={rule.enabled ? { color: rule.color } : undefined}>
                 {rule.label}
               </span>
               {custom && (
                 <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                  <Pencil
+                    size={10}
+                    className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground cursor-pointer"
                     onClick={() => { setEditingRule(rule); setAddDialogOpen(true); }}
-                  >
-                    <Pencil size={10} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+                  />
+                  <Trash2
+                    size={10}
+                    className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground cursor-pointer"
                     onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
-                  >
-                    <Trash2 size={10} />
-                  </Button>
+                  />
                 </>
               )}
             </div>
