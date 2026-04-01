@@ -1358,6 +1358,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     const name = sourcePath.split("/").filter(Boolean).pop() || "";
     const newPath = targetParent ? `${targetParent}/${name}` : name;
     if (newPath === sourcePath || newPath.startsWith(sourcePath + "/")) return;
+    if (customGroups.includes(newPath)) {
+      toast.error(t('vault.groups.errors.duplicatePath'));
+      return;
+    }
     const updatedGroups = customGroups.map((g) => {
       if (g === sourcePath) return newPath;
       if (g.startsWith(sourcePath + "/")) return newPath + g.slice(sourcePath.length);
@@ -2703,6 +2707,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       {/* Group Details Panel */}
       {currentSection === "hosts" && isGroupPanelOpen && editingGroupPath && (
         <GroupDetailsPanel
+          key={editingGroupPath}
           groupPath={editingGroupPath}
           config={groupConfigs.find(c => c.path === editingGroupPath)}
           availableKeys={keys}

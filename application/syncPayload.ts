@@ -302,7 +302,7 @@ export function applySyncPayload(
   if (payload.knownHosts !== undefined) {
     vaultImport.knownHosts = payload.knownHosts;
   }
-  if (payload.groupConfigs !== undefined) {
+  if (Array.isArray(payload.groupConfigs)) {
     vaultImport.groupConfigs = payload.groupConfigs;
   }
 

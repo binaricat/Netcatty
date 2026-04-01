@@ -284,12 +284,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   };
 
   const removeHostFromChain = (index: number) => {
-    setForm((prev) => ({
-      ...prev,
-      hostChain: {
-        hostIds: (prev.hostChain?.hostIds || []).filter((_, i) => i !== index),
-      },
-    }));
+    setForm((prev) => {
+      const ids = (prev.hostChain?.hostIds || []).filter((_, i) => i !== index);
+      return { ...prev, hostChain: ids.length > 0 ? { hostIds: ids } : undefined };
+    });
   };
 
   const clearHostChain = useCallback(() => {
@@ -315,12 +313,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   };
 
   const removeEnvVar = (index: number) => {
-    setForm((prev) => ({
-      ...prev,
-      environmentVariables: (prev.environmentVariables || []).filter(
-        (_, i) => i !== index,
-      ),
-    }));
+    setForm((prev) => {
+      const filtered = (prev.environmentVariables || []).filter((_, i) => i !== index);
+      return { ...prev, environmentVariables: filtered.length > 0 ? filtered : undefined };
+    });
   };
 
   const handleSubmit = () => {
@@ -1758,7 +1754,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 className="text-muted-foreground hover:text-destructive flex-shrink-0 ml-auto"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setForm((prev) => ({ ...prev, environmentVariables: [] }));
+                  setForm((prev) => ({ ...prev, environmentVariables: undefined }));
                 }}
               />
             </button>

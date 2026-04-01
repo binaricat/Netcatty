@@ -217,12 +217,10 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   };
 
   const removeHostFromChain = (index: number) => {
-    setForm((prev) => ({
-      ...prev,
-      hostChain: {
-        hostIds: (prev.hostChain?.hostIds || []).filter((_, i) => i !== index),
-      },
-    }));
+    setForm((prev) => {
+      const ids = (prev.hostChain?.hostIds || []).filter((_, i) => i !== index);
+      return { ...prev, hostChain: ids.length > 0 ? { hostIds: ids } : undefined };
+    });
   };
 
   const clearHostChain = useCallback(() => {
