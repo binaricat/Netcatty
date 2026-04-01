@@ -15,6 +15,7 @@ import { customThemeStore, useCustomThemes } from "../../../application/state/cu
 import { parseItermcolors } from "../../../infrastructure/parsers/itermcolorsParser";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
@@ -26,30 +27,87 @@ import type { TerminalTheme } from "../../../domain/models";
 // Keyword highlight rules editor for global settings
 const DEFAULT_NEW_RULE_COLOR = '#F87171';
 
+const AddCustomRuleDialog: React.FC<{
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onAdd: (rule: KeywordHighlightRule) => void;
+}> = ({ open, onOpenChange, onAdd }) => {
+  const { t } = useI18n();
+  const [label, setLabel] = useState('');
+  const [pattern, setPattern] = useState('');
+  const [color, setColor] = useState(DEFAULT_NEW_RULE_COLOR);
+  const [patternError, setPatternError] = useState<string | null>(null);
+
+  const reset = () => { setLabel(''); setPattern(''); setColor(DEFAULT_NEW_RULE_COLOR); setPatternError(null); };
+
+  const handleSubmit = () => {
+    if (!label.trim() || !pattern.trim()) return;
+    try { new RegExp(pattern, 'gi'); } catch {
+      setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
+      return;
+    }
+    onAdd({ id: crypto.randomUUID(), label: label.trim(), patterns: [pattern.trim()], color, enabled: true });
+    reset();
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{t('settings.terminal.keywordHighlight.addCustom')}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.terminal.keywordHighlight.labelField')}</Label>
+            <div className="flex gap-2">
+              <Input
+                placeholder={t('settings.terminal.keywordHighlight.labelPlaceholder')}
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                className="flex-1"
+              />
+              <label className="relative flex-shrink-0">
+                <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="sr-only" />
+                <span className="block w-9 h-9 rounded-md cursor-pointer border border-border/50 hover:border-border" style={{ backgroundColor: color }} />
+              </label>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.terminal.keywordHighlight.patternField')}</Label>
+            <Input
+              placeholder={t('settings.terminal.keywordHighlight.patternPlaceholder')}
+              value={pattern}
+              onChange={(e) => { setPattern(e.target.value); if (patternError) setPatternError(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+              className={cn("font-mono", patternError && "border-destructive")}
+            />
+            {patternError && <div className="text-xs text-destructive">{patternError}</div>}
+          </div>
+          {label.trim() && pattern.trim() && !patternError && (
+            <div className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+              <span className="text-xs text-muted-foreground">{t('settings.terminal.keywordHighlight.preview')}:</span>
+              <span className="text-sm font-medium" style={{ color }}>{label}</span>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { reset(); onOpenChange(false); }}>{t('common.cancel')}</Button>
+          <Button onClick={handleSubmit} disabled={!label.trim() || !pattern.trim()}>{t('common.add')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const KeywordHighlightRulesEditor: React.FC<{
   rules: KeywordHighlightRule[];
   onChange: (rules: KeywordHighlightRule[]) => void;
 }> = ({ rules, onChange }) => {
   const { t } = useI18n();
-  const [newLabel, setNewLabel] = useState('');
-  const [newPattern, setNewPattern] = useState('');
-  const [newColor, setNewColor] = useState(DEFAULT_NEW_RULE_COLOR);
-  const [patternError, setPatternError] = useState<string | null>(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   const isBuiltIn = (id: string) => DEFAULT_KEYWORD_HIGHLIGHT_RULES.some((r) => r.id === id);
-
-  const handleAdd = () => {
-    if (!newLabel.trim() || !newPattern.trim()) return;
-    try { new RegExp(newPattern, 'gi'); } catch {
-      setPatternError(t('settings.terminal.keywordHighlight.invalidPattern'));
-      return;
-    }
-    onChange([...rules, { id: crypto.randomUUID(), label: newLabel.trim(), patterns: [newPattern.trim()], color: newColor, enabled: true }]);
-    setNewLabel('');
-    setNewPattern('');
-    setNewColor(DEFAULT_NEW_RULE_COLOR);
-    setPatternError(null);
-  };
 
   return (
     <div className="space-y-2.5">
@@ -96,51 +154,37 @@ const KeywordHighlightRulesEditor: React.FC<{
         </div>
       ))}
 
-      {/* Add custom rule */}
-      <div className="pt-2 mt-2 border-t border-border/50 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">{t('settings.terminal.keywordHighlight.addCustom')}</span>
-        <div className="flex gap-1.5">
-          <Input
-            placeholder={t('settings.terminal.keywordHighlight.labelPlaceholder')}
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            className="h-7 text-xs flex-1"
-          />
-          <label className="relative flex-shrink-0">
-            <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="sr-only" />
-            <span className="block w-7 h-7 rounded cursor-pointer border border-border/50 hover:border-border" style={{ backgroundColor: newColor }} />
-          </label>
-        </div>
-        <div className="flex gap-1.5">
-          <Input
-            placeholder={t('settings.terminal.keywordHighlight.patternPlaceholder')}
-            value={newPattern}
-            onChange={(e) => { setNewPattern(e.target.value); if (patternError) setPatternError(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-            className={cn("h-7 text-xs font-mono flex-1", patternError && "border-destructive")}
-          />
-          <Button variant="secondary" size="icon" className="h-7 w-7 flex-shrink-0" onClick={handleAdd} disabled={!newLabel.trim() || !newPattern.trim()}>
-            <Plus size={12} />
-          </Button>
-        </div>
-        {patternError && <div className="text-[10px] text-destructive">{patternError}</div>}
+      <div className="flex gap-2 pt-2 mt-2 border-t border-border/50">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={() => setAddDialogOpen(true)}
+        >
+          <Plus size={14} className="mr-1.5" />
+          {t('settings.terminal.keywordHighlight.addCustom')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            onChange(rules.map((rule) => {
+              const def = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
+              return def ? { ...rule, color: def.color, enabled: true } : rule;
+            }));
+          }}
+        >
+          <RotateCcw size={14} className="mr-1.5" />
+          {t("settings.terminal.keywordHighlight.resetColors")}
+        </Button>
       </div>
 
-      {/* Reset built-in colors */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full mt-1 text-muted-foreground hover:text-foreground"
-        onClick={() => {
-          onChange(rules.map((rule) => {
-            const def = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((r) => r.id === rule.id);
-            return def ? { ...rule, color: def.color, enabled: true } : rule;
-          }));
-        }}
-      >
-        <RotateCcw size={14} className="mr-2" />
-        {t("settings.terminal.keywordHighlight.resetColors")}
-      </Button>
+      <AddCustomRuleDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onAdd={(rule) => onChange([...rules, rule])}
+      />
     </div>
   );
 };
