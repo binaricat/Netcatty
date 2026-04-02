@@ -1476,7 +1476,10 @@ function App({ settings }: { settings: SettingsState }) {
           onCloseSession={closeSession}
           onUpdateSessionStatus={handleSessionStatusChange}
           onUpdateHostDistro={updateHostDistro}
-          onUpdateHost={(host) => updateHosts(hosts.map(h => h.id === host.id ? host : h))}
+          onUpdateHost={(host) => {
+            const exists = hosts.some(h => h.id === host.id);
+            updateHosts(exists ? hosts.map(h => h.id === host.id ? host : h) : [...hosts, host]);
+          }}
           onAddKnownHost={(kh) => updateKnownHosts([...knownHosts, kh])}
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
             addShellHistoryEntry({ command, hostId, hostLabel, sessionId });

@@ -1583,20 +1583,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         onUpdateTerminalFontWeight?.(newFontWeight);
         return;
       }
-      // Patch only fontWeight fields on the raw (un-merged) host to avoid flattening group defaults
-      const rawHost = hostMap.get(focusedHost.id);
-      if (rawHost) {
-        onUpdateHost({ ...rawHost, fontWeight: newFontWeight, fontWeightOverride: true });
-      }
+      // Prefer raw (un-merged) host to avoid flattening group defaults; fall back to
+      // focusedHost for quick-connect hosts that are not yet in the saved hosts list.
+      const rawHost = hostMap.get(focusedHost.id) ?? focusedHost;
+      onUpdateHost({ ...rawHost, fontWeight: newFontWeight, fontWeightOverride: true });
     });
   }, [focusedHost, focusedFontWeight, isFocusedHostLocal, onUpdateTerminalFontWeight, onUpdateHost, hostMap]);
 
   const handleFontWeightResetForFocusedSession = useCallback(() => {
     if (!focusedHost || isFocusedHostLocal) return;
-    const rawHost = hostMap.get(focusedHost.id);
-    if (rawHost) {
-      onUpdateHost(clearHostFontWeightOverride(rawHost));
-    }
+    const rawHost = hostMap.get(focusedHost.id) ?? focusedHost;
+    onUpdateHost(clearHostFontWeightOverride(rawHost));
   }, [focusedHost, isFocusedHostLocal, onUpdateHost, hostMap]);
 
   // Keep MCP/ACP approval IPC listener alive for the entire terminal lifecycle.
