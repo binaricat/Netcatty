@@ -1478,7 +1478,12 @@ function App({ settings }: { settings: SettingsState }) {
           onUpdateHostDistro={updateHostDistro}
           onUpdateHost={(host) => {
             const exists = hosts.some(h => h.id === host.id);
-            updateHosts(exists ? hosts.map(h => h.id === host.id ? host : h) : [...hosts, host]);
+            if (exists) {
+              updateHosts(hosts.map(h => h.id === host.id ? host : h));
+            } else if (host.id.startsWith('quick-')) {
+              // Only auto-add quick-connect hosts; never re-add intentionally deleted saved hosts
+              updateHosts([...hosts, host]);
+            }
           }}
           onAddKnownHost={(kh) => updateKnownHosts([...knownHosts, kh])}
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
