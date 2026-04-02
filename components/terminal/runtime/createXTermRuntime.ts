@@ -129,6 +129,19 @@ const detectPlatform = (): XTermPlatform => {
   return "darwin";
 };
 
+/**
+ * Extract the primary font family from a CSS font-family string that may
+ * include fallback fonts.  `document.fonts.check` returns `false` when *any*
+ * listed font is still loading, so passing the entire CJK fallback stack
+ * causes false negatives during early terminal creation – which in turn makes
+ * `fontWeightBold` fall back to the normal weight and renders bold text too
+ * thin.
+ */
+export const primaryFontFamily = (fontFamily: string): string => {
+  const first = fontFamily.split(",")[0]?.trim();
+  return first || fontFamily;
+};
+
 export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime => {
   const platform = detectPlatform();
   const deviceMemoryGb =
@@ -180,7 +193,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (typeof document === "undefined" || !document.fonts?.check) {
       return fontWeightBold;
     }
-    const weightSpec = `${fontWeightBold} ${effectiveFontSize}px ${fontFamily}`;
+    const weightSpec = `${fontWeightBold} ${effectiveFontSize}px ${primaryFontFamily(fontFamily)}`;
     return document.fonts.check(weightSpec) ? fontWeightBold : fontWeight;
   })();
 
