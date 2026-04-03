@@ -1379,6 +1379,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isFocusedHostLocal = useMemo(() => {
     return focusedHost?.protocol === 'local' || !!focusedHost?.id?.startsWith('local-');
   }, [focusedHost]);
+  // Quick-connect hosts have ephemeral IDs and are not persisted, so sidebar
+  // appearance changes should update global settings instead of per-host overrides.
+  const isFocusedHostEphemeral = useMemo(() => {
+    return isFocusedHostLocal || !!focusedHost?.id?.startsWith('quick-');
+  }, [focusedHost, isFocusedHostLocal]);
   const previewTargetSessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id ?? null;
   const activeThemePreviewId = themePreview.targetSessionId === previewTargetSessionId
     ? themePreview.themeId
@@ -1579,22 +1584,25 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
     if (!focusedHost || newFontWeight === focusedFontWeight) return;
     startTransition(() => {
-      if (isFocusedHostLocal) {
+      if (isFocusedHostEphemeral) {
         onUpdateTerminalFontWeight?.(newFontWeight);
         return;
       }
-      // Prefer raw (un-merged) host to avoid flattening group defaults; fall back to
-      // focusedHost for quick-connect hosts that are not yet in the saved hosts list.
-      const rawHost = hostMap.get(focusedHost.id) ?? focusedHost;
-      onUpdateHost({ ...rawHost, fontWeight: newFontWeight, fontWeightOverride: true });
+      // Prefer raw (un-merged) host to avoid flattening group defaults
+      const rawHost = hostMap.get(focusedHost.id);
+      if (rawHost) {
+        onUpdateHost({ ...rawHost, fontWeight: newFontWeight, fontWeightOverride: true });
+      }
     });
-  }, [focusedHost, focusedFontWeight, isFocusedHostLocal, onUpdateTerminalFontWeight, onUpdateHost, hostMap]);
+  }, [focusedHost, focusedFontWeight, isFocusedHostEphemeral, onUpdateTerminalFontWeight, onUpdateHost, hostMap]);
 
   const handleFontWeightResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
-    const rawHost = hostMap.get(focusedHost.id) ?? focusedHost;
-    onUpdateHost(clearHostFontWeightOverride(rawHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost, hostMap]);
+    if (!focusedHost || isFocusedHostEphemeral) return;
+    const rawHost = hostMap.get(focusedHost.id);
+    if (rawHost) {
+      onUpdateHost(clearHostFontWeightOverride(rawHost));
+    }
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, hostMap]);
 
   // Keep MCP/ACP approval IPC listener alive for the entire terminal lifecycle.
   // Must live here (TerminalLayer), not inside the AI panel subtree, so closing

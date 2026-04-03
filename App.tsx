@@ -1476,15 +1476,7 @@ function App({ settings }: { settings: SettingsState }) {
           onCloseSession={closeSession}
           onUpdateSessionStatus={handleSessionStatusChange}
           onUpdateHostDistro={updateHostDistro}
-          onUpdateHost={(host) => {
-            const exists = hosts.some(h => h.id === host.id);
-            if (exists) {
-              updateHosts(hosts.map(h => h.id === host.id ? host : h));
-            } else if (host.id.startsWith('quick-')) {
-              // Only auto-add quick-connect hosts; never re-add intentionally deleted saved hosts
-              updateHosts([...hosts, host]);
-            }
-          }}
+          onUpdateHost={(host) => updateHosts(hosts.map(h => h.id === host.id ? host : h))}
           onAddKnownHost={(kh) => updateKnownHosts([...knownHosts, kh])}
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
             addShellHistoryEntry({ command, hostId, hostLabel, sessionId });
