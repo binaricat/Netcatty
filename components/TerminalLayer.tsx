@@ -1379,11 +1379,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isFocusedHostLocal = useMemo(() => {
     return focusedHost?.protocol === 'local' || !!focusedHost?.id?.startsWith('local-');
   }, [focusedHost]);
-  // Quick-connect hosts have ephemeral IDs and are not persisted, so sidebar
-  // appearance changes should update global settings instead of per-host overrides.
+  // Hosts not in the persisted hostMap (e.g. quick-connect) are ephemeral —
+  // sidebar appearance changes should update global settings, not per-host overrides.
   const isFocusedHostEphemeral = useMemo(() => {
-    return isFocusedHostLocal || !!focusedHost?.id?.startsWith('quick-');
-  }, [focusedHost, isFocusedHostLocal]);
+    if (isFocusedHostLocal) return true;
+    if (!focusedHost) return true;
+    return !hostMap.has(focusedHost.id);
+  }, [focusedHost, isFocusedHostLocal, hostMap]);
   const previewTargetSessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id ?? null;
   const activeThemePreviewId = themePreview.targetSessionId === previewTargetSessionId
     ? themePreview.themeId
@@ -1530,14 +1532,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     themeCommitTimerRef.current = setTimeout(() => {
       startTransition(() => {
-        if (isFocusedHostLocal) {
+        if (isFocusedHostEphemeral) {
           onUpdateTerminalThemeId?.(themeId);
           return;
         }
         onUpdateHost({ ...focusedHost, theme: themeId, themeOverride: true });
       });
     }, 160);
-  }, [applyTerminalPreviewVars, applyTopTabsPreviewVars, focusedHost, focusedThemeId, isFocusedHostLocal, onUpdateTerminalThemeId, onUpdateHost, previewTargetSessionId]);
+  }, [applyTerminalPreviewVars, applyTopTabsPreviewVars, focusedHost, focusedThemeId, isFocusedHostEphemeral, onUpdateTerminalThemeId, onUpdateHost, previewTargetSessionId]);
 
   const handleThemeResetForFocusedSession = useCallback(() => {
     if (themeCommitTimerRef.current) {
@@ -1545,41 +1547,41 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     clearTerminalPreviewVars(previewTargetSessionId);
     setThemePreview({ targetSessionId: null, themeId: null });
-    if (!focusedHost || isFocusedHostLocal) return;
+    if (!focusedHost || isFocusedHostEphemeral) return;
     onUpdateHost(clearHostThemeOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost, previewTargetSessionId]);
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, previewTargetSessionId]);
 
   const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
     if (!focusedHost || fontFamilyId === focusedFontFamilyId) return;
     startTransition(() => {
-      if (isFocusedHostLocal) {
+      if (isFocusedHostEphemeral) {
         onUpdateTerminalFontFamilyId?.(fontFamilyId);
         return;
       }
       onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
     });
-  }, [focusedHost, focusedFontFamilyId, isFocusedHostLocal, onUpdateTerminalFontFamilyId, onUpdateHost]);
+  }, [focusedHost, focusedFontFamilyId, isFocusedHostEphemeral, onUpdateTerminalFontFamilyId, onUpdateHost]);
 
   const handleFontFamilyResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
+    if (!focusedHost || isFocusedHostEphemeral) return;
     onUpdateHost(clearHostFontFamilyOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost]);
 
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
     if (!focusedHost || newFontSize === focusedFontSize) return;
     startTransition(() => {
-      if (isFocusedHostLocal) {
+      if (isFocusedHostEphemeral) {
         onUpdateTerminalFontSize?.(newFontSize);
         return;
       }
       onUpdateHost({ ...focusedHost, fontSize: newFontSize, fontSizeOverride: true });
     });
-  }, [focusedHost, focusedFontSize, isFocusedHostLocal, onUpdateTerminalFontSize, onUpdateHost]);
+  }, [focusedHost, focusedFontSize, isFocusedHostEphemeral, onUpdateTerminalFontSize, onUpdateHost]);
 
   const handleFontSizeResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostLocal) return;
+    if (!focusedHost || isFocusedHostEphemeral) return;
     onUpdateHost(clearHostFontSizeOverride(focusedHost));
-  }, [focusedHost, isFocusedHostLocal, onUpdateHost]);
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost]);
 
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
     if (!focusedHost || newFontWeight === focusedFontWeight) return;

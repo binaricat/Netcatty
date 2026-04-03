@@ -336,10 +336,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     if (status !== 'connected' || fontWeightFixupDoneRef.current || !termRef.current) return;
     fontWeightFixupDoneRef.current = true;
-    const w = termRef.current.options.fontWeight;
-    if (w === 'normal' || w === 400) return;
     const timer = setTimeout(() => {
       if (!termRef.current) return;
+      // Re-read the current weight at fire time to avoid stale closures
+      const w = termRef.current.options.fontWeight;
+      if (w === 'normal' || w === 400) return;
       termRef.current.options.fontWeight = 'normal';
       termRef.current.options.fontWeight = w;
     }, 200);

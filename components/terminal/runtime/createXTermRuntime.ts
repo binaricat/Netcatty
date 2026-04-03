@@ -138,7 +138,9 @@ const detectPlatform = (): XTermPlatform => {
  * thin.
  */
 export const primaryFontFamily = (fontFamily: string): string => {
-  const first = fontFamily.split(",")[0]?.trim();
+  // Split on commas that are NOT inside quotes to handle font names like "Foo, Bar"
+  const match = fontFamily.match(/^(?:"[^"]*"|'[^']*'|[^,])+/);
+  const first = match?.[0]?.trim();
   return first || fontFamily;
 };
 
