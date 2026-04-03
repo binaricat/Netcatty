@@ -101,6 +101,10 @@ const LazyConnectionLogsManager = lazy(() => import("./ConnectionLogsManager"));
 
 export type VaultSection = "hosts" | "keys" | "snippets" | "port" | "knownhosts" | "logs";
 
+type DropTarget =
+  | { kind: "root" }
+  | { kind: "group"; path: string };
+
 // Props without isActive - it's now subscribed internally
 interface VaultViewProps {
   hosts: Host[];
@@ -222,7 +226,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     false,
   );
 
-  const [isBreadcrumbDragOver, setIsBreadcrumbDragOver] = useState(false);
+  const [dragOverDropTarget, setDragOverDropTarget] = useState<DropTarget | null>(null);
+  const [confirmedDropTarget, setConfirmedDropTarget] = useState<DropTarget | null>(null);
+  const dropTargetPulseTimeoutRef = useRef<number | null>(null);
 
   const [showRecentHosts, _setShowRecentHosts] = useStoredBoolean(
     STORAGE_KEY_SHOW_RECENT_HOSTS,
@@ -236,6 +242,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       onNavigateToSectionHandled?.();
     }
   }, [navigateToSection, onNavigateToSectionHandled]);
+
+  useEffect(() => {
+    return () => {
+      if (dropTargetPulseTimeoutRef.current !== null) {
+        window.clearTimeout(dropTargetPulseTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // View mode, sorting, and tag filter state
   const [viewMode, setViewMode] = useStoredViewMode(
@@ -1422,8 +1436,36 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   const isHostsSectionActive = currentSection === "hosts";
 
-  const moveHostToGroup = (hostId: string, groupPath: string | null) => {
+  const isSameDropTarget = useCallback((a: DropTarget | null, b: DropTarget | null) => {
+    if (!a || !b) return a === b;
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "root") return true;
+    return a.path === b.path;
+  }, []);
+
+  const pulseDropTarget = useCallback((target: DropTarget) => {
+    setConfirmedDropTarget(target);
+    if (dropTargetPulseTimeoutRef.current !== null) {
+      window.clearTimeout(dropTargetPulseTimeoutRef.current);
+    }
+    dropTargetPulseTimeoutRef.current = window.setTimeout(() => {
+      setConfirmedDropTarget((current) => (isSameDropTarget(current, target) ? null : current));
+      dropTargetPulseTimeoutRef.current = null;
+    }, 900);
+  }, [isSameDropTarget]);
+
+  const setGroupDragOverDropTarget = useCallback((path: string | null) => {
+    setDragOverDropTarget(path ? { kind: "group", path } : null);
+  }, []);
+
+  const moveHostToGroup = useCallback((hostId: string, groupPath: string | null) => {
     const targetGroup = groupPath || "";
+    const hostToMove = hosts.find((h) => h.id === hostId);
+    if (!hostToMove || (hostToMove.group || "") === targetGroup) {
+      setDragOverDropTarget(null);
+      return;
+    }
+
     // Find the most specific (deepest) managed source that matches the target group
     const targetManagedSource = managedSources
       .filter(s => targetGroup === s.groupName || targetGroup.startsWith(s.groupName + "/"))
@@ -1450,7 +1492,23 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         };
       }),
     );
-  };
+    setDragOverDropTarget(null);
+    pulseDropTarget(groupPath ? { kind: "group", path: groupPath } : { kind: "root" });
+    toast.success(
+      t("vault.hosts.moveToGroup.success", {
+        host: hostToMove.label,
+        group: groupPath || t("vault.hosts.allHosts"),
+      }),
+    );
+  }, [hosts, managedSources, onUpdateHosts, pulseDropTarget, t]);
+
+  const getDropTargetClasses = (target: DropTarget) =>
+    cn(
+      isSameDropTarget(dragOverDropTarget, target) &&
+        "!bg-[#e7ebf0] dark:!bg-white/[0.10]",
+      isSameDropTarget(confirmedDropTarget, target) &&
+        "!bg-[#dde3ea] dark:!bg-white/[0.14]",
+    );
 
   const handleUnmanageGroup = useCallback((groupPath: string) => {
     const source = managedSources.find(s => s.groupName === groupPath);
@@ -1833,24 +1891,33 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             "flex-1 overflow-auto px-4 py-4 space-y-6",
             !isHostsSectionActive && "hidden",
           )}
+          onDragEndCapture={() => setDragOverDropTarget(null)}
         >
                 <section className="space-y-2">
                   {viewMode !== "tree" && (
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <button
                         className={cn(
-                          "text-primary hover:underline transition-all rounded px-1 -mx-1",
-                          isBreadcrumbDragOver && "ring-2 ring-primary bg-primary/10",
+                          "text-primary hover:underline transition-colors duration-150 rounded px-1 -mx-1",
+                          getDropTargetClasses({ kind: "root" }),
                         )}
                         onClick={() => setSelectedGroupPath(null)}
                         onDragOver={(e) => {
                           e.preventDefault();
-                          setIsBreadcrumbDragOver(true);
+                          setDragOverDropTarget({ kind: "root" });
                         }}
-                        onDragLeave={() => setIsBreadcrumbDragOver(false)}
+                        onDragLeave={(e) => {
+                          const nextTarget = e.relatedTarget;
+                          if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) {
+                            return;
+                          }
+                          setDragOverDropTarget((current) =>
+                            current?.kind === "root" ? null : current,
+                          );
+                        }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          setIsBreadcrumbDragOver(false);
+                          setDragOverDropTarget(null);
                           const groupPath = e.dataTransfer.getData("group-path");
                           const hostId = e.dataTransfer.getData("host-id");
                           if (groupPath) moveGroup(groupPath, null);
@@ -2120,10 +2187,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                           <ContextMenuTrigger asChild>
                             <div
                               className={cn(
-                                "group cursor-pointer",
+                                "group cursor-pointer transition-colors duration-150",
                                 viewMode === "grid"
                                   ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                                   : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
+                                getDropTargetClasses({ kind: "group", path: node.path }),
                               )}
                               draggable
                               onDragStart={(e) =>
@@ -2136,10 +2204,21 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                               onDragOver={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
+                                setDragOverDropTarget({ kind: "group", path: node.path });
+                              }}
+                              onDragLeave={(e) => {
+                                const nextTarget = e.relatedTarget;
+                                if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) {
+                                  return;
+                                }
+                                setDragOverDropTarget((current) =>
+                                  current?.kind === "group" && current.path === node.path ? null : current,
+                                );
                               }}
                               onDrop={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
+                                setDragOverDropTarget(null);
                                 const hostId =
                                   e.dataTransfer.getData("host-id");
                                 const groupPath =
@@ -2306,6 +2385,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       isMultiSelectMode={isMultiSelectMode}
                       selectedHostIds={selectedHostIds}
                       toggleHostSelection={toggleHostSelection}
+                      getDropTargetClasses={(path) =>
+                        getDropTargetClasses({ kind: "group", path })
+                      }
+                      setDragOverDropTarget={setGroupDragOverDropTarget}
                     />
                   ) : sortMode === "group" && groupedDisplayHosts ? (
                     <div className="space-y-6">

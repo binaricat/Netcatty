@@ -36,6 +36,8 @@ interface HostTreeViewProps {
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
+  getDropTargetClasses?: (target: string) => string;
+  setDragOverDropTarget?: (target: string | null) => void;
 }
 
 interface TreeNodeProps {
@@ -61,6 +63,8 @@ interface TreeNodeProps {
   isMultiSelectMode?: boolean;
   selectedHostIds?: Set<string>;
   toggleHostSelection?: (hostId: string) => void;
+  getDropTargetClasses?: (target: string) => string;
+  setDragOverDropTarget?: (target: string | null) => void;
 }
 
 
@@ -87,6 +91,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   isMultiSelectMode,
   selectedHostIds,
   toggleHostSelection,
+  getDropTargetClasses,
+  setDragOverDropTarget,
 }) => {
   const { t } = useI18n();
   const isExpanded = expandedPaths.has(node.path);
@@ -140,6 +146,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               <div
                 className={cn(
                   "flex items-center py-2 pr-3 text-sm font-medium cursor-pointer transition-colors select-none group hover:bg-secondary/60 rounded-lg",
+                  getDropTargetClasses?.(node.path),
                 )}
                 style={{ paddingLeft }}
                 draggable
@@ -147,10 +154,19 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  setDragOverDropTarget?.(node.path);
+                }}
+                onDragLeave={(e) => {
+                  const nextTarget = e.relatedTarget;
+                  if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) {
+                    return;
+                  }
+                  setDragOverDropTarget?.(null);
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  setDragOverDropTarget?.(null);
                   const hostId = e.dataTransfer.getData("host-id");
                   const groupPath = e.dataTransfer.getData("group-path");
                   if (hostId) moveHostToGroup(hostId, node.path);
@@ -242,6 +258,8 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               isMultiSelectMode={isMultiSelectMode}
               selectedHostIds={selectedHostIds}
               toggleHostSelection={toggleHostSelection}
+              getDropTargetClasses={getDropTargetClasses}
+              setDragOverDropTarget={setDragOverDropTarget}
             />
           ))}
 
@@ -548,6 +566,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
           isMultiSelectMode={isMultiSelectMode}
           selectedHostIds={selectedHostIds}
           toggleHostSelection={toggleHostSelection}
+          getDropTargetClasses={getDropTargetClasses}
+          setDragOverDropTarget={setDragOverDropTarget}
         />
       ))}
 
