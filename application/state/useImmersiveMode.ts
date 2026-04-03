@@ -144,6 +144,7 @@ function applyImmersiveStyle(css: string, isDark: boolean, bg: string) {
 
 function removeImmersiveStyle() {
   document.getElementById(STYLE_ID)?.remove();
+  delete document.documentElement.dataset.immersiveTheme;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,7 @@ export function useImmersiveMode({
       overrideActiveRef.current = true;
       appliedFpRef.current = fp;
       applyImmersiveStyle(getImmersiveCss(activeTerminalTheme), activeTerminalTheme.type === 'dark', activeTerminalTheme.colors.background);
+      document.documentElement.dataset.immersiveTheme = fp;
     }
   }, [isTerminalTab, activeTerminalTheme]);
 

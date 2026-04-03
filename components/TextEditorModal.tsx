@@ -125,12 +125,38 @@ const hslToHex = (hslString: string): string => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
-// Get background color from CSS variable
-const getBackgroundColor = (): string => {
-  const bgValue = getComputedStyle(document.documentElement)
-    .getPropertyValue('--background')
+// Read a CSS custom-property and convert from HSL to hex
+const getCssColor = (varName: string, fallback: string): string => {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(varName)
     .trim();
-  return bgValue ? hslToHex(bgValue) : '#1e1e1e';
+  return value ? hslToHex(value) : fallback;
+};
+
+interface EditorColors {
+  bg: string;
+  fg: string;
+  primary: string;
+  card: string;
+  mutedFg: string;
+  border: string;
+}
+
+/** Read all UI CSS variables that matter for the Monaco theme. */
+const getEditorColors = (isDark: boolean): EditorColors => ({
+  bg: getCssColor('--background', isDark ? '#1e1e1e' : '#ffffff'),
+  fg: getCssColor('--foreground', isDark ? '#d4d4d4' : '#1e1e1e'),
+  primary: getCssColor('--primary', isDark ? '#569cd6' : '#0078d4'),
+  card: getCssColor('--card', isDark ? '#252526' : '#f3f3f3'),
+  mutedFg: getCssColor('--muted-foreground', isDark ? '#858585' : '#858585'),
+  border: getCssColor('--border', isDark ? '#3c3c3c' : '#d4d4d4'),
+});
+
+/** Build a fingerprint string so we can detect immersive-mode color changes cheaply. */
+const getThemeSignal = (): string => {
+  const root = document.documentElement;
+  return root.dataset.immersiveTheme
+    ?? getComputedStyle(root).getPropertyValue('--background').trim();
 };
 
 export const TextEditorModal: React.FC<TextEditorModalProps> = ({
@@ -163,49 +189,64 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
     document.documentElement.classList.contains('dark')
   );
 
-  // Track background color for custom theme
-  const [bgColor, setBgColor] = useState(() => getBackgroundColor());
+  // Track a signal that changes whenever immersive-mode or base theme colors change
+  const [themeSignal, setThemeSignal] = useState(() => getThemeSignal());
 
   // Custom theme name
   const customThemeName = isDarkTheme ? 'netcatty-dark' : 'netcatty-light';
 
-  // Define and update custom Monaco themes based on UI background color
+  // Define and update custom Monaco themes — syncs with immersive-mode / base UI colors
   useEffect(() => {
     if (!monaco) return;
 
-    // Define dark theme with custom background
+    const colors = getEditorColors(isDarkTheme);
+
+    const themeColors: Record<string, string> = {
+      'editor.background': colors.bg,
+      'editor.foreground': colors.fg,
+      'editorCursor.foreground': colors.primary,
+      'editor.selectionBackground': colors.primary + '40',
+      'editor.inactiveSelectionBackground': colors.primary + '25',
+      'editorLineNumber.foreground': colors.mutedFg,
+      'editorLineNumber.activeForeground': colors.fg,
+      'editor.lineHighlightBackground': colors.fg + '08',
+      'editorWidget.background': colors.card,
+      'editorWidget.foreground': colors.fg,
+      'editorWidget.border': colors.border,
+      'input.background': colors.card,
+      'input.foreground': colors.fg,
+      'input.border': colors.border,
+    };
+
     monaco.editor.defineTheme('netcatty-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [],
-      colors: {
-        'editor.background': bgColor,
-      },
+      colors: themeColors,
     });
 
-    // Define light theme with custom background
     monaco.editor.defineTheme('netcatty-light', {
       base: 'vs',
       inherit: true,
       rules: [],
-      colors: {
-        'editor.background': bgColor,
-      },
+      colors: themeColors,
     });
 
-    // Apply the current theme
     monaco.editor.setTheme(customThemeName);
-  }, [monaco, isDarkTheme, bgColor, customThemeName]);
+  }, [monaco, isDarkTheme, themeSignal, customThemeName]);
 
-  // Listen for theme changes via MutationObserver on <html> class and style
+  // Listen for theme changes via MutationObserver on <html> class, style, and immersive data attr
   useEffect(() => {
     const root = document.documentElement;
     const updateTheme = () => {
       setIsDarkTheme(root.classList.contains('dark'));
-      setBgColor(getBackgroundColor());
+      setThemeSignal(getThemeSignal());
     };
     const observer = new MutationObserver(updateTheme);
-    observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-immersive-theme'],
+    });
     return () => observer.disconnect();
   }, []);
 

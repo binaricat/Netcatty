@@ -443,9 +443,11 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   isMultiSelectMode,
   selectedHostIds,
   toggleHostSelection,
+  getDropTargetClasses,
+  setDragOverDropTarget,
 }) => {
   const { t } = useI18n();
-  
+
   // Use external state if provided, otherwise use local persistent state
   const localTreeState = useTreeExpandedState(STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED);
   
