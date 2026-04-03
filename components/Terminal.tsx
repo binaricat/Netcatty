@@ -256,6 +256,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   isVisibleRef.current = isVisible;
   const pendingOutputScrollRef = useRef(false);
   const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const fontWeightFixupDoneRef = useRef(false);
 
   useEffect(() => {
     if (xtermRuntimeRef.current) {
@@ -328,6 +329,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const statusRef = useRef<TerminalSession["status"]>(status);
   statusRef.current = status;
+
+  // Work around xterm.js WebGL renderer bug: glyphs rendered via the constructor
+  // look different from dynamically-set ones. After text appears on screen (status
+  // becomes "connected"), do a fontWeight round-trip to normalize the rendering.
+  useEffect(() => {
+    if (status !== 'connected' || fontWeightFixupDoneRef.current || !termRef.current) return;
+    fontWeightFixupDoneRef.current = true;
+    const w = termRef.current.options.fontWeight;
+    if (w === 'normal' || w === 400) return;
+    const timer = setTimeout(() => {
+      if (!termRef.current) return;
+      termRef.current.options.fontWeight = 'normal';
+      termRef.current.options.fontWeight = w;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [status]);
 
   const [chainProgress, setChainProgress] = useState<{
     currentHop: number;
