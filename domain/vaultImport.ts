@@ -1071,7 +1071,7 @@ const exportHostsToCsv = (hosts: Host[]): string => {
   }
 
   const passwordColIdx = header.indexOf("Password");
-  return rows.map((r) => r.map((c, i) => escapeCsv(c, i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
+  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(c, rowIdx > 0 && i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
 };
 
 interface ExportHostsResult {
