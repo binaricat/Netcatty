@@ -32,8 +32,14 @@ export interface KeyboardInteractiveRequest {
   savedPassword?: string | null;
 }
 
-const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) =>
-  !prompt.echo && prompt.prompt.toLowerCase().includes("password");
+const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) => {
+  if (prompt.echo) return false;
+  const lower = prompt.prompt.toLowerCase();
+  if (!lower.includes("password")) return false;
+  // Exclude OTP / one-time password / verification code prompts
+  if (lower.includes("one-time") || lower.includes("otp") || lower.includes("verification") || lower.includes("token") || lower.includes("code")) return false;
+  return true;
+};
 
 interface KeyboardInteractiveModalProps {
   request: KeyboardInteractiveRequest | null;

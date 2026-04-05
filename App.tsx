@@ -747,7 +747,9 @@ function App({ settings }: { settings: SettingsState }) {
       const request = keyboardInteractiveQueue.find(r => r.requestId === requestId);
       if (request?.sessionId) {
         const session = sessions.find(s => s.id === request.sessionId);
-        if (session?.hostId) {
+        // Only save when the prompting hostname matches the session's host,
+        // to avoid overwriting the destination host's password with a jump host's password
+        if (session?.hostId && (!request.hostname || request.hostname === session.hostname)) {
           const host = hosts.find(h => h.id === session.hostId);
           if (host) {
             updateHosts(hosts.map(h => h.id === host.id ? { ...h, password: savePassword } : h));
