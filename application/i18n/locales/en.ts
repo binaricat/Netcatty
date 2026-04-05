@@ -1648,6 +1648,7 @@ const en: Messages = {
   'keyboard.interactive.fillSaved': 'Fill with saved password',
   'keyboard.interactive.useSaved': 'Use saved',
   'keyboard.interactive.useSavedPassword': 'Use saved password',
+  'keyboard.interactive.savePassword': 'Save password',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH Key Passphrase',
