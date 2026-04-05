@@ -382,7 +382,7 @@ const importFromCsv = (text: string): VaultImportResult => {
       "ssh";
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
-    const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined)?.trim() || undefined;
+    const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
 
     parsedHosts.push(
       createHost({
