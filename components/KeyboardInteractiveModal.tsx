@@ -32,6 +32,9 @@ export interface KeyboardInteractiveRequest {
   savedPassword?: string | null;
 }
 
+const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) =>
+  !prompt.echo && prompt.prompt.toLowerCase().includes("password");
+
 interface KeyboardInteractiveModalProps {
   request: KeyboardInteractiveRequest | null;
   onSubmit: (requestId: string, responses: string[], savePassword?: string) => void;
@@ -49,15 +52,11 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [savePassword, setSavePassword] = useState(false);
 
-  const isAPasswordPrompt = useCallback((prompt: KeyboardInteractivePrompt) => {
-    return !prompt.echo && prompt.prompt.toLowerCase().includes("password");
-  }, []);
-
   // Index of the first password prompt (if any)
   const passwordPromptIndex = useMemo(() => {
     if (!request) return -1;
     return request.prompts.findIndex(p => isAPasswordPrompt(p));
-  }, [request, isAPasswordPrompt]);
+  }, [request]);
 
   // Reset state when request changes
   useEffect(() => {
@@ -175,8 +174,8 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                     </button>
                   )}
                 </div>
-                {/* Save password checkbox - shown for password prompts */}
-                {isAPasswordPrompt(prompt) && (
+                {/* Save password checkbox - shown only for the first password prompt */}
+                {index === passwordPromptIndex && (
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input
                       type="checkbox"

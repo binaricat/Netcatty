@@ -191,6 +191,7 @@ const dedupeHosts = (hosts: Host[]): { hosts: Host[]; duplicates: number } => {
     duplicates++;
     const mergedTags = Array.from(new Set([...(existing.tags ?? []), ...(host.tags ?? [])]));
     existing.tags = mergedTags;
+    if (!existing.password && host.password) existing.password = host.password;
     if (existing.group == null && host.group != null) existing.group = host.group;
     if (existing.label === existing.hostname && host.label && host.label !== host.hostname) {
       existing.label = host.label;
