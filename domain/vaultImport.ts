@@ -1020,10 +1020,11 @@ const exportHostsToCsv = (hosts: Host[]): string => {
   const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
   const rows: string[][] = [header];
 
-  const escapeCsv = (value: string) => {
+  const escapeCsv = (value: string, skipFormulaGuard = false) => {
     // Prevent CSV formula injection by prefixing dangerous characters with a single quote
     // These characters can be interpreted as formulas by spreadsheet applications
-    if (/^[=+\-@\t\r]/.test(value)) {
+    // Skip for password fields to preserve credentials verbatim for round-trip
+    if (!skipFormulaGuard && /^[=+\-@\t\r]/.test(value)) {
       value = "'" + value;
     }
     if (value.includes('"')) value = value.replace(/"/g, '""');
@@ -1069,7 +1070,8 @@ const exportHostsToCsv = (hosts: Host[]): string => {
     ]);
   }
 
-  return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
+  const passwordColIdx = header.indexOf("Password");
+  return rows.map((r) => r.map((c, i) => escapeCsv(c, i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
 };
 
 interface ExportHostsResult {
