@@ -722,6 +722,7 @@ function App({ settings }: { settings: SettingsState }) {
       // Add to queue instead of replacing - supports multiple concurrent sessions
       setKeyboardInteractiveQueue(prev => [...prev, {
         requestId: request.requestId,
+        sessionId: request.sessionId,
         name: request.name,
         instructions: request.instructions,
         prompts: request.prompts,
@@ -736,14 +737,29 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   // Handle keyboard-interactive submit
-  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[]) => {
+  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[], savePassword?: string) => {
     const bridge = netcattyBridge.get();
     if (bridge?.respondKeyboardInteractive) {
       void bridge.respondKeyboardInteractive(requestId, responses, false);
     }
+    // Save password to host if requested
+    if (savePassword) {
+      const request = keyboardInteractiveQueue.find(r => r.requestId === requestId);
+      if (request?.sessionId) {
+        const session = sessions.find(s => s.id === request.sessionId);
+        // Only save when the prompting hostname matches the session's host,
+        // to avoid overwriting the destination host's password with a jump host's password
+        if (session?.hostId && (!request.hostname || request.hostname === session.hostname)) {
+          const host = hosts.find(h => h.id === session.hostId);
+          if (host) {
+            updateHosts(hosts.map(h => h.id === host.id ? { ...h, password: savePassword } : h));
+          }
+        }
+      }
+    }
     // Remove from queue by requestId
     setKeyboardInteractiveQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, []);
+  }, [keyboardInteractiveQueue, sessions, hosts, updateHosts]);
 
   // Handle keyboard-interactive cancel
   const handleKeyboardInteractiveCancel = useCallback((requestId: string) => {

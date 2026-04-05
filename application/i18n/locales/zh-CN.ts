@@ -1651,10 +1651,7 @@ const zhCN: Messages = {
   'keyboard.interactive.enterResponse': '输入响应',
   'keyboard.interactive.submit': '提交',
   'keyboard.interactive.verifying': '验证中...',
-  'keyboard.interactive.fill': '填入',
-  'keyboard.interactive.fillSaved': '填入已保存的密码',
-  'keyboard.interactive.useSaved': '使用已保存',
-  'keyboard.interactive.useSavedPassword': '使用已保存的密码',
+  'keyboard.interactive.savePassword': '保存密码',
 
   // Passphrase Modal for encrypted SSH keys
   'passphrase.title': 'SSH 密钥密码',

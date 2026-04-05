@@ -4,7 +4,7 @@
  * This modal displays prompts from the SSH server and collects user responses.
  */
 import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Button } from "./ui/button";
 import {
@@ -24,6 +24,7 @@ export interface KeyboardInteractivePrompt {
 
 export interface KeyboardInteractiveRequest {
   requestId: string;
+  sessionId?: string;
   name: string;
   instructions: string;
   prompts: KeyboardInteractivePrompt[];
@@ -31,9 +32,18 @@ export interface KeyboardInteractiveRequest {
   savedPassword?: string | null;
 }
 
+const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) => {
+  if (prompt.echo) return false;
+  const lower = prompt.prompt.toLowerCase();
+  if (!lower.includes("password")) return false;
+  // Exclude OTP / one-time password / verification code prompts
+  if (lower.includes("one-time") || lower.includes("otp") || lower.includes("verification") || lower.includes("token") || lower.includes("code")) return false;
+  return true;
+};
+
 interface KeyboardInteractiveModalProps {
   request: KeyboardInteractiveRequest | null;
-  onSubmit: (requestId: string, responses: string[]) => void;
+  onSubmit: (requestId: string, responses: string[], savePassword?: string) => void;
   onCancel: (requestId: string) => void;
 }
 
@@ -46,15 +56,28 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
   const [responses, setResponses] = useState<string[]>([]);
   const [showPasswords, setShowPasswords] = useState<boolean[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [savePassword, setSavePassword] = useState(false);
+
+  // Index of the first password prompt (if any)
+  const passwordPromptIndex = useMemo(() => {
+    if (!request) return -1;
+    return request.prompts.findIndex(p => isAPasswordPrompt(p));
+  }, [request]);
 
   // Reset state when request changes
   useEffect(() => {
     if (request) {
-      setResponses(request.prompts.map(() => ""));
+      const initial = request.prompts.map(() => "");
+      // Auto-fill saved password into the password prompt
+      if (request.savedPassword && passwordPromptIndex >= 0) {
+        initial[passwordPromptIndex] = request.savedPassword;
+      }
+      setResponses(initial);
       setShowPasswords(request.prompts.map(() => false));
       setIsSubmitting(false);
+      setSavePassword(false);
     }
-  }, [request]);
+  }, [request, passwordPromptIndex]);
 
   const handleResponseChange = useCallback((index: number, value: string) => {
     setResponses((prev) => {
@@ -75,8 +98,11 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
   const handleSubmit = useCallback(() => {
     if (!request || isSubmitting) return;
     setIsSubmitting(true);
-    onSubmit(request.requestId, responses);
-  }, [request, responses, onSubmit, isSubmitting]);
+    const passwordToSave = savePassword && passwordPromptIndex >= 0
+      ? responses[passwordPromptIndex]
+      : undefined;
+    onSubmit(request.requestId, responses, passwordToSave);
+  }, [request, responses, onSubmit, isSubmitting, savePassword, passwordPromptIndex]);
 
   const handleCancel = useCallback(() => {
     if (!request) return;
@@ -154,19 +180,20 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
                     </button>
                   )}
                 </div>
-                {/* Use saved password button - shown below input, right-aligned */}
-                {isPassword && request.savedPassword && !responses[index] && (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50"
-                      onClick={() => handleResponseChange(index, request.savedPassword!)}
+                {/* Save password checkbox - shown only for the first password prompt */}
+                {index === passwordPromptIndex && (
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={savePassword}
+                      onChange={(e) => setSavePassword(e.target.checked)}
                       disabled={isSubmitting}
-                    >
-                      <KeyRound size={12} />
-                      <span>{t("keyboard.interactive.useSavedPassword")}</span>
-                    </button>
-                  </div>
+                      className="accent-primary"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {t("keyboard.interactive.savePassword")}
+                    </span>
+                  </label>
                 )}
               </div>
             );

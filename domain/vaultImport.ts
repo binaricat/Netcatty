@@ -155,6 +155,7 @@ const createHost = (input: {
   label?: string;
   hostname: string;
   username?: string;
+  password?: string;
   port?: number;
   protocol?: Exclude<HostProtocol, "mosh">;
   group?: string;
@@ -167,6 +168,7 @@ const createHost = (input: {
     hostname: input.hostname.trim(),
     port: input.port ?? DEFAULT_SSH_PORT,
     username: input.username?.trim() ?? "",
+    password: input.password || undefined,
     group: normalizeGroupPath(input.group),
     tags: (input.tags ?? []).filter(Boolean),
     os: "linux",
@@ -189,6 +191,7 @@ const dedupeHosts = (hosts: Host[]): { hosts: Host[]; duplicates: number } => {
     duplicates++;
     const mergedTags = Array.from(new Set([...(existing.tags ?? []), ...(host.tags ?? [])]));
     existing.tags = mergedTags;
+    if (!existing.password && host.password) existing.password = host.password;
     if (existing.group == null && host.group != null) existing.group = host.group;
     if (existing.label === existing.hostname && host.label && host.label !== host.hostname) {
       existing.label = host.label;
@@ -333,6 +336,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   const protocolIdx = findHeaderIndex(header, ["protocol", "proto", "scheme"]);
   const portIdx = findHeaderIndex(header, ["port"]);
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
+  const passwordIdx = findHeaderIndex(header, ["password", "pass", "passwd"]);
 
   if (hostnameIdx === -1) {
     return {
@@ -378,12 +382,14 @@ const importFromCsv = (text: string): VaultImportResult => {
       "ssh";
     const port = parsePort(portIdx >= 0 ? row[portIdx] : undefined) ?? target.port;
     const username = (usernameIdx >= 0 ? row[usernameIdx] : undefined)?.trim() || target.username;
+    const password = (passwordIdx >= 0 ? row[passwordIdx] : undefined) || undefined;
 
     parsedHosts.push(
       createHost({
         label,
         hostname: target.hostname,
         username,
+        password,
         port,
         protocol,
         group,
@@ -993,12 +999,12 @@ export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username"];
+  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
-    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "192.168.1.10", "ssh", "22", "root"]);
-    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "server-a.example.com", "ssh", "22", "ubuntu"]);
-    rows.push(["Database", "DB", "db,mysql", "db.example.com", "ssh", "4567", "admin"]);
+    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "192.168.1.10", "ssh", "22", "root", ""]);
+    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "server-a.example.com", "ssh", "22", "ubuntu", ""]);
+    rows.push(["Database", "DB", "db,mysql", "db.example.com", "ssh", "4567", "admin", ""]);
   }
 
   const escapeCsv = (value: string) => {
@@ -1011,13 +1017,14 @@ export const getVaultCsvTemplate = (
 };
 
 const exportHostsToCsv = (hosts: Host[]): string => {
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username"];
+  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
   const rows: string[][] = [header];
 
-  const escapeCsv = (value: string) => {
+  const escapeCsv = (value: string, skipFormulaGuard = false) => {
     // Prevent CSV formula injection by prefixing dangerous characters with a single quote
     // These characters can be interpreted as formulas by spreadsheet applications
-    if (/^[=+\-@\t\r]/.test(value)) {
+    // Skip for password fields to preserve credentials verbatim for round-trip
+    if (!skipFormulaGuard && /^[=+\-@\t\r]/.test(value)) {
       value = "'" + value;
     }
     if (value.includes('"')) value = value.replace(/"/g, '""');
@@ -1059,10 +1066,12 @@ const exportHostsToCsv = (hosts: Host[]): string => {
       host.protocol ?? "ssh",
       String(effectivePort),
       effectiveUsername,
+      host.password ?? "",
     ]);
   }
 
-  return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
+  const passwordColIdx = header.indexOf("Password");
+  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(c, rowIdx > 0 && i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
 };
 
 interface ExportHostsResult {

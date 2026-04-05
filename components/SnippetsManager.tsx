@@ -18,6 +18,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
 import { Textarea } from './ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -951,8 +952,9 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   };
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="h-full flex gap-3 relative">
-      <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         <header className="border-b border-border/50 bg-secondary/80 backdrop-blur">
           <div className="h-14 px-4 py-2 flex items-center gap-2">
             {/* Search box */}
@@ -1059,7 +1061,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     <ContextMenuTrigger>
                       <div
                         className={cn(
-                          "group cursor-pointer",
+                          "group cursor-pointer overflow-hidden",
                           viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
@@ -1079,11 +1081,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         }}
                         onClick={() => setSelectedPackage(pkg.path)}
                       >
-                        <div className="flex items-center gap-3 h-full">
+                        <div className="flex items-center gap-3 h-full min-w-0">
                           <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
                             <Package size={18} />
                           </div>
-                          <div className="min-w-0 flex-1">
+                          <div className="w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{pkg.name}</div>
                             <div className="text-[11px] text-muted-foreground">{t('snippets.package.count', { count: pkg.count })}</div>
                           </div>
@@ -1114,7 +1116,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     <ContextMenuTrigger>
                       <div
                         className={cn(
-                          "group cursor-pointer",
+                          "group cursor-pointer overflow-hidden",
                           viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
@@ -1126,15 +1128,22 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         }}
                         onClick={() => handleEdit(snippet)}
                       >
-                        <div className="flex items-center gap-3 h-full">
+                        <div className="flex items-center gap-3 h-full min-w-0">
                           <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
                             <FileCode size={18} />
                           </div>
-                          <div className="min-w-0 flex-1">
+                          <div className="w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{snippet.label}</div>
-                            <div className="text-[11px] text-muted-foreground font-mono leading-4 truncate">
-                              {snippet.command.replace(/\s+/g, ' ') || t('snippets.commandFallback')}
-                            </div>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="text-[11px] text-muted-foreground font-mono leading-4 truncate">
+                                  {snippet.command.replace(/\s+/g, ' ') || t('snippets.commandFallback')}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-sm break-all font-mono text-xs">
+                                {snippet.command}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           {snippet.shortkey && (
                             <div className="shrink-0 px-2 py-1 text-[10px] font-mono rounded border border-border bg-muted/50 text-muted-foreground">
@@ -1254,6 +1263,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       {/* Right Panel */}
       {renderRightPanel()}
     </div>
+    </TooltipProvider>
   );
 };
 
