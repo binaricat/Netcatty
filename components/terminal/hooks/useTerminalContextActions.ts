@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import type { RefObject } from "react";
 import { logger } from "../../../lib/logger";
 import { normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
+import { clearTerminalViewport } from "../clearTerminalViewport";
 
 type TerminalBackendWriteApi = {
   writeToSession: (sessionId: string, data: string) => void;
@@ -65,7 +66,7 @@ export const useTerminalContextActions = ({
   const onClear = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    term.clear();
+    clearTerminalViewport(term);
   }, [termRef]);
 
   const onSelectWord = useCallback(() => {
