@@ -145,6 +145,262 @@ function findEndMarker(outputText, marker) {
   return null;
 }
 
+function normalizePtyOutput(stdout, {
+  stripMarkers = false,
+  expectedPrompt = "",
+  trimOutput = true,
+  stripPrompt = true,
+} = {}) {
+  let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
+  if (stripMarkers) {
+    cleaned = cleaned.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+  }
+  const normalizedPrompt = stripAnsi(String(expectedPrompt || "")).replace(/\r/g, "");
+  if (stripPrompt && normalizedPrompt && cleaned.endsWith(normalizedPrompt)) {
+    cleaned = cleaned.slice(0, cleaned.length - normalizedPrompt.length);
+  }
+  return trimOutput ? cleaned.trim() : cleaned;
+}
+
+function startPtyJob(ptyStream, command, options) {
+  const {
+    stripMarkers = false,
+    trackForCancellation = null,
+    timeoutMs = 60000,
+    shellKind,
+    chatSessionId,
+    abortSignal,
+    expectedPrompt,
+    typedInput = false,
+    echoCommand,
+  } = options || {};
+
+  const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
+  const resolvedShellKind = shellKind || "posix";
+
+  let output = "";
+  let foundStart = false;
+  let preStartOutput = "";
+  let timeoutId = null;
+  let promptFallbackTimer = null;
+  let finished = false;
+  let unsubscribe = null;
+  const cleanupFns = [];
+  let pendingStart = "";
+  let resolveResult;
+  const resultPromise = new Promise((resolve) => {
+    resolveResult = resolve;
+  });
+
+  function clearPromptFallback() {
+    if (promptFallbackTimer) {
+      clearTimeout(promptFallbackTimer);
+      promptFallbackTimer = null;
+    }
+  }
+
+  function schedulePromptFallback() {
+    clearPromptFallback();
+    if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+    promptFallbackTimer = setTimeout(() => {
+      if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+      finish(output, null, null);
+    }, 250);
+  }
+
+  function checkEnd() {
+    const found = findEndMarker(output, marker);
+    if (!found) return;
+    const stdout = output.slice(0, found.endIdx);
+    finish(stdout, found.exitCode);
+  }
+
+  function finish(stdout, exitCode, error) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeoutId);
+    clearPromptFallback();
+    unsubscribe?.();
+    for (const fn of cleanupFns) {
+      try {
+        fn();
+      } catch {
+        // Ignore cleanup failures
+      }
+    }
+    if (trackForCancellation) {
+      trackForCancellation.delete(marker);
+    }
+
+    const cleaned = normalizePtyOutput(stdout, { stripMarkers, expectedPrompt });
+    if (error) {
+      resolveResult({ ok: false, stdout: cleaned, stderr: "", exitCode: exitCode ?? -1, error });
+    } else {
+      resolveResult({
+        ok: exitCode === 0 || exitCode === null,
+        stdout: cleaned,
+        stderr: "",
+        exitCode: exitCode ?? 0,
+      });
+    }
+  }
+
+  function onData(data) {
+    const text = data.toString();
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      if (typeof ptyStream.write === "function") ptyStream.write("\x03");
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      finish(foundStart ? output : preStartOutput, -1, `Command timed out after ${timeoutSec}s without output`);
+    }, timeoutMs);
+
+    if (!foundStart) {
+      preStartOutput += text;
+      const combined = pendingStart + text;
+      pendingStart = "";
+      const startMarker = marker + "_S";
+      let matched = false;
+
+      const lines = combined.split(/\r?\n/);
+      const trailingPartial = /[\r\n]$/.test(combined) ? "" : lines.pop() || "";
+      for (const line of lines) {
+        if (stripAnsi(line).trim() === startMarker) {
+          foundStart = true;
+          matched = true;
+          break;
+        }
+      }
+      pendingStart = trailingPartial;
+
+      if (foundStart) {
+        const boundary = preStartOutput.search(new RegExp(`${marker}_S[^\n\r]*(?:\r?\n|$)`));
+        if (boundary !== -1) {
+          const afterBoundary = preStartOutput.slice(boundary);
+          const firstNl = afterBoundary.search(/\r?\n/);
+          output = firstNl === -1 ? "" : afterBoundary.slice(firstNl).replace(/^\r?\n/, "");
+        }
+        preStartOutput = "";
+        schedulePromptFallback();
+        checkEnd();
+        return;
+      }
+
+      if (!matched) {
+        const fallbackEnd = findEndMarker(preStartOutput, marker);
+        if (fallbackEnd) {
+          let stdout = preStartOutput.slice(0, fallbackEnd.endIdx);
+          const lastStartIdx = stdout.lastIndexOf(startMarker);
+          if (lastStartIdx !== -1) {
+            const nlAfterStart = stdout.indexOf("\n", lastStartIdx);
+            if (nlAfterStart !== -1) {
+              stdout = stdout.slice(nlAfterStart + 1);
+            }
+          }
+          finish(stdout, fallbackEnd.exitCode);
+        }
+      }
+      return;
+    }
+
+    output += text;
+    schedulePromptFallback();
+    checkEnd();
+  }
+
+  if (abortSignal?.aborted) {
+    finish("", -1, "Cancelled");
+    return {
+      marker,
+      cancel: () => {},
+      getSnapshot: () => ({ stdout: "", status: "cancelled", foundStart: false }),
+      resultPromise,
+    };
+  }
+
+  timeoutId = setTimeout(() => {
+    if (typeof ptyStream.write === "function") ptyStream.write("\x03");
+    const timeoutSec = Math.round(timeoutMs / 1000);
+    finish("", -1, `Command timed out after ${timeoutSec}s without output`);
+  }, timeoutMs);
+
+  unsubscribe = subscribeToPtyData(ptyStream, onData);
+
+  const cancel = () => {
+    if (typeof ptyStream.write === "function") ptyStream.write("\x03");
+    finish(foundStart ? output : preStartOutput, -1, "Cancelled");
+  };
+
+  if (trackForCancellation) {
+    trackForCancellation.set(marker, {
+      ptyStream,
+      chatSessionId: chatSessionId || null,
+      cancel,
+      cleanup: () => {
+        clearTimeout(timeoutId);
+        unsubscribe?.();
+      },
+    });
+  }
+
+  if (typeof ptyStream.on === "function") {
+    const onClose = () => finish(foundStart ? output : preStartOutput, null, "Stream closed unexpectedly");
+    const onError = (err) => finish(foundStart ? output : preStartOutput, -1, `Stream error: ${err?.message || err}`);
+    ptyStream.on("close", onClose);
+    ptyStream.on("end", onClose);
+    ptyStream.on("error", onError);
+    cleanupFns.push(() => {
+      try { ptyStream.removeListener("close", onClose); } catch {}
+      try { ptyStream.removeListener("end", onClose); } catch {}
+      try { ptyStream.removeListener("error", onError); } catch {}
+    });
+  }
+  if (typeof ptyStream.onExit === "function") {
+    const disposable = ptyStream.onExit(() => finish(foundStart ? output : preStartOutput, null, "Process exited"));
+    cleanupFns.push(() => {
+      try {
+        disposable?.dispose?.();
+      } catch {
+        // Ignore cleanup failures
+      }
+    });
+  }
+
+  if (abortSignal) {
+    const onAbort = () => {
+      if (typeof ptyStream.write === "function") ptyStream.write("\x03");
+      finish(foundStart ? output : preStartOutput, -1, "Cancelled");
+    };
+    abortSignal.addEventListener("abort", onAbort, { once: true });
+    cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
+  }
+
+  if (typedInput && typeof echoCommand === "function") {
+    try {
+      echoCommand(command);
+    } catch {
+      // Ignore synthetic echo failures.
+    }
+  }
+
+  ptyStream.write(buildWrappedCommand(command, resolvedShellKind, marker));
+
+  return {
+    marker,
+    cancel,
+    getSnapshot: () => ({
+      stdout: normalizePtyOutput(foundStart ? output : preStartOutput, {
+        stripMarkers,
+        expectedPrompt,
+        trimOutput: false,
+        stripPrompt: false,
+      }),
+      status: finished ? "finished" : "running",
+      foundStart,
+    }),
+    resultPromise,
+  };
+}
+
 /**
  * Execute command through a terminal PTY stream.
  * The user sees the command typed and output in their terminal.
@@ -163,228 +419,7 @@ function findEndMarker(outputText, marker) {
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
  */
 function execViaPty(ptyStream, command, options) {
-  const {
-    stripMarkers = false,
-    trackForCancellation = null,
-    timeoutMs = 60000,
-    shellKind,
-    chatSessionId,
-    abortSignal,
-    expectedPrompt,
-    typedInput = false,
-    echoCommand,
-  } = options || {};
-
-  const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
-  const resolvedShellKind = shellKind || "posix";
-
-  // Fast-path: already aborted before we even start
-  if (abortSignal?.aborted) {
-    return Promise.resolve({ ok: false, stdout: "", stderr: "", exitCode: -1, error: "Cancelled" });
-  }
-
-  return new Promise((resolve) => {
-    let output = "";
-    let foundStart = false;
-    let preStartOutput = "";
-    let timeoutId = null;
-    let promptFallbackTimer = null;
-    let finished = false;
-    let unsubscribe = null;
-    const cleanupFns = [];
-
-    // Buffer for incomplete line data when searching for start marker.
-    // SSH channels can split data at arbitrary byte boundaries, so the
-    // start marker may arrive across two chunks.  We keep the content
-    // after the last \n (i.e. the current incomplete line) and prepend
-    // it to the next chunk so indexOf can match the full marker.
-    let pendingStart = "";
-
-    const onData = (data) => {
-      const text = data.toString();
-
-      if (!foundStart) {
-        preStartOutput += text;
-        const combined = pendingStart + text;
-        pendingStart = "";
-        const startMarker = marker + "_S";
-        let matched = false;
-        let pos = 0;
-        while (pos < combined.length) {
-          const idx = combined.indexOf(startMarker, pos);
-          if (idx === -1) break;
-          if (idx === 0 || combined[idx - 1] === '\n' || combined[idx - 1] === '\r') {
-            foundStart = true;
-            matched = true;
-            const afterMarker = combined.slice(idx);
-            const nlIdx = afterMarker.indexOf("\n");
-            if (nlIdx !== -1) {
-              output += afterMarker.slice(nlIdx + 1);
-            }
-            break;
-          }
-          pos = idx + 1;
-        }
-        if (!matched) {
-          // Keep the last incomplete line for cross-chunk matching
-          const lastNl = combined.lastIndexOf("\n");
-          pendingStart = lastNl === -1 ? combined : combined.slice(lastNl + 1);
-        }
-        if (foundStart) {
-          preStartOutput = "";
-          schedulePromptFallback();
-          checkEnd();
-          return;
-        }
-
-        // Fallback: if strict start-marker detection missed (e.g. due shell
-        // control sequence prefixes), still complete as soon as we observe a
-        // valid end marker with exit code.
-        const fallbackEnd = findEndMarker(preStartOutput, marker);
-        if (fallbackEnd) {
-          let stdout = preStartOutput.slice(0, fallbackEnd.endIdx);
-          const lastStartIdx = stdout.lastIndexOf(startMarker);
-          if (lastStartIdx !== -1) {
-            const nlAfterStart = stdout.indexOf("\n", lastStartIdx);
-            if (nlAfterStart !== -1) {
-              stdout = stdout.slice(nlAfterStart + 1);
-            }
-          }
-          finish(stdout, fallbackEnd.exitCode);
-        }
-        return;
-      }
-
-      output += text;
-      schedulePromptFallback();
-      checkEnd();
-    };
-
-    function clearPromptFallback() {
-      if (promptFallbackTimer) {
-        clearTimeout(promptFallbackTimer);
-        promptFallbackTimer = null;
-      }
-    }
-
-    function schedulePromptFallback() {
-      clearPromptFallback();
-      if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
-
-      // Fallback for shells that visibly return to the same idle prompt but
-      // never emit the wrapped end marker line.
-      promptFallbackTimer = setTimeout(() => {
-        if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
-        finish(output, null, null);
-      }, 250);
-    }
-
-    function checkEnd() {
-      // Look for the end marker at a line boundary (actual printf output),
-      // not inside the echo of the printf command argument.
-      const found = findEndMarker(output, marker);
-      if (!found) return;
-      const stdout = output.slice(0, found.endIdx);
-      finish(stdout, found.exitCode);
-    }
-
-    function finish(stdout, exitCode, error) {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeoutId);
-      clearPromptFallback();
-      unsubscribe?.();
-      for (const fn of cleanupFns) { try { fn(); } catch { /* ignore */ } }
-      if (trackForCancellation) {
-        trackForCancellation.delete(marker);
-      }
-
-      let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
-      if (stripMarkers) {
-        cleaned = cleaned.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
-      }
-      const normalizedPrompt = stripAnsi(String(expectedPrompt || "")).replace(/\r/g, "");
-      if (normalizedPrompt && cleaned.endsWith(normalizedPrompt)) {
-        cleaned = cleaned.slice(0, cleaned.length - normalizedPrompt.length);
-      }
-      cleaned = cleaned.trim();
-      if (error) {
-        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: exitCode ?? -1, error });
-      } else {
-        resolve({
-          ok: exitCode === 0 || exitCode === null,
-          stdout: cleaned,
-          stderr: "",
-          exitCode: exitCode ?? 0,
-        });
-      }
-    }
-
-    timeoutId = setTimeout(() => {
-      // Send Ctrl+C to kill the timed-out command
-      if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-      const timeoutSec = Math.round(timeoutMs / 1000);
-      finish(output, -1, `Command timed out (${timeoutSec}s)`);
-    }, timeoutMs);
-
-    unsubscribe = subscribeToPtyData(ptyStream, onData);
-
-    // Register for cancellation if tracking map provided
-    if (trackForCancellation) {
-      trackForCancellation.set(marker, {
-        ptyStream,
-        chatSessionId: chatSessionId || null,
-        cancel: () => {
-          if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-          finish(output, -1, "Cancelled");
-        },
-        cleanup: () => {
-          clearTimeout(timeoutId);
-          unsubscribe?.();
-        },
-      });
-    }
-
-    // Stream close/error detection — resolve immediately instead of waiting for timeout
-    if (typeof ptyStream.on === "function") {
-      const onClose = () => finish(output, null, "Stream closed unexpectedly");
-      const onError = (err) => finish(output, -1, `Stream error: ${err?.message || err}`);
-      ptyStream.on("close", onClose);
-      ptyStream.on("end", onClose);
-      ptyStream.on("error", onError);
-      cleanupFns.push(() => {
-        try { ptyStream.removeListener("close", onClose); } catch { /* */ }
-        try { ptyStream.removeListener("end", onClose); } catch { /* */ }
-        try { ptyStream.removeListener("error", onError); } catch { /* */ }
-      });
-    }
-    // node-pty uses onExit instead of close/end
-    if (typeof ptyStream.onExit === "function") {
-      const disposable = ptyStream.onExit(() => finish(output, null, "Process exited"));
-      cleanupFns.push(() => { try { disposable?.dispose?.(); } catch { /* */ } });
-    }
-
-    // AbortSignal handling — send Ctrl+C and resolve when aborted
-    if (abortSignal) {
-      const onAbort = () => {
-        if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-        finish(output, -1, "Cancelled");
-      };
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-      cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
-    }
-
-    if (typedInput && typeof echoCommand === "function") {
-      try {
-        echoCommand(command);
-      } catch {
-        // Ignore synthetic echo failures.
-      }
-    }
-
-    // Markers are filtered from terminal display by preload.cjs.
-    ptyStream.write(buildWrappedCommand(command, resolvedShellKind, marker));
-  });
+  return startPtyJob(ptyStream, command, options).resultPromise;
 }
 
 /**
@@ -659,6 +694,7 @@ execViaRawPty._seq = 0;
 
 module.exports = {
   execViaPty,
+  startPtyJob,
   execViaChannel,
   execViaRawPty,
   detectShellKind,

@@ -12,7 +12,7 @@ const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
-const { execViaPty, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
+const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
@@ -48,6 +48,13 @@ let permissionMode = "confirm";
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
+const backgroundJobs = new Map(); // jobId -> job metadata
+const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
+const pendingSessionWriteApprovals = new Map(); // sessionId -> method
+const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
+const BACKGROUND_JOB_RETENTION_MS = 10 * 60 * 1000;
+const MAX_BACKGROUND_JOB_OUTPUT_CHARS = 256 * 1024;
 
 // ── Approval gate (for confirm mode with ACP/MCP agents) ──
 let getMainWindowFn = null; // () => BrowserWindow | null
@@ -159,6 +166,135 @@ function cancelPtyExecsForSession(chatSessionId) {
     } catch { /* ignore */ }
     activePtyExecs.delete(marker);
   }
+}
+
+function createBackgroundJobId() {
+  return `job_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
+}
+
+function cancelBackgroundJobsForSession(chatSessionId) {
+  if (!chatSessionId) return;
+  for (const [, job] of backgroundJobs) {
+    if (job.chatSessionId !== chatSessionId) continue;
+    if (job.status !== "running") continue;
+    try {
+      job.handle?.cancel?.();
+    } catch {
+      // Ignore cancellation failures
+    }
+  }
+}
+
+function readBackgroundJobOutput(job) {
+  if (!job) return "";
+  if (job.status === "running") {
+    return job.handle?.getSnapshot?.()?.stdout || job.stdout || "";
+  }
+  return job.stdout || "";
+}
+
+function createOutputWindow(stdout) {
+  const fullText = String(stdout || "");
+  const totalOutputChars = fullText.length;
+  const outputBaseOffset = Math.max(0, totalOutputChars - MAX_BACKGROUND_JOB_OUTPUT_CHARS);
+  return {
+    stdout: outputBaseOffset > 0 ? fullText.slice(outputBaseOffset) : fullText,
+    outputBaseOffset,
+    totalOutputChars,
+    outputTruncated: outputBaseOffset > 0,
+  };
+}
+
+function refreshRunningJobSnapshot(job) {
+  if (!job || job.status !== "running") return;
+  const window = createOutputWindow(readBackgroundJobOutput(job));
+  job.stdout = window.stdout;
+  job.outputBaseOffset = window.outputBaseOffset;
+  job.totalOutputChars = window.totalOutputChars;
+  job.outputTruncated = window.outputTruncated;
+}
+
+function storeCompletedJobOutput(job, stdout) {
+  const window = createOutputWindow(stdout);
+  job.stdout = window.stdout;
+  job.outputBaseOffset = window.outputBaseOffset;
+  job.totalOutputChars = window.totalOutputChars;
+  job.outputTruncated = window.outputTruncated;
+  job.handle = null;
+}
+
+function pruneCompletedBackgroundJobs(now = Date.now()) {
+  for (const [jobId, job] of backgroundJobs) {
+    if (job.status === "running") continue;
+    const updatedAt = Number(job.updatedAt) || 0;
+    if (updatedAt > 0 && now - updatedAt > BACKGROUND_JOB_RETENTION_MS) {
+      backgroundJobs.delete(jobId);
+    }
+  }
+}
+
+function serializeBackgroundJob(job, offset = 0) {
+  if (job.status === "running") {
+    refreshRunningJobSnapshot(job);
+  }
+  const stdout = job.stdout || "";
+  const outputBaseOffset = job.outputBaseOffset || 0;
+  const totalOutputChars = Math.max(outputBaseOffset + stdout.length, job.totalOutputChars || 0);
+  const numericOffset = Math.max(0, Number(offset) || 0);
+  const relativeOffset = numericOffset <= outputBaseOffset
+    ? 0
+    : Math.min(numericOffset - outputBaseOffset, stdout.length);
+  return {
+    ok: true,
+    jobId: job.id,
+    sessionId: job.sessionId,
+    command: job.command,
+    status: job.status,
+    completed: job.status !== "running",
+    exitCode: job.exitCode,
+    error: job.error,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+    output: stdout.slice(relativeOffset),
+    nextOffset: totalOutputChars,
+    totalOutputChars,
+    outputBaseOffset,
+    outputTruncated: Boolean(job.outputTruncated),
+    recommendedPollIntervalMs: DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS,
+  };
+}
+
+function describeActiveSessionExecution(entry) {
+  if (!entry) return "another command";
+  return entry.kind === "job" ? "a long-running command" : "another command";
+}
+
+function getSessionBusyError(sessionId) {
+  const active = activeSessionExecutions.get(sessionId);
+  if (!active) return null;
+  return {
+    ok: false,
+    error: `Session already has ${describeActiveSessionExecution(active)} in progress. Wait for it to finish or stop it before starting another command.`,
+  };
+}
+
+function reserveSessionExecution(sessionId, kind) {
+  const existing = getSessionBusyError(sessionId);
+  if (existing) return existing;
+  const token = `${kind}_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
+  activeSessionExecutions.set(sessionId, {
+    kind,
+    startedAt: Date.now(),
+    token,
+  });
+  return { ok: true, token };
+}
+
+function releaseSessionExecution(sessionId, token) {
+  const active = activeSessionExecutions.get(sessionId);
+  if (!active) return;
+  if (token && active.token !== token) return;
+  activeSessionExecutions.delete(sessionId);
 }
 
 function init(deps) {
@@ -413,6 +549,8 @@ async function handleMessage(socket, line) {
 // Methods that modify remote state — blocked in observer mode
 const WRITE_METHODS = new Set([
   "netcatty/exec",
+  "netcatty/jobStart",
+  "netcatty/jobStop",
 ]);
 
 /**
@@ -429,6 +567,9 @@ function validateSessionScope(sessionId, chatSessionId) {
 }
 
 async function dispatch(method, params) {
+  const sessionWriteLockId = (method === "netcatty/exec" || method === "netcatty/jobStart") ? params?.sessionId : null;
+  pruneCompletedBackgroundJobs();
+
   // Observer mode: block all write operations
   if (permissionMode === "observer" && WRITE_METHODS.has(method)) {
     return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
@@ -438,27 +579,55 @@ async function dispatch(method, params) {
     return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
   }
 
-  // Confirm mode: request user approval for write operations
-  if (permissionMode === "confirm" && WRITE_METHODS.has(method)) {
-    const { chatSessionId, ...toolArgs } = params || {};
-    const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
-    if (!approved) {
-      return { ok: false, error: "Operation denied by user." };
-    }
+  if ((method === "netcatty/exec" || method === "netcatty/jobStart") && params?.sessionId) {
+    const busy = getSessionBusyError(params.sessionId);
+    if (busy) return busy;
   }
 
-  // Scope validation for session-targeted operations
-  if (method !== "netcatty/getContext" && params?.sessionId) {
-    const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
-    if (scopeErr) return { ok: false, error: scopeErr };
+  if (sessionWriteLockId) {
+    const pendingMethod = pendingSessionWriteApprovals.get(sessionWriteLockId);
+    if (pendingMethod) {
+      return {
+        ok: false,
+        error: "Session already has another command request awaiting approval or startup. Wait for it to finish before starting a new command.",
+      };
+    }
+    pendingSessionWriteApprovals.set(sessionWriteLockId, method);
   }
-  switch (method) {
-    case "netcatty/getContext":
-      return handleGetContext(params);
-    case "netcatty/exec":
-      return handleExec(params);
-    default:
-      throw new Error(`Unknown method: ${method}`);
+
+  try {
+    // Confirm mode: request user approval for write operations
+    if (permissionMode === "confirm" && WRITE_METHODS.has(method)) {
+      const { chatSessionId, ...toolArgs } = params || {};
+      const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
+      if (!approved) {
+        return { ok: false, error: "Operation denied by user." };
+      }
+    }
+
+    // Scope validation for session-targeted operations
+    if (method !== "netcatty/getContext" && params?.sessionId) {
+      const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
+      if (scopeErr) return { ok: false, error: scopeErr };
+    }
+    switch (method) {
+      case "netcatty/getContext":
+        return handleGetContext(params);
+      case "netcatty/exec":
+        return handleExec(params);
+      case "netcatty/jobStart":
+        return handleJobStart(params);
+      case "netcatty/jobPoll":
+        return handleJobPoll(params);
+      case "netcatty/jobStop":
+        return handleJobStop(params);
+      default:
+        throw new Error(`Unknown method: ${method}`);
+    }
+  } finally {
+    if (sessionWriteLockId) {
+      pendingSessionWriteApprovals.delete(sessionWriteLockId);
+    }
   }
 }
 
@@ -526,7 +695,7 @@ function handleGetContext(params) {
 
 // ── Handler: exec ──
 
-function handleExec(params) {
+function resolveExecContext(params) {
   const { sessionId, command } = params;
   if (!sessionId || !command) throw new Error("sessionId and command are required");
   if (typeof command !== 'string' || !command.trim()) {
@@ -574,58 +743,243 @@ function handleExec(params) {
 
   const sshClient = session.conn || session.sshClient;
   const ptyStream = session.stream || session.pty || session.proc;
+  return {
+    ok: true,
+    context: {
+      sessionId,
+      command,
+      session,
+      chatSessionId,
+      sessionProtocol,
+      isNetworkDevice,
+      sshClient,
+      ptyStream,
+    },
+  };
+}
+
+function handleExec(params) {
+  const resolved = resolveExecContext(params);
+  if (!resolved.ok) return resolved;
+  const {
+    sessionId,
+    command,
+    session,
+    chatSessionId,
+    sessionProtocol,
+    isNetworkDevice,
+    sshClient,
+    ptyStream,
+  } = resolved.context;
+  const reservation = reserveSessionExecution(sessionId, "exec");
+  if (!reservation.ok) return reservation;
+  const sessionToken = reservation.token;
+
+  const runExecution = (factory) => {
+    try {
+      return Promise.resolve(factory()).finally(() => {
+        releaseSessionExecution(sessionId, sessionToken);
+      });
+    } catch (err) {
+      releaseSessionExecution(sessionId, sessionToken);
+      return { ok: false, error: err?.message || String(err) };
+    }
+  };
 
   // Network devices (switches/routers) connected via SSH: use raw execution.
   // Their vendor CLIs (Huawei VRP, Cisco IOS, etc.) don't run a POSIX shell,
   // so shell-wrapped commands with markers would fail. Raw mode sends commands
   // as-is with idle-timeout completion detection — same as serial sessions.
   if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
-    return execViaRawPty(ptyStream, command, {
+    return runExecution(() => execViaRawPty(ptyStream, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
       chatSessionId: params?.chatSessionId,
       encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
-    });
+    }));
   }
 
   // Prefer the interactive PTY so the user sees command/output in-session.
   if (ptyStream && typeof ptyStream.write === "function") {
-    return execViaPty(ptyStream, command, {
+    return runExecution(() => execViaPty(ptyStream, command, {
       trackForCancellation: activePtyExecs,
       timeoutMs: commandTimeoutMs,
       shellKind: session.shellKind,
       expectedPrompt: session.lastIdlePrompt || "",
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
-    });
+    }));
   }
 
   // Network devices require an interactive PTY for raw command execution.
   // If we got here, ptyStream wasn't writable — there's no usable channel.
   if (isNetworkDevice) {
+    releaseSessionExecution(sessionId, sessionToken);
     return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
   }
 
   // Fallback: SSH exec channel (invisible to terminal).
   // At this point ptyStream is not writable (already returned above if it was).
   if (sshClient && typeof sshClient.exec === "function") {
-    return execViaChannel(sshClient, command, {
+    return runExecution(() => execViaChannel(sshClient, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
-    });
+    }));
   }
 
   // Serial port: raw command execution (no shell wrapping)
   if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
-    return execViaRawPty(session.serialPort, command, {
+    return runExecution(() => execViaRawPty(session.serialPort, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
       chatSessionId: params?.chatSessionId,
       encoding: session.serialEncoding || "utf8",
-    });
+    }));
   }
 
+  releaseSessionExecution(sessionId, sessionToken);
   return { ok: false, error: "Session does not support command execution" };
+}
+
+function handleJobStart(params) {
+  const resolved = resolveExecContext(params);
+  if (!resolved.ok) return resolved;
+  const {
+    sessionId,
+    command,
+    session,
+    chatSessionId,
+    isNetworkDevice,
+    sessionProtocol,
+    ptyStream,
+  } = resolved.context;
+
+  if (isNetworkDevice || sessionProtocol === "serial") {
+    return {
+      ok: false,
+      error: "Background execution currently supports shell-backed PTY sessions only.",
+    };
+  }
+
+  if (!ptyStream || typeof ptyStream.write !== "function") {
+    return {
+      ok: false,
+      error: "Background execution requires a writable PTY-backed terminal session.",
+    };
+  }
+
+  const reservation = reserveSessionExecution(sessionId, "job");
+  if (!reservation.ok) return reservation;
+  const sessionToken = reservation.token;
+
+  const jobId = createBackgroundJobId();
+  const timeoutMs = Math.max(commandTimeoutMs, DEFAULT_BACKGROUND_JOB_TIMEOUT_MS);
+  let handle;
+  try {
+    handle = startPtyJob(ptyStream, command, {
+      trackForCancellation: activePtyExecs,
+      timeoutMs,
+      shellKind: session.shellKind,
+      chatSessionId,
+      expectedPrompt: session.lastIdlePrompt || "",
+      typedInput: true,
+      echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
+    });
+  } catch (err) {
+    releaseSessionExecution(sessionId, sessionToken);
+    return { ok: false, error: err?.message || String(err) };
+  }
+
+  const startedAt = Date.now();
+  const job = {
+    id: jobId,
+    sessionId,
+    chatSessionId: chatSessionId || null,
+    command,
+    status: "running",
+    startedAt,
+    updatedAt: startedAt,
+    exitCode: null,
+    error: null,
+    stdout: "",
+    outputBaseOffset: 0,
+    totalOutputChars: 0,
+    outputTruncated: false,
+    handle,
+  };
+  backgroundJobs.set(jobId, job);
+
+  handle.resultPromise.then((result) => {
+    job.updatedAt = Date.now();
+    job.exitCode = result.exitCode ?? null;
+    storeCompletedJobOutput(job, result.stdout || "");
+    if (result.error === "Cancelled") {
+      job.status = "cancelled";
+      job.error = result.error;
+      releaseSessionExecution(sessionId, sessionToken);
+      return;
+    }
+    if (result.error) {
+      job.status = "failed";
+      job.error = result.error;
+      releaseSessionExecution(sessionId, sessionToken);
+      return;
+    }
+    job.status = "completed";
+    releaseSessionExecution(sessionId, sessionToken);
+  }).catch((err) => {
+    job.updatedAt = Date.now();
+    job.status = "failed";
+    job.error = err?.message || String(err);
+    storeCompletedJobOutput(job, job.stdout || "");
+    releaseSessionExecution(sessionId, sessionToken);
+  });
+
+  return {
+    ok: true,
+    jobId,
+    sessionId,
+    command,
+    status: "running",
+    startedAt,
+    outputMode: "foreground-mirrored",
+    recommendedPollIntervalMs: DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS,
+  };
+}
+
+function getScopedJob(jobId, chatSessionId) {
+  const job = backgroundJobs.get(jobId);
+  if (!job) return null;
+  if (chatSessionId && job.chatSessionId && job.chatSessionId !== chatSessionId) {
+    return null;
+  }
+  return job;
+}
+
+function handleJobPoll(params) {
+  const { jobId, offset = 0, chatSessionId } = params || {};
+  if (!jobId) throw new Error("jobId is required");
+  const job = getScopedJob(jobId, chatSessionId || null);
+  if (!job) return { ok: false, error: "Background job not found" };
+  return serializeBackgroundJob(job, offset);
+}
+
+function handleJobStop(params) {
+  const { jobId, chatSessionId } = params || {};
+  if (!jobId) throw new Error("jobId is required");
+  const job = getScopedJob(jobId, chatSessionId || null);
+  if (!job) return { ok: false, error: "Background job not found" };
+  if (job.status === "running") {
+    try {
+      job.handle?.cancel?.();
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+    job.status = "cancelled";
+    job.error = "Cancelled";
+    job.updatedAt = Date.now();
+  }
+  return serializeBackgroundJob(job, 0);
 }
 
 // ── MCP Server Config Builder ──
@@ -695,6 +1049,7 @@ function cleanupScopedMetadata(chatSessionId) {
   if (chatSessionId) {
     scopedMetadata.delete(chatSessionId);
     cancelledChatSessions.delete(chatSessionId);
+    cancelBackgroundJobsForSession(chatSessionId);
   }
 }
 
@@ -705,6 +1060,15 @@ function cleanup() {
     tcpPort = null;
   }
   scopedMetadata.clear();
+  for (const [, job] of backgroundJobs) {
+    try {
+      job.handle?.cancel?.();
+    } catch {
+      // Ignore cancellation failures during cleanup
+    }
+  }
+  backgroundJobs.clear();
+  activeSessionExecutions.clear();
 }
 
 module.exports = {
@@ -723,6 +1087,7 @@ module.exports = {
   getOrCreateHost,
   buildMcpServerConfig,
   activePtyExecs,
+  cancelBackgroundJobsForSession,
   cancelAllPtyExecs,
   cancelPtyExecsForSession,
   getSessionMeta,
