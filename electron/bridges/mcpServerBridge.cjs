@@ -185,12 +185,38 @@ function cancelBackgroundJobsForSession(chatSessionId) {
   }
 }
 
-function readBackgroundJobOutput(job) {
-  if (!job) return "";
-  if (job.status === "running") {
-    return job.handle?.getSnapshot?.()?.stdout || job.stdout || "";
+function readBackgroundJobSnapshot(job) {
+  if (!job) {
+    return {
+      stdout: "",
+      outputBaseOffset: 0,
+      totalOutputChars: 0,
+      outputTruncated: false,
+    };
   }
-  return job.stdout || "";
+  if (job.status === "running") {
+    const snapshot = job.handle?.getSnapshot?.();
+    if (snapshot) {
+      const stdout = String(snapshot.stdout || "");
+      const outputBaseOffset = Math.max(0, Number(snapshot.outputBaseOffset) || 0);
+      const totalOutputChars = Math.max(outputBaseOffset + stdout.length, Number(snapshot.totalOutputChars) || 0);
+      return {
+        stdout,
+        outputBaseOffset,
+        totalOutputChars,
+        outputTruncated: Boolean(snapshot.outputTruncated),
+      };
+    }
+  }
+  const stdout = String(job.stdout || "");
+  const outputBaseOffset = Math.max(0, Number(job.outputBaseOffset) || 0);
+  const totalOutputChars = Math.max(outputBaseOffset + stdout.length, Number(job.totalOutputChars) || 0);
+  return {
+    stdout,
+    outputBaseOffset,
+    totalOutputChars,
+    outputTruncated: Boolean(job.outputTruncated),
+  };
 }
 
 function createOutputWindow(stdout) {
@@ -207,14 +233,25 @@ function createOutputWindow(stdout) {
 
 function refreshRunningJobSnapshot(job) {
   if (!job || job.status !== "running") return;
-  const window = createOutputWindow(readBackgroundJobOutput(job));
-  job.stdout = window.stdout;
-  job.outputBaseOffset = window.outputBaseOffset;
-  job.totalOutputChars = window.totalOutputChars;
-  job.outputTruncated = window.outputTruncated;
+  const snapshot = readBackgroundJobSnapshot(job);
+  job.stdout = snapshot.stdout;
+  job.outputBaseOffset = snapshot.outputBaseOffset;
+  job.totalOutputChars = snapshot.totalOutputChars;
+  job.outputTruncated = snapshot.outputTruncated;
 }
 
-function storeCompletedJobOutput(job, stdout) {
+function storeCompletedJobOutput(job, stdout, metadata = null) {
+  if (metadata && typeof metadata === "object") {
+    const normalizedStdout = String(metadata.stdout ?? stdout ?? "");
+    const outputBaseOffset = Math.max(0, Number(metadata.outputBaseOffset) || 0);
+    const totalOutputChars = Math.max(outputBaseOffset + normalizedStdout.length, Number(metadata.totalOutputChars) || 0);
+    job.stdout = normalizedStdout;
+    job.outputBaseOffset = outputBaseOffset;
+    job.totalOutputChars = totalOutputChars;
+    job.outputTruncated = Boolean(metadata.outputTruncated);
+    job.handle = null;
+    return;
+  }
   const window = createOutputWindow(stdout);
   job.stdout = window.stdout;
   job.outputBaseOffset = window.outputBaseOffset;
@@ -884,6 +921,8 @@ function handleJobStart(params) {
       expectedPrompt: session.lastIdlePrompt || "",
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
+      maxBufferedChars: MAX_BACKGROUND_JOB_OUTPUT_CHARS,
+      normalizeFinalOutput: false,
     });
   } catch (err) {
     releaseSessionExecution(sessionId, sessionToken);
@@ -912,7 +951,7 @@ function handleJobStart(params) {
   handle.resultPromise.then((result) => {
     job.updatedAt = Date.now();
     job.exitCode = result.exitCode ?? null;
-    storeCompletedJobOutput(job, result.stdout || "");
+    storeCompletedJobOutput(job, result.stdout || "", result);
     if (result.error === "Cancelled") {
       job.status = "cancelled";
       job.error = result.error;

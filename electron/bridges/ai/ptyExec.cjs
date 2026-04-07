@@ -162,6 +162,19 @@ function normalizePtyOutput(stdout, {
   return trimOutput ? cleaned.trim() : cleaned;
 }
 
+function appendBoundedOutput(current, chunk, maxBufferedChars) {
+  const combined = `${current || ""}${chunk || ""}`;
+  const limit = Number.isFinite(maxBufferedChars) ? Math.max(0, Math.floor(maxBufferedChars)) : 0;
+  if (limit <= 0 || combined.length <= limit) {
+    return { text: combined, dropped: 0 };
+  }
+  const dropped = combined.length - limit;
+  return {
+    text: combined.slice(dropped),
+    dropped,
+  };
+}
+
 function startPtyJob(ptyStream, command, options) {
   const {
     stripMarkers = false,
@@ -173,6 +186,8 @@ function startPtyJob(ptyStream, command, options) {
     expectedPrompt,
     typedInput = false,
     echoCommand,
+    maxBufferedChars = 0,
+    normalizeFinalOutput = true,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -181,6 +196,7 @@ function startPtyJob(ptyStream, command, options) {
   let output = "";
   let foundStart = false;
   let preStartOutput = "";
+  let outputOffset = 0;
   let timeoutId = null;
   let promptFallbackTimer = null;
   let finished = false;
@@ -215,6 +231,13 @@ function startPtyJob(ptyStream, command, options) {
     finish(stdout, found.exitCode);
   }
 
+  function appendToOutput(text) {
+    if (!text) return;
+    const next = appendBoundedOutput(output, text, maxBufferedChars);
+    output = next.text;
+    outputOffset += next.dropped;
+  }
+
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
@@ -232,15 +255,34 @@ function startPtyJob(ptyStream, command, options) {
       trackForCancellation.delete(marker);
     }
 
-    const cleaned = normalizePtyOutput(stdout, { stripMarkers, expectedPrompt });
+    const cleaned = normalizePtyOutput(stdout, {
+      stripMarkers,
+      expectedPrompt,
+      trimOutput: normalizeFinalOutput,
+      stripPrompt: normalizeFinalOutput,
+    });
+    const outputBaseOffset = foundStart ? outputOffset : 0;
+    const totalOutputChars = outputBaseOffset + cleaned.length;
     if (error) {
-      resolveResult({ ok: false, stdout: cleaned, stderr: "", exitCode: exitCode ?? -1, error });
+      resolveResult({
+        ok: false,
+        stdout: cleaned,
+        stderr: "",
+        exitCode: exitCode ?? -1,
+        error,
+        outputBaseOffset,
+        totalOutputChars,
+        outputTruncated: outputBaseOffset > 0,
+      });
     } else {
       resolveResult({
         ok: exitCode === 0 || exitCode === null,
         stdout: cleaned,
         stderr: "",
         exitCode: exitCode ?? 0,
+        outputBaseOffset,
+        totalOutputChars,
+        outputTruncated: outputBaseOffset > 0,
       });
     }
   }
@@ -277,7 +319,10 @@ function startPtyJob(ptyStream, command, options) {
         if (boundary !== -1) {
           const afterBoundary = preStartOutput.slice(boundary);
           const firstNl = afterBoundary.search(/\r?\n/);
-          output = firstNl === -1 ? "" : afterBoundary.slice(firstNl).replace(/^\r?\n/, "");
+          const initialOutput = firstNl === -1 ? "" : afterBoundary.slice(firstNl).replace(/^\r?\n/, "");
+          const next = appendBoundedOutput("", initialOutput, maxBufferedChars);
+          output = next.text;
+          outputOffset = next.dropped;
         }
         preStartOutput = "";
         schedulePromptFallback();
@@ -302,7 +347,7 @@ function startPtyJob(ptyStream, command, options) {
       return;
     }
 
-    output += text;
+    appendToOutput(text);
     schedulePromptFallback();
     checkEnd();
   }
@@ -394,6 +439,9 @@ function startPtyJob(ptyStream, command, options) {
         trimOutput: false,
         stripPrompt: false,
       }),
+      outputBaseOffset: foundStart ? outputOffset : 0,
+      totalOutputChars: foundStart ? outputOffset + output.length : 0,
+      outputTruncated: foundStart ? outputOffset > 0 : false,
       status: finished ? "finished" : "running",
       foundStart,
     }),
