@@ -957,7 +957,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     }
     return filtered
       .sort((a, b) => (b.lastConnectedAt || 0) - (a.lastConnectedAt || 0))
-      .slice(0, 20);
+      .slice(0, 6);
   }, [hosts, selectedGroupPath, search, selectedTags]);
 
   // No longer deduplicate pinned/recent hosts from the main list,
