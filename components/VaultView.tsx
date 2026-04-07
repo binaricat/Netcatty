@@ -960,16 +960,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       .slice(0, 20);
   }, [hosts, selectedGroupPath, search, selectedTags]);
 
-  // IDs of hosts already shown in Pinned/Recent sections at root level,
-  // so the main host list can exclude them to avoid duplicates.
-  const pinnedRecentIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const h of pinnedHosts) ids.add(h.id);
-    if (showRecentHosts) {
-      for (const h of recentHosts) ids.add(h.id);
-    }
-    return ids;
-  }, [pinnedHosts, recentHosts, showRecentHosts]);
+  // No longer deduplicate pinned/recent hosts from the main list,
+  // so hosts always appear in their groups regardless of pinned/recent status.
+  const pinnedRecentIds = useMemo(() => new Set<string>(), []);
 
   // For tree view: apply search, tag filter, and sorting, but not group filtering
   const treeViewHosts = useMemo(() => {
