@@ -595,10 +595,17 @@ const WRITE_METHODS = new Set([
 
 /**
  * Validate that a sessionId is allowed in the current scope.
- * Checks both process-level SCOPED_SESSION_IDS and per-chatSession scoped metadata.
+ * Checks explicit per-call scopedSessionIds first (static MCP scope mode),
+ * then per-chatSession scoped metadata (dynamic mode), then global scope.
  */
-function validateSessionScope(sessionId, chatSessionId) {
+function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null) {
   if (!sessionId) return null; // will fail at handler level
+  if (Array.isArray(explicitScopedIds) && explicitScopedIds.length > 0) {
+    if (!explicitScopedIds.includes(sessionId)) {
+      return `Session "${sessionId}" is not in the current scope.`;
+    }
+    return null;
+  }
   const scopedIds = getScopedSessionIds(chatSessionId);
   if (scopedIds && scopedIds.length > 0 && !scopedIds.includes(sessionId)) {
     return `Session "${sessionId}" is not in the current scope.`;
@@ -627,7 +634,7 @@ async function dispatch(method, params) {
   // Validate session scope *before* queuing approval so out-of-scope
   // requests fail fast without blocking the session's write lock.
   if (method !== "netcatty/getContext" && params?.sessionId) {
-    const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
+    const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId, params?.scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
 
@@ -1008,28 +1015,28 @@ function getScopedJob(jobId, chatSessionId) {
 }
 
 function handleJobPoll(params) {
-  const { jobId, offset = 0, chatSessionId } = params || {};
+  const { jobId, offset = 0, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
   // Re-check session scope so a caller that lost access to the host
   // cannot continue reading output from jobs on that session.
-  // This covers both dynamic (chatSessionId) and static (NETCATTY_MCP_SESSION_IDS) scoping.
+  // Covers dynamic (chatSessionId), static (scopedSessionIds), and global modes.
   if (job.sessionId) {
-    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null);
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
   return serializeBackgroundJob(job, offset);
 }
 
 function handleJobStop(params) {
-  const { jobId, chatSessionId } = params || {};
+  const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
-  // Re-check session scope for both dynamic and static scoping modes.
+  // Re-check session scope for dynamic, static, and global scoping modes.
   if (job.sessionId) {
-    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null);
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
   if (job.status === "running") {
@@ -1159,4 +1166,7 @@ module.exports = {
   setMainWindowGetter,
   resolveApprovalFromRenderer,
   clearPendingApprovals,
+  reserveSessionExecution,
+  releaseSessionExecution,
+  getSessionBusyError,
 };

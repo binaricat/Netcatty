@@ -1029,6 +1029,19 @@ function registerHandlers(ipcMain) {
       return { ok: false, error: "Session not found" };
     }
 
+    // Honor the per-session execution lock so this IPC path does not race with
+    // long-running background jobs started via terminal_start.
+    const busyErr = mcpServerBridge.getSessionBusyError?.(sessionId);
+    if (busyErr) return busyErr;
+    const reservation = mcpServerBridge.reserveSessionExecution?.(sessionId, "exec");
+    if (reservation && !reservation.ok) return reservation;
+    const sessionToken = reservation?.token;
+    const releaseLock = () => {
+      if (sessionToken) {
+        try { mcpServerBridge.releaseSessionExecution?.(sessionId, sessionToken); } catch {}
+      }
+    };
+
     // Look up device type from metadata (set by renderer from Host.deviceType).
     // Mosh sessions use a shell-backed PTY, so network device mode only applies to SSH/serial.
     // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
@@ -1043,12 +1056,26 @@ function registerHandlers(ipcMain) {
     if (!isNetworkDevice) {
       const safety = mcpServerBridge.checkCommandSafety(command);
       if (safety.blocked) {
+        releaseLock();
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
     }
 
+    // Helper: ensure the session lock is released once the promise settles
+    // (or immediately on a synchronous error/early return).
+    const withLockRelease = (factory) => {
+      try {
+        const result = factory();
+        return Promise.resolve(result).finally(releaseLock);
+      } catch (err) {
+        releaseLock();
+        return { ok: false, error: err?.message || String(err) };
+      }
+    };
+
     try {
       if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
+        releaseLock();
         return {
           ok: false,
           error: "AI execution is not supported for this local shell executable. Configure the local terminal to use bash/zsh/sh, fish, PowerShell/pwsh, or cmd.exe.",
@@ -1062,18 +1089,18 @@ function registerHandlers(ipcMain) {
       if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaRawPty(ptyStream, command, {
+        return withLockRelease(() => execViaRawPty(ptyStream, command, {
           timeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
           encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
-        });
+        }));
       }
 
       // Prefer PTY stream (visible in terminal)
       if (ptyStream && typeof ptyStream.write === "function") {
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaPty(ptyStream, command, {
+        return withLockRelease(() => execViaPty(ptyStream, command, {
           stripMarkers: true,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           timeoutMs,
@@ -1089,11 +1116,12 @@ function registerHandlers(ipcMain) {
               syntheticEcho: true,
             });
           },
-        });
+        }));
       }
 
       // Network devices require an interactive PTY for raw command execution.
       if (isNetworkDevice) {
+        releaseLock();
         return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
       }
 
@@ -1102,27 +1130,29 @@ function registerHandlers(ipcMain) {
       if (sshClient && typeof sshClient.exec === "function") {
         const { execViaChannel } = require("./ai/ptyExec.cjs");
         const channelTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaChannel(sshClient, command, {
+        return withLockRelease(() => execViaChannel(sshClient, command, {
           timeoutMs: channelTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
-        });
+        }));
       }
 
       // Serial port: raw command execution (no shell wrapping)
       if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaRawPty(session.serialPort, command, {
+        return withLockRelease(() => execViaRawPty(session.serialPort, command, {
           timeoutMs: serialTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
           encoding: session.serialEncoding || "utf8",
-        });
+        }));
       }
 
+      releaseLock();
       return { ok: false, error: "No terminal stream or SSH client available for this session" };
     } catch (err) {
+      releaseLock();
       return { ok: false, error: err?.message || String(err) };
     }
   });
