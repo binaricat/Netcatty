@@ -578,6 +578,12 @@ function startPtyJob(ptyStream, command, options) {
 
     if (!foundStart) {
       preStartOutput += text;
+      // Cap preStartOutput for background jobs so a noisy idle PTY can't
+      // accumulate megabytes before the start marker arrives. We only need
+      // enough tail to find the marker boundary.
+      if (maxBufferedChars > 0 && preStartOutput.length > maxBufferedChars) {
+        preStartOutput = preStartOutput.slice(preStartOutput.length - maxBufferedChars);
+      }
       const combined = pendingStart + text;
       pendingStart = "";
       const startMarker = marker + "_S";

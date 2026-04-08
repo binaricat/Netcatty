@@ -986,22 +986,15 @@ function handleJobStart(params) {
     storeCompletedJobOutput(job, result.stdout || "", result);
     const isForcedCancel = typeof result.error === "string" && result.error.includes("forced");
     if (result.error === "Cancelled" || isForcedCancel) {
+      // Forced cancel means the process ignored SIGINT for the cancel
+      // wall-clock window. We mark the job as cancelled and release the
+      // lock so the session is reusable; the error message tells the
+      // caller the process may still be running so subsequent commands
+      // should be considered carefully. This is consistent: callers see
+      // completed=true exactly when the lock is no longer held.
+      job.status = "cancelled";
       job.error = result.error;
-      if (isForcedCancel) {
-        // The process may still be attached to the PTY. Hold the session
-        // lock and keep the job's status as "stopping" so serializeBackgroundJob
-        // reports completed=false until the lock is actually released.
-        // After the grace period, transition to "cancelled" + release the lock.
-        job.status = "stopping";
-        setTimeout(() => {
-          job.status = "cancelled";
-          job.updatedAt = Date.now();
-          releaseSessionExecution(sessionId, sessionToken);
-        }, 60000);
-      } else {
-        job.status = "cancelled";
-        releaseSessionExecution(sessionId, sessionToken);
-      }
+      releaseSessionExecution(sessionId, sessionToken);
       return;
     }
     if (result.error) {
