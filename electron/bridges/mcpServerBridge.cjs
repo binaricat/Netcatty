@@ -265,7 +265,7 @@ function storeCompletedJobOutput(job, stdout, metadata = null) {
 
 function pruneCompletedBackgroundJobs(now = Date.now()) {
   for (const [jobId, job] of backgroundJobs) {
-    if (job.status === "running") continue;
+    if (job.status === "running" || job.status === "stopping") continue;
     const updatedAt = Number(job.updatedAt) || 0;
     if (updatedAt > 0 && now - updatedAt > BACKGROUND_JOB_RETENTION_MS) {
       backgroundJobs.delete(jobId);

@@ -390,14 +390,12 @@ function startPtyJob(ptyStream, command, options) {
       trackForCancellation.delete(marker);
     }
 
-    const visibleStdout = foundStart
-      ? visibleOutput
-      : normalizePtyOutput(stdout, {
-        stripMarkers,
-        expectedPrompt,
-        trimOutput: false,
-        stripPrompt: false,
-      });
+    const visibleStdout = normalizePtyOutput(stdout, {
+      stripMarkers,
+      expectedPrompt,
+      trimOutput: false,
+      stripPrompt: true,
+    });
     const cleaned = normalizeFinalOutput
       ? normalizePtyOutput(stdout, {
         stripMarkers,
