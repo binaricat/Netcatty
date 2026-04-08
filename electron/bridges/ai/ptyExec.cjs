@@ -190,30 +190,19 @@ function consumeVisibleText(carry, chunk) {
   let visibleText = "";
   let index = 0;
 
-  // Helper: erase the current (final) line in visibleText. Used for \r so that
-  // progress bars (e.g. "10%\r20%\r30%") collapse to the latest frame instead
-  // of accumulating every redraw.
-  const eraseCurrentLine = () => {
-    const lastNl = visibleText.lastIndexOf("\n");
-    if (lastNl === -1) {
-      visibleText = "";
-    } else {
-      visibleText = visibleText.slice(0, lastNl + 1);
-    }
-  };
-
   while (index < input.length) {
     const ch = input[index];
 
     if (ch === "\r") {
-      // \r without an immediately-following \n: treat as carriage return
-      // (reset current line). \r\n is just a newline — leave the \n to be
-      // appended on the next iteration.
+      // Preserve \r so the caller can apply it against the accumulated
+      // visibleOutput buffer (handles cross-chunk progress redraws like
+      // "10%" then "\r20%"). Collapse \r\n into a single \n.
       if (input[index + 1] === "\n") {
-        index += 1; // skip \r, fall through to handle \n normally
+        visibleText += "\n";
+        index += 2;
         continue;
       }
-      eraseCurrentLine();
+      visibleText += "\r";
       index += 1;
       continue;
     }
@@ -446,16 +435,16 @@ function startPtyJob(ptyStream, command, options) {
 
   function schedulePromptFallback() {
     clearPromptFallback();
-    // Disable the prompt-suffix completion fallback for background jobs.
-    // Long-running commands often print prompt-like text (nested shells,
-    // ssh, sudo -s, REPLs) and would be misdetected as completed.
-    // Background jobs rely strictly on the end marker.
-    if (maxBufferedChars > 0) return;
     if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+    // Use a longer delay for background jobs so commands that open a nested
+    // shell or REPL (ssh, sudo -s, python REPL) have time to produce more
+    // output past their initial prompt and avoid being misdetected as
+    // completed. The recheck at fire-time naturally rejects those cases.
+    const delayMs = maxBufferedChars > 0 ? 10000 : 250;
     promptFallbackTimer = setTimeout(() => {
       if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
       finish(output, null, null);
-    }, 250);
+    }, delayMs);
   }
 
   function checkEnd() {
@@ -467,6 +456,39 @@ function startPtyJob(ptyStream, command, options) {
 
   // Carry buffer for incomplete marker lines split across chunks.
   let visibleMarkerCarry = "";
+
+  // Apply \r as carriage return: erase the current line in visibleOutput.
+  // This handles progress redraws (npm/pip/curl) that use \r to reset.
+  // Returns the input text with \r processed against visibleOutput.
+  function applyCarriageReturns(text) {
+    if (!text || text.indexOf("\r") === -1) return text;
+    let result = "";
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "\r") {
+        // Erase the current line: anything after the last \n in result, or
+        // (if result has no newline yet) anything after the last \n in
+        // visibleOutput too. The current "line" is the unbroken tail.
+        const lastNlInResult = result.lastIndexOf("\n");
+        if (lastNlInResult >= 0) {
+          result = result.slice(0, lastNlInResult + 1);
+        } else {
+          result = "";
+          // Also erase the trailing line of visibleOutput so cross-chunk
+          // progress redraws collapse to the latest frame.
+          const lastNlInBuffer = visibleOutput.lastIndexOf("\n");
+          if (lastNlInBuffer >= 0) {
+            visibleOutput = visibleOutput.slice(0, lastNlInBuffer + 1);
+          } else {
+            visibleOutput = "";
+          }
+        }
+        continue;
+      }
+      result += ch;
+    }
+    return result;
+  }
 
   function appendToVisible(text) {
     if (!text) return;
@@ -498,6 +520,8 @@ function startPtyJob(ptyStream, command, options) {
       cleanVisible = cleanVisible.replace(new RegExp(`^[^\r\n]*${marker}[^\r\n]*[\r\n]*`, "gm"), "");
       if (!cleanVisible) return;
     }
+    cleanVisible = applyCarriageReturns(cleanVisible);
+    if (!cleanVisible && !visibleOutput) return;
     const next = appendBoundedOutput(visibleOutput, cleanVisible, maxBufferedChars);
     visibleOutput = next.text;
     visibleOutputOffset += next.dropped;
