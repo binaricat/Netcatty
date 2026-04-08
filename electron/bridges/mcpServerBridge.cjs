@@ -179,6 +179,9 @@ function cancelBackgroundJobsForSession(chatSessionId) {
     if (job.status !== "running") continue;
     try {
       job.handle?.cancel?.();
+      job.status = "stopping";
+      job.error = "Cancellation requested";
+      job.updatedAt = Date.now();
     } catch {
       // Ignore cancellation failures
     }
@@ -194,7 +197,7 @@ function readBackgroundJobSnapshot(job) {
       outputTruncated: false,
     };
   }
-  if (job.status === "running") {
+  if (job.status === "running" || job.status === "stopping") {
     const snapshot = job.handle?.getSnapshot?.();
     if (snapshot) {
       const stdout = String(snapshot.stdout || "");
@@ -232,7 +235,7 @@ function createOutputWindow(stdout) {
 }
 
 function refreshRunningJobSnapshot(job) {
-  if (!job || job.status !== "running") return;
+  if (!job || (job.status !== "running" && job.status !== "stopping")) return;
   const snapshot = readBackgroundJobSnapshot(job);
   job.stdout = snapshot.stdout;
   job.outputBaseOffset = snapshot.outputBaseOffset;
@@ -271,7 +274,7 @@ function pruneCompletedBackgroundJobs(now = Date.now()) {
 }
 
 function serializeBackgroundJob(job, offset = 0) {
-  if (job.status === "running") {
+  if (job.status === "running" || job.status === "stopping") {
     refreshRunningJobSnapshot(job);
   }
   const stdout = job.stdout || "";
@@ -287,7 +290,7 @@ function serializeBackgroundJob(job, offset = 0) {
     sessionId: job.sessionId,
     command: job.command,
     status: job.status,
-    completed: job.status !== "running",
+    completed: job.status !== "running" && job.status !== "stopping",
     exitCode: job.exitCode,
     error: job.error,
     startedAt: job.startedAt,
@@ -1014,8 +1017,8 @@ function handleJobStop(params) {
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
     }
-    job.status = "cancelled";
-    job.error = "Cancelled";
+    job.status = "stopping";
+    job.error = "Cancellation requested";
     job.updatedAt = Date.now();
   }
   return serializeBackgroundJob(job, 0);

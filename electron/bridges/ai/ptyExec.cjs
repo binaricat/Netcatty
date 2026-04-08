@@ -175,6 +175,85 @@ function appendBoundedOutput(current, chunk, maxBufferedChars) {
   };
 }
 
+function consumeVisibleText(carry, chunk) {
+  const input = `${carry || ""}${chunk || ""}`;
+  if (!input) {
+    return { visibleText: "", carry: "" };
+  }
+
+  let visibleText = "";
+  let index = 0;
+
+  while (index < input.length) {
+    const ch = input[index];
+
+    if (ch === "\r") {
+      index += 1;
+      continue;
+    }
+
+    if (ch !== "\u001b") {
+      visibleText += ch;
+      index += 1;
+      continue;
+    }
+
+    if (index + 1 >= input.length) {
+      break;
+    }
+
+    const next = input[index + 1];
+
+    if (next === "[") {
+      let cursor = index + 2;
+      let complete = false;
+      while (cursor < input.length) {
+        const code = input.charCodeAt(cursor);
+        if (code >= 0x40 && code <= 0x7e) {
+          index = cursor + 1;
+          complete = true;
+          break;
+        }
+        cursor += 1;
+      }
+      if (!complete) break;
+      continue;
+    }
+
+    if (next === "]") {
+      let cursor = index + 2;
+      let complete = false;
+      while (cursor < input.length) {
+        const oscChar = input[cursor];
+        if (oscChar === "\u0007") {
+          index = cursor + 1;
+          complete = true;
+          break;
+        }
+        if (oscChar === "\u001b") {
+          if (cursor + 1 >= input.length) break;
+          if (input[cursor + 1] === "\\") {
+            index = cursor + 2;
+            complete = true;
+            break;
+          }
+        }
+        cursor += 1;
+      }
+      if (!complete) break;
+      continue;
+    }
+
+    visibleText += ch;
+    index += 1;
+  }
+
+  return {
+    visibleText,
+    carry: input.slice(index),
+  };
+}
+
 function startPtyJob(ptyStream, command, options) {
   const {
     stripMarkers = false,
@@ -192,13 +271,18 @@ function startPtyJob(ptyStream, command, options) {
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   const resolvedShellKind = shellKind || "posix";
+  const CANCEL_GRACE_MS = 5000;
 
   let output = "";
   let foundStart = false;
   let preStartOutput = "";
-  let outputOffset = 0;
+  let visibleOutput = "";
+  let visibleOutputOffset = 0;
+  let visibleCarry = "";
   let timeoutId = null;
   let promptFallbackTimer = null;
+  let cancelTimerId = null;
+  let cancelRequested = false;
   let finished = false;
   let unsubscribe = null;
   const cleanupFns = [];
@@ -213,6 +297,46 @@ function startPtyJob(ptyStream, command, options) {
       clearTimeout(promptFallbackTimer);
       promptFallbackTimer = null;
     }
+  }
+
+  function clearCancelTimer() {
+    if (cancelTimerId) {
+      clearTimeout(cancelTimerId);
+      cancelTimerId = null;
+    }
+  }
+
+  function sendInterrupt() {
+    try {
+      if (typeof ptyStream.signal === "function") {
+        ptyStream.signal("INT");
+      }
+    } catch {
+      // Ignore signal failures and fall back to ETX.
+    }
+    try {
+      if (typeof ptyStream.write === "function") {
+        ptyStream.write("\x03");
+      }
+    } catch {
+      // Ignore PTY write failures during cancellation.
+    }
+  }
+
+  function requestCancel() {
+    if (finished || cancelRequested) return;
+    cancelRequested = true;
+    clearPromptFallback();
+    clearCancelTimer();
+    sendInterrupt();
+    cancelTimerId = setTimeout(() => {
+      sendInterrupt();
+      finish(foundStart ? output : preStartOutput, -1, "Cancelled");
+    }, CANCEL_GRACE_MS);
+    cleanupFns.push(() => clearCancelTimer());
+    setTimeout(() => {
+      if (!finished) sendInterrupt();
+    }, 150);
   }
 
   function schedulePromptFallback() {
@@ -231,11 +355,21 @@ function startPtyJob(ptyStream, command, options) {
     finish(stdout, found.exitCode);
   }
 
+  function appendToVisible(text) {
+    if (!text) return;
+    const normalized = consumeVisibleText(visibleCarry, text);
+    visibleCarry = normalized.carry;
+    if (!normalized.visibleText) return;
+    const next = appendBoundedOutput(visibleOutput, normalized.visibleText, maxBufferedChars);
+    visibleOutput = next.text;
+    visibleOutputOffset += next.dropped;
+  }
+
   function appendToOutput(text) {
     if (!text) return;
     const next = appendBoundedOutput(output, text, maxBufferedChars);
     output = next.text;
-    outputOffset += next.dropped;
+    appendToVisible(text);
   }
 
   function finish(stdout, exitCode, error) {
@@ -243,6 +377,7 @@ function startPtyJob(ptyStream, command, options) {
     finished = true;
     clearTimeout(timeoutId);
     clearPromptFallback();
+    clearCancelTimer();
     unsubscribe?.();
     for (const fn of cleanupFns) {
       try {
@@ -255,21 +390,33 @@ function startPtyJob(ptyStream, command, options) {
       trackForCancellation.delete(marker);
     }
 
-    const cleaned = normalizePtyOutput(stdout, {
-      stripMarkers,
-      expectedPrompt,
-      trimOutput: normalizeFinalOutput,
-      stripPrompt: normalizeFinalOutput,
-    });
-    const outputBaseOffset = foundStart ? outputOffset : 0;
-    const totalOutputChars = outputBaseOffset + cleaned.length;
-    if (error) {
+    const visibleStdout = foundStart
+      ? visibleOutput
+      : normalizePtyOutput(stdout, {
+        stripMarkers,
+        expectedPrompt,
+        trimOutput: false,
+        stripPrompt: false,
+      });
+    const cleaned = normalizeFinalOutput
+      ? normalizePtyOutput(stdout, {
+        stripMarkers,
+        expectedPrompt,
+        trimOutput: true,
+        stripPrompt: true,
+      })
+      : visibleStdout;
+    const outputBaseOffset = foundStart ? visibleOutputOffset : 0;
+    const totalOutputChars = outputBaseOffset + visibleStdout.length;
+    const finalError = (!error && cancelRequested) ? "Cancelled" : error;
+    const finalExitCode = finalError === "Cancelled" ? (exitCode ?? 130) : exitCode;
+    if (finalError) {
       resolveResult({
         ok: false,
         stdout: cleaned,
         stderr: "",
-        exitCode: exitCode ?? -1,
-        error,
+        exitCode: finalExitCode ?? -1,
+        error: finalError,
         outputBaseOffset,
         totalOutputChars,
         outputTruncated: outputBaseOffset > 0,
@@ -279,7 +426,7 @@ function startPtyJob(ptyStream, command, options) {
         ok: exitCode === 0 || exitCode === null,
         stdout: cleaned,
         stderr: "",
-        exitCode: exitCode ?? 0,
+        exitCode: finalExitCode ?? 0,
         outputBaseOffset,
         totalOutputChars,
         outputTruncated: outputBaseOffset > 0,
@@ -320,9 +467,11 @@ function startPtyJob(ptyStream, command, options) {
           const afterBoundary = preStartOutput.slice(boundary);
           const firstNl = afterBoundary.search(/\r?\n/);
           const initialOutput = firstNl === -1 ? "" : afterBoundary.slice(firstNl).replace(/^\r?\n/, "");
-          const next = appendBoundedOutput("", initialOutput, maxBufferedChars);
-          output = next.text;
-          outputOffset = next.dropped;
+          output = "";
+          visibleOutput = "";
+          visibleOutputOffset = 0;
+          visibleCarry = "";
+          appendToOutput(initialOutput);
         }
         preStartOutput = "";
         schedulePromptFallback();
@@ -348,7 +497,12 @@ function startPtyJob(ptyStream, command, options) {
     }
 
     appendToOutput(text);
-    schedulePromptFallback();
+    if (!cancelRequested) {
+      schedulePromptFallback();
+    } else if (hasExpectedPromptSuffix(output, expectedPrompt)) {
+      finish(output, 130, "Cancelled");
+      return;
+    }
     checkEnd();
   }
 
@@ -363,7 +517,7 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   timeoutId = setTimeout(() => {
-    if (typeof ptyStream.write === "function") ptyStream.write("\x03");
+    sendInterrupt();
     const timeoutSec = Math.round(timeoutMs / 1000);
     finish("", -1, `Command timed out after ${timeoutSec}s without output`);
   }, timeoutMs);
@@ -371,8 +525,7 @@ function startPtyJob(ptyStream, command, options) {
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
   const cancel = () => {
-    if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-    finish(foundStart ? output : preStartOutput, -1, "Cancelled");
+    requestCancel();
   };
 
   if (trackForCancellation) {
@@ -388,8 +541,8 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   if (typeof ptyStream.on === "function") {
-    const onClose = () => finish(foundStart ? output : preStartOutput, null, "Stream closed unexpectedly");
-    const onError = (err) => finish(foundStart ? output : preStartOutput, -1, `Stream error: ${err?.message || err}`);
+    const onClose = () => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Stream closed unexpectedly");
+    const onError = (err) => finish(foundStart ? output : preStartOutput, -1, cancelRequested ? "Cancelled" : `Stream error: ${err?.message || err}`);
     ptyStream.on("close", onClose);
     ptyStream.on("end", onClose);
     ptyStream.on("error", onError);
@@ -400,7 +553,7 @@ function startPtyJob(ptyStream, command, options) {
     });
   }
   if (typeof ptyStream.onExit === "function") {
-    const disposable = ptyStream.onExit(() => finish(foundStart ? output : preStartOutput, null, "Process exited"));
+    const disposable = ptyStream.onExit(() => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Process exited"));
     cleanupFns.push(() => {
       try {
         disposable?.dispose?.();
@@ -412,8 +565,7 @@ function startPtyJob(ptyStream, command, options) {
 
   if (abortSignal) {
     const onAbort = () => {
-      if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-      finish(foundStart ? output : preStartOutput, -1, "Cancelled");
+      requestCancel();
     };
     abortSignal.addEventListener("abort", onAbort, { once: true });
     cleanupFns.push(() => abortSignal.removeEventListener("abort", onAbort));
@@ -433,16 +585,16 @@ function startPtyJob(ptyStream, command, options) {
     marker,
     cancel,
     getSnapshot: () => ({
-      stdout: normalizePtyOutput(foundStart ? output : preStartOutput, {
+      stdout: foundStart ? visibleOutput : normalizePtyOutput(preStartOutput, {
         stripMarkers,
         expectedPrompt,
         trimOutput: false,
         stripPrompt: false,
       }),
-      outputBaseOffset: foundStart ? outputOffset : 0,
-      totalOutputChars: foundStart ? outputOffset + output.length : 0,
-      outputTruncated: foundStart ? outputOffset > 0 : false,
-      status: finished ? "finished" : "running",
+      outputBaseOffset: foundStart ? visibleOutputOffset : 0,
+      totalOutputChars: foundStart ? visibleOutputOffset + visibleOutput.length : 0,
+      outputTruncated: foundStart ? visibleOutputOffset > 0 : false,
+      status: finished ? "finished" : (cancelRequested ? "stopping" : "running"),
       foundStart,
     }),
     resultPromise,
