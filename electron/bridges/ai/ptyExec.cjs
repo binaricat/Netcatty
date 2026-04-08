@@ -271,7 +271,7 @@ function startPtyJob(ptyStream, command, options) {
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   const resolvedShellKind = shellKind || "posix";
-  const CANCEL_GRACE_MS = 5000;
+  const CANCEL_RETRY_MS = 5000;
 
   let output = "";
   let foundStart = false;
@@ -281,7 +281,7 @@ function startPtyJob(ptyStream, command, options) {
   let visibleCarry = "";
   let timeoutId = null;
   let promptFallbackTimer = null;
-  let cancelTimerId = null;
+  let cancelRetryTimerId = null;
   let cancelRequested = false;
   let finished = false;
   let unsubscribe = null;
@@ -299,11 +299,24 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
-  function clearCancelTimer() {
-    if (cancelTimerId) {
-      clearTimeout(cancelTimerId);
-      cancelTimerId = null;
+  function clearCancelRetryTimer() {
+    if (cancelRetryTimerId) {
+      clearTimeout(cancelRetryTimerId);
+      cancelRetryTimerId = null;
     }
+  }
+
+  function armOutputTimeout() {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      sendInterrupt();
+      if (cancelRequested) {
+        armOutputTimeout();
+        return;
+      }
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      finish(foundStart ? output : preStartOutput, -1, `Command timed out after ${timeoutSec}s without output`);
+    }, timeoutMs);
   }
 
   function sendInterrupt() {
@@ -327,13 +340,14 @@ function startPtyJob(ptyStream, command, options) {
     if (finished || cancelRequested) return;
     cancelRequested = true;
     clearPromptFallback();
-    clearCancelTimer();
+    clearCancelRetryTimer();
     sendInterrupt();
-    cancelTimerId = setTimeout(() => {
+    cancelRetryTimerId = setTimeout(function retryCancel() {
+      if (finished || !cancelRequested) return;
       sendInterrupt();
-      finish(foundStart ? output : preStartOutput, -1, "Cancelled");
-    }, CANCEL_GRACE_MS);
-    cleanupFns.push(() => clearCancelTimer());
+      cancelRetryTimerId = setTimeout(retryCancel, CANCEL_RETRY_MS);
+    }, CANCEL_RETRY_MS);
+    armOutputTimeout();
     setTimeout(() => {
       if (!finished) sendInterrupt();
     }, 150);
@@ -377,7 +391,7 @@ function startPtyJob(ptyStream, command, options) {
     finished = true;
     clearTimeout(timeoutId);
     clearPromptFallback();
-    clearCancelTimer();
+    clearCancelRetryTimer();
     unsubscribe?.();
     for (const fn of cleanupFns) {
       try {
@@ -434,12 +448,7 @@ function startPtyJob(ptyStream, command, options) {
 
   function onData(data) {
     const text = data.toString();
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => {
-      if (typeof ptyStream.write === "function") ptyStream.write("\x03");
-      const timeoutSec = Math.round(timeoutMs / 1000);
-      finish(foundStart ? output : preStartOutput, -1, `Command timed out after ${timeoutSec}s without output`);
-    }, timeoutMs);
+    armOutputTimeout();
 
     if (!foundStart) {
       preStartOutput += text;
@@ -514,11 +523,7 @@ function startPtyJob(ptyStream, command, options) {
     };
   }
 
-  timeoutId = setTimeout(() => {
-    sendInterrupt();
-    const timeoutSec = Math.round(timeoutMs / 1000);
-    finish("", -1, `Command timed out after ${timeoutSec}s without output`);
-  }, timeoutMs);
+  armOutputTimeout();
 
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
