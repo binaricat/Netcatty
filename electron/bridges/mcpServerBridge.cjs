@@ -642,8 +642,11 @@ async function dispatch(method, params) {
   const sessionWriteLockId = (method === "netcatty/exec" || method === "netcatty/jobStart") ? params?.sessionId : null;
   pruneCompletedBackgroundJobs();
 
-  // Observer mode: block all write operations
-  if (permissionMode === "observer" && WRITE_METHODS.has(method)) {
+  // Observer mode: block all write operations *except* netcatty/jobStop,
+  // which must remain available so users can interrupt long-running jobs
+  // they started before switching to observer mode (otherwise the job
+  // would hold the per-session lock until it exits on its own).
+  if (permissionMode === "observer" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
     return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
   }
 
@@ -1175,6 +1178,11 @@ function cleanupScopedMetadata(chatSessionId) {
     scopedMetadata.delete(chatSessionId);
     cancelledChatSessions.delete(chatSessionId);
     cancelBackgroundJobsForSession(chatSessionId);
+    // Resolve any in-flight approval requests so dispatch()'s finally block
+    // releases its pendingSessionWriteApprovals entry. Without this, a chat
+    // deleted while an approval was pending would leave the per-session
+    // write lock held until the 5-minute approval timeout.
+    clearPendingApprovals(chatSessionId);
   }
 }
 
