@@ -765,6 +765,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   return (
     <div
       data-top-tabs-root
+      data-section="top-tabs"
       className="relative w-full bg-secondary app-drag"
       style={{
         ...dragRegionNoSelect,

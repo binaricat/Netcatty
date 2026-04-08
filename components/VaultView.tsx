@@ -1554,13 +1554,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Component no longer handles visibility - that's done by VaultViewWrapper
   return (
-    <div ref={rootRef} className="absolute inset-0 min-h-0 flex">
+    <div ref={rootRef} className="absolute inset-0 min-h-0 flex" data-section="vault-view">
       {/* Sidebar */}
       <TooltipProvider delayDuration={100}>
-        <div className={cn(
-          "bg-secondary/80 border-r border-border/60 flex flex-col transition-all duration-200",
-          sidebarCollapsed ? "w-14" : "w-52"
-        )}>
+        <div
+          className={cn(
+            "bg-secondary/80 border-r border-border/60 flex flex-col transition-all duration-200",
+            sidebarCollapsed ? "w-14" : "w-52"
+          )}
+          data-section="vault-sidebar"
+        >
           <div className={cn(
             "py-4 flex items-center",
             sidebarCollapsed ? "px-2 justify-center" : "px-4"
@@ -1723,12 +1726,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       </TooltipProvider>
 
       {/* Main Area */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0 relative">
+      <div
+        className="flex-1 min-w-0 flex flex-col min-h-0 relative"
+        data-section="vault-main"
+      >
         <header
           className={cn(
             "border-b border-border/50 bg-secondary/80 backdrop-blur app-drag",
             !isHostsSectionActive && "hidden",
           )}
+          data-section="vault-hosts-header"
         >
           <div className="h-14 px-4 py-2 flex items-center gap-3">
             <div className="relative flex-1 app-no-drag">
@@ -1935,6 +1942,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             "flex-1 overflow-auto px-4 py-4 space-y-6",
             !isHostsSectionActive && "hidden",
           )}
+          data-section="vault-host-list"
           onDragEndCapture={() => setDragOverDropTarget(null)}
         >
                 <section className="space-y-2">

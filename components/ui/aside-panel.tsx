@@ -45,6 +45,11 @@ interface AsidePanelProps {
     className?: string;
     width?: string;
     layout?: AsidePanelLayout;
+    /**
+     * Optional stable identifier emitted as `data-section` on the panel
+     * root. Used as a targeting hook for Custom CSS (Settings → Appearance).
+     */
+    dataSection?: string;
 }
 
 interface AsidePanelHeaderProps {
@@ -173,6 +178,11 @@ interface AsidePanelStackProps {
     className?: string;
     width?: string;
     layout?: AsidePanelLayout;
+    /**
+     * Optional stable identifier emitted as `data-section` on the panel
+     * root. Used as a targeting hook for Custom CSS.
+     */
+    dataSection?: string;
 }
 
 export type AsidePanelLayout = 'overlay' | 'inline';
@@ -200,6 +210,7 @@ export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
     className,
     width = 'w-[380px]',
     layout = 'overlay',
+    dataSection,
 }) => {
     const [stack, setStack] = useState<AsideContentItem[]>([initialItem]);
 
@@ -252,7 +263,8 @@ export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
                 layout === 'overlay' && width,
                 className
             )}
-            style={inlineStyle}>
+            style={inlineStyle}
+            data-section={dataSection}>
                 <AsidePanelHeader
                     title={currentItem.title}
                     subtitle={currentItem.subtitle}
@@ -280,6 +292,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
     className,
     width = 'w-[380px]',
     layout = 'overlay',
+    dataSection,
 }) => {
     if (!open) return null;
 
@@ -299,7 +312,8 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
             layout === 'overlay' && width,
             className
         )}
-        style={inlineStyle}>
+        style={inlineStyle}
+        data-section={dataSection}>
             {title && (
                 <AsidePanelHeader
                     title={title}

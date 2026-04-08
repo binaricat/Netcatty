@@ -32,6 +32,7 @@ import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { ToastProvider, toast } from './components/ui/toast';
 import { VaultView, VaultSection } from './components/VaultView';
+import { QuickAddSnippetDialog } from './components/QuickAddSnippetDialog';
 import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
 import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
 import { cn } from './lib/utils';
@@ -1537,6 +1538,17 @@ function App({ settings }: { settings: SettingsState }) {
           );
         })}
       </div>
+
+      {/* Global "quick add snippet" dialog, triggered by the
+          netcatty:snippets:add window event (from ScriptsSidePanel "+"). */}
+      <QuickAddSnippetDialog
+        snippets={snippets}
+        packages={snippetPackages}
+        onCreateSnippet={(snippet) => updateSnippets([...snippets, snippet])}
+        onCreatePackage={(pkg) =>
+          updateSnippetPackages(Array.from(new Set([...snippetPackages, pkg])))
+        }
+      />
 
       {isQuickSwitcherOpen && (
         <Suspense fallback={null}>

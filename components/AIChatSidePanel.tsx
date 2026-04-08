@@ -775,7 +775,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   if (!isVisible) return null;
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full bg-background" data-section="ai-chat-panel">
       {/* ── Header ── */}
       <div className="px-2.5 py-1.5 flex items-center justify-between border-b border-border/50 shrink-0">
         <AgentSelector

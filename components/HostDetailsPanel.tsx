@@ -634,6 +634,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       onClose={onCancel}
       width="w-[420px]"
       layout={layout}
+      dataSection="host-details-panel"
       title={
         initialData ? t("hostDetails.title.details") : t("hostDetails.title.new")
       }

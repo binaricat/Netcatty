@@ -1819,7 +1819,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!activeWorkspace || !isFocusMode) return null;
 
     return (
-      <div className="w-56 flex-shrink-0 bg-secondary/50 border-r border-border/50 flex flex-col">
+      <div
+        className="w-56 flex-shrink-0 bg-secondary/50 border-r border-border/50 flex flex-col"
+        data-section="terminal-workspace-sidebar"
+      >
         {/* Header with view toggle */}
         <div className="h-10 flex items-center justify-between px-3 border-b border-border/50">
           <span className="text-xs font-medium text-muted-foreground">
@@ -1890,6 +1893,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       <div
         ref={workspaceOuterRef}
         className="absolute inset-0 bg-background flex flex-col"
+        data-section="terminal-workspace"
         style={{
           visibility: isTerminalLayerVisible ? 'visible' : 'hidden',
           pointerEvents: isTerminalLayerVisible ? 'auto' : 'none',

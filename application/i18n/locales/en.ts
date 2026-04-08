@@ -237,9 +237,9 @@ const en: Messages = {
   'settings.appearance.themeColor.dark': 'Dark palette',
   'settings.appearance.customCss': 'Custom CSS',
   'settings.appearance.customCss.desc':
-    'Add custom CSS to personalize the app appearance. Changes apply immediately.',
+    'Add custom CSS to personalize the app appearance. Changes apply immediately. Major UI regions expose a [data-section="..."] attribute you can target — e.g. snippets-panel, host-details-panel, group-details-panel, serial-host-details-panel, ai-chat-panel, vault-sidebar, vault-main, vault-hosts-header, vault-host-list, vault-view, terminal-workspace, terminal-workspace-sidebar, top-tabs.',
   'settings.appearance.customCss.placeholder':
-    '/* Example: */\n.terminal { background: #1a1a2e !important; }\n:root { --radius: 0.25rem; }',
+    '/* Examples — use !important to beat Tailwind utility specificity */\n\n/* Make snippet sidebar text larger */\n[data-section="snippets-panel"] {\n  font-size: 14px !important;\n}\n\n/* Custom terminal background */\n.terminal { background: #1a1a2e !important; }\n\n/* Tweak global border radius */\n:root { --radius: 0.25rem; }',
   'settings.appearance.language': 'Language',
   'settings.appearance.language.desc': 'Choose the UI language',
   'settings.appearance.uiFont': 'Interface Font',

@@ -168,6 +168,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
       subtitle={initialData.label}
       className="z-40"
       layout={layout}
+      dataSection="serial-host-details-panel"
     >
       <AsidePanelContent>
         {/* Label */}

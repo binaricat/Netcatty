@@ -5,7 +5,7 @@
  * Clicking a snippet executes it in the focused terminal session.
  */
 
-import { ChevronRight, Package, Search, Zap } from 'lucide-react';
+import { ChevronRight, Package, Plus, Search, Zap } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
@@ -119,15 +119,25 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     onSnippetClick(command, noAutoRun);
   }, [onSnippetClick]);
 
+  const handleAddSnippet = useCallback(() => {
+    // Let the App shell listen and navigate to the Snippets section with
+    // the "add" panel pre-opened, so the user does not have to leave the
+    // terminal to jump back and click "New Snippet".
+    window.dispatchEvent(new CustomEvent('netcatty:snippets:add'));
+  }, []);
+
   if (!isVisible) return null;
 
   const hasAnyContent = snippets.length > 0 || packages.length > 0;
 
   return (
-    <div className="h-full flex flex-col bg-background overflow-hidden">
-      {/* Search */}
-      <div className="shrink-0 px-2 py-1.5 border-b border-border/50">
-        <div className="relative">
+    <div
+      className="h-full flex flex-col bg-background overflow-hidden"
+      data-section="snippets-panel"
+    >
+      {/* Search + Add */}
+      <div className="shrink-0 px-2 py-1.5 border-b border-border/50 flex items-center gap-1.5">
+        <div className="relative flex-1 min-w-0">
           <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
@@ -136,6 +146,15 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             className="h-7 pl-7 text-xs bg-muted/30 border-none"
           />
         </div>
+        <button
+          type="button"
+          onClick={handleAddSnippet}
+          title={t('snippets.action.newSnippet')}
+          aria-label={t('snippets.action.newSnippet')}
+          className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        >
+          <Plus size={14} />
+        </button>
       </div>
 
       {/* Breadcrumb */}

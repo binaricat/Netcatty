@@ -220,9 +220,10 @@ const zhCN: Messages = {
   'settings.appearance.themeColor.light': '浅色主题',
   'settings.appearance.themeColor.dark': '深色主题',
   'settings.appearance.customCss': '自定义 CSS',
-  'settings.appearance.customCss.desc': '使用自定义 CSS 个性化界面，修改会立即生效。',
+  'settings.appearance.customCss.desc':
+    '使用自定义 CSS 个性化界面，修改会立即生效。主要 UI 区块都暴露了 [data-section="..."] 属性供你定位，比如：snippets-panel、host-details-panel、group-details-panel、serial-host-details-panel、ai-chat-panel、vault-sidebar、vault-main、vault-hosts-header、vault-host-list、vault-view、terminal-workspace、terminal-workspace-sidebar、top-tabs。',
   'settings.appearance.customCss.placeholder':
-    '/* 示例：*/\n.terminal { background: #1a1a2e !important; }\n:root { --radius: 0.25rem; }',
+    '/* 示例 — 由于 Tailwind 优先级较高，需要使用 !important */\n\n/* 放大代码片段侧边栏字号 */\n[data-section="snippets-panel"] {\n  font-size: 14px !important;\n}\n\n/* 自定义终端背景色 */\n.terminal { background: #1a1a2e !important; }\n\n/* 调整全局圆角 */\n:root { --radius: 0.25rem; }',
   'settings.appearance.language': '语言',
   'settings.appearance.language.desc': '选择界面语言',
   'settings.appearance.uiFont': '界面字体',
