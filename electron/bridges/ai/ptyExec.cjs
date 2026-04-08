@@ -390,6 +390,9 @@ function startPtyJob(ptyStream, command, options) {
     cancelRequested = true;
     clearPromptFallback();
     clearCancelRetryTimer();
+    // Cancel the startup timer too — otherwise a pre-start cancel resolves
+    // as "Background job startup timed out" instead of "Cancelled".
+    clearStartupTimeout();
     sendInterrupt();
     cancelRetryTimerId = setTimeout(function retryCancel() {
       if (finished || !cancelRequested) return;
@@ -629,7 +632,15 @@ function startPtyJob(ptyStream, command, options) {
             }
           }
           finish(stdout, fallbackEnd.exitCode);
+          return;
         }
+      }
+      // If we're cancelling a still-queued command and the shell has returned
+      // to its idle prompt, finish immediately as Cancelled instead of waiting
+      // for the cancel wall-clock timer.
+      if (cancelRequested && hasExpectedPromptSuffix(preStartOutput, expectedPrompt)) {
+        finish(preStartOutput, 130, "Cancelled");
+        return;
       }
       return;
     }

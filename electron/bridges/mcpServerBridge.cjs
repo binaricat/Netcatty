@@ -634,7 +634,10 @@ async function dispatch(method, params) {
     return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
   }
 
-  if (WRITE_METHODS.has(method) && isChatSessionCancelled(params?.chatSessionId)) {
+  // netcatty/jobStop must remain callable after ACP cancel so users can stop
+  // a long-running terminal_start job (which intentionally survives ACP Stop)
+  // even from a chat session whose write methods are otherwise blocked.
+  if (WRITE_METHODS.has(method) && method !== "netcatty/jobStop" && isChatSessionCancelled(params?.chatSessionId)) {
     return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
   }
 
@@ -1004,6 +1007,15 @@ function handleJobStart(params) {
     if (result.error) {
       job.status = "failed";
       job.error = result.error;
+      releaseSessionExecution(sessionId, sessionToken);
+      return;
+    }
+    // A non-zero exit code without an error message still represents a
+    // failed command (e.g. a build/test that returned 1). Mark it as failed
+    // so callers don't have to special-case exitCode against status.
+    if (typeof result.exitCode === "number" && result.exitCode !== 0) {
+      job.status = "failed";
+      job.error = `Command exited with code ${result.exitCode}`;
       releaseSessionExecution(sessionId, sessionToken);
       return;
     }
