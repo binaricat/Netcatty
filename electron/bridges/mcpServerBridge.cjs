@@ -281,22 +281,9 @@ function serializeBackgroundJob(job, offset = 0) {
   const outputBaseOffset = job.outputBaseOffset || 0;
   const totalOutputChars = Math.max(outputBaseOffset + stdout.length, job.totalOutputChars || 0);
   const numericOffset = Math.max(0, Number(offset) || 0);
-  // If the caller's offset already covers the visible buffer's logical end
-  // (i.e. their offset equals or exceeds outputBaseOffset + stdout.length),
-  // there are two cases:
-  //   1. No new output → return empty.
-  //   2. CR redraws shrunk visibleOutput since their last poll → return the
-  //      current full stdout so the caller sees the latest progress frame.
-  // We detect case 2 by checking that totalOutputChars (monotonic) is ahead
-  // of the caller's offset, even though stdout doesn't extend past it.
-  let output;
-  if (numericOffset <= outputBaseOffset) {
-    output = stdout;
-  } else if (numericOffset >= outputBaseOffset + stdout.length) {
-    output = totalOutputChars > numericOffset ? stdout : "";
-  } else {
-    output = stdout.slice(numericOffset - outputBaseOffset);
-  }
+  const relativeOffset = numericOffset <= outputBaseOffset
+    ? 0
+    : Math.min(numericOffset - outputBaseOffset, stdout.length);
   return {
     ok: true,
     jobId: job.id,
@@ -308,7 +295,7 @@ function serializeBackgroundJob(job, offset = 0) {
     error: job.error,
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
-    output,
+    output: stdout.slice(relativeOffset),
     nextOffset: totalOutputChars,
     totalOutputChars,
     outputBaseOffset,

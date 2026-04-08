@@ -194,15 +194,9 @@ function consumeVisibleText(carry, chunk) {
     const ch = input[index];
 
     if (ch === "\r") {
-      // Preserve \r so the caller can apply it against the accumulated
-      // visibleOutput buffer (handles cross-chunk progress redraws like
-      // "10%" then "\r20%"). Collapse \r\n into a single \n.
-      if (input[index + 1] === "\n") {
-        visibleText += "\n";
-        index += 2;
-        continue;
-      }
-      visibleText += "\r";
+      // Drop \r — keep raw text simple. Progress redraws naturally
+      // accumulate in the bounded buffer; consumers that want a
+      // collapsed view can post-process. Preserves \r\n as just \n.
       index += 1;
       continue;
     }
@@ -461,59 +455,12 @@ function startPtyJob(ptyStream, command, options) {
   // Carry buffer for incomplete marker lines split across chunks.
   let visibleMarkerCarry = "";
 
-  // Apply \r as a "deferred" carriage return: it parks the cursor at the
-  // start of the current line, but does NOT erase the existing content
-  // unless / until a subsequent character arrives to overwrite it. This
-  // preserves the latest visible frame for commands like
-  // `printf '10%%\r'; sleep; printf '20%%\r'` while still collapsing
-  // continuous progress redraws to a single frame.
-  let crPending = false;
-  function applyCarriageReturns(text) {
-    if (!text) {
-      return text;
-    }
-    if (text.indexOf("\r") === -1 && !crPending) {
-      return text;
-    }
-    let result = "";
-    const eraseCurrentLineFromResult = () => {
-      const lastNlInResult = result.lastIndexOf("\n");
-      if (lastNlInResult >= 0) {
-        result = result.slice(0, lastNlInResult + 1);
-      } else {
-        result = "";
-        // Also erase trailing line of visibleOutput so cross-chunk
-        // progress redraws collapse correctly.
-        const lastNlInBuffer = visibleOutput.lastIndexOf("\n");
-        if (lastNlInBuffer >= 0) {
-          visibleOutput = visibleOutput.slice(0, lastNlInBuffer + 1);
-        } else {
-          visibleOutput = "";
-        }
-      }
-    };
-
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === "\r") {
-        // Park the cursor; defer erasure until a real character or newline.
-        crPending = true;
-        continue;
-      }
-      if (ch === "\n") {
-        // Newline cancels any deferred CR — the line is finalized.
-        crPending = false;
-        result += ch;
-        continue;
-      }
-      if (crPending) {
-        eraseCurrentLineFromResult();
-        crPending = false;
-      }
-      result += ch;
-    }
-    return result;
-  }
+  // Note: we intentionally do NOT collapse CR redraws in visibleOutput.
+  // Doing so makes polling offsets non-monotonic and can drop finalized
+  // lines after a CR rewrite. Instead, the buffer stores raw bytes
+  // (including \r) and the bounded-buffer cap (256KB) keeps progress-bar
+  // accumulation under control. Consumers that want a "collapsed" view
+  // can apply CR processing themselves.
 
   function appendToVisible(text) {
     if (!text) return;
@@ -553,12 +500,7 @@ function startPtyJob(ptyStream, command, options) {
       cleanVisible = cleanVisible.replace(new RegExp(`^[^\r\n]*${marker}[^\r\n]*[\r\n]*`, "gm"), "");
       if (!cleanVisible) return;
     }
-    // Bump the monotonic high watermark by the *raw visible bytes* before
-    // any CR collapsing, so polling offsets always advance even when later
-    // redraws shrink visibleOutput.
     visibleHighWatermark += cleanVisible.length;
-    cleanVisible = applyCarriageReturns(cleanVisible);
-    if (!cleanVisible && !visibleOutput) return;
     const next = appendBoundedOutput(visibleOutput, cleanVisible, maxBufferedChars);
     visibleOutput = next.text;
     visibleOutputOffset += next.dropped;
@@ -621,9 +563,7 @@ function startPtyJob(ptyStream, command, options) {
       });
       cleaned = strippedVisible;
       outputBaseOffset = visibleOutputOffset;
-      // Use the monotonic high watermark so the final poll's totalOutputChars
-      // never moves backwards relative to earlier polls (e.g. after CR redraws).
-      totalOutputChars = Math.max(outputBaseOffset + visibleOutput.length, visibleHighWatermark);
+      totalOutputChars = outputBaseOffset + visibleOutput.length;
     } else {
       const visibleStdout = normalizePtyOutput(stdout, {
         stripMarkers,
@@ -837,14 +777,11 @@ function startPtyJob(ptyStream, command, options) {
     cancel,
     // Until the start marker arrives, return empty stdout/zero offsets so
     // an early poll cannot advance nextOffset past pre-start PTY noise that
-    // gets discarded once the real command begins. Polling at status="running"
-    // is still valid; it just yields no output until _S is observed.
-    // totalOutputChars uses visibleHighWatermark (monotonic) so CR redraws
-    // (e.g. progress bars) cannot make a caller's offset move backwards.
+    // gets discarded once the real command begins.
     getSnapshot: () => ({
       stdout: foundStart ? visibleOutput : "",
       outputBaseOffset: foundStart ? visibleOutputOffset : 0,
-      totalOutputChars: foundStart ? Math.max(visibleOutputOffset + visibleOutput.length, visibleHighWatermark) : 0,
+      totalOutputChars: foundStart ? visibleOutputOffset + visibleOutput.length : 0,
       outputTruncated: foundStart ? visibleOutputOffset > 0 : false,
       status: finished ? "finished" : (cancelRequested ? "stopping" : "running"),
       foundStart,
