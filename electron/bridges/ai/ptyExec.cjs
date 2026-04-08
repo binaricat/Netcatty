@@ -150,10 +150,16 @@ function normalizePtyOutput(stdout, {
   expectedPrompt = "",
   trimOutput = true,
   stripPrompt = true,
+  markerToStrip = null,
 } = {}) {
   let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
   if (stripMarkers) {
-    cleaned = cleaned.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+    // Prefer the job-specific marker so user output that contains "__NCMCP_"
+    // (e.g. printf '__NCMCP_demo\n') is preserved.
+    const pattern = markerToStrip
+      ? new RegExp(`^[^\r\n]*${markerToStrip}[^\r\n]*[\r\n]*`, "gm")
+      : /^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm;
+    cleaned = cleaned.replace(pattern, "");
   }
   const normalizedPrompt = stripAnsi(String(expectedPrompt || "")).replace(/\r/g, "");
   if (stripPrompt && normalizedPrompt && cleaned.endsWith(normalizedPrompt)) {
@@ -283,6 +289,7 @@ function startPtyJob(ptyStream, command, options) {
   let visibleCarry = "";
   let timeoutId = null;
   let wallTimeoutId = null;
+  let startupTimeoutId = null;
   let promptFallbackTimer = null;
   let cancelRetryTimerId = null;
   let cancelRequested = false;
@@ -335,6 +342,26 @@ function startPtyJob(ptyStream, command, options) {
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
     }, timeoutMs);
+  }
+
+  // Bounded startup deadline: even for background jobs (which intentionally
+  // skip the wall-clock timeout), we still need a hard limit on how long we
+  // wait for the wrapped command's start marker. Otherwise an already-chatty
+  // PTY (e.g. a tab running tail -f) would let onData re-arm the inactivity
+  // timer forever before _S arrives, hanging the job and the session lock.
+  const STARTUP_TIMEOUT_MS = 30000;
+  function armStartupTimeout() {
+    startupTimeoutId = setTimeout(() => {
+      if (finished || foundStart) return;
+      sendInterrupt();
+      finish(preStartOutput, -1, "Background job startup timed out — start marker never arrived");
+    }, STARTUP_TIMEOUT_MS);
+  }
+  function clearStartupTimeout() {
+    if (startupTimeoutId) {
+      clearTimeout(startupTimeoutId);
+      startupTimeoutId = null;
+    }
   }
 
   function sendInterrupt() {
@@ -411,23 +438,22 @@ function startPtyJob(ptyStream, command, options) {
       // lines split across PTY data boundaries are matched as a whole.
       cleanVisible = visibleMarkerCarry + cleanVisible;
       visibleMarkerCarry = "";
-      // If the last line has no trailing newline, it may be an incomplete
-      // marker — hold it back until the next chunk completes it.
+      // Match only this job's specific marker so user output that happens to
+      // contain "__NCMCP_" (e.g. printf '__NCMCP_demo\n') is preserved.
       const lastNl = cleanVisible.lastIndexOf("\n");
       if (lastNl === -1) {
-        // Entire text is a single incomplete line — carry it all.
-        if (cleanVisible.includes("__NCMCP_")) {
+        if (cleanVisible.includes(marker)) {
           visibleMarkerCarry = cleanVisible;
           return;
         }
       } else if (lastNl < cleanVisible.length - 1) {
         const trailing = cleanVisible.slice(lastNl + 1);
-        if (trailing.includes("__NCMCP_")) {
+        if (trailing.includes(marker)) {
           visibleMarkerCarry = trailing;
           cleanVisible = cleanVisible.slice(0, lastNl + 1);
         }
       }
-      cleanVisible = cleanVisible.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+      cleanVisible = cleanVisible.replace(new RegExp(`^[^\r\n]*${marker}[^\r\n]*[\r\n]*`, "gm"), "");
       if (!cleanVisible) return;
     }
     const next = appendBoundedOutput(visibleOutput, cleanVisible, maxBufferedChars);
@@ -447,6 +473,7 @@ function startPtyJob(ptyStream, command, options) {
     finished = true;
     clearTimeout(timeoutId);
     clearTimeout(wallTimeoutId);
+    clearStartupTimeout();
     clearPromptFallback();
     clearCancelRetryTimer();
     unsubscribe?.();
@@ -461,9 +488,9 @@ function startPtyJob(ptyStream, command, options) {
       trackForCancellation.delete(marker);
     }
 
-    // Flush any incomplete marker carry — if it wasn't a marker, append it.
+    // Flush any incomplete marker carry — if it wasn't this job's marker, append it.
     if (visibleMarkerCarry) {
-      const leftover = visibleMarkerCarry.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+      const leftover = visibleMarkerCarry.replace(new RegExp(`^[^\r\n]*${marker}[^\r\n]*[\r\n]*`, "gm"), "");
       visibleMarkerCarry = "";
       if (leftover) {
         const next = appendBoundedOutput(visibleOutput, leftover, maxBufferedChars);
@@ -480,10 +507,11 @@ function startPtyJob(ptyStream, command, options) {
     let outputBaseOffset;
     let totalOutputChars;
     if (maxBufferedChars > 0 && foundStart) {
-      // Always strip markers from the visible buffer — it accumulates raw
-      // PTY data including the end-marker line that must not leak to callers.
+      // Always strip this job's markers from the visible buffer — it accumulates
+      // raw PTY data including the end-marker line that must not leak to callers.
       const strippedVisible = normalizePtyOutput(visibleOutput, {
         stripMarkers: true,
+        markerToStrip: marker,
         expectedPrompt,
         trimOutput: normalizeFinalOutput,
         stripPrompt: true,
@@ -494,6 +522,7 @@ function startPtyJob(ptyStream, command, options) {
     } else {
       const visibleStdout = normalizePtyOutput(stdout, {
         stripMarkers,
+        markerToStrip: marker,
         expectedPrompt,
         trimOutput: false,
         stripPrompt: true,
@@ -501,6 +530,7 @@ function startPtyJob(ptyStream, command, options) {
       cleaned = normalizeFinalOutput
         ? normalizePtyOutput(stdout, {
           stripMarkers,
+          markerToStrip: marker,
           expectedPrompt,
           trimOutput: true,
           stripPrompt: true,
@@ -558,6 +588,7 @@ function startPtyJob(ptyStream, command, options) {
       pendingStart = trailingPartial;
 
       if (foundStart) {
+        clearStartupTimeout();
         // Use the *last* occurrence of the start marker to skip the echoed
         // wrapper command and capture only output after the real printf line.
         const markerPattern = new RegExp(`${marker}_S[^\n\r]*(?:\r?\n|$)`, "g");
@@ -621,6 +652,7 @@ function startPtyJob(ptyStream, command, options) {
 
   armOutputTimeout();
   armWallTimeout();
+  armStartupTimeout();
 
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
