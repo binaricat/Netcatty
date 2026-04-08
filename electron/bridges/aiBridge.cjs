@@ -2463,9 +2463,12 @@ function registerHandlers(ipcMain) {
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
     const activeRun = effectiveChatSessionId ? acpChatRuns.get(effectiveChatSessionId) : null;
     const effectiveRequestId = requestId || activeRun?.requestId || "";
-    // Cancel PTY executions scoped to this chat session (send Ctrl+C)
+    // Cancel synchronous PTY executions scoped to this chat session (send Ctrl+C).
+    // Do NOT cancel terminal_start background jobs here — they were intentionally
+    // launched as long-running and should keep running when the user only wants
+    // to stop the model's polling/output. Background jobs are still cleaned up
+    // when the chat session itself is deleted (see cleanupScopedMetadata).
     mcpServerBridge.cancelPtyExecsForSession(effectiveChatSessionId);
-    mcpServerBridge.cancelBackgroundJobsForSession?.(effectiveChatSessionId);
     mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
     mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
     if (activeRun && activeRun.requestId === effectiveRequestId) {

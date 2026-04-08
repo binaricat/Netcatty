@@ -1023,8 +1023,13 @@ function handleJobStart(params) {
 function getScopedJob(jobId, chatSessionId) {
   const job = backgroundJobs.get(jobId);
   if (!job) return null;
-  if (chatSessionId && job.chatSessionId && job.chatSessionId !== chatSessionId) {
-    return null;
+  // Per-chat isolation: a job started under a chat session can only be
+  // accessed by callers presenting the same chatSessionId. Unscoped or
+  // statically-scoped callers cannot reach into another chat's jobs.
+  if (job.chatSessionId) {
+    if (!chatSessionId || job.chatSessionId !== chatSessionId) {
+      return null;
+    }
   }
   return job;
 }
