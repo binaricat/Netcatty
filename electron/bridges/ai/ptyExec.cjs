@@ -464,33 +464,54 @@ function startPtyJob(ptyStream, command, options) {
   // Carry buffer for incomplete marker lines split across chunks.
   let visibleMarkerCarry = "";
 
-  // Apply \r as carriage return: erase the current line in visibleOutput.
-  // This handles progress redraws (npm/pip/curl) that use \r to reset.
-  // Returns the input text with \r processed against visibleOutput.
+  // Apply \r as a "deferred" carriage return: it parks the cursor at the
+  // start of the current line, but does NOT erase the existing content
+  // unless / until a subsequent character arrives to overwrite it. This
+  // preserves the latest visible frame for commands like
+  // `printf '10%%\r'; sleep; printf '20%%\r'` while still collapsing
+  // continuous progress redraws to a single frame.
+  let crPending = false;
   function applyCarriageReturns(text) {
-    if (!text || text.indexOf("\r") === -1) return text;
+    if (!text) {
+      return text;
+    }
+    if (text.indexOf("\r") === -1 && !crPending) {
+      return text;
+    }
     let result = "";
+    const eraseCurrentLineFromResult = () => {
+      const lastNlInResult = result.lastIndexOf("\n");
+      if (lastNlInResult >= 0) {
+        result = result.slice(0, lastNlInResult + 1);
+      } else {
+        result = "";
+        // Also erase trailing line of visibleOutput so cross-chunk
+        // progress redraws collapse correctly.
+        const lastNlInBuffer = visibleOutput.lastIndexOf("\n");
+        if (lastNlInBuffer >= 0) {
+          visibleOutput = visibleOutput.slice(0, lastNlInBuffer + 1);
+        } else {
+          visibleOutput = "";
+        }
+      }
+    };
+
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       if (ch === "\r") {
-        // Erase the current line: anything after the last \n in result, or
-        // (if result has no newline yet) anything after the last \n in
-        // visibleOutput too. The current "line" is the unbroken tail.
-        const lastNlInResult = result.lastIndexOf("\n");
-        if (lastNlInResult >= 0) {
-          result = result.slice(0, lastNlInResult + 1);
-        } else {
-          result = "";
-          // Also erase the trailing line of visibleOutput so cross-chunk
-          // progress redraws collapse to the latest frame.
-          const lastNlInBuffer = visibleOutput.lastIndexOf("\n");
-          if (lastNlInBuffer >= 0) {
-            visibleOutput = visibleOutput.slice(0, lastNlInBuffer + 1);
-          } else {
-            visibleOutput = "";
-          }
-        }
+        // Park the cursor; defer erasure until a real character or newline.
+        crPending = true;
         continue;
+      }
+      if (ch === "\n") {
+        // Newline cancels any deferred CR — the line is finalized.
+        crPending = false;
+        result += ch;
+        continue;
+      }
+      if (crPending) {
+        eraseCurrentLineFromResult();
+        crPending = false;
       }
       result += ch;
     }
