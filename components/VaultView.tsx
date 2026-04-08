@@ -1443,6 +1443,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, [managedSources]);
 
   const isHostsSectionActive = currentSection === "hosts";
+  const hasHostsSidePanel =
+    isHostsSectionActive &&
+    ((isGroupPanelOpen && !!editingGroupPath) || isHostPanelOpen);
+  const splitViewGridStyle = hasHostsSidePanel
+    ? {
+      gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 220px), 280px))",
+      justifyContent: "start" as const,
+    }
+    : undefined;
 
   const isSameDropTarget = useCallback((a: DropTarget | null, b: DropTarget | null) => {
     if (!a || !b) return a === b;
@@ -1973,9 +1982,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       </h3>
                       <div className={cn(
                         viewMode === "grid"
-                          ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          ? cn(
+                            "grid gap-3",
+                            !hasHostsSidePanel && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                          )
                           : "flex flex-col gap-0",
-                      )}>
+                      )}
+                      style={viewMode === "grid" ? splitViewGridStyle : undefined}>
                         {pinnedHosts.map((host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
@@ -2073,9 +2086,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       </h3>
                       <div className={cn(
                         viewMode === "grid"
-                          ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          ? cn(
+                            "grid gap-3",
+                            !hasHostsSidePanel && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                          )
                           : "flex flex-col gap-0",
-                      )}>
+                      )}
+                      style={viewMode === "grid" ? splitViewGridStyle : undefined}>
                         {recentHosts.map((host) => {
                           const safeHost = sanitizeHost(host);
                           const effectiveDistro = getEffectiveHostDistro(safeHost);
@@ -2174,9 +2191,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       className={cn(
                         displayedGroups.length === 0 ? "hidden" : "",
                         viewMode === "grid"
-                          ? "grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          ? cn(
+                            "grid gap-3",
+                            !hasHostsSidePanel && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                          )
                           : "flex flex-col gap-0",
                       )}
+                      style={viewMode === "grid" ? splitViewGridStyle : undefined}
                       onDragOver={(e) => {
                         e.preventDefault();
                       }}
@@ -2414,9 +2435,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                             <div
                               className={cn(
                                 viewMode === "grid"
-                                  ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                                  ? cn(
+                                    "grid gap-3",
+                                    !hasHostsSidePanel && "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                                  )
                                   : "flex flex-col gap-0",
                               )}
+                              style={viewMode === "grid" ? splitViewGridStyle : undefined}
                             >
                               {group.hosts.filter((h) => selectedGroupPath || !pinnedRecentIds.has(h.id)).map((host) => {
                                 const safeHost = sanitizeHost(host);
@@ -2555,9 +2580,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                     <div
                       className={cn(
                         viewMode === "grid"
-                          ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                          ? cn(
+                            "grid gap-3",
+                            !hasHostsSidePanel && "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+                          )
                           : "flex flex-col gap-0",
                       )}
+                      style={viewMode === "grid" ? splitViewGridStyle : undefined}
                     >
                       {displayedHosts.filter((h) => selectedGroupPath || !pinnedRecentIds.has(h.id)).map((host) => {
                           const safeHost = sanitizeHost(host);
@@ -2823,6 +2852,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             setIsGroupPanelOpen(false);
             setEditingGroupPath(null);
           }}
+          layout="inline"
         />
       )}
 
@@ -2862,6 +2892,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
               Array.from(new Set([...customGroups, groupPath])),
             );
           }}
+          layout="inline"
         />
       )}
 
@@ -2882,6 +2913,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             setIsHostPanelOpen(false);
             setEditingHost(null);
           }}
+          layout="inline"
         />
       )}
 

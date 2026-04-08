@@ -2,6 +2,7 @@ import React from 'react';
 import {
     AsidePanel,
     AsidePanelContent,
+    type AsidePanelLayout,
 } from './ui/aside-panel';
 import { ScrollArea } from './ui/scroll-area';
 import { ThemeList } from './ThemeList';
@@ -13,6 +14,7 @@ interface ThemeSelectPanelProps {
     onClose: () => void;
     onBack?: () => void;
     showBackButton?: boolean;
+    layout?: AsidePanelLayout;
 }
 
 const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
@@ -22,6 +24,7 @@ const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
     onClose,
     onBack,
     showBackButton = true,
+    layout = 'overlay',
 }) => {
     return (
         <AsidePanel
@@ -30,6 +33,7 @@ const ThemeSelectPanel: React.FC<ThemeSelectPanelProps> = ({
             title="Select Color Theme"
             showBackButton={showBackButton}
             onBack={onBack}
+            layout={layout}
         >
             <AsidePanelContent className="p-0">
                 <ScrollArea className="h-full">

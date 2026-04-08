@@ -39,6 +39,7 @@ import {
 import {
   AsidePanel,
   AsidePanelContent,
+  type AsidePanelLayout,
 } from "./ui/aside-panel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -63,6 +64,7 @@ interface GroupDetailsPanelProps {
   terminalFontSize: number;
   onSave: (config: GroupConfig, newName?: string, newParent?: string | null) => void;
   onCancel: () => void;
+  layout?: AsidePanelLayout;
 }
 
 const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
@@ -76,6 +78,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   terminalFontSize,
   onSave,
   onCancel,
+  layout = "overlay",
 }) => {
   const { t } = useI18n();
   const availableFonts = useAvailableFonts();
@@ -351,6 +354,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         onClearProxy={clearProxyConfig}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -368,6 +372,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         onClearChain={clearHostChain}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -395,6 +400,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         }}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -411,6 +417,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         onClose={onCancel}
         onBack={() => setActiveSubPanel("none")}
         showBackButton={true}
+        layout={layout}
       />
     );
   }
@@ -427,6 +434,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       onClose={onCancel}
       width="w-[380px]"
       title={t("vault.groups.details")}
+      layout={layout}
       actions={
         <Button
           variant="ghost"

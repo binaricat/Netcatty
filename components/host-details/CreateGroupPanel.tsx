@@ -5,7 +5,7 @@
 import { FolderPlus,HelpCircle,Plus } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { AsidePanel,AsidePanelContent } from '../ui/aside-panel';
+import { AsidePanel,AsidePanelContent,type AsidePanelLayout } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -42,6 +42,7 @@ export interface CreateGroupPanelProps {
     onSave: () => void;
     onBack: () => void;
     onCancel: () => void;
+    layout?: AsidePanelLayout;
 }
 
 export const CreateGroupPanel: React.FC<CreateGroupPanelProps> = ({
@@ -53,6 +54,7 @@ export const CreateGroupPanel: React.FC<CreateGroupPanelProps> = ({
     onSave,
     onBack,
     onCancel,
+    layout = 'overlay',
 }) => {
     const { t } = useI18n();
     return (
@@ -62,6 +64,7 @@ export const CreateGroupPanel: React.FC<CreateGroupPanelProps> = ({
             title={t('hostDetails.group.title')}
             showBackButton={true}
             onBack={onBack}
+            layout={layout}
             actions={
                 <Button size="sm" onClick={onSave} disabled={!newGroupName.trim()}>
                     {t('common.save')}

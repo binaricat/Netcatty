@@ -216,7 +216,7 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a command on a Netcatty terminal session. For shell sessions, the command runs in the session's shell. For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable.",
+  "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 60 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
     command: z.string().describe("The command to execute in the target session."),
@@ -239,6 +239,69 @@ server.tool(
       parts.push(`[exit code: ${result.exitCode}]`);
     }
     return { content: [{ type: "text", text: parts.join("\n") }] };
+  },
+);
+
+server.tool(
+  "terminal_start",
+  "Start a long-running command on a Netcatty terminal session without waiting for final completion. The command still runs in the visible terminal/PTTY so the user can watch live output. Prefer this whenever the command may exceed about 2 minutes, or when it streams output for an extended period, such as builds, scans, watch commands, and log-follow commands. After starting, wait at least about 30 seconds before the first terminal_poll unless you have a strong reason to check sooner.",
+  {
+    sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
+    command: z.string().describe("The command to start in the target session."),
+  },
+  async ({ sessionId, command }) => {
+    const guardErr = guardWriteOperation(command, { skipBlocklist: true });
+    if (guardErr) {
+      return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };
+    }
+    const result = await rpcCall("netcatty/jobStart", { ...scopeParams, sessionId, command });
+    if (!result.ok) {
+      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to start background command"}` }], isError: true };
+    }
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          jobId: result.jobId,
+          sessionId: result.sessionId,
+          status: result.status,
+          startedAt: result.startedAt,
+          outputMode: result.outputMode,
+          recommendedPollIntervalMs: result.recommendedPollIntervalMs,
+        }, null, 2),
+      }],
+    };
+  },
+);
+
+server.tool(
+  "terminal_poll",
+  "Poll a long-running Netcatty command that was started with terminal_start. Returns incremental output since the given offset and the current status. Use the returned nextOffset for the next poll. If outputTruncated is true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls unless the tool output explicitly justifies checking sooner. As soon as completed is true, stop polling and analyze the final result immediately.",
+  {
+    jobId: z.string().describe("The background job ID returned by terminal_start."),
+    offset: z.number().int().min(0).optional().describe("Character offset previously returned as nextOffset. Omit or use 0 on the first poll."),
+  },
+  async ({ jobId, offset }) => {
+    const result = await rpcCall("netcatty/jobPoll", { ...scopeParams, jobId, offset: offset || 0 });
+    if (!result.ok) {
+      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to poll background command"}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "terminal_stop",
+  "Stop a long-running Netcatty command that was started with terminal_start. This sends Ctrl+C to the running terminal job and returns its latest state.",
+  {
+    jobId: z.string().describe("The background job ID returned by terminal_start."),
+  },
+  async ({ jobId }) => {
+    const result = await rpcCall("netcatty/jobStop", { ...scopeParams, jobId });
+    if (!result.ok) {
+      return { content: [{ type: "text", text: `Error: ${result.error || "Failed to stop background command"}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );
 

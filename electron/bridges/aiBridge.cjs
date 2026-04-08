@@ -1029,6 +1029,19 @@ function registerHandlers(ipcMain) {
       return { ok: false, error: "Session not found" };
     }
 
+    // Honor the per-session execution lock so this IPC path does not race with
+    // long-running background jobs started via terminal_start.
+    const busyErr = mcpServerBridge.getSessionBusyError?.(sessionId);
+    if (busyErr) return busyErr;
+    const reservation = mcpServerBridge.reserveSessionExecution?.(sessionId, "exec");
+    if (reservation && !reservation.ok) return reservation;
+    const sessionToken = reservation?.token;
+    const releaseLock = () => {
+      if (sessionToken) {
+        try { mcpServerBridge.releaseSessionExecution?.(sessionId, sessionToken); } catch {}
+      }
+    };
+
     // Look up device type from metadata (set by renderer from Host.deviceType).
     // Mosh sessions use a shell-backed PTY, so network device mode only applies to SSH/serial.
     // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
@@ -1043,12 +1056,26 @@ function registerHandlers(ipcMain) {
     if (!isNetworkDevice) {
       const safety = mcpServerBridge.checkCommandSafety(command);
       if (safety.blocked) {
+        releaseLock();
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
     }
 
+    // Helper: ensure the session lock is released once the promise settles
+    // (or immediately on a synchronous error/early return).
+    const withLockRelease = (factory) => {
+      try {
+        const result = factory();
+        return Promise.resolve(result).finally(releaseLock);
+      } catch (err) {
+        releaseLock();
+        return { ok: false, error: err?.message || String(err) };
+      }
+    };
+
     try {
       if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
+        releaseLock();
         return {
           ok: false,
           error: "AI execution is not supported for this local shell executable. Configure the local terminal to use bash/zsh/sh, fish, PowerShell/pwsh, or cmd.exe.",
@@ -1062,18 +1089,18 @@ function registerHandlers(ipcMain) {
       if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaRawPty(ptyStream, command, {
+        return withLockRelease(() => execViaRawPty(ptyStream, command, {
           timeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
           encoding: "utf8", // SSH PTY streams use UTF-8, not latin1
-        });
+        }));
       }
 
       // Prefer PTY stream (visible in terminal)
       if (ptyStream && typeof ptyStream.write === "function") {
         const timeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaPty(ptyStream, command, {
+        return withLockRelease(() => execViaPty(ptyStream, command, {
           stripMarkers: true,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           timeoutMs,
@@ -1089,11 +1116,16 @@ function registerHandlers(ipcMain) {
               syntheticEcho: true,
             });
           },
-        });
+          // Catty Agent has no terminal_start fallback for long-running
+          // commands, so do NOT enforce a hard wall-clock timeout here.
+          // The inactivity timeout still applies, so genuinely hung
+          // processes are still terminated.
+        }));
       }
 
       // Network devices require an interactive PTY for raw command execution.
       if (isNetworkDevice) {
+        releaseLock();
         return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
       }
 
@@ -1102,27 +1134,29 @@ function registerHandlers(ipcMain) {
       if (sshClient && typeof sshClient.exec === "function") {
         const { execViaChannel } = require("./ai/ptyExec.cjs");
         const channelTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaChannel(sshClient, command, {
+        return withLockRelease(() => execViaChannel(sshClient, command, {
           timeoutMs: channelTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
-        });
+        }));
       }
 
       // Serial port: raw command execution (no shell wrapping)
       if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return execViaRawPty(session.serialPort, command, {
+        return withLockRelease(() => execViaRawPty(session.serialPort, command, {
           timeoutMs: serialTimeoutMs,
           trackForCancellation: mcpServerBridge.activePtyExecs,
           chatSessionId,
           encoding: session.serialEncoding || "utf8",
-        });
+        }));
       }
 
+      releaseLock();
       return { ok: false, error: "No terminal stream or SSH client available for this session" };
     } catch (err) {
+      releaseLock();
       return { ok: false, error: err?.message || String(err) };
     }
   });
@@ -2266,7 +2300,9 @@ function registerHandlers(ipcMain) {
         `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
         `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
         `Call get_environment first to discover available sessions and their IDs. ` +
-        `For normal shell commands, use terminal_execute so you receive command output. ` +
+        `Use terminal_execute only for commands likely to finish within about 60 seconds. ` +
+        `For long-running commands such as builds, scans, follow/log streaming, watch commands, or anything likely to exceed 60 seconds on PTY-backed shell sessions, use terminal_start, then terminal_poll until completed is true. Reuse the returned nextOffset for the next poll. If terminal_poll reports outputTruncated=true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls, and increase the interval further when there is no new output, to avoid wasting tokens. As soon as completed is true, stop polling and analyze the result immediately. Note: terminal_start requires a PTY-backed session; for sessions that only support exec-channel execution (no writable PTY), use terminal_execute instead. ` +
+        `Use terminal_stop if you need to interrupt a started long-running command. ` +
         `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`;
 
       // Build message content: text + optional attachments
@@ -2443,7 +2479,11 @@ function registerHandlers(ipcMain) {
     const effectiveChatSessionId = chatSessionId || acpRequestSessions.get(requestId);
     const activeRun = effectiveChatSessionId ? acpChatRuns.get(effectiveChatSessionId) : null;
     const effectiveRequestId = requestId || activeRun?.requestId || "";
-    // Cancel PTY executions scoped to this chat session (send Ctrl+C)
+    // Cancel synchronous PTY executions scoped to this chat session (send Ctrl+C).
+    // Do NOT cancel terminal_start background jobs here — they were intentionally
+    // launched as long-running and should keep running when the user only wants
+    // to stop the model's polling/output. Background jobs are still cleaned up
+    // when the chat session itself is deleted (see cleanupScopedMetadata).
     mcpServerBridge.cancelPtyExecsForSession(effectiveChatSessionId);
     mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
     mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);

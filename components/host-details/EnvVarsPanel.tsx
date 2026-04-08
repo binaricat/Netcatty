@@ -6,7 +6,7 @@ import { Plus,X } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { EnvVar } from '../../types';
-import { AsidePanel,AsidePanelContent } from '../ui/aside-panel';
+import { AsidePanel,AsidePanelContent,type AsidePanelLayout } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -25,6 +25,7 @@ export interface EnvVarsPanelProps {
     onSave: () => void;
     onBack: () => void;
     onCancel: () => void;
+    layout?: AsidePanelLayout;
 }
 
 export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
@@ -41,6 +42,7 @@ export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
     onSave,
     onBack,
     onCancel,
+    layout = 'overlay',
 }) => {
     const { t } = useI18n();
     return (
@@ -50,6 +52,7 @@ export const EnvVarsPanel: React.FC<EnvVarsPanelProps> = ({
             title={t('hostDetails.envVars.title')}
             showBackButton={true}
             onBack={onBack}
+            layout={layout}
             actions={
                 <Button size="sm" onClick={onSave}>
                     {t('common.save')}

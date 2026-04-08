@@ -17,6 +17,7 @@ import {
   AsidePanel,
   AsidePanelContent,
   AsidePanelFooter,
+  type AsidePanelLayout,
 } from './ui/aside-panel';
 
 interface SerialPort {
@@ -35,6 +36,7 @@ interface SerialHostDetailsPanelProps {
   groups?: string[];
   onSave: (host: Host) => void;
   onCancel: () => void;
+  layout?: AsidePanelLayout;
 }
 
 const BAUD_RATES = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
@@ -49,6 +51,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
   groups = [],
   onSave,
   onCancel,
+  layout = 'overlay',
 }) => {
   const { t } = useI18n();
   const terminalBackend = useTerminalBackend();
@@ -164,6 +167,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
       title={t('serial.edit.title')}
       subtitle={initialData.label}
       className="z-40"
+      layout={layout}
     >
       <AsidePanelContent>
         {/* Label */}
