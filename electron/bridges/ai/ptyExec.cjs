@@ -190,10 +190,30 @@ function consumeVisibleText(carry, chunk) {
   let visibleText = "";
   let index = 0;
 
+  // Helper: erase the current (final) line in visibleText. Used for \r so that
+  // progress bars (e.g. "10%\r20%\r30%") collapse to the latest frame instead
+  // of accumulating every redraw.
+  const eraseCurrentLine = () => {
+    const lastNl = visibleText.lastIndexOf("\n");
+    if (lastNl === -1) {
+      visibleText = "";
+    } else {
+      visibleText = visibleText.slice(0, lastNl + 1);
+    }
+  };
+
   while (index < input.length) {
     const ch = input[index];
 
     if (ch === "\r") {
+      // \r without an immediately-following \n: treat as carriage return
+      // (reset current line). \r\n is just a newline — leave the \n to be
+      // appended on the next iteration.
+      if (input[index + 1] === "\n") {
+        index += 1; // skip \r, fall through to handle \n normally
+        continue;
+      }
+      eraseCurrentLine();
       index += 1;
       continue;
     }
@@ -416,6 +436,11 @@ function startPtyJob(ptyStream, command, options) {
 
   function schedulePromptFallback() {
     clearPromptFallback();
+    // Disable the prompt-suffix completion fallback for background jobs.
+    // Long-running commands often print prompt-like text (nested shells,
+    // ssh, sudo -s, REPLs) and would be misdetected as completed.
+    // Background jobs rely strictly on the end marker.
+    if (maxBufferedChars > 0) return;
     if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
     promptFallbackTimer = setTimeout(() => {
       if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
