@@ -344,13 +344,17 @@ function startPtyJob(ptyStream, command, options) {
     }, timeoutMs);
   }
 
-  // Bounded startup deadline: even for background jobs (which intentionally
-  // skip the wall-clock timeout), we still need a hard limit on how long we
-  // wait for the wrapped command's start marker. Otherwise an already-chatty
-  // PTY (e.g. a tab running tail -f) would let onData re-arm the inactivity
+  // Bounded startup deadline for background jobs (which intentionally skip
+  // the wall-clock timeout): we still need a hard limit on how long we wait
+  // for the wrapped command's start marker. Otherwise an already-chatty PTY
+  // (e.g. a tab running tail -f) would let onData re-arm the inactivity
   // timer forever before _S arrives, hanging the job and the session lock.
+  // Foreground execViaPty paths skip this — they rely on inactivity timeout
+  // and the (optional) wall-clock deadline, so a queued command can wait for
+  // the shell to become idle without being aborted prematurely.
   const STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
+    if (maxBufferedChars <= 0) return;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
       sendInterrupt();
@@ -716,13 +720,12 @@ function startPtyJob(ptyStream, command, options) {
   return {
     marker,
     cancel,
+    // Until the start marker arrives, return empty stdout/zero offsets so
+    // an early poll cannot advance nextOffset past pre-start PTY noise that
+    // gets discarded once the real command begins. Polling at status="running"
+    // is still valid; it just yields no output until _S is observed.
     getSnapshot: () => ({
-      stdout: foundStart ? visibleOutput : normalizePtyOutput(preStartOutput, {
-        stripMarkers,
-        expectedPrompt,
-        trimOutput: false,
-        stripPrompt: false,
-      }),
+      stdout: foundStart ? visibleOutput : "",
       outputBaseOffset: foundStart ? visibleOutputOffset : 0,
       totalOutputChars: foundStart ? visibleOutputOffset + visibleOutput.length : 0,
       outputTruncated: foundStart ? visibleOutputOffset > 0 : false,
