@@ -370,9 +370,10 @@ function startPtyJob(ptyStream, command, options) {
     // Hard wall-clock deadline for cancellation: if the process ignores
     // Ctrl+C and never redraws the prompt, force-finish after a bounded
     // period so the session is not stuck in "stopping" forever.
+    // Mark as "forced" so callers can tell the shell may still be busy.
     setTimeout(() => {
       if (!finished) {
-        finish(foundStart ? output : preStartOutput, 130, "Cancelled");
+        finish(foundStart ? output : preStartOutput, 130, "Cancelled (forced — process may still be running)");
       }
     }, CANCEL_WALL_TIMEOUT_MS);
   }

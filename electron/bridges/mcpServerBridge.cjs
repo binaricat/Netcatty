@@ -624,6 +624,13 @@ async function dispatch(method, params) {
     if (busy) return busy;
   }
 
+  // Validate session scope *before* queuing approval so out-of-scope
+  // requests fail fast without blocking the session's write lock.
+  if (method !== "netcatty/getContext" && params?.sessionId) {
+    const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
+    if (scopeErr) return { ok: false, error: scopeErr };
+  }
+
   if (sessionWriteLockId) {
     const pendingMethod = pendingSessionWriteApprovals.get(sessionWriteLockId);
     if (pendingMethod) {
@@ -643,12 +650,6 @@ async function dispatch(method, params) {
       if (!approved) {
         return { ok: false, error: "Operation denied by user." };
       }
-    }
-
-    // Scope validation for session-targeted operations
-    if (method !== "netcatty/getContext" && params?.sessionId) {
-      const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId);
-      if (scopeErr) return { ok: false, error: scopeErr };
     }
     switch (method) {
       case "netcatty/getContext":
@@ -955,10 +956,17 @@ function handleJobStart(params) {
     job.updatedAt = Date.now();
     job.exitCode = result.exitCode ?? null;
     storeCompletedJobOutput(job, result.stdout || "", result);
-    if (result.error === "Cancelled") {
+    const isForcedCancel = typeof result.error === "string" && result.error.includes("forced");
+    if (result.error === "Cancelled" || isForcedCancel) {
       job.status = "cancelled";
       job.error = result.error;
-      releaseSessionExecution(sessionId, sessionToken);
+      // If the cancel was forced (process may still be running), delay
+      // releasing the session lock to give the shell time to settle.
+      if (isForcedCancel) {
+        setTimeout(() => releaseSessionExecution(sessionId, sessionToken), 5000);
+      } else {
+        releaseSessionExecution(sessionId, sessionToken);
+      }
       return;
     }
     if (result.error) {
@@ -1003,6 +1011,12 @@ function handleJobPoll(params) {
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
+  // Re-check session scope so a chat that lost access to the host
+  // cannot continue reading output from jobs on that session.
+  if (job.sessionId && chatSessionId) {
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId);
+    if (scopeErr) return { ok: false, error: scopeErr };
+  }
   return serializeBackgroundJob(job, offset);
 }
 
@@ -1011,6 +1025,12 @@ function handleJobStop(params) {
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
+  // Re-check session scope so a chat that lost access cannot send
+  // Ctrl+C to jobs on sessions it no longer controls.
+  if (job.sessionId && chatSessionId) {
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId);
+    if (scopeErr) return { ok: false, error: scopeErr };
+  }
   if (job.status === "running") {
     try {
       job.handle?.cancel?.();
