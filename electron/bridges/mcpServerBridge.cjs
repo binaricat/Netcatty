@@ -856,6 +856,9 @@ function handleExec(params) {
       expectedPrompt: session.lastIdlePrompt || "",
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
+      // MCP callers have terminal_start as a fallback for long commands,
+      // so enforce a hard wall-clock timeout here to match the MCP budget.
+      enforceWallTimeout: true,
     }));
   }
 
@@ -1030,15 +1033,14 @@ function handleJobPoll(params) {
 }
 
 function handleJobStop(params) {
-  const { jobId, chatSessionId, scopedSessionIds } = params || {};
+  const { jobId, chatSessionId } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
-  // Re-check session scope for dynamic, static, and global scoping modes.
-  if (job.sessionId) {
-    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-    if (scopeErr) return { ok: false, error: scopeErr };
-  }
+  // Note: do NOT re-check session scope here. If a job was started under
+  // an allowed scope but the session later left the caller's scope, the
+  // caller still needs to be able to stop the job — otherwise the per-
+  // session execution lock stays held forever and blocks future commands.
   if (job.status === "running") {
     try {
       job.handle?.cancel?.();

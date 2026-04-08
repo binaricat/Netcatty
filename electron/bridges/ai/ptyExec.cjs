@@ -267,6 +267,7 @@ function startPtyJob(ptyStream, command, options) {
     echoCommand,
     maxBufferedChars = 0,
     normalizeFinalOutput = true,
+    enforceWallTimeout = false,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -321,12 +322,13 @@ function startPtyJob(ptyStream, command, options) {
     }, timeoutMs);
   }
 
-  // Hard wall-clock deadline: for foreground (non-background-job) execution,
-  // ensure the command is forcibly terminated even if it keeps producing output.
-  // Background jobs use maxBufferedChars > 0 and have their own much longer
-  // timeout, so they skip this wall-clock guard.
+  // Hard wall-clock deadline: opt-in via enforceWallTimeout. Used by callers
+  // that have a strict tool-call budget (e.g. MCP terminal_execute, where the
+  // model can fall back to terminal_start). Default is off so existing
+  // foreground execution paths (Catty Agent) keep their inactivity-based
+  // timeout for long-running streaming commands.
   function armWallTimeout() {
-    if (maxBufferedChars > 0) return;
+    if (!enforceWallTimeout || maxBufferedChars > 0) return;
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       sendInterrupt();
