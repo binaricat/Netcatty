@@ -7,7 +7,7 @@ import React, { useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
-import { AsidePanel } from '../ui/aside-panel';
+import { AsidePanel, type AsidePanelLayout } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -24,6 +24,7 @@ export interface ChainPanelProps {
     onClearChain: () => void;
     onBack: () => void;
     onCancel: () => void;
+    layout?: AsidePanelLayout;
 }
 
 export const ChainPanel: React.FC<ChainPanelProps> = ({
@@ -37,6 +38,7 @@ export const ChainPanel: React.FC<ChainPanelProps> = ({
     onClearChain,
     onBack,
     onCancel,
+    layout = 'overlay',
 }) => {
     const { t } = useI18n();
     const [searchQuery, setSearchQuery] = useState('');
@@ -54,6 +56,7 @@ export const ChainPanel: React.FC<ChainPanelProps> = ({
             title={t('hostDetails.chain.title')}
             showBackButton={true}
             onBack={onBack}
+            layout={layout}
             actions={
                 <Button size="sm" onClick={onBack}>
                     {t('common.save')}

@@ -51,6 +51,7 @@ import {
   AsidePanel,
   AsidePanelContent,
   AsidePanelFooter,
+  type AsidePanelLayout,
 } from "./ui/aside-panel";
 import { Badge } from "./ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -100,6 +101,7 @@ interface HostDetailsPanelProps {
   onCreateGroup?: (groupPath: string) => void; // Callback to create a new group
   onCreateTag?: (tag: string) => void; // Callback to create a new tag
   groupDefaults?: Partial<import('../domain/models').GroupConfig>;
+  layout?: AsidePanelLayout;
 }
 
 const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
@@ -118,6 +120,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   onCreateGroup,
   onCreateTag,
   groupDefaults,
+  layout = "overlay",
 }) => {
   const { t } = useI18n();
   const { checkSshAgent } = useApplicationBackend();
@@ -502,6 +505,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onSave={handleCreateGroup}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -514,6 +518,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onClearProxy={clearProxyConfig}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -531,6 +536,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onClearChain={clearHostChain}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -559,6 +565,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         }}
         onBack={() => setActiveSubPanel("none")}
         onCancel={onCancel}
+        layout={layout}
       />
     );
   }
@@ -576,6 +583,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onClose={onCancel}
         onBack={() => setActiveSubPanel("none")}
         showBackButton={true}
+        layout={layout}
       />
     );
   }
@@ -614,6 +622,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         onClose={onCancel}
         onBack={() => setActiveSubPanel("none")}
         showBackButton={true}
+        layout={layout}
       />
     );
   }
@@ -624,6 +633,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       open={true}
       onClose={onCancel}
       width="w-[420px]"
+      layout={layout}
       title={
         initialData ? t("hostDetails.title.details") : t("hostDetails.title.new")
       }

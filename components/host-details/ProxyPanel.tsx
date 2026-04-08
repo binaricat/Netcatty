@@ -7,7 +7,7 @@ import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { ProxyConfig } from '../../types';
-import { AsidePanel,AsidePanelContent } from '../ui/aside-panel';
+import { AsidePanel,AsidePanelContent,type AsidePanelLayout } from '../ui/aside-panel';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -19,6 +19,7 @@ export interface ProxyPanelProps {
     onClearProxy: () => void;
     onBack: () => void;
     onCancel: () => void;
+    layout?: AsidePanelLayout;
 }
 
 export const ProxyPanel: React.FC<ProxyPanelProps> = ({
@@ -27,6 +28,7 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
     onClearProxy,
     onBack,
     onCancel,
+    layout = 'overlay',
 }) => {
     const { t } = useI18n();
     return (
@@ -36,6 +38,7 @@ export const ProxyPanel: React.FC<ProxyPanelProps> = ({
             title={t('hostDetails.proxyPanel.title')}
             showBackButton={true}
             onBack={onBack}
+            layout={layout}
             actions={
                 <Button size="sm" onClick={onBack} disabled={!proxyConfig?.host}>
                     {t('common.save')}
