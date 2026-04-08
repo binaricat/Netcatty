@@ -1723,7 +1723,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       </TooltipProvider>
 
       {/* Main Area */}
-      <div className="flex-1 flex flex-col min-h-0 relative">
+      <div className="flex-1 min-w-0 flex flex-col min-h-0 relative">
         <header
           className={cn(
             "border-b border-border/50 bg-secondary/80 backdrop-blur app-drag",
@@ -1832,14 +1832,25 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 <CheckSquare size={16} />
               </Button>
             </div>
-            {/* New Host split button */}
-            <div className="flex items-center app-no-drag">
+            {/* New Host split button — collapses with an animation when the
+                host details / new-host aside panel is open, since the button
+                would be a no-op in that state. */}
+            <div
+              className={cn(
+                "flex items-center app-no-drag overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
+                isHostPanelOpen
+                  ? "max-w-0 opacity-0 -ml-2 pointer-events-none"
+                  : "max-w-[260px] opacity-100",
+              )}
+              aria-hidden={isHostPanelOpen}
+            >
               <Dropdown>
                 <div className="flex items-center rounded-md bg-primary text-primary-foreground">
                   <Button
                     size="sm"
                     className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none app-no-drag"
                     onClick={handleNewHost}
+                    tabIndex={isHostPanelOpen ? -1 : 0}
                   >
                     <Plus size={14} className="mr-2" /> {t("vault.hosts.newHost")}
                   </Button>
@@ -1847,6 +1858,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                     <Button
                       size="sm"
                       className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none app-no-drag"
+                      tabIndex={isHostPanelOpen ? -1 : 0}
                     >
                       <ChevronDown size={14} />
                     </Button>
@@ -1883,22 +1895,37 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 </DropdownContent>
               </Dropdown>
             </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
-              onClick={onCreateLocalTerminal}
+            {/* Terminal + Serial — collapse together with an animation when
+                the host details / new-host aside panel is open, freeing
+                horizontal space for the panel. */}
+            <div
+              className={cn(
+                "flex items-center gap-3 overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
+                isHostPanelOpen
+                  ? "max-w-0 opacity-0 -ml-3 pointer-events-none"
+                  : "max-w-[320px] opacity-100",
+              )}
+              aria-hidden={isHostPanelOpen}
             >
-              <TerminalSquare size={14} className="mr-2" /> {t("common.terminal")}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
-              onClick={() => setIsSerialModalOpen(true)}
-            >
-              <Usb size={14} className="mr-2" /> {t("serial.button")}
-            </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+                onClick={onCreateLocalTerminal}
+                tabIndex={isHostPanelOpen ? -1 : 0}
+              >
+                <TerminalSquare size={14} className="mr-2" /> {t("common.terminal")}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+                onClick={() => setIsSerialModalOpen(true)}
+                tabIndex={isHostPanelOpen ? -1 : 0}
+              >
+                <Usb size={14} className="mr-2" /> {t("serial.button")}
+              </Button>
+            </div>
           </div>
         </header>
 

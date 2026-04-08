@@ -44,6 +44,10 @@ const OAUTH_LOOPBACK_PORT = 45678; // must match electron/bridges/oauthBridge.cj
 const WINDOW_STATE_FILE = "window-state.json";
 const DEFAULT_WINDOW_WIDTH = 1400;
 const DEFAULT_WINDOW_HEIGHT = 900;
+// Minimum window size: enough to render the expanded sidebar + a usable
+// host list + the 420px host details / new-host aside panel without overflow.
+const MIN_WINDOW_WIDTH = 1100;
+const MIN_WINDOW_HEIGHT = 640;
 
 function debugLog(...args) {
   if (!DEBUG_WINDOWS) return;
@@ -626,9 +630,10 @@ async function createWindow(electronModule, options) {
   };
 
   if (savedState) {
-    // Use saved dimensions
-    windowBounds.width = savedState.width;
-    windowBounds.height = savedState.height;
+    // Use saved dimensions, but clamp to the minimum so a previously
+    // shrunk window from an older build cannot start below the minimum.
+    windowBounds.width = Math.max(savedState.width, MIN_WINDOW_WIDTH);
+    windowBounds.height = Math.max(savedState.height, MIN_WINDOW_HEIGHT);
 
     // Only use saved position if the screen is available at that location
     if (typeof savedState.x === "number" && typeof savedState.y === "number") {
@@ -658,6 +663,8 @@ async function createWindow(electronModule, options) {
 
   const win = new BrowserWindow({
     ...windowBounds,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     backgroundColor,
     icon: appIcon,
     show: false,
