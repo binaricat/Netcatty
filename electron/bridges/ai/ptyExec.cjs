@@ -357,22 +357,22 @@ function startPtyJob(ptyStream, command, options) {
     }, timeoutMs);
   }
 
-  // Bounded startup deadline for background jobs (which intentionally skip
-  // the wall-clock timeout): we still need a hard limit on how long we wait
-  // for the wrapped command's start marker. Otherwise an already-chatty PTY
-  // (e.g. a tab running tail -f) would let onData re-arm the inactivity
-  // timer forever before _S arrives, hanging the job and the session lock.
-  // Foreground execViaPty paths skip this — they rely on inactivity timeout
-  // and the (optional) wall-clock deadline, so a queued command can wait for
-  // the shell to become idle without being aborted prematurely.
-  const STARTUP_TIMEOUT_MS = 30000;
+  // Bounded startup deadline: we always need a hard limit on how long we
+  // wait for the wrapped command's start marker. Otherwise an already-chatty
+  // PTY (e.g. a tab running tail -f) would let onData re-arm the inactivity
+  // timer forever before _S arrives, hanging the call and the session lock.
+  // Foreground execs use the configured timeoutMs as the deadline (matching
+  // the pre-PR behavior); background jobs use a fixed 30s since their main
+  // timeout is much longer (1 hour) and meant for the actual command.
+  const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
-    if (maxBufferedChars <= 0) return;
+    const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
       sendInterrupt();
-      finish(preStartOutput, -1, "Background job startup timed out — start marker never arrived");
-    }, STARTUP_TIMEOUT_MS);
+      const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
+      finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
+    }, startupMs);
   }
   function clearStartupTimeout() {
     if (startupTimeoutId) {
@@ -603,7 +603,9 @@ function startPtyJob(ptyStream, command, options) {
       });
       cleaned = strippedVisible;
       outputBaseOffset = visibleOutputOffset;
-      totalOutputChars = outputBaseOffset + visibleOutput.length;
+      // Use the monotonic high watermark so the final poll's totalOutputChars
+      // never moves backwards relative to earlier polls (e.g. after CR redraws).
+      totalOutputChars = Math.max(outputBaseOffset + visibleOutput.length, visibleHighWatermark);
     } else {
       const visibleStdout = normalizePtyOutput(stdout, {
         stripMarkers,
