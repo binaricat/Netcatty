@@ -272,6 +272,7 @@ function startPtyJob(ptyStream, command, options) {
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   const resolvedShellKind = shellKind || "posix";
   const CANCEL_RETRY_MS = 5000;
+  const CANCEL_WALL_TIMEOUT_MS = 30000;
 
   let output = "";
   let foundStart = false;
@@ -280,6 +281,7 @@ function startPtyJob(ptyStream, command, options) {
   let visibleOutputOffset = 0;
   let visibleCarry = "";
   let timeoutId = null;
+  let wallTimeoutId = null;
   let promptFallbackTimer = null;
   let cancelRetryTimerId = null;
   let cancelRequested = false;
@@ -319,6 +321,20 @@ function startPtyJob(ptyStream, command, options) {
     }, timeoutMs);
   }
 
+  // Hard wall-clock deadline: for foreground (non-background-job) execution,
+  // ensure the command is forcibly terminated even if it keeps producing output.
+  // Background jobs use maxBufferedChars > 0 and have their own much longer
+  // timeout, so they skip this wall-clock guard.
+  function armWallTimeout() {
+    if (maxBufferedChars > 0) return;
+    wallTimeoutId = setTimeout(() => {
+      if (finished) return;
+      sendInterrupt();
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
+    }, timeoutMs);
+  }
+
   function sendInterrupt() {
     try {
       if (typeof ptyStream.signal === "function") {
@@ -351,6 +367,14 @@ function startPtyJob(ptyStream, command, options) {
     setTimeout(() => {
       if (!finished) sendInterrupt();
     }, 150);
+    // Hard wall-clock deadline for cancellation: if the process ignores
+    // Ctrl+C and never redraws the prompt, force-finish after a bounded
+    // period so the session is not stuck in "stopping" forever.
+    setTimeout(() => {
+      if (!finished) {
+        finish(foundStart ? output : preStartOutput, 130, "Cancelled");
+      }
+    }, CANCEL_WALL_TIMEOUT_MS);
   }
 
   function schedulePromptFallback() {
@@ -390,6 +414,7 @@ function startPtyJob(ptyStream, command, options) {
     if (finished) return;
     finished = true;
     clearTimeout(timeoutId);
+    clearTimeout(wallTimeoutId);
     clearPromptFallback();
     clearCancelRetryTimer();
     unsubscribe?.();
@@ -469,7 +494,14 @@ function startPtyJob(ptyStream, command, options) {
       pendingStart = trailingPartial;
 
       if (foundStart) {
-        const boundary = preStartOutput.search(new RegExp(`${marker}_S[^\n\r]*(?:\r?\n|$)`));
+        // Use the *last* occurrence of the start marker to skip the echoed
+        // wrapper command and capture only output after the real printf line.
+        const markerPattern = new RegExp(`${marker}_S[^\n\r]*(?:\r?\n|$)`, "g");
+        let boundary = -1;
+        let m;
+        while ((m = markerPattern.exec(preStartOutput)) !== null) {
+          boundary = m.index;
+        }
         if (boundary !== -1) {
           const afterBoundary = preStartOutput.slice(boundary);
           const firstNl = afterBoundary.search(/\r?\n/);
@@ -524,6 +556,7 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   armOutputTimeout();
+  armWallTimeout();
 
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
