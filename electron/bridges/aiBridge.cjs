@@ -1116,6 +1116,10 @@ function registerHandlers(ipcMain) {
               syntheticEcho: true,
             });
           },
+          // Match the pre-PR behavior: enforce a hard wall-clock deadline so
+          // commands like tail -f / verbose builds cannot hold the session
+          // lock indefinitely.
+          enforceWallTimeout: true,
         }));
       }
 

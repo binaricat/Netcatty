@@ -597,10 +597,13 @@ const WRITE_METHODS = new Set([
  * Validate that a sessionId is allowed in the current scope.
  * Checks explicit per-call scopedSessionIds first (static MCP scope mode),
  * then per-chatSession scoped metadata (dynamic mode), then global scope.
+ *
+ * An explicit empty array (`[]`) means "no access" — not "fall through to
+ * global scope" — matching the documented behavior in handleGetContext.
  */
 function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null) {
   if (!sessionId) return null; // will fail at handler level
-  if (Array.isArray(explicitScopedIds) && explicitScopedIds.length > 0) {
+  if (Array.isArray(explicitScopedIds)) {
     if (!explicitScopedIds.includes(sessionId)) {
       return `Session "${sessionId}" is not in the current scope.`;
     }
