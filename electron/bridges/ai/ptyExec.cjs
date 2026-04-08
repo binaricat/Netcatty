@@ -429,22 +429,41 @@ function startPtyJob(ptyStream, command, options) {
       trackForCancellation.delete(marker);
     }
 
-    const visibleStdout = normalizePtyOutput(stdout, {
-      stripMarkers,
-      expectedPrompt,
-      trimOutput: false,
-      stripPrompt: true,
-    });
-    const cleaned = normalizeFinalOutput
-      ? normalizePtyOutput(stdout, {
+    // For background jobs (maxBufferedChars > 0), use the already-stripped
+    // visibleOutput so completion offsets are consistent with polling offsets.
+    // Re-normalizing from the raw buffer would produce a shorter result because
+    // ANSI codes inflate the raw buffer, causing it to truncate earlier.
+    let cleaned;
+    let outputBaseOffset;
+    let totalOutputChars;
+    if (maxBufferedChars > 0 && foundStart) {
+      const strippedVisible = normalizePtyOutput(visibleOutput, {
         stripMarkers,
         expectedPrompt,
-        trimOutput: true,
+        trimOutput: normalizeFinalOutput,
         stripPrompt: true,
-      })
-      : visibleStdout;
-    const outputBaseOffset = foundStart ? visibleOutputOffset : 0;
-    const totalOutputChars = outputBaseOffset + visibleStdout.length;
+      });
+      cleaned = strippedVisible;
+      outputBaseOffset = visibleOutputOffset;
+      totalOutputChars = outputBaseOffset + visibleOutput.length;
+    } else {
+      const visibleStdout = normalizePtyOutput(stdout, {
+        stripMarkers,
+        expectedPrompt,
+        trimOutput: false,
+        stripPrompt: true,
+      });
+      cleaned = normalizeFinalOutput
+        ? normalizePtyOutput(stdout, {
+          stripMarkers,
+          expectedPrompt,
+          trimOutput: true,
+          stripPrompt: true,
+        })
+        : visibleStdout;
+      outputBaseOffset = foundStart ? visibleOutputOffset : 0;
+      totalOutputChars = outputBaseOffset + visibleStdout.length;
+    }
     const finalError = (!error && cancelRequested) ? "Cancelled" : error;
     const finalExitCode = finalError === "Cancelled" ? (exitCode ?? 130) : exitCode;
     if (finalError) {
