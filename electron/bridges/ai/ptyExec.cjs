@@ -437,8 +437,10 @@ function startPtyJob(ptyStream, command, options) {
     let outputBaseOffset;
     let totalOutputChars;
     if (maxBufferedChars > 0 && foundStart) {
+      // Always strip markers from the visible buffer — it accumulates raw
+      // PTY data including the end-marker line that must not leak to callers.
       const strippedVisible = normalizePtyOutput(visibleOutput, {
-        stripMarkers,
+        stripMarkers: true,
         expectedPrompt,
         trimOutput: normalizeFinalOutput,
         stripPrompt: true,

@@ -216,7 +216,7 @@ server.tool(
 // Tool: terminal_execute
 server.tool(
   "terminal_execute",
-  "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 2 minutes. This 2-minute rule exists because Codex MCP tool calls commonly time out around 120 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
+  "Execute a short command on a Netcatty terminal session and wait for the full result. Use this only for commands expected to finish within about 60 seconds. For long-running commands such as builds, scans, log-following, or anything likely to exceed that budget, use terminal_start and then terminal_poll instead.",
   {
     sessionId: z.string().describe("The terminal session ID (from get_environment) to execute on."),
     command: z.string().describe("The command to execute in the target session."),
