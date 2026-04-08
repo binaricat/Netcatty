@@ -641,16 +641,17 @@ async function dispatch(method, params) {
     return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
   }
 
-  if ((method === "netcatty/exec" || method === "netcatty/jobStart") && params?.sessionId) {
-    const busy = getSessionBusyError(params.sessionId);
-    if (busy) return busy;
-  }
-
-  // Validate session scope *before* queuing approval so out-of-scope
-  // requests fail fast without blocking the session's write lock.
+  // Validate session scope *first* so out-of-scope callers cannot infer the
+  // existence or activity of foreign sessions through busy-state error
+  // messages, and so requests fail fast without blocking the write lock.
   if (method !== "netcatty/getContext" && params?.sessionId) {
     const scopeErr = validateSessionScope(params.sessionId, params?.chatSessionId, params?.scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
+  }
+
+  if ((method === "netcatty/exec" || method === "netcatty/jobStart") && params?.sessionId) {
+    const busy = getSessionBusyError(params.sessionId);
+    if (busy) return busy;
   }
 
   if (sessionWriteLockId) {

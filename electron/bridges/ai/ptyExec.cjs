@@ -413,6 +413,16 @@ function startPtyJob(ptyStream, command, options) {
     // Cancel the startup timer too — otherwise a pre-start cancel resolves
     // as "Background job startup timed out" instead of "Cancelled".
     clearStartupTimeout();
+    // For pre-start cancellation on sessions without a known idle prompt,
+    // schedule a short fallback to finish the job after Ctrl+C has had time
+    // to take effect. Without this, the cancel waits the full forced-cancel
+    // window even though the shell may have returned to idle quickly.
+    if (!foundStart && !expectedPrompt) {
+      setTimeout(() => {
+        if (finished || foundStart) return;
+        finish(preStartOutput, 130, "Cancelled");
+      }, 2000);
+    }
     sendInterrupt();
     cancelRetryTimerId = setTimeout(function retryCancel() {
       if (finished || !cancelRequested) return;
