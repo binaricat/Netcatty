@@ -82,13 +82,13 @@ function resolveCodexAcpBinaryPath(shellEnv, electronModule) {
   // Packaged build (or dev fallback): use npm-bundled binary
   try {
     const pkgName = getCodexPackageName();
-    if (!pkgName) return binaryName;
+    if (!pkgName) return null;
 
     const pkgRoot = path.dirname(require.resolve("@zed-industries/codex-acp/package.json"));
     const resolved = require.resolve(`${pkgName}/bin/${binaryName}`, { paths: [pkgRoot] });
     return toUnpackedAsarPath(resolved);
   } catch {
-    return binaryName;
+    return null;
   }
 }
 

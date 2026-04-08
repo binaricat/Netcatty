@@ -1208,8 +1208,14 @@ function registerHandlers(ipcMain) {
 
     const { createACPProvider } = require("@mcpc-tech/acp-ai-provider");
     const shellEnv = await getShellEnv();
+    const resolvedCommand = resolveCodexAcpBinaryPath(shellEnv, electronModule);
+    if (!resolvedCommand) {
+      const result = { ok: false, checkedAt: now, error: "codex-acp binary not found", code: "ENOENT" };
+      setCodexValidationCache(result);
+      return result;
+    }
     const provider = createACPProvider({
-      command: resolveCodexAcpBinaryPath(shellEnv, electronModule),
+      command: resolvedCommand,
       env: shellEnv,
       session: {
         cwd: process.cwd(),
@@ -1927,6 +1933,9 @@ function registerHandlers(ipcMain) {
         : claudeAcp
           ? claudeAcp.command
           : acpCommand;
+      if (!resolvedCommand) {
+        return { ok: false, models: [], error: `${agentLabel} binary not found` };
+      }
       const resolvedArgs = claudeAcp
         ? [...claudeAcp.prependArgs, ...(acpArgs || [])]
         : acpArgs || [];
@@ -2117,6 +2126,9 @@ function registerHandlers(ipcMain) {
           : claudeAcp
             ? claudeAcp.command
             : acpCommand;
+        if (!resolvedCommand) {
+          throw new Error(`${agentLabel} binary not found`);
+        }
         const resolvedArgs = claudeAcp
           ? [...claudeAcp.prependArgs, ...(acpArgs || [])]
           : acpArgs || [];
@@ -2185,12 +2197,16 @@ function registerHandlers(ipcMain) {
         cleanupAcpProvider(chatSessionId);
 
         const fallbackClaudeAcp = isClaudeAgent ? resolveClaudeAcpBinaryPath(shellEnv, electronModule) : null;
+        const fallbackCommand = isCodexAgent
+          ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
+          : fallbackClaudeAcp
+            ? fallbackClaudeAcp.command
+            : acpCommand;
+        if (!fallbackCommand) {
+          throw new Error(`${agentLabel} binary not found`);
+        }
         const fallbackProvider = createACPProvider({
-          command: isCodexAgent
-            ? resolveCodexAcpBinaryPath(shellEnv, electronModule)
-            : fallbackClaudeAcp
-              ? fallbackClaudeAcp.command
-              : acpCommand,
+          command: fallbackCommand,
           args: fallbackClaudeAcp
             ? [...fallbackClaudeAcp.prependArgs, ...(acpArgs || [])]
             : acpArgs || [],

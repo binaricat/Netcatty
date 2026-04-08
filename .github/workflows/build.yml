@@ -43,6 +43,21 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Install cross-platform native binaries
+        shell: bash
+        run: |
+          # npm ci only installs optional deps for the host platform, but
+          # electron-builder produces both arm64 and x64 binaries, so we
+          # need the native codex-acp binary for the other architecture too.
+          # Platform-specific codex-acp packages declare cpu/os constraints,
+          # so --force is needed to install the non-host-arch binary.
+          CODEX_VER=$(node -e "console.log(require('./node_modules/@zed-industries/codex-acp/package.json').version)")
+          if [[ "${{ matrix.name }}" == "macos" ]]; then
+            npm install "@zed-industries/codex-acp-darwin-x64@${CODEX_VER}" "@zed-industries/codex-acp-darwin-arm64@${CODEX_VER}" --no-save --force
+          elif [[ "${{ matrix.name }}" == "windows" ]]; then
+            npm install "@zed-industries/codex-acp-win32-x64@${CODEX_VER}" "@zed-industries/codex-acp-win32-arm64@${CODEX_VER}" --no-save --force
+          fi
+
       - name: Set version
         shell: bash
         run: |
