@@ -399,7 +399,14 @@ function startPtyJob(ptyStream, command, options) {
     const normalized = consumeVisibleText(visibleCarry, text);
     visibleCarry = normalized.carry;
     if (!normalized.visibleText) return;
-    const next = appendBoundedOutput(visibleOutput, normalized.visibleText, maxBufferedChars);
+    // Strip internal markers *before* they enter the bounded buffer so they
+    // never occupy space or leak partially when truncation splits a line.
+    let cleanVisible = normalized.visibleText;
+    if (maxBufferedChars > 0) {
+      cleanVisible = cleanVisible.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+      if (!cleanVisible) return;
+    }
+    const next = appendBoundedOutput(visibleOutput, cleanVisible, maxBufferedChars);
     visibleOutput = next.text;
     visibleOutputOffset += next.dropped;
   }

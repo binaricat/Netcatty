@@ -960,11 +960,12 @@ function handleJobStart(params) {
     if (result.error === "Cancelled" || isForcedCancel) {
       job.status = "cancelled";
       job.error = result.error;
-      // If the cancel was forced (process may still be running), delay
-      // releasing the session lock to give the shell time to settle.
-      if (isForcedCancel) {
-        setTimeout(() => releaseSessionExecution(sessionId, sessionToken), 5000);
-      } else {
+      // If the cancel was forced (process may still be running), do NOT
+      // release the session lock — the previous foreground process is
+      // likely still attached and accepting further input would corrupt
+      // state. The lock will be released when the session disconnects
+      // or the user manually intervenes.
+      if (!isForcedCancel) {
         releaseSessionExecution(sessionId, sessionToken);
       }
       return;
