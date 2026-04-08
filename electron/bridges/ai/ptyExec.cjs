@@ -439,19 +439,16 @@ function startPtyJob(ptyStream, command, options) {
 
   function schedulePromptFallback() {
     clearPromptFallback();
-    // Background jobs (terminal_start) MUST rely strictly on the end marker
-    // for completion. Commands that open child shells with the same prompt
-    // as the parent (bash, zsh, sudo -s, ssh hops) would otherwise be
-    // misdetected as completed while the child is still running, releasing
-    // the session lock and corrupting subsequent commands. Background jobs
-    // have their own long timeout and explicit terminal_stop, so they can
-    // safely wait for the real _E marker.
-    if (maxBufferedChars > 0) return;
     if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+    // Background jobs use a much longer delay (30s) so commands that open
+    // child shells / REPLs with the same prompt have time to print past
+    // their initial prompt and avoid being misdetected as completed.
+    // Foreground execs use 250ms to match the pre-PR behavior.
+    const delayMs = maxBufferedChars > 0 ? 30000 : 250;
     promptFallbackTimer = setTimeout(() => {
       if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
       finish(output, null, null);
-    }, 250);
+    }, delayMs);
   }
 
   function checkEnd() {

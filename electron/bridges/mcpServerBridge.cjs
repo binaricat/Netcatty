@@ -907,6 +907,9 @@ function handleExec(params) {
     return runExecution(() => execViaChannel(sshClient, command, {
       timeoutMs: commandTimeoutMs,
       trackForCancellation: activePtyExecs,
+      // Pass chatSessionId so cancelPtyExecsForSession can interrupt this
+      // exec channel when the originating ACP run is stopped.
+      chatSessionId: params?.chatSessionId,
     }));
   }
 
