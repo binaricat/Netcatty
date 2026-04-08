@@ -1116,10 +1116,10 @@ function registerHandlers(ipcMain) {
               syntheticEcho: true,
             });
           },
-          // Match the pre-PR behavior: enforce a hard wall-clock deadline so
-          // commands like tail -f / verbose builds cannot hold the session
-          // lock indefinitely.
-          enforceWallTimeout: true,
+          // Catty Agent has no terminal_start fallback for long-running
+          // commands, so do NOT enforce a hard wall-clock timeout here.
+          // The inactivity timeout still applies, so genuinely hung
+          // processes are still terminated.
         }));
       }
 

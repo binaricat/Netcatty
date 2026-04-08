@@ -940,7 +940,10 @@ function handleJobStart(params) {
   let handle;
   try {
     handle = startPtyJob(ptyStream, command, {
-      trackForCancellation: activePtyExecs,
+      // Intentionally do NOT register in activePtyExecs: terminal_start jobs
+      // are designed to survive ACP "Stop" so the model can stop polling
+      // without aborting a long-running build/scan/log stream. The job is
+      // managed via terminal_stop and the per-session execution lock.
       timeoutMs,
       shellKind: session.shellKind,
       chatSessionId,
@@ -980,14 +983,20 @@ function handleJobStart(params) {
     storeCompletedJobOutput(job, result.stdout || "", result);
     const isForcedCancel = typeof result.error === "string" && result.error.includes("forced");
     if (result.error === "Cancelled" || isForcedCancel) {
-      job.status = "cancelled";
       job.error = result.error;
       if (isForcedCancel) {
-        // The process may still be attached to the PTY. Release the lock
-        // after a longer delay to reduce the chance of writing into the
-        // still-running process while not permanently locking the session.
-        setTimeout(() => releaseSessionExecution(sessionId, sessionToken), 60000);
+        // The process may still be attached to the PTY. Hold the session
+        // lock and keep the job's status as "stopping" so serializeBackgroundJob
+        // reports completed=false until the lock is actually released.
+        // After the grace period, transition to "cancelled" + release the lock.
+        job.status = "stopping";
+        setTimeout(() => {
+          job.status = "cancelled";
+          job.updatedAt = Date.now();
+          releaseSessionExecution(sessionId, sessionToken);
+        }, 60000);
       } else {
+        job.status = "cancelled";
         releaseSessionExecution(sessionId, sessionToken);
       }
       return;
