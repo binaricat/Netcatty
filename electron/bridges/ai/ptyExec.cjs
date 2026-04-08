@@ -295,6 +295,10 @@ function startPtyJob(ptyStream, command, options) {
   let preStartOutput = "";
   let visibleOutput = "";
   let visibleOutputOffset = 0;
+  // Monotonic high-water mark for the visible byte stream. Increases on every
+  // append; never decreases when CR redraws collapse visibleOutput. Used as
+  // the polling nextOffset so callers' offsets stay monotonic.
+  let visibleHighWatermark = 0;
   let visibleCarry = "";
   let timeoutId = null;
   let wallTimeoutId = null;
@@ -435,16 +439,19 @@ function startPtyJob(ptyStream, command, options) {
 
   function schedulePromptFallback() {
     clearPromptFallback();
+    // Background jobs (terminal_start) MUST rely strictly on the end marker
+    // for completion. Commands that open child shells with the same prompt
+    // as the parent (bash, zsh, sudo -s, ssh hops) would otherwise be
+    // misdetected as completed while the child is still running, releasing
+    // the session lock and corrupting subsequent commands. Background jobs
+    // have their own long timeout and explicit terminal_stop, so they can
+    // safely wait for the real _E marker.
+    if (maxBufferedChars > 0) return;
     if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
-    // Use a longer delay for background jobs so commands that open a nested
-    // shell or REPL (ssh, sudo -s, python REPL) have time to produce more
-    // output past their initial prompt and avoid being misdetected as
-    // completed. The recheck at fire-time naturally rejects those cases.
-    const delayMs = maxBufferedChars > 0 ? 10000 : 250;
     promptFallbackTimer = setTimeout(() => {
       if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
       finish(output, null, null);
-    }, delayMs);
+    }, 250);
   }
 
   function checkEnd() {
@@ -502,24 +509,36 @@ function startPtyJob(ptyStream, command, options) {
       // lines split across PTY data boundaries are matched as a whole.
       cleanVisible = visibleMarkerCarry + cleanVisible;
       visibleMarkerCarry = "";
-      // Match only this job's specific marker so user output that happens to
-      // contain "__NCMCP_" (e.g. printf '__NCMCP_demo\n') is preserved.
+      // We must withhold any trailing line that *might* be the start of an
+      // internal marker line, even if the random marker token isn't fully
+      // present yet (the chunk boundary may split the marker mid-token).
+      // Detect this by looking for the constant prefix "__NCMCP_" — only
+      // user output that *contains an unrelated __NCMCP_ string and ends
+      // with a newline* will be preserved through the next strip step.
+      const NCMCP_PREFIX = "__NCMCP_";
       const lastNl = cleanVisible.lastIndexOf("\n");
       if (lastNl === -1) {
-        if (cleanVisible.includes(marker)) {
+        if (cleanVisible.includes(NCMCP_PREFIX)) {
           visibleMarkerCarry = cleanVisible;
           return;
         }
       } else if (lastNl < cleanVisible.length - 1) {
         const trailing = cleanVisible.slice(lastNl + 1);
-        if (trailing.includes(marker)) {
+        if (trailing.includes(NCMCP_PREFIX)) {
           visibleMarkerCarry = trailing;
           cleanVisible = cleanVisible.slice(0, lastNl + 1);
         }
       }
+      // Strip only this job's specific marker lines so user output that
+      // happens to contain "__NCMCP_" (e.g. printf '__NCMCP_demo\n') is
+      // preserved.
       cleanVisible = cleanVisible.replace(new RegExp(`^[^\r\n]*${marker}[^\r\n]*[\r\n]*`, "gm"), "");
       if (!cleanVisible) return;
     }
+    // Bump the monotonic high watermark by the *raw visible bytes* before
+    // any CR collapsing, so polling offsets always advance even when later
+    // redraws shrink visibleOutput.
+    visibleHighWatermark += cleanVisible.length;
     cleanVisible = applyCarriageReturns(cleanVisible);
     if (!cleanVisible && !visibleOutput) return;
     const next = appendBoundedOutput(visibleOutput, cleanVisible, maxBufferedChars);
@@ -800,10 +819,12 @@ function startPtyJob(ptyStream, command, options) {
     // an early poll cannot advance nextOffset past pre-start PTY noise that
     // gets discarded once the real command begins. Polling at status="running"
     // is still valid; it just yields no output until _S is observed.
+    // totalOutputChars uses visibleHighWatermark (monotonic) so CR redraws
+    // (e.g. progress bars) cannot make a caller's offset move backwards.
     getSnapshot: () => ({
       stdout: foundStart ? visibleOutput : "",
       outputBaseOffset: foundStart ? visibleOutputOffset : 0,
-      totalOutputChars: foundStart ? visibleOutputOffset + visibleOutput.length : 0,
+      totalOutputChars: foundStart ? Math.max(visibleOutputOffset + visibleOutput.length, visibleHighWatermark) : 0,
       outputTruncated: foundStart ? visibleOutputOffset > 0 : false,
       status: finished ? "finished" : (cancelRequested ? "stopping" : "running"),
       foundStart,
