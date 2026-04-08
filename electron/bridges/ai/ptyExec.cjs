@@ -394,15 +394,37 @@ function startPtyJob(ptyStream, command, options) {
     finish(stdout, found.exitCode);
   }
 
+  // Carry buffer for incomplete marker lines split across chunks.
+  let visibleMarkerCarry = "";
+
   function appendToVisible(text) {
     if (!text) return;
     const normalized = consumeVisibleText(visibleCarry, text);
     visibleCarry = normalized.carry;
     if (!normalized.visibleText) return;
-    // Strip internal markers *before* they enter the bounded buffer so they
-    // never occupy space or leak partially when truncation splits a line.
+
     let cleanVisible = normalized.visibleText;
     if (maxBufferedChars > 0) {
+      // Rejoin with any incomplete line from the previous chunk so marker
+      // lines split across PTY data boundaries are matched as a whole.
+      cleanVisible = visibleMarkerCarry + cleanVisible;
+      visibleMarkerCarry = "";
+      // If the last line has no trailing newline, it may be an incomplete
+      // marker — hold it back until the next chunk completes it.
+      const lastNl = cleanVisible.lastIndexOf("\n");
+      if (lastNl === -1) {
+        // Entire text is a single incomplete line — carry it all.
+        if (cleanVisible.includes("__NCMCP_")) {
+          visibleMarkerCarry = cleanVisible;
+          return;
+        }
+      } else if (lastNl < cleanVisible.length - 1) {
+        const trailing = cleanVisible.slice(lastNl + 1);
+        if (trailing.includes("__NCMCP_")) {
+          visibleMarkerCarry = trailing;
+          cleanVisible = cleanVisible.slice(0, lastNl + 1);
+        }
+      }
       cleanVisible = cleanVisible.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
       if (!cleanVisible) return;
     }
@@ -435,6 +457,17 @@ function startPtyJob(ptyStream, command, options) {
     }
     if (trackForCancellation) {
       trackForCancellation.delete(marker);
+    }
+
+    // Flush any incomplete marker carry — if it wasn't a marker, append it.
+    if (visibleMarkerCarry) {
+      const leftover = visibleMarkerCarry.replace(/^[^\r\n]*__NCMCP_[^\r\n]*[\r\n]*/gm, "");
+      visibleMarkerCarry = "";
+      if (leftover) {
+        const next = appendBoundedOutput(visibleOutput, leftover, maxBufferedChars);
+        visibleOutput = next.text;
+        visibleOutputOffset += next.dropped;
+      }
     }
 
     // For background jobs (maxBufferedChars > 0), use the already-stripped

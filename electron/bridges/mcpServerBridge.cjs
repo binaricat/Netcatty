@@ -960,12 +960,12 @@ function handleJobStart(params) {
     if (result.error === "Cancelled" || isForcedCancel) {
       job.status = "cancelled";
       job.error = result.error;
-      // If the cancel was forced (process may still be running), do NOT
-      // release the session lock — the previous foreground process is
-      // likely still attached and accepting further input would corrupt
-      // state. The lock will be released when the session disconnects
-      // or the user manually intervenes.
-      if (!isForcedCancel) {
+      if (isForcedCancel) {
+        // The process may still be attached to the PTY. Release the lock
+        // after a longer delay to reduce the chance of writing into the
+        // still-running process while not permanently locking the session.
+        setTimeout(() => releaseSessionExecution(sessionId, sessionToken), 60000);
+      } else {
         releaseSessionExecution(sessionId, sessionToken);
       }
       return;
@@ -1012,10 +1012,11 @@ function handleJobPoll(params) {
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
-  // Re-check session scope so a chat that lost access to the host
+  // Re-check session scope so a caller that lost access to the host
   // cannot continue reading output from jobs on that session.
-  if (job.sessionId && chatSessionId) {
-    const scopeErr = validateSessionScope(job.sessionId, chatSessionId);
+  // This covers both dynamic (chatSessionId) and static (NETCATTY_MCP_SESSION_IDS) scoping.
+  if (job.sessionId) {
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
   return serializeBackgroundJob(job, offset);
@@ -1026,10 +1027,9 @@ function handleJobStop(params) {
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
-  // Re-check session scope so a chat that lost access cannot send
-  // Ctrl+C to jobs on sessions it no longer controls.
-  if (job.sessionId && chatSessionId) {
-    const scopeErr = validateSessionScope(job.sessionId, chatSessionId);
+  // Re-check session scope for both dynamic and static scoping modes.
+  if (job.sessionId) {
+    const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
   if (job.status === "running") {
