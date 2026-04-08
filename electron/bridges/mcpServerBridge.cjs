@@ -609,6 +609,15 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
     }
     return null;
   }
+  // If a chat has explicit scoped metadata (even an empty array), enforce it.
+  // Only fall through to fallback/global when no chat-scoped context exists.
+  if (chatSessionId && scopedMetadata.has(chatSessionId)) {
+    const chatScoped = scopedMetadata.get(chatSessionId)?.sessionIds || [];
+    if (!chatScoped.includes(sessionId)) {
+      return `Session "${sessionId}" is not in the current scope.`;
+    }
+    return null;
+  }
   const scopedIds = getScopedSessionIds(chatSessionId);
   if (scopedIds && scopedIds.length > 0 && !scopedIds.includes(sessionId)) {
     return `Session "${sessionId}" is not in the current scope.`;
@@ -1036,14 +1045,22 @@ function handleJobPoll(params) {
 }
 
 function handleJobStop(params) {
-  const { jobId, chatSessionId } = params || {};
+  const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getScopedJob(jobId, chatSessionId || null);
   if (!job) return { ok: false, error: "Background job not found" };
-  // Note: do NOT re-check session scope here. If a job was started under
-  // an allowed scope but the session later left the caller's scope, the
-  // caller still needs to be able to stop the job — otherwise the per-
-  // session execution lock stays held forever and blocks future commands.
+  // For statically scoped MCP clients, validate that the job's session is
+  // within the caller's static scope so a foreign jobId cannot cancel jobs
+  // outside the caller's allowed sessions. Dynamic chat scope is already
+  // enforced by getScopedJob (caller's chatSessionId must match the job's),
+  // and we intentionally do NOT re-check dynamic scope here so jobs can
+  // still be stopped after workspace membership changes — otherwise the
+  // session lock would stay held forever.
+  if (Array.isArray(scopedSessionIds) && job.sessionId) {
+    if (!scopedSessionIds.includes(job.sessionId)) {
+      return { ok: false, error: `Session "${job.sessionId}" is not in the current scope.` };
+    }
+  }
   if (job.status === "running") {
     try {
       job.handle?.cancel?.();
