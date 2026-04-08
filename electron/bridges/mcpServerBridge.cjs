@@ -273,6 +273,38 @@ function pruneCompletedBackgroundJobs(now = Date.now()) {
   }
 }
 
+// Collapse carriage-return progress redraws to the latest frame.
+// Each \r resets the cursor to the start of the current line; the next
+// non-\r character overwrites the existing line content. A trailing \r
+// (with no following content) leaves the existing line intact, so a
+// snapshot taken between redraws still shows the latest visible frame.
+// Used at serialize time so the stored buffer can keep raw monotonic
+// offsets while polled output shows the latest frame.
+function collapseCarriageReturns(text) {
+  if (!text || text.indexOf("\r") === -1) return text;
+  let result = "";
+  let crPending = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\r") {
+      crPending = true;
+      continue;
+    }
+    if (ch === "\n") {
+      crPending = false;
+      result += ch;
+      continue;
+    }
+    if (crPending) {
+      const lastNl = result.lastIndexOf("\n");
+      result = lastNl >= 0 ? result.slice(0, lastNl + 1) : "";
+      crPending = false;
+    }
+    result += ch;
+  }
+  return result;
+}
+
 function serializeBackgroundJob(job, offset = 0) {
   if (job.status === "running" || job.status === "stopping") {
     refreshRunningJobSnapshot(job);
@@ -295,7 +327,7 @@ function serializeBackgroundJob(job, offset = 0) {
     error: job.error,
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
-    output: stdout.slice(relativeOffset),
+    output: collapseCarriageReturns(stdout.slice(relativeOffset)),
     nextOffset: totalOutputChars,
     totalOutputChars,
     outputBaseOffset,
@@ -669,8 +701,11 @@ async function dispatch(method, params) {
   }
 
   try {
-    // Confirm mode: request user approval for write operations
-    if (permissionMode === "confirm" && WRITE_METHODS.has(method)) {
+    // Confirm mode: request user approval for write operations.
+    // netcatty/jobStop bypasses approval — it's a stop/cancel action that
+    // must remain available even if the renderer is unavailable; otherwise
+    // a runaway terminal_start job could not be interrupted at all.
+    if (permissionMode === "confirm" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {

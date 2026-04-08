@@ -194,9 +194,14 @@ function consumeVisibleText(carry, chunk) {
     const ch = input[index];
 
     if (ch === "\r") {
-      // Drop \r — keep raw text simple. Progress redraws naturally
-      // accumulate in the bounded buffer; consumers that want a
-      // collapsed view can post-process. Preserves \r\n as just \n.
+      // Preserve \r so consumers / serializers can collapse progress-bar
+      // redraws to the latest frame. \r\n becomes a single \n.
+      if (input[index + 1] === "\n") {
+        visibleText += "\n";
+        index += 2;
+        continue;
+      }
+      visibleText += "\r";
       index += 1;
       continue;
     }
@@ -299,6 +304,10 @@ function startPtyJob(ptyStream, command, options) {
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
   let cancelRetryTimerId = null;
+  // Track one-shot timers scheduled inside requestCancel so finish() can
+  // clear them when the job exits early; otherwise they keep the Node
+  // event loop alive after the resultPromise has already resolved.
+  const cancelOneShotTimers = [];
   let cancelRequested = false;
   let finished = false;
   let unsubscribe = null;
@@ -405,10 +414,11 @@ function startPtyJob(ptyStream, command, options) {
     // to take effect. Without this, the cancel waits the full forced-cancel
     // window even though the shell may have returned to idle quickly.
     if (!foundStart && !expectedPrompt) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         if (finished || foundStart) return;
         finish(preStartOutput, 130, "Cancelled");
       }, 2000);
+      cancelOneShotTimers.push(t);
     }
     sendInterrupt();
     cancelRetryTimerId = setTimeout(function retryCancel() {
@@ -417,18 +427,20 @@ function startPtyJob(ptyStream, command, options) {
       cancelRetryTimerId = setTimeout(retryCancel, CANCEL_RETRY_MS);
     }, CANCEL_RETRY_MS);
     armOutputTimeout();
-    setTimeout(() => {
+    const t150 = setTimeout(() => {
       if (!finished) sendInterrupt();
     }, 150);
+    cancelOneShotTimers.push(t150);
     // Hard wall-clock deadline for cancellation: if the process ignores
     // Ctrl+C and never redraws the prompt, force-finish after a bounded
     // period so the session is not stuck in "stopping" forever.
     // Mark as "forced" so callers can tell the shell may still be busy.
-    setTimeout(() => {
+    const tWall = setTimeout(() => {
       if (!finished) {
         finish(foundStart ? output : preStartOutput, 130, "Cancelled (forced — process may still be running)");
       }
     }, CANCEL_WALL_TIMEOUT_MS);
+    cancelOneShotTimers.push(tWall);
   }
 
   function schedulePromptFallback() {
@@ -521,6 +533,11 @@ function startPtyJob(ptyStream, command, options) {
     clearStartupTimeout();
     clearPromptFallback();
     clearCancelRetryTimer();
+    // Clear any pending one-shot cancel timers so they do not keep the
+    // Node event loop alive after the job has resolved.
+    while (cancelOneShotTimers.length) {
+      clearTimeout(cancelOneShotTimers.pop());
+    }
     unsubscribe?.();
     for (const fn of cleanupFns) {
       try {
