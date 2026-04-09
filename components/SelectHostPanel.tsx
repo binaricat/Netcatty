@@ -1,11 +1,9 @@
 import {
-  ArrowLeft,
   Check,
   ChevronRight,
   LayoutGrid,
   Plus,
   Search,
-  X,
 } from "lucide-react";
 import React, { useMemo, useState } from "react";
 import { cn } from "../lib/utils";
@@ -14,6 +12,7 @@ import { Host, SSHKey } from "../types";
 import { ManagedSource } from "../domain/models";
 import { DistroAvatar } from "./DistroAvatar";
 import HostDetailsPanel from "./HostDetailsPanel";
+import { AsidePanel, type AsidePanelLayout } from "./ui/aside-panel";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
@@ -44,6 +43,7 @@ interface SelectHostPanelProps {
   title?: string;
   subtitle?: string;
   className?: string;
+  layout?: AsidePanelLayout;
 }
 
 const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
@@ -63,6 +63,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   title,
   subtitle,
   className,
+  layout = "overlay",
 }) => {
   const { t } = useI18n();
   const panelTitle = title ?? t("selectHost.title");
@@ -205,35 +206,16 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
 
   return (
     <TooltipProvider delayDuration={300}>
-    <div
-      className={cn(
-        "absolute right-0 top-0 bottom-0 w-[380px] border-l border-border/60 bg-background z-40 flex flex-col app-no-drag",
-        className,
-      )}
+    <AsidePanel
+      open={true}
+      onClose={onBack}
+      title={panelTitle}
+      subtitle={subtitle}
+      showBackButton={true}
+      onBack={onBack}
+      className={cn(layout === "overlay" && "z-40", className)}
+      layout={layout}
     >
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={onBack}
-            className="p-1 hover:bg-muted rounded-md transition-colors cursor-pointer shrink-0"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold">{panelTitle}</h3>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground">{subtitle}</p>
-            )}
-          </div>
-        </div>
-        <button
-          onClick={onBack}
-          className="p-1.5 hover:bg-muted rounded-md transition-colors cursor-pointer shrink-0"
-        >
-          <X size={18} />
-        </button>
-      </div>
 
       {/* Toolbar */}
       <div className="px-4 py-3 flex items-center gap-2 border-b border-border/60 shrink-0">
@@ -277,7 +259,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-w-0">
         <div className="p-3 space-y-3">
           {/* Breadcrumbs */}
           {currentPath && (
@@ -398,7 +380,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       </ScrollArea>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-border/60">
+      <div className="px-4 py-3 border-t border-border/60 shrink-0">
         <Button
           className="w-full"
           disabled={selectedHostIds.length === 0}
@@ -436,7 +418,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
           onCreateGroup={onCreateGroup}
         />
       )}
-    </div>
+    </AsidePanel>
     </TooltipProvider>
   );
 };
