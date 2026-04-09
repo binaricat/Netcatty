@@ -213,7 +213,11 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
       subtitle={subtitle}
       showBackButton={true}
       onBack={onBack}
-      className={cn(layout === "overlay" && "z-40", className)}
+      className={cn(
+        layout === "overlay" && "z-40",
+        showNewHostPanel && "overflow-visible",
+        className,
+      )}
       layout={layout}
     >
 
