@@ -70,7 +70,12 @@ function setMainWindowGetter(fn) {
  * Sends an IPC event and returns a Promise<boolean> that resolves
  * when the user approves/rejects in the UI, or auto-denies after timeout.
  */
-const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+// External ACP agents (for example Codex) may give up on MCP tool calls after
+// about 120 seconds; see openai/codex#6127 ("timed out awaiting tools/call
+// after 120s"). Keep the Netcatty-side approval window below that with a small
+// buffer so a stale approval cannot still be accepted after the agent has
+// already timed out and abandoned the call.
+const APPROVAL_TIMEOUT_MS = 110 * 1000; // 110 seconds
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
@@ -1206,7 +1211,7 @@ function cleanupScopedMetadata(chatSessionId) {
     // Resolve any in-flight approval requests so dispatch()'s finally block
     // releases its pendingSessionWriteApprovals entry. Without this, a chat
     // deleted while an approval was pending would leave the per-session
-    // write lock held until the 5-minute approval timeout.
+    // write lock held until the approval timeout expires.
     clearPendingApprovals(chatSessionId);
   }
 }
