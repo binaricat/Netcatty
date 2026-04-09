@@ -8,7 +8,7 @@ import { Host, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import { HotkeyScheme, KeyBinding, keyEventToString, ManagedSource, matchesKeyBinding, parseKeyCombo } from '../domain/models';
 import { DistroAvatar } from './DistroAvatar';
 import SelectHostPanel from './SelectHostPanel';
-import { AsidePanel, AsidePanelContent } from './ui/aside-panel';
+import { AsidePanel, AsidePanelContent, AsidePanelFooter } from './ui/aside-panel';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Combobox, ComboboxOption } from './ui/combobox';
@@ -721,6 +721,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           onSaveHost={onSaveHost}
           onCreateGroup={onCreateGroup}
           title={t('snippets.targets.add')}
+          layout="inline"
         />
       );
     }
@@ -731,6 +732,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           open={true}
           onClose={handleClosePanel}
           title={editingSnippet.id ? t('snippets.panel.editTitle') : t('snippets.panel.newTitle')}
+          layout="inline"
           actions={
             <Button
               variant="ghost"
@@ -884,7 +886,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           </AsidePanelContent>
 
           {/* Footer */}
-          <div className="px-4 py-3 border-t border-border/60 shrink-0">
+          <AsidePanelFooter>
             <Button
               className="w-full"
               onClick={handleSubmit}
@@ -892,7 +894,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             >
               {editingSnippet.targets?.length ? t('action.run') : t('common.save')}
             </Button>
-          </div>
+          </AsidePanelFooter>
         </AsidePanel>
       );
     }
@@ -906,6 +908,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           subtitle={t('snippets.history.subtitle', { count: shellHistory.length })}
           showBackButton={true}
           onBack={handleClosePanel}
+          layout="inline"
         >
           {/* History List */}
           <div
@@ -953,7 +956,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
 
   return (
     <TooltipProvider delayDuration={300}>
-    <div className="h-full flex gap-3 relative">
+    <div className="h-full min-h-0 flex relative">
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         <header className="border-b border-border/50 bg-secondary/80 backdrop-blur">
           <div className="h-14 px-4 py-2 flex items-center gap-2">
