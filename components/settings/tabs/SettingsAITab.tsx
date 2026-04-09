@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   AIPermissionMode,
   AIProviderId,
+  AIToolIntegrationMode,
   ExternalAgentConfig,
   ProviderConfig,
   WebSearchConfig,
@@ -61,6 +62,8 @@ interface SettingsAITabProps {
   setActiveModelId: (id: string) => void;
   globalPermissionMode: AIPermissionMode;
   setGlobalPermissionMode: (mode: AIPermissionMode) => void;
+  toolIntegrationMode: AIToolIntegrationMode;
+  setToolIntegrationMode: (mode: AIToolIntegrationMode) => void;
   externalAgents: ExternalAgentConfig[];
   setExternalAgents: (value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => void;
   defaultAgentId: string;
@@ -138,6 +141,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setActiveModelId,
   globalPermissionMode,
   setGlobalPermissionMode,
+  toolIntegrationMode,
+  setToolIntegrationMode,
   externalAgents,
   setExternalAgents,
   defaultAgentId,
@@ -584,6 +589,30 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               </div>
             </div>
           )}
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Bot size={18} className="text-muted-foreground" />
+              <h3 className="text-base font-medium">{t('ai.toolAccess.title')}</h3>
+            </div>
+
+            <div className="bg-muted/30 rounded-lg p-4">
+              <SettingRow
+                label={t('ai.toolAccess.mode')}
+                description={t('ai.toolAccess.description')}
+              >
+                <Select
+                  value={toolIntegrationMode}
+                  options={[
+                    { value: 'mcp', label: t('ai.toolAccess.mode.mcp') },
+                    { value: 'skills', label: t('ai.toolAccess.mode.skills') },
+                  ]}
+                  onChange={(value) => setToolIntegrationMode(value as AIToolIntegrationMode)}
+                  className="w-48"
+                />
+              </SettingRow>
+            </div>
+          </div>
 
           {/* -- Web Search Section -- */}
           <WebSearchSettings

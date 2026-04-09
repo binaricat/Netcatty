@@ -1747,6 +1747,11 @@ const zhCN: Messages = {
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',
   'ai.defaultAgent.catty': 'Catty（内置）',
+  'ai.toolAccess.title': '工具接入',
+  'ai.toolAccess.mode': 'Netcatty 接入模式',
+  'ai.toolAccess.description': '选择外部 ACP Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。当前 Skills + CLI 依赖宿主机器上可用的 Node.js 运行时。',
+  'ai.toolAccess.mode.mcp': 'MCP',
+  'ai.toolAccess.mode.skills': 'Skills + CLI',
 
   // AI Chat
   'ai.chat.noProvider': '尚未配置 AI 提供商。请前往 **设置 → AI → 提供商** 添加并启用一个提供商。',
@@ -1823,7 +1828,7 @@ const zhCN: Messages = {
   // AI Safety Settings
   'ai.safety.title': '安全',
   'ai.safety.permissionMode': '权限模式',
-  'ai.safety.permissionMode.description': '控制 AI 与终端的交互方式。观察者模式通过 MCP Server 阻止所有写操作，对内置和 ACP Agent 均生效。确认模式对 ACP Agent 仅为建议性（ACP Agent 有自己的工具审批流程）。',
+  'ai.safety.permissionMode.description': '控制 AI 与终端的交互方式。观察者模式会通过 Netcatty 阻止所有写操作，对内置和 ACP Agent 均生效。确认模式对 ACP Agent 仅为建议性（ACP Agent 有自己的工具审批流程）。',
   'ai.safety.permissionMode.observer': '观察者 - 只读，禁止操作',
   'ai.safety.permissionMode.confirm': '确认 - 操作前询问',
   'ai.safety.permissionMode.autonomous': '自主 - 自由执行',
@@ -1833,7 +1838,7 @@ const zhCN: Messages = {
   'ai.safety.maxIterations': '最大迭代次数',
   'ai.safety.maxIterations.description': '防止 AI 失控执行的最大工具调用循环次数。ACP Agent 可能有自己的内部迭代限制，以其为准。',
   'ai.safety.blocklist': '命令黑名单',
-  'ai.safety.blocklist.description': '用于拦截危险命令的正则表达式。通过 MCP Server 对内置和 ACP Agent 均生效。',
+  'ai.safety.blocklist.description': '用于拦截危险命令的正则表达式。通过 Netcatty 执行层对内置和 ACP Agent 均生效。',
   'ai.safety.blocklist.placeholder': '正则表达式...',
   'ai.safety.blocklist.reset': '恢复默认',
   'ai.safety.blocklist.add': '添加规则',

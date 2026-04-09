@@ -86,6 +86,8 @@ const SettingsAITabContainer: React.FC = () => {
                     setActiveModelId={aiState.setActiveModelId}
                     globalPermissionMode={aiState.globalPermissionMode}
                     setGlobalPermissionMode={aiState.setGlobalPermissionMode}
+                    toolIntegrationMode={aiState.toolIntegrationMode}
+                    setToolIntegrationMode={aiState.setToolIntegrationMode}
                     externalAgents={aiState.externalAgents}
                     setExternalAgents={aiState.setExternalAgents}
                     defaultAgentId={aiState.defaultAgentId}

@@ -8,18 +8,29 @@
 
 const net = require("node:net");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
 const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
+const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
+const sftpBridge = require("./sftpBridge.cjs");
+
+const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
+
+function debugLog(...args) {
+  if (!DEBUG_MCP) return;
+  console.error("[MCP Bridge:debug]", ...args);
+}
 
 let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, ... }>
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
 let electronModule = null;
+let cliDiscoveryFilePath = getCliDiscoveryFilePath();
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
@@ -48,6 +59,7 @@ let permissionMode = "confirm";
 // Track active PTY executions for cancellation
 const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
+const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const pendingSessionWriteApprovals = new Map(); // sessionId -> method
@@ -63,6 +75,7 @@ let approvalIdCounter = 0;
 
 function setMainWindowGetter(fn) {
   getMainWindowFn = fn;
+  debugLog("setMainWindowGetter", { hasGetter: typeof fn === "function" });
 }
 
 /**
@@ -79,6 +92,7 @@ const APPROVAL_TIMEOUT_MS = 110 * 1000; // 110 seconds
 
 function requestApprovalFromRenderer(toolName, args, chatSessionId) {
   return new Promise((resolve) => {
+    debugLog("requestApprovalFromRenderer", { toolName, args, chatSessionId });
     const mainWin = typeof getMainWindowFn === 'function' ? getMainWindowFn() : null;
     if (!mainWin || mainWin.isDestroyed()) {
       // No renderer available — deny to preserve confirm mode safety guarantee
@@ -119,6 +133,7 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
 }
 
 function resolveApprovalFromRenderer(approvalId, approved) {
+  debugLog("resolveApprovalFromRenderer", { approvalId, approved });
   const entry = pendingApprovals.get(approvalId);
   if (entry) {
     pendingApprovals.delete(approvalId);
@@ -377,8 +392,36 @@ function releaseSessionExecution(sessionId, token) {
 function init(deps) {
   sessions = deps.sessions;
   electronModule = deps.electronModule || null;
+  cliDiscoveryFilePath = deps.cliDiscoveryFilePath || getCliDiscoveryFilePath();
+  debugLog("init", { hasSessions: Boolean(sessions), hasElectron: Boolean(electronModule) });
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
+  }
+}
+
+function writeCliDiscoveryFile() {
+  if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
+  const payload = {
+    port: tcpPort,
+    token: authToken,
+    pid: process.pid,
+    permissionMode,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.dirname(cliDiscoveryFilePath), { recursive: true });
+    fs.writeFileSync(cliDiscoveryFilePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  } catch (err) {
+    console.error("[MCP Bridge] Failed to write AI CLI discovery file:", err?.message || err);
+  }
+}
+
+function removeCliDiscoveryFile() {
+  if (!cliDiscoveryFilePath) return;
+  try {
+    fs.rmSync(cliDiscoveryFilePath, { force: true });
+  } catch (err) {
+    console.error("[MCP Bridge] Failed to remove AI CLI discovery file:", err?.message || err);
   }
 }
 
@@ -424,6 +467,7 @@ function getMaxIterations() {
 function setPermissionMode(mode) {
   if (mode === "observer" || mode === "confirm" || mode === "autonomous") {
     permissionMode = mode;
+    writeCliDiscoveryFile();
   }
 }
 
@@ -444,6 +488,39 @@ function isChatSessionCancelled(chatSessionId) {
   return Boolean(chatSessionId && cancelledChatSessions.has(chatSessionId));
 }
 
+function getActiveChatExecution(chatSessionId) {
+  if (!chatSessionId) return null;
+  return activeExecChatSessions.get(chatSessionId) || null;
+}
+
+function beginChatExecution(chatSessionId, sessionId, command) {
+  if (!chatSessionId) return { ok: true, release: () => {} };
+  const active = getActiveChatExecution(chatSessionId);
+  if (active) {
+    return {
+      ok: false,
+      active,
+    };
+  }
+  activeExecChatSessions.set(chatSessionId, {
+    sessionId,
+    command,
+    startedAt: Date.now(),
+  });
+  let released = false;
+  return {
+    ok: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      const current = activeExecChatSessions.get(chatSessionId);
+      if (current && current.sessionId === sessionId && current.command === command) {
+        activeExecChatSessions.delete(chatSessionId);
+      }
+    },
+  };
+}
+
 /**
  * Register metadata for terminal sessions (called from renderer via IPC).
  * Metadata is stored per-scope (chatSessionId) so different AI chat sessions
@@ -452,6 +529,11 @@ function isChatSessionCancelled(chatSessionId) {
  * @param {string} [chatSessionId] - AI chat session ID for per-scope isolation
  */
 function updateSessionMetadata(sessionList, chatSessionId) {
+  debugLog("updateSessionMetadata", {
+    chatSessionId,
+    count: Array.isArray(sessionList) ? sessionList.length : 0,
+    sessionIds: Array.isArray(sessionList) ? sessionList.map(s => s.sessionId) : [],
+  });
   const ids = sessionList.map(s => s.sessionId);
   const metaMap = new Map();
   for (const s of sessionList) {
@@ -529,12 +611,15 @@ function getOrCreateHost() {
 
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
+      debugLog("TCP client connected");
       handleConnection(socket);
     });
 
     server.listen(0, "127.0.0.1", () => {
       tcpPort = server.address().port;
       tcpServer = server;
+      debugLog("TCP server listening", { port: tcpPort });
+      writeCliDiscoveryFile();
       resolve(tcpPort);
     });
 
@@ -563,6 +648,7 @@ function handleConnection(socket) {
       const line = buffer.slice(0, newlineIdx);
       buffer = buffer.slice(newlineIdx + 1);
       if (!line.trim()) continue;
+      debugLog("Incoming line", line);
       handleMessage(socket, line);
     }
   });
@@ -581,6 +667,7 @@ async function handleMessage(socket, line) {
   }
 
   const { id, method, params } = msg;
+  debugLog("handleMessage", { id, method, params });
   if (id == null || !method) return;
 
   // ── Authentication gate ──
@@ -588,6 +675,7 @@ async function handleMessage(socket, line) {
   // All other methods are rejected until the socket is authenticated.
   if (!authenticatedSockets.has(socket)) {
     if (method === "auth/verify" && params?.token === authToken) {
+      debugLog("auth/verify success");
       authenticatedSockets.add(socket);
       const response = JSON.stringify({ jsonrpc: "2.0", id, result: { ok: true } }) + "\n";
       if (!socket.destroyed) socket.write(response);
@@ -626,6 +714,12 @@ async function handleMessage(socket, line) {
 // Methods that modify remote state — blocked in observer mode
 const WRITE_METHODS = new Set([
   "netcatty/exec",
+  "netcatty/sftp/write",
+  "netcatty/sftp/upload",
+  "netcatty/sftp/mkdir",
+  "netcatty/sftp/delete",
+  "netcatty/sftp/rename",
+  "netcatty/sftp/chmod",
   "netcatty/jobStart",
   "netcatty/jobStop",
 ]);
@@ -656,6 +750,7 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
     return null;
   }
   const scopedIds = getScopedSessionIds(chatSessionId);
+  debugLog("validateSessionScope", { sessionId, chatSessionId, scopedIds });
   if (scopedIds && scopedIds.length > 0 && !scopedIds.includes(sessionId)) {
     return `Session "${sessionId}" is not in the current scope.`;
   }
@@ -663,6 +758,7 @@ function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null
 }
 
 async function dispatch(method, params) {
+  debugLog("dispatch", { method, params, permissionMode });
   const sessionWriteLockId = (method === "netcatty/exec" || method === "netcatty/jobStart") ? params?.sessionId : null;
   pruneCompletedBackgroundJobs();
 
@@ -711,6 +807,12 @@ async function dispatch(method, params) {
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
     if (permissionMode === "confirm" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
+      if (!params?.chatSessionId) {
+        return {
+          ok: false,
+          error: 'Operation denied: permission mode is "confirm", but this CLI request is not attached to an AI chat session. Manual CLI write operations are non-interactive; switch Settings → AI → Safety to "autonomous" to allow this action.',
+        };
+      }
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {
@@ -720,8 +822,34 @@ async function dispatch(method, params) {
     switch (method) {
       case "netcatty/getContext":
         return handleGetContext(params);
+      case "netcatty/getStatus":
+        return handleGetStatus();
       case "netcatty/exec":
         return handleExec(params);
+      case "netcatty/sftp/list":
+        return handleSftpList(params);
+      case "netcatty/sftp/read":
+        return handleSftpRead(params);
+      case "netcatty/sftp/write":
+        return handleSftpWrite(params);
+      case "netcatty/sftp/download":
+        return handleSftpDownload(params);
+      case "netcatty/sftp/upload":
+        return handleSftpUpload(params);
+      case "netcatty/sftp/mkdir":
+        return handleSftpMkdir(params);
+      case "netcatty/sftp/delete":
+        return handleSftpDelete(params);
+      case "netcatty/sftp/rename":
+        return handleSftpRename(params);
+      case "netcatty/sftp/stat":
+        return handleSftpStat(params);
+      case "netcatty/sftp/chmod":
+        return handleSftpChmod(params);
+      case "netcatty/sftp/home":
+        return handleSftpHome(params);
+      case "netcatty/setCancelled":
+        return handleSetCancelled(params);
       case "netcatty/jobStart":
         return handleJobStart(params);
       case "netcatty/jobPoll":
@@ -741,6 +869,7 @@ async function dispatch(method, params) {
 // ── Handler: getContext ──
 
 function handleGetContext(params) {
+  debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
   if (!sessions) return { hosts: [], instructions: "No sessions available." };
 
   // chatSessionId may be passed via env for per-scope metadata lookup
@@ -800,16 +929,204 @@ function handleGetContext(params) {
   };
 }
 
+function handleGetStatus() {
+  return {
+    ok: true,
+    environment: "netcatty-terminal",
+    permissionMode,
+    commandTimeoutMs,
+    maxIterations,
+    tcpPort,
+    sessionCount: sessions?.size || 0,
+    scopedContextCount: scopedMetadata.size,
+    activeExecutionCount: activePtyExecs.size,
+    activeChatExecutionCount: activeExecChatSessions.size,
+    pendingApprovalCount: pendingApprovals.size,
+    discoveryFilePath: cliDiscoveryFilePath || null,
+    discoveryFilePresent: Boolean(cliDiscoveryFilePath && existsSync(cliDiscoveryFilePath)),
+  };
+}
+
+function handleSetCancelled(params) {
+  const chatSessionId = params?.chatSessionId;
+  const cancelled = params?.cancelled !== false;
+  if (!chatSessionId || typeof chatSessionId !== "string") {
+    throw new Error("chatSessionId is required");
+  }
+
+  if (cancelled) {
+    cancelPtyExecsForSession(chatSessionId);
+    clearPendingApprovals(chatSessionId);
+  }
+  setChatSessionCancelled(chatSessionId, cancelled);
+
+  return {
+    ok: true,
+    chatSessionId,
+    cancelled,
+  };
+}
+
+async function withSessionBackedSftp(params, action, options = {}) {
+  if (!params?.sessionId) throw new Error("sessionId is required");
+  const opened = await sftpBridge.openSftpForSession(null, { sessionId: params.sessionId });
+  const sftpId = opened?.sftpId;
+  if (!sftpId) throw new Error("Failed to open session-backed SFTP handle");
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 0;
+  const operationName = options.operationName || "SFTP operation";
+  let timeoutId = null;
+  let timedOut = false;
+  try {
+    const payload = {
+      ...params,
+      sftpId,
+    };
+    if (!timeoutMs) {
+      return await action(payload);
+    }
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      const finishResolve = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve(value);
+      };
+      const finishReject = (err) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        reject(err);
+      };
+      timeoutId = setTimeout(async () => {
+        if (settled) return;
+        timedOut = true;
+        try {
+          await sftpBridge.closeSftp(null, { sftpId });
+        } catch {
+          // Ignore close failures during forced timeout cleanup.
+        }
+        finishReject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      Promise.resolve()
+        .then(() => action(payload))
+        .then(finishResolve, finishReject);
+    });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (!timedOut) {
+      try {
+        await sftpBridge.closeSftp(null, { sftpId });
+      } catch {
+        // Ignore close failures for one-off internal SFTP handles.
+      }
+    }
+  }
+}
+
+async function handleSftpList(params) {
+  const entries = await withSessionBackedSftp(params, (payload) => sftpBridge.listSftp(null, payload));
+  return { ok: true, entries };
+}
+
+async function handleSftpRead(params) {
+  if (!params?.path) throw new Error("path is required");
+  const content = await withSessionBackedSftp(params, (payload) => sftpBridge.readSftp(null, payload));
+  return { ok: true, path: params.path, content };
+}
+
+async function handleSftpWrite(params) {
+  if (!params?.path) throw new Error("path is required");
+  if (typeof params?.content !== "string") throw new Error("content is required");
+  await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.writeSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP write" },
+  );
+  return { ok: true, path: params.path };
+}
+
+async function handleSftpDownload(params) {
+  if (!params?.remotePath || !params?.localPath) {
+    throw new Error("remotePath and localPath are required");
+  }
+  const result = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.downloadSftpToLocal(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP download" },
+  );
+  return { ok: true, ...result };
+}
+
+async function handleSftpUpload(params) {
+  if (!params?.remotePath || !params?.localPath) {
+    throw new Error("remotePath and localPath are required");
+  }
+  const result = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.uploadLocalToSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP upload" },
+  );
+  return { ok: true, ...result };
+}
+
+async function handleSftpMkdir(params) {
+  if (!params?.path) throw new Error("path is required");
+  await withSessionBackedSftp(params, (payload) => sftpBridge.mkdirSftp(null, payload));
+  return { ok: true, path: params.path };
+}
+
+async function handleSftpDelete(params) {
+  if (!params?.path) throw new Error("path is required");
+  await withSessionBackedSftp(params, (payload) => sftpBridge.deleteSftp(null, payload));
+  return { ok: true, path: params.path };
+}
+
+async function handleSftpRename(params) {
+  if (!params?.oldPath || !params?.newPath) {
+    throw new Error("oldPath and newPath are required");
+  }
+  await withSessionBackedSftp(params, (payload) => sftpBridge.renameSftp(null, payload));
+  return { ok: true, oldPath: params.oldPath, newPath: params.newPath };
+}
+
+async function handleSftpStat(params) {
+  if (!params?.path) throw new Error("path is required");
+  const stat = await withSessionBackedSftp(params, (payload) => sftpBridge.statSftp(null, payload));
+  return { ok: true, stat };
+}
+
+async function handleSftpChmod(params) {
+  if (!params?.path || !params?.mode) throw new Error("path and mode are required");
+  await withSessionBackedSftp(params, (payload) => sftpBridge.chmodSftp(null, payload));
+  return { ok: true, path: params.path, mode: params.mode };
+}
+
+async function handleSftpHome(params) {
+  const result = await withSessionBackedSftp(params, (payload) => sftpBridge.getSftpHomeDir(null, payload));
+  if (!result?.success) {
+    throw new Error(result?.error || "Could not determine home directory");
+  }
+  return { ok: true, homeDir: result.homeDir };
+}
+
 // ── Handler: exec ──
 
 function resolveExecContext(params) {
   const { sessionId, command } = params;
+  debugLog("handleExec:start", { sessionId, command, chatSessionId: params?.chatSessionId });
   if (!sessionId || !command) throw new Error("sessionId and command are required");
   if (typeof command !== 'string' || !command.trim()) {
     return { ok: false, error: 'Invalid command', exitCode: 1 };
   }
 
   const session = sessions?.get(sessionId);
+  debugLog("handleExec:sessionLookup", {
+    sessionId,
+    found: Boolean(session),
+    protocol: session?.protocol || session?.type || null,
+    shellKind: session?.shellKind || null,
+  });
   if (!session) return { ok: false, error: "Session not found" };
 
   // Look up device type from metadata (set by renderer from Host.deviceType).
@@ -837,6 +1154,7 @@ function resolveExecContext(params) {
   if (!isNetworkDevice) {
     const safety = checkCommandSafety(command);
     if (safety.blocked) {
+      debugLog("handleExec:blocklisted", { sessionId, matchedPattern: safety.matchedPattern });
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
     }
   }
@@ -881,14 +1199,27 @@ function handleExec(params) {
   const reservation = reserveSessionExecution(sessionId, "exec");
   if (!reservation.ok) return reservation;
   const sessionToken = reservation.token;
+  const executionLock = beginChatExecution(chatSessionId, sessionId, command);
+  if (!executionLock.ok) {
+    releaseSessionExecution(sessionId, sessionToken);
+    return {
+      ok: false,
+      code: "COMMAND_ALREADY_RUNNING",
+      error: `Another Netcatty command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
+      activeCommand: executionLock.active.command,
+      activeSessionId: executionLock.active.sessionId,
+    };
+  }
 
   const runExecution = (factory) => {
     try {
       return Promise.resolve(factory()).finally(() => {
         releaseSessionExecution(sessionId, sessionToken);
+        executionLock.release();
       });
     } catch (err) {
       releaseSessionExecution(sessionId, sessionToken);
+      executionLock.release();
       return { ok: false, error: err?.message || String(err) };
     }
   };
@@ -915,6 +1246,8 @@ function handleExec(params) {
       expectedPrompt: session.lastIdlePrompt || "",
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
+      chatSessionId,
+      chatSessionId,
       // MCP callers have terminal_start as a fallback for long commands,
       // so enforce a hard wall-clock timeout here to match the MCP budget.
       enforceWallTimeout: true,
@@ -925,6 +1258,7 @@ function handleExec(params) {
   // If we got here, ptyStream wasn't writable — there's no usable channel.
   if (isNetworkDevice) {
     releaseSessionExecution(sessionId, sessionToken);
+    executionLock.release();
     return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
   }
 
@@ -951,6 +1285,7 @@ function handleExec(params) {
   }
 
   releaseSessionExecution(sessionId, sessionToken);
+  executionLock.release();
   return { ok: false, error: "Session does not support command execution" };
 }
 
@@ -1177,6 +1512,9 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
   if (authToken) {
     env.push({ name: "NETCATTY_MCP_TOKEN", value: authToken });
   }
+  if (DEBUG_MCP) {
+    env.push({ name: "NETCATTY_MCP_DEBUG", value: "1" });
+  }
 
   // When chatSessionId is present, the MCP subprocess resolves scope dynamically
   // through main-process metadata, so avoid freezing session IDs at spawn time.
@@ -1217,6 +1555,7 @@ function cleanupScopedMetadata(chatSessionId) {
 }
 
 function cleanup() {
+  removeCliDiscoveryFile();
   if (tcpServer) {
     tcpServer.close();
     tcpServer = null;

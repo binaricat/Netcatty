@@ -6,7 +6,20 @@
  * and forwards stream events to the renderer via IPC.
  */
 
-import type { ExternalAgentConfig } from './types';
+import type { AIToolIntegrationMode, ExternalAgentConfig } from './types';
+
+export interface DefaultTargetSessionHint {
+  sessionId: string;
+  hostname: string;
+  label: string;
+  os?: string;
+  username?: string;
+  protocol?: string;
+  shellType?: string;
+  deviceType?: string;
+  connected: boolean;
+  source: 'scope-target' | 'only-connected-in-scope';
+}
 
 export interface AcpAgentCallbacks {
   onSessionId?: (sessionId: string) => void;
@@ -33,6 +46,8 @@ interface AcpBridge {
     existingSessionId?: string,
     historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
     images?: FileAttachment[],
+    toolIntegrationMode?: AIToolIntegrationMode,
+    defaultTargetSession?: DefaultTargetSessionHint,
   ): Promise<{ ok: boolean; error?: string }>;
   aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
@@ -70,6 +85,8 @@ export async function runAcpAgentTurn(
   existingSessionId?: string,
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
   images?: FileAttachment[],
+  toolIntegrationMode?: AIToolIntegrationMode,
+  defaultTargetSession?: DefaultTargetSessionHint,
 ): Promise<void> {
   const acpBridge = bridge as unknown as AcpBridge;
 
@@ -126,6 +143,8 @@ export async function runAcpAgentTurn(
     existingSessionId,
     historyMessages,
     images?.length ? images : undefined,
+    toolIntegrationMode,
+    defaultTargetSession,
   ).catch((err: Error) => {
     callbacks.onError(err.message);
   });

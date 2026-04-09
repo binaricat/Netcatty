@@ -5,6 +5,7 @@ import {
   STORAGE_KEY_AI_ACTIVE_PROVIDER,
   STORAGE_KEY_AI_ACTIVE_MODEL,
   STORAGE_KEY_AI_PERMISSION_MODE,
+  STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_HOST_PERMISSIONS,
   STORAGE_KEY_AI_EXTERNAL_AGENTS,
   STORAGE_KEY_AI_DEFAULT_AGENT,
@@ -19,6 +20,7 @@ import {
 import type {
   AISession,
   AIPermissionMode,
+  AIToolIntegrationMode,
   ProviderConfig,
   HostAIPermission,
   ExternalAgentConfig,
@@ -29,8 +31,16 @@ import type {
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
 
 /** Typed accessor for the Electron IPC bridge exposed on `window.netcatty`. */
+interface AIBridge {
+  aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
+  aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
+  aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
+  aiMcpSetCommandTimeout?: (timeout: number) => Promise<unknown> | unknown;
+  aiMcpSetMaxIterations?: (maxIterations: number) => Promise<unknown> | unknown;
+}
+
 function getAIBridge() {
-  return (window as unknown as { netcatty?: Record<string, (...args: unknown[]) => unknown> }).netcatty;
+  return (window as unknown as { netcatty?: AIBridge }).netcatty;
 }
 
 const AI_STATE_CHANGED_EVENT = 'netcatty:ai-state-changed';
@@ -192,6 +202,10 @@ export function useAIState() {
     if (stored === 'observer' || stored === 'confirm' || stored === 'autonomous') return stored;
     return 'confirm';
   });
+  const [toolIntegrationMode, setToolIntegrationModeRaw] = useState<AIToolIntegrationMode>(() => {
+    const stored = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);
+    return stored === 'skills' ? 'skills' : 'mcp';
+  });
   const [hostPermissions, setHostPermissionsRaw] = useState<HostAIPermission[]>(() =>
     localStorageAdapter.read<HostAIPermission[]>(STORAGE_KEY_AI_HOST_PERMISSIONS) ?? []
   );
@@ -252,7 +266,7 @@ export function useAIState() {
     let changed = false;
     const nextActiveSessionIdMap: Record<string, string | null> = {};
 
-    for (const [scopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
+    for (const [scopeKey, sessionId] of Object.entries(activeSessionIdMap) as Array<[string, string | null]>) {
       const nextSessionId = sessionId && validSessionIds.has(sessionId) ? sessionId : null;
       nextActiveSessionIdMap[scopeKey] = nextSessionId;
       if (nextSessionId !== sessionId) {
@@ -330,6 +344,11 @@ export function useAIState() {
     });
   }, []);
 
+  const setToolIntegrationMode = useCallback((mode: AIToolIntegrationMode) => {
+    setToolIntegrationModeRaw(mode);
+    localStorageAdapter.writeString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, mode);
+  }, []);
+
   const setExternalAgents = useCallback((value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => {
     setExternalAgentsRaw(prev => {
       const next = typeof value === 'function' ? value(prev) : value;
@@ -396,6 +415,13 @@ export function useAIState() {
             }
             break;
           }
+          case STORAGE_KEY_AI_TOOL_INTEGRATION_MODE:
+            setToolIntegrationModeRaw(
+              localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
+                ? 'skills'
+                : 'mcp',
+            );
+            break;
           case STORAGE_KEY_AI_EXTERNAL_AGENTS: {
             const agents = localStorageAdapter.read<ExternalAgentConfig[]>(STORAGE_KEY_AI_EXTERNAL_AGENTS);
             if (agents != null && !Array.isArray(agents)) {
@@ -511,7 +537,11 @@ export function useAIState() {
     bridge?.aiMcpSetCommandTimeout?.(initialTimeout);
     const initialMaxIter = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
     bridge?.aiMcpSetMaxIterations?.(initialMaxIter);
-    const initialPermMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE) ?? 'confirm';
+    const storedPermMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
+    const initialPermMode: AIPermissionMode =
+      storedPermMode === 'observer' || storedPermMode === 'confirm' || storedPermMode === 'autonomous'
+        ? storedPermMode
+        : 'confirm';
     bridge?.aiMcpSetPermissionMode?.(initialPermMode);
   }, []);
 
@@ -819,6 +849,8 @@ export function useAIState() {
     // Permission model
     globalPermissionMode,
     setGlobalPermissionMode,
+    toolIntegrationMode,
+    setToolIntegrationMode,
     hostPermissions,
     setHostPermissions,
 

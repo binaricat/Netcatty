@@ -125,6 +125,7 @@ export interface AISessionScope {
 
 // Permission model
 export type AIPermissionMode = 'observer' | 'confirm' | 'autonomous';
+export type AIToolIntegrationMode = 'mcp' | 'skills';
 
 export interface HostAIPermission {
   hostId: string;
@@ -214,6 +215,7 @@ export interface AISettings {
   activeProviderId: string;
   activeModelId: string;
   globalPermissionMode: AIPermissionMode;
+  toolIntegrationMode: AIToolIntegrationMode;
   externalAgents: ExternalAgentConfig[];
   defaultAgentId: string;
   commandBlocklist: string[];    // global command blocklist patterns
@@ -247,6 +249,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   activeProviderId: '',
   activeModelId: '',
   globalPermissionMode: 'confirm',
+  toolIntegrationMode: 'mcp',
   externalAgents: [],
   defaultAgentId: 'catty',
   commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
@@ -289,11 +292,30 @@ export const CODEX_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning' },
 ];
 
+export const COPILOT_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', description: 'Default' },
+  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', description: 'Highest quality' },
+  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5' },
+  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', description: 'Fastest Claude' },
+  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+  { id: 'gpt-5.4', name: 'GPT 5.4' },
+  { id: 'gpt-5.3-codex', name: 'Codex 5.3' },
+  { id: 'gpt-5.2-codex', name: 'Codex 5.2' },
+  { id: 'gpt-5.2', name: 'GPT 5.2' },
+  { id: 'gpt-5.1-codex-max', name: 'Codex 5.1 Max' },
+  { id: 'gpt-5.1-codex', name: 'Codex 5.1' },
+  { id: 'gpt-5.1', name: 'GPT 5.1' },
+  { id: 'gpt-5-mini', name: 'GPT 5 Mini', description: 'Fast' },
+  { id: 'gpt-4.1', name: 'GPT 4.1' },
+];
+
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
   if (!agentCommand) return [];
   const basename = agentCommand.split('/').pop()?.toLowerCase() ?? '';
   if (basename.startsWith('claude')) return CLAUDE_MODEL_PRESETS;
   if (basename.startsWith('codex')) return CODEX_MODEL_PRESETS;
+  if (basename.startsWith('copilot')) return COPILOT_MODEL_PRESETS;
   return [];
 }
 

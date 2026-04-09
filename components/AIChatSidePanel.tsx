@@ -21,8 +21,8 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import { useWindowControls } from '../application/state/useWindowControls';
 import { useFileUpload } from '../application/state/useFileUpload';
 import type {
-  AgentModelPreset,
   AIPermissionMode,
+  AIToolIntegrationMode,
   AISession,
   AISessionScope,
   ChatMessage,
@@ -39,7 +39,11 @@ import AgentSelector from './ai/AgentSelector';
 import ChatInput from './ai/ChatInput';
 import ChatMessageList from './ai/ChatMessageList';
 import ConversationExport from './ai/ConversationExport';
-import { useAIChatStreaming, getNetcattyBridge } from './ai/hooks/useAIChatStreaming';
+import {
+  useAIChatStreaming,
+  getNetcattyBridge,
+  type DefaultTargetSessionHint,
+} from './ai/hooks/useAIChatStreaming';
 import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
@@ -89,6 +93,7 @@ interface AIChatSidePanelProps {
 
   // Agent info
   defaultAgentId: string;
+  toolIntegrationMode: AIToolIntegrationMode;
   externalAgents: ExternalAgentConfig[];
   setExternalAgents?: (value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => void;
   agentModelMap: Record<string, string>;
@@ -210,6 +215,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   activeProviderId,
   activeModelId,
   defaultAgentId,
+  toolIntegrationMode,
   externalAgents,
   setExternalAgents,
   agentModelMap,
@@ -304,6 +310,29 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
     return historySessions[0] ?? null;
   }, [sessions, activeSessionIdForScope, historySessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds]);
+
+  const defaultTargetSession = useMemo<DefaultTargetSessionHint | undefined>(() => {
+    const connectedSessions = terminalSessions.filter((session) => session.connected !== false);
+
+    if (scopeType === 'terminal' && scopeTargetId) {
+      const target = terminalSessions.find((session) => session.sessionId === scopeTargetId);
+      if (target) {
+        return {
+          ...target,
+          source: 'scope-target',
+        };
+      }
+    }
+
+    if (connectedSessions.length === 1) {
+      return {
+        ...connectedSessions[0],
+        source: 'only-connected-in-scope',
+      };
+    }
+
+    return undefined;
+  }, [terminalSessions, scopeType, scopeTargetId]);
 
   const activeSessionId = activeSession?.id ?? activeSessionIdForScope;
   const isStreaming = activeSessionId ? streamingSessionIds.has(activeSessionId) : false;
@@ -440,7 +469,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   const providerDisplayName = activeProvider?.name ?? '';
   const modelDisplayName = activeModelId || activeProvider?.defaultModel || '';
-  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, AgentModelPreset[]>>({});
 
   // Agent model presets for the current external agent
   const currentAgentConfig = useMemo(
@@ -451,51 +479,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     () => isCopilotAgentConfig(currentAgentConfig),
     [currentAgentConfig],
   );
-
-  // Ref to read agentModelMap inside the effect without re-triggering it
-  // when setAgentModel updates the map (avoids double ACP spawn).
-  const agentModelMapRef = useRef(agentModelMap);
-  agentModelMapRef.current = agentModelMap;
-
-  useEffect(() => {
-    if (!currentAgentConfig?.acpCommand) return;
-    if (!isCopilotExternalAgent) return;
-
-    const bridge = getNetcattyBridge();
-    if (!bridge?.aiAcpListModels) return;
-
-    let cancelled = false;
-    void bridge.aiAcpListModels(
-      currentAgentConfig.acpCommand,
-      currentAgentConfig.acpArgs || [],
-      undefined,
-      undefined,
-      `models_${currentAgentId}`,
-    ).then((result) => {
-      if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
-      const knownModelIds = new Set(result.models.map((model) => model.id));
-      setRuntimeAgentModelPresets((prev) => ({
-        ...prev,
-        [currentAgentId]: result.models ?? [],
-      }));
-      const storedModelId = agentModelMapRef.current[currentAgentId];
-      if (result.currentModelId && (!storedModelId || !knownModelIds.has(storedModelId))) {
-        setAgentModel(currentAgentId, result.currentModelId);
-      }
-    }).catch((err) => {
-      if (!cancelled) {
-        console.warn('[AIChatSidePanel] Failed to load ACP agent models:', err);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentAgentConfig, currentAgentId, isCopilotExternalAgent, setAgentModel]);
-
   const agentModelPresets = useMemo(
-    () => runtimeAgentModelPresets[currentAgentId] ?? getAgentModelPresets(currentAgentConfig?.command),
-    [currentAgentId, currentAgentConfig?.command, runtimeAgentModelPresets],
+    () => getAgentModelPresets(currentAgentConfig?.command),
+    [currentAgentConfig?.command],
   );
 
   // Per-agent model: recall last selection or use first preset as default
@@ -503,6 +489,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     const stored = agentModelMap[currentAgentId];
     if (stored && agentModelPresets.some(p => stored === p.id || stored.startsWith(p.id + '/'))) {
       return stored;
+    }
+    if (isCopilotExternalAgent) {
+      return undefined;
     }
     // Default to first preset; for models with thinking levels, use the default level
     if (agentModelPresets.length > 0) {
@@ -513,7 +502,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       return first.id;
     }
     return undefined;
-  }, [currentAgentId, agentModelMap, agentModelPresets]);
+  }, [currentAgentId, agentModelMap, agentModelPresets, isCopilotExternalAgent]);
 
   const handleAgentModelSelect = useCallback((modelId: string) => {
     setAgentModel(currentAgentId, modelId);
@@ -677,8 +666,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           updateExternalSessionId: updateSessionExternalSessionId,
           historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
           terminalSessions,
+          defaultTargetSession,
           providers,
           selectedAgentModel,
+          toolIntegrationMode,
         });
       } catch (err) {
         reportStreamError(sessionId, abortController.signal, err);
@@ -714,8 +705,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     ensureSession, addMessageToSession, updateMessageById, updateLastMessage,
     setStreamingForScope, setInputValue, clearFiles,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
-    abortControllersRef, terminalSessions, providers, selectedAgentModel, updateSessionExternalSessionId,
+    abortControllersRef, terminalSessions, defaultTargetSession, providers, selectedAgentModel, updateSessionExternalSessionId,
     scopeType, scopeTargetId, scopeLabel, globalPermissionMode, commandBlocklist, webSearchConfig, buildExecutorContextForScope,
+    toolIntegrationMode,
   ]);
 
   const handleStop = useCallback(() => {

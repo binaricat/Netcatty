@@ -24,6 +24,7 @@ const {
   resolveClaudeAcpBinaryPath,
   getShellEnv,
   serializeStreamChunk,
+  toUnpackedAsarPath,
 } = require("./ai/shellUtils.cjs");
 
 const {
@@ -42,6 +43,91 @@ const {
   setCodexValidationCache,
 } = require("./ai/codexHelpers.cjs");
 
+const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
+const NETCATTY_TOOL_SKILL_PATH = toUnpackedAsarPath(
+  path.resolve(__dirname, "../../skills/netcatty-tool-cli/SKILL.md"),
+);
+const NETCATTY_TOOL_CLI_PATH = toUnpackedAsarPath(
+  path.resolve(__dirname, "../cli/netcatty-tool-cli.cjs"),
+);
+
+function debugMcpLog(...args) {
+  if (!DEBUG_MCP) return;
+  console.error("[AI Bridge:debug]", ...args);
+}
+
+function normalizeToolIntegrationMode(mode) {
+  return mode === "skills" ? "skills" : "mcp";
+}
+
+function buildExternalAgentContextualPrompt({ mode, prompt, chatSessionId, defaultTargetSession }) {
+  if (mode === "skills") {
+    const cliCommandPrefix = existsSync(NETCATTY_TOOL_CLI_PATH)
+      ? `node "${NETCATTY_TOOL_CLI_PATH}"`
+      : "netcatty-tool-cli";
+    const skillHint = existsSync(NETCATTY_TOOL_SKILL_PATH)
+      ? `The local Netcatty skill file is "${NETCATTY_TOOL_SKILL_PATH}". You do not need to read it for routine read-only requests if the host instructions here are sufficient. Only open it when the task is unusual, multi-step, or you are unsure about the workflow. `
+      : "";
+    const cliHint = existsSync(NETCATTY_TOOL_CLI_PATH)
+      ? `For this chat session, the exact Netcatty CLI command prefix is \`${cliCommandPrefix}\`.`
+      : "Use the exact Netcatty CLI command prefix provided by the host application for this chat session. ";
+    const scopeHint = chatSessionId
+      ? `Always include \`--chat-session ${chatSessionId}\` on every Netcatty CLI call so you stay inside the current scoped session set. `
+      : "";
+    const defaultTargetHint = defaultTargetSession
+      ? (
+        `The host has already identified the default target session for this AI panel: ` +
+        `sessionId="${defaultTargetSession.sessionId}", ` +
+        `label="${defaultTargetSession.label || ""}", ` +
+        `hostname="${defaultTargetSession.hostname || ""}", ` +
+        `protocol="${defaultTargetSession.protocol || ""}", ` +
+        `connected=${defaultTargetSession.connected !== false}. ` +
+        (defaultTargetSession.connected !== false
+          ? `For routine requests that do not mention another session or host, use this default target directly and prefer \`${cliCommandPrefix} exec --session ${defaultTargetSession.sessionId} --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""} -- <command>\` instead of starting with discovery. Only run \`env\` or \`session\` lookup when the user explicitly points to another session (for example with @), when the task is ambiguous, or when the direct command fails. `
+          : `This default target is currently not connected, so do not execute against it directly. Fall back to \`env\` / \`session\` lookup if the user may want another available session. `)
+      )
+      : "";
+    const discoveryHint = defaultTargetSession?.connected !== false
+      ? `If you do need discovery because the task is ambiguous or points to another session, start with \`${cliCommandPrefix} env --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\` to discover available sessions and their IDs. `
+      : `Start with \`${cliCommandPrefix} env --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\` to discover available sessions and their IDs. `;
+
+    return (
+      `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
+      `${skillHint}` +
+      `${cliHint}` +
+      `${scopeHint}` +
+      `${defaultTargetHint}` +
+      `Use Skills + CLI instead of the "netcatty-remote-hosts" MCP server for Netcatty session access. ` +
+      `First classify the task: remote command execution tasks go through \`exec\`, while remote file or directory tasks go through \`sftp\`. If the user explicitly says to avoid shell or \`exec\`, do not use \`exec\`. ` +
+      `${discoveryHint}` +
+      `After choosing a target session ID, call \`${cliCommandPrefix} session --session <id> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\` before executing anything. Do not infer protocol, shell type, device type, or connection readiness from the \`env\` result alone when you are about to run a command. ` +
+      `For remote file operations, use the Netcatty SFTP CLI surface instead of trying to reconstruct SSH credentials or open your own SSH/SFTP connection. Treat file and directory tasks as SFTP tasks by default, not shell tasks. Prefer one-off commands such as \`${cliCommandPrefix} sftp list --session <id> --remote-path <remote-path> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`, \`${cliCommandPrefix} sftp read --session <id> --remote-path <remote-path> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`, \`${cliCommandPrefix} sftp write --session <id> --remote-path <remote-path> --content <text> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`, \`${cliCommandPrefix} sftp download --session <id> --remote-path <remote-path> --local-path <local-path> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`, or \`${cliCommandPrefix} sftp upload --session <id> --local-path <local-path> --remote-path <remote-path> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`. ` +
+      `Keep local and remote path semantics strict: \`--remote-path\` always refers to the remote host, while \`--local-path\` always refers to the local machine running Netcatty. If the user asks to download a file to a local destination such as \`/tmp\`, \`~/Downloads\`, or a desktop path, use \`sftp download\`, not \`sftp read\` or \`sftp write\`. If the user asks to create or modify a file on the remote host, use \`sftp write\` or another remote SFTP operation, not \`sftp download\`. ` +
+      `If you need to create or update a small text file with known content on the remote host, prefer \`${cliCommandPrefix} sftp write ...\` directly. Use \`sftp upload\` only when a real local file already exists and must be transferred to the remote host. Do not create temporary local files just to upload text that could be sent with \`sftp write\`. ` +
+      `Keep SFTP usage one-off and explicit: every \`sftp\` command should include both \`--session <id>\` and \`--chat-session ${chatSessionId || "<chat-session-id>"}\`. Do not open reusable SFTP handles or use \`--sftp <id>\`. ` +
+      `Run Netcatty CLI calls strictly one at a time. Do not issue concurrent or background Netcatty CLI commands for the same chat session, and always wait for each call to finish before starting the next one. ` +
+      `For simple read-only requests such as hostname, IP address, CPU info, memory info, disk usage, pwd, whoami, uname, or process checks, use the shortest possible path: one \`env\`, one \`session\`, then one \`exec\`. Prefer a single straightforward command over creating helper scripts or multi-step shell orchestration. ` +
+      `For those simple read-only requests, do not spend time reading extra files, designing scripts, or narrating a plan unless the first direct command fails or the session metadata shows a special device type. ` +
+      `Do not create temporary scripts, JSON post-processing scripts, or extra wrapper commands unless the task genuinely requires logic that cannot fit cleanly in one direct command. ` +
+      `Avoid shell command substitution such as \`$()\` and backticks, because Netcatty safety policy may block them. Prefer straightforward command chains such as \`hostname && hostname -I && lscpu\`. ` +
+      `Avoid wrapping simple commands in \`sh -c\`, \`bash -c\`, or similar shell launcher patterns unless the task genuinely requires shell parsing that cannot be expressed as a direct command. ` +
+      `Do not spend time narrating intent before every CLI call for routine read-only checks. Execute the minimal command sequence and then report the result. ` +
+      `Only after that confirmation step should you call \`${cliCommandPrefix} exec --session <id> --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""} -- <command>\` for command execution. ` +
+      `If you need the legacy environment resource shape, use \`${cliCommandPrefix} resource environment --json${chatSessionId ? ` --chat-session ${chatSessionId}` : ""}\`. ` +
+      `If the user stops the run or asks to abort outstanding Netcatty work, use \`${cliCommandPrefix} cancel --chat-session ${chatSessionId || "<chat-session-id>"} --json\`, and use \`resume\` to re-enable execs for that scope if needed. ` +
+      `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`
+    );
+  }
+
+  return (
+    `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
+    `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
+    `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
+    `Call get_environment first to discover available sessions and their IDs. ` +
+    `For normal shell commands, use terminal_execute so you receive command output. ` +
+    `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`
+  );
+}
 
 const { execViaPty } = require("./ai/ptyExec.cjs");
 
@@ -272,6 +358,12 @@ function init(deps) {
   } catch {
     // windowManager may not be available yet; will be set lazily
   }
+
+  // Keep the internal TCP bridge warm so the external CLI can discover and
+  // call the same Netcatty execution path without going through MCP.
+  mcpServerBridge.getOrCreateHost().catch((err) => {
+    console.error("[AI Bridge] Failed to initialize AI CLI host:", err?.message || err);
+  });
 }
 
 /**
@@ -2031,7 +2123,7 @@ function registerHandlers(ipcMain) {
     }
   });
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -2076,6 +2168,19 @@ function registerHandlers(ipcMain) {
       const isClaudeAgent = matchesAgentCommand(acpCommand, "claude-agent-acp");
       const isCopilotAgent = matchesAgentCommand(acpCommand, "copilot");
       const agentLabel = isCodexAgent ? "codex" : isClaudeAgent ? "claude" : isCopilotAgent ? "copilot" : acpCommand;
+      const effectiveToolIntegrationMode = normalizeToolIntegrationMode(toolIntegrationMode);
+      debugMcpLog("ACP request start", {
+        requestId,
+        chatSessionId,
+        acpCommand,
+        acpArgs,
+        model,
+        providerId,
+        sessionCwd,
+        isCodexAgent,
+        isClaudeAgent,
+        toolIntegrationMode: effectiveToolIntegrationMode,
+      });
 
       // Resolve API key from providerId (decrypted in main process only)
       const resolvedProvider = providerId ? resolveProviderApiKey(providerId) : null;
@@ -2108,21 +2213,31 @@ function registerHandlers(ipcMain) {
         : { mcpServers: [], fingerprint: getCodexMcpFingerprint([]) };
       if (shouldAbortStartup()) return { ok: true };
 
-      // Inject Netcatty MCP server for scoped terminal-session access
-      try {
-        const mcpPort = await mcpServerBridge.getOrCreateHost();
-        const scopedIds = mcpServerBridge.getScopedSessionIds(chatSessionId);
-        const netcattyMcpConfig = mcpServerBridge.buildMcpServerConfig(mcpPort, scopedIds, chatSessionId);
-        mcpSnapshot.mcpServers.push(netcattyMcpConfig);
-        if (isCopilotAgent) {
-          logAcpDebug(agentLabel, "Injected Netcatty MCP server into session", {
+      // Inject Netcatty MCP server for scoped terminal-session access only when
+      // the user selected MCP mode. Skills mode uses the Netcatty CLI instead.
+      if (effectiveToolIntegrationMode === "mcp") {
+        try {
+          const mcpPort = await mcpServerBridge.getOrCreateHost();
+          const scopedIds = mcpServerBridge.getScopedSessionIds(chatSessionId);
+          const netcattyMcpConfig = mcpServerBridge.buildMcpServerConfig(mcpPort, scopedIds, chatSessionId);
+          mcpSnapshot.mcpServers.push(netcattyMcpConfig);
+          debugMcpLog("Injected Netcatty MCP server", {
+            requestId,
             chatSessionId,
+            mcpPort,
             scopedIds,
-            injectedServer: summarizeMcpServersForDebug([netcattyMcpConfig])[0],
+            mcpServerNames: mcpSnapshot.mcpServers.map(server => server.name),
           });
+          if (isCopilotAgent) {
+            logAcpDebug(agentLabel, "Injected Netcatty MCP server into session", {
+              chatSessionId,
+              scopedIds,
+              injectedServer: summarizeMcpServersForDebug([netcattyMcpConfig])[0],
+            });
+          }
+        } catch (err) {
+          console.error("[ACP] Failed to inject Netcatty MCP server:", err?.message || err);
         }
-      } catch (err) {
-        console.error("[ACP] Failed to inject Netcatty MCP server:", err?.message || err);
       }
       if (shouldAbortStartup()) return { ok: true };
 
@@ -2184,6 +2299,14 @@ function registerHandlers(ipcMain) {
             : {}),
           persistSession: true,
         });
+        debugMcpLog("Created ACP provider", {
+          requestId,
+          chatSessionId,
+          resolvedCommand,
+          resolvedArgs,
+          mcpServerNames: mcpSnapshot.mcpServers.map(server => server.name),
+          authMethodId: isCodexAgent ? (apiKey ? "codex-api-key" : "chatgpt") : null,
+        });
 
         if (isCopilotAgent) {
           logAcpDebug(agentLabel, "Creating ACP provider", {
@@ -2213,6 +2336,11 @@ function registerHandlers(ipcMain) {
       let modelInstance = providerEntry.provider.languageModel(model || undefined);
       try {
         await providerEntry.provider.initSession(providerEntry.provider.tools);
+        debugMcpLog("provider.initSession ok", {
+          requestId,
+          chatSessionId,
+          providerSessionId: providerEntry.provider.getSessionId?.() || null,
+        });
         if (isCopilotAgent) {
           logAcpDebug(agentLabel, "ACP session initialized", {
             requestId,
@@ -2223,6 +2351,11 @@ function registerHandlers(ipcMain) {
         }
         if (shouldAbortStartup()) return { ok: true };
       } catch (err) {
+        debugMcpLog("provider.initSession error", {
+          requestId,
+          chatSessionId,
+          message: err?.message || String(err),
+        });
         const attemptedResumeSessionId = providerEntry.provider?.getSessionId?.() || existingSessionId;
         if (!attemptedResumeSessionId || !shouldRetryFreshSession(err)) {
           throw err;
@@ -2276,6 +2409,11 @@ function registerHandlers(ipcMain) {
         acpProviders.set(chatSessionId, providerEntry);
         modelInstance = providerEntry.provider.languageModel(model || undefined);
         await providerEntry.provider.initSession(providerEntry.provider.tools);
+        debugMcpLog("fallback provider.initSession ok", {
+          requestId,
+          chatSessionId,
+          providerSessionId: providerEntry.provider.getSessionId?.() || null,
+        });
         if (isCopilotAgent) {
           logAcpDebug(agentLabel, "ACP session initialized after fallback", {
             requestId,
@@ -2294,16 +2432,13 @@ function registerHandlers(ipcMain) {
         });
       }
 
-      // Prepend context hint so the agent uses Netcatty MCP tools for the scoped sessions
-      const contextualPrompt =
-        `[Context: You are inside Netcatty, a multi-session terminal manager. ` +
-        `Use the "netcatty-remote-hosts" MCP tools to operate only on the terminal sessions exposed by Netcatty. ` +
-        `Those sessions may be remote hosts, a local terminal, or Mosh-backed shells. ` +
-        `Call get_environment first to discover available sessions and their IDs. ` +
-        `Use terminal_execute only for commands likely to finish within about 60 seconds. ` +
-        `For long-running commands such as builds, scans, follow/log streaming, watch commands, or anything likely to exceed 60 seconds on PTY-backed shell sessions, use terminal_start, then terminal_poll until completed is true. Reuse the returned nextOffset for the next poll. If terminal_poll reports outputTruncated=true, only the retained tail starting at outputBaseOffset is still available. Do not poll aggressively: wait at least about 30 seconds between polls, and increase the interval further when there is no new output, to avoid wasting tokens. As soon as completed is true, stop polling and analyze the result immediately. Note: terminal_start requires a PTY-backed session; for sessions that only support exec-channel execution (no writable PTY), use terminal_execute instead. ` +
-        `Use terminal_stop if you need to interrupt a started long-running command. ` +
-        `For serial/raw sessions and network device sessions (deviceType: network), commands are sent as-is without shell wrapping and exit codes are unavailable. Use vendor CLI commands directly.]\n\n${prompt}`;
+      // Prepend context hint so the agent uses the configured Netcatty access mode.
+      const contextualPrompt = buildExternalAgentContextualPrompt({
+        mode: effectiveToolIntegrationMode,
+        prompt,
+        chatSessionId,
+        defaultTargetSession,
+      });
 
       // Build message content: text + optional attachments
       // ACP provider only supports image/* and audio/* inline via `type: "file"`.
@@ -2407,6 +2542,12 @@ function registerHandlers(ipcMain) {
             if (isCopilotAgent && (serialized.type === "tool-call" || serialized.type === "tool-result" || serialized.type === "error" || serialized.type === "status")) {
               logAcpDebug(agentLabel, `Stream event: ${serialized.type}`, serialized);
             }
+            debugMcpLog("ACP stream event", {
+              requestId,
+              chatSessionId,
+              type: serialized.type,
+              toolName: serialized.toolName || null,
+            });
             safeSend(event.sender, "netcatty:ai:acp:event", {
               requestId,
               event: serialized,
@@ -2422,6 +2563,12 @@ function registerHandlers(ipcMain) {
 
       // If stream completed with zero content, likely an auth or connection issue
       if (!hasContent && !abortController.signal.aborted) {
+        debugMcpLog("ACP empty response", {
+          requestId,
+          chatSessionId,
+          isCodexAgent,
+          providerSessionId: providerEntry.provider.getSessionId?.() || null,
+        });
         if (isCopilotAgent) {
           logAcpDebug(agentLabel, "Stream completed with no content", {
             requestId,
@@ -2439,6 +2586,7 @@ function registerHandlers(ipcMain) {
             : "Agent returned an empty response.",
         });
       } else {
+        debugMcpLog("ACP stream done", { requestId, chatSessionId, hasContent });
         if (!isActiveAcpRun(chatSessionId, requestId)) {
           return { ok: true };
         }
@@ -2583,6 +2731,7 @@ function cleanup() {
   }
   codexLoginSessions.clear();
   invalidateCodexValidationCache();
+  mcpServerBridge.cleanup();
 }
 
 module.exports = { init, registerHandlers, cleanup };

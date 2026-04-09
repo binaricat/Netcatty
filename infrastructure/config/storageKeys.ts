@@ -88,6 +88,7 @@ export const STORAGE_KEY_AI_PROVIDERS = 'netcatty_ai_providers_v1';
 export const STORAGE_KEY_AI_ACTIVE_PROVIDER = 'netcatty_ai_active_provider_v1';
 export const STORAGE_KEY_AI_ACTIVE_MODEL = 'netcatty_ai_active_model_v1';
 export const STORAGE_KEY_AI_PERMISSION_MODE = 'netcatty_ai_permission_mode_v1';
+export const STORAGE_KEY_AI_TOOL_INTEGRATION_MODE = 'netcatty_ai_tool_integration_mode_v1';
 export const STORAGE_KEY_AI_HOST_PERMISSIONS = 'netcatty_ai_host_permissions_v1';
 export const STORAGE_KEY_AI_EXTERNAL_AGENTS = 'netcatty_ai_external_agents_v1';
 export const STORAGE_KEY_AI_DEFAULT_AGENT = 'netcatty_ai_default_agent_v1';

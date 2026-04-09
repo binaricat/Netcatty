@@ -1,0 +1,19 @@
+# Control Commands
+
+Read this when you need diagnostics, cancellation, or to re-enable a cancelled chat scope.
+
+## Useful Commands
+
+- Runtime diagnostics:
+  - `<netcatty-cli-prefix> status --json`
+- Legacy environment resource shape:
+  - `<netcatty-cli-prefix> resource environment --json --chat-session <chat-session-id>`
+- Cancel outstanding Netcatty work for this chat scope:
+  - `<netcatty-cli-prefix> cancel --chat-session <chat-session-id> --json`
+- Re-enable execution for that same chat scope:
+  - `<netcatty-cli-prefix> resume --chat-session <chat-session-id> --json`
+
+## Rules
+
+- `cancel` affects the current chat scope; later `exec` calls in that scope will be blocked until `resume`.
+- Do not issue control commands concurrently with other Netcatty CLI commands for the same chat session.

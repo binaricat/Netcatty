@@ -8,6 +8,9 @@
   "author": "binaricat <support@netcatty.com>",
   "license": "GPL-3.0-or-later",
   "main": "electron/main.cjs",
+  "bin": {
+    "netcatty-tool-cli": "./electron/cli/netcatty-tool-cli.cjs"
+  },
   "scripts": {
     "dev": "npm run lint && concurrently -k \"vite\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
@@ -24,6 +27,7 @@
     "pack:linux-arm64": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --arm64 --publish=never",
     "postinstall": "electron-builder install-app-deps && patch-package",
     "rebuild": "electron-builder install-app-deps",
+    "tool:cli": "node electron/cli/netcatty-tool-cli.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

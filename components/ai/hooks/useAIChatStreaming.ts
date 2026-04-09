@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import type {
   AIPermissionMode,
+  AIToolIntegrationMode,
   AISession,
   ChatMessage,
   ChatMessageAttachment,
@@ -137,6 +138,10 @@ export interface TerminalSessionInfo {
   connected: boolean;
 }
 
+export interface DefaultTargetSessionHint extends TerminalSessionInfo {
+  source: 'scope-target' | 'only-connected-in-scope';
+}
+
 /** Typed accessor for the netcatty bridge on the window object. */
 export function getNetcattyBridge(): PanelBridge | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -242,8 +247,10 @@ export interface SendToExternalContext {
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   terminalSessions: TerminalSessionInfo[];
+  defaultTargetSession?: DefaultTargetSessionHint;
   providers: ProviderConfig[];
   selectedAgentModel?: string;
+  toolIntegrationMode: AIToolIntegrationMode;
 }
 
 // -------------------------------------------------------------------
@@ -635,6 +642,8 @@ export function useAIChatStreaming({
         context.existingSessionId,
         context.historyMessages,
         attachedImages.length > 0 ? attachedImages : undefined,
+        context.toolIntegrationMode,
+        context.defaultTargetSession,
       );
     } else {
       // Fallback: spawn as raw process
