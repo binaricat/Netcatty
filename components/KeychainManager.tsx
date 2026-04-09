@@ -513,7 +513,12 @@ echo $3 >> "$FILE"`);
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-0">
+      <div
+        className={cn(
+          "flex-1 flex flex-col min-h-0 transition-all duration-200",
+          panel.type !== "closed" && "mr-[380px]",
+        )}
+      >
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 bg-secondary/60 border-b border-border/70 px-3 py-1.5 shrink-0">
           {/* Filter Tabs */}
@@ -680,12 +685,7 @@ echo $3 >> "$FILE"`);
         </div>
 
         {/* Scrollable Content */}
-        <div
-          className={cn(
-            "flex-1 overflow-y-auto transition-all duration-200",
-            panel.type !== "closed" && "mr-[380px]",
-          )}
-        >
+        <div className="flex-1 overflow-y-auto">
           {/* Keys Section */}
           <div className="space-y-3 p-3">
           <div className="flex items-center justify-between">
