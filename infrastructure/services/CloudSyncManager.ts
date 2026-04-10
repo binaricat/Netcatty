@@ -1304,11 +1304,14 @@ export class CloudSyncManager {
    * `{ version (SHA), date }` entries, newest first.
    */
   async getGistRevisionHistory(): Promise<Array<{ version: string; date: Date }>> {
-    const adapter = this.adapters.get('github');
-    if (!adapter || !(adapter as import('./adapters/GitHubAdapter').default).getHistory) {
+    let adapter: import('./adapters/GitHubAdapter').default;
+    try {
+      adapter = await this.getConnectedAdapter('github') as import('./adapters/GitHubAdapter').default;
+    } catch {
       return [];
     }
-    return (adapter as import('./adapters/GitHubAdapter').default).getHistory();
+    if (!adapter.getHistory) return [];
+    return adapter.getHistory();
   }
 
   /**
@@ -1333,11 +1336,14 @@ export class CloudSyncManager {
     if (this.state.securityState !== 'UNLOCKED' || !this.masterPassword) {
       throw new Error('Vault is locked');
     }
-    const adapter = this.adapters.get('github');
-    if (!adapter || !(adapter as import('./adapters/GitHubAdapter').default).downloadRevision) {
+    let adapter: import('./adapters/GitHubAdapter').default;
+    try {
+      adapter = await this.getConnectedAdapter('github') as import('./adapters/GitHubAdapter').default;
+    } catch {
       throw new Error('GitHub adapter not available');
     }
-    const syncedFile = await (adapter as import('./adapters/GitHubAdapter').default).downloadRevision(sha);
+    if (!adapter.downloadRevision) throw new Error('GitHub adapter not available');
+    const syncedFile = await adapter.downloadRevision(sha);
     if (!syncedFile) return null;
 
     const payload = await EncryptionService.decryptPayload(syncedFile, this.masterPassword);

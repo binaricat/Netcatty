@@ -567,19 +567,29 @@ export class GitHubAdapter {
   }
 
   /**
-   * Get revision history for the sync gist.
+   * Get revision history for the sync gist. Lazily discovers the gist
+   * ID if it hasn't been resolved yet (same pattern as `download()`).
    */
   async getHistory(): Promise<Array<{ version: string; date: Date }>> {
-    if (!this.accessToken || !this.gistId) return [];
+    if (!this.accessToken) return [];
+    if (!this.gistId) {
+      this.gistId = await findSyncGist(this.accessToken);
+    }
+    if (!this.gistId) return [];
     return getGistHistory(this.accessToken, this.gistId);
   }
 
   /**
    * Download a specific historical revision of the sync gist (still
-   * encrypted — the caller must decrypt it).
+   * encrypted — the caller must decrypt it). Lazily discovers the
+   * gist ID if needed.
    */
   async downloadRevision(sha: string): Promise<SyncedFile | null> {
-    if (!this.accessToken || !this.gistId) return null;
+    if (!this.accessToken) return null;
+    if (!this.gistId) {
+      this.gistId = await findSyncGist(this.accessToken);
+    }
+    if (!this.gistId) return null;
     return downloadGistRevision(this.accessToken, this.gistId, sha);
   }
 
