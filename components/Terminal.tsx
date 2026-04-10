@@ -28,7 +28,7 @@ import {
 import {
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
-import { classifyDistroId, getEffectiveHostDistro } from "../domain/host";
+import { classifyDistroId } from "../domain/host";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
@@ -518,11 +518,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // command on Cisco / Huawei / Juniper etc. generates one AAA session
   // log entry per poll because each exec channel is counted as a new
   // session on those devices.
-  const effectiveDistro = getEffectiveHostDistro(host);
-  const deviceClass = classifyDistroId(effectiveDistro);
-  const isNetworkDevice = host.deviceType === 'network' || deviceClass === 'network-device';
+  //
+  // IMPORTANT: this gating must NOT go through getEffectiveHostDistro()
+  // because that honors the manual distro override (`distroMode: 'manual'`
+  // + `manualDistro`) which is purely a cosmetic icon choice. A user who
+  // pinned an "ubuntu" icon on what is actually a Cisco host would
+  // otherwise silently re-enable the polling loop and re-introduce the
+  // AAA log flood this patch is meant to eliminate. The display icon can
+  // still be overridden (see DistroAvatar) — gating uses the raw detected
+  // `host.distro` and the explicit `host.deviceType` only.
+  const detectedDeviceClass = classifyDistroId(host.distro);
+  const isNetworkDevice =
+    host.deviceType === 'network' || detectedDeviceClass === 'network-device';
   const isSupportedOs =
-    !isNetworkDevice && (host.os === 'linux' || host.os === 'macos' || deviceClass === 'linux-like');
+    !isNetworkDevice &&
+    (host.os === 'linux' || host.os === 'macos' || detectedDeviceClass === 'linux-like');
   const { stats: serverStats } = useServerStats({
     sessionId,
     enabled: terminalSettings?.showServerStats ?? true,
