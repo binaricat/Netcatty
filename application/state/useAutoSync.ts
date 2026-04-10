@@ -57,9 +57,26 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSyncedDataRef = useRef<string>('');
   const hasCheckedRemoteRef = useRef(false);
+  /** True once checkRemoteVersion has completed (success or failure). Until
+   *  this is set, the debounced auto-sync effect will not fire, preventing
+   *  an empty local vault from racing ahead and overwriting a non-empty
+   *  cloud vault before the startup pull has run. See #679. */
+  const remoteCheckDoneRef = useRef(false);
   const isInitializedRef = useRef(false);
   const isSyncRunningRef = useRef(false);
   const skipNextSyncRef = useRef(false);
+
+  // State for the empty-vault-vs-cloud confirmation dialog (Fix D).
+  // When checkRemoteVersion detects that the local vault is empty but
+  // the cloud has data, it pauses and exposes this state so the root
+  // component can render a confirmation dialog.
+  const [emptyVaultConflict, setEmptyVaultConflict] = useState<{
+    remotePayload: SyncPayload;
+    hostCount: number;
+    keyCount: number;
+    snippetCount: number;
+  } | null>(null);
+  const emptyVaultResolveRef = useRef<((action: 'restore' | 'keep-empty') => void) | null>(null);
 
   // Listen for SFTP bookmark changes to trigger auto-sync
   const [bookmarksVersion, setBookmarksVersion] = useState(0);
@@ -173,6 +190,20 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.credentialsUnavailable'));
       }
 
+      // Prevent pushing an empty vault to cloud. This is almost always
+      // a sign that the local state was lost (update, import failure,
+      // storage corruption) rather than a deliberate "delete everything".
+      // We only block auto-sync — manual trigger from Settings can still
+      // push if the user explicitly wants to.
+      const hasAnyData = (payload.hosts?.length ?? 0) > 0
+        || (payload.keys?.length ?? 0) > 0
+        || (payload.snippets?.length ?? 0) > 0
+        || (payload.identities?.length ?? 0) > 0;
+      if (!hasAnyData && trigger === 'auto') {
+        console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
+        return;
+      }
+
       const results = await sync.syncNow(payload);
 
       // Apply merged payloads first (before checking for failures) so local
@@ -234,18 +265,60 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       const remotePayload = await sync.downloadFromProvider(connectedProvider);
 
       if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
-        const { mergeSyncPayloads } = await import('../../domain/syncMerge');
         const localPayload = buildPayload();
+        const localIsEmpty =
+          (localPayload.hosts?.length ?? 0) === 0 &&
+          (localPayload.keys?.length ?? 0) === 0 &&
+          (localPayload.snippets?.length ?? 0) === 0 &&
+          (localPayload.identities?.length ?? 0) === 0;
+        const remoteHasData =
+          (remotePayload.hosts?.length ?? 0) > 0 ||
+          (remotePayload.keys?.length ?? 0) > 0 ||
+          (remotePayload.snippets?.length ?? 0) > 0;
+
+        // If local vault is empty but cloud has data, this almost certainly
+        // means the user's data was lost (update, storage corruption, etc.).
+        // Pause and ask the user what to do instead of silently merging.
+        if (localIsEmpty && remoteHasData) {
+          const userAction = await new Promise<'restore' | 'keep-empty'>((resolve) => {
+            emptyVaultResolveRef.current = resolve;
+            setEmptyVaultConflict({
+              remotePayload,
+              hostCount: remotePayload.hosts?.length ?? 0,
+              keyCount: remotePayload.keys?.length ?? 0,
+              snippetCount: remotePayload.snippets?.length ?? 0,
+            });
+          });
+          setEmptyVaultConflict(null);
+          emptyVaultResolveRef.current = null;
+
+          if (userAction === 'restore') {
+            config.onApplyPayload(remotePayload);
+            skipNextSyncRef.current = true;
+            notify.success(t('sync.autoSync.restoredMessage'), t('sync.autoSync.restoredTitle'));
+          } else {
+            // User chose to keep the empty vault. Don't apply remote data.
+            // The next auto-sync will eventually push the empty state if
+            // the user makes another edit.
+            notify.info(t('sync.autoSync.keptLocalMessage'), t('sync.autoSync.keptLocalTitle'));
+          }
+          return;
+        }
+
+        const { mergeSyncPayloads } = await import('../../domain/syncMerge');
         const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
 
         config.onApplyPayload(mergeResult.payload);
-        // Don't save base or skip auto-sync — let the data-change effect
-        // naturally trigger an upload of the merged payload (which will
-        // go through syncAllProviders and save base on success).
+        // Prevent the data-change effect from immediately re-uploading the
+        // merged payload — the merge already incorporated both sides. The
+        // next deliberate edit by the user will trigger a normal sync.
+        skipNextSyncRef.current = true;
         notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);
+    } finally {
+      remoteCheckDoneRef.current = true;
     }
   }, [sync, config, buildPayload, t]);
   
@@ -255,7 +328,15 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (!sync.hasAnyConnectedProvider || !sync.autoSyncEnabled || !sync.isUnlocked) {
       return;
     }
-    
+
+    // Don't auto-sync until the startup remote check has completed.
+    // Without this gate, an empty local vault can push to the cloud
+    // before checkRemoteVersion even runs, overwriting a non-empty
+    // remote vault — the exact bug described in #679.
+    if (!remoteCheckDoneRef.current) {
+      return;
+    }
+
     // Skip initial render
     if (!isInitializedRef.current) {
       isInitializedRef.current = true;
@@ -313,19 +394,26 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
   }, [sync.hasAnyConnectedProvider, sync.isUnlocked, checkRemoteVersion]);
   
-  // Reset check flag when provider disconnects
+  // Reset check flags when provider disconnects
   useEffect(() => {
     if (!sync.hasAnyConnectedProvider) {
       hasCheckedRemoteRef.current = false;
+      remoteCheckDoneRef.current = false;
     }
   }, [sync.hasAnyConnectedProvider]);
   
+  const resolveEmptyVaultConflict = useCallback((action: 'restore' | 'keep-empty') => {
+    emptyVaultResolveRef.current?.(action);
+  }, []);
+
   return {
     syncNow,
     buildPayload,
     isSyncing: sync.isSyncing,
     isConnected: sync.hasAnyConnectedProvider,
     autoSyncEnabled: sync.autoSyncEnabled,
+    emptyVaultConflict,
+    resolveEmptyVaultConflict,
   };
 };
 

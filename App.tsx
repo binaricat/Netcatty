@@ -382,7 +382,7 @@ function App({ settings }: { settings: SettingsState }) {
   );
 
   // Auto-sync hook for cloud sync
-  const { syncNow: handleSyncNow } = useAutoSync({
+  const { syncNow: handleSyncNow, emptyVaultConflict, resolveEmptyVaultConflict } = useAutoSync({
     hosts,
     keys,
     identities,
@@ -1679,6 +1679,65 @@ function App({ settings }: { settings: SettingsState }) {
         onCancel={handlePassphraseCancel}
         onSkip={handlePassphraseSkip}
       />
+
+      {/* Empty vault vs cloud data confirmation dialog (#679) */}
+      {emptyVaultConflict && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="bg-background rounded-lg shadow-xl w-full max-w-md p-6 mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                  <path d="M12 9v4" />
+                  <path d="M12 17h.01" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">{t('sync.autoSync.emptyVaultConflict.title')}</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {t('sync.autoSync.emptyVaultConflict.description')}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-muted/30 rounded-lg p-3 mb-5 text-sm">
+              <div className="font-medium text-muted-foreground mb-1">{t('sync.autoSync.emptyVaultConflict.cloudLabel')}</div>
+              <div>{emptyVaultConflict.hostCount} hosts, {emptyVaultConflict.keyCount} keys, {emptyVaultConflict.snippetCount} snippets</div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => resolveEmptyVaultConflict('restore')}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-primary bg-primary/5 hover:bg-primary/10 transition-colors text-left"
+              >
+                <svg className="w-5 h-5 text-primary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" x2="12" y1="15" y2="3" />
+                </svg>
+                <div>
+                  <div className="font-medium">{t('sync.autoSync.emptyVaultConflict.restore')}</div>
+                  <div className="text-xs text-muted-foreground">{t('sync.autoSync.emptyVaultConflict.restoreDesc')}</div>
+                </div>
+              </button>
+              <button
+                onClick={() => resolveEmptyVaultConflict('keep-empty')}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors text-left"
+              >
+                <svg className="w-5 h-5 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+                <div>
+                  <div className="font-medium">{t('sync.autoSync.emptyVaultConflict.keepEmpty')}</div>
+                  <div className="text-xs text-muted-foreground">{t('sync.autoSync.emptyVaultConflict.keepEmptyDesc')}</div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
