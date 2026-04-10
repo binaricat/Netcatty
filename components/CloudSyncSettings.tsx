@@ -1082,7 +1082,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             } else {
                 setHistoryError(t('cloudSync.revisionHistory.revisionNotFound'));
             }
-        } catch (err) {
+        } catch {
             // Decrypt failures can manifest as various error types:
             // "Decryption failed", OperationError, "unable to authenticate
             // data", AES-GCM tag mismatch, etc. Show the friendly message
@@ -1287,7 +1287,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             {sync.syncHistory.length > 0 && (
                                 <div className="rounded-lg border bg-card">
                                     <div className="px-3 py-2 border-b border-border/60">
-                                        <div className="text-sm font-medium">{t('cloudSync.revisionHistory.title')}</div>
+                                        <div className="text-sm font-medium">{t('cloudSync.history.title')}</div>
                                     </div>
                                     <div className="max-h-48 overflow-y-auto">
                                         {sync.syncHistory.slice(0, 10).map((entry) => (
