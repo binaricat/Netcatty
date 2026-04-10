@@ -22,6 +22,16 @@ export const DISTRO_LOGOS: Record<string, string> = {
   macos: "/distro/macos.svg",
   windows: "/distro/windows.svg",
   linux: "/distro/linux.svg",
+  // Network device vendors — auto-detected from the SSH server
+  // identification string (see domain/host.ts `detectVendorFromSshVersion`).
+  cisco: "/distro/cisco.svg",
+  juniper: "/distro/juniper.svg",
+  huawei: "/distro/huawei.svg",
+  hpe: "/distro/hpe.svg",
+  mikrotik: "/distro/mikrotik.svg",
+  fortinet: "/distro/fortinet.svg",
+  paloalto: "/distro/paloalto.svg",
+  zyxel: "/distro/zyxel.svg",
 };
 
 export const DISTRO_COLORS: Record<string, string> = {
@@ -42,6 +52,15 @@ export const DISTRO_COLORS: Record<string, string> = {
   macos: "bg-[#333333]",
   windows: "bg-[#0078D4]",
   linux: "bg-[#333333]",
+  // Network device vendor brand colors
+  cisco: "bg-[#1BA0D7]",
+  juniper: "bg-[#0A6EB4]",
+  huawei: "bg-[#CF0A2C]",
+  hpe: "bg-[#01A982]",
+  mikrotik: "bg-[#293239]",
+  fortinet: "bg-[#EE3124]",
+  paloalto: "bg-[#FA582D]",
+  zyxel: "bg-[#00497A]",
   default: "bg-slate-600",
 };
 

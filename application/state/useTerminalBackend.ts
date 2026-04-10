@@ -128,6 +128,14 @@ export const useTerminalBackend = () => {
     return bridge.getSessionPwd(sessionId);
   }, []);
 
+  const getSessionRemoteInfo = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getSessionRemoteInfo) {
+      return { success: false, error: 'getSessionRemoteInfo unavailable' };
+    }
+    return bridge.getSessionRemoteInfo(sessionId);
+  }, []);
+
   const getServerStats = useCallback(async (sessionId: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getServerStats) return { success: false, error: 'getServerStats unavailable' };
@@ -150,6 +158,7 @@ export const useTerminalBackend = () => {
     listSerialPorts,
     execCommand,
     getSessionPwd,
+    getSessionRemoteInfo,
     getServerStats,
     writeToSession,
     resizeSession,

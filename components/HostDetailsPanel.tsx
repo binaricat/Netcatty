@@ -31,7 +31,11 @@ import {
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
-import { getEffectiveHostDistro, LINUX_DISTRO_OPTIONS } from "../domain/host";
+import {
+  getEffectiveHostDistro,
+  LINUX_DISTRO_OPTIONS,
+  NETWORK_DEVICE_OPTIONS,
+} from "../domain/host";
 import { customThemeStore } from "../application/state/customThemeStore";
 import {
   clearHostFontSizeOverride,
@@ -83,7 +87,10 @@ type SubPanel =
   | "theme-select"
   | "telnet-theme-select";
 
-const LINUX_DISTRO_OPTION_IDS = [...LINUX_DISTRO_OPTIONS];
+const LINUX_DISTRO_OPTION_IDS = [
+  ...LINUX_DISTRO_OPTIONS,
+  ...NETWORK_DEVICE_OPTIONS,
+];
 
 interface HostDetailsPanelProps {
   initialData?: Host | null;

@@ -230,6 +230,17 @@ declare global {
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;
     /** Get current working directory from an active SSH session */
     getSessionPwd?(sessionId: string): Promise<{ success: boolean; cwd?: string; error?: string }>;
+    /**
+     * Get metadata about an already-connected SSH session — currently the
+     * SSH server identification string (the `software` part of the
+     * SSH-2.0 banner). Used to classify network-device vendors from the
+     * banner without opening any additional exec channel.
+     */
+    getSessionRemoteInfo?(sessionId: string): Promise<{
+      success: boolean;
+      remoteSshVersion?: string;
+      error?: string;
+    }>;
     /** Get server stats (CPU, Memory, Disk, Network) from an active SSH session */
     getServerStats?(sessionId: string): Promise<{
       success: boolean;

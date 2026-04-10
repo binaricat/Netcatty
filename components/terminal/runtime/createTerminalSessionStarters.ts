@@ -10,6 +10,7 @@ import {
   sanitizeCredentialValue,
 } from "../../../domain/credentials";
 import { resolveHostAuth } from "../../../domain/sshAuth";
+import { detectVendorFromSshVersion } from "../../../domain/host";
 
 /** Timeout of distro detection task */
 const DISTRO_DETECT_TIMEOUT = 8000; // ms
@@ -37,6 +38,11 @@ type TerminalBackendApi = {
   execCommand: (options: Parameters<NetcattyBridge["execCommand"]>[0]) => Promise<{
     stdout?: string;
     stderr?: string;
+  }>;
+  getSessionRemoteInfo?: (sessionId: string) => Promise<{
+    success: boolean;
+    remoteSshVersion?: string;
+    error?: string;
   }>;
   onSessionData: (sessionId: string, cb: (data: string) => void) => () => void;
   onSessionExit: (
@@ -231,6 +237,28 @@ const runDistroDetection = async (
   ctx: TerminalSessionStartersContext,
   auth: { username: string; password?: string; key?: SSHKey; passphrase?: string },
 ) => {
+  // Step 1: try to classify from the SSH server identification string
+  // captured at handshake time. This is free (no extra channel) and
+  // reliably identifies most network-device vendors (Cisco IOS, Huawei
+  // VRP, HPE Comware, MikroTik, Fortinet, etc.) so we can skip the
+  // POSIX-shell probe entirely for those hosts — which otherwise fails
+  // and, on devices like Cisco / Juniper with AAA logging, generates an
+  // extra session log entry per connect.
+  try {
+    if (ctx.terminalBackend.getSessionRemoteInfo && ctx.sessionId) {
+      const info = await ctx.terminalBackend.getSessionRemoteInfo(ctx.sessionId);
+      const vendor = detectVendorFromSshVersion(info?.remoteSshVersion);
+      if (vendor) {
+        ctx.onOsDetected?.(ctx.host.id, vendor);
+        return;
+      }
+    }
+  } catch (err) {
+    logger.warn("SSH banner vendor detection failed", err);
+  }
+
+  // Step 2: unknown or generic OpenSSH/Dropbear — fall back to the
+  // /etc/os-release probe to distinguish Linux distros and macOS.
   if (!ctx.terminalBackend.execAvailable()) return;
   try {
     const res = await ctx.terminalBackend.execCommand({

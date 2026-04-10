@@ -28,6 +28,7 @@ import {
 import {
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
+import { classifyDistroId, getEffectiveHostDistro } from "../domain/host";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import KnownHostConfirmDialog, { HostKeyInfo } from "./KnownHostConfirmDialog";
@@ -510,12 +511,23 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isLocalConnection = host.protocol === "local";
   const isSerialConnection = host.protocol === "serial";
 
-  // Server stats (CPU, Memory, Disk) — only for Linux/macOS
+  // Server stats (CPU, Memory, Disk) — only for Linux/macOS, and never
+  // for hosts classified as network devices (either via explicit
+  // deviceType='network' or via SSH banner detection that populated
+  // host.distro with a network-vendor ID). See #674: polling the stats
+  // command on Cisco / Huawei / Juniper etc. generates one AAA session
+  // log entry per poll because each exec channel is counted as a new
+  // session on those devices.
+  const effectiveDistro = getEffectiveHostDistro(host);
+  const deviceClass = classifyDistroId(effectiveDistro);
+  const isNetworkDevice = host.deviceType === 'network' || deviceClass === 'network-device';
+  const isSupportedOs =
+    !isNetworkDevice && (host.os === 'linux' || host.os === 'macos' || deviceClass === 'linux-like');
   const { stats: serverStats } = useServerStats({
     sessionId,
     enabled: terminalSettings?.showServerStats ?? true,
     refreshInterval: terminalSettings?.serverStatsRefreshInterval ?? 5,
-    isSupportedOs: host.os === 'linux' || host.os === 'macos',
+    isSupportedOs,
     isConnected: status === 'connected',
     isVisible,
   });

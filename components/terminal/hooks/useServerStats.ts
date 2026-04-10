@@ -89,9 +89,21 @@ export function useServerStats({
   const hasFetchedRef = useRef(false);
   const connectedAtRef = useRef(0);
   const fetchGenerationRef = useRef(0);
+  // Auto-disable polling after a few consecutive failures. This covers
+  // hosts the banner classifier could not identify (e.g. Juniper JUNOS,
+  // Arista EOS, Cisco NX-OS — all of which advertise themselves as
+  // OpenSSH but do not support the POSIX stats shell command). Without
+  // this, the hook would keep retrying forever and generate an AAA
+  // session log every refresh interval.
+  const CONSECUTIVE_FAILURE_LIMIT = 3;
+  const consecutiveFailuresRef = useRef(0);
+  const givenUpRef = useRef(false);
 
   const fetchStats = useCallback(async () => {
     if (!enabled || !isSupportedOs || !isConnected || !isVisible || !sessionId) {
+      return;
+    }
+    if (givenUpRef.current) {
       return;
     }
 
@@ -104,6 +116,21 @@ export function useServerStats({
     setIsLoading(true);
     setError(null);
 
+    const markFailure = (message: string) => {
+      consecutiveFailuresRef.current += 1;
+      setError(message);
+      if (consecutiveFailuresRef.current >= CONSECUTIVE_FAILURE_LIMIT) {
+        // Stop polling this session. The caller's useEffect sees the
+        // givenUp flag via the next render cycle and we also clear the
+        // interval locally so no further ticks fire.
+        givenUpRef.current = true;
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }
+    };
+
     try {
       const result = await bridge.getServerStats(sessionId);
 
@@ -112,6 +139,7 @@ export function useServerStats({
 
       if (result.success && result.stats) {
         hasFetchedRef.current = true;
+        consecutiveFailuresRef.current = 0;
         setStats({
           cpu: result.stats.cpu,
           cpuCores: result.stats.cpuCores,
@@ -134,11 +162,17 @@ export function useServerStats({
           lastUpdated: Date.now(),
         });
       } else if (result.error) {
-        setError(result.error);
+        markFailure(result.error);
+      } else {
+        // Response was not marked as success but has no error — treat as
+        // a soft failure. This happens e.g. when the stats shell pipeline
+        // returns a parse failure on a host that isn't a typical Linux
+        // distro (JUNOS, NX-OS, EOS).
+        markFailure('No stats returned');
       }
     } catch (err) {
       if (isMountedRef.current && generation === fetchGenerationRef.current) {
-        setError(err instanceof Error ? err.message : 'Unknown error');
+        markFailure(err instanceof Error ? err.message : 'Unknown error');
       }
     } finally {
       if (isMountedRef.current && generation === fetchGenerationRef.current) {
@@ -158,9 +192,13 @@ export function useServerStats({
     }
 
     if (!enabled || !isSupportedOs || !isConnected) {
-      // Reset stats and fetch state when disabled or not connected
+      // Reset stats and fetch state when disabled or not connected.
+      // Also reset the give-up flag so that a reconnect (possibly to a
+      // different host at the same sessionId slot) gets a fresh chance.
       hasFetchedRef.current = false;
       connectedAtRef.current = 0;
+      consecutiveFailuresRef.current = 0;
+      givenUpRef.current = false;
 
       setStats({
         cpu: null,
