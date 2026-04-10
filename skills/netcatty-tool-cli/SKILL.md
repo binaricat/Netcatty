@@ -13,7 +13,7 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
 
 1. Use the exact Netcatty CLI prefix provided by the host prompt.
 2. Keep `--chat-session <chat-session-id>` on every Netcatty CLI call. Do not omit it.
-3. Treat `--chat-session <chat-session-id>` as required for `env`, `session`, `resource environment`, real `exec`, and every `sftp` operation. Treat `--session <session-id>` as required for `session`, `exec`, and every `sftp` operation.
+3. Treat `--chat-session <chat-session-id>` as required for `env`, `session`, real `exec`, and every `sftp` operation. Treat `--session <session-id>` as required for `session`, `exec`, and every `sftp` operation.
 4. Classify the task before choosing a command path:
    - Remote command execution tasks go through the exec reference.
    - Remote file or directory tasks go through the sftp reference.

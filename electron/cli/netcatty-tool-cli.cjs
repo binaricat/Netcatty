@@ -12,7 +12,6 @@ function printHelp() {
     "  netcatty-tool-cli status [--json]\n" +
     "  netcatty-tool-cli env --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli session --session <id> --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli resource environment --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli exec --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
     "  netcatty-tool-cli job-start --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
     "  netcatty-tool-cli job-poll --job <id> --chat-session <id> [--offset <n>] [--json]\n" +
@@ -43,7 +42,7 @@ function printHelp() {
     "Notes:\n" +
     "  - Start the Netcatty desktop app before using this CLI.\n" +
     "  - This CLI is intended as an internal Skills + CLI transport, not a general customer-facing shell tool.\n" +
-    "  - `env`, `session`, and `resource environment` always require --chat-session <id>.\n" +
+    "  - `env` and `session` always require --chat-session <id>.\n" +
     "  - `exec` always requires both --session <id> and --chat-session <id>.\n" +
     "  - `job-start` always requires both --session <id> and --chat-session <id>.\n" +
     "  - `job-poll` and `job-stop` always require both --job <id> and --chat-session <id>.\n" +
@@ -207,9 +206,10 @@ function formatJobText(result) {
   if (result.updatedAt) lines.push(`Updated: ${new Date(result.updatedAt).toISOString()}`);
   if (typeof result.exitCode === "number") lines.push(`Exit Code: ${result.exitCode}`);
   if (result.error) lines.push(`Error: ${result.error}`);
-  if (result.outputDelta) {
+  const outputText = typeof result.output === "string" ? result.output : "";
+  if (outputText) {
     lines.push("");
-    lines.push(result.outputDelta.replace(/\n$/, ""));
+    lines.push(outputText.replace(/\n$/, ""));
   }
   return `${lines.join("\n")}\n`;
 }
@@ -379,25 +379,6 @@ async function run() {
       const host = await resolveTargetHost(client, opts);
       const payload = { ok: true, host };
       const output = opts.json ? JSON.stringify(payload, null, 2) : formatSessionText(host);
-      process.stdout.write(`${output}${opts.json ? "\n" : ""}`);
-      return;
-    }
-
-    if (command === "resource" && subcommand === "environment") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for resource environment.");
-      }
-      const params = buildScopeParams(opts);
-      const ctx = await client.call("netcatty/getContext", params);
-      const resource = {
-        ok: true,
-        contents: [{
-          uri: "netcatty://context",
-          mimeType: "application/json",
-          text: JSON.stringify(ctx, null, 2),
-        }],
-      };
-      const output = opts.json ? JSON.stringify(resource, null, 2) : `${resource.contents[0].text}\n`;
       process.stdout.write(`${output}${opts.json ? "\n" : ""}`);
       return;
     }
