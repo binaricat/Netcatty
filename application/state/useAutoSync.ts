@@ -22,6 +22,25 @@ import { localStorageAdapter } from '../../infrastructure/persistence/localStora
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
 import { notify } from '../notification';
 
+/**
+ * Check whether a sync payload has any meaningful user data. Covers all
+ * synced entity arrays so that edge cases (e.g. user has 0 hosts but 1
+ * port forwarding rule) are not mistakenly treated as "empty".
+ */
+function isPayloadEffectivelyEmpty(payload: SyncPayload): boolean {
+  return (
+    (payload.hosts?.length ?? 0) === 0 &&
+    (payload.keys?.length ?? 0) === 0 &&
+    (payload.snippets?.length ?? 0) === 0 &&
+    (payload.identities?.length ?? 0) === 0 &&
+    (payload.customGroups?.length ?? 0) === 0 &&
+    (payload.snippetPackages?.length ?? 0) === 0 &&
+    (payload.portForwardingRules?.length ?? 0) === 0 &&
+    (payload.knownHosts?.length ?? 0) === 0 &&
+    (payload.groupConfigs?.length ?? 0) === 0
+  );
+}
+
 interface AutoSyncConfig {
   // Data to sync
   hosts: SyncPayload['hosts'];
@@ -195,11 +214,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // storage corruption) rather than a deliberate "delete everything".
       // We only block auto-sync — manual trigger from Settings can still
       // push if the user explicitly wants to.
-      const hasAnyData = (payload.hosts?.length ?? 0) > 0
-        || (payload.keys?.length ?? 0) > 0
-        || (payload.snippets?.length ?? 0) > 0
-        || (payload.identities?.length ?? 0) > 0;
-      if (!hasAnyData && trigger === 'auto') {
+      if (isPayloadEffectivelyEmpty(payload) && trigger === 'auto') {
         console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
         return;
       }
@@ -266,15 +281,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
         const localPayload = buildPayload();
-        const localIsEmpty =
-          (localPayload.hosts?.length ?? 0) === 0 &&
-          (localPayload.keys?.length ?? 0) === 0 &&
-          (localPayload.snippets?.length ?? 0) === 0 &&
-          (localPayload.identities?.length ?? 0) === 0;
-        const remoteHasData =
-          (remotePayload.hosts?.length ?? 0) > 0 ||
-          (remotePayload.keys?.length ?? 0) > 0 ||
-          (remotePayload.snippets?.length ?? 0) > 0;
+        const localIsEmpty = isPayloadEffectivelyEmpty(localPayload);
+        const remoteHasData = !isPayloadEffectivelyEmpty(remotePayload);
 
         // If local vault is empty but cloud has data, this almost certainly
         // means the user's data was lost (update, storage corruption, etc.).
@@ -403,7 +411,13 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   }, [sync.hasAnyConnectedProvider]);
   
   const resolveEmptyVaultConflict = useCallback((action: 'restore' | 'keep-empty') => {
-    emptyVaultResolveRef.current?.(action);
+    // Guard: resolve only once (prevents double-click from entering an
+    // inconsistent state). The ref is nulled immediately so subsequent
+    // calls are no-ops.
+    const resolve = emptyVaultResolveRef.current;
+    if (!resolve) return;
+    emptyVaultResolveRef.current = null;
+    resolve(action);
   }, []);
 
   return {
