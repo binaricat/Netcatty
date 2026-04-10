@@ -1055,6 +1055,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         setHistoryLoading(true);
         setHistoryError(null);
         setHistoryPreview(null);
+        setHistoryRevisions([]);
         try {
             const revisions = await sync.getGistRevisionHistory();
             setHistoryRevisions(revisions);
@@ -1079,15 +1080,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     version: result.meta.version,
                 });
             } else {
-                setHistoryError(t('cloudSync.history.revisionNotFound'));
+                setHistoryError(t('cloudSync.revisionHistory.revisionNotFound'));
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : t('common.unknownError');
-            if (msg.includes('ecrypt') || msg.includes('tag')) {
-                setHistoryError(t('cloudSync.history.decryptFailed'));
-            } else {
-                setHistoryError(msg);
-            }
+            // Decrypt failures can manifest as various error types:
+            // "Decryption failed", OperationError, "unable to authenticate
+            // data", AES-GCM tag mismatch, etc. Show the friendly message
+            // for any error originating from the decrypt step; network
+            // errors would have been caught by the fetch layer already.
+            setHistoryError(t('cloudSync.revisionHistory.decryptFailed'));
         } finally {
             setHistoryPreviewLoading(false);
         }
@@ -1096,7 +1097,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     const handleRestoreRevision = () => {
         if (!historyPreview) return;
         onApplyPayload(historyPreview.payload);
-        toast.success(t('cloudSync.history.restored'));
+        toast.success(t('cloudSync.revisionHistory.restored'));
         setShowHistoryModal(false);
         setHistoryPreview(null);
     };
@@ -1166,7 +1167,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             isProviderReadyForSync(sync.providers.github) ? (
                                 <Button size="sm" variant="ghost" onClick={handleOpenHistory} className="gap-1">
                                     <History size={14} />
-                                    {t('cloudSync.history.viewButton')}
+                                    {t('cloudSync.revisionHistory.viewButton')}
                                 </Button>
                             ) : undefined
                         }
@@ -1286,7 +1287,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             {sync.syncHistory.length > 0 && (
                                 <div className="rounded-lg border bg-card">
                                     <div className="px-3 py-2 border-b border-border/60">
-                                        <div className="text-sm font-medium">{t('cloudSync.history.title')}</div>
+                                        <div className="text-sm font-medium">{t('cloudSync.revisionHistory.title')}</div>
                                     </div>
                                     <div className="max-h-48 overflow-y-auto">
                                         {sync.syncHistory.slice(0, 10).map((entry) => (
@@ -1376,9 +1377,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <History size={18} />
-                            {t('cloudSync.history.title')}
+                            {t('cloudSync.revisionHistory.title')}
                         </DialogTitle>
-                        <DialogDescription>{t('cloudSync.history.description')}</DialogDescription>
+                        <DialogDescription>{t('cloudSync.revisionHistory.description')}</DialogDescription>
                     </DialogHeader>
 
                     {historyError && (
@@ -1395,28 +1396,28 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         // Preview of a selected revision
                         <div className="space-y-4 overflow-y-auto flex-1 min-h-0">
                             <div className="rounded-lg border p-4 space-y-2">
-                                <div className="text-sm font-medium">{t('cloudSync.history.revisionPreview')}</div>
+                                <div className="text-sm font-medium">{t('cloudSync.revisionHistory.revisionPreview')}</div>
                                 {historyPreview.deviceName && (
                                     <div className="text-xs text-muted-foreground">
-                                        {t('cloudSync.history.device')}: {historyPreview.deviceName}
+                                        {t('cloudSync.revisionHistory.device')}: {historyPreview.deviceName}
                                         {historyPreview.version != null && ` · v${historyPreview.version}`}
                                     </div>
                                 )}
                                 <div className="grid grid-cols-2 gap-2 text-sm">
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
-                                        <span className="text-muted-foreground">{t('cloudSync.history.hosts')}</span>
+                                        <span className="text-muted-foreground">{t('cloudSync.revisionHistory.hosts')}</span>
                                         <span className="font-medium">{historyPreview.preview.hostCount}</span>
                                     </div>
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
-                                        <span className="text-muted-foreground">{t('cloudSync.history.keys')}</span>
+                                        <span className="text-muted-foreground">{t('cloudSync.revisionHistory.keys')}</span>
                                         <span className="font-medium">{historyPreview.preview.keyCount}</span>
                                     </div>
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
-                                        <span className="text-muted-foreground">{t('cloudSync.history.snippets')}</span>
+                                        <span className="text-muted-foreground">{t('cloudSync.revisionHistory.snippets')}</span>
                                         <span className="font-medium">{historyPreview.preview.snippetCount}</span>
                                     </div>
                                     <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
-                                        <span className="text-muted-foreground">{t('cloudSync.history.identities')}</span>
+                                        <span className="text-muted-foreground">{t('cloudSync.revisionHistory.identities')}</span>
                                         <span className="font-medium">{historyPreview.preview.identityCount}</span>
                                     </div>
                                 </div>
@@ -1427,7 +1428,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                                 </Button>
                                 <Button onClick={handleRestoreRevision} className="gap-1">
                                     <Download size={14} />
-                                    {t('cloudSync.history.restoreButton')}
+                                    {t('cloudSync.revisionHistory.restoreButton')}
                                 </Button>
                             </DialogFooter>
                         </div>
@@ -1436,7 +1437,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         <div className="overflow-y-auto flex-1 min-h-0 -mx-1">
                             {historyRevisions.length === 0 ? (
                                 <div className="text-sm text-muted-foreground text-center py-8">
-                                    {t('cloudSync.history.empty')}
+                                    {t('cloudSync.revisionHistory.empty')}
                                 </div>
                             ) : (
                                 <div className="space-y-1 px-1">
@@ -1453,7 +1454,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                                         >
                                             <div>
                                                 <div className="font-medium">
-                                                    {index === 0 ? t('cloudSync.history.current') : `${t('cloudSync.history.revision')} #${historyRevisions.length - index}`}
+                                                    {index === 0 ? t('cloudSync.revisionHistory.current') : `${t('cloudSync.revisionHistory.revision')} #${historyRevisions.length - index}`}
                                                 </div>
                                                 <div className="text-xs text-muted-foreground">
                                                     {rev.date.toLocaleString()}

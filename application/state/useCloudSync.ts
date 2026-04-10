@@ -90,7 +90,21 @@ export interface CloudSyncHook {
   syncToProvider: (provider: CloudProvider, payload: SyncPayload) => Promise<SyncResult>;
   downloadFromProvider: (provider: CloudProvider) => Promise<SyncPayload | null>;
   resolveConflict: (resolution: ConflictResolution) => Promise<SyncPayload | null>;
-  
+
+  // Gist Revision History
+  getGistRevisionHistory: () => Promise<Array<{ version: string; date: Date }>>;
+  downloadGistRevision: (sha: string) => Promise<{
+    payload: SyncPayload;
+    meta: import('../../domain/sync').SyncFileMeta;
+    preview: {
+      hostCount: number;
+      keyCount: number;
+      snippetCount: number;
+      identityCount: number;
+      portForwardingRuleCount: number;
+    };
+  } | null>;
+
   // Settings
   setAutoSync: (enabled: boolean, intervalMinutes?: number) => void;
   setDeviceName: (name: string) => void;
