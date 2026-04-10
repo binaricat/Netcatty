@@ -1860,28 +1860,36 @@ async function getSessionDistroInfo(_event, payload) {
   }
   const command = "cat /etc/os-release 2>/dev/null || uname -a";
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
     const timer = setTimeout(() => {
-      resolve({ success: false, error: 'Timeout probing distro' });
+      settle({ success: false, error: 'Timeout probing distro' });
+      // Clean up the exec channel so it doesn't linger.
+      try { if (activeStream) activeStream.close(); } catch { /* ignore */ }
     }, 5000);
+    let activeStream = null;
     try {
       session.conn.exec(command, (err, stream) => {
         if (err) {
-          clearTimeout(timer);
-          resolve({ success: false, error: err.message || String(err) });
+          settle({ success: false, error: err.message || String(err) });
           return;
         }
+        activeStream = stream;
         let stdout = '';
         let stderr = '';
         stream.on('data', (chunk) => { stdout += chunk.toString(); });
         stream.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
         stream.on('close', () => {
-          clearTimeout(timer);
-          resolve({ success: true, stdout, stderr });
+          settle({ success: true, stdout, stderr });
         });
       });
     } catch (err) {
-      clearTimeout(timer);
-      resolve({ success: false, error: err?.message || String(err) });
+      settle({ success: false, error: err?.message || String(err) });
     }
   });
 }

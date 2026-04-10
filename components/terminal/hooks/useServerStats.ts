@@ -181,6 +181,15 @@ export function useServerStats({
     }
   }, [sessionId, enabled, isSupportedOs, isConnected, isVisible]);
 
+  // When the session changes (e.g., same tab reconnects to a different host
+  // while staying connected), reset the failure counter. Without this, a
+  // JUNOS session that tripped the counter would permanently suppress
+  // polling even after the tab reconnects to a Linux host.
+  useEffect(() => {
+    consecutiveFailuresRef.current = 0;
+    givenUpRef.current = false;
+  }, [sessionId]);
+
   // Initial fetch and periodic refresh
   useEffect(() => {
     isMountedRef.current = true;

@@ -248,6 +248,11 @@ const attachSessionToTerminal = (
       }
     }
 
+    // Clean up the connection token for this sessionId so stale timers
+    // that haven't fired yet will fail the isConnectionTokenCurrent check
+    // (previously they would see the old token still in the map and pass).
+    connectionTokensBySessionId.delete(ctx.sessionId);
+
     ctx.onSessionExit?.(ctx.sessionId, evt);
   });
 };
