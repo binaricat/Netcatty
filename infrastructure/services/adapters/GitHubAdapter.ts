@@ -396,6 +396,39 @@ export const getGistHistory = async (
   }));
 };
 
+/**
+ * Download a specific historical revision of the sync gist.
+ * Uses `GET /gists/{gist_id}/{sha}` which returns the gist at that point
+ * in time. Returns the raw SyncedFile (still encrypted) or null if the
+ * revision does not contain the sync file.
+ */
+export const downloadGistRevision = async (
+  accessToken: string,
+  gistId: string,
+  sha: string,
+): Promise<SyncedFile | null> => {
+  const response = await fetch(
+    `${SYNC_CONSTANTS.GITHUB_API_BASE}/gists/${gistId}/${sha}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    },
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`Failed to download gist revision: ${response.statusText}`);
+  }
+
+  const gist: GitHubGist = await response.json();
+  const file = gist.files[SYNC_CONSTANTS.SYNC_FILE_NAME];
+  if (!file?.content) return null;
+
+  return JSON.parse(file.content) as SyncedFile;
+};
+
 // ============================================================================
 // GitHub Adapter Class
 // ============================================================================
@@ -531,6 +564,23 @@ export class GitHubAdapter {
 
     await deleteSyncGist(this.accessToken, this.gistId);
     this.gistId = null;
+  }
+
+  /**
+   * Get revision history for the sync gist.
+   */
+  async getHistory(): Promise<Array<{ version: string; date: Date }>> {
+    if (!this.accessToken || !this.gistId) return [];
+    return getGistHistory(this.accessToken, this.gistId);
+  }
+
+  /**
+   * Download a specific historical revision of the sync gist (still
+   * encrypted — the caller must decrypt it).
+   */
+  async downloadRevision(sha: string): Promise<SyncedFile | null> {
+    if (!this.accessToken || !this.gistId) return null;
+    return downloadGistRevision(this.accessToken, this.gistId, sha);
   }
 
   /**

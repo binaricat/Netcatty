@@ -475,6 +475,10 @@ export const useCloudSync = (): CloudSyncHook => {
     syncToProvider: syncToProviderWithUnlock,
     downloadFromProvider: downloadFromProviderWithUnlock,
     resolveConflict: resolveConflictWithUnlock,
+
+    // Gist Revision History (#679)
+    getGistRevisionHistory: manager.getGistRevisionHistory.bind(manager),
+    downloadGistRevision: manager.downloadGistRevision.bind(manager),
     
     // Settings
     setAutoSync,

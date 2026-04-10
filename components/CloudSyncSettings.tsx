@@ -22,6 +22,7 @@ import {
     Github,
     Key,
     Loader2,
+    History,
     RefreshCw,
     Settings,
     Server,
@@ -285,6 +286,7 @@ interface ProviderCardProps {
     onCancelConnect?: () => void;
     onDisconnect: () => void;
     onSync: () => void;
+    extraActions?: React.ReactNode;
 }
 
 const ProviderCard: React.FC<ProviderCardProps> = ({
@@ -303,6 +305,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
     onCancelConnect,
     onDisconnect,
     onSync,
+    extraActions,
 }) => {
     const { t } = useI18n();
     const formatLastSync = (timestamp?: number): string => {
@@ -395,6 +398,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                             )}
                             {t('cloudSync.provider.sync')}
                         </Button>
+                        {extraActions}
                         {onEdit && (
                             <Button
                                 size="sm"
@@ -715,6 +719,20 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Conflict modal
     const [showConflictModal, setShowConflictModal] = useState(false);
 
+    // Gist revision history (#679)
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [historyRevisions, setHistoryRevisions] = useState<Array<{ version: string; date: Date }>>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyPreview, setHistoryPreview] = useState<{
+      sha: string;
+      payload: SyncPayload;
+      preview: { hostCount: number; keyCount: number; snippetCount: number; identityCount: number; portForwardingRuleCount: number };
+      deviceName?: string;
+      version?: number;
+    } | null>(null);
+    const [historyPreviewLoading, setHistoryPreviewLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
+
     // Change master key dialog
     const [showChangeKeyDialog, setShowChangeKeyDialog] = useState(false);
     const [currentMasterKey, setCurrentMasterKey] = useState('');
@@ -1030,6 +1048,59 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         }
     };
 
+    // -- Gist revision history handlers --
+
+    const handleOpenHistory = async () => {
+        setShowHistoryModal(true);
+        setHistoryLoading(true);
+        setHistoryError(null);
+        setHistoryPreview(null);
+        try {
+            const revisions = await sync.getGistRevisionHistory();
+            setHistoryRevisions(revisions);
+        } catch (err) {
+            setHistoryError(err instanceof Error ? err.message : t('common.unknownError'));
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const handlePreviewRevision = async (sha: string) => {
+        setHistoryPreviewLoading(true);
+        setHistoryError(null);
+        try {
+            const result = await sync.downloadGistRevision(sha);
+            if (result) {
+                setHistoryPreview({
+                    sha,
+                    payload: result.payload,
+                    preview: result.preview,
+                    deviceName: result.meta.deviceName,
+                    version: result.meta.version,
+                });
+            } else {
+                setHistoryError(t('cloudSync.history.revisionNotFound'));
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : t('common.unknownError');
+            if (msg.includes('ecrypt') || msg.includes('tag')) {
+                setHistoryError(t('cloudSync.history.decryptFailed'));
+            } else {
+                setHistoryError(msg);
+            }
+        } finally {
+            setHistoryPreviewLoading(false);
+        }
+    };
+
+    const handleRestoreRevision = () => {
+        if (!historyPreview) return;
+        onApplyPayload(historyPreview.payload);
+        toast.success(t('cloudSync.history.restored'));
+        setShowHistoryModal(false);
+        setHistoryPreview(null);
+    };
+
     return (
         <div className="space-y-6">
             {/* Header with status */}
@@ -1091,6 +1162,14 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         onConnect={handleConnectGitHub}
                         onDisconnect={() => sync.disconnectProvider('github')}
                         onSync={() => handleSync('github')}
+                        extraActions={
+                            isProviderReadyForSync(sync.providers.github) ? (
+                                <Button size="sm" variant="ghost" onClick={handleOpenHistory} className="gap-1">
+                                    <History size={14} />
+                                    {t('cloudSync.history.viewButton')}
+                                </Button>
+                            ) : undefined
+                        }
                     />
 
                     <ProviderCard
@@ -1290,6 +1369,113 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 onResolve={handleResolveConflict}
                 onClose={() => setShowConflictModal(false)}
             />
+
+            {/* Gist Revision History Modal (#679) */}
+            <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+                <DialogContent className="sm:max-w-[520px] max-h-[80vh] overflow-hidden flex flex-col z-[70]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <History size={18} />
+                            {t('cloudSync.history.title')}
+                        </DialogTitle>
+                        <DialogDescription>{t('cloudSync.history.description')}</DialogDescription>
+                    </DialogHeader>
+
+                    {historyError && (
+                        <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-500">
+                            {historyError}
+                        </div>
+                    )}
+
+                    {historyLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                            <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                        </div>
+                    ) : historyPreview ? (
+                        // Preview of a selected revision
+                        <div className="space-y-4 overflow-y-auto flex-1 min-h-0">
+                            <div className="rounded-lg border p-4 space-y-2">
+                                <div className="text-sm font-medium">{t('cloudSync.history.revisionPreview')}</div>
+                                {historyPreview.deviceName && (
+                                    <div className="text-xs text-muted-foreground">
+                                        {t('cloudSync.history.device')}: {historyPreview.deviceName}
+                                        {historyPreview.version != null && ` · v${historyPreview.version}`}
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                    <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
+                                        <span className="text-muted-foreground">{t('cloudSync.history.hosts')}</span>
+                                        <span className="font-medium">{historyPreview.preview.hostCount}</span>
+                                    </div>
+                                    <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
+                                        <span className="text-muted-foreground">{t('cloudSync.history.keys')}</span>
+                                        <span className="font-medium">{historyPreview.preview.keyCount}</span>
+                                    </div>
+                                    <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
+                                        <span className="text-muted-foreground">{t('cloudSync.history.snippets')}</span>
+                                        <span className="font-medium">{historyPreview.preview.snippetCount}</span>
+                                    </div>
+                                    <div className="flex justify-between px-2 py-1 bg-muted/30 rounded">
+                                        <span className="text-muted-foreground">{t('cloudSync.history.identities')}</span>
+                                        <span className="font-medium">{historyPreview.preview.identityCount}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter className="gap-2">
+                                <Button variant="outline" onClick={() => setHistoryPreview(null)}>
+                                    {t('common.back')}
+                                </Button>
+                                <Button onClick={handleRestoreRevision} className="gap-1">
+                                    <Download size={14} />
+                                    {t('cloudSync.history.restoreButton')}
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    ) : (
+                        // Revision list
+                        <div className="overflow-y-auto flex-1 min-h-0 -mx-1">
+                            {historyRevisions.length === 0 ? (
+                                <div className="text-sm text-muted-foreground text-center py-8">
+                                    {t('cloudSync.history.empty')}
+                                </div>
+                            ) : (
+                                <div className="space-y-1 px-1">
+                                    {historyRevisions.map((rev, index) => (
+                                        <button
+                                            key={rev.version}
+                                            onClick={() => handlePreviewRevision(rev.version)}
+                                            disabled={historyPreviewLoading}
+                                            className={cn(
+                                                "w-full flex items-center justify-between p-2.5 rounded-lg text-left text-sm transition-colors",
+                                                "hover:bg-accent border border-transparent hover:border-border",
+                                                index === 0 && "bg-primary/5 border-primary/20",
+                                            )}
+                                        >
+                                            <div>
+                                                <div className="font-medium">
+                                                    {index === 0 ? t('cloudSync.history.current') : `${t('cloudSync.history.revision')} #${historyRevisions.length - index}`}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">
+                                                    {rev.date.toLocaleString()}
+                                                </div>
+                                            </div>
+                                            <div className="text-xs text-muted-foreground font-mono">
+                                                {rev.version.slice(0, 7)}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {historyPreviewLoading && (
+                        <div className="absolute inset-0 bg-background/50 flex items-center justify-center rounded-lg">
+                            <Loader2 size={24} className="animate-spin" />
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={showWebdavDialog} onOpenChange={setShowWebdavDialog}>
                 <DialogContent className="sm:max-w-[460px] max-h-[80vh] overflow-y-auto z-[70]">
