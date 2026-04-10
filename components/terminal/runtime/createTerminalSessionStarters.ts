@@ -236,7 +236,19 @@ const attachSessionToTerminal = (
 const runDistroDetection = async (
   ctx: TerminalSessionStartersContext,
   auth: { username: string; password?: string; key?: SSHKey; passphrase?: string },
+  scheduledSessionId: string,
 ) => {
+  // Stale-session guard: if the user has already disconnected and
+  // started a new connection on the same sessionId slot, any work we
+  // do here would apply to the wrong host. Bail out whenever the live
+  // session ID no longer matches the one that was active when this
+  // detection pass was scheduled. The check is repeated after every
+  // await below because the session can change during an async call.
+  const isSessionStillActive = () =>
+    !!ctx.sessionRef.current && ctx.sessionRef.current === scheduledSessionId;
+
+  if (!isSessionStillActive()) return;
+
   // Step 1: try to classify from the SSH server identification string
   // captured at handshake time. This is free (no extra channel) and
   // reliably identifies most network-device vendors (Cisco IOS, Huawei
@@ -245,8 +257,9 @@ const runDistroDetection = async (
   // and, on devices like Cisco / Juniper with AAA logging, generates an
   // extra session log entry per connect.
   try {
-    if (ctx.terminalBackend.getSessionRemoteInfo && ctx.sessionId) {
-      const info = await ctx.terminalBackend.getSessionRemoteInfo(ctx.sessionId);
+    if (ctx.terminalBackend.getSessionRemoteInfo && scheduledSessionId) {
+      const info = await ctx.terminalBackend.getSessionRemoteInfo(scheduledSessionId);
+      if (!isSessionStillActive()) return;
       const vendor = detectVendorFromSshVersion(info?.remoteSshVersion);
       if (vendor) {
         ctx.onOsDetected?.(ctx.host.id, vendor);
@@ -256,6 +269,8 @@ const runDistroDetection = async (
   } catch (err) {
     logger.warn("SSH banner vendor detection failed", err);
   }
+
+  if (!isSessionStillActive()) return;
 
   // Step 2: unknown or generic OpenSSH/Dropbear — fall back to the
   // /etc/os-release probe to distinguish Linux distros and macOS.
@@ -271,6 +286,7 @@ const runDistroDetection = async (
       command: "cat /etc/os-release 2>/dev/null || uname -a",
       timeout: DISTRO_DETECT_TIMEOUT,
     });
+    if (!isSessionStillActive()) return;
     const data = `${res.stdout || ""}\n${res.stderr || ""}`;
     const idMatch = data.match(/^ID="?([\w-]+)"?$/im);
     const distro = idMatch
@@ -642,17 +658,32 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }, 600);
       }
 
-      // Run OS detection only after successful connection
-      setTimeout(
-        () =>
-          void runDistroDetection(ctx, {
-            username: effectiveUsername,
-            password: usedPassword,
-            key: usedKey,
-            passphrase: effectivePassphrase,
-          }),
-        600,
-      );
+      // Run OS detection only after successful connection. Capture the
+      // session ID at schedule time and re-check it inside both the
+      // timer and the detection's async awaits, so a quick
+      // disconnect+reconnect on the same session slot cannot cause us
+      // to read host B's SSH banner and write it onto host A.
+      {
+        const distroScheduledSessionId = id;
+        setTimeout(() => {
+          if (
+            !ctx.sessionRef.current ||
+            ctx.sessionRef.current !== distroScheduledSessionId
+          ) {
+            return;
+          }
+          void runDistroDetection(
+            ctx,
+            {
+              username: effectiveUsername,
+              password: usedPassword,
+              key: usedKey,
+              passphrase: effectivePassphrase,
+            },
+            distroScheduledSessionId,
+          );
+        }, 600);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const authError = isAuthError(err);
