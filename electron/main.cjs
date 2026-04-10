@@ -110,6 +110,7 @@ if (!app || !BrowserWindow) {
 const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
+const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 
 try {
   protocol?.registerSchemesAsPrivileged?.([
@@ -458,10 +459,12 @@ const registerBridges = (win) => {
   };
 
   // Initialize bridges with shared dependencies
+  const cliDiscoveryFilePath = getCliDiscoveryFilePath({ userDataDir: app.getPath("userData") });
   const deps = {
     sessions,
     sftpClients,
     electronModule,
+    cliDiscoveryFilePath,
   };
 
   sshBridge.init(deps);

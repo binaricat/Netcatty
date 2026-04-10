@@ -15,5 +15,5 @@ Read this when you need diagnostics, cancellation, or to re-enable a cancelled c
 
 ## Rules
 
-- `cancel` affects the current chat scope; later `exec` calls in that scope will be blocked until `resume`.
+- `cancel` affects the current chat scope; it requests cancellation for in-flight `exec`, session-backed SFTP transfers, and running `job-start` work in that scope. Later `exec` calls in that scope stay blocked until `resume`.
 - Do not issue control commands concurrently with other Netcatty CLI commands for the same chat session.

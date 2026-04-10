@@ -247,6 +247,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   const [showHistory, setShowHistory] = useState(false);
   const [currentAgentId, setCurrentAgentId] = useState(defaultAgentId);
+  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, ReturnType<typeof getAgentModelPresets>>>({});
 
   const { files, addFiles, removeFile, clearFiles } = useFileUpload();
   const { openSettingsWindow } = useWindowControls();
@@ -479,9 +480,49 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     () => isCopilotAgentConfig(currentAgentConfig),
     [currentAgentConfig],
   );
+
+  const agentModelMapRef = useRef(agentModelMap);
+  agentModelMapRef.current = agentModelMap;
+
+  useEffect(() => {
+    if (!currentAgentConfig?.acpCommand) return;
+    if (!isCopilotExternalAgent) return;
+
+    const bridge = getNetcattyBridge();
+    if (!bridge?.aiAcpListModels) return;
+
+    let cancelled = false;
+    void bridge.aiAcpListModels(
+      currentAgentConfig.acpCommand,
+      currentAgentConfig.acpArgs || [],
+      undefined,
+      undefined,
+      `models_${currentAgentId}`,
+    ).then((result) => {
+      if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
+      const knownModelIds = new Set(result.models.map((model) => model.id));
+      setRuntimeAgentModelPresets((prev) => ({
+        ...prev,
+        [currentAgentId]: result.models ?? [],
+      }));
+      const storedModelId = agentModelMapRef.current[currentAgentId];
+      if (result.currentModelId && (!storedModelId || !knownModelIds.has(storedModelId))) {
+        setAgentModel(currentAgentId, result.currentModelId);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.warn('[AIChatSidePanel] Failed to load ACP agent models:', err);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAgentConfig, currentAgentId, isCopilotExternalAgent, setAgentModel]);
+
   const agentModelPresets = useMemo(
-    () => getAgentModelPresets(currentAgentConfig?.command),
-    [currentAgentConfig?.command],
+    () => runtimeAgentModelPresets[currentAgentId] ?? getAgentModelPresets(currentAgentConfig?.command),
+    [currentAgentConfig?.command, currentAgentId, runtimeAgentModelPresets],
   );
 
   // Per-agent model: recall last selection or use first preset as default
@@ -489,9 +530,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     const stored = agentModelMap[currentAgentId];
     if (stored && agentModelPresets.some(p => stored === p.id || stored.startsWith(p.id + '/'))) {
       return stored;
-    }
-    if (isCopilotExternalAgent) {
-      return undefined;
     }
     // Default to first preset; for models with thinking levels, use the default level
     if (agentModelPresets.length > 0) {
@@ -502,7 +540,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       return first.id;
     }
     return undefined;
-  }, [currentAgentId, agentModelMap, agentModelPresets, isCopilotExternalAgent]);
+  }, [currentAgentId, agentModelMap, agentModelPresets]);
 
   const handleAgentModelSelect = useCallback((modelId: string) => {
     setAgentModel(currentAgentId, modelId);

@@ -18,7 +18,7 @@ This project is wired around three layers: domain (pure logic), application stat
 - **UI** (`components/`, `App.tsx`): Presentation; depends on hooks and domain helpers only.
 
 ## How Things Talk
-- UI calls application hooks → hooks call domain helpers → persistence/config via infrastructure adapters.
+- UI calls application hooks -> hooks call domain helpers -> persistence/config via infrastructure adapters.
 - `App.tsx` wires hooks to components; no business logic should live in components beyond view glue.
 - Local storage keys are centralized in `infrastructure/config/storageKeys.ts`; avoid ad-hoc `localStorage` calls elsewhere.
 
@@ -44,6 +44,12 @@ This project is wired around three layers: domain (pure logic), application stat
 - Avoid direct network/fetch in components; add a service/adaptor first.
 - Maintain ASCII-only unless required by existing file content.
 
+## Review Boundaries
+- Treat `electron/cli/*`, `netcatty-tool-cli`, the CLI discovery file, and the local TCP bridge as internal Netcatty integration surfaces unless a task explicitly says otherwise.
+- Do not review those surfaces as public APIs by default, and do not assume they must support third-party callers, manual launches, or non-Netcatty agents.
+- On supported first-party paths, assume Netcatty's own launcher provides required integration environment such as `NETCATTY_TOOL_CLI_DISCOVERY_FILE`.
+- If a review concern depends on external exposure, third-party compatibility, or public API stability, call it out as out of scope unless the task explicitly includes that contract.
+
 ---
 
 ## Aside Panel Design System
@@ -54,20 +60,20 @@ VaultView subpages (Hosts, Keychain, Port Forwarding, Snippets, Known Hosts) sha
 
 Import from `./ui/aside-panel`:
 ```tsx
-import { 
-  AsidePanel, 
-  AsidePanelHeader, 
-  AsidePanelContent, 
+import {
+  AsidePanel,
+  AsidePanelHeader,
+  AsidePanelContent,
   AsidePanelFooter,
   AsideActionMenu,
-  AsideActionMenuItem 
+  AsideActionMenuItem
 } from "./ui/aside-panel";
 ```
 
 ### Basic Usage
 ```tsx
-<AsidePanel 
-  open={isOpen} 
+<AsidePanel
+  open={isOpen}
   onClose={handleClose}
   title="Panel Title"
   subtitle="Optional subtitle"

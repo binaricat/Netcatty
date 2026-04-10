@@ -1221,6 +1221,9 @@ const api = {
   aiMcpSetPermissionMode: async (mode) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:set-permission-mode", { mode });
   },
+  aiMcpSetToolIntegrationMode: async (mode) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:set-tool-integration-mode", { mode });
+  },
   // MCP approval gate: renderer receives approval requests from main process
   onMcpApprovalRequest: (cb) => {
     const handler = (_event, payload) => cb(payload);

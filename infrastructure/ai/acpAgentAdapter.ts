@@ -103,16 +103,29 @@ export async function runAcpAgentTurn(
   });
   cleanupFns.push(unsubEvent);
 
+  let settled = false;
+  let resolveDone!: () => void;
+  const settle = (fn?: () => void) => {
+    if (settled) return false;
+    settled = true;
+    fn?.();
+    resolveDone();
+    return true;
+  };
+
   const donePromise = new Promise<void>((resolve) => {
+    resolveDone = resolve;
     const unsubDone = acpBridge.onAiAcpDone(requestId, () => {
-      callbacks.onDone();
-      resolve();
+      settle(() => {
+        callbacks.onDone();
+      });
     });
     cleanupFns.push(unsubDone);
 
     const unsubError = acpBridge.onAiAcpError(requestId, (error: string) => {
-      callbacks.onError(error);
-      resolve();
+      settle(() => {
+        callbacks.onError(error);
+      });
     });
     cleanupFns.push(unsubError);
   });
@@ -124,6 +137,9 @@ export async function runAcpAgentTurn(
       return;
     }
     const onAbort = () => {
+      if (!settle()) {
+        return;
+      }
       acpBridge.aiAcpCancel(requestId, chatSessionId).catch(() => {});
     };
     signal.addEventListener('abort', onAbort, { once: true });
@@ -131,7 +147,7 @@ export async function runAcpAgentTurn(
   }
 
   // Start the ACP stream in the main process
-  acpBridge.aiAcpStream(
+  void acpBridge.aiAcpStream(
     requestId,
     chatSessionId,
     config.acpCommand,
@@ -145,8 +161,20 @@ export async function runAcpAgentTurn(
     images?.length ? images : undefined,
     toolIntegrationMode,
     defaultTargetSession,
-  ).catch((err: Error) => {
-    callbacks.onError(err.message);
+  ).then((result) => {
+    if (result?.ok === false) {
+      settle(() => {
+        callbacks.onError(result.error || 'Failed to start ACP stream');
+      });
+    }
+  }).catch((err: Error) => {
+    settle(() => {
+      callbacks.onError(err.message);
+    });
+  }).finally(() => {
+    if (settled) {
+      cleanup(cleanupFns);
+    }
   });
 
   // Wait for done or error

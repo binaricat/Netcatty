@@ -8,11 +8,32 @@ const { getCliDiscoveryFilePath } = require("./discoveryPath.cjs");
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
 const EXEC_RPC_TIMEOUT_BUFFER_MS = 5_000;
+const DEFAULT_APPROVAL_TIMEOUT_MS = 110_000;
 const LONG_RUNNING_METHODS = new Set([
   "netcatty/exec",
+  "netcatty/jobStart",
+  "netcatty/sftp/list",
+  "netcatty/sftp/read",
   "netcatty/sftp/upload",
   "netcatty/sftp/write",
   "netcatty/sftp/download",
+  "netcatty/sftp/mkdir",
+  "netcatty/sftp/delete",
+  "netcatty/sftp/rename",
+  "netcatty/sftp/stat",
+  "netcatty/sftp/chmod",
+  "netcatty/sftp/home",
+]);
+const APPROVAL_WAIT_METHODS = new Set([
+  "netcatty/exec",
+  "netcatty/jobStart",
+  "netcatty/sftp/write",
+  "netcatty/sftp/download",
+  "netcatty/sftp/upload",
+  "netcatty/sftp/mkdir",
+  "netcatty/sftp/delete",
+  "netcatty/sftp/rename",
+  "netcatty/sftp/chmod",
 ]);
 
 function createError(code, message) {
@@ -21,16 +42,31 @@ function createError(code, message) {
   return err;
 }
 
-function resolveRpcTimeoutMs(method, bridgeCommandTimeoutMs) {
-  if (!LONG_RUNNING_METHODS.has(method)) {
-    return DEFAULT_RPC_TIMEOUT_MS;
+function resolveRpcTimeoutMs(method, bridgeCommandTimeoutMs, bridgePermissionMode, bridgeApprovalTimeoutMs) {
+  const execTimeoutMs = LONG_RUNNING_METHODS.has(method)
+    ? (Number.isFinite(bridgeCommandTimeoutMs) && bridgeCommandTimeoutMs > 0
+      ? bridgeCommandTimeoutMs
+      : DEFAULT_EXEC_TIMEOUT_MS)
+    : 0;
+  const approvalTimeoutMs = (bridgePermissionMode === "confirm" && APPROVAL_WAIT_METHODS.has(method))
+    ? (Number.isFinite(bridgeApprovalTimeoutMs) && bridgeApprovalTimeoutMs > 0
+      ? bridgeApprovalTimeoutMs
+      : DEFAULT_APPROVAL_TIMEOUT_MS)
+    : 0;
+
+  if (execTimeoutMs > 0 && approvalTimeoutMs > 0) {
+    return Math.max(
+      DEFAULT_RPC_TIMEOUT_MS,
+      approvalTimeoutMs + execTimeoutMs + EXEC_RPC_TIMEOUT_BUFFER_MS,
+    );
   }
-
-  const execTimeoutMs = Number.isFinite(bridgeCommandTimeoutMs) && bridgeCommandTimeoutMs > 0
-    ? bridgeCommandTimeoutMs
-    : DEFAULT_EXEC_TIMEOUT_MS;
-
-  return Math.max(DEFAULT_RPC_TIMEOUT_MS, execTimeoutMs + EXEC_RPC_TIMEOUT_BUFFER_MS);
+  if (execTimeoutMs > 0) {
+    return Math.max(DEFAULT_RPC_TIMEOUT_MS, execTimeoutMs + EXEC_RPC_TIMEOUT_BUFFER_MS);
+  }
+  if (approvalTimeoutMs > 0) {
+    return Math.max(DEFAULT_RPC_TIMEOUT_MS, approvalTimeoutMs + EXEC_RPC_TIMEOUT_BUFFER_MS);
+  }
+  return DEFAULT_RPC_TIMEOUT_MS;
 }
 
 function loadDiscovery() {
@@ -138,13 +174,20 @@ async function connectClient() {
   });
 
   let bridgeCommandTimeoutMs = null;
+  let bridgePermissionMode = null;
+  let bridgeApprovalTimeoutMs = null;
 
   async function call(method, params) {
     if (socket.destroyed || !socket.writable) {
       throw createError("CONNECTION_CLOSED", "Connection to Netcatty TCP bridge is closed.");
     }
     const id = nextRpcId++;
-    const timeoutMs = resolveRpcTimeoutMs(method, bridgeCommandTimeoutMs);
+    const timeoutMs = resolveRpcTimeoutMs(
+      method,
+      bridgeCommandTimeoutMs,
+      bridgePermissionMode,
+      bridgeApprovalTimeoutMs,
+    );
     return await new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         rejectPending(
@@ -185,6 +228,12 @@ async function connectClient() {
     const statusResult = await call("netcatty/getStatus", {});
     if (Number.isFinite(statusResult?.commandTimeoutMs) && statusResult.commandTimeoutMs > 0) {
       bridgeCommandTimeoutMs = statusResult.commandTimeoutMs;
+    }
+    if (typeof statusResult?.permissionMode === "string") {
+      bridgePermissionMode = statusResult.permissionMode;
+    }
+    if (Number.isFinite(statusResult?.approvalTimeoutMs) && statusResult.approvalTimeoutMs > 0) {
+      bridgeApprovalTimeoutMs = statusResult.approvalTimeoutMs;
     }
   } catch {
     // Keep the default RPC timeout when bridge status cannot be fetched.

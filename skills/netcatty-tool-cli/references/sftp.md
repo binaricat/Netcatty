@@ -8,6 +8,8 @@ Use this reference for remote file or directory tasks.
 - If the user explicitly says to use only `sftp`, do not call `exec`.
 - Every `sftp` command must include both `--session <session-id>` and `--chat-session <chat-session-id>`.
 - Do not use reusable SFTP handles or `--sftp <id>`.
+- After choosing a target session, first run `session --session <id> --json --chat-session <chat-session-id>` and inspect the returned metadata.
+- Use SFTP only when that `session` result shows a connected SSH-backed session. For local, Mosh, Telnet, serial/raw, or network-device sessions, do not use SFTP.
 - Keep path semantics strict:
   - `--remote-path` always means a path on the remote host.
   - `--local-path` always means a path on the local machine running Netcatty.

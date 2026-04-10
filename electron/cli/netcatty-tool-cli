@@ -1,0 +1,29 @@
+#!/bin/sh
+
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CLI_SCRIPT="$SCRIPT_DIR/netcatty-tool-cli.cjs"
+
+APP_BIN=""
+if [ -n "${NETCATTY_CLI_ELECTRON_EXEC_PATH:-}" ] && [ -x "${NETCATTY_CLI_ELECTRON_EXEC_PATH}" ]; then
+  APP_BIN="${NETCATTY_CLI_ELECTRON_EXEC_PATH}"
+elif [ -x "$SCRIPT_DIR/../../../../MacOS/Netcatty" ]; then
+  APP_BIN="$SCRIPT_DIR/../../../../MacOS/Netcatty"
+elif [ -x "$SCRIPT_DIR/../../../../Netcatty" ]; then
+  APP_BIN="$SCRIPT_DIR/../../../../Netcatty"
+elif [ -x "$SCRIPT_DIR/../../../../netcatty" ]; then
+  APP_BIN="$SCRIPT_DIR/../../../../netcatty"
+fi
+
+if [ -n "$APP_BIN" ]; then
+  export ELECTRON_RUN_AS_NODE=1
+  exec "$APP_BIN" "$CLI_SCRIPT" "$@"
+fi
+
+if command -v node >/dev/null 2>&1; then
+  exec node "$CLI_SCRIPT" "$@"
+fi
+
+printf '%s\n' "Failed to locate the bundled Netcatty runtime for netcatty-tool-cli." >&2
+exit 1

@@ -767,11 +767,12 @@ declare global {
       deviceType?: string;
       connected: boolean;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
+    aiMcpSetToolIntegrationMode?(mode: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;
     aiSpawnAgent?(agentId: string, command: string, args?: string[], env?: Record<string, string>, options?: { closeStdin?: boolean }): Promise<{ ok: boolean; pid?: number; error?: string }>;
     aiWriteToAgent?(agentId: string, data: string): Promise<{ ok: boolean; error?: string }>;
     aiCloseAgentStdin?(agentId: string): Promise<{ ok: boolean; error?: string }>;
     aiKillAgent?(agentId: string): Promise<{ ok: boolean; error?: string }>;
-    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>, toolIntegrationMode?: 'mcp' | 'skills'): Promise<{ ok: boolean; error?: string }>;
+    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }): Promise<{ ok: boolean; error?: string }>;
     aiAcpCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiAcpCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
     onAiAcpEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;

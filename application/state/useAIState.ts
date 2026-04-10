@@ -34,6 +34,7 @@ import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
 interface AIBridge {
   aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
   aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
+  aiMcpSetToolIntegrationMode?: (mode: AIToolIntegrationMode) => Promise<unknown> | unknown;
   aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
   aiMcpSetCommandTimeout?: (timeout: number) => Promise<unknown> | unknown;
   aiMcpSetMaxIterations?: (maxIterations: number) => Promise<unknown> | unknown;
@@ -347,6 +348,8 @@ export function useAIState() {
   const setToolIntegrationMode = useCallback((mode: AIToolIntegrationMode) => {
     setToolIntegrationModeRaw(mode);
     localStorageAdapter.writeString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, mode);
+    const bridge = getAIBridge();
+    bridge?.aiMcpSetToolIntegrationMode?.(mode);
   }, []);
 
   const setExternalAgents = useCallback((value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => {
@@ -416,11 +419,13 @@ export function useAIState() {
             break;
           }
           case STORAGE_KEY_AI_TOOL_INTEGRATION_MODE:
-            setToolIntegrationModeRaw(
-              localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
+            {
+              const mode = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
                 ? 'skills'
-                : 'mcp',
-            );
+                : 'mcp';
+              setToolIntegrationModeRaw(mode);
+              getAIBridge()?.aiMcpSetToolIntegrationMode?.(mode);
+            }
             break;
           case STORAGE_KEY_AI_EXTERNAL_AGENTS: {
             const agents = localStorageAdapter.read<ExternalAgentConfig[]>(STORAGE_KEY_AI_EXTERNAL_AGENTS);
@@ -543,6 +548,11 @@ export function useAIState() {
         ? storedPermMode
         : 'confirm';
     bridge?.aiMcpSetPermissionMode?.(initialPermMode);
+    const initialToolMode: AIToolIntegrationMode =
+      localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
+        ? 'skills'
+        : 'mcp';
+    bridge?.aiMcpSetToolIntegrationMode?.(initialToolMode);
   }, []);
 
   // ── Session CRUD ──

@@ -18,8 +18,9 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
    - Remote command execution tasks go through the exec reference.
    - Remote file or directory tasks go through the sftp reference.
    - If the user explicitly says to avoid shell or `exec`, do not use `exec`.
-5. If the host prompt already names a connected default target session, use that session directly for routine requests that do not mention another session or host, but still pass the explicit `--session <id>` in the command.
-6. Only fall back to `env` / `session` lookup when the task is ambiguous, the user points to another session, or the direct attempt fails.
+   - Treat `exec` as the short-command path only. If the command may exceed about 60 seconds, or streams output for an extended period, use the long-running job commands instead of plain `exec`.
+5. If the host prompt already names a connected default target session, use that session directly for routine requests that do not mention another session or host, but still start with `session --session <id> --json --chat-session <chat-session-id>` instead of jumping straight to `exec` or `sftp`.
+6. Only fall back to `env` lookup when the task is ambiguous, the user points to another session, or that direct `session` lookup fails.
 
 ## Core Rules
 
@@ -37,9 +38,3 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
 - Session and device-type handling: `references/session-types.md`
 - Cancel, resume, and runtime diagnostics: `references/control-commands.md`
 - Error handling and authoritative failures: `references/errors.md`
-
-## TODO
-
-- Keep this skill synchronized with `/Users/eric/Documents/GitHub/Netcatty/electron/cli/netcatty-tool-cli.cjs` and `/Users/eric/Documents/GitHub/Netcatty/electron/bridges/aiBridge.cjs` whenever the Skills + CLI workflow changes.
-- MCP remains a separate stable surface. Only update this skill for MCP-related changes if the CLI-facing behavior or user-facing guidance needs to stay aligned.
-- If Netcatty adds batch or multi-target CLI operations later, expose them explicitly in `netcatty-tool-cli` and document the exact output shape here before relying on them in skills.

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
+const path = require("node:path");
+
 const { connectClient, createError } = require("./netcattyRpcClient.cjs");
 
 function printHelp() {
@@ -11,7 +13,10 @@ function printHelp() {
     "  netcatty-tool-cli env --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli session --session <id> --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli resource environment --chat-session <id> [--json] [--scope-session <session-id> ...]\n" +
-    "  netcatty-tool-cli exec --session <id> --chat-session <id> [--json] [--] <command>\n" +
+    "  netcatty-tool-cli exec --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
+    "  netcatty-tool-cli job-start --session <id> --chat-session <id> [--json] [--] <shell-ready-command>\n" +
+    "  netcatty-tool-cli job-poll --job <id> --chat-session <id> [--offset <n>] [--json]\n" +
+    "  netcatty-tool-cli job-stop --job <id> --chat-session <id> [--json]\n" +
     "  netcatty-tool-cli sftp list --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli sftp read --session <id> --remote-path <remote-path> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
     "  netcatty-tool-cli sftp write --session <id> --remote-path <remote-path> --content <text> --chat-session <id> [--encoding <enc>] [--json] [--scope-session <session-id> ...]\n" +
@@ -30,7 +35,9 @@ function printHelp() {
     "  netcatty-tool-cli status --json\n" +
     "  netcatty-tool-cli env --chat-session ai_123 --json\n" +
     "  netcatty-tool-cli session --session sess_123 --json --chat-session ai_123\n" +
-    "  netcatty-tool-cli exec --session sess_123 --chat-session ai_123 --json -- pwd\n" +
+    "  netcatty-tool-cli exec --session sess_123 --chat-session ai_123 --json -- \"pwd\"\n" +
+    "  netcatty-tool-cli job-start --session sess_123 --chat-session ai_123 --json -- \"npm run dev\"\n" +
+    "  netcatty-tool-cli job-poll --job job_123 --chat-session ai_123 --offset 0 --json\n" +
     "  netcatty-tool-cli sftp list --session sess_123 --remote-path /etc --chat-session ai_123 --json\n" +
     "  netcatty-tool-cli sftp download --session sess_123 --remote-path /etc/hosts --local-path ./hosts.txt --chat-session ai_123 --json\n\n" +
     "Notes:\n" +
@@ -38,9 +45,11 @@ function printHelp() {
     "  - This CLI is intended as an internal Skills + CLI transport, not a general customer-facing shell tool.\n" +
     "  - `env`, `session`, and `resource environment` always require --chat-session <id>.\n" +
     "  - `exec` always requires both --session <id> and --chat-session <id>.\n" +
-    "  - Every `sftp <op>` always requires both --session <id> and --chat-session <id>.\n" +
-    "  - `cancel` stops in-flight executions and blocks further execs for that chat session until `resume`.\n" +
-    "  - TODO: Add explicit batch execution / cancellation commands if the MCP surface expands.\n",
+    "  - `job-start` always requires both --session <id> and --chat-session <id>.\n" +
+    "  - `job-poll` and `job-stop` always require both --job <id> and --chat-session <id>.\n" +
+    "  - Every `sftp <op>` always requires both --session <id> and --chat-session <id>, and only works on connected SSH-backed sessions.\n" +
+    "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
+    "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
   );
 }
 
@@ -54,6 +63,10 @@ function toErrorPayload(err) {
   };
 }
 
+function readFlagValue(args, index) {
+  return index < args.length ? args[index] : null;
+}
+
 function parseArgs(argv) {
   const args = argv.slice(2);
   const opts = {
@@ -61,6 +74,8 @@ function parseArgs(argv) {
     chatSessionId: null,
     scopedSessionIds: [],
     sessionId: null,
+    jobId: null,
+    offset: null,
     remotePath: null,
     localPath: null,
     oldRemotePath: null,
@@ -83,53 +98,64 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--chat-session") {
-      opts.chatSessionId = args[i + 1] || null;
+      opts.chatSessionId = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--scope-session") {
-      const value = args[i + 1] || null;
+      const value = readFlagValue(args, i + 1);
       if (value) opts.scopedSessionIds.push(value);
       i += 1;
       continue;
     }
     if (arg === "--session") {
-      opts.sessionId = args[i + 1] || null;
+      opts.sessionId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--job") {
+      opts.jobId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--offset") {
+      const value = readFlagValue(args, i + 1);
+      opts.offset = value == null ? null : Number(value);
       i += 1;
       continue;
     }
     if (arg === "--remote-path") {
-      opts.remotePath = args[i + 1] || null;
+      opts.remotePath = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--local-path") {
-      opts.localPath = args[i + 1] || null;
+      opts.localPath = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--old-remote-path") {
-      opts.oldRemotePath = args[i + 1] || null;
+      opts.oldRemotePath = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--new-remote-path") {
-      opts.newRemotePath = args[i + 1] || null;
+      opts.newRemotePath = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--content") {
-      opts.content = args[i + 1] || null;
+      opts.content = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--mode") {
-      opts.mode = args[i + 1] || null;
+      opts.mode = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
     if (arg === "--encoding") {
-      opts.encoding = args[i + 1] || null;
+      opts.encoding = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
@@ -171,14 +197,32 @@ function formatExecText(result) {
   return `${parts.join("\n")}\n`;
 }
 
+function formatJobText(result) {
+  const lines = [
+    `Job: ${result.jobId || ""}`,
+    `Session: ${result.sessionId || ""}`,
+    `Status: ${result.status || "unknown"}`,
+  ];
+  if (result.startedAt) lines.push(`Started: ${new Date(result.startedAt).toISOString()}`);
+  if (result.updatedAt) lines.push(`Updated: ${new Date(result.updatedAt).toISOString()}`);
+  if (typeof result.exitCode === "number") lines.push(`Exit Code: ${result.exitCode}`);
+  if (result.error) lines.push(`Error: ${result.error}`);
+  if (result.outputDelta) {
+    lines.push("");
+    lines.push(result.outputDelta.replace(/\n$/, ""));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function buildScopeParams(opts) {
+  const params = {};
   if (opts.chatSessionId) {
-    return { chatSessionId: opts.chatSessionId };
+    params.chatSessionId = opts.chatSessionId;
   }
   if (Array.isArray(opts.scopedSessionIds) && opts.scopedSessionIds.length > 0) {
-    return { scopedSessionIds: opts.scopedSessionIds };
+    params.scopedSessionIds = opts.scopedSessionIds;
   }
-  return {};
+  return params;
 }
 
 function findHostOrThrow(ctx, sessionId) {
@@ -200,6 +244,34 @@ async function resolveTargetHost(client, opts) {
     "INVALID_ARGUMENT",
     "Missing required --session <id>. Run env --json to inspect available sessions first.",
   );
+}
+
+function getSftpCapabilityError(host) {
+  if (!host) return "SFTP target session is unavailable.";
+  if (host.connected === false) {
+    return `Session "${host.sessionId}" is not connected. Reconnect it before using SFTP.`;
+  }
+  const protocol = String(host.protocol || "").toLowerCase();
+  const deviceType = String(host.deviceType || "").toLowerCase();
+  if (protocol === "ssh") {
+    return null;
+  }
+  if (protocol === "local") {
+    return "SFTP is not available for local sessions. Use normal local filesystem tools instead.";
+  }
+  if (protocol === "mosh") {
+    return "SFTP is not available for Mosh sessions. Open an SSH session for this host or use another transfer path.";
+  }
+  if (protocol === "telnet") {
+    return "SFTP is not available for Telnet sessions. Open an SSH session for this host or use another transfer path.";
+  }
+  if (protocol === "serial" || deviceType === "network") {
+    return "SFTP is not available for serial or network-device sessions. Use exec/vendor CLI commands or another transfer path.";
+  }
+  if (protocol) {
+    return `SFTP is not available for ${protocol} sessions. Open an SSH session for this host or use another transfer path.`;
+  }
+  return "SFTP is only available for connected SSH-backed sessions.";
 }
 
 function formatSessionText(host) {
@@ -245,6 +317,28 @@ function formatSftpListText(entries) {
     entry.lastModified || "",
   ].join("\t"));
   return `Type\tName\tSize\tPermissions\tModified\n${rows.join("\n")}\n`;
+}
+
+function getSingleCommandOrThrow(opts, commandName) {
+  if (!opts.command.length) {
+    throw createError("INVALID_ARGUMENT", "Missing command after --.");
+  }
+  if (opts.command.length !== 1) {
+    throw createError(
+      "INVALID_ARGUMENT",
+      `${commandName} expects exactly one shell-ready command string after --. Preserve quoting in a single argument instead of passing multiple tokens.`,
+    );
+  }
+  return opts.command[0];
+}
+
+function ensureBridgeCallOk(result, defaultCode, defaultMessage) {
+  if (!result || result.ok !== false) {
+    return result;
+  }
+  const err = createError(result.code || defaultCode, result.error || defaultMessage);
+  err.details = result;
+  throw err;
 }
 
 async function run() {
@@ -312,13 +406,11 @@ async function run() {
       if (!opts.chatSessionId) {
         throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for exec.");
       }
-      if (!opts.command.length) {
-        throw createError("INVALID_ARGUMENT", "Missing command after --.");
-      }
+      const shellCommand = getSingleCommandOrThrow(opts, "exec");
       const host = await resolveTargetHost(client, opts);
       const rpcParams = {
         sessionId: host.sessionId,
-        command: opts.command.join(" "),
+        command: shellCommand,
         chatSessionId: opts.chatSessionId,
       };
       const result = await client.call("netcatty/exec", rpcParams);
@@ -335,6 +427,70 @@ async function run() {
       return;
     }
 
+    if (command === "job-start") {
+      if (!opts.chatSessionId) {
+        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-start.");
+      }
+      const shellCommand = getSingleCommandOrThrow(opts, "job-start");
+      const host = await resolveTargetHost(client, opts);
+      const result = await client.call("netcatty/jobStart", {
+        sessionId: host.sessionId,
+        command: shellCommand,
+        chatSessionId: opts.chatSessionId,
+      });
+      if (!result.ok) {
+        throw createError(result.code || "JOB_START_FAILED", result.error || "Failed to start long-running command");
+      }
+      process.stdout.write(opts.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : formatJobText(result));
+      return;
+    }
+
+    if (command === "job-poll") {
+      if (!opts.chatSessionId) {
+        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-poll.");
+      }
+      if (!opts.jobId) {
+        throw createError("INVALID_ARGUMENT", "Missing required --job <id> for job-poll.");
+      }
+      const offset = Number.isFinite(opts.offset) && opts.offset >= 0 ? opts.offset : 0;
+      const result = await client.call("netcatty/jobPoll", {
+        jobId: opts.jobId,
+        offset,
+        chatSessionId: opts.chatSessionId,
+        ...buildScopeParams(opts),
+      });
+      if (!result.ok) {
+        throw createError(result.code || "JOB_POLL_FAILED", result.error || "Failed to poll long-running command");
+      }
+      process.stdout.write(opts.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : formatJobText(result));
+      return;
+    }
+
+    if (command === "job-stop") {
+      if (!opts.chatSessionId) {
+        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-stop.");
+      }
+      if (!opts.jobId) {
+        throw createError("INVALID_ARGUMENT", "Missing required --job <id> for job-stop.");
+      }
+      const result = await client.call("netcatty/jobStop", {
+        jobId: opts.jobId,
+        chatSessionId: opts.chatSessionId,
+        ...buildScopeParams(opts),
+      });
+      if (!result.ok) {
+        throw createError(result.code || "JOB_STOP_FAILED", result.error || "Failed to stop long-running command");
+      }
+      process.stdout.write(opts.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : formatJobText(result));
+      return;
+    }
+
     if (command === "sftp") {
       if (!opts.chatSessionId) {
         throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for sftp.");
@@ -345,6 +501,10 @@ async function run() {
       }
 
       const host = await resolveTargetHost(client, opts);
+      const sftpCapabilityError = getSftpCapabilityError(host);
+      if (sftpCapabilityError) {
+        throw createError("SFTP_UNSUPPORTED_SESSION", sftpCapabilityError);
+      }
       const buildSftpParams = () => {
         const params = {
           sessionId: host.sessionId,
@@ -352,7 +512,7 @@ async function run() {
           ...buildScopeParams(opts),
         };
         if (opts.remotePath) params.remotePath = opts.remotePath;
-        if (opts.localPath) params.localPath = opts.localPath;
+        if (opts.localPath) params.localPath = path.resolve(opts.localPath);
         if (opts.remotePath) params.path = opts.remotePath;
         if (opts.oldRemotePath) params.oldPath = opts.oldRemotePath;
         if (opts.newRemotePath) params.newPath = opts.newRemotePath;
@@ -364,7 +524,11 @@ async function run() {
 
       if (subcommand === "list") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp list.");
-        const result = await client.call("netcatty/sftp/list", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/list", buildSftpParams()),
+          "SFTP_LIST_FAILED",
+          "Failed to list remote directory",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : formatSftpListText(result.entries));
@@ -373,7 +537,11 @@ async function run() {
 
       if (subcommand === "read") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp read.");
-        const result = await client.call("netcatty/sftp/read", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/read", buildSftpParams()),
+          "SFTP_READ_FAILED",
+          "Failed to read remote file",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `${result.content}${result.content?.endsWith("\n") ? "" : "\n"}`);
@@ -383,7 +551,11 @@ async function run() {
       if (subcommand === "write") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp write.");
         if (opts.content == null) throw createError("INVALID_ARGUMENT", "Missing required --content <text> for sftp write.");
-        const result = await client.call("netcatty/sftp/write", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/write", buildSftpParams()),
+          "SFTP_WRITE_FAILED",
+          "Failed to write remote file",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Wrote ${opts.remotePath}.\n`);
@@ -394,7 +566,11 @@ async function run() {
         if (!opts.remotePath || !opts.localPath) {
           throw createError("INVALID_ARGUMENT", "Missing required --remote-path and --local-path for sftp download.");
         }
-        const result = await client.call("netcatty/sftp/download", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/download", buildSftpParams()),
+          "SFTP_DOWNLOAD_FAILED",
+          "Failed to download remote file",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Downloaded ${opts.remotePath} -> ${opts.localPath}.\n`);
@@ -405,7 +581,11 @@ async function run() {
         if (!opts.remotePath || !opts.localPath) {
           throw createError("INVALID_ARGUMENT", "Missing required --local-path and --remote-path for sftp upload.");
         }
-        const result = await client.call("netcatty/sftp/upload", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/upload", buildSftpParams()),
+          "SFTP_UPLOAD_FAILED",
+          "Failed to upload local file",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Uploaded ${opts.localPath} -> ${opts.remotePath}.\n`);
@@ -414,7 +594,11 @@ async function run() {
 
       if (subcommand === "mkdir") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp mkdir.");
-        const result = await client.call("netcatty/sftp/mkdir", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/mkdir", buildSftpParams()),
+          "SFTP_MKDIR_FAILED",
+          "Failed to create remote directory",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Created ${opts.remotePath}.\n`);
@@ -423,7 +607,11 @@ async function run() {
 
       if (subcommand === "delete") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp delete.");
-        const result = await client.call("netcatty/sftp/delete", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/delete", buildSftpParams()),
+          "SFTP_DELETE_FAILED",
+          "Failed to delete remote path",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Deleted ${opts.remotePath}.\n`);
@@ -434,7 +622,11 @@ async function run() {
         if (!opts.oldRemotePath || !opts.newRemotePath) {
           throw createError("INVALID_ARGUMENT", "Missing required --old-remote-path and --new-remote-path for sftp rename.");
         }
-        const result = await client.call("netcatty/sftp/rename", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/rename", buildSftpParams()),
+          "SFTP_RENAME_FAILED",
+          "Failed to rename remote path",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Renamed ${opts.oldRemotePath} -> ${opts.newRemotePath}.\n`);
@@ -443,7 +635,11 @@ async function run() {
 
       if (subcommand === "stat") {
         if (!opts.remotePath) throw createError("INVALID_ARGUMENT", "Missing required --remote-path <remote-path> for sftp stat.");
-        const result = await client.call("netcatty/sftp/stat", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/stat", buildSftpParams()),
+          "SFTP_STAT_FAILED",
+          "Failed to stat remote path",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `${JSON.stringify(result.stat, null, 2)}\n`);
@@ -454,7 +650,11 @@ async function run() {
         if (!opts.remotePath || !opts.mode) {
           throw createError("INVALID_ARGUMENT", "Missing required --remote-path and --mode for sftp chmod.");
         }
-        const result = await client.call("netcatty/sftp/chmod", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/chmod", buildSftpParams()),
+          "SFTP_CHMOD_FAILED",
+          "Failed to chmod remote path",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `Changed mode of ${opts.remotePath} to ${opts.mode}.\n`);
@@ -462,7 +662,11 @@ async function run() {
       }
 
       if (subcommand === "home") {
-        const result = await client.call("netcatty/sftp/home", buildSftpParams());
+        const result = ensureBridgeCallOk(
+          await client.call("netcatty/sftp/home", buildSftpParams()),
+          "SFTP_HOME_FAILED",
+          "Failed to resolve remote home directory",
+        );
         process.stdout.write(opts.json
           ? `${JSON.stringify(result, null, 2)}\n`
           : `${result.homeDir}\n`);

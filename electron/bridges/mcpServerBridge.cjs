@@ -29,6 +29,7 @@ let sessions = null;   // Map<sessionId, { sshClient, stream, pty, proc, conn, .
 let tcpServer = null;
 let tcpPort = null;
 let authToken = null;  // Random token generated when TCP server starts
+let pendingHostStart = null; // { promise, server, cancel }
 let electronModule = null;
 let cliDiscoveryFilePath = getCliDiscoveryFilePath();
 
@@ -38,9 +39,6 @@ const authenticatedSockets = new WeakSet();
 // Per-scope metadata: chatSessionId → { sessionIds: string[], metadata: Map<sessionId, meta> }
 // Each chat session only sees the hosts registered for its scope.
 const scopedMetadata = new Map();
-
-// Fallback: last-registered scope (used when no chatSessionId is provided)
-let fallbackScopedSessionIds = [];
 
 // Command safety checking (reuse from aiBridge)
 let commandBlocklist = [];
@@ -62,11 +60,13 @@ const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
+const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, cancel }
 const pendingSessionWriteApprovals = new Map(); // sessionId -> method
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
 const BACKGROUND_JOB_RETENTION_MS = 10 * 60 * 1000;
 const MAX_BACKGROUND_JOB_OUTPUT_CHARS = 256 * 1024;
+let activeSftpOpSeq = 0;
 
 // ── Approval gate (for confirm mode with ACP/MCP agents) ──
 let getMainWindowFn = null; // () => BrowserWindow | null
@@ -141,24 +141,41 @@ function resolveApprovalFromRenderer(approvalId, approved) {
   }
 }
 
+function notifyRendererApprovalCleared(approvalIds) {
+  if (!Array.isArray(approvalIds) || approvalIds.length === 0) return;
+  try {
+    const win = typeof getMainWindowFn === "function" ? getMainWindowFn() : null;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send("netcatty:ai:mcp:approval-cleared", { approvalIds });
+    }
+  } catch {
+    // Ignore renderer notification failures during approval cleanup.
+  }
+}
+
 /**
  * Clear pending MCP approvals, optionally scoped to a specific chatSessionId.
  * Resolves matched entries with false (denied) to unblock hanging promises.
  */
 function clearPendingApprovals(chatSessionId) {
+  const clearedIds = [];
   if (!chatSessionId) {
-    for (const [, entry] of pendingApprovals) {
+    for (const [id, entry] of pendingApprovals) {
       entry.resolve(false);
+      clearedIds.push(id);
     }
     pendingApprovals.clear();
+    notifyRendererApprovalCleared(clearedIds);
     return;
   }
   for (const [id, entry] of pendingApprovals) {
     if (entry.chatSessionId === chatSessionId) {
       pendingApprovals.delete(id);
       entry.resolve(false);
+      clearedIds.push(id);
     }
   }
+  notifyRendererApprovalCleared(clearedIds);
 }
 
 function cancelAllPtyExecs() {
@@ -206,6 +223,47 @@ function cancelBackgroundJobsForSession(chatSessionId) {
       // Ignore cancellation failures
     }
   }
+}
+
+function registerSftpOp(chatSessionId, cancel) {
+  if (!chatSessionId || typeof cancel !== "function") {
+    return () => {};
+  }
+  const opId = `sftp_${Date.now().toString(36)}_${(++activeSftpOpSeq).toString(36)}`;
+  activeSessionSftpOps.set(opId, { chatSessionId, cancel });
+  return () => {
+    activeSessionSftpOps.delete(opId);
+  };
+}
+
+async function cancelSftpOpsForSession(chatSessionId) {
+  if (!chatSessionId) return;
+  const pending = [];
+  for (const [opId, entry] of activeSessionSftpOps) {
+    if (entry.chatSessionId !== chatSessionId) continue;
+    activeSessionSftpOps.delete(opId);
+    try {
+      pending.push(Promise.resolve(entry.cancel()));
+    } catch {
+      // Ignore cancellation failures for already-closed SFTP handles.
+    }
+  }
+  if (pending.length) {
+    await Promise.allSettled(pending);
+  }
+}
+
+function cancelAllSftpOps() {
+  const pending = [];
+  for (const [opId, entry] of activeSessionSftpOps) {
+    activeSessionSftpOps.delete(opId);
+    try {
+      pending.push(Promise.resolve(entry.cancel()));
+    } catch {
+      // Ignore cancellation failures during global cleanup.
+    }
+  }
+  return pending.length ? Promise.allSettled(pending) : Promise.resolve([]);
 }
 
 function readBackgroundJobSnapshot(job) {
@@ -425,6 +483,39 @@ function removeCliDiscoveryFile() {
   }
 }
 
+function shutdownHost({ preserveScopedMetadata = false } = {}) {
+  removeCliDiscoveryFile();
+  authToken = null;
+  if (pendingHostStart?.server && pendingHostStart.server !== tcpServer) {
+    const inFlightStart = pendingHostStart;
+    pendingHostStart = null;
+    inFlightStart.cancel?.();
+  }
+  if (tcpServer) {
+    tcpServer.close();
+    tcpServer = null;
+    tcpPort = null;
+  }
+  clearPendingApprovals();
+  cancelAllPtyExecs();
+  void cancelAllSftpOps();
+  cancelledChatSessions.clear();
+  activeExecChatSessions.clear();
+  pendingSessionWriteApprovals.clear();
+  if (!preserveScopedMetadata) {
+    scopedMetadata.clear();
+  }
+  for (const [, job] of backgroundJobs) {
+    try {
+      job.handle?.cancel?.();
+    } catch {
+      // Ignore cancellation failures during cleanup
+    }
+  }
+  backgroundJobs.clear();
+  activeSessionExecutions.clear();
+}
+
 function echoCommandToSession(session, sessionId, command) {
   if (!electronModule || !session?.webContentsId || !command) return;
   const contents = electronModule.webContents?.fromId?.(session.webContentsId);
@@ -552,23 +643,46 @@ function updateSessionMetadata(sessionList, chatSessionId) {
   // Store per-scope metadata when chatSessionId is provided
   if (chatSessionId) {
     scopedMetadata.set(chatSessionId, { sessionIds: ids, metadata: metaMap });
-  } else {
-    // Only update fallback when no chatSessionId — prevents scoped updates from
-    // leaking all sessions to unscoped agents
-    fallbackScopedSessionIds = ids.slice();
   }
 }
 
 /**
- * Get scoped session IDs. If chatSessionId is provided, returns IDs for that
- * specific scope; otherwise returns the last-registered fallback.
+ * Get scoped session IDs for a specific chat session.
  */
 function getScopedSessionIds(chatSessionId) {
-  if (chatSessionId) {
-    const scoped = scopedMetadata.get(chatSessionId);
-    if (scoped) return scoped.sessionIds;
+  if (!chatSessionId) return [];
+  const scoped = scopedMetadata.get(chatSessionId);
+  return scoped?.sessionIds || [];
+}
+
+/**
+ * Resolve the effective session scope for a request.
+ * Explicit per-call scopedSessionIds may only narrow the chat scope, never widen it.
+ *
+ * Returns:
+ * - `null` when no scope context was provided at all
+ * - `[]` when the effective scope is intentionally empty
+ * - a concrete array of allowed session IDs otherwise
+ */
+function resolveScopedSessionIds(chatSessionId, explicitScopedIds = null) {
+  const hasExplicitScope = Array.isArray(explicitScopedIds);
+  const hasChatScope = typeof chatSessionId === "string" && chatSessionId.length > 0;
+
+  if (!hasExplicitScope && !hasChatScope) {
+    return null;
   }
-  return fallbackScopedSessionIds;
+
+  if (!hasChatScope) {
+    return explicitScopedIds;
+  }
+
+  const chatScopedIds = getScopedSessionIds(chatSessionId);
+  if (!hasExplicitScope) {
+    return chatScopedIds;
+  }
+
+  const chatScopedSet = new Set(chatScopedIds);
+  return explicitScopedIds.filter((sessionId) => chatScopedSet.has(sessionId));
 }
 
 /**
@@ -576,16 +690,9 @@ function getScopedSessionIds(chatSessionId) {
  * Falls back to session object properties if no scoped metadata is found.
  */
 function getSessionMeta(sessionId, chatSessionId) {
-  // Try scoped metadata first
-  if (chatSessionId) {
-    const scoped = scopedMetadata.get(chatSessionId);
-    if (scoped?.metadata?.has(sessionId)) return scoped.metadata.get(sessionId);
-  }
-  // Fallback: check all scopes for this sessionId (backwards compat)
-  for (const [, scope] of scopedMetadata) {
-    if (scope.metadata?.has(sessionId)) return scope.metadata.get(sessionId);
-  }
-  return null;
+  if (!chatSessionId) return null;
+  const scoped = scopedMetadata.get(chatSessionId);
+  return scoped?.metadata?.get(sessionId) || null;
 }
 
 /**
@@ -605,29 +712,76 @@ function checkCommandSafety(command) {
 
 function getOrCreateHost() {
   if (tcpServer && tcpPort) return Promise.resolve(tcpPort);
+  if (pendingHostStart?.promise) return pendingHostStart.promise;
 
   // Generate a random auth token for this server instance
   authToken = crypto.randomBytes(32).toString("hex");
 
-  return new Promise((resolve, reject) => {
-    const server = net.createServer((socket) => {
-      debugLog("TCP client connected");
-      handleConnection(socket);
-    });
+  const server = net.createServer((socket) => {
+    debugLog("TCP client connected");
+    handleConnection(socket);
+  });
+  const startState = {
+    promise: null,
+    server,
+    cancel: null,
+  };
+
+  const startPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const finishReject = (err) => {
+      if (settled) return;
+      settled = true;
+      if (pendingHostStart === startState) {
+        pendingHostStart = null;
+      }
+      if (tcpServer !== server) {
+        authToken = null;
+      }
+      reject(err);
+    };
+    const finishResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      if (pendingHostStart === startState) {
+        pendingHostStart = null;
+      }
+      resolve(value);
+    };
+    startState.cancel = () => {
+      try {
+        server.close();
+      } catch {
+        // Ignore close failures while aborting a host startup.
+      }
+      finishReject(new Error("TCP bridge startup cancelled"));
+    };
 
     server.listen(0, "127.0.0.1", () => {
+      if (settled) {
+        try {
+          server.close();
+        } catch {
+          // Ignore close failures for a host that was already cancelled.
+        }
+        return;
+      }
       tcpPort = server.address().port;
       tcpServer = server;
       debugLog("TCP server listening", { port: tcpPort });
       writeCliDiscoveryFile();
-      resolve(tcpPort);
+      finishResolve(tcpPort);
     });
 
     server.on("error", (err) => {
       console.error("[MCP Bridge] TCP server error:", err.message);
-      reject(err);
+      finishReject(err);
     });
   });
+
+  startState.promise = startPromise;
+  pendingHostStart = startState;
+  return startPromise;
 }
 
 const MAX_TCP_BUFFER = 10 * 1024 * 1024; // 10MB
@@ -715,6 +869,7 @@ async function handleMessage(socket, line) {
 const WRITE_METHODS = new Set([
   "netcatty/exec",
   "netcatty/sftp/write",
+  "netcatty/sftp/download",
   "netcatty/sftp/upload",
   "netcatty/sftp/mkdir",
   "netcatty/sftp/delete",
@@ -726,32 +881,25 @@ const WRITE_METHODS = new Set([
 
 /**
  * Validate that a sessionId is allowed in the current scope.
- * Checks explicit per-call scopedSessionIds first (static MCP scope mode),
- * then per-chatSession scoped metadata (dynamic mode), then global scope.
+ * Explicit per-call scopedSessionIds can only narrow the effective scope;
+ * they are intersected with per-chatSession scoped metadata when both exist.
  *
  * An explicit empty array (`[]`) means "no access" — not "fall through to
  * global scope" — matching the documented behavior in handleGetContext.
  */
 function validateSessionScope(sessionId, chatSessionId, explicitScopedIds = null) {
   if (!sessionId) return null; // will fail at handler level
-  if (Array.isArray(explicitScopedIds)) {
-    if (!explicitScopedIds.includes(sessionId)) {
-      return `Session "${sessionId}" is not in the current scope.`;
-    }
-    return null;
+  const resolvedScopedIds = resolveScopedSessionIds(chatSessionId, explicitScopedIds);
+  if (resolvedScopedIds === null) {
+    return "chatSessionId or scopedSessionIds is required.";
   }
-  // If a chat has explicit scoped metadata (even an empty array), enforce it.
-  // Only fall through to fallback/global when no chat-scoped context exists.
-  if (chatSessionId && scopedMetadata.has(chatSessionId)) {
-    const chatScoped = scopedMetadata.get(chatSessionId)?.sessionIds || [];
-    if (!chatScoped.includes(sessionId)) {
-      return `Session "${sessionId}" is not in the current scope.`;
-    }
-    return null;
-  }
-  const scopedIds = getScopedSessionIds(chatSessionId);
-  debugLog("validateSessionScope", { sessionId, chatSessionId, scopedIds });
-  if (scopedIds && scopedIds.length > 0 && !scopedIds.includes(sessionId)) {
+  debugLog("validateSessionScope", {
+    sessionId,
+    chatSessionId,
+    explicitScopedIds,
+    resolvedScopedIds,
+  });
+  if (!resolvedScopedIds.includes(sessionId)) {
     return `Session "${sessionId}" is not in the current scope.`;
   }
   return null;
@@ -768,6 +916,13 @@ async function dispatch(method, params) {
   // would hold the per-session lock until it exits on its own).
   if (permissionMode === "observer" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
     return { ok: false, error: `Operation denied: permission mode is "observer" (read-only). Change to "confirm" or "autonomous" in Settings → AI → Safety to allow this action.` };
+  }
+
+  if (WRITE_METHODS.has(method) && !params?.chatSessionId) {
+    return {
+      ok: false,
+      error: "chatSessionId is required for write operations.",
+    };
   }
 
   // netcatty/jobStop must remain callable after ACP cancel so users can stop
@@ -807,12 +962,6 @@ async function dispatch(method, params) {
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
     if (permissionMode === "confirm" && WRITE_METHODS.has(method) && method !== "netcatty/jobStop") {
-      if (!params?.chatSessionId) {
-        return {
-          ok: false,
-          error: 'Operation denied: permission mode is "confirm", but this CLI request is not attached to an AI chat session. Manual CLI write operations are non-interactive; switch Settings → AI → Safety to "autonomous" to allow this action.',
-        };
-      }
       const { chatSessionId, ...toolArgs } = params || {};
       const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
       if (!approved) {
@@ -877,8 +1026,11 @@ function handleGetContext(params) {
   const explicitScopedIds = Array.isArray(params?.scopedSessionIds)
     ? params.scopedSessionIds
     : null;
-  const resolvedScopedIds = explicitScopedIds ?? (chatSessionId ? getScopedSessionIds(chatSessionId) : null);
-  const hasScopedContext = explicitScopedIds !== null || chatSessionId !== null;
+  const resolvedScopedIds = resolveScopedSessionIds(chatSessionId, explicitScopedIds);
+  if (resolvedScopedIds === null) {
+    throw new Error("chatSessionId or scopedSessionIds is required.");
+  }
+  const hasScopedContext = true;
   const scopedIds = resolvedScopedIds ? new Set(resolvedScopedIds) : null;
 
   const hosts = [];
@@ -934,12 +1086,14 @@ function handleGetStatus() {
     ok: true,
     environment: "netcatty-terminal",
     permissionMode,
+    approvalTimeoutMs: APPROVAL_TIMEOUT_MS,
     commandTimeoutMs,
     maxIterations,
     tcpPort,
     sessionCount: sessions?.size || 0,
     scopedContextCount: scopedMetadata.size,
     activeExecutionCount: activePtyExecs.size,
+    activeSftpOperationCount: activeSessionSftpOps.size,
     activeChatExecutionCount: activeExecChatSessions.size,
     pendingApprovalCount: pendingApprovals.size,
     discoveryFilePath: cliDiscoveryFilePath || null,
@@ -947,7 +1101,7 @@ function handleGetStatus() {
   };
 }
 
-function handleSetCancelled(params) {
+async function handleSetCancelled(params) {
   const chatSessionId = params?.chatSessionId;
   const cancelled = params?.cancelled !== false;
   if (!chatSessionId || typeof chatSessionId !== "string") {
@@ -955,10 +1109,14 @@ function handleSetCancelled(params) {
   }
 
   if (cancelled) {
+    setChatSessionCancelled(chatSessionId, true);
     cancelPtyExecsForSession(chatSessionId);
+    cancelBackgroundJobsForSession(chatSessionId);
     clearPendingApprovals(chatSessionId);
+    void cancelSftpOpsForSession(chatSessionId);
+  } else {
+    setChatSessionCancelled(chatSessionId, false);
   }
-  setChatSessionCancelled(chatSessionId, cancelled);
 
   return {
     ok: true,
@@ -967,71 +1125,139 @@ function handleSetCancelled(params) {
   };
 }
 
+function getSessionSftpEncodingStateKey(chatSessionId, sessionId) {
+  if (!chatSessionId || !sessionId) return null;
+  return `chat:${chatSessionId}:session:${sessionId}`;
+}
+
 async function withSessionBackedSftp(params, action, options = {}) {
   if (!params?.sessionId) throw new Error("sessionId is required");
-  const opened = await sftpBridge.openSftpForSession(null, { sessionId: params.sessionId });
-  const sftpId = opened?.sftpId;
-  if (!sftpId) throw new Error("Failed to open session-backed SFTP handle");
+  const chatSessionId = typeof params?.chatSessionId === "string" && params.chatSessionId ? params.chatSessionId : null;
+  const encodingStateKey = getSessionSftpEncodingStateKey(chatSessionId, params.sessionId);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 0;
+  const cancelCleanupGraceMs = Number.isFinite(options.cancelCleanupGraceMs) && options.cancelCleanupGraceMs >= 0
+    ? options.cancelCleanupGraceMs
+    : 1000;
   const operationName = options.operationName || "SFTP operation";
+  const abortController = new AbortController();
+  let sftpId = null;
   let timeoutId = null;
-  let timedOut = false;
+  let forceCloseTimer = null;
+  let closeRequested = false;
+  let closePromise = null;
+  let cancellationError = null;
+  let timeoutError = null;
+  const closeSftpHandle = () => {
+    if (!sftpId) {
+      return Promise.resolve();
+    }
+    if (!closePromise) {
+      closePromise = Promise.resolve().then(() => sftpBridge.closeSftp(null, { sftpId, encodingStateKey }));
+    }
+    return closePromise;
+  };
+  const closeSftpInBackground = () => {
+    if (closeRequested) return;
+    closeRequested = true;
+    void closeSftpHandle().catch(() => {
+      // Ignore close failures while cleaning up a cancelled or timed-out handle.
+    });
+  };
+  const requestAbort = (err) => {
+    if (!abortController.signal.aborted) {
+      abortController.abort(err);
+    }
+    if (!forceCloseTimer && !closeRequested) {
+      forceCloseTimer = setTimeout(() => {
+        forceCloseTimer = null;
+        closeSftpInBackground();
+      }, cancelCleanupGraceMs);
+    }
+  };
+  const unregisterSftpOp = registerSftpOp(chatSessionId, () => {
+    if (!cancellationError) {
+      cancellationError = new Error("Cancelled");
+    }
+    requestAbort(cancellationError);
+  });
   try {
+    if (timeoutMs) {
+      timeoutId = setTimeout(() => {
+        if (!timeoutError) {
+          timeoutError = new Error(`${operationName} timed out after ${timeoutMs}ms`);
+        }
+        requestAbort(timeoutError);
+      }, timeoutMs);
+    }
+
+    const opened = await sftpBridge.openSftpForSession(null, {
+      sessionId: params.sessionId,
+      encodingStateKey,
+      abortSignal: abortController.signal,
+      timeoutMs,
+    });
+    sftpId = opened?.sftpId;
+    if (!sftpId) throw new Error("Failed to open session-backed SFTP handle");
+    if (timeoutError) {
+      throw timeoutError;
+    }
+    if (cancellationError) {
+      throw cancellationError;
+    }
+
     const payload = {
       ...params,
       sftpId,
+      abortSignal: abortController.signal,
+      timeoutMs,
     };
-    if (!timeoutMs) {
-      return await action(payload);
+    const value = await Promise.resolve().then(() => action(payload));
+    if (timeoutError) {
+      throw timeoutError;
     }
-    return await new Promise((resolve, reject) => {
-      let settled = false;
-      const finishResolve = (value) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        resolve(value);
-      };
-      const finishReject = (err) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        reject(err);
-      };
-      timeoutId = setTimeout(async () => {
-        if (settled) return;
-        timedOut = true;
-        try {
-          await sftpBridge.closeSftp(null, { sftpId });
-        } catch {
-          // Ignore close failures during forced timeout cleanup.
-        }
-        finishReject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      Promise.resolve()
-        .then(() => action(payload))
-        .then(finishResolve, finishReject);
-    });
+    if (cancellationError) {
+      throw cancellationError;
+    }
+    return value;
+  } catch (err) {
+    if (timeoutError) {
+      throw timeoutError;
+    }
+    if (cancellationError) {
+      throw cancellationError;
+    }
+    throw err;
   } finally {
+    unregisterSftpOp();
     if (timeoutId) clearTimeout(timeoutId);
-    if (!timedOut) {
-      try {
-        await sftpBridge.closeSftp(null, { sftpId });
-      } catch {
-        // Ignore close failures for one-off internal SFTP handles.
-      }
+    if (forceCloseTimer) {
+      clearTimeout(forceCloseTimer);
+      forceCloseTimer = null;
+    }
+    try {
+      await closeSftpHandle();
+    } catch {
+      // Ignore close failures for one-off internal SFTP handles.
     }
   }
 }
 
 async function handleSftpList(params) {
-  const entries = await withSessionBackedSftp(params, (payload) => sftpBridge.listSftp(null, payload));
+  const entries = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.listSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP list" },
+  );
   return { ok: true, entries };
 }
 
 async function handleSftpRead(params) {
   if (!params?.path) throw new Error("path is required");
-  const content = await withSessionBackedSftp(params, (payload) => sftpBridge.readSftp(null, payload));
+  const content = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.readSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP read" },
+  );
   return { ok: true, path: params.path, content };
 }
 
@@ -1072,13 +1298,21 @@ async function handleSftpUpload(params) {
 
 async function handleSftpMkdir(params) {
   if (!params?.path) throw new Error("path is required");
-  await withSessionBackedSftp(params, (payload) => sftpBridge.mkdirSftp(null, payload));
+  await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.mkdirSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP mkdir" },
+  );
   return { ok: true, path: params.path };
 }
 
 async function handleSftpDelete(params) {
   if (!params?.path) throw new Error("path is required");
-  await withSessionBackedSftp(params, (payload) => sftpBridge.deleteSftp(null, payload));
+  await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.deleteSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP delete" },
+  );
   return { ok: true, path: params.path };
 }
 
@@ -1086,24 +1320,40 @@ async function handleSftpRename(params) {
   if (!params?.oldPath || !params?.newPath) {
     throw new Error("oldPath and newPath are required");
   }
-  await withSessionBackedSftp(params, (payload) => sftpBridge.renameSftp(null, payload));
+  await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.renameSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP rename" },
+  );
   return { ok: true, oldPath: params.oldPath, newPath: params.newPath };
 }
 
 async function handleSftpStat(params) {
   if (!params?.path) throw new Error("path is required");
-  const stat = await withSessionBackedSftp(params, (payload) => sftpBridge.statSftp(null, payload));
+  const stat = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.statSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP stat" },
+  );
   return { ok: true, stat };
 }
 
 async function handleSftpChmod(params) {
   if (!params?.path || !params?.mode) throw new Error("path and mode are required");
-  await withSessionBackedSftp(params, (payload) => sftpBridge.chmodSftp(null, payload));
+  await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.chmodSftp(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP chmod" },
+  );
   return { ok: true, path: params.path, mode: params.mode };
 }
 
 async function handleSftpHome(params) {
-  const result = await withSessionBackedSftp(params, (payload) => sftpBridge.getSftpHomeDir(null, payload));
+  const result = await withSessionBackedSftp(
+    params,
+    (payload) => sftpBridge.getSftpHomeDir(null, payload),
+    { timeoutMs: commandTimeoutMs, operationName: "SFTP home" },
+  );
   if (!result?.success) {
     throw new Error(result?.error || "Could not determine home directory");
   }
@@ -1246,7 +1496,6 @@ function handleExec(params) {
       expectedPrompt: session.lastIdlePrompt || "",
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
-      chatSessionId,
       chatSessionId,
       // MCP callers have terminal_start as a fallback for long commands,
       // so enforce a hard wall-clock timeout here to match the MCP budget.
@@ -1437,7 +1686,7 @@ function handleJobPoll(params) {
   if (!job) return { ok: false, error: "Background job not found" };
   // Re-check session scope so a caller that lost access to the host
   // cannot continue reading output from jobs on that session.
-  // Covers dynamic (chatSessionId), static (scopedSessionIds), and global modes.
+  // Covers dynamic (chatSessionId) and static (scopedSessionIds) modes.
   if (job.sessionId) {
     const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
@@ -1494,7 +1743,7 @@ function resolveMcpServerRuntimeCommand() {
 }
 
 function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
-  // Use provided scoped IDs, or resolve from chatSessionId, or fall back
+  // Use provided scoped IDs, or resolve them from chatSessionId.
   const effectiveIds = (scopedSessionIds && scopedSessionIds.length > 0)
     ? scopedSessionIds
     : getScopedSessionIds(chatSessionId);
@@ -1541,7 +1790,7 @@ function buildMcpServerConfig(port, scopedSessionIds, chatSessionId) {
 
 // ── Cleanup ──
 
-function cleanupScopedMetadata(chatSessionId) {
+async function cleanupScopedMetadata(chatSessionId) {
   if (chatSessionId) {
     scopedMetadata.delete(chatSessionId);
     cancelledChatSessions.delete(chatSessionId);
@@ -1551,26 +1800,13 @@ function cleanupScopedMetadata(chatSessionId) {
     // deleted while an approval was pending would leave the per-session
     // write lock held until the approval timeout expires.
     clearPendingApprovals(chatSessionId);
+    await cancelSftpOpsForSession(chatSessionId);
+    sftpBridge.clearSftpEncodingStateByPrefix?.(`chat:${chatSessionId}:session:`);
   }
 }
 
 function cleanup() {
-  removeCliDiscoveryFile();
-  if (tcpServer) {
-    tcpServer.close();
-    tcpServer = null;
-    tcpPort = null;
-  }
-  scopedMetadata.clear();
-  for (const [, job] of backgroundJobs) {
-    try {
-      job.handle?.cancel?.();
-    } catch {
-      // Ignore cancellation failures during cleanup
-    }
-  }
-  backgroundJobs.clear();
-  activeSessionExecutions.clear();
+  shutdownHost();
 }
 
 module.exports = {
@@ -1592,9 +1828,11 @@ module.exports = {
   cancelBackgroundJobsForSession,
   cancelAllPtyExecs,
   cancelPtyExecsForSession,
+  cancelSftpOpsForSession,
   getSessionMeta,
   cleanupScopedMetadata,
   cleanup,
+  shutdownHost,
   setMainWindowGetter,
   resolveApprovalFromRenderer,
   clearPendingApprovals,

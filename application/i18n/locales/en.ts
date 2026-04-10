@@ -1741,7 +1741,7 @@ const en: Messages = {
   'ai.defaultAgent.catty': 'Catty (Built-in)',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
-  'ai.toolAccess.description': 'Choose how external ACP agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands. Skills + CLI currently requires a working Node.js runtime on the host.',
+  'ai.toolAccess.description': 'Choose how external ACP agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
 

@@ -1749,7 +1749,7 @@ const zhCN: Messages = {
   'ai.defaultAgent.catty': 'Catty（内置）',
   'ai.toolAccess.title': '工具接入',
   'ai.toolAccess.mode': 'Netcatty 接入模式',
-  'ai.toolAccess.description': '选择外部 ACP Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。当前 Skills + CLI 依赖宿主机器上可用的 Node.js 运行时。',
+  'ai.toolAccess.description': '选择外部 ACP Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
 
