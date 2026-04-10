@@ -455,7 +455,7 @@ const en: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': 'Recommended — recover your hosts, keys, and snippets from the cloud backup',
   'sync.autoSync.emptyVaultConflict.keepEmpty': 'Keep Empty',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': 'Start fresh with an empty vault',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{{hosts}} hosts, {{keys}} keys, {{snippets}} snippets',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} hosts, {keys} keys, {snippets} snippets',
   'sync.credentialsUnavailable': 'This device cannot decrypt some saved credentials. Re-enter credentials locally before syncing.',
   'time.never': 'Never',
   'time.justNow': 'Just now',

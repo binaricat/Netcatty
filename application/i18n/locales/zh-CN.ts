@@ -276,7 +276,7 @@ const zhCN: Messages = {
   'sync.autoSync.emptyVaultConflict.restoreDesc': '推荐 — 从云端备份恢复主机、密钥和代码片段',
   'sync.autoSync.emptyVaultConflict.keepEmpty': '保持为空',
   'sync.autoSync.emptyVaultConflict.keepEmptyDesc': '从头开始，使用空的主机库',
-  'sync.autoSync.emptyVaultConflict.cloudSummary': '{{hosts}} 台主机，{{keys}} 个密钥，{{snippets}} 个代码片段',
+  'sync.autoSync.emptyVaultConflict.cloudSummary': '{hosts} 台主机，{keys} 个密钥，{snippets} 个代码片段',
   'sync.credentialsUnavailable': '当前设备无法解密部分已保存凭据。请先在本地重新输入凭据后再同步。',
   'time.never': '从未',
   'time.justNow': '刚刚',
