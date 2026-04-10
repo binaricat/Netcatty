@@ -28,7 +28,7 @@ import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { STORAGE_KEY_DEBUG_HOTKEYS } from './infrastructure/config/storageKeys';
 import { TopTabs } from './components/TopTabs';
 import { Button } from './components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { ToastProvider, toast } from './components/ui/toast';
@@ -1681,18 +1681,23 @@ function App({ settings }: { settings: SettingsState }) {
         onSkip={handlePassphraseSkip}
       />
 
-      {/* Empty vault vs cloud data confirmation dialog (#679) */}
-      <Dialog open={!!emptyVaultConflict}>
-        <DialogContent className="max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+      {/* Empty vault vs cloud data confirmation dialog (#679).
+          This dialog intentionally cannot be dismissed — the user MUST
+          choose "Restore" or "Keep Empty" before the sync flow can
+          proceed. hideCloseButton removes the X button, onOpenChange
+          is a no-op so ESC also does nothing, and onInteractOutside
+          prevents click-away. */}
+      <Dialog open={!!emptyVaultConflict} onOpenChange={() => { /* intentionally non-dismissable */ }}>
+        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-500" />
               {t('sync.autoSync.emptyVaultConflict.title')}
             </DialogTitle>
+            <DialogDescription>
+              {t('sync.autoSync.emptyVaultConflict.description')}
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {t('sync.autoSync.emptyVaultConflict.description')}
-          </p>
           {emptyVaultConflict && (
             <div className="bg-muted/30 rounded-lg p-3 text-sm">
               <div className="font-medium text-muted-foreground mb-1">{t('sync.autoSync.emptyVaultConflict.cloudLabel')}</div>

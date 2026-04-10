@@ -28,17 +28,24 @@ import { notify } from '../notification';
  * port forwarding rule) are not mistakenly treated as "empty".
  */
 function isPayloadEffectivelyEmpty(payload: SyncPayload): boolean {
-  return (
-    (payload.hosts?.length ?? 0) === 0 &&
-    (payload.keys?.length ?? 0) === 0 &&
-    (payload.snippets?.length ?? 0) === 0 &&
-    (payload.identities?.length ?? 0) === 0 &&
-    (payload.customGroups?.length ?? 0) === 0 &&
-    (payload.snippetPackages?.length ?? 0) === 0 &&
-    (payload.portForwardingRules?.length ?? 0) === 0 &&
-    (payload.knownHosts?.length ?? 0) === 0 &&
-    (payload.groupConfigs?.length ?? 0) === 0
-  );
+  // Check all synced entity arrays.
+  const hasEntities =
+    (payload.hosts?.length ?? 0) > 0 ||
+    (payload.keys?.length ?? 0) > 0 ||
+    (payload.snippets?.length ?? 0) > 0 ||
+    (payload.identities?.length ?? 0) > 0 ||
+    (payload.customGroups?.length ?? 0) > 0 ||
+    (payload.snippetPackages?.length ?? 0) > 0 ||
+    (payload.portForwardingRules?.length ?? 0) > 0 ||
+    (payload.knownHosts?.length ?? 0) > 0 ||
+    (payload.groupConfigs?.length ?? 0) > 0;
+  if (hasEntities) return false;
+  // Also consider settings: if any key has a defined value, the user has
+  // customized something worth preserving.
+  if (payload.settings && Object.values(payload.settings).some((v) => v !== undefined)) {
+    return false;
+  }
+  return true;
 }
 
 interface AutoSyncConfig {
