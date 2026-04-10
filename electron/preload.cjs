@@ -577,6 +577,9 @@ const api = {
   getSessionRemoteInfo: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:remoteInfo", { sessionId });
   },
+  getSessionDistroInfo: async (sessionId) => {
+    return ipcRenderer.invoke("netcatty:ssh:distroInfo", { sessionId });
+  },
   getServerStats: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:stats", { sessionId });
   },

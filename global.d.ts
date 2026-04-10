@@ -241,6 +241,19 @@ declare global {
       remoteSshVersion?: string;
       error?: string;
     }>;
+    /**
+     * Probe the remote distro by running
+     * `cat /etc/os-release 2>/dev/null || uname -a` on the existing SSH
+     * connection's exec channel (not a brand-new connection). Used as a
+     * fallback when banner classification could not identify a network
+     * device vendor and we still want a distro-specific icon.
+     */
+    getSessionDistroInfo?(sessionId: string): Promise<{
+      success: boolean;
+      stdout?: string;
+      stderr?: string;
+      error?: string;
+    }>;
     /** Get server stats (CPU, Memory, Disk, Network) from an active SSH session */
     getServerStats?(sessionId: string): Promise<{
       success: boolean;

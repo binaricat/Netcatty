@@ -136,6 +136,14 @@ export const useTerminalBackend = () => {
     return bridge.getSessionRemoteInfo(sessionId);
   }, []);
 
+  const getSessionDistroInfo = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getSessionDistroInfo) {
+      return { success: false, error: 'getSessionDistroInfo unavailable' };
+    }
+    return bridge.getSessionDistroInfo(sessionId);
+  }, []);
+
   const getServerStats = useCallback(async (sessionId: string) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getServerStats) return { success: false, error: 'getServerStats unavailable' };
@@ -159,6 +167,7 @@ export const useTerminalBackend = () => {
     execCommand,
     getSessionPwd,
     getSessionRemoteInfo,
+    getSessionDistroInfo,
     getServerStats,
     writeToSession,
     resizeSession,

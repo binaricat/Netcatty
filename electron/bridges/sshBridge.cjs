@@ -1839,6 +1839,53 @@ async function getSessionRemoteInfo(_event, payload) {
   };
 }
 
+/**
+ * Run the distro-identification probe on an already-connected SSH
+ * session's connection. Uses an exec channel on the existing conn —
+ * which is still one extra channel (and therefore one extra AAA
+ * session on vendor CLIs that don't multiplex channels cleanly), but
+ * avoids the full auth round-trip that `execCommand` would do by
+ * creating a brand new SSHClient. The renderer only falls through to
+ * this when banner classification returned no vendor, so in practice
+ * it never runs against Cisco/Huawei/HPE/etc. — only against
+ * Linux-like hosts and OpenSSH-fronted network devices (JUNOS,
+ * NX-OS, EOS) that are already handled by the useServerStats
+ * failure-counter path downstream.
+ */
+async function getSessionDistroInfo(_event, payload) {
+  const { sessionId } = payload || {};
+  const session = sessions.get(sessionId);
+  if (!session || !session.conn) {
+    return { success: false, error: 'Session not found or not connected' };
+  }
+  const command = "cat /etc/os-release 2>/dev/null || uname -a";
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve({ success: false, error: 'Timeout probing distro' });
+    }, 5000);
+    try {
+      session.conn.exec(command, (err, stream) => {
+        if (err) {
+          clearTimeout(timer);
+          resolve({ success: false, error: err.message || String(err) });
+          return;
+        }
+        let stdout = '';
+        let stderr = '';
+        stream.on('data', (chunk) => { stdout += chunk.toString(); });
+        stream.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+        stream.on('close', () => {
+          clearTimeout(timer);
+          resolve({ success: true, stdout, stderr });
+        });
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      resolve({ success: false, error: err?.message || String(err) });
+    }
+  });
+}
+
 async function getSessionPwd(event, payload) {
   const { sessionId } = payload;
   const session = sessions.get(sessionId);
@@ -2437,6 +2484,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:ssh:exec", execCommand);
   ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
   ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);
+  ipcMain.handle("netcatty:ssh:distroInfo", getSessionDistroInfo);
   ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
   ipcMain.handle("netcatty:ssh:stats", getServerStats);
   ipcMain.handle("netcatty:key:generate", generateKeyPair);

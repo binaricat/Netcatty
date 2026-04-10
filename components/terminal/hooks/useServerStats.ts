@@ -260,15 +260,23 @@ export function useServerStats({
     // (e.g., tab was hidden while connected and is now becoming visible).
     const connectionAge = Date.now() - connectedAtRef.current;
     const needsWarmup = !hasFetchedRef.current && connectionAge < 2000;
-    const initialTimer = setTimeout(fetchStats, needsWarmup ? 2000 : 0);
+    // If we already gave up on this session (exceeded the consecutive
+    // failure limit), don't even schedule new timers on effect reruns
+    // such as visibility/tab-focus/settings changes. The cleanup at
+    // disconnect/sessionId change clears the flag for a fresh attempt.
+    const initialTimer = givenUpRef.current
+      ? null
+      : setTimeout(fetchStats, needsWarmup ? 2000 : 0);
 
     // Set up periodic refresh
     const intervalMs = Math.max(5, refreshInterval) * 1000; // Minimum 5 seconds
-    intervalRef.current = setInterval(fetchStats, intervalMs);
+    if (!givenUpRef.current) {
+      intervalRef.current = setInterval(fetchStats, intervalMs);
+    }
 
     return () => {
       isMountedRef.current = false;
-      clearTimeout(initialTimer);
+      if (initialTimer) clearTimeout(initialTimer);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;

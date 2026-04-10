@@ -80,11 +80,16 @@ export const detectVendorFromSshVersion = (softwareVersion?: string): '' | Netwo
   const s = (softwareVersion || '').trim();
   if (!s) return '';
 
-  // Cisco family — IOS, IOS XA, Wireless LAN Controller, IPSSHd (also 3Com)
+  // Cisco family — IOS, IOS XA, Wireless LAN Controller
   if (/^Cisco[-_]/i.test(s)) return 'cisco';
   if (/^CiscoIOS_/i.test(s)) return 'cisco';
   if (/^CISCO_WLC\b/.test(s)) return 'cisco';
-  if (/^IPSSH-/i.test(s)) return 'cisco';
+  // Note: `IPSSH-*` is used by both Cisco and 3Com devices (per Nmap
+  // `match ssh m|^SSH-([\d.]+)-IPSSH-([\d.]+)\|`), so we cannot map it
+  // to a specific vendor icon from the banner alone. Users who want a
+  // custom icon for such devices can set one via the Host Details
+  // manual distro override. The stats-polling gate is still handled
+  // correctly via `host.deviceType === 'network'`.
 
   // Juniper NetScreen firewall (JUNOS itself uses OpenSSH and is caught
   // by the fallback failure-counter path in useServerStats).
