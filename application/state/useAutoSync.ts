@@ -361,9 +361,10 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       return;
     }
 
-    checkRemoteInFlightRef.current = true;
-
-    // Find connected provider
+    // Find connected provider BEFORE acquiring the in-flight lock so the
+    // "nothing to check" early return doesn't leak the lock and wedge
+    // the retry timer. Any path that takes the lock MUST reach the
+    // finally-release below.
     const connectedProvider = AUTO_SYNC_PROVIDER_ORDER.find((provider) =>
       isProviderReadyForSync(state.providers[provider]),
     ) ?? null;
@@ -373,6 +374,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       remoteCheckDoneRef.current = true;
       return;
     }
+
+    checkRemoteInFlightRef.current = true;
 
     // Track whether the startup path completed in a state where the anchor/base
     // are consistent with the local vault. Only then should we latch
