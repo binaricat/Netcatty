@@ -1108,11 +1108,22 @@ export class CloudSyncManager {
 
   /**
    * Helper: Upload encrypted file to a provider
+   *
+   * `payloadForBase`, when supplied, is persisted as the new sync base
+   * BEFORE the anchor is advanced. Ordering matters: if the renderer
+   * crashes between the two writes, the next startup's inspect must
+   * either (a) see no anchor advance and re-merge against the fresh
+   * base, or (b) see both advanced consistently. The previous ordering
+   * (anchor before base) allowed a crash window where the next run
+   * saw "remote unchanged" (anchor matched) but silently kept a stale
+   * base, so a subsequent 3-way merge could misclassify entries that
+   * landed in this upload.
    */
   private async uploadToProvider(
     provider: CloudProvider,
     adapter: CloudAdapter,
-    syncedFile: SyncedFile
+    syncedFile: SyncedFile,
+    payloadForBase?: SyncPayload,
   ): Promise<SyncResult> {
     try {
       const resourceId = await adapter.upload(syncedFile);
@@ -1134,6 +1145,12 @@ export class CloudSyncManager {
       };
 
       this.saveSyncConfig();
+      // Persist base BEFORE anchor so a crash between them degrades
+      // safely: the stale anchor forces re-inspection next run, which
+      // merges against the fresh base and cannot silently drift.
+      if (payloadForBase) {
+        await this.saveSyncBase(payloadForBase, provider);
+      }
       await this.saveSyncAnchor(provider, syncedFile, resourceId);
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       this.notifyStateChange();
@@ -1281,10 +1298,17 @@ export class CloudSyncManager {
             checkResult.remoteFile.meta.version, // base on remote version
           );
 
-          const uploadResult = await this.uploadToProvider(provider, adapter, mergedSyncedFile);
+          const uploadResult = await this.uploadToProvider(
+            provider,
+            adapter,
+            mergedSyncedFile,
+            mergeResult.payload,
+          );
 
           if (uploadResult.success) {
-            await this.saveSyncBase(mergeResult.payload, provider);
+            // Base was persisted inside uploadToProvider before the
+            // anchor advanced, so a crash between them cannot leave a
+            // stale base pointing at pre-merge state.
             this.state.syncState = 'IDLE';
 
             this.addSyncHistoryEntry({
@@ -1347,11 +1371,12 @@ export class CloudSyncManager {
         this.state.localVersion
       );
 
-      // 3. Upload
-      const result = await this.uploadToProvider(provider, adapter, syncedFile);
+      // 3. Upload — base is persisted inside uploadToProvider before
+      // the anchor advances so a crash between them cannot leave the
+      // base pointing at a pre-upload snapshot.
+      const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
 
       if (result.success) {
-        await this.saveSyncBase(payload, provider);
         this.state.syncState = 'IDLE';
       } else {
         this.state.syncState = 'ERROR';
@@ -1779,9 +1804,13 @@ export class CloudSyncManager {
       return results;
     }
 
-    // 4. Parallel Uploads
+    // 4. Parallel Uploads — pass the payload so base is persisted
+    // inside uploadToProvider BEFORE the per-provider anchor advances.
+    // Ordering matters: a crash between the two writes must leave the
+    // stale anchor re-triggering inspection on next startup, not a
+    // fresh anchor paired with a stale base.
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
-      const result = await this.uploadToProvider(provider, adapter, syncedFile);
+      const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
       results.set(provider, result);
     });
 
@@ -1791,12 +1820,6 @@ export class CloudSyncManager {
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
       this.state.syncState = 'IDLE';
-      // Save base per provider that successfully uploaded
-      if (payload) {
-        for (const [p, r] of results) {
-          if (r.success) await this.saveSyncBase(payload, p);
-        }
-      }
 
       // If a merge happened, attach the merged payload to successful results
       // so callers can apply remote additions to local state

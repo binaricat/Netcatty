@@ -572,6 +572,9 @@ declare global {
     }>;
     trimVaultBackups?(payload: { maxCount: number }): Promise<{ deletedCount: number; keptCount: number }>;
     openVaultBackupDir?(): Promise<{ success: boolean; path: string }>;
+    // Subscribe to main-process-driven "vault backups changed" events.
+    // Returns an unsubscribe callback. Undefined in non-Electron builds.
+    onVaultBackupsChanged?(handler: () => void): () => void;
 
     // Notify main process the renderer has mounted/painted (used to avoid initial blank screen).
     rendererReady?(): void;

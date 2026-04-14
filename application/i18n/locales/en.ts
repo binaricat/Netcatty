@@ -450,6 +450,8 @@ const en: Messages = {
   'sync.autoSync.noProvider': 'No cloud provider connected. Open Settings → Sync & Cloud to connect one.',
   'sync.autoSync.alreadySyncing': 'Sync is already in progress.',
   'sync.autoSync.restoreInProgress': 'A vault restore is in progress in another window. Please wait for it to finish.',
+  'sync.autoSync.interruptedApplyTitle': 'Sync paused — previous restore interrupted',
+  'sync.autoSync.interruptedApplyMessage': 'A previous restore did not finish cleanly, so the local vault may be inconsistent. Open Settings → Sync & Cloud → Restore and apply a protective backup before auto-sync resumes.',
   'sync.autoSync.vaultLocked': 'Vault is locked. Open Settings → Sync & Cloud to unlock.',
   'sync.autoSync.conflictDetected': 'Sync conflict detected. Open Settings → Sync & Cloud to resolve.',
   'sync.autoSync.syncFailed': 'Sync failed',

@@ -427,16 +427,34 @@ function createVaultBackupService({ app, safeStorage, shell }) {
       dirPath,
       `${BACKUP_FILE_PREFIX}${createdAt}-${id}${BACKUP_FILE_EXT}`,
     );
-    // Atomic write: serialize to a sibling tmp file first and rename into
-    // place. A crash mid-write leaves behind a .tmp that listBackups
-    // ignores, rather than a truncated .json that would masquerade as a
-    // valid record.
+    // Durable atomic write: serialize to a sibling tmp file, fsync the
+    // file's data+metadata to stable storage, rename into place, then
+    // fsync the directory entry itself. Without the file fsync a system
+    // crash between writeFile and rename can leave the OS with a
+    // successfully-renamed entry whose data blocks are still only in
+    // page cache — the file is visible but reads back as zeros or torn
+    // content. Without the directory fsync the rename itself may not be
+    // durable: on recovery listBackups sees an empty directory even
+    // though the file's blocks made it to disk. Both matter for the
+    // protective-before-restore case, where the user is about to
+    // overwrite their vault and the safety net MUST survive a crash
+    // between backup and restore.
     const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-    await fs.promises.writeFile(
-      tmpPath,
-      `${JSON.stringify(record, null, 2)}\n`,
-      { mode: 0o600 },
-    );
+    let tmpHandle;
+    try {
+      tmpHandle = await fs.promises.open(tmpPath, 'w', 0o600);
+      await tmpHandle.writeFile(`${JSON.stringify(record, null, 2)}\n`);
+      await tmpHandle.sync();
+    } finally {
+      if (tmpHandle) {
+        try {
+          await tmpHandle.close();
+        } catch {
+          /* ignore — close failure after successful sync still leaves
+             data durable on disk */
+        }
+      }
+    }
     try {
       await fs.promises.rename(tmpPath, filePath);
     } catch (renameError) {
@@ -448,6 +466,33 @@ function createVaultBackupService({ app, safeStorage, shell }) {
         /* ignore */
       }
       throw renameError;
+    }
+    // fsync the directory so the rename itself is durably recorded.
+    // On Linux this is required; on macOS it is a no-op at the FS
+    // layer but still safe and portable. On Windows fs.open on a
+    // directory is not supported — the rename is durable as part of
+    // NTFS's journal, so skip the sync there.
+    if (process.platform !== 'win32') {
+      let dirHandle;
+      try {
+        dirHandle = await fs.promises.open(dirPath, 'r');
+        await dirHandle.sync();
+      } catch (dirSyncError) {
+        // Directory fsync is a defense-in-depth hardening step — if
+        // the filesystem refuses (tmpfs, some network mounts) the
+        // rename already happened and the file is reachable, so a
+        // failure here should not abort the backup. Log so a
+        // systematic issue is diagnosable.
+        console.warn('[vaultBackupBridge] Directory fsync failed:', dirSyncError);
+      } finally {
+        if (dirHandle) {
+          try {
+            await dirHandle.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     }
 
     // Reuse the enumeration we already did for dedupe, prepending the
@@ -470,11 +515,42 @@ function registerHandlers(ipcMain, electronModule) {
     shell: electronModule?.shell,
   });
 
+  const BrowserWindow = electronModule?.BrowserWindow;
+
+  // Broadcast a backup-changed event to every renderer so other windows
+  // (notably the Settings window's backup list) can refresh without the
+  // user manually navigating. Any successful create / trim path calls
+  // this. Failures fall through silently — a dropped notification is
+  // recoverable on the next manual refresh, while re-throwing here
+  // would turn a harmless broadcast failure into a user-visible error.
+  const broadcastBackupsChanged = () => {
+    if (!BrowserWindow?.getAllWindows) return;
+    try {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed?.()) continue;
+        try {
+          win.webContents?.send?.("netcatty:vaultBackups:changed");
+        } catch (error) {
+          console.warn("[vaultBackupBridge] Failed to notify window:", error);
+        }
+      }
+    } catch (error) {
+      console.warn("[vaultBackupBridge] Broadcast failed:", error);
+    }
+  };
+
   ipcMain.handle("netcatty:vaultBackups:capabilities", async () => {
     return { encryptionAvailable: service.isEncryptionAvailable() };
   });
   ipcMain.handle("netcatty:vaultBackups:create", async (_event, payload) => {
-    return service.createBackup(payload || {});
+    const result = await service.createBackup(payload || {});
+    // Only broadcast when a new record was actually written; a
+    // deduped (created=false) return means the on-disk state did not
+    // change, so other windows already show the latest backup.
+    if (result?.created) {
+      broadcastBackupsChanged();
+    }
+    return result;
   });
   ipcMain.handle("netcatty:vaultBackups:list", async () => {
     return service.listBackups();
@@ -483,7 +559,11 @@ function registerHandlers(ipcMain, electronModule) {
     return service.readBackup(payload || {});
   });
   ipcMain.handle("netcatty:vaultBackups:trim", async (_event, payload) => {
-    return service.trimBackups(payload || {});
+    const result = await service.trimBackups(payload || {});
+    if (result?.deletedCount) {
+      broadcastBackupsChanged();
+    }
+    return result;
   });
   ipcMain.handle("netcatty:vaultBackups:openDir", async () => {
     return service.openBackupDir();

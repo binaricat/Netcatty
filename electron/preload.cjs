@@ -870,6 +870,23 @@ const api = {
     ipcRenderer.invoke("netcatty:vaultBackups:trim", payload),
   openVaultBackupDir: () =>
     ipcRenderer.invoke("netcatty:vaultBackups:openDir"),
+  // Subscribe to cross-window "backups changed" events emitted by the
+  // main process whenever a create/trim actually mutated the on-disk
+  // set. Returns an unsubscribe function so React-style consumers can
+  // release the listener on unmount without leaking IPC handlers.
+  onVaultBackupsChanged: (handler) => {
+    if (typeof handler !== "function") return () => {};
+    const listener = () => {
+      try { handler(); } catch (error) {
+        console.warn("[preload] onVaultBackupsChanged handler threw:", error);
+      }
+    };
+    ipcRenderer.on("netcatty:vaultBackups:changed", listener);
+    return () => {
+      try { ipcRenderer.removeListener("netcatty:vaultBackups:changed", listener); }
+      catch { /* ignore */ }
+    };
+  },
 
   // Tell main process the renderer has mounted/painted (used to avoid initial blank screen).
   rendererReady: () => ipcRenderer.send("netcatty:renderer:ready"),

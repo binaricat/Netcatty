@@ -17,6 +17,7 @@ import {
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
 import { collectSyncableSettings, hasMeaningfulSyncData } from '../syncPayload';
+import { readInterruptedVaultApply } from '../localVaultBackups';
 import {
   STORAGE_KEY_PORT_FORWARDING,
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
@@ -196,6 +197,30 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.autoSync.restoreInProgress'));
       }
 
+      // Refuse to auto-push when a previous apply crashed mid-way and
+      // left the vault in a partial state. `applyProtectedSyncPayload`
+      // sets a sentinel before its non-atomic localStorage writes and
+      // clears it on successful completion; the sentinel's presence
+      // here means the renderer crashed between a first write and the
+      // clean-up, so the in-memory payload is a mix of pre-apply and
+      // post-apply entries. Pushing that would silently overwrite an
+      // intact cloud copy with corrupted data.
+      //
+      // Manual triggers surface a user-visible error that points the
+      // user at the Restore UI; auto triggers return quietly (the
+      // next startup toast below flags the state).
+      const interruptedApply = readInterruptedVaultApply();
+      if (interruptedApply) {
+        if (trigger === 'auto') {
+          console.warn(
+            '[AutoSync] Skipping: previous apply was interrupted — refusing to push partial state.',
+            interruptedApply,
+          );
+          return;
+        }
+        throw new Error(t('sync.autoSync.interruptedApplyMessage'));
+      }
+
       // If another window unlocked, reuse the in-memory session password from main process.
       if (state.securityState !== 'UNLOCKED') {
         const bridge = netcattyBridge.get();
@@ -272,6 +297,24 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       isSyncRunningRef.current = false;
     }
   }, [sync, buildPayload, getDataHash, onApplyPayload, t]);
+
+  // One-shot toast per mount when a previous apply was interrupted, so the
+  // user understands why auto-sync is silently paused and where to go to
+  // recover. `applyProtectedSyncPayload` clears the sentinel on a clean
+  // apply, so this only fires once per genuine crash and naturally stops
+  // after the user completes a recovery.
+  const interruptedApplyNotifiedRef = useRef(false);
+  useEffect(() => {
+    if (interruptedApplyNotifiedRef.current) return;
+    if (!sync.isUnlocked) return;
+    const interrupted = readInterruptedVaultApply();
+    if (!interrupted) return;
+    interruptedApplyNotifiedRef.current = true;
+    notify.error(
+      t('sync.autoSync.interruptedApplyMessage'),
+      t('sync.autoSync.interruptedApplyTitle'),
+    );
+  }, [sync.isUnlocked, t]);
 
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {
@@ -409,10 +452,16 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     } finally {
       if (startupConsistent) {
         hasCheckedRemoteRef.current = true;
+        // Only open the auto-sync gate when the inspect actually
+        // validated the remote state. Leaving the gate closed on
+        // inspect failure is intentional: an edit made during a
+        // degraded startup must not race ahead and push a partially-
+        // hydrated vault over an intact remote. The retry effect
+        // below re-fires checkRemoteVersion on the next provider/
+        // unlock/startupReady transition, and a manual sync from
+        // Settings remains available as an escape hatch.
+        remoteCheckDoneRef.current = true;
       }
-      // Always open the auto-sync gate; otherwise a transient inspect
-      // failure would permanently disable background sync until restart.
-      remoteCheckDoneRef.current = true;
     }
   }, [config, buildPayload, t]);
   
@@ -466,6 +515,15 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (isRestoreInProgress()) {
       return;
     }
+
+    // Don't even schedule a push while the apply-in-progress sentinel
+    // is held. The syncNow path re-checks and refuses too, but dropping
+    // the debounced schedule here avoids spinning a 3-second timer for
+    // every keystroke while the user is in the Restore UI working
+    // through recovery.
+    if (readInterruptedVaultApply()) {
+      return;
+    }
     
     // Clear existing timeout
     if (syncTimeoutRef.current) {
@@ -484,21 +542,48 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     };
   }, [sync.hasAnyConnectedProvider, sync.autoSyncEnabled, sync.isUnlocked, sync.isSyncing, getDataHash, syncNow, config.settingsVersion, bookmarksVersion]);
   
-  // Check remote version on startup/unlock
+  // Check remote version on startup/unlock, then retry with backoff
+  // while the inspect keeps failing. Without the timer-based retry,
+  // a failure that doesn't coincide with a dep change would wedge the
+  // auto-sync gate closed until the user restarts or manually triggers
+  // sync from Settings — the 30s/60s/90s cadence below lets a short
+  // outage (network blip, provider rate-limit) self-heal.
   useEffect(() => {
     if (
-      sync.hasAnyConnectedProvider &&
-      sync.isUnlocked &&
-      !hasCheckedRemoteRef.current &&
-      config.startupReady !== false
+      !sync.hasAnyConnectedProvider ||
+      !sync.isUnlocked ||
+      hasCheckedRemoteRef.current ||
+      config.startupReady === false
     ) {
-      // `startupReady` is the explicit readiness signal the parent feeds
-      // in once the version-change backup has finished; it's a strictly
-      // stronger gate than the 1s timer this code used to carry, and
-      // removing the timer also removes the window where a user could
-      // see the "syncing" affordance without any actual work queued.
-      void checkRemoteVersion();
+      return;
     }
+
+    let cancelled = false;
+    let attempt = 0;
+    let timerId: NodeJS.Timeout | null = null;
+
+    const tick = () => {
+      if (cancelled) return;
+      void (async () => {
+        await checkRemoteVersion();
+        if (cancelled || hasCheckedRemoteRef.current) return;
+        // Cap retries at ~5 minutes total (30s + 60s + 120s + 240s). A
+        // persistent failure beyond that is almost certainly a
+        // misconfiguration that needs user action rather than more
+        // auto-retries.
+        if (attempt >= 4) return;
+        const delayMs = Math.min(240_000, 30_000 * 2 ** attempt);
+        attempt += 1;
+        timerId = setTimeout(tick, delayMs);
+      })();
+    };
+
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [sync.hasAnyConnectedProvider, sync.isUnlocked, config.startupReady, checkRemoteVersion]);
   
   // Reset check flags when provider disconnects

@@ -53,6 +53,21 @@ export const STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION = 'netcatty_local_v
  */
 export const STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL = 'netcatty_vault_restore_in_progress_until_v1';
 
+/**
+ * Apply-in-progress sentinel. Set before a destructive applySyncPayload
+ * starts writing and cleared after it completes successfully. If this
+ * value is present on a later startup, the previous apply was
+ * interrupted mid-way (renderer crash, power loss, IPC failure) and the
+ * local vault is a partial mix of pre-apply and post-apply state.
+ * Auto-sync must refuse to push in that window — otherwise the partial
+ * state would silently overwrite an intact cloud copy — until the user
+ * manually restores from a protective backup or completes a full merge.
+ * The value is a JSON-encoded record (startedAt, protectiveBackupId,
+ * source) so the UI can surface a specific recovery hint rather than a
+ * generic "something broke" warning.
+ */
+export const STORAGE_KEY_VAULT_APPLY_IN_PROGRESS = 'netcatty_vault_apply_in_progress_v1';
+
 // SFTP File Opener Associations
 export const STORAGE_KEY_SFTP_FILE_ASSOCIATIONS = 'netcatty_sftp_file_associations_v1';
 export const STORAGE_KEY_SFTP_DEFAULT_OPENER = 'netcatty_sftp_default_opener_v1';

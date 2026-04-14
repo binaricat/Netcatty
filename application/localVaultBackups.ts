@@ -2,6 +2,7 @@ import type { SyncPayload } from '../domain/sync';
 import {
   STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION,
   STORAGE_KEY_LOCAL_VAULT_BACKUP_MAX_COUNT,
+  STORAGE_KEY_VAULT_APPLY_IN_PROGRESS,
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
 } from '../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
@@ -269,14 +270,89 @@ export async function withRestoreBarrier<T>(
 }
 
 /**
+ * Shape of the apply-in-progress sentinel record. Persisted as JSON in
+ * `STORAGE_KEY_VAULT_APPLY_IN_PROGRESS` so the next session can
+ * distinguish "the last apply completed cleanly" from "the last apply
+ * crashed mid-way and the local vault is a partial mix of states."
+ */
+export interface VaultApplyInProgressRecord {
+  startedAt: number;
+  protectiveBackupId: string | null;
+}
+
+/**
+ * Returns the persisted apply-in-progress record if a previous apply
+ * was interrupted before clearing it. Callers (notably auto-sync) use
+ * this to refuse to push a partial-apply local state over an intact
+ * cloud copy. See `applyProtectedSyncPayload` for the write side.
+ *
+ * `null` here means "no interrupted apply detected" — either nothing
+ * was ever applied, or the last apply finished cleanly.
+ */
+export function readInterruptedVaultApply(): VaultApplyInProgressRecord | null {
+  try {
+    const raw = localStorageAdapter.readString(STORAGE_KEY_VAULT_APPLY_IN_PROGRESS);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const startedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : 0;
+    const protectiveBackupId =
+      typeof parsed.protectiveBackupId === 'string' ? parsed.protectiveBackupId : null;
+    if (!startedAt) return null;
+    return { startedAt, protectiveBackupId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clears the apply-in-progress sentinel. The normal completion path
+ * inside `applyProtectedSyncPayload` clears it automatically; this
+ * export exists so the user's explicit recovery action ("I've restored
+ * from a backup, resume sync") can acknowledge the interrupted state
+ * from the UI without re-running an apply.
+ */
+export function clearInterruptedVaultApply(): void {
+  try {
+    localStorageAdapter.remove(STORAGE_KEY_VAULT_APPLY_IN_PROGRESS);
+  } catch {
+    /* ignore — next clean apply will overwrite */
+  }
+}
+
+function writeApplyInProgressSentinel(record: VaultApplyInProgressRecord): void {
+  try {
+    localStorageAdapter.writeString(
+      STORAGE_KEY_VAULT_APPLY_IN_PROGRESS,
+      JSON.stringify(record),
+    );
+  } catch (error) {
+    // Sentinel write is best-effort: a failure here means a later crash
+    // won't be detected, but does NOT compromise the apply itself.
+    // Log so a systematic storage outage is diagnosable.
+    console.warn('[localVaultBackups] Failed to set apply-in-progress sentinel:', error);
+  }
+}
+
+/**
  * Shared "apply a remote-sourced payload safely" helper.
  *
  * Holds the cross-window restore barrier, snapshots the pre-apply vault
- * into a protective backup, and only then runs the supplied `applyPayload`
- * callback. Every destructive apply path (startup merge, conflict
- * resolution, empty-vault restore, manual Gist-revision restore) must go
- * through this so the protections can't drift out of sync between the
- * main window and the settings window.
+ * into a protective backup, persists an apply-in-progress sentinel, and
+ * only then runs the supplied `applyPayload` callback. Every destructive
+ * apply path (startup merge, conflict resolution, empty-vault restore,
+ * manual Gist-revision restore) must go through this so the protections
+ * can't drift out of sync between the main window and the settings
+ * window.
+ *
+ * The sentinel closes the partial-apply-then-crash window: `applyPayload`
+ * writes to several localStorage keys non-atomically (hosts, keys, port-
+ * forwarding rules, settings). A crash mid-sequence leaves the vault in
+ * a state that is neither pre-apply nor post-apply, and the next
+ * auto-sync would otherwise push that partial state over an intact cloud
+ * copy. The sentinel flags "local may be inconsistent" for the next
+ * session; `readInterruptedVaultApply` exposes that to callers that
+ * enforce "don't auto-push a half-applied vault."
  *
  * `buildPreApplyPayload` is invoked *before* the apply to snapshot the
  * current vault. Callers pass their own React-closure builder (hosts,
@@ -294,8 +370,10 @@ export function applyProtectedSyncPayload(options: {
   const { buildPreApplyPayload, applyPayload, translateProtectiveBackupFailure } = options;
   return withRestoreBarrier(async () => {
     const pre = buildPreApplyPayload();
+    let protectiveBackupId: string | null = null;
     try {
-      await createRequiredProtectiveLocalVaultBackup(pre);
+      const backup = await createRequiredProtectiveLocalVaultBackup(pre);
+      protectiveBackupId = backup?.id ?? null;
     } catch (error) {
       // Destructive apply without a working safety net is exactly the
       // overwrite-without-recovery regression this module was added to
@@ -306,7 +384,22 @@ export function applyProtectedSyncPayload(options: {
       }
       throw error;
     }
+
+    // Mark the apply as in-progress. If the renderer crashes between
+    // the first localStorage write inside `applyPayload` and the
+    // successful completion below, the next session will observe this
+    // sentinel and refuse to auto-sync the partial state.
+    writeApplyInProgressSentinel({
+      startedAt: Date.now(),
+      protectiveBackupId,
+    });
+
+    // Only clear the sentinel on successful completion. A throw from
+    // `applyPayload` deliberately leaves the sentinel set: the partial
+    // write is still on disk, and the next session must observe the
+    // flag so auto-sync refuses to push the half-applied state.
     await applyPayload();
+    clearInterruptedVaultApply();
   });
 }
 

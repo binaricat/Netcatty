@@ -269,6 +269,8 @@ const zhCN: Messages = {
   'sync.autoSync.noProvider': '未连接云同步 provider。请打开 设置 → Sync & Cloud 进行连接。',
   'sync.autoSync.alreadySyncing': '同步正在进行中。',
   'sync.autoSync.restoreInProgress': '另一个窗口中的本地备份恢复正在进行中，请等待其完成。',
+  'sync.autoSync.interruptedApplyTitle': '同步已暂停 — 上次恢复未完成',
+  'sync.autoSync.interruptedApplyMessage': '上次本地恢复过程未正常结束，本地数据可能处于半应用状态。请打开「设置 → Sync & Cloud → 恢复」，从保护性备份中恢复后再让自动同步继续。',
   'sync.autoSync.vaultLocked': 'Vault 处于锁定状态。请打开 设置 → Sync & Cloud 解锁。',
   'sync.autoSync.conflictDetected': '检测到同步冲突。请打开 设置 → Sync & Cloud 处理。',
   'sync.autoSync.syncFailed': '同步失败',
