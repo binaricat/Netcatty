@@ -858,6 +858,16 @@ const api = {
 
   // App info
   getAppInfo: () => ipcRenderer.invoke("netcatty:app:getInfo"),
+  createVaultBackup: (payload) =>
+    ipcRenderer.invoke("netcatty:vaultBackups:create", payload),
+  listVaultBackups: () =>
+    ipcRenderer.invoke("netcatty:vaultBackups:list"),
+  readVaultBackup: (payload) =>
+    ipcRenderer.invoke("netcatty:vaultBackups:read", payload),
+  trimVaultBackups: (payload) =>
+    ipcRenderer.invoke("netcatty:vaultBackups:trim", payload),
+  openVaultBackupDir: () =>
+    ipcRenderer.invoke("netcatty:vaultBackups:openDir"),
 
   // Tell main process the renderer has mounted/painted (used to avoid initial blank screen).
   rendererReady: () => ipcRenderer.send("netcatty:renderer:ready"),

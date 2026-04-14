@@ -2,6 +2,7 @@ import React, { useCallback } from "react";
 import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
 import { buildSyncPayload, applySyncPayload } from "../../../application/syncPayload";
+import { createProtectiveLocalVaultBackup } from "../../../application/localVaultBackups";
 import type { SyncableVaultData } from "../../../application/syncPayload";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
@@ -54,14 +55,20 @@ export default function SettingsSyncTab(props: {
   }, [vault, portForwardingRules]);
 
   const onApplyPayload = useCallback(
-    (payload: SyncPayload) => {
+    async (payload: SyncPayload) => {
+      try {
+        await createProtectiveLocalVaultBackup(onBuildPayload());
+      } catch (error) {
+        console.error("[SettingsSyncTab] Failed to create protective backup:", error);
+      }
+
       applySyncPayload(payload, {
         importVaultData: importDataFromString,
         importPortForwardingRules,
         onSettingsApplied,
       });
     },
-    [importDataFromString, importPortForwardingRules, onSettingsApplied],
+    [importDataFromString, importPortForwardingRules, onBuildPayload, onSettingsApplied],
   );
 
   const clearAllLocalData = useCallback(() => {

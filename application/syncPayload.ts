@@ -63,6 +63,29 @@ export interface SyncableVaultData {
   groupConfigs?: GroupConfig[];
 }
 
+/**
+ * Returns true when the payload contains any meaningful user data worth
+ * protecting or syncing.
+ */
+export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
+  const hasEntities =
+    (payload.hosts?.length ?? 0) > 0 ||
+    (payload.keys?.length ?? 0) > 0 ||
+    (payload.snippets?.length ?? 0) > 0 ||
+    (payload.identities?.length ?? 0) > 0 ||
+    (payload.customGroups?.length ?? 0) > 0 ||
+    (payload.snippetPackages?.length ?? 0) > 0 ||
+    (payload.portForwardingRules?.length ?? 0) > 0 ||
+    (payload.knownHosts?.length ?? 0) > 0 ||
+    (payload.groupConfigs?.length ?? 0) > 0;
+
+  if (hasEntities) return true;
+
+  return Boolean(
+    payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
+  );
+}
+
 /** Callbacks used by `applySyncPayload` to import data into local state. */
 interface SyncPayloadImporters {
   /** Import vault data (hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts). */

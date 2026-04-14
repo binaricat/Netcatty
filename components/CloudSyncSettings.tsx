@@ -17,6 +17,7 @@ import {
     Download,
     Database,
     ExternalLink,
+    FolderOpen,
     Eye,
     EyeOff,
     Github,
@@ -32,6 +33,7 @@ import {
     X,
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
+import { useLocalVaultBackups } from '../application/state/useLocalVaultBackups';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
     findSyncPayloadEncryptedCredentialPaths,
@@ -628,9 +630,200 @@ const ConflictModal: React.FC<ConflictModalProps> = ({
 
 interface SyncDashboardProps {
     onBuildPayload: () => SyncPayload;
-    onApplyPayload: (payload: SyncPayload) => void;
+    onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;
 }
+
+interface LocalBackupsPanelProps {
+    onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
+}
+
+const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload }) => {
+    const { t, resolvedLocale } = useI18n();
+    const {
+        backups,
+        isLoading,
+        maxBackups,
+        refreshBackups,
+        readBackup,
+        setMaxBackups,
+        openBackupDirectory,
+    } = useLocalVaultBackups();
+    const [maxBackupsInput, setMaxBackupsInput] = useState(String(maxBackups));
+    const [isSavingMaxBackups, setIsSavingMaxBackups] = useState(false);
+    const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+
+    useEffect(() => {
+        setMaxBackupsInput(String(maxBackups));
+    }, [maxBackups]);
+
+    const formatTimestamp = (timestamp: number) =>
+        new Date(timestamp).toLocaleString(resolvedLocale || undefined);
+
+    const getReasonLabel = (reason: 'app_version_change' | 'before_restore') =>
+        reason === 'app_version_change'
+            ? t('cloudSync.localBackups.reason.appVersionChange')
+            : t('cloudSync.localBackups.reason.beforeRestore');
+
+    const handleSaveMaxBackups = async () => {
+        setIsSavingMaxBackups(true);
+        try {
+            const next = await setMaxBackups(Number(maxBackupsInput));
+            setMaxBackupsInput(String(next));
+            toast.success(t('cloudSync.localBackups.maxSaved', { count: String(next) }));
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : t('common.unknownError'),
+                t('sync.toast.errorTitle'),
+            );
+        } finally {
+            setIsSavingMaxBackups(false);
+        }
+    };
+
+    const handleOpenBackupDirectory = async () => {
+        try {
+            await openBackupDirectory();
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : t('common.unknownError'),
+                t('sync.toast.errorTitle'),
+            );
+        }
+    };
+
+    const handleRestoreBackup = async (backupId: string) => {
+        setRestoringBackupId(backupId);
+        try {
+            const detail = await readBackup(backupId);
+            if (!detail) {
+                throw new Error(t('cloudSync.localBackups.restoreMissing'));
+            }
+            await Promise.resolve(onApplyPayload(detail.payload));
+            await refreshBackups();
+            toast.success(t('cloudSync.localBackups.restoreSuccess'));
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : t('common.unknownError'),
+                t('cloudSync.localBackups.restoreFailedTitle'),
+            );
+        } finally {
+            setRestoringBackupId(null);
+        }
+    };
+
+    return (
+        <div className="rounded-lg border bg-card p-4 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <div className="text-sm font-medium">{t('cloudSync.localBackups.title')}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                        {t('cloudSync.localBackups.desc')}
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void refreshBackups()}
+                        disabled={isLoading}
+                        className="gap-1"
+                    >
+                        <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
+                        {t('settings.system.refresh')}
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleOpenBackupDirectory()}
+                        className="gap-1"
+                    >
+                        <FolderOpen size={14} />
+                        {t('settings.system.openFolder')}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="flex items-end gap-2">
+                <div className="space-y-2">
+                    <Label>{t('cloudSync.localBackups.maxCount')}</Label>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={maxBackupsInput}
+                        onChange={(e) => setMaxBackupsInput(e.target.value)}
+                        className="w-28"
+                    />
+                </div>
+                <Button
+                    variant="outline"
+                    onClick={() => void handleSaveMaxBackups()}
+                    disabled={isSavingMaxBackups}
+                    className="gap-2"
+                >
+                    {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
+                    {t('common.save')}
+                </Button>
+            </div>
+
+            {backups.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
+                    {t('cloudSync.localBackups.empty')}
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {backups.map((backup) => (
+                        <div
+                            key={backup.id}
+                            className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+                        >
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-medium">
+                                        {getReasonLabel(backup.reason)}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {formatTimestamp(backup.createdAt)}
+                                    </span>
+                                    {backup.sourceAppVersion && backup.targetAppVersion && (
+                                        <span className="text-xs text-muted-foreground">
+                                            {t('cloudSync.localBackups.versionChange', {
+                                                from: backup.sourceAppVersion,
+                                                to: backup.targetAppVersion,
+                                            })}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                    {t('cloudSync.localBackups.counts', {
+                                        hosts: String(backup.preview.hostCount),
+                                        keys: String(backup.preview.keyCount),
+                                        snippets: String(backup.preview.snippetCount),
+                                    })}
+                                </div>
+                            </div>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void handleRestoreBackup(backup.id)}
+                                disabled={restoringBackupId === backup.id}
+                                className="gap-2"
+                            >
+                                {restoringBackupId === backup.id ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                    <Download size={14} />
+                                )}
+                                {t('cloudSync.localBackups.restore')}
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
 
 const SyncDashboard: React.FC<SyncDashboardProps> = ({
     onBuildPayload,
@@ -1012,7 +1205,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             if (result.success) {
                 // Apply merged data if a three-way merge happened
                 if (result.mergedPayload && onApplyPayload) {
-                    onApplyPayload(result.mergedPayload);
+                    await Promise.resolve(onApplyPayload(result.mergedPayload));
                 }
                 toast.success(t('cloudSync.sync.success', { provider }));
             } else if (result.conflictDetected) {
@@ -1030,7 +1223,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         try {
             const payload = await sync.resolveConflict(resolution);
             if (payload && resolution === 'USE_REMOTE') {
-                onApplyPayload(payload);
+                await Promise.resolve(onApplyPayload(payload));
                 toast.success(t('cloudSync.resolve.downloaded'));
             } else if (resolution === 'USE_LOCAL') {
                 // Re-sync with local data
@@ -1094,9 +1287,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         }
     };
 
-    const handleRestoreRevision = () => {
+    const handleRestoreRevision = async () => {
         if (!historyPreview) return;
-        onApplyPayload(historyPreview.payload);
+        await Promise.resolve(onApplyPayload(historyPreview.payload));
         toast.success(t('cloudSync.revisionHistory.restored'));
         setShowHistoryModal(false);
         setHistoryPreview(null);
@@ -1326,6 +1519,10 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             )}
                         </div>
                     )}
+
+                    <LocalBackupsPanel
+                        onApplyPayload={onApplyPayload}
+                    />
 
                     {/* Clear Local Data */}
                     <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
@@ -1955,7 +2152,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
 interface CloudSyncSettingsProps {
     onBuildPayload: () => SyncPayload;
-    onApplyPayload: (payload: SyncPayload) => void;
+    onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;
 }
 
@@ -1965,7 +2162,12 @@ export const CloudSyncSettings: React.FC<CloudSyncSettingsProps> = (props) => {
     // Simplified UX: once a master key is configured, we auto-unlock via safeStorage
     // so users don't have to manage a separate LOCKED screen.
     if (securityState === 'NO_KEY') {
-        return <GatekeeperScreen onSetupComplete={() => { }} />;
+        return (
+            <div className="space-y-6">
+                <GatekeeperScreen onSetupComplete={() => { }} />
+                <LocalBackupsPanel onApplyPayload={props.onApplyPayload} />
+            </div>
+        );
     }
 
     return <SyncDashboard {...props} />;

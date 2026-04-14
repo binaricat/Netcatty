@@ -47,6 +47,7 @@ import {
 import { mergeSyncPayloads } from '../../domain/syncMerge';
 
 const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
+const SYNC_REMOTE_ANCHOR_STORAGE_KEY = 'netcatty_sync_remote_anchor_v1';
 
 // ============================================================================
 // Types
@@ -72,6 +73,15 @@ export interface SyncManagerState {
 }
 
 export type SyncEventCallback = (event: SyncEvent) => void;
+
+interface ProviderSyncAnchor {
+  signature: string | null;
+  version: number;
+  updatedAt: number;
+  deviceId?: string;
+  resourceId?: string | null;
+  observedAt: number;
+}
 
 // ============================================================================
 // CloudSyncManager Class
@@ -754,6 +764,7 @@ export class CloudSyncManager {
       await this.saveProviderConnection('github', this.state.providers.github);
       // Clear merge base when (re)authenticating to a potentially different account
       this.removeFromStorage(this.syncBaseKey('github'));
+      this.clearSyncAnchor('github');
       this.emit({
         type: 'AUTH_COMPLETED',
         provider: 'github',
@@ -809,6 +820,7 @@ export class CloudSyncManager {
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       // Clear merge base when (re)authenticating to a potentially different account
       this.removeFromStorage(this.syncBaseKey(provider));
+      this.clearSyncAnchor(provider);
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -847,6 +859,7 @@ export class CloudSyncManager {
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       // Clear merge base when (re)configuring to a different endpoint/bucket
       this.removeFromStorage(this.syncBaseKey(provider));
+      this.clearSyncAnchor(provider);
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -891,6 +904,7 @@ export class CloudSyncManager {
     // Clear the merge base for this provider so reconnecting to a different
     // account/resource doesn't reuse an unrelated snapshot
     this.removeFromStorage(this.syncBaseKey(provider));
+    this.clearSyncAnchor(provider);
     this.notifyStateChange(); // Ensure UI updates immediately after disconnect
   }
 
@@ -925,32 +939,164 @@ export class CloudSyncManager {
   // Sync Operations
   // ==========================================================================
 
+  private syncAnchorKey(provider: CloudProvider): string {
+    return `${SYNC_REMOTE_ANCHOR_STORAGE_KEY}_${provider}`;
+  }
+
+  private createSyncedFileSignature(syncedFile: SyncedFile | null): string | null {
+    if (!syncedFile) return null;
+    const { meta } = syncedFile;
+    return [
+      meta.version,
+      meta.updatedAt,
+      meta.deviceId,
+      meta.iv,
+      meta.salt,
+    ].join(':');
+  }
+
+  private loadSyncAnchor(provider: CloudProvider): ProviderSyncAnchor | null {
+    return this.loadFromStorage<ProviderSyncAnchor>(this.syncAnchorKey(provider));
+  }
+
+  private saveSyncAnchor(
+    provider: CloudProvider,
+    syncedFile: SyncedFile | null,
+    resourceId?: string | null,
+  ): void {
+    this.saveToStorage(this.syncAnchorKey(provider), {
+      signature: this.createSyncedFileSignature(syncedFile),
+      version: syncedFile?.meta.version ?? 0,
+      updatedAt: syncedFile?.meta.updatedAt ?? 0,
+      deviceId: syncedFile?.meta.deviceId,
+      resourceId: resourceId ?? this.state.providers[provider].resourceId ?? null,
+      observedAt: Date.now(),
+    } satisfies ProviderSyncAnchor);
+  }
+
+  private clearSyncAnchor(provider?: CloudProvider): void {
+    if (provider) {
+      this.removeFromStorage(this.syncAnchorKey(provider));
+      return;
+    }
+    for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
+      this.removeFromStorage(this.syncAnchorKey(p));
+    }
+  }
+
+  private async inspectProviderRemoteState(
+    provider: CloudProvider,
+    adapter: CloudAdapter,
+  ): Promise<{
+    remoteChanged: boolean;
+    remoteFile: SyncedFile | null;
+    error?: string;
+  }> {
+    try {
+      const remoteFile = await adapter.download();
+      const currentSignature = this.createSyncedFileSignature(remoteFile);
+      const anchor = this.loadSyncAnchor(provider);
+      const currentResourceId = adapter.resourceId || this.state.providers[provider].resourceId || null;
+
+      if (!anchor) {
+        return {
+          remoteChanged: currentSignature !== null,
+          remoteFile,
+        };
+      }
+
+      const resourceChanged = (anchor.resourceId || null) !== currentResourceId;
+      return {
+        remoteChanged: resourceChanged || anchor.signature !== currentSignature,
+        remoteFile,
+      };
+    } catch (error) {
+      return {
+        remoteChanged: false,
+        remoteFile: null,
+        error: String(error),
+      };
+    }
+  }
+
   /**
    * Helper: Check for conflicts with a specific provider
    */
   private async checkProviderConflict(
+    provider: CloudProvider,
     adapter: CloudAdapter
   ): Promise<{
     conflict: boolean;
     error?: string;
     remoteFile?: SyncedFile;
   }> {
-    try {
-      const remoteFile = await adapter.download();
-
-      if (remoteFile) {
-        // Compare versions
-        if (remoteFile.meta.updatedAt > this.state.localUpdatedAt) {
-          return {
-            conflict: true,
-            remoteFile,
-          };
-        }
-      }
-      return { conflict: false };
-    } catch (error) {
-      return { conflict: false, error: String(error) };
+    const inspection = await this.inspectProviderRemoteState(provider, adapter);
+    if (inspection.error) {
+      return { conflict: false, error: inspection.error };
     }
+    return {
+      conflict: inspection.remoteChanged && Boolean(inspection.remoteFile),
+      remoteFile: inspection.remoteFile ?? undefined,
+    };
+  }
+
+  async inspectProviderRemote(provider: CloudProvider): Promise<{
+    remoteChanged: boolean;
+    remoteFile: SyncedFile | null;
+    payload: SyncPayload | null;
+  }> {
+    if (this.state.securityState !== 'UNLOCKED' || !this.masterPassword) {
+      throw new Error('Vault is locked');
+    }
+
+    const adapter = await this.getConnectedAdapter(provider);
+    const inspection = await this.inspectProviderRemoteState(provider, adapter);
+    if (inspection.error) {
+      throw new Error(inspection.error);
+    }
+
+    if (!inspection.remoteFile) {
+      return {
+        remoteChanged: inspection.remoteChanged,
+        remoteFile: null,
+        payload: null,
+      };
+    }
+
+    return {
+      remoteChanged: inspection.remoteChanged,
+      remoteFile: inspection.remoteFile,
+      payload: await EncryptionService.decryptPayload(inspection.remoteFile, this.masterPassword),
+    };
+  }
+
+  async commitRemoteInspection(
+    provider: CloudProvider,
+    remoteFile: SyncedFile,
+    payload: SyncPayload,
+  ): Promise<void> {
+    const adapter = await this.getConnectedAdapter(provider);
+    const resourceId = adapter.resourceId || this.state.providers[provider].resourceId || null;
+    if (resourceId && this.state.providers[provider].resourceId !== resourceId) {
+      ++this.providerDecryptSeq[provider];
+      this.state.providers[provider] = {
+        ...this.state.providers[provider],
+        resourceId,
+      };
+    }
+
+    this.state.localVersion = remoteFile.meta.version;
+    this.state.localUpdatedAt = remoteFile.meta.updatedAt;
+    this.state.remoteVersion = remoteFile.meta.version;
+    this.state.remoteUpdatedAt = remoteFile.meta.updatedAt;
+    this.state.providers[provider].lastSync = Date.now();
+    this.state.providers[provider].lastSyncVersion = remoteFile.meta.version;
+
+    this.saveSyncConfig();
+    this.saveSyncAnchor(provider, remoteFile, resourceId);
+    await this.saveSyncBase(payload, provider);
+    await this.saveProviderConnection(provider, this.state.providers[provider]);
+    this.notifyStateChange();
   }
 
   /**
@@ -962,7 +1108,7 @@ export class CloudSyncManager {
     syncedFile: SyncedFile
   ): Promise<SyncResult> {
     try {
-      await adapter.upload(syncedFile);
+      const resourceId = await adapter.upload(syncedFile);
       this.state.lastError = null;
 
       // Update local state (safe to do multiple times if values are same)
@@ -973,10 +1119,15 @@ export class CloudSyncManager {
       // Invalidate any pending provider decrypt so it cannot overwrite
       // the lastSync/lastSyncVersion we are about to set.
       ++this.providerDecryptSeq[provider];
-      this.state.providers[provider].lastSync = Date.now();
-      this.state.providers[provider].lastSyncVersion = syncedFile.meta.version;
+      this.state.providers[provider] = {
+        ...this.state.providers[provider],
+        resourceId: resourceId || this.state.providers[provider].resourceId,
+        lastSync: Date.now(),
+        lastSyncVersion: syncedFile.meta.version,
+      };
 
       this.saveSyncConfig();
+      this.saveSyncAnchor(provider, syncedFile, resourceId);
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       this.notifyStateChange();
 
@@ -1091,7 +1242,7 @@ export class CloudSyncManager {
 
     try {
       // 1. Check for conflict
-      const checkResult = await this.checkProviderConflict(adapter);
+      const checkResult = await this.checkProviderConflict(provider, adapter);
 
       if (checkResult.error) {
         throw new Error(checkResult.error);
@@ -1244,7 +1395,7 @@ export class CloudSyncManager {
     try {
       let remoteFile: SyncedFile | null;
       try {
-        remoteFile = await adapter.download();
+      remoteFile = await adapter.download();
       } catch (downloadError) {
         throw new Error(`Download failed: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
       }
@@ -1260,14 +1411,7 @@ export class CloudSyncManager {
         throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
       }
 
-      // Update local tracking
-      this.state.localVersion = remoteFile.meta.version;
-      this.state.localUpdatedAt = remoteFile.meta.updatedAt;
-      this.state.remoteVersion = remoteFile.meta.version;
-      this.state.remoteUpdatedAt = remoteFile.meta.updatedAt;
-      this.saveSyncConfig();
-      await this.saveSyncBase(payload, provider);
-      this.notifyStateChange(); // Notify UI of state change
+      await this.commitRemoteInspection(provider, remoteFile, payload);
 
       // Add to sync history
       this.addSyncHistoryEntry({
@@ -1436,7 +1580,7 @@ export class CloudSyncManager {
         this.updateProviderStatus(provider, 'syncing');
         this.emit({ type: 'SYNC_STARTED', provider });
 
-        const check = await this.checkProviderConflict(adapter);
+        const check = await this.checkProviderConflict(provider, adapter);
         return { provider, adapter, check };
       } catch (error) {
         return { provider, error: String(error) };
@@ -1750,6 +1894,7 @@ export class CloudSyncManager {
     for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
       this.removeFromStorage(this.syncBaseKey(p));
     }
+    this.clearSyncAnchor();
   }
 
   private addSyncHistoryEntry(entry: Omit<SyncHistoryEntry, 'id'>): void {
@@ -1780,6 +1925,7 @@ export class CloudSyncManager {
     this.saveSyncConfig();
     this.saveToStorage(SYNC_HISTORY_STORAGE_KEY, []);
     this.clearSyncBase();
+    this.clearSyncAnchor();
     this.notifyStateChange();
   }
 

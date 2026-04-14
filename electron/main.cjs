@@ -164,6 +164,7 @@ const getCredentialBridge = createLazyModule("./bridges/credentialBridge.cjs");
 const getAutoUpdateBridge = createLazyModule("./bridges/autoUpdateBridge.cjs");
 const getAiBridge = createLazyModule("./bridges/aiBridge.cjs");
 const getWindowManager = createLazyModule("./bridges/windowManager.cjs");
+const getVaultBackupBridge = createLazyModule("./bridges/vaultBackupBridge.cjs");
 
 // GPU settings
 // NOTE: Do not disable Chromium sandbox by default.
@@ -414,6 +415,7 @@ const registerBridges = (win) => {
   const credentialBridge = getCredentialBridge();
   const autoUpdateBridge = getAutoUpdateBridge();
   const aiBridge = getAiBridge();
+  const vaultBackupBridge = getVaultBackupBridge();
 
   const getCloudSyncPasswordPath = () => {
     try {
@@ -513,6 +515,7 @@ const registerBridges = (win) => {
   autoUpdateBridge.registerHandlers(ipcMain);
   aiBridge.registerHandlers(ipcMain);
   crashLogBridge.registerHandlers(ipcMain);
+  vaultBackupBridge.registerHandlers(ipcMain, electronModule);
 
   // ZMODEM cancel handler
   ipcMain.on("netcatty:zmodem:cancel", (_event, payload) => {

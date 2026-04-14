@@ -20,12 +20,20 @@ import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
 import { collectSessionIds } from './domain/workspace';
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
-import { applySyncPayload } from './application/syncPayload';
+import { applySyncPayload, buildSyncPayload } from './application/syncPayload';
+import {
+  createProtectiveLocalVaultBackup,
+  ensureVersionChangeBackup,
+} from './application/localVaultBackups';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
 import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
-import { STORAGE_KEY_DEBUG_HOTKEYS } from './infrastructure/config/storageKeys';
+import {
+  STORAGE_KEY_DEBUG_HOTKEYS,
+  STORAGE_KEY_PORT_FORWARDING,
+} from './infrastructure/config/storageKeys';
+import { getEffectiveKnownHosts } from './infrastructure/syncHelpers';
 import { TopTabs } from './components/TopTabs';
 import { Button } from './components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
@@ -222,6 +230,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, [workspaceFocusStyle]);
 
   const {
+    isInitialized: isVaultInitialized,
     hosts,
     keys,
     identities,
@@ -395,6 +404,74 @@ function App({ settings }: { settings: SettingsState }) {
     [portForwardingRules],
   );
 
+  const buildCurrentSyncPayload = useCallback(() => {
+    let effectivePortForwardingRules = portForwardingRulesForSync;
+    if (effectivePortForwardingRules.length === 0) {
+      const stored = localStorageAdapter.read<typeof portForwardingRulesForSync>(
+        STORAGE_KEY_PORT_FORWARDING,
+      );
+      if (stored && Array.isArray(stored) && stored.length > 0) {
+        effectivePortForwardingRules = stored.map((rule) => ({
+          ...rule,
+          status: 'inactive' as const,
+          error: undefined,
+          lastUsedAt: undefined,
+        }));
+      }
+    }
+
+    return buildSyncPayload(
+      {
+        hosts,
+        keys,
+        identities,
+        snippets,
+        customGroups,
+        snippetPackages,
+        knownHosts: getEffectiveKnownHosts(knownHosts),
+        groupConfigs,
+      },
+      effectivePortForwardingRules,
+    );
+  }, [
+    customGroups,
+    groupConfigs,
+    hosts,
+    identities,
+    keys,
+    knownHosts,
+    portForwardingRulesForSync,
+    snippetPackages,
+    snippets,
+  ]);
+
+  const [startupSyncSafetyReady, setStartupSyncSafetyReady] = useState(false);
+
+  useEffect(() => {
+    if (!isVaultInitialized || startupSyncSafetyReady) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const info = await netcattyBridge.get()?.getAppInfo?.();
+        await ensureVersionChangeBackup(
+          buildCurrentSyncPayload(),
+          info?.version ?? null,
+        );
+      } catch (error) {
+        console.error('[App] Failed to create version-change backup:', error);
+      } finally {
+        if (!cancelled) {
+          setStartupSyncSafetyReady(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [buildCurrentSyncPayload, isVaultInitialized, startupSyncSafetyReady]);
+
   // Auto-sync hook for cloud sync
   const { syncNow: handleSyncNow, emptyVaultConflict, resolveEmptyVaultConflict } = useAutoSync({
     hosts,
@@ -407,7 +484,14 @@ function App({ settings }: { settings: SettingsState }) {
     knownHosts,
     groupConfigs,
     settingsVersion: settings.settingsVersion,
-    onApplyPayload: (payload) => {
+    startupReady: startupSyncSafetyReady,
+    onApplyPayload: async (payload) => {
+      try {
+        await createProtectiveLocalVaultBackup(buildCurrentSyncPayload());
+      } catch (error) {
+        console.error('[App] Failed to create protective local backup:', error);
+      }
+
       applySyncPayload(payload, {
         importVaultData: importDataFromString,
         importPortForwardingRules,

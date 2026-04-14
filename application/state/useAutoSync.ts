@@ -16,37 +16,11 @@ import {
   findSyncPayloadEncryptedCredentialPaths,
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
-import { collectSyncableSettings } from '../syncPayload';
+import { collectSyncableSettings, hasMeaningfulSyncData } from '../syncPayload';
 import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
 import { notify } from '../notification';
-
-/**
- * Check whether a sync payload has any meaningful user data. Covers all
- * synced entity arrays so that edge cases (e.g. user has 0 hosts but 1
- * port forwarding rule) are not mistakenly treated as "empty".
- */
-function isPayloadEffectivelyEmpty(payload: SyncPayload): boolean {
-  // Check all synced entity arrays.
-  const hasEntities =
-    (payload.hosts?.length ?? 0) > 0 ||
-    (payload.keys?.length ?? 0) > 0 ||
-    (payload.snippets?.length ?? 0) > 0 ||
-    (payload.identities?.length ?? 0) > 0 ||
-    (payload.customGroups?.length ?? 0) > 0 ||
-    (payload.snippetPackages?.length ?? 0) > 0 ||
-    (payload.portForwardingRules?.length ?? 0) > 0 ||
-    (payload.knownHosts?.length ?? 0) > 0 ||
-    (payload.groupConfigs?.length ?? 0) > 0;
-  if (hasEntities) return false;
-  // Also consider settings: if any key has a defined value, the user has
-  // customized something worth preserving.
-  if (payload.settings && Object.values(payload.settings).some((v) => v !== undefined)) {
-    return false;
-  }
-  return true;
-}
 
 interface AutoSyncConfig {
   // Data to sync
@@ -61,9 +35,10 @@ interface AutoSyncConfig {
   groupConfigs?: SyncPayload['groupConfigs'];
   /** Opaque token that changes whenever a synced setting changes. */
   settingsVersion?: number;
+  startupReady?: boolean;
 
   // Callbacks
-  onApplyPayload: (payload: SyncPayload) => void;
+  onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
 }
 
 // Get manager singleton for direct state access
@@ -221,7 +196,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // storage corruption) rather than a deliberate "delete everything".
       // We only block auto-sync — manual trigger from Settings can still
       // push if the user explicitly wants to.
-      if (isPayloadEffectivelyEmpty(payload) && trigger === 'auto') {
+      if (!hasMeaningfulSyncData(payload) && trigger === 'auto') {
         console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
         return;
       }
@@ -232,7 +207,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // state gets updated even when some providers failed
       for (const result of results.values()) {
         if (result.mergedPayload) {
-          onApplyPayload(result.mergedPayload);
+          await Promise.resolve(onApplyPayload(result.mergedPayload));
           skipNextSyncRef.current = true;
           break; // All providers share the same merged payload
         }
@@ -268,7 +243,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
     const unlocked = state.securityState === 'UNLOCKED';
     
-    if (!hasProvider || !unlocked || hasCheckedRemoteRef.current) {
+    if (!hasProvider || !unlocked || hasCheckedRemoteRef.current || config.startupReady === false) {
       return;
     }
     
@@ -282,14 +257,21 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (!connectedProvider) return;
     
     try {
-      // Load base BEFORE downloading (downloadFromProvider overwrites the base)
+      // Load base BEFORE observing the remote payload (commitRemoteInspection overwrites the base).
       const base = await manager.loadSyncBase(connectedProvider);
-      const remotePayload = await sync.downloadFromProvider(connectedProvider);
+      const inspection = await manager.inspectProviderRemote(connectedProvider);
 
-      if (remotePayload && remotePayload.syncedAt > state.localUpdatedAt) {
+      if (inspection.payload && inspection.remoteChanged && inspection.remoteFile) {
+        const remotePayload = inspection.payload;
         const localPayload = buildPayload();
-        const localIsEmpty = isPayloadEffectivelyEmpty(localPayload);
-        const remoteHasData = !isPayloadEffectivelyEmpty(remotePayload);
+        const localIsEmpty = !hasMeaningfulSyncData(localPayload);
+        const remoteHasData = hasMeaningfulSyncData(remotePayload);
+
+        await manager.commitRemoteInspection(
+          connectedProvider,
+          inspection.remoteFile,
+          remotePayload,
+        );
 
         // If local vault is empty but cloud has data, this almost certainly
         // means the user's data was lost (update, storage corruption, etc.).
@@ -308,7 +290,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           emptyVaultResolveRef.current = null;
 
           if (userAction === 'restore') {
-            config.onApplyPayload(remotePayload);
+            await Promise.resolve(config.onApplyPayload(remotePayload));
             skipNextSyncRef.current = true;
             notify.success(t('sync.autoSync.restoredMessage'), t('sync.autoSync.restoredTitle'));
           } else {
@@ -323,7 +305,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         const { mergeSyncPayloads } = await import('../../domain/syncMerge');
         const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
 
-        config.onApplyPayload(mergeResult.payload);
+        await Promise.resolve(config.onApplyPayload(mergeResult.payload));
         // Prevent the data-change effect from immediately re-uploading the
         // merged payload — the merge already incorporated both sides. The
         // next deliberate edit by the user will trigger a normal sync.
@@ -335,7 +317,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     } finally {
       remoteCheckDoneRef.current = true;
     }
-  }, [sync, config, buildPayload, t]);
+  }, [config, buildPayload, t]);
   
   // Debounced auto-sync when data changes
   useEffect(() => {
@@ -399,7 +381,12 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   
   // Check remote version on startup/unlock
   useEffect(() => {
-    if (sync.hasAnyConnectedProvider && sync.isUnlocked && !hasCheckedRemoteRef.current) {
+    if (
+      sync.hasAnyConnectedProvider &&
+      sync.isUnlocked &&
+      !hasCheckedRemoteRef.current &&
+      config.startupReady !== false
+    ) {
       // Delay check to ensure everything is loaded
       const timer = setTimeout(() => {
         checkRemoteVersion();
@@ -407,7 +394,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       
       return () => clearTimeout(timer);
     }
-  }, [sync.hasAnyConnectedProvider, sync.isUnlocked, checkRemoteVersion]);
+  }, [sync.hasAnyConnectedProvider, sync.isUnlocked, config.startupReady, checkRemoteVersion]);
   
   // Reset check flags when provider disconnects
   useEffect(() => {
