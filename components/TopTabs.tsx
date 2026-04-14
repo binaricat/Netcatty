@@ -793,9 +793,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         {/* Fixed left tabs: Vaults and SFTP */}
         <div className="flex items-end gap-0 flex-shrink-0 app-drag">
           <div
+            data-tab-id="vault"
+            data-tab-type="root"
+            data-state={isVaultActive ? 'active' : 'inactive'}
             onClick={() => onSelectTab('vault')}
             className={cn(
-              "relative h-7 px-3 rounded text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
+              "netcatty-tab relative h-7 px-3 rounded text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
             )}
             style={{
               backgroundColor: isVaultActive
@@ -822,9 +825,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </div>
           {showSftpTab && (
             <div
+              data-tab-id="sftp"
+              data-tab-type="root"
+              data-state={isSftpActive ? 'active' : 'inactive'}
               onClick={() => onSelectTab('sftp')}
               className={cn(
-                "relative h-7 px-3 rounded-none text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
+                "netcatty-tab relative h-7 px-3 rounded-none text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
               )}
               style={{
                 backgroundColor: isSftpActive
