@@ -24,6 +24,7 @@ import { applySyncPayload, buildSyncPayload } from './application/syncPayload';
 import {
   createProtectiveLocalVaultBackup,
   ensureVersionChangeBackup,
+  withRestoreBarrier,
 } from './application/localVaultBackups';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
@@ -446,6 +447,16 @@ function App({ settings }: { settings: SettingsState }) {
   ]);
 
   const [startupSyncSafetyReady, setStartupSyncSafetyReady] = useState(false);
+  // buildCurrentSyncPayload's identity changes any time the vault settles
+  // (hosts, keys, identities, ...). Keeping it in the effect deps would
+  // re-fire the startup block many times during the initial decryption burst,
+  // producing redundant IPC calls and a race where setStartupSyncSafetyReady
+  // could open the auto-sync gate using a stale snapshot (I7). We instead
+  // capture the latest builder in a ref and depend only on isVaultInitialized.
+  const buildCurrentSyncPayloadRef = useRef(buildCurrentSyncPayload);
+  useEffect(() => {
+    buildCurrentSyncPayloadRef.current = buildCurrentSyncPayload;
+  }, [buildCurrentSyncPayload]);
 
   useEffect(() => {
     if (!isVaultInitialized || startupSyncSafetyReady) return;
@@ -455,7 +466,7 @@ function App({ settings }: { settings: SettingsState }) {
       try {
         const info = await netcattyBridge.get()?.getAppInfo?.();
         await ensureVersionChangeBackup(
-          buildCurrentSyncPayload(),
+          buildCurrentSyncPayloadRef.current(),
           info?.version ?? null,
         );
       } catch (error) {
@@ -470,7 +481,7 @@ function App({ settings }: { settings: SettingsState }) {
     return () => {
       cancelled = true;
     };
-  }, [buildCurrentSyncPayload, isVaultInitialized, startupSyncSafetyReady]);
+  }, [isVaultInitialized, startupSyncSafetyReady]);
 
   // Auto-sync hook for cloud sync
   const { syncNow: handleSyncNow, emptyVaultConflict, resolveEmptyVaultConflict } = useAutoSync({
@@ -486,16 +497,32 @@ function App({ settings }: { settings: SettingsState }) {
     settingsVersion: settings.settingsVersion,
     startupReady: startupSyncSafetyReady,
     onApplyPayload: async (payload) => {
-      try {
-        await createProtectiveLocalVaultBackup(buildCurrentSyncPayload());
-      } catch (error) {
-        console.error('[App] Failed to create protective local backup:', error);
-      }
+      // Hold the cross-window restore barrier around the entire apply.
+      // useAutoSync reads this barrier on its debounce tick and skips
+      // pushing while it's held, so a Settings-window triggered cloud
+      // apply (startup merge, empty-vault restore, conflict resolution)
+      // cannot race a concurrent auto-sync push from any window. Cheap
+      // localStorage set — nested barrier calls are harmless (they just
+      // refresh the deadline).
+      await withRestoreBarrier(async () => {
+        // buildCurrentSyncPayload captures from React closures. Read the
+        // pre-apply snapshot FIRST, before applySyncPayload overwrites
+        // state — otherwise we'd back up what we just imported, which
+        // defeats the point of a protective backup. See review note in
+        // `createProtectiveLocalVaultBackup` for why the closure-vs-
+        // storage distinction matters here.
+        const preApplyPayload = buildCurrentSyncPayload();
+        try {
+          await createProtectiveLocalVaultBackup(preApplyPayload);
+        } catch (error) {
+          console.error('[App] Failed to create protective local backup:', error);
+        }
 
-      applySyncPayload(payload, {
-        importVaultData: importDataFromString,
-        importPortForwardingRules,
-        onSettingsApplied: settings.rehydrateAllFromStorage,
+        applySyncPayload(payload, {
+          importVaultData: importDataFromString,
+          importPortForwardingRules,
+          onSettingsApplied: settings.rehydrateAllFromStorage,
+        });
       });
     },
   });

@@ -43,6 +43,16 @@ export const STORAGE_KEY_AUTO_UPDATE_ENABLED = 'netcatty_auto_update_enabled_v1'
 export const STORAGE_KEY_LOCAL_VAULT_BACKUP_MAX_COUNT = 'netcatty_local_vault_backup_max_count_v1';
 export const STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION = 'netcatty_local_vault_backup_last_app_version_v1';
 
+/**
+ * Cross-window barrier: set while a local vault restore is applying so
+ * auto-sync in another window doesn't upload a pre-restore snapshot
+ * concurrently. The value is an epoch-ms deadline — auto-sync treats any
+ * value in the future as "restore in progress" and any value in the past
+ * as a stale lock that can be ignored. See useAutoSync and
+ * CloudSyncSettings for readers/writers.
+ */
+export const STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL = 'netcatty_vault_restore_in_progress_until_v1';
+
 // SFTP File Opener Associations
 export const STORAGE_KEY_SFTP_FILE_ASSOCIATIONS = 'netcatty_sftp_file_associations_v1';
 export const STORAGE_KEY_SFTP_DEFAULT_OPENER = 'netcatty_sftp_default_opener_v1';

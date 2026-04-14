@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
 import { useLocalVaultBackups } from '../application/state/useLocalVaultBackups';
+import { withRestoreBarrier } from '../application/localVaultBackups';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
     findSyncPayloadEncryptedCredentialPaths,
@@ -636,14 +637,25 @@ interface SyncDashboardProps {
 
 interface LocalBackupsPanelProps {
     onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
+    /**
+     * When true, the panel hides the Restore button entirely — e.g. while the
+     * master key has not been configured yet, a restore would land credentials
+     * on disk in plaintext (I3). Listing is still allowed so users can see that
+     * their history exists.
+     */
+    restoreDisabledReason?: 'no-master-key' | null;
 }
 
-const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload }) => {
+const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
+    onApplyPayload,
+    restoreDisabledReason = null,
+}) => {
     const { t, resolvedLocale } = useI18n();
     const {
         backups,
         isLoading,
         maxBackups,
+        encryptionAvailable,
         refreshBackups,
         readBackup,
         setMaxBackups,
@@ -652,6 +664,11 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
     const [maxBackupsInput, setMaxBackupsInput] = useState(String(maxBackups));
     const [isSavingMaxBackups, setIsSavingMaxBackups] = useState(false);
     const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+    // Backup chosen in the list but not yet confirmed. A two-step flow keeps
+    // users from wiping their vault with a single accidental click (I2).
+    const [pendingRestoreBackup, setPendingRestoreBackup] = useState<
+        (typeof backups)[number] | null
+    >(null);
 
     useEffect(() => {
         setMaxBackupsInput(String(maxBackups));
@@ -692,14 +709,21 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
         }
     };
 
-    const handleRestoreBackup = async (backupId: string) => {
+    const performRestore = async (backupId: string) => {
         setRestoringBackupId(backupId);
         try {
-            const detail = await readBackup(backupId);
-            if (!detail) {
-                throw new Error(t('cloudSync.localBackups.restoreMissing'));
-            }
-            await Promise.resolve(onApplyPayload(detail.payload));
+            // Hold the cross-window restore barrier around both the load
+            // and the apply so another window's auto-sync cannot push a
+            // pre-restore snapshot concurrently. See `withRestoreBarrier`
+            // in application/localVaultBackups.ts for the read-side in
+            // useAutoSync.
+            await withRestoreBarrier(async () => {
+                const detail = await readBackup(backupId);
+                if (!detail) {
+                    throw new Error(t('cloudSync.localBackups.restoreMissing'));
+                }
+                await Promise.resolve(onApplyPayload(detail.payload));
+            });
             await refreshBackups();
             toast.success(t('cloudSync.localBackups.restoreSuccess'));
         } catch (error) {
@@ -711,6 +735,32 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
             setRestoringBackupId(null);
         }
     };
+
+    const restoreAllowed = restoreDisabledReason === null;
+    // While encryptionAvailable is still `null` we're mid-probe — render the
+    // restore button as disabled so the user never sees a path they can't
+    // actually take (I1 surface). Once resolved, `false` hides the panel body
+    // via the unavailable banner below.
+    const encryptionResolved = encryptionAvailable !== null;
+    const encryptionUsable = encryptionAvailable === true;
+
+    // safeStorage probe finished and returned "not available" → disable the
+    // panel entirely; the main process refuses to write in this state (I1).
+    if (encryptionResolved && !encryptionUsable) {
+        return (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                    <AlertTriangle size={16} />
+                    <span className="text-sm font-medium">
+                        {t('cloudSync.localBackups.unavailableTitle')}
+                    </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                    {t('cloudSync.localBackups.unavailableDesc')}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-4">
@@ -745,6 +795,18 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
                     </div>
                 </div>
             </div>
+
+            {!restoreAllowed && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-1">
+                        <AlertTriangle size={14} />
+                        <span className="font-medium">
+                            {t('cloudSync.localBackups.lockedTitle')}
+                        </span>
+                    </div>
+                    {t('cloudSync.localBackups.lockedDesc')}
+                </div>
+            )}
 
             <div className="rounded-lg border bg-card p-4 space-y-4">
                 <div className="flex items-start justify-between gap-3">
@@ -813,25 +875,95 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
                                         })}
                                     </div>
                                 </div>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => void handleRestoreBackup(backup.id)}
-                                    disabled={restoringBackupId === backup.id}
-                                    className="gap-2"
-                                >
-                                    {restoringBackupId === backup.id ? (
-                                        <Loader2 size={14} className="animate-spin" />
-                                    ) : (
-                                        <Download size={14} />
-                                    )}
-                                    {t('cloudSync.localBackups.restore')}
-                                </Button>
+                                {restoreAllowed && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setPendingRestoreBackup(backup)}
+                                        disabled={restoringBackupId === backup.id}
+                                        className="gap-2"
+                                    >
+                                        {restoringBackupId === backup.id ? (
+                                            <Loader2 size={14} className="animate-spin" />
+                                        ) : (
+                                            <Download size={14} />
+                                        )}
+                                        {t('cloudSync.localBackups.restore')}
+                                    </Button>
+                                )}
                             </div>
                         ))}
                     </div>
                 )}
             </div>
+
+            {/* Restore confirmation dialog (I2). Keeps the destructive action
+                gated behind an explicit second click, mirroring the clear-local
+                dialog elsewhere in this screen. */}
+            <Dialog
+                open={pendingRestoreBackup !== null}
+                onOpenChange={(open) => {
+                    if (!open) setPendingRestoreBackup(null);
+                }}
+            >
+                <DialogContent className="sm:max-w-[440px] z-[70]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-destructive">
+                            <AlertTriangle size={20} />
+                            {t('cloudSync.localBackups.restoreConfirmTitle')}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {t('cloudSync.localBackups.restoreConfirmDesc')}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {pendingRestoreBackup && (
+                        <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium">
+                                    {getReasonLabel(pendingRestoreBackup.reason)}
+                                </span>
+                                <span className="text-muted-foreground">
+                                    {formatTimestamp(pendingRestoreBackup.createdAt)}
+                                </span>
+                            </div>
+                            <div className="text-muted-foreground">
+                                {t('cloudSync.localBackups.counts', {
+                                    hosts: String(pendingRestoreBackup.preview.hostCount),
+                                    keys: String(pendingRestoreBackup.preview.keyCount),
+                                    snippets: String(pendingRestoreBackup.preview.snippetCount),
+                                })}
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            variant="outline"
+                            onClick={() => setPendingRestoreBackup(null)}
+                            disabled={restoringBackupId !== null}
+                        >
+                            {t('cloudSync.localBackups.restoreConfirmCancel')}
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={async () => {
+                                const target = pendingRestoreBackup;
+                                if (!target) return;
+                                setPendingRestoreBackup(null);
+                                await performRestore(target.id);
+                            }}
+                            disabled={restoringBackupId !== null}
+                            className="gap-2"
+                        >
+                            {restoringBackupId !== null ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <Download size={14} />
+                            )}
+                            {t('cloudSync.localBackups.restoreConfirmButton')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };
@@ -1234,7 +1366,12 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         try {
             const payload = await sync.resolveConflict(resolution);
             if (payload && resolution === 'USE_REMOTE') {
-                await Promise.resolve(onApplyPayload(payload));
+                // USE_REMOTE applies cloud data over local — same data-loss
+                // shape as a local backup restore, so gate auto-sync in
+                // every other window the same way.
+                await withRestoreBarrier(async () => {
+                    await Promise.resolve(onApplyPayload(payload));
+                });
                 toast.success(t('cloudSync.resolve.downloaded'));
             } else if (resolution === 'USE_LOCAL') {
                 // Re-sync with local data
@@ -1300,7 +1437,12 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
     const handleRestoreRevision = async () => {
         if (!historyPreview) return;
-        await Promise.resolve(onApplyPayload(historyPreview.payload));
+        // Gist revision restore is a destructive "replace local with cloud
+        // snapshot" op — same shape as a local backup restore, same
+        // cross-window race to block.
+        await withRestoreBarrier(async () => {
+            await Promise.resolve(onApplyPayload(historyPreview.payload));
+        });
         toast.success(t('cloudSync.revisionHistory.restored'));
         setShowHistoryModal(false);
         setHistoryPreview(null);
@@ -2176,7 +2318,14 @@ export const CloudSyncSettings: React.FC<CloudSyncSettingsProps> = (props) => {
         return (
             <div className="space-y-6">
                 <GatekeeperScreen onSetupComplete={() => { }} />
-                <LocalBackupsPanel onApplyPayload={props.onApplyPayload} />
+                {/* The master key is not configured yet. Expose the backup
+                    history for diagnostic purposes but refuse restores: the
+                    vault encryption layer can't re-protect the restored
+                    credentials until the user finishes master-key setup (I3). */}
+                <LocalBackupsPanel
+                    onApplyPayload={props.onApplyPayload}
+                    restoreDisabledReason="no-master-key"
+                />
             </div>
         );
     }

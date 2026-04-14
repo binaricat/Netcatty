@@ -6,6 +6,9 @@ const path = require("node:path");
 
 const {
   BACKUP_DIR_NAME,
+  MAX_PAYLOAD_BYTES,
+  VaultBackupEncryptionUnavailableError,
+  VaultBackupTooLargeError,
   createVaultBackupService,
 } = require("./vaultBackupBridge.cjs");
 
@@ -13,7 +16,10 @@ function createTempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-vault-backup-"));
 }
 
-function createService(rootDir, { encrypted = false } = {}) {
+// All tests default to encrypted=true because the bridge now refuses to
+// write plaintext backups (I1). Individual tests opt out to verify the
+// refusal path.
+function createService(rootDir, { encrypted = true } = {}) {
   const app = {
     getPath(key) {
       if (key !== "userData") throw new Error(`Unexpected path key: ${key}`);
@@ -50,17 +56,34 @@ function createService(rootDir, { encrypted = false } = {}) {
   });
 }
 
-test("vault backups round-trip and dedupe identical payloads", async () => {
-  const rootDir = createTempRoot();
-  const service = createService(rootDir);
-  const payload = {
-    hosts: [{ id: "h1", label: "prod", hostname: "prod", username: "root", port: 22, os: "linux", group: "", tags: [], protocol: "ssh" }],
+function samplePayload(overrides = {}) {
+  return {
+    hosts: [
+      {
+        id: "h1",
+        label: "prod",
+        hostname: "prod",
+        username: "root",
+        port: 22,
+        os: "linux",
+        group: "",
+        tags: [],
+        protocol: "ssh",
+      },
+    ],
     keys: [],
     identities: [],
     snippets: [],
     customGroups: [],
     syncedAt: Date.now(),
+    ...overrides,
   };
+}
+
+test("vault backups round-trip and dedupe identical payloads", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+  const payload = samplePayload();
 
   try {
     const first = await service.createBackup({
@@ -123,6 +146,388 @@ test("vault backups honor retention trimming and can use encrypted payload stora
     const newest = listed[0];
     const restored = await service.readBackup({ id: newest.id });
     assert.equal(restored.payload.hosts[0].id, "h2");
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// I1 — plaintext refusal when safeStorage is unavailable
+// ============================================================================
+
+test("createBackup refuses when safeStorage is unavailable (I1)", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir, { encrypted: false });
+
+  try {
+    await assert.rejects(
+      () => service.createBackup({ payload: samplePayload() }),
+      (err) => {
+        assert.ok(err instanceof VaultBackupEncryptionUnavailableError);
+        assert.equal(err.code, "VAULT_BACKUP_ENCRYPTION_UNAVAILABLE");
+        return true;
+      },
+    );
+
+    // Critical: nothing should have been written to disk. Earlier versions
+    // silently wrote a plain-json-v1 record here, leaking plaintext
+    // credentials (see review I1).
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const files = fs.existsSync(backupDir)
+      ? fs.readdirSync(backupDir).filter((name) => name.endsWith(".json"))
+      : [];
+    assert.equal(files.length, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("isEncryptionAvailable reports safeStorage state accurately", () => {
+  const rootDir = createTempRoot();
+  try {
+    assert.equal(createService(rootDir, { encrypted: true }).isEncryptionAvailable(), true);
+    assert.equal(createService(rootDir, { encrypted: false }).isEncryptionAvailable(), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// Atomic writes and listBackups resilience
+// ============================================================================
+
+test("listBackups ignores .tmp files left by an interrupted write", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    await service.createBackup({ payload: samplePayload() });
+
+    // Simulate a crash mid-write: drop a dangling .tmp file matching the
+    // backup naming convention but with the atomic-write suffix.
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const tmpPath = path.join(
+      backupDir,
+      `vault-backup-${Date.now()}-abc.json.tmp-deadbeef`,
+    );
+    fs.writeFileSync(tmpPath, "{ half written", { mode: 0o600 });
+
+    const listed = await service.listBackups();
+    // The legitimate backup is still there; the .tmp file is ignored
+    // because it does not end in ".json".
+    assert.equal(listed.length, 1);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("listBackups tolerates a corrupted backup file by skipping it", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const ok = await service.createBackup({ payload: samplePayload() });
+    assert.ok(ok.created);
+
+    // Drop a syntactically-invalid backup alongside the real one.
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const bogusPath = path.join(backupDir, `vault-backup-${Date.now() + 1}-bad.json`);
+    fs.writeFileSync(bogusPath, "{ this is not json", { mode: 0o600 });
+
+    // Must not throw — the bad file is logged-and-skipped.
+    const listed = await service.listBackups();
+    assert.equal(listed.length, 1, "corrupted file should be skipped, valid remains");
+    assert.equal(listed[0].id, ok.backup.id);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// Legacy plain-json-v1 migration path
+// ============================================================================
+
+test("readBackup can still read legacy plain-json-v1 records for migration", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+  const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+
+  try {
+    // Hand-craft a legacy record that would have been produced by the
+    // pre-I1 code path. Users on that build must still be able to read
+    // and migrate off of these files.
+    const createdAt = Date.now();
+    const id = "legacy-record-id";
+    const payload = samplePayload();
+    const record = {
+      formatVersion: 1,
+      id,
+      createdAt,
+      reason: "before_restore",
+      fingerprint: "legacy",
+      preview: {
+        hostCount: 1,
+        keyCount: 0,
+        snippetCount: 0,
+        identityCount: 0,
+        portForwardingRuleCount: 0,
+      },
+      payloadEncoding: "plain-json-v1",
+      payloadData: JSON.stringify(payload),
+    };
+    fs.writeFileSync(
+      path.join(backupDir, `vault-backup-${createdAt}-${id}.json`),
+      JSON.stringify(record, null, 2),
+      { mode: 0o600 },
+    );
+
+    const restored = await service.readBackup({ id });
+    assert.equal(restored.payload.hosts[0].id, "h1");
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("readBackup throws a clear error for unknown payloadEncoding", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+  const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+
+  try {
+    const record = {
+      formatVersion: 1,
+      id: "future-record",
+      createdAt: Date.now(),
+      reason: "before_restore",
+      fingerprint: "future",
+      preview: { hostCount: 0, keyCount: 0, snippetCount: 0, identityCount: 0, portForwardingRuleCount: 0 },
+      payloadEncoding: "future-algo-v9",
+      payloadData: "unreadable",
+    };
+    fs.writeFileSync(
+      path.join(backupDir, `vault-backup-${record.createdAt}-future.json`),
+      JSON.stringify(record),
+      { mode: 0o600 },
+    );
+
+    await assert.rejects(
+      () => service.readBackup({ id: "future-record" }),
+      /Unsupported vault backup encoding/,
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// Hash normalization (I8)
+// ============================================================================
+
+// ============================================================================
+// Input validation (review Important #4)
+// ============================================================================
+
+test("createBackup rejects a payload larger than MAX_PAYLOAD_BYTES", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    // Build a payload whose JSON serialization exceeds the cap. A single
+    // large string field is the cheapest way to push past the limit without
+    // an actual 25MB in-memory blob per field.
+    const giant = "x".repeat(MAX_PAYLOAD_BYTES + 1);
+    const oversized = samplePayload({ __bloat: giant });
+
+    await assert.rejects(
+      () => service.createBackup({ payload: oversized }),
+      (err) => {
+        assert.ok(err instanceof VaultBackupTooLargeError);
+        assert.equal(err.code, "VAULT_BACKUP_TOO_LARGE");
+        return true;
+      },
+    );
+
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const files = fs.existsSync(backupDir)
+      ? fs.readdirSync(backupDir).filter((name) => name.endsWith(".json"))
+      : [];
+    assert.equal(files.length, 0, "oversized payload must not land on disk");
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup normalizes an out-of-range reason to 'before_restore'", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const first = await service.createBackup({
+      payload: samplePayload(),
+      reason: "__INJECTED__\r\nlog-spoofed",
+    });
+    assert.equal(first.created, true);
+    assert.equal(
+      first.backup.reason,
+      "before_restore",
+      "unknown reason must fall back to the safe enum default",
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup strips version strings with control chars or weird punctuation", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const result = await service.createBackup({
+      payload: samplePayload(),
+      reason: "app_version_change",
+      sourceAppVersion: "1.0.0\nrm -rf /",
+      targetAppVersion: "   ",
+    });
+    assert.equal(result.created, true);
+    assert.equal(result.backup.sourceAppVersion, undefined);
+    assert.equal(result.backup.targetAppVersion, undefined);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup accepts a legitimate SemVer-ish version string", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const result = await service.createBackup({
+      payload: samplePayload(),
+      reason: "app_version_change",
+      sourceAppVersion: "1.0.89",
+      targetAppVersion: "2.0.0-rc.1",
+    });
+    assert.equal(result.created, true);
+    assert.equal(result.backup.sourceAppVersion, "1.0.89");
+    assert.equal(result.backup.targetAppVersion, "2.0.0-rc.1");
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup rejects an array payload (not an object)", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    await assert.rejects(
+      () => service.createBackup({ payload: [] }),
+      /Missing vault backup payload/,
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("trimBackups clamps out-of-range maxCount instead of silently defaulting", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    // Seed several backups.
+    for (let i = 0; i < 3; i += 1) {
+      await service.createBackup({
+        payload: samplePayload({ hosts: [{ id: `h${i}`, label: `h${i}`, hostname: `h${i}`, username: "u", port: 22, os: "linux", group: "", tags: [], protocol: "ssh" }] }),
+      });
+    }
+
+    // maxCount = 0 is out of range → clamped to DEFAULT (20), nothing deleted.
+    const zeroResult = await service.trimBackups({ maxCount: 0 });
+    assert.equal(zeroResult.deletedCount, 0);
+    assert.equal((await service.listBackups()).length, 3);
+
+    // maxCount = 200 clamps to 100, no-op on a 3-entry set.
+    const hugeResult = await service.trimBackups({ maxCount: 200 });
+    assert.equal(hugeResult.deletedCount, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// Concurrency (review Important #5)
+// ============================================================================
+
+test("concurrent createBackup calls with identical payloads dedupe via the mutex", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+  const payload = samplePayload();
+
+  try {
+    // Fire N parallel requests with the same payload. Without the mutex,
+    // each call would observe an empty directory in its own tick, skip
+    // dedupe, and write a distinct file. With the mutex, the first call
+    // writes and each subsequent call observes the previous write and
+    // dedupes.
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        service.createBackup({ payload, reason: "before_restore" }),
+      ),
+    );
+
+    const created = results.filter((r) => r.created);
+    const deduped = results.filter((r) => !r.created);
+    assert.equal(created.length, 1, "exactly one concurrent call should create a new backup");
+    assert.equal(deduped.length, 4);
+    // All results point at the same id — the first one's.
+    const canonicalId = created[0].backup.id;
+    for (const r of deduped) {
+      assert.equal(r.backup.id, canonicalId);
+    }
+
+    // Disk state confirms only one file landed.
+    const listed = await service.listBackups();
+    assert.equal(listed.length, 1);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("a failing createBackup does not poison the mutex for subsequent calls", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    // First call rejects (invalid payload).
+    await assert.rejects(
+      () => service.createBackup({ payload: null }),
+      /Missing vault backup payload/,
+    );
+
+    // Next call must still succeed — the mutex chain kept moving.
+    const ok = await service.createBackup({ payload: samplePayload() });
+    assert.equal(ok.created, true);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("fingerprint is stable when top-level syncedAt drifts", async () => {
+  // The bridge zeros top-level syncedAt inside normalizePayloadForHash
+  // so semantically-equal payloads dedupe. This guards the dedupe path
+  // the createBackup test already covers, from the reverse direction.
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const base = samplePayload({ syncedAt: 0 });
+    const first = await service.createBackup({ payload: { ...base, syncedAt: 1 } });
+    const second = await service.createBackup({ payload: { ...base, syncedAt: 9_999_999 } });
+    assert.equal(first.created, true);
+    assert.equal(second.created, false, "differs only by top-level syncedAt → dedupe");
+    assert.equal(second.backup.id, first.backup.id);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

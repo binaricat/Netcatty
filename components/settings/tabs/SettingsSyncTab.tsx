@@ -2,7 +2,10 @@ import React, { useCallback } from "react";
 import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
 import { buildSyncPayload, applySyncPayload } from "../../../application/syncPayload";
-import { createProtectiveLocalVaultBackup } from "../../../application/localVaultBackups";
+import {
+  createProtectiveLocalVaultBackup,
+  withRestoreBarrier,
+} from "../../../application/localVaultBackups";
 import type { SyncableVaultData } from "../../../application/syncPayload";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
@@ -56,16 +59,32 @@ export default function SettingsSyncTab(props: {
 
   const onApplyPayload = useCallback(
     async (payload: SyncPayload) => {
-      try {
-        await createProtectiveLocalVaultBackup(onBuildPayload());
-      } catch (error) {
-        console.error("[SettingsSyncTab] Failed to create protective backup:", error);
-      }
+      // Callers from inside CloudSyncSettings already wrap destructive
+      // ops (local-backup restore, conflict USE_REMOTE, Gist revision
+      // restore) with `withRestoreBarrier`. This `onApplyPayload` is
+      // also invoked by the same flows. Re-wrapping here is a
+      // defense-in-depth: the barrier write is a cheap localStorage set
+      // and nested calls just refresh the deadline, never race each
+      // other. If no caller has set the barrier (e.g. future callers we
+      // haven't converted yet), this guarantees it's held for the whole
+      // apply window.
+      await withRestoreBarrier(async () => {
+        // Snapshot the payload BEFORE mutating local state so the
+        // protective backup reflects what's being replaced. onBuildPayload
+        // captures from React closures, so we call it once up-front
+        // rather than after the apply has already overwritten storage.
+        const pre = onBuildPayload();
+        try {
+          await createProtectiveLocalVaultBackup(pre);
+        } catch (error) {
+          console.error("[SettingsSyncTab] Failed to create protective backup:", error);
+        }
 
-      applySyncPayload(payload, {
-        importVaultData: importDataFromString,
-        importPortForwardingRules,
-        onSettingsApplied,
+        applySyncPayload(payload, {
+          importVaultData: importDataFromString,
+          importPortForwardingRules,
+          onSettingsApplied,
+        });
       });
     },
     [importDataFromString, importPortForwardingRules, onBuildPayload, onSettingsApplied],

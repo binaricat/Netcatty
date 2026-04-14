@@ -512,6 +512,7 @@ declare global {
 
     // App info (name/version/platform) for About screens
     getAppInfo?(): Promise<{ name: string; version: string; platform: string }>;
+    getVaultBackupCapabilities?(): Promise<{ encryptionAvailable: boolean }>;
     createVaultBackup?(payload: {
       payload: import('./domain/sync').SyncPayload;
       reason: 'app_version_change' | 'before_restore';

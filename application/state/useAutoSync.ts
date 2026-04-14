@@ -17,7 +17,10 @@ import {
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
 import { collectSyncableSettings, hasMeaningfulSyncData } from '../syncPayload';
-import { STORAGE_KEY_PORT_FORWARDING } from '../../infrastructure/config/storageKeys';
+import {
+  STORAGE_KEY_PORT_FORWARDING,
+  STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
+} from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
 import { notify } from '../notification';
@@ -45,6 +48,14 @@ interface AutoSyncConfig {
 const manager = getCloudSyncManager();
 const AUTO_SYNC_PROVIDER_ORDER: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
 
+// Cross-window restore barrier: stored as an epoch-ms deadline. Any value
+// in the future means a restore is applying in some window and auto-sync
+// must not push concurrently.
+const isRestoreInProgress = (): boolean => {
+  const raw = localStorageAdapter.readNumber(STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL);
+  return typeof raw === 'number' && raw > Date.now();
+};
+
 type SyncTrigger = 'auto' | 'manual';
 
 interface SyncNowOptions {
@@ -66,6 +77,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const isInitializedRef = useRef(false);
   const isSyncRunningRef = useRef(false);
   const skipNextSyncRef = useRef(false);
+  // Held so checkRemoteVersion (defined below syncNow) can kick off a
+  // round-trip upload AFTER a startup three-way merge, without taking
+  // `syncNow` as a useCallback dep (which would rebuild the callback on
+  // every state change).
+  const syncNowRef = useRef<((options?: SyncNowOptions) => Promise<void>) | null>(null);
 
   // State for the empty-vault-vs-cloud confirmation dialog (Fix D).
   // When checkRemoteVersion detects that the local vault is empty but
@@ -165,6 +181,26 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.autoSync.alreadySyncing'));
       }
 
+      // Cross-window guard: another window may be in the middle of
+      // applying a local vault restore. If we push right now we'd upload
+      // the pre-restore snapshot (the main window's React state hasn't
+      // observed the localStorage writes yet), clobbering the just-
+      // restored cloud copy. Skip silently on auto triggers and fail
+      // loudly on manual ones so the user understands why their click
+      // did nothing.
+      //
+      // Pairs with `withRestoreBarrier` in application/localVaultBackups.ts
+      // (the writer) and with the matching early-return in the
+      // debounced-sync effect below (the other reader, which prevents
+      // scheduling a push while the barrier is held).
+      if (isRestoreInProgress()) {
+        if (trigger === 'auto') {
+          console.info('[AutoSync] Skipping: a vault restore is in progress in another window.');
+          return;
+        }
+        throw new Error(t('sync.autoSync.restoreInProgress'));
+      }
+
       // If another window unlocked, reuse the in-memory session password from main process.
       if (state.securityState !== 'UNLOCKED') {
         const bridge = netcattyBridge.get();
@@ -196,6 +232,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // storage corruption) rather than a deliberate "delete everything".
       // We only block auto-sync — manual trigger from Settings can still
       // push if the user explicitly wants to.
+      //
+      // This pairs with the inspect-failure "fail open" behavior in
+      // checkRemoteVersion below: if inspect transiently errors we still
+      // let auto-sync run, trusting this guard to refuse if local is
+      // truly empty rather than letting an empty state clobber remote.
       if (!hasMeaningfulSyncData(payload) && trigger === 'auto') {
         console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
         return;
@@ -236,85 +277,140 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       isSyncRunningRef.current = false;
     }
   }, [sync, buildPayload, getDataHash, onApplyPayload, t]);
+
+  // Keep the ref in sync with the latest syncNow so non-callback code
+  // paths (e.g. the startup-merge deferred round-trip below) can invoke
+  // the current closure without participating in the callback's dep
+  // chain.
+  useEffect(() => {
+    syncNowRef.current = syncNow;
+  }, [syncNow]);
   
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {
     const state = manager.getState();
     const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
     const unlocked = state.securityState === 'UNLOCKED';
-    
+
     if (!hasProvider || !unlocked || hasCheckedRemoteRef.current || config.startupReady === false) {
       return;
     }
-    
-    hasCheckedRemoteRef.current = true;
-    
+
     // Find connected provider
     const connectedProvider = AUTO_SYNC_PROVIDER_ORDER.find((provider) =>
       isProviderReadyForSync(state.providers[provider]),
     ) ?? null;
-    
-    if (!connectedProvider) return;
-    
+
+    if (!connectedProvider) {
+      // Nothing to check — mark as done so the auto-sync gate opens.
+      remoteCheckDoneRef.current = true;
+      return;
+    }
+
+    // Track whether the startup path completed in a state where the anchor/base
+    // are consistent with the local vault. Only then should we latch
+    // hasCheckedRemoteRef so that transient failures are retryable.
+    let startupConsistent = false;
     try {
       // Load base BEFORE observing the remote payload (commitRemoteInspection overwrites the base).
       const base = await manager.loadSyncBase(connectedProvider);
       const inspection = await manager.inspectProviderRemote(connectedProvider);
 
-      if (inspection.payload && inspection.remoteChanged && inspection.remoteFile) {
-        const remotePayload = inspection.payload;
-        const localPayload = buildPayload();
-        const localIsEmpty = !hasMeaningfulSyncData(localPayload);
-        const remoteHasData = hasMeaningfulSyncData(remotePayload);
+      if (!inspection.payload || !inspection.remoteChanged || !inspection.remoteFile) {
+        // Remote unchanged (or empty) — no local mutation needed; anchor/base
+        // are already in sync with remote from a previous run.
+        startupConsistent = true;
+        return;
+      }
 
-        await manager.commitRemoteInspection(
-          connectedProvider,
-          inspection.remoteFile,
-          remotePayload,
-        );
+      const remoteFile = inspection.remoteFile;
+      const remotePayload = inspection.payload;
+      const localPayload = buildPayload();
+      const localIsEmpty = !hasMeaningfulSyncData(localPayload);
+      const remoteHasData = hasMeaningfulSyncData(remotePayload);
 
-        // If local vault is empty but cloud has data, this almost certainly
-        // means the user's data was lost (update, storage corruption, etc.).
-        // Pause and ask the user what to do instead of silently merging.
-        if (localIsEmpty && remoteHasData) {
-          const userAction = await new Promise<'restore' | 'keep-empty'>((resolve) => {
-            emptyVaultResolveRef.current = resolve;
-            setEmptyVaultConflict({
-              remotePayload,
-              hostCount: remotePayload.hosts?.length ?? 0,
-              keyCount: remotePayload.keys?.length ?? 0,
-              snippetCount: remotePayload.snippets?.length ?? 0,
-            });
+      // If local vault is empty but cloud has data, this almost certainly
+      // means the user's data was lost (update, storage corruption, etc.).
+      // Pause and ask the user what to do instead of silently merging.
+      if (localIsEmpty && remoteHasData) {
+        const userAction = await new Promise<'restore' | 'keep-empty'>((resolve) => {
+          emptyVaultResolveRef.current = resolve;
+          setEmptyVaultConflict({
+            remotePayload,
+            hostCount: remotePayload.hosts?.length ?? 0,
+            keyCount: remotePayload.keys?.length ?? 0,
+            snippetCount: remotePayload.snippets?.length ?? 0,
           });
-          setEmptyVaultConflict(null);
-          emptyVaultResolveRef.current = null;
+        });
+        setEmptyVaultConflict(null);
+        emptyVaultResolveRef.current = null;
 
-          if (userAction === 'restore') {
-            await Promise.resolve(config.onApplyPayload(remotePayload));
-            skipNextSyncRef.current = true;
-            notify.success(t('sync.autoSync.restoredMessage'), t('sync.autoSync.restoredTitle'));
-          } else {
-            // User chose to keep the empty vault. Don't apply remote data.
-            // The next auto-sync will eventually push the empty state if
-            // the user makes another edit.
-            notify.info(t('sync.autoSync.keptLocalMessage'), t('sync.autoSync.keptLocalTitle'));
-          }
-          return;
+        if (userAction === 'restore') {
+          // Apply remote FIRST; only commit anchor/base after the UI-side
+          // state has accepted the remote payload, otherwise a failure
+          // between commit and apply would leave the anchor pointing at
+          // remote while local is still empty — the exact overwrite window
+          // we're trying to close.
+          await Promise.resolve(config.onApplyPayload(remotePayload));
+          await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload);
+          skipNextSyncRef.current = true;
+          startupConsistent = true;
+          notify.success(t('sync.autoSync.restoredMessage'), t('sync.autoSync.restoredTitle'));
+        } else {
+          // User chose to keep the empty vault. Deliberately do NOT advance
+          // the anchor or base — the next sync must still treat remote as
+          // "unseen" so the empty-vault-push guard (`hasMeaningfulSyncData`)
+          // keeps protecting the cloud copy. startupConsistent stays false
+          // so hasCheckedRemoteRef is not latched and the next startup will
+          // re-prompt if the user still has not added anything.
+          notify.info(t('sync.autoSync.keptLocalMessage'), t('sync.autoSync.keptLocalTitle'));
         }
+        return;
+      }
 
-        const { mergeSyncPayloads } = await import('../../domain/syncMerge');
-        const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
+      const { mergeSyncPayloads } = await import('../../domain/syncMerge');
+      const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
 
-        await Promise.resolve(config.onApplyPayload(mergeResult.payload));
-        // Prevent the data-change effect from immediately re-uploading the
-        // merged payload — the merge already incorporated both sides. The
-        // next deliberate edit by the user will trigger a normal sync.
-        skipNextSyncRef.current = true;
-        notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
+      // Apply merged payload to local state BEFORE committing. If the apply
+      // throws, the next startup will re-run the merge with fresh data.
+      await Promise.resolve(config.onApplyPayload(mergeResult.payload));
+      // Base is the last-agreed remote snapshot; `commitRemoteInspection`
+      // stores remotePayload as the base so the next diff is computed
+      // against what the cloud actually has, not against the merged
+      // local-only state.
+      await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload);
+      startupConsistent = true;
+      notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
+
+      // If the three-way merge introduced any local-only additions that the
+      // remote does not yet have, we MUST round-trip those to the cloud.
+      // Previously this branch set `skipNextSyncRef = true` and stopped, so
+      // the merged-in additions lived only on the device that ran the merge
+      // until the user's next edit. Now we kick off a sync right after the
+      // commit so both sides converge within the same session.
+      //
+      // Done via setTimeout(0) so the onApplyPayload-induced React state
+      // flush completes its commit phase before syncNow captures a payload
+      // snapshot. Without this deferral, buildPayload would read the pre-
+      // merge state and upload the stale data.
+      if (mergeResult.payload) {
+        setTimeout(() => {
+          // `syncNow` is safe to call even when state seems clean — its
+          // own hasMeaningfulSyncData guard and isSyncing interlock prevent
+          // spurious uploads. Any failure here is logged inside syncNow.
+          void syncNowRef.current?.({ trigger: 'auto' });
+        }, 0);
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);
+      // Leave hasCheckedRemoteRef=false so the next startup (or the next
+      // provider/unlock transition) can retry.
     } finally {
+      if (startupConsistent) {
+        hasCheckedRemoteRef.current = true;
+      }
+      // Always open the auto-sync gate; otherwise a transient inspect
+      // failure would permanently disable background sync until restart.
       remoteCheckDoneRef.current = true;
     }
   }, [config, buildPayload, t]);
@@ -361,6 +457,14 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     if (sync.isSyncing || isSyncRunningRef.current) {
       return;
     }
+
+    // Hold off on scheduling a new push while another window is applying
+    // a restore — the restore is about to land via localStorage and the
+    // debounce-fired syncNow would otherwise race it. The next data-
+    // change tick after the restore barrier clears will re-enter here.
+    if (isRestoreInProgress()) {
+      return;
+    }
     
     // Clear existing timeout
     if (syncTimeoutRef.current) {
@@ -387,12 +491,12 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       !hasCheckedRemoteRef.current &&
       config.startupReady !== false
     ) {
-      // Delay check to ensure everything is loaded
-      const timer = setTimeout(() => {
-        checkRemoteVersion();
-      }, 1000);
-      
-      return () => clearTimeout(timer);
+      // `startupReady` is the explicit readiness signal the parent feeds
+      // in once the version-change backup has finished; it's a strictly
+      // stronger gate than the 1s timer this code used to carry, and
+      // removing the timer also removes the window where a user could
+      // see the "syncing" affordance without any actual work queued.
+      void checkRemoteVersion();
     }
   }, [sync.hasAnyConnectedProvider, sync.isUnlocked, config.startupReady, checkRemoteVersion]);
   

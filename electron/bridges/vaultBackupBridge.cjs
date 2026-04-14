@@ -6,27 +6,54 @@ const BACKUP_DIR_NAME = "vault-backups";
 const BACKUP_FILE_PREFIX = "vault-backup-";
 const BACKUP_FILE_EXT = ".json";
 
+// The renderer is the untrusted input boundary for this bridge, so every
+// piece of user-controlled data is validated before it reaches disk or
+// propagates back into the UI. Keep these limits in sync with the
+// renderer's `sanitizeLocalVaultBackupMaxCount` constants.
+const MIN_MAX_COUNT = 1;
+const MAX_MAX_COUNT = 100;
+const DEFAULT_MAX_COUNT = 20;
+// 25 MiB — two orders of magnitude above any realistic vault. A payload
+// exceeding this is either a runaway test harness or a misbehaving/compromised
+// renderer; refusing here prevents disk-fill DoS. The vault proper is capped
+// at a much smaller size elsewhere in the app, so legitimate users never hit
+// this limit.
+const MAX_PAYLOAD_BYTES = 25 * 1024 * 1024;
+const ALLOWED_REASONS = new Set(["app_version_change", "before_restore"]);
+// Version strings are persisted and surfaced in the Settings UI, so they
+// must not carry control chars that would break logs, parsing, or
+// display. Keep alphanumerics + a handful of punctuation that covers
+// SemVer-ish and prerelease tags.
+const VERSION_STRING_PATTERN = /^[A-Za-z0-9._+\-]{1,64}$/;
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizePayloadForHash(value, key = "") {
+// Normalize a payload into a form that hashes stably across runs:
+// - object keys sorted so JSON.stringify output is deterministic
+// - undefined values dropped (they'd stringify as gaps anyway)
+// - the top-level `syncedAt` timestamp is zeroed so semantically-equal
+//   payloads produced seconds apart still dedupe. Only the object
+//   branch handles this — `syncedAt` never appears as a raw primitive
+//   or inside an array in SyncPayload.
+function normalizePayloadForHash(value) {
   if (Array.isArray(value)) {
-    return value.map((item) => normalizePayloadForHash(item));
+    return value.map(normalizePayloadForHash);
   }
   if (isPlainObject(value)) {
     const entries = Object.entries(value)
       .filter(([, item]) => item !== undefined)
       .sort(([a], [b]) => a.localeCompare(b));
     return entries.reduce((acc, [entryKey, entryValue]) => {
-      acc[entryKey] = normalizePayloadForHash(
-        entryKey === "syncedAt" ? 0 : entryValue,
-        entryKey,
-      );
+      acc[entryKey] =
+        entryKey === "syncedAt"
+          ? 0
+          : normalizePayloadForHash(entryValue);
       return acc;
     }, {});
   }
-  return key === "syncedAt" ? 0 : value;
+  return value;
 }
 
 function stableStringify(value) {
@@ -62,29 +89,97 @@ function toBackupSummary(record) {
   };
 }
 
-function encodePayload(payload, safeStorage) {
-  const raw = JSON.stringify(payload);
-  if (safeStorage?.isEncryptionAvailable?.()) {
-    return {
-      encoding: "safeStorage-v1",
-      data: safeStorage.encryptString(raw).toString("base64"),
-    };
+// Clamp an unvalidated maxCount to the supported range. Returns
+// DEFAULT_MAX_COUNT for anything non-finite or non-numeric so callers
+// without a configured retention still get a sane cap.
+function sanitizeMaxCount(rawMaxCount) {
+  const numeric = Number(rawMaxCount);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_MAX_COUNT;
+  return Math.max(MIN_MAX_COUNT, Math.min(MAX_MAX_COUNT, Math.floor(numeric)));
+}
+
+function sanitizeReason(rawReason) {
+  // Fall back to the "before_restore" default rather than throwing — the
+  // default is the safer label for an unknown-cause backup, since it
+  // implies "this was taken defensively" in the UI.
+  if (typeof rawReason === "string" && ALLOWED_REASONS.has(rawReason)) {
+    return rawReason;
   }
+  return "before_restore";
+}
+
+function sanitizeOptionalVersionString(value) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!VERSION_STRING_PATTERN.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+// Approximate byte length of a payload. We use JSON.stringify length as
+// the canonical measure (UTF-16 code units → not exact UTF-8 bytes, but
+// adequate for a DoS guard; the actual file on disk is larger because
+// of base64 encoding of the ciphertext).
+function estimatePayloadSize(payload) {
+  try {
+    return JSON.stringify(payload).length;
+  } catch {
+    return Infinity;
+  }
+}
+
+// Error thrown when the platform has no secure storage available. Backups
+// would contain plaintext credentials (passwords, private keys, passphrases)
+// in fields that SyncPayload carries unencrypted, so falling back to a
+// plain-json file on disk would regress the vault's security posture below
+// what the normal encrypted localStorage vault provides. We refuse rather
+// than silently weaken the user's protection.
+class VaultBackupEncryptionUnavailableError extends Error {
+  constructor() {
+    super(
+      "Secure storage is unavailable on this platform; vault backups cannot be created or read safely.",
+    );
+    this.name = "VaultBackupEncryptionUnavailableError";
+    this.code = "VAULT_BACKUP_ENCRYPTION_UNAVAILABLE";
+  }
+}
+
+class VaultBackupTooLargeError extends Error {
+  constructor(size) {
+    super(
+      `Vault backup payload exceeds maximum allowed size (${size} > ${MAX_PAYLOAD_BYTES}).`,
+    );
+    this.name = "VaultBackupTooLargeError";
+    this.code = "VAULT_BACKUP_TOO_LARGE";
+  }
+}
+
+function isSafeStorageAvailable(safeStorage) {
+  return Boolean(safeStorage?.isEncryptionAvailable?.());
+}
+
+function encodePayload(payload, safeStorage) {
+  if (!isSafeStorageAvailable(safeStorage)) {
+    throw new VaultBackupEncryptionUnavailableError();
+  }
+  const raw = JSON.stringify(payload);
   return {
-    encoding: "plain-json-v1",
-    data: raw,
+    encoding: "safeStorage-v1",
+    data: safeStorage.encryptString(raw).toString("base64"),
   };
 }
 
 function decodePayload(record, safeStorage) {
   if (record.payloadEncoding === "safeStorage-v1") {
-    if (!safeStorage?.decryptString) {
-      throw new Error("Encrypted backup cannot be read because secure storage is unavailable.");
+    if (!safeStorage?.decryptString || !isSafeStorageAvailable(safeStorage)) {
+      throw new VaultBackupEncryptionUnavailableError();
     }
     const decrypted = safeStorage.decryptString(Buffer.from(record.payloadData, "base64"));
     return JSON.parse(decrypted);
   }
 
+  // Legacy "plain-json-v1" records may exist from an earlier build; read
+  // them once so users can migrate their data, but never write new ones.
   if (record.payloadEncoding === "plain-json-v1") {
     return JSON.parse(record.payloadData);
   }
@@ -127,10 +222,14 @@ async function listBackupRecords(dirPath) {
   return records;
 }
 
-async function pruneBackupRecords(dirPath, maxCount) {
-  const sanitizedMaxCount = Math.max(1, Math.min(100, Number(maxCount) || 20));
-  const records = await listBackupRecords(dirPath);
-  const toDelete = records.slice(sanitizedMaxCount);
+// Delete old backups, trusting the caller-provided `records` list when
+// supplied to avoid a redundant directory scan. `createBackup` has just
+// scanned + written, so it passes its freshly-enumerated records through
+// here. External callers (retention-change UI, trim IPC) rescan.
+async function pruneBackupRecords(dirPath, maxCount, records = null) {
+  const sanitizedMaxCount = sanitizeMaxCount(maxCount);
+  const sourceRecords = records ?? (await listBackupRecords(dirPath));
+  const toDelete = sourceRecords.slice(sanitizedMaxCount);
   let deletedCount = 0;
 
   for (const entry of toDelete) {
@@ -144,7 +243,7 @@ async function pruneBackupRecords(dirPath, maxCount) {
 
   return {
     deletedCount,
-    keptCount: Math.min(records.length, sanitizedMaxCount),
+    keptCount: Math.min(sourceRecords.length, sanitizedMaxCount),
   };
 }
 
@@ -155,59 +254,32 @@ function createVaultBackupService({ app, safeStorage, shell }) {
 
   const getBackupDir = () => path.join(app.getPath("userData"), BACKUP_DIR_NAME);
 
+  // Serialize createBackup so two concurrent calls (version-change backup
+  // running at startup + an explicit protective-before-restore triggered
+  // by the user's click, etc.) observe each other's writes. Without this,
+  // both observers would see an empty directory, compute the same
+  // fingerprint, skip the dedupe, and write two identical files.
+  let createBackupLock = Promise.resolve();
+  // Monotonically increasing `createdAt` per service instance. `Date.now()`
+  // has 1ms resolution and back-to-back async calls (version-change backup
+  // followed immediately by a protective backup) can land in the same
+  // millisecond, producing ties that `listBackupRecords` cannot resolve
+  // (the sort has no tiebreaker). Bumping ensures strict ordering so
+  // callers always see the true newest record first.
+  let lastCreatedAt = 0;
+
   return {
+    isEncryptionAvailable() {
+      return isSafeStorageAvailable(safeStorage);
+    },
+
     async createBackup(options = {}) {
-      const payload = options.payload;
-      if (!payload || typeof payload !== "object") {
-        throw new Error("Missing vault backup payload.");
-      }
-
-      const dirPath = getBackupDir();
-      const records = await listBackupRecords(dirPath);
-      const fingerprint = computePayloadFingerprint(payload);
-      const latest = records[0]?.record ?? null;
-      if (latest?.fingerprint === fingerprint) {
-        return {
-          created: false,
-          backup: toBackupSummary(latest),
-        };
-      }
-
-      const createdAt = Date.now();
-      const id = crypto.randomUUID();
-      const preview = buildPreview(payload);
-      const encoded = encodePayload(payload, safeStorage);
-      const record = {
-        formatVersion: 1,
-        id,
-        createdAt,
-        reason: typeof options.reason === "string" ? options.reason : "before_restore",
-        sourceAppVersion:
-          typeof options.sourceAppVersion === "string" ? options.sourceAppVersion : undefined,
-        targetAppVersion:
-          typeof options.targetAppVersion === "string" ? options.targetAppVersion : undefined,
-        fingerprint,
-        preview,
-        payloadEncoding: encoded.encoding,
-        payloadData: encoded.data,
-      };
-
-      const filePath = path.join(
-        dirPath,
-        `${BACKUP_FILE_PREFIX}${createdAt}-${id}${BACKUP_FILE_EXT}`,
-      );
-      await fs.promises.writeFile(
-        filePath,
-        `${JSON.stringify(record, null, 2)}\n`,
-        { mode: 0o600 },
-      );
-
-      await pruneBackupRecords(dirPath, options.maxCount);
-
-      return {
-        created: true,
-        backup: toBackupSummary(record),
-      };
+      const next = createBackupLock.then(() => doCreateBackup(options));
+      // Swallow the rejection on the lock chain so one caller's error
+      // does not poison subsequent calls; each individual await sees its
+      // own rejection via the `next` return.
+      createBackupLock = next.catch(() => undefined);
+      return next;
     },
 
     async listBackups() {
@@ -252,6 +324,96 @@ function createVaultBackupService({ app, safeStorage, shell }) {
       };
     },
   };
+
+  async function doCreateBackup(options) {
+    const payload = options.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Missing vault backup payload.");
+    }
+
+    // Refuse early when the payload is too large to prevent a
+    // misbehaving or compromised renderer from filling the disk. The
+    // check runs before any side effect so callers see a deterministic
+    // failure rather than a partial write.
+    const estimatedSize = estimatePayloadSize(payload);
+    if (estimatedSize > MAX_PAYLOAD_BYTES) {
+      throw new VaultBackupTooLargeError(estimatedSize);
+    }
+
+    // Refuse before doing anything side-effectful so callers get a clear
+    // error rather than a silently-weakened plaintext backup.
+    if (!isSafeStorageAvailable(safeStorage)) {
+      throw new VaultBackupEncryptionUnavailableError();
+    }
+
+    const dirPath = getBackupDir();
+    const existingRecords = await listBackupRecords(dirPath);
+    const fingerprint = computePayloadFingerprint(payload);
+    const latest = existingRecords[0]?.record ?? null;
+    if (latest?.fingerprint === fingerprint) {
+      return {
+        created: false,
+        backup: toBackupSummary(latest),
+      };
+    }
+
+    let createdAt = Date.now();
+    if (createdAt <= lastCreatedAt) createdAt = lastCreatedAt + 1;
+    lastCreatedAt = createdAt;
+    const id = crypto.randomUUID();
+    const preview = buildPreview(payload);
+    const encoded = encodePayload(payload, safeStorage);
+    const record = {
+      formatVersion: 1,
+      id,
+      createdAt,
+      reason: sanitizeReason(options.reason),
+      sourceAppVersion: sanitizeOptionalVersionString(options.sourceAppVersion),
+      targetAppVersion: sanitizeOptionalVersionString(options.targetAppVersion),
+      fingerprint,
+      preview,
+      payloadEncoding: encoded.encoding,
+      payloadData: encoded.data,
+    };
+
+    const filePath = path.join(
+      dirPath,
+      `${BACKUP_FILE_PREFIX}${createdAt}-${id}${BACKUP_FILE_EXT}`,
+    );
+    // Atomic write: serialize to a sibling tmp file first and rename into
+    // place. A crash mid-write leaves behind a .tmp that listBackups
+    // ignores, rather than a truncated .json that would masquerade as a
+    // valid record.
+    const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+    await fs.promises.writeFile(
+      tmpPath,
+      `${JSON.stringify(record, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    try {
+      await fs.promises.rename(tmpPath, filePath);
+    } catch (renameError) {
+      // Best-effort cleanup; swallow unlink errors so the rename error
+      // surfaces to the caller.
+      try {
+        await fs.promises.unlink(tmpPath);
+      } catch {
+        /* ignore */
+      }
+      throw renameError;
+    }
+
+    // Reuse the enumeration we already did for dedupe, prepending the
+    // newly-written record so pruneBackupRecords can trim without
+    // re-scanning the directory. Records are ordered newest-first.
+    const nextRecords = [{ record, filePath }, ...existingRecords];
+    await pruneBackupRecords(dirPath, options.maxCount, nextRecords);
+
+    return {
+      created: true,
+      backup: toBackupSummary(record),
+    };
+  }
 }
 
 function registerHandlers(ipcMain, electronModule) {
@@ -261,6 +423,9 @@ function registerHandlers(ipcMain, electronModule) {
     shell: electronModule?.shell,
   });
 
+  ipcMain.handle("netcatty:vaultBackups:capabilities", async () => {
+    return { encryptionAvailable: service.isEncryptionAvailable() };
+  });
   ipcMain.handle("netcatty:vaultBackups:create", async (_event, payload) => {
     return service.createBackup(payload || {});
   });
@@ -282,6 +447,9 @@ module.exports = {
   BACKUP_DIR_NAME,
   BACKUP_FILE_EXT,
   BACKUP_FILE_PREFIX,
+  MAX_PAYLOAD_BYTES,
+  VaultBackupEncryptionUnavailableError,
+  VaultBackupTooLargeError,
   buildPreview,
   computePayloadFingerprint,
   createVaultBackupService,

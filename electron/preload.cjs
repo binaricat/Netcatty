@@ -858,6 +858,8 @@ const api = {
 
   // App info
   getAppInfo: () => ipcRenderer.invoke("netcatty:app:getInfo"),
+  getVaultBackupCapabilities: () =>
+    ipcRenderer.invoke("netcatty:vaultBackups:capabilities"),
   createVaultBackup: (payload) =>
     ipcRenderer.invoke("netcatty:vaultBackups:create", payload),
   listVaultBackups: () =>

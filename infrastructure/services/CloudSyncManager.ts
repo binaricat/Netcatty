@@ -45,6 +45,13 @@ import {
   encryptProviderSecrets,
 } from '../persistence/secureFieldAdapter';
 import { mergeSyncPayloads } from '../../domain/syncMerge';
+// Extracted into a plain ESM module so the signature logic is covered by
+// the node --test harness (see syncSignature.test.mjs). The previous
+// inline implementation only hashed a handful of meta fields and was
+// trivially forgeable by a misbehaving adapter; v2 hashes the full meta
+// plus a prefix of the ciphertext.
+import { createSyncedFileSignature as createSyncedFileSignatureImpl } from './syncSignature.js';
+import { decideRemoteChanged } from './syncAnchorDecision.js';
 
 const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
 const SYNC_REMOTE_ANCHOR_STORAGE_KEY = 'netcatty_sync_remote_anchor_v1';
@@ -943,29 +950,21 @@ export class CloudSyncManager {
     return `${SYNC_REMOTE_ANCHOR_STORAGE_KEY}_${provider}`;
   }
 
-  private createSyncedFileSignature(syncedFile: SyncedFile | null): string | null {
-    if (!syncedFile) return null;
-    const { meta } = syncedFile;
-    return [
-      meta.version,
-      meta.updatedAt,
-      meta.deviceId,
-      meta.iv,
-      meta.salt,
-    ].join(':');
+  private createSyncedFileSignature(syncedFile: SyncedFile | null): Promise<string | null> {
+    return createSyncedFileSignatureImpl(syncedFile);
   }
 
   private loadSyncAnchor(provider: CloudProvider): ProviderSyncAnchor | null {
     return this.loadFromStorage<ProviderSyncAnchor>(this.syncAnchorKey(provider));
   }
 
-  private saveSyncAnchor(
+  private async saveSyncAnchor(
     provider: CloudProvider,
     syncedFile: SyncedFile | null,
     resourceId?: string | null,
-  ): void {
+  ): Promise<void> {
     this.saveToStorage(this.syncAnchorKey(provider), {
-      signature: this.createSyncedFileSignature(syncedFile),
+      signature: await this.createSyncedFileSignature(syncedFile),
       version: syncedFile?.meta.version ?? 0,
       updatedAt: syncedFile?.meta.updatedAt ?? 0,
       deviceId: syncedFile?.meta.deviceId,
@@ -994,20 +993,19 @@ export class CloudSyncManager {
   }> {
     try {
       const remoteFile = await adapter.download();
-      const currentSignature = this.createSyncedFileSignature(remoteFile);
+      const currentSignature = await this.createSyncedFileSignature(remoteFile);
       const anchor = this.loadSyncAnchor(provider);
       const currentResourceId = adapter.resourceId || this.state.providers[provider].resourceId || null;
 
-      if (!anchor) {
-        return {
-          remoteChanged: currentSignature !== null,
-          remoteFile,
-        };
-      }
+      const decision = decideRemoteChanged({
+        currentSignature,
+        currentResourceId,
+        anchor,
+        hasRemoteFile: Boolean(remoteFile),
+      });
 
-      const resourceChanged = (anchor.resourceId || null) !== currentResourceId;
       return {
-        remoteChanged: resourceChanged || anchor.signature !== currentSignature,
+        remoteChanged: decision.remoteChanged,
         remoteFile,
       };
     } catch (error) {
@@ -1093,7 +1091,7 @@ export class CloudSyncManager {
     this.state.providers[provider].lastSyncVersion = remoteFile.meta.version;
 
     this.saveSyncConfig();
-    this.saveSyncAnchor(provider, remoteFile, resourceId);
+    await this.saveSyncAnchor(provider, remoteFile, resourceId);
     await this.saveSyncBase(payload, provider);
     await this.saveProviderConnection(provider, this.state.providers[provider]);
     this.notifyStateChange();
@@ -1127,7 +1125,7 @@ export class CloudSyncManager {
       };
 
       this.saveSyncConfig();
-      this.saveSyncAnchor(provider, syncedFile, resourceId);
+      await this.saveSyncAnchor(provider, syncedFile, resourceId);
       await this.saveProviderConnection(provider, this.state.providers[provider]);
       this.notifyStateChange();
 
