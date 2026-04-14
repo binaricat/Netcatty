@@ -500,6 +500,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             <ContextMenuTrigger asChild>
               <div
                 data-tab-id={session.id}
+                data-tab-type="session"
+                data-state={activeTabId === session.id ? 'active' : 'inactive'}
                 onClick={() => onSelectTab(session.id)}
                 draggable
                 onDragStart={(e) => handleTabDragStart(e, session.id)}
@@ -508,7 +510,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 onDragLeave={handleTabDragLeave}
                 onDrop={(e) => handleTabDrop(e, session.id)}
                 className={cn(
-                  "relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
                   "transition-transform duration-150",
                   isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
                 )}
@@ -599,6 +601,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             <ContextMenuTrigger asChild>
               <div
                 data-tab-id={workspace.id}
+                data-tab-type="workspace"
+                data-state={isActive ? 'active' : 'inactive'}
                 onClick={() => onSelectTab(workspace.id)}
                 draggable
                 onDragStart={(e) => handleTabDragStart(e, workspace.id)}
@@ -607,7 +611,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 onDragLeave={handleTabDragLeave}
                 onDrop={(e) => handleTabDrop(e, workspace.id)}
                 className={cn(
-                  "relative h-7 pl-3 pr-2 min-w-[150px] max-w-[260px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[150px] max-w-[260px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
                   "transition-transform duration-150",
                   isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
                 )}
@@ -697,9 +701,11 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <div
             key={logView.id}
             data-tab-id={logView.id}
+            data-tab-type="logView"
+            data-state={isActive ? 'active' : 'inactive'}
             onClick={() => onSelectTab(logView.id)}
             className={cn(
-              "relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+              "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-none text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
             )}
             style={{
               backgroundColor: isActive
