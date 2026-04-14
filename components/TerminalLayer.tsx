@@ -340,7 +340,6 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
               deleteSession={aiState.deleteSession}
               updateSessionTitle={aiState.updateSessionTitle}
               updateSessionExternalSessionId={aiState.updateSessionExternalSessionId}
-              retargetSessionScope={aiState.retargetSessionScope}
               addMessageToSession={aiState.addMessageToSession}
               updateLastMessage={aiState.updateLastMessage}
               updateMessageById={aiState.updateMessageById}

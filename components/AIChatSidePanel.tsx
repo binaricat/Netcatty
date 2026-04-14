@@ -50,8 +50,8 @@ import {
   applyHistorySessionSelection,
   resolveDisplayedPanelView,
   resolveDisplayedSession,
-  shouldRetargetSessionForScope,
 } from './ai/aiPanelViewState';
+import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
   useAIChatStreaming,
@@ -102,7 +102,6 @@ interface AIChatSidePanelProps {
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
-  retargetSessionScope: (sessionId: string, scope: AISessionScope) => void;
   addMessageToSession: (sessionId: string, message: ChatMessage) => void;
   updateLastMessage: (
     sessionId: string,
@@ -243,7 +242,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   deleteSession,
   updateSessionTitle,
   updateSessionExternalSessionId,
-  retargetSessionScope,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
@@ -302,36 +300,25 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setActiveSessionIdForScope(scopeKey, id);
   }, [scopeKey, setActiveSessionIdForScope]);
 
-  const activeTerminalTargetIds = useMemo(() => {
-    const targetIds = new Set<string>();
-    for (const [sessionScopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
-      if (!sessionScopeKey.startsWith('terminal:') || !sessionId) continue;
-      const targetId = sessionScopeKey.slice('terminal:'.length);
-      if (!targetId || targetId === scopeTargetId) continue;
-      targetIds.add(targetId);
-    }
-    return targetIds;
-  }, [activeSessionIdMap, scopeTargetId]);
-
   const historySessions = useMemo(
     () =>
       sessions
         .map((session) => ({
           session,
-          matchRank: getSessionScopeMatchRank(session, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds),
+          matchRank: getSessionScopeMatchRank(session, scopeType, scopeTargetId, scopeHostIds),
         }))
         .filter(({ matchRank }) => matchRank > 0)
         .sort((a, b) => b.matchRank - a.matchRank || b.session.updatedAt - a.session.updatedAt)
         .map(({ session }) => session),
-    [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds],
+    [sessions, scopeType, scopeTargetId, scopeHostIds],
   );
 
   const explicitPanelView = panelViewByScope[scopeKey];
   const currentDraft = draftsByScope[scopeKey] ?? null;
   const persistedSessionId = activeSessionIdMap[scopeKey] ?? null;
   const normalizedPanelView = useMemo<AIPanelView>(
-    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId),
-    [explicitPanelView, currentDraft, historySessions, persistedSessionId],
+    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType),
+    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType],
   );
   const activeSession = useMemo(
     () => resolveDisplayedSession(normalizedPanelView, historySessions),
@@ -385,39 +372,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     showDraftView(scopeKey);
   }, [normalizedPanelView, explicitPanelView, scopeKey, showDraftView]);
 
-  const shouldRetargetActiveSession = useMemo(() => {
-    return shouldRetargetSessionForScope(
-      activeSession,
-      scopeType,
-      scopeTargetId,
-      scopeHostIds,
-      activeTerminalTargetIds,
-    );
-  }, [activeSession, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds]);
-
   useEffect(() => {
     if (!activeSession) return;
-
-    if (shouldRetargetActiveSession && isVisible) {
-      if (streamingSessionIds.has(activeSession.id)) {
-        const controller = abortControllersRef.current.get(activeSession.id);
-        if (controller) {
-          controller.abort();
-          abortControllersRef.current.delete(activeSession.id);
-        }
-        setStreamingForScope(activeSession.id, false);
-        clearAllPendingApprovals(activeSession.id);
-        const bridge = getNetcattyBridge();
-        bridge?.aiCattyCancelExec?.(activeSession.id);
-        bridge?.aiAcpCancel?.('', activeSession.id);
-      }
-      retargetSessionScope(activeSession.id, {
-        type: scopeType,
-        targetId: scopeTargetId,
-        hostIds: scopeHostIds,
-      });
-      return;
-    }
 
     if (isVisible && activeSessionIdMap[scopeKey] !== activeSession.id) {
       setActiveSessionId(activeSession.id);
@@ -426,16 +382,8 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     activeSession,
     activeSessionIdMap,
     scopeKey,
-    retargetSessionScope,
     isVisible,
-    scopeHostIds,
-    scopeTargetId,
-    scopeType,
     setActiveSessionId,
-    setStreamingForScope,
-    shouldRetargetActiveSession,
-    streamingSessionIds,
-    abortControllersRef,
   ]);
 
   const ensureScopeDraft = useCallback((agentId: string) => {
@@ -1203,20 +1151,20 @@ const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                   onClick={() => onSelect(session.id)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(session.id); }}
                   className={cn(
-                    'w-full flex items-center justify-between py-2.5 border-b border-border/20 text-left transition-colors cursor-pointer group',
+                    SESSION_HISTORY_ROW_CLASSNAMES.row,
                     isActive ? 'text-foreground' : 'text-foreground/70 hover:text-foreground',
                   )}
                 >
-                  <span className="text-[13px] truncate pr-3 flex-1 min-w-0">
+                  <span className={SESSION_HISTORY_ROW_CLASSNAMES.title}>
                     {session.title || t('ai.chat.untitled')}
                   </span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[12px] text-muted-foreground/50">
+                  <div className={SESSION_HISTORY_ROW_CLASSNAMES.meta}>
+                    <span className={SESSION_HISTORY_ROW_CLASSNAMES.time}>
                       {timeStr}
                     </span>
                     <button
                       onClick={(e) => onDelete(e, session.id)}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-destructive transition-all cursor-pointer"
+                      className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
                       title="Delete"
                     >
                       <Trash2 size={12} />

@@ -207,19 +207,6 @@ function setLatestAIActiveSessionMapSnapshot(activeSessionIdMap: Record<string, 
   latestAIActiveSessionMapSnapshot = activeSessionIdMap;
 }
 
-function buildScopeKey(scope: AISessionScope) {
-  return `${scope.type}:${scope.targetId ?? ''}`;
-}
-
-function areHostIdsEqual(left?: string[], right?: string[]) {
-  const leftIds = left ?? [];
-  const rightIds = right ?? [];
-  if (leftIds.length !== rightIds.length) return false;
-
-  const rightSet = new Set(rightIds);
-  return leftIds.every((hostId) => rightSet.has(hostId));
-}
-
 function setLatestAIDraftsByScopeSnapshot(draftsByScope: DraftsByScope) {
   latestAIDraftsByScopeSnapshot = draftsByScope;
 }
@@ -788,60 +775,6 @@ export function useAIState() {
     });
   }, [debouncedPersistSessions]);
 
-  const retargetSessionScope = useCallback((sessionId: string, scope: AISessionScope) => {
-    const currentSession = sessionsRef.current.find((session) => session.id === sessionId);
-    if (!currentSession) return;
-
-    const currentScope = currentSession.scope;
-    const scopeChanged =
-      currentScope.type !== scope.type
-      || currentScope.targetId !== scope.targetId
-      || !areHostIdsEqual(currentScope.hostIds, scope.hostIds);
-
-    const nextScopeKey = buildScopeKey(scope);
-    const currentScopeKey = buildScopeKey(currentScope);
-
-    if (scopeChanged) {
-      setSessionsRaw((prev) => {
-        let changed = false;
-        const next = prev.map((session) => {
-          if (session.id !== sessionId) return session;
-          changed = true;
-          return { ...session, scope, externalSessionId: undefined };
-        });
-
-        if (!changed) return prev;
-
-        sessionsRef.current = next;
-        setLatestAISessionsSnapshot(next);
-        persistSessions(next);
-        return next;
-      });
-    }
-
-    setActiveSessionIdMapRaw((prev) => {
-      let changed = false;
-      const next = { ...prev };
-
-      if (currentScopeKey !== nextScopeKey && next[currentScopeKey] === sessionId) {
-        delete next[currentScopeKey];
-        changed = true;
-      }
-
-      if (next[nextScopeKey] !== sessionId) {
-        next[nextScopeKey] = sessionId;
-        changed = true;
-      }
-
-      if (!changed) return prev;
-
-      setLatestAIActiveSessionMapSnapshot(next);
-      localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, next);
-      emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
-      return next;
-    });
-  }, [persistSessions]);
-
   // Maximum messages per session to prevent unbounded memory growth
   const MAX_MESSAGES_PER_SESSION = 500;
 
@@ -1175,7 +1108,6 @@ export function useAIState() {
     deleteSessionsByTarget,
     updateSessionTitle,
     updateSessionExternalSessionId,
-    retargetSessionScope,
     addMessageToSession,
     updateLastMessage,
     updateMessageById,

@@ -16,12 +16,19 @@ export function resolveDisplayedPanelView(
   hasDraft: boolean,
   sessions: AISession[],
   persistedSessionId?: string | null,
+  scopeType: "terminal" | "workspace" = "workspace",
 ): AIPanelView {
   if (panelView) {
     return normalizePanelView(panelView, sessions);
   }
 
   if (hasDraft) {
+    return DEFAULT_PANEL_VIEW;
+  }
+
+  // New terminal sessions should always start from a blank draft. History is
+  // still available in the drawer, but never auto-resumed into a fresh SSH tab.
+  if (scopeType === "terminal") {
     return DEFAULT_PANEL_VIEW;
   }
 
@@ -60,28 +67,6 @@ export function resolveDisplayedSession(
   }
 
   return sessions.find((session) => session.id === panelView.sessionId) ?? null;
-}
-
-export function shouldRetargetSessionForScope(
-  session: AISession | null,
-  scopeType: "terminal" | "workspace",
-  scopeTargetId?: string,
-  scopeHostIds?: string[],
-  activeTerminalTargetIds?: Set<string>,
-): boolean {
-  if (!session || scopeType !== "terminal" || !scopeTargetId || !scopeHostIds?.length) {
-    return false;
-  }
-
-  if (session.scope.type !== scopeType || session.scope.targetId === scopeTargetId) {
-    return false;
-  }
-
-  if (session.scope.targetId && activeTerminalTargetIds?.has(session.scope.targetId)) {
-    return false;
-  }
-
-  return session.scope.hostIds?.some((hostId) => scopeHostIds.includes(hostId)) ?? false;
 }
 
 export function applyHistorySessionSelection(
