@@ -35,11 +35,22 @@ export function decideRemoteChanged(input) {
   const { currentSignature, currentResourceId, anchor, hasRemoteFile } = input;
 
   if (!anchor) {
-    // No anchor means we've never observed this provider. If remote has
-    // no file at all, nothing to merge. If remote has a file, treat as
-    // changed so we three-way merge (the base will be empty).
-    if (!hasRemoteFile || currentSignature === null) {
+    // No anchor means we've never observed this provider.
+    if (!hasRemoteFile) {
+      // Remote has no file at all → nothing to merge.
       return { remoteChanged: false, reason: 'no-anchor-no-remote' };
+    }
+    if (currentSignature === null) {
+      // hasRemoteFile=true but the signature computed to null — the
+      // file exists but we can't hash its meta (malformed shape, newer
+      // schema, partial download). Treat as CHANGED so the caller
+      // routes through the three-way merge / decrypt path rather than
+      // silently short-circuiting and letting the next upload overwrite
+      // an unreadable-but-extant remote file. If the payload is
+      // decryptable the merge will succeed; if it isn't, the decrypt
+      // error surfaces to the user, which is strictly safer than a
+      // silent stomp.
+      return { remoteChanged: true, reason: 'unreadable-remote' };
     }
     return { remoteChanged: true, reason: 'no-anchor-remote-has-data' };
   }

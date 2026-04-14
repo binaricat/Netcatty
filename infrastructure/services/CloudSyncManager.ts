@@ -1019,18 +1019,27 @@ export class CloudSyncManager {
 
   /**
    * Helper: Check for conflicts with a specific provider
+   *
+   * Fails closed on inspection error: throws rather than returning a
+   * `{conflict: false, error}` tuple. The previous return-shape let
+   * `syncAll`'s `validUploads` filter — which checks `!r.error` (the
+   * outer per-provider try/catch error) and `!r.check?.conflict` but
+   * NOT `r.check?.error` — admit this provider into the upload batch
+   * with `conflict: false`, which then proceeded to upload stale local
+   * data over the remote (the exact #711/#719 failure mode on a
+   * transient download 5xx). Throwing surfaces the failure through the
+   * same per-provider try/catch that already handles connection errors.
    */
   private async checkProviderConflict(
     provider: CloudProvider,
     adapter: CloudAdapter
   ): Promise<{
     conflict: boolean;
-    error?: string;
     remoteFile?: SyncedFile;
   }> {
     const inspection = await this.inspectProviderRemoteState(provider, adapter);
     if (inspection.error) {
-      return { conflict: false, error: inspection.error };
+      throw new Error(inspection.error);
     }
     return {
       conflict: inspection.remoteChanged && Boolean(inspection.remoteFile),
@@ -1239,12 +1248,11 @@ export class CloudSyncManager {
     this.emit({ type: 'SYNC_STARTED', provider });
 
     try {
-      // 1. Check for conflict
+      // 1. Check for conflict. `checkProviderConflict` throws on
+      // inspect failure, which the outer try/catch routes to the
+      // SYNC_ERROR path — so we never reach the upload branch with an
+      // unknown remote state.
       const checkResult = await this.checkProviderConflict(provider, adapter);
-
-      if (checkResult.error) {
-        throw new Error(checkResult.error);
-      }
 
       if (checkResult.conflict && checkResult.remoteFile) {
         // Remote is newer — attempt three-way merge instead of blocking
@@ -1393,7 +1401,7 @@ export class CloudSyncManager {
     try {
       let remoteFile: SyncedFile | null;
       try {
-      remoteFile = await adapter.download();
+        remoteFile = await adapter.download();
       } catch (downloadError) {
         throw new Error(`Download failed: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
       }

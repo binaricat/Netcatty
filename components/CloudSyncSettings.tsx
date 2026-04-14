@@ -683,9 +683,22 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             : t('cloudSync.localBackups.reason.beforeRestore');
 
     const handleSaveMaxBackups = async () => {
+        // Reject empty / non-numeric input BEFORE hitting setMaxBackups:
+        // `Number("")` coerces to 0, which `sanitizeLocalVaultBackupMaxCount`
+        // clamps to the default (20). That silently resets the user's
+        // retention to the default on "clear and save" and shows a success
+        // toast — misleading. Surface the validation error instead.
+        const parsed = Number(maxBackupsInput);
+        if (!Number.isFinite(parsed) || parsed <= 0 || maxBackupsInput.trim() === '') {
+            toast.error(
+                t('cloudSync.localBackups.maxInvalid'),
+                t('sync.toast.errorTitle'),
+            );
+            return;
+        }
         setIsSavingMaxBackups(true);
         try {
-            const next = await setMaxBackups(Number(maxBackupsInput));
+            const next = await setMaxBackups(parsed);
             setMaxBackupsInput(String(next));
             toast.success(t('cloudSync.localBackups.maxSaved', { count: String(next) }));
         } catch (error) {

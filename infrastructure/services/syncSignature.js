@@ -78,10 +78,19 @@ export async function createSyncedFileSignature(syncedFile) {
   const { meta, payload } = syncedFile;
   if (!meta || typeof meta !== 'object') return null;
 
+  // Serialize meta as a canonical JSON object with keys sorted. Earlier
+  // versions joined `${key}=${JSON.stringify(...)}` with `|`, which left
+  // the `=` separator unescaped: a future meta key containing `=` in its
+  // name (or a string value that mimics the separator syntax) could
+  // alias with a different key/value pair. JSON.stringify of a sorted
+  // plain object is injection-proof because string values are quoted
+  // and escaped by the serializer.
   const metaKeys = Object.keys(meta).sort();
-  const metaSerialized = metaKeys
-    .map((key) => `${key}=${JSON.stringify(meta[key] ?? null)}`)
-    .join('|');
+  const canonicalMeta = {};
+  for (const key of metaKeys) {
+    canonicalMeta[key] = meta[key] ?? null;
+  }
+  const metaSerialized = JSON.stringify(canonicalMeta);
 
   const payloadStr = typeof payload === 'string' ? payload : '';
   const payloadLen = payloadStr.length;

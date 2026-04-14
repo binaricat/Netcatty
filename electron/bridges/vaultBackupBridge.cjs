@@ -33,13 +33,15 @@ function isPlainObject(value) {
 // Normalize a payload into a form that hashes stably across runs:
 // - object keys sorted so JSON.stringify output is deterministic
 // - undefined values dropped (they'd stringify as gaps anyway)
-// - the top-level `syncedAt` timestamp is zeroed so semantically-equal
-//   payloads produced seconds apart still dedupe. Only the object
-//   branch handles this — `syncedAt` never appears as a raw primitive
-//   or inside an array in SyncPayload.
-function normalizePayloadForHash(value) {
+// - the TOP-LEVEL `syncedAt` timestamp is zeroed so semantically-equal
+//   payloads produced seconds apart still dedupe. Nested `syncedAt`
+//   fields (e.g. a future per-record mtime) are preserved — zeroing
+//   them would silently collide two semantically-different payloads
+//   into the same fingerprint and cause the version-change / protective
+//   backup dedupe to drop a backup that should have been written.
+function normalizePayloadForHash(value, isRoot = true) {
   if (Array.isArray(value)) {
-    return value.map(normalizePayloadForHash);
+    return value.map((item) => normalizePayloadForHash(item, false));
   }
   if (isPlainObject(value)) {
     const entries = Object.entries(value)
@@ -47,9 +49,9 @@ function normalizePayloadForHash(value) {
       .sort(([a], [b]) => a.localeCompare(b));
     return entries.reduce((acc, [entryKey, entryValue]) => {
       acc[entryKey] =
-        entryKey === "syncedAt"
+        isRoot && entryKey === "syncedAt"
           ? 0
-          : normalizePayloadForHash(entryValue);
+          : normalizePayloadForHash(entryValue, false);
       return acc;
     }, {});
   }
@@ -116,13 +118,15 @@ function sanitizeOptionalVersionString(value) {
   return trimmed;
 }
 
-// Approximate byte length of a payload. We use JSON.stringify length as
-// the canonical measure (UTF-16 code units → not exact UTF-8 bytes, but
-// adequate for a DoS guard; the actual file on disk is larger because
-// of base64 encoding of the ciphertext).
+// UTF-8 byte length of a payload's JSON serialization. Earlier revisions
+// returned `JSON.stringify(payload).length` (UTF-16 code units), which
+// under-counted by ~3x for non-ASCII vaults — a deck full of CJK snippet
+// labels would report ~12.5 MiB against the 25 MiB cap when the on-wire
+// size was actually 25+ MiB. `Buffer.byteLength(..., 'utf8')` gives the
+// true bytes-on-disk figure.
 function estimatePayloadSize(payload) {
   try {
-    return JSON.stringify(payload).length;
+    return Buffer.byteLength(JSON.stringify(payload), "utf8");
   } catch {
     return Infinity;
   }

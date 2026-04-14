@@ -22,7 +22,8 @@ import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
 import { applySyncPayload, buildSyncPayload } from './application/syncPayload';
 import {
-  createProtectiveLocalVaultBackup,
+  ProtectiveBackupUnavailableError,
+  createRequiredProtectiveLocalVaultBackup,
   ensureVersionChangeBackup,
   withRestoreBarrier,
 } from './application/localVaultBackups';
@@ -508,14 +509,27 @@ function App({ settings }: { settings: SettingsState }) {
         // buildCurrentSyncPayload captures from React closures. Read the
         // pre-apply snapshot FIRST, before applySyncPayload overwrites
         // state — otherwise we'd back up what we just imported, which
-        // defeats the point of a protective backup. See review note in
-        // `createProtectiveLocalVaultBackup` for why the closure-vs-
-        // storage distinction matters here.
+        // defeats the point of a protective backup.
+        //
+        // Use the STRICT variant here: a cloud apply that lands over a
+        // non-empty local vault is a destructive mutation, and a silent
+        // backup failure would reintroduce the exact overwrite-without-
+        // recovery path this PR is meant to close. When local is empty
+        // (`hasMeaningfulSyncData` false, e.g. first-run empty-vault
+        // restore) the strict variant returns null and the apply
+        // continues — nothing to protect.
         const preApplyPayload = buildCurrentSyncPayload();
         try {
-          await createProtectiveLocalVaultBackup(preApplyPayload);
+          await createRequiredProtectiveLocalVaultBackup(preApplyPayload);
         } catch (error) {
-          console.error('[App] Failed to create protective local backup:', error);
+          if (error instanceof ProtectiveBackupUnavailableError) {
+            throw new Error(
+              t('cloudSync.localBackups.protectiveBackupFailed', {
+                message: error.message,
+              }),
+            );
+          }
+          throw error;
         }
 
         applySyncPayload(payload, {

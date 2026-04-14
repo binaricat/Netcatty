@@ -135,12 +135,65 @@ export async function createLocalVaultBackup(
   }
 }
 
-export async function createProtectiveLocalVaultBackup(
+/**
+ * Thrown when a caller requires a protective backup and the backup
+ * couldn't be written — safeStorage unavailable, bridge missing,
+ * main-process rejection, disk error.
+ *
+ * Callers should surface this as a user-visible abort rather than
+ * proceeding with the destructive apply. Separate from "nothing to
+ * back up" (empty vault) which is returned as `null`.
+ */
+export class ProtectiveBackupUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProtectiveBackupUnavailableError';
+  }
+}
+
+/**
+ * Create a protective local backup before a destructive apply (restore
+ * from backup list, restore from Gist revision, cloud download applied
+ * over meaningful local state).
+ *
+ * Returns `null` when there is nothing meaningful to back up — in that
+ * case the caller can safely proceed with the apply, because there is
+ * no local data to lose.
+ *
+ * Throws `ProtectiveBackupUnavailableError` when pre-apply state IS
+ * meaningful but the backup attempt failed. Callers MUST abort the
+ * destructive apply in that case and surface the error to the user,
+ * otherwise we regress the exact safety contract the backup system
+ * was added to enforce (the `console.error`-and-proceed pattern that
+ * previously swallowed safeStorage/keychain failures and continued).
+ */
+export async function createRequiredProtectiveLocalVaultBackup(
   payload: SyncPayload,
 ): Promise<LocalVaultBackupPreview | null> {
-  return createLocalVaultBackup(payload, {
-    reason: 'before_restore',
-  });
+  if (!hasMeaningfulSyncData(payload)) {
+    // Nothing to protect — an empty-vault backup would produce a
+    // useless record, not a safety net.
+    return null;
+  }
+
+  const bridge = netcattyBridge.get();
+  if (!bridge?.createVaultBackup) {
+    throw new ProtectiveBackupUnavailableError(
+      'Vault backup bridge is not available in this environment.',
+    );
+  }
+
+  try {
+    const result = await bridge.createVaultBackup({
+      payload,
+      reason: 'before_restore',
+      maxCount: getLocalVaultBackupMaxCount(),
+    });
+    return result?.backup ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ProtectiveBackupUnavailableError(message);
+  }
 }
 
 /**
@@ -211,7 +264,8 @@ export async function ensureVersionChangeBackup(
   }
 
   let backup: LocalVaultBackupPreview | null = null;
-  if (hasMeaningfulSyncData(payload)) {
+  const payloadIsMeaningful = hasMeaningfulSyncData(payload);
+  if (payloadIsMeaningful) {
     backup = await createLocalVaultBackup(payload, {
       reason: 'app_version_change',
       sourceAppVersion: previousVersion,
@@ -219,7 +273,17 @@ export async function ensureVersionChangeBackup(
     });
   }
 
-  localStorageAdapter.writeString(STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION, normalizedVersion);
+  // Only advance the stored version stamp when we either wrote a
+  // backup OR had nothing to back up. If the payload was meaningful
+  // but the backup attempt failed (e.g. a transient keychain lock),
+  // leave the stamp pointing at the previous version so the next
+  // launch retries. Previously this wrote the new version
+  // unconditionally, which turned a transient failure into a
+  // permanent "the version-change backup never happens" regression.
+  const shouldAdvanceVersion = !payloadIsMeaningful || backup !== null;
+  if (shouldAdvanceVersion) {
+    localStorageAdapter.writeString(STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION, normalizedVersion);
+  }
 
   return {
     created: Boolean(backup),

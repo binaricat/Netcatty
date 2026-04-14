@@ -532,3 +532,47 @@ test("fingerprint is stable when top-level syncedAt drifts", async () => {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test("fingerprint treats nested syncedAt as load-bearing (C1)", async () => {
+  // The top-level `syncedAt` is zeroed so two payloads that differ only in
+  // when-they-were-packaged still dedupe. But that zeroing must NOT cascade
+  // into nested objects — a future schema where any child record carries
+  // its own `syncedAt` could otherwise collide into a false dedupe, and
+  // the version-change / protective backup would be silently skipped.
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const makeNested = (nestedSyncedAt) =>
+      samplePayload({
+        syncedAt: 0,
+        hosts: [
+          {
+            id: "h1",
+            label: "prod",
+            hostname: "prod",
+            username: "root",
+            port: 22,
+            os: "linux",
+            group: "",
+            tags: [],
+            protocol: "ssh",
+            syncedAt: nestedSyncedAt,
+          },
+        ],
+      });
+
+    const first = await service.createBackup({ payload: makeNested(111) });
+    const second = await service.createBackup({ payload: makeNested(222) });
+    assert.equal(first.created, true);
+    assert.equal(
+      second.created,
+      true,
+      "nested syncedAt must NOT be zeroed — payloads are semantically different",
+    );
+    assert.notEqual(second.backup.id, first.backup.id);
+    assert.notEqual(second.backup.fingerprint, first.backup.fingerprint);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

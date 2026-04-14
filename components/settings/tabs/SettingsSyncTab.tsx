@@ -3,10 +3,12 @@ import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
 import { buildSyncPayload, applySyncPayload } from "../../../application/syncPayload";
 import {
-  createProtectiveLocalVaultBackup,
+  ProtectiveBackupUnavailableError,
+  createRequiredProtectiveLocalVaultBackup,
   withRestoreBarrier,
 } from "../../../application/localVaultBackups";
 import type { SyncableVaultData } from "../../../application/syncPayload";
+import { useI18n } from "../../../application/i18n/I18nProvider";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { getEffectiveKnownHosts } from "../../../infrastructure/syncHelpers";
@@ -29,6 +31,7 @@ export default function SettingsSyncTab(props: {
     clearVaultData,
     onSettingsApplied,
   } = props;
+  const { t } = useI18n();
 
   const onBuildPayload = useCallback((): SyncPayload => {
     // If hook state is empty but localStorage has data, the async store
@@ -75,9 +78,21 @@ export default function SettingsSyncTab(props: {
         // rather than after the apply has already overwritten storage.
         const pre = onBuildPayload();
         try {
-          await createProtectiveLocalVaultBackup(pre);
+          await createRequiredProtectiveLocalVaultBackup(pre);
         } catch (error) {
-          console.error("[SettingsSyncTab] Failed to create protective backup:", error);
+          // User-triggered destructive op: a failed safety backup means
+          // we MUST abort rather than continuing to overwrite the user's
+          // data with no recovery path. The previous console.error-and-
+          // proceed behavior regressed the PR's own safety contract when
+          // safeStorage was transiently unavailable (e.g. locked keychain).
+          if (error instanceof ProtectiveBackupUnavailableError) {
+            throw new Error(
+              t("cloudSync.localBackups.protectiveBackupFailed", {
+                message: error.message,
+              }),
+            );
+          }
+          throw error;
         }
 
         applySyncPayload(payload, {
@@ -87,7 +102,7 @@ export default function SettingsSyncTab(props: {
         });
       });
     },
-    [importDataFromString, importPortForwardingRules, onBuildPayload, onSettingsApplied],
+    [importDataFromString, importPortForwardingRules, onBuildPayload, onSettingsApplied, t],
   );
 
   const clearAllLocalData = useCallback(() => {
