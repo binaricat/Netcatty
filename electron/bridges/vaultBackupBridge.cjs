@@ -256,7 +256,14 @@ async function listBackupRecords(dirPath) {
   records.sort((a, b) => {
     const aTime = Number(a.record.createdAt || 0);
     const bTime = Number(b.record.createdAt || 0);
-    return bTime - aTime;
+    if (aTime !== bTime) return bTime - aTime;
+    // Stable, deterministic tiebreak when two backups share a millisecond
+    // (rapid successive creates, clock quantization). Without this the
+    // retention trimmer's "delete the oldest" pass is order-dependent and
+    // can drop a different record across list() → prune() passes.
+    const aId = String(a.record.id || '');
+    const bId = String(b.record.id || '');
+    return bId.localeCompare(aId);
   });
 
   return records;

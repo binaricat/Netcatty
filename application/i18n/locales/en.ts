@@ -443,6 +443,8 @@ const en: Messages = {
   'sync.toast.completedMessage': 'Sync completed successfully',
   'sync.toast.errorTitle': 'Sync Error',
   'sync.autoSync.failedTitle': 'Sync failed',
+  'sync.autoSync.inspectFailedTitle': 'Sync paused',
+  'sync.autoSync.inspectFailedMessage': 'Could not reach the cloud to check for changes. Auto-sync will retry when data changes or the app is restarted.',
   'sync.autoSync.syncedTitle': 'Synced from cloud',
   'sync.autoSync.syncedMessage': 'Your data has been updated from the cloud.',
   'sync.autoSync.noProvider': 'No cloud provider connected. Open Settings → Sync & Cloud to connect one.',

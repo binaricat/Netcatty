@@ -77,11 +77,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const isInitializedRef = useRef(false);
   const isSyncRunningRef = useRef(false);
   const skipNextSyncRef = useRef(false);
-  // Held so checkRemoteVersion (defined below syncNow) can kick off a
-  // round-trip upload AFTER a startup three-way merge, without taking
-  // `syncNow` as a useCallback dep (which would rebuild the callback on
-  // every state change).
-  const syncNowRef = useRef<((options?: SyncNowOptions) => Promise<void>) | null>(null);
 
   // State for the empty-vault-vs-cloud confirmation dialog (Fix D).
   // When checkRemoteVersion detects that the local vault is empty but
@@ -278,14 +273,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
   }, [sync, buildPayload, getDataHash, onApplyPayload, t]);
 
-  // Keep the ref in sync with the latest syncNow so non-callback code
-  // paths (e.g. the startup-merge deferred round-trip below) can invoke
-  // the current closure without participating in the callback's dep
-  // chain.
-  useEffect(() => {
-    syncNowRef.current = syncNow;
-  }, [syncNow]);
-  
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {
     const state = manager.getState();
@@ -384,25 +371,39 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       // If the three-way merge introduced any local-only additions that the
       // remote does not yet have, we MUST round-trip those to the cloud.
-      // Previously this branch set `skipNextSyncRef = true` and stopped, so
-      // the merged-in additions lived only on the device that ran the merge
-      // until the user's next edit. Now we kick off a sync right after the
-      // commit so both sides converge within the same session.
+      // Previously this branch stopped after applying merge locally, so the
+      // merged-in additions lived only on the device that ran the merge
+      // until the user's next edit.
       //
-      // Done via setTimeout(0) so the onApplyPayload-induced React state
-      // flush completes its commit phase before syncNow captures a payload
-      // snapshot. Without this deferral, buildPayload would read the pre-
-      // merge state and upload the stale data.
+      // We push the merged payload *directly* through the manager rather
+      // than going through the React-state-driven `syncNow`. syncNow
+      // rebuilds the payload from hooks state, which may not yet reflect
+      // the onApplyPayload we awaited above (React commit phase is async
+      // relative to the awaited promise resolution). Passing mergeResult
+      // in explicitly removes the race entirely and avoids a setTimeout(0)
+      // that only approximated the correct ordering.
       if (mergeResult.payload) {
-        setTimeout(() => {
-          // `syncNow` is safe to call even when state seems clean — its
-          // own hasMeaningfulSyncData guard and isSyncing interlock prevent
-          // spurious uploads. Any failure here is logged inside syncNow.
-          void syncNowRef.current?.({ trigger: 'auto' });
-        }, 0);
+        try {
+          await manager.syncAllProviders(mergeResult.payload);
+          // Suppress the debounced follow-up tick that otherwise fires
+          // once React commits the applied state, since we've just
+          // already pushed that exact payload upstream.
+          skipNextSyncRef.current = true;
+        } catch (error) {
+          // Non-fatal: the next user edit will drive another sync cycle.
+          console.warn('[AutoSync] Post-merge round-trip push failed:', error);
+        }
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);
+      // Surface a degraded-sync hint to the user rather than silently
+      // opening the auto-sync gate. Auto-sync will still retry on next
+      // data change (see finally block), but without this toast the user
+      // has no visible signal that startup reconciliation failed.
+      notify.error(
+        t('sync.autoSync.inspectFailedMessage'),
+        t('sync.autoSync.inspectFailedTitle'),
+      );
       // Leave hasCheckedRemoteRef=false so the next startup (or the next
       // provider/unlock transition) can retry.
     } finally {
@@ -507,6 +508,25 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       remoteCheckDoneRef.current = false;
     }
   }, [sync.hasAnyConnectedProvider]);
+
+  // On unmount, release any pending empty-vault confirmation. Without
+  // this, an unmount mid-dialog (window close, workspace switch) leaves
+  // the resolver promise dangling forever and the `checkRemoteVersion`
+  // finally block never sets remoteCheckDoneRef — in practice React
+  // tears down the hook first, but leaking the resolve callback and
+  // referenced remotePayload keeps them pinned by the awaiter until
+  // the next reload. Resolving with 'keep-empty' is the safe default:
+  // it mirrors the "don't touch remote" choice and leaves the version
+  // stamp untouched so the next mount re-prompts.
+  useEffect(() => {
+    return () => {
+      const resolve = emptyVaultResolveRef.current;
+      if (resolve) {
+        emptyVaultResolveRef.current = null;
+        resolve('keep-empty');
+      }
+    };
+  }, []);
   
   const resolveEmptyVaultConflict = useCallback((action: 'restore' | 'keep-empty') => {
     // Guard: resolve only once (prevents double-click from entering an

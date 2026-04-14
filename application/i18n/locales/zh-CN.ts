@@ -262,6 +262,8 @@ const zhCN: Messages = {
   'sync.toast.completedMessage': '同步完成',
   'sync.toast.errorTitle': '同步错误',
   'sync.autoSync.failedTitle': '同步失败',
+  'sync.autoSync.inspectFailedTitle': '同步已暂停',
+  'sync.autoSync.inspectFailedMessage': '无法访问云端以检查变更。数据改动或下次启动时会自动重试。',
   'sync.autoSync.syncedTitle': '已从云端同步',
   'sync.autoSync.syncedMessage': '你的数据已从云端更新。',
   'sync.autoSync.noProvider': '未连接云同步 provider。请打开 设置 → Sync & Cloud 进行连接。',

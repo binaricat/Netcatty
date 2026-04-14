@@ -20,12 +20,11 @@ import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
 import { collectSessionIds } from './domain/workspace';
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
-import { applySyncPayload, buildSyncPayload } from './application/syncPayload';
+import type { SyncPayload } from './domain/sync';
+import { applySyncPayload, buildSyncPayload, hasMeaningfulSyncData } from './application/syncPayload';
 import {
-  ProtectiveBackupUnavailableError,
-  createRequiredProtectiveLocalVaultBackup,
+  applyProtectedSyncPayload,
   ensureVersionChangeBackup,
-  withRestoreBarrier,
 } from './application/localVaultBackups';
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
@@ -448,41 +447,86 @@ function App({ settings }: { settings: SettingsState }) {
   ]);
 
   const [startupSyncSafetyReady, setStartupSyncSafetyReady] = useState(false);
-  // buildCurrentSyncPayload's identity changes any time the vault settles
-  // (hosts, keys, identities, ...). Keeping it in the effect deps would
-  // re-fire the startup block many times during the initial decryption burst,
-  // producing redundant IPC calls and a race where setStartupSyncSafetyReady
-  // could open the auto-sync gate using a stale snapshot (I7). We instead
-  // capture the latest builder in a ref and depend only on isVaultInitialized.
+  // buildCurrentSyncPayload's identity changes each time the vault
+  // settles. The retry effect below watches the underlying data arrays
+  // for hydration progress, and uses the ref to always read the latest
+  // builder without pulling buildCurrentSyncPayload itself into deps
+  // (its identity churns on unrelated state updates too).
   const buildCurrentSyncPayloadRef = useRef(buildCurrentSyncPayload);
   useEffect(() => {
     buildCurrentSyncPayloadRef.current = buildCurrentSyncPayload;
   }, [buildCurrentSyncPayload]);
 
+  const versionBackupAttemptedRef = useRef(false);
+  // Two-stage gate: once the vault has initialized we open the auto-sync
+  // gate immediately — the hook's own hasMeaningfulSyncData guard and
+  // the cross-window restore barrier prevent an empty-but-not-yet-
+  // hydrated snapshot from overwriting cloud data. The version-change
+  // backup itself is best-effort and retries below as vault data arrives.
   useEffect(() => {
-    if (!isVaultInitialized || startupSyncSafetyReady) return;
+    if (isVaultInitialized && !startupSyncSafetyReady) {
+      setStartupSyncSafetyReady(true);
+    }
+  }, [isVaultInitialized, startupSyncSafetyReady]);
+
+  // Retry the version-change backup as hosts/keys/snippets become
+  // available. ensureVersionChangeBackup refuses to advance the stored
+  // version stamp when the observed payload is empty, so running this
+  // effect repeatedly is safe and eventually latches once the vault has
+  // hydrated enough to be backed up (or the user genuinely stays empty,
+  // in which case the effect continues to no-op).
+  useEffect(() => {
+    if (!isVaultInitialized || versionBackupAttemptedRef.current) return;
+    const payload = buildCurrentSyncPayloadRef.current();
+    if (!hasMeaningfulSyncData(payload)) return;
+    versionBackupAttemptedRef.current = true;
 
     let cancelled = false;
     void (async () => {
       try {
         const info = await netcattyBridge.get()?.getAppInfo?.();
-        await ensureVersionChangeBackup(
-          buildCurrentSyncPayloadRef.current(),
-          info?.version ?? null,
-        );
+        await ensureVersionChangeBackup(payload, info?.version ?? null);
       } catch (error) {
-        console.error('[App] Failed to create version-change backup:', error);
-      } finally {
         if (!cancelled) {
-          setStartupSyncSafetyReady(true);
+          // Reset the latch so a later data change (or the next mount)
+          // can retry. ensureVersionChangeBackup already leaves the
+          // version stamp untouched on failure, so retrying is safe.
+          versionBackupAttemptedRef.current = false;
         }
+        console.error('[App] Failed to create version-change backup:', error);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [isVaultInitialized, startupSyncSafetyReady]);
+  }, [isVaultInitialized, hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts]);
+
+  // Memoized "apply a remote payload safely" callback. Stable identity
+  // across renders so useAutoSync's `syncNow` useCallback doesn't rebuild
+  // on unrelated App-level state changes (which would churn the debounced
+  // auto-sync useEffect dep chain).
+  const handleApplySyncPayload = useCallback(
+    (payload: SyncPayload) =>
+      applyProtectedSyncPayload({
+        buildPreApplyPayload: () => buildCurrentSyncPayload(),
+        applyPayload: () =>
+          applySyncPayload(payload, {
+            importVaultData: importDataFromString,
+            importPortForwardingRules,
+            onSettingsApplied: settings.rehydrateAllFromStorage,
+          }),
+        translateProtectiveBackupFailure: (message) =>
+          t('cloudSync.localBackups.protectiveBackupFailed', { message }),
+      }),
+    [
+      buildCurrentSyncPayload,
+      importDataFromString,
+      importPortForwardingRules,
+      settings.rehydrateAllFromStorage,
+      t,
+    ],
+  );
 
   // Auto-sync hook for cloud sync
   const { syncNow: handleSyncNow, emptyVaultConflict, resolveEmptyVaultConflict } = useAutoSync({
@@ -497,48 +541,7 @@ function App({ settings }: { settings: SettingsState }) {
     groupConfigs,
     settingsVersion: settings.settingsVersion,
     startupReady: startupSyncSafetyReady,
-    onApplyPayload: async (payload) => {
-      // Hold the cross-window restore barrier around the entire apply.
-      // useAutoSync reads this barrier on its debounce tick and skips
-      // pushing while it's held, so a Settings-window triggered cloud
-      // apply (startup merge, empty-vault restore, conflict resolution)
-      // cannot race a concurrent auto-sync push from any window. Cheap
-      // localStorage set — nested barrier calls are harmless (they just
-      // refresh the deadline).
-      await withRestoreBarrier(async () => {
-        // buildCurrentSyncPayload captures from React closures. Read the
-        // pre-apply snapshot FIRST, before applySyncPayload overwrites
-        // state — otherwise we'd back up what we just imported, which
-        // defeats the point of a protective backup.
-        //
-        // Use the STRICT variant here: a cloud apply that lands over a
-        // non-empty local vault is a destructive mutation, and a silent
-        // backup failure would reintroduce the exact overwrite-without-
-        // recovery path this PR is meant to close. When local is empty
-        // (`hasMeaningfulSyncData` false, e.g. first-run empty-vault
-        // restore) the strict variant returns null and the apply
-        // continues — nothing to protect.
-        const preApplyPayload = buildCurrentSyncPayload();
-        try {
-          await createRequiredProtectiveLocalVaultBackup(preApplyPayload);
-        } catch (error) {
-          if (error instanceof ProtectiveBackupUnavailableError) {
-            throw new Error(
-              t('cloudSync.localBackups.protectiveBackupFailed', {
-                message: error.message,
-              }),
-            );
-          }
-          throw error;
-        }
-
-        applySyncPayload(payload, {
-          importVaultData: importDataFromString,
-          importPortForwardingRules,
-          onSettingsApplied: settings.rehydrateAllFromStorage,
-        });
-      });
-    },
+    onApplyPayload: handleApplySyncPayload,
   });
 
   const { clearAndRemoveSource, clearAndRemoveSources, unmanageSource } = useManagedSourceSync({

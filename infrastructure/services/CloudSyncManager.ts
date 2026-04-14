@@ -1596,7 +1596,49 @@ export class CloudSyncManager {
     const checkResults = await Promise.all(checkTasks);
 
     // 2. Analyze Results & Handle Conflicts — merge ALL conflicting providers
+    //
+    // Contract: every connected provider is assumed to mirror the *same*
+    // logical vault. When providers hold divergent content (e.g. user
+    // intentionally points GitHub and OneDrive at separate accounts with
+    // different data), uploading the conflict-merged payload below will
+    // overwrite provider-unique content on non-conflicting providers. A
+    // proper fix requires per-provider compare-and-swap (follow-up work,
+    // see I-1 and `docs/`). Until then, we log a diagnostic warning when
+    // we detect cross-provider base divergence so the issue is visible in
+    // support logs.
     const conflicts = checkResults.filter((r) => !r.error && r.check?.conflict && r.check?.remoteFile);
+
+    // Instrumentation only — detect divergent provider bases (an
+    // unsupported configuration). Cheap: bases are already persisted
+    // and we only read their aggregate counts.
+    if (checkResults.filter((r) => !r.error).length > 1) {
+      try {
+        const summaries = await Promise.all(
+          checkResults
+            .filter((r) => !r.error)
+            .map(async (r) => {
+              const base = await this.loadSyncBase(r.provider as CloudProvider);
+              return {
+                provider: r.provider,
+                hosts: base?.hosts?.length ?? 0,
+                keys: base?.keys?.length ?? 0,
+                snippets: base?.snippets?.length ?? 0,
+              };
+            }),
+        );
+        const signatures = summaries.map((s) => `${s.hosts}/${s.keys}/${s.snippets}`);
+        const allSame = signatures.every((sig) => sig === signatures[0]);
+        if (!allSame) {
+          console.warn(
+            '[CloudSyncManager] syncAll: connected providers hold divergent bases (multi-account setup?). Uploading the conflict-merged payload will replace each provider\'s current remote. See I-7 in PR #720 for context.',
+            summaries,
+          );
+        }
+      } catch (diagError) {
+        // Non-fatal diagnostic; never let it block the sync.
+        console.warn('[CloudSyncManager] syncAll: base-divergence check failed:', diagError);
+      }
+    }
 
     if (conflicts.length > 0) {
       // Three-way merge: incorporate remote data from every conflicting provider

@@ -197,12 +197,23 @@ export async function createRequiredProtectiveLocalVaultBackup(
 }
 
 /**
- * How long to hold the cross-window restore barrier. Long enough to
- * cover a slow protective-backup write + applySyncPayload on a large
- * vault, short enough that an abandoned lock (crashed window) clears
- * itself without user intervention.
+ * How long each heartbeat extends the cross-window restore barrier.
+ * Short enough that an abandoned lock (crashed window, hung task)
+ * clears itself quickly without user intervention. The heartbeat
+ * interval below refreshes the deadline as long as the caller's task
+ * is still running, so large vaults or slow keychain unlocks cannot
+ * expose a mid-apply window to concurrent auto-sync even when the
+ * total apply time exceeds this value.
  */
 const RESTORE_BARRIER_HOLD_MS = 60_000;
+
+/**
+ * How often the heartbeat refreshes the barrier. Picked to ensure at
+ * least two refreshes land before the current deadline would expire,
+ * so a single missed tick (event-loop stall, GC pause) cannot drop
+ * the barrier prematurely.
+ */
+const RESTORE_BARRIER_HEARTBEAT_MS = Math.max(1_000, Math.floor(RESTORE_BARRIER_HOLD_MS / 3));
 
 /**
  * Run `task` while holding a cross-window "restore in progress" barrier.
@@ -213,33 +224,90 @@ const RESTORE_BARRIER_HOLD_MS = 60_000;
  * future. We write a time-bounded deadline (rather than a boolean) so a
  * crashed window can never leave sync permanently wedged.
  *
- * Always clears the barrier — success, throw, or crash-after-set — via
- * a try/finally around the caller's task. The caller is responsible for
- * the actual vault mutation inside `task`.
+ * While the task runs, a heartbeat timer re-writes the deadline so a
+ * slow apply (large vault, slow keychain) keeps the barrier held rather
+ * than exposing a post-deadline window to concurrent auto-sync. The
+ * heartbeat is cleared and the barrier is released in a finally block
+ * so success, throw, and unexpected early-return all converge on the
+ * same cleanup.
  */
 export async function withRestoreBarrier<T>(
   task: () => Promise<T>,
   holdMs: number = RESTORE_BARRIER_HOLD_MS,
 ): Promise<T> {
-  const deadline = Date.now() + holdMs;
-  try {
-    localStorageAdapter.writeNumber(STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL, deadline);
-  } catch (error) {
-    // If we can't write the barrier we still proceed — the UI-side
-    // `isSyncBusy` guard and same-window debounce cancellation are a
-    // secondary defense. Better to complete the restore than refuse on
-    // a broken localStorage.
-    console.warn('[localVaultBackups] Failed to set restore barrier:', error);
-  }
+  const writeDeadline = () => {
+    try {
+      localStorageAdapter.writeNumber(
+        STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
+        Date.now() + holdMs,
+      );
+    } catch (error) {
+      // If we can't write the barrier we still proceed — the UI-side
+      // `isSyncBusy` guard and same-window debounce cancellation are a
+      // secondary defense. Better to complete the restore than refuse on
+      // a broken localStorage.
+      console.warn('[localVaultBackups] Failed to set restore barrier:', error);
+    }
+  };
+
+  writeDeadline();
+  const heartbeat = setInterval(
+    writeDeadline,
+    Math.max(1_000, Math.min(holdMs / 3, RESTORE_BARRIER_HEARTBEAT_MS)),
+  );
+
   try {
     return await task();
   } finally {
+    clearInterval(heartbeat);
     try {
       localStorageAdapter.writeNumber(STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL, 0);
     } catch {
       /* ignore — the deadline will expire naturally */
     }
   }
+}
+
+/**
+ * Shared "apply a remote-sourced payload safely" helper.
+ *
+ * Holds the cross-window restore barrier, snapshots the pre-apply vault
+ * into a protective backup, and only then runs the supplied `applyPayload`
+ * callback. Every destructive apply path (startup merge, conflict
+ * resolution, empty-vault restore, manual Gist-revision restore) must go
+ * through this so the protections can't drift out of sync between the
+ * main window and the settings window.
+ *
+ * `buildPreApplyPayload` is invoked *before* the apply to snapshot the
+ * current vault. Callers pass their own React-closure builder (hosts,
+ * keys, port-forwarding rules) because the caller owns that state.
+ *
+ * `translateProtectiveBackupFailure` converts the
+ * `ProtectiveBackupUnavailableError` into a user-visible message in the
+ * caller's locale. It runs only on the thrown-and-caught path.
+ */
+export function applyProtectedSyncPayload(options: {
+  buildPreApplyPayload: () => SyncPayload;
+  applyPayload: () => void | Promise<void>;
+  translateProtectiveBackupFailure: (message: string) => string;
+}): Promise<void> {
+  const { buildPreApplyPayload, applyPayload, translateProtectiveBackupFailure } = options;
+  return withRestoreBarrier(async () => {
+    const pre = buildPreApplyPayload();
+    try {
+      await createRequiredProtectiveLocalVaultBackup(pre);
+    } catch (error) {
+      // Destructive apply without a working safety net is exactly the
+      // overwrite-without-recovery regression this module was added to
+      // prevent. Surface the failure to the caller; every call site
+      // currently aborts the apply and shows a user-visible error.
+      if (error instanceof ProtectiveBackupUnavailableError) {
+        throw new Error(translateProtectiveBackupFailure(error.message));
+      }
+      throw error;
+    }
+    await applyPayload();
+  });
 }
 
 export async function ensureVersionChangeBackup(
