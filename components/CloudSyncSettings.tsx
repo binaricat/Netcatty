@@ -714,34 +714,36 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
 
     return (
         <div className="space-y-4">
-            <div className="rounded-lg border bg-card p-4 space-y-4">
-                <div>
-                    <div className="text-sm font-medium">{t('cloudSync.localBackups.retentionTitle')}</div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                        {t('cloudSync.localBackups.retentionDesc')}
+            <div className="rounded-lg border bg-card p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div className="max-w-lg">
+                        <div className="text-sm font-medium">{t('cloudSync.localBackups.retentionTitle')}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                            {t('cloudSync.localBackups.retentionDesc')}
+                        </div>
                     </div>
-                </div>
-                <div className="flex items-end gap-2">
-                    <div className="space-y-2">
-                        <Label>{t('cloudSync.localBackups.maxCount')}</Label>
-                        <Input
-                            type="number"
-                            min={1}
-                            max={100}
-                            value={maxBackupsInput}
-                            onChange={(e) => setMaxBackupsInput(e.target.value)}
-                            className="w-28"
-                        />
+                    <div className="space-y-2 md:min-w-[260px] md:shrink-0">
+                        <Label className="md:block md:text-right">{t('cloudSync.localBackups.maxCount')}</Label>
+                        <div className="flex items-end gap-2 md:justify-end">
+                            <Input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={maxBackupsInput}
+                                onChange={(e) => setMaxBackupsInput(e.target.value)}
+                                className="w-28"
+                            />
+                            <Button
+                                variant="outline"
+                                onClick={() => void handleSaveMaxBackups()}
+                                disabled={isSavingMaxBackups}
+                                className="gap-2"
+                            >
+                                {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
+                                {t('common.save')}
+                            </Button>
+                        </div>
                     </div>
-                    <Button
-                        variant="outline"
-                        onClick={() => void handleSaveMaxBackups()}
-                        disabled={isSavingMaxBackups}
-                        className="gap-2"
-                    >
-                        {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
-                        {t('common.save')}
-                    </Button>
                 </div>
             </div>
 
