@@ -34,7 +34,11 @@ import {
 } from 'lucide-react';
 import { useCloudSync } from '../application/state/useCloudSync';
 import { useLocalVaultBackups } from '../application/state/useLocalVaultBackups';
-import { withRestoreBarrier } from '../application/localVaultBackups';
+import {
+    MAX_LOCAL_VAULT_BACKUP_MAX_COUNT,
+    MIN_LOCAL_VAULT_BACKUP_MAX_COUNT,
+    withRestoreBarrier,
+} from '../application/localVaultBackups';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
     findSyncPayloadEncryptedCredentialPaths,
@@ -683,13 +687,29 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             : t('cloudSync.localBackups.reason.beforeRestore');
 
     const handleSaveMaxBackups = async () => {
-        // Reject empty / non-numeric input BEFORE hitting setMaxBackups:
-        // `Number("")` coerces to 0, which `sanitizeLocalVaultBackupMaxCount`
-        // clamps to the default (20). That silently resets the user's
-        // retention to the default on "clear and save" and shows a success
-        // toast — misleading. Surface the validation error instead.
+        // Validate BEFORE calling setMaxBackups, which hands off to the
+        // renderer's `sanitizeLocalVaultBackupMaxCount` clamp. Two failure
+        // modes must be surfaced rather than silently clamped, because
+        // both produce a misleading "saved" toast:
+        //
+        //   1. Empty / non-numeric input — `Number("")` coerces to 0 and
+        //      sanitize clamps to the default (20). A user who meant to
+        //      clear the field then re-type would see their retention
+        //      silently reset to 20 with a success message.
+        //
+        //   2. Out-of-range input (e.g. 500) — sanitize clamps to 100 and
+        //      still reports success, but the visible error string says
+        //      "between 1 and 100", so the user has no idea their value
+        //      was changed. Reject explicitly instead.
+        //
+        // The 1..MAX range check mirrors the main-process `sanitizeMaxCount`
+        // in vaultBackupBridge.cjs so renderer and bridge agree.
         const parsed = Number(maxBackupsInput);
-        if (!Number.isFinite(parsed) || parsed <= 0 || maxBackupsInput.trim() === '') {
+        const inRange =
+            Number.isFinite(parsed) &&
+            parsed >= MIN_LOCAL_VAULT_BACKUP_MAX_COUNT &&
+            parsed <= MAX_LOCAL_VAULT_BACKUP_MAX_COUNT;
+        if (!inRange || maxBackupsInput.trim() === '') {
             toast.error(
                 t('cloudSync.localBackups.maxInvalid'),
                 t('sync.toast.errorTitle'),
@@ -730,6 +750,19 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             // pre-restore snapshot concurrently. See `withRestoreBarrier`
             // in application/localVaultBackups.ts for the read-side in
             // useAutoSync.
+            //
+            // In-memory React state refresh is implicit: `onApplyPayload`
+            // (supplied by the hosting screen) routes through
+            // `applySyncPayload` → `importDataFromString` → store writes
+            // → the hook-store listeners in `useVaultState` /
+            // `useCustomThemes` / etc. We do NOT explicitly re-pull host
+            // lists here because a future refactor that decouples those
+            // stores from the apply path would silently break the UI
+            // refresh in a way that's only visible after a manual
+            // restart. Any change to that chain must either preserve
+            // store-listener notification OR add an explicit
+            // `rehydrateAllFromStorage` call here — do not assume
+            // restore is "just" a payload swap.
             await withRestoreBarrier(async () => {
                 const detail = await readBackup(backupId);
                 if (!detail) {
@@ -1387,10 +1420,20 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 });
                 toast.success(t('cloudSync.resolve.downloaded'));
             } else if (resolution === 'USE_LOCAL') {
-                // Re-sync with local data
+                // Re-sync with local data. Hold the same cross-window
+                // restore barrier that USE_REMOTE uses: without it, a
+                // concurrent auto-sync tick in another window can slip
+                // between our conflict resolution and the upload,
+                // producing a second upload path with stale state that
+                // races against this push. USE_LOCAL doesn't mutate the
+                // renderer's in-memory state (no onApplyPayload call), so
+                // the barrier is belt-and-suspenders against the other
+                // window's push, not ours.
                 const localPayload = onBuildPayload();
                 if (!ensureSyncablePayload(localPayload)) return;
-                await sync.syncNow(localPayload);
+                await withRestoreBarrier(async () => {
+                    await sync.syncNow(localPayload);
+                });
                 toast.success(t('cloudSync.resolve.uploaded'));
             }
             setShowConflictModal(false);

@@ -40,6 +40,18 @@
  */
 
 /**
+ * Sentinel error for a missing WebCrypto subtle digest — see
+ * `sha256Hex` and `createSyncedFileSignature` for the fail-closed
+ * handling.
+ */
+class SyncSignatureUnavailableError extends Error {
+  constructor() {
+    super('WebCrypto subtle.digest is unavailable; signature cannot be computed safely.');
+    this.name = 'SyncSignatureUnavailableError';
+  }
+}
+
+/**
  * Compute SHA-256 of a UTF-8 string, returning lowercase hex.
  *
  * Uses `globalThis.crypto.subtle` (Web Crypto API) which is available in
@@ -47,17 +59,22 @@
  * both, and CI/tests run under Node). Keeping to the Web Crypto API also
  * avoids pulling `node:crypto` into the renderer bundle.
  *
+ * Throws `SyncSignatureUnavailableError` when subtle.digest is missing.
+ * Earlier revisions returned a length-only fallback string (`nosha-N`),
+ * which would produce a short, truncation-trivial pseudo-signature that
+ * an attacker controlling the remote could alias against a legitimate
+ * v3 signature of the same length. Failing loudly here lets the caller
+ * in `createSyncedFileSignature` return `null`, which routes through
+ * the "unreadable remote → treat as changed → three-way merge or
+ * surface decrypt error" path — strictly safer than a weak signature.
+ *
  * @param {string} input
  * @returns {Promise<string>}
  */
 async function sha256Hex(input) {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle?.digest) {
-    // Extremely unusual environment — no WebCrypto at all. Fall back to
-    // a non-cryptographic but length-stable marker so the signature is
-    // still well-formed; callers will at worst over-eagerly detect a
-    // remote change and re-merge, which is safe.
-    return `nosha-${input.length}`;
+    throw new SyncSignatureUnavailableError();
   }
   const bytes = new globalThis.TextEncoder().encode(input);
   const buf = await subtle.digest('SHA-256', bytes);
@@ -94,7 +111,20 @@ export async function createSyncedFileSignature(syncedFile) {
 
   const payloadStr = typeof payload === 'string' ? payload : '';
   const payloadLen = payloadStr.length;
-  const payloadHash = payloadStr ? await sha256Hex(payloadStr) : 'empty';
+  let payloadHash;
+  try {
+    payloadHash = payloadStr ? await sha256Hex(payloadStr) : 'empty';
+  } catch (error) {
+    if (error instanceof SyncSignatureUnavailableError) {
+      // Fail closed: no signature → decideRemoteChanged's
+      // `currentSignature === null` branch treats the remote as
+      // "unreadable" and routes through three-way merge. That is the
+      // safe behavior vs. a weak pseudo-signature that could silently
+      // alias against another payload of the same length.
+      return null;
+    }
+    throw error;
+  }
 
   return `v3:${metaSerialized}|len=${payloadLen}|sha256=${payloadHash}`;
 }

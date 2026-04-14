@@ -179,3 +179,34 @@ test('v2-format anchor string does not equal a v3 signature', async () => {
   const v2Like = String(v3).replace(/^v3:/, 'v2:').replace(/sha256=[a-f0-9]+$/, 'head=xxxxxxxxxxxxxxxx');
   assert.notEqual(v3, v2Like);
 });
+
+test('missing WebCrypto subtle → signature is null (fail-closed, no weak fallback)', async () => {
+  // Earlier revisions returned `nosha-<length>` when subtle.digest was
+  // unavailable. That fallback was length-only, so an adversary
+  // controlling the remote could trivially produce a payload whose
+  // weak pseudo-signature equals a legitimate v3 signature of the
+  // same length. Failing to `null` routes decideRemoteChanged into the
+  // "unreadable remote → treat as changed → three-way merge" path,
+  // which is strictly safer.
+  //
+  // `globalThis.crypto` is a read-only getter in Node, so we override
+  // the `subtle` property on the existing object rather than
+  // reassigning the whole binding.
+  const subtleDescriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'subtle');
+  Object.defineProperty(globalThis.crypto, 'subtle', {
+    configurable: true,
+    get() {
+      return undefined;
+    },
+  });
+  try {
+    const sig = await createSyncedFileSignature(makeSyncedFile());
+    assert.equal(sig, null, 'missing subtle must not produce a weak fallback string');
+  } finally {
+    if (subtleDescriptor) {
+      Object.defineProperty(globalThis.crypto, 'subtle', subtleDescriptor);
+    } else {
+      delete globalThis.crypto.subtle;
+    }
+  }
+});

@@ -273,14 +273,28 @@ export async function ensureVersionChangeBackup(
     });
   }
 
-  // Only advance the stored version stamp when we either wrote a
-  // backup OR had nothing to back up. If the payload was meaningful
-  // but the backup attempt failed (e.g. a transient keychain lock),
-  // leave the stamp pointing at the previous version so the next
-  // launch retries. Previously this wrote the new version
-  // unconditionally, which turned a transient failure into a
-  // permanent "the version-change backup never happens" regression.
-  const shouldAdvanceVersion = !payloadIsMeaningful || backup !== null;
+  // Only advance the stored version stamp when we actually wrote a
+  // backup. Two failure modes we must NOT collapse into "advance":
+  //
+  //   1. Meaningful payload + backup failed (transient keychain lock,
+  //      disk error) — leaving the stamp unchanged means the next
+  //      launch retries, instead of turning a transient error into a
+  //      permanent "the version-change backup never happened" hole.
+  //
+  //   2. Non-meaningful payload at the moment we checked — on startup
+  //      the async vault rehydrate may not have finished yet, so
+  //      `hasMeaningfulSyncData` can return false transiently even
+  //      though the user has real data. Advancing in that window would
+  //      burn the one-shot upgrade opportunity; holding keeps the
+  //      retry available on the next launch when rehydrate has
+  //      completed (or when the user genuinely starts from empty and
+  //      the next migration-boundary arrives).
+  //
+  // Trade-off: a user who truly starts empty and never adds data will
+  // hit this branch on every launch until they do. That's cheap (a
+  // single meaningful-data check) and strictly safer than silently
+  // skipping the first real upgrade backup.
+  const shouldAdvanceVersion = payloadIsMeaningful && backup !== null;
   if (shouldAdvanceVersion) {
     localStorageAdapter.writeString(STORAGE_KEY_LOCAL_VAULT_BACKUP_LAST_APP_VERSION, normalizedVersion);
   }

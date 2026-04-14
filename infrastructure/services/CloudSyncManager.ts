@@ -1269,7 +1269,7 @@ export class CloudSyncManager {
           const base = await this.loadSyncBase(provider);
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
 
-          console.log('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
+          console.info('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
 
           // Encrypt and upload merged payload
           const mergedSyncedFile = await EncryptionService.encryptPayload(
@@ -1613,7 +1613,7 @@ export class CloudSyncManager {
         }
         const mergeResult = { payload: merged };
 
-        console.log('[CloudSyncManager] syncAll: three-way merge completed');
+        console.info('[CloudSyncManager] syncAll: three-way merge completed');
 
         // Replace payload with merged payload for upload to all providers
         payload = mergeResult.payload;

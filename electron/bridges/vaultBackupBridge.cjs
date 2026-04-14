@@ -39,6 +39,19 @@ function isPlainObject(value) {
 //   them would silently collide two semantically-different payloads
 //   into the same fingerprint and cause the version-change / protective
 //   backup dedupe to drop a backup that should have been written.
+//
+// INVARIANT: array order is treated as semantically meaningful and is
+// NOT canonicalized. Every domain array that flows through SyncPayload
+// (hosts, keys, snippets, identities, portForwardingRules, …) is
+// produced by a store that iterates its internal `Map`/`Set` in a
+// stable, insertion-ordered way, so two semantically-equal payloads
+// built in the same renderer session produce identical orderings. If a
+// future refactor introduces a non-deterministic iteration source,
+// fingerprints will flap and the dedupe will miss — sort at the
+// producer, not here. Sorting inside the hash function would require
+// choosing a stable key per array type and would silently hide
+// intentionally-reordered payloads (user dragged a host in the list)
+// as "the same backup," which would be a safety regression.
 function normalizePayloadForHash(value, isRoot = true) {
   if (Array.isArray(value)) {
     return value.map((item) => normalizePayloadForHash(item, false));
@@ -191,7 +204,30 @@ function decodePayload(record, safeStorage) {
   throw new Error(`Unsupported vault backup encoding: ${record.payloadEncoding}`);
 }
 
+// Upper bound for a backup file on disk. The plaintext payload is capped
+// at MAX_PAYLOAD_BYTES on write; the encrypted-and-base64-encoded record
+// plus JSON envelope inflates that by ~2x worst case (base64 adds ~33%,
+// JSON formatting adds some, and the record metadata rounds up). A 2x
+// multiplier leaves comfortable headroom for legitimate backups while
+// still rejecting a 100+ MiB file that a user (or attacker) dropped
+// into the backup directory manually.
+const MAX_BACKUP_FILE_BYTES = MAX_PAYLOAD_BYTES * 2;
+
 async function readBackupRecord(filePath) {
+  // Refuse oversized files BEFORE readFile. `fs.readFile` buffers the
+  // whole file into memory, so an attacker (or a corrupted state) that
+  // places a huge file in the backup dir could OOM the renderer during
+  // listBackups enumeration. Stat-then-read keeps the failure mode to
+  // a cheap rejection.
+  let stat;
+  try {
+    stat = await fs.promises.stat(filePath);
+  } catch (error) {
+    throw new Error(`Unable to stat vault backup ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (stat.size > MAX_BACKUP_FILE_BYTES) {
+    throw new VaultBackupTooLargeError(stat.size);
+  }
   const raw = await fs.promises.readFile(filePath, "utf8");
   const parsed = JSON.parse(raw);
   if (!parsed || typeof parsed !== "object" || typeof parsed.id !== "string") {

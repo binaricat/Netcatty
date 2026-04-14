@@ -576,3 +576,51 @@ test("fingerprint treats nested syncedAt as load-bearing (C1)", async () => {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test("readBackupRecord rejects oversized files before buffering them", async () => {
+  // Write-path already caps at MAX_PAYLOAD_BYTES; this guards the READ
+  // path against a pre-existing or externally-placed file larger than
+  // the bound, which would otherwise be slurped into memory by
+  // fs.readFile inside listBackups/readBackup and risk OOMing the
+  // renderer. The cap is 2x the write cap to allow for the base64 +
+  // JSON-envelope inflation of legitimate records.
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    // Seed a legitimate backup so the directory exists and listBackups
+    // has something to iterate past.
+    const ok = await service.createBackup({ payload: samplePayload() });
+    assert.ok(ok.created);
+
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const hugePath = path.join(
+      backupDir,
+      `vault-backup-${Date.now() + 1}-huge.json`,
+    );
+    // MAX_PAYLOAD_BYTES * 2 = 50 MiB; we write one byte past that.
+    const hugeSize = MAX_PAYLOAD_BYTES * 2 + 1;
+    // Pre-allocate the file without actually writing 50 MiB of content:
+    // `ftruncate` produces a sparse file of the requested size on every
+    // supported filesystem, so the test stays fast and uses minimal disk.
+    const fd = fs.openSync(hugePath, "w", 0o600);
+    try {
+      fs.ftruncateSync(fd, hugeSize);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // listBackups now enumerates both files; the huge one should be
+    // skipped with a warning (matching the corrupted-file behavior) and
+    // the valid one must still come back.
+    const listed = await service.listBackups();
+    assert.equal(
+      listed.length,
+      1,
+      "oversized file should be skipped during enumeration",
+    );
+    assert.equal(listed[0].id, ok.backup.id);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
