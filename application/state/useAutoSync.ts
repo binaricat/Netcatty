@@ -316,15 +316,52 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     );
   }, [sync.isUnlocked, t]);
 
+  // Stabilize the fields `checkRemoteVersion` reads from `config`.
+  // AutoSyncConfig is a fresh object literal on every App render, so a
+  // naive `config` dep would rebuild `checkRemoteVersion`'s identity on
+  // every unrelated state change — re-firing the retry effect with
+  // `attempt=0` and spawning overlapping in-flight inspections. The
+  // refs below let `checkRemoteVersion` read the latest callback and
+  // readiness flag without pulling the object identity into deps.
+  const onApplyPayloadRef = useRef(config.onApplyPayload);
+  useEffect(() => {
+    onApplyPayloadRef.current = config.onApplyPayload;
+  }, [config.onApplyPayload]);
+  const startupReadyRef = useRef(config.startupReady);
+  useEffect(() => {
+    startupReadyRef.current = config.startupReady;
+  }, [config.startupReady]);
+  // `buildPayload` closes over live React state so its identity flips
+  // on every vault edit; route it through a ref so `checkRemoteVersion`
+  // can read the latest builder without churning its memo identity.
+  const buildPayloadRef = useRef(buildPayload);
+  useEffect(() => {
+    buildPayloadRef.current = buildPayload;
+  }, [buildPayload]);
+
+  // Serialize `checkRemoteVersion` invocations. Overlapping runs would
+  // race on `commitRemoteInspection` + `onApplyPayload`: two merges
+  // could both write-then-clear the apply-in-progress sentinel around
+  // interleaved applies, and both could push post-merge snapshots to
+  // remote. The cross-window `withRestoreBarrier` protects other
+  // windows but does NOT serialize same-window re-entry, so this
+  // in-flight guard closes that gap at the top of the call.
+  const checkRemoteInFlightRef = useRef(false);
+
   // Check remote version and pull if newer (on startup)
   const checkRemoteVersion = useCallback(async () => {
+    if (checkRemoteInFlightRef.current) {
+      return;
+    }
     const state = manager.getState();
     const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
     const unlocked = state.securityState === 'UNLOCKED';
 
-    if (!hasProvider || !unlocked || hasCheckedRemoteRef.current || config.startupReady === false) {
+    if (!hasProvider || !unlocked || hasCheckedRemoteRef.current || startupReadyRef.current === false) {
       return;
     }
+
+    checkRemoteInFlightRef.current = true;
 
     // Find connected provider
     const connectedProvider = AUTO_SYNC_PROVIDER_ORDER.find((provider) =>
@@ -355,7 +392,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       const remoteFile = inspection.remoteFile;
       const remotePayload = inspection.payload;
-      const localPayload = buildPayload();
+      const localPayload = buildPayloadRef.current();
       const localIsEmpty = !hasMeaningfulSyncData(localPayload);
       const remoteHasData = hasMeaningfulSyncData(remotePayload);
 
@@ -381,7 +418,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           // between commit and apply would leave the anchor pointing at
           // remote while local is still empty — the exact overwrite window
           // we're trying to close.
-          await Promise.resolve(config.onApplyPayload(remotePayload));
+          await Promise.resolve(onApplyPayloadRef.current(remotePayload));
           await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload);
           skipNextSyncRef.current = true;
           startupConsistent = true;
@@ -403,7 +440,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       // Apply merged payload to local state BEFORE committing. If the apply
       // throws, the next startup will re-run the merge with fresh data.
-      await Promise.resolve(config.onApplyPayload(mergeResult.payload));
+      await Promise.resolve(onApplyPayloadRef.current(mergeResult.payload));
       // Base is the last-agreed remote snapshot; `commitRemoteInspection`
       // stores remotePayload as the base so the next diff is computed
       // against what the cloud actually has, not against the merged
@@ -462,8 +499,14 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // Settings remains available as an escape hatch.
         remoteCheckDoneRef.current = true;
       }
+      checkRemoteInFlightRef.current = false;
     }
-  }, [config, buildPayload, t]);
+    // Intentionally minimal deps: `buildPayload`, `config.onApplyPayload`,
+    // and `config.startupReady` are read through refs above so their
+    // identity flips (every vault edit produces a fresh `buildPayload`
+    // and a fresh AutoSyncConfig literal) cannot re-memoize this
+    // callback and restart the retry-timer's exponential backoff.
+  }, [t]);
   
   // Debounced auto-sync when data changes
   useEffect(() => {
