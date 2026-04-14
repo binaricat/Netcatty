@@ -723,7 +723,6 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
                         </div>
                     </div>
                     <div className="space-y-2 md:min-w-[260px] md:shrink-0">
-                        <Label className="md:block md:text-right">{t('cloudSync.localBackups.maxCount')}</Label>
                         <div className="flex items-end gap-2 md:justify-end">
                             <Input
                                 type="number"
