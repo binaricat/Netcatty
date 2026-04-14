@@ -1393,6 +1393,8 @@ const en: Messages = {
   'cloudSync.history.error': 'Error',
   'cloudSync.localBackups.title': 'Local Backup History',
   'cloudSync.localBackups.desc': 'Netcatty keeps local restore points before app version changes and before vault restores.',
+  'cloudSync.localBackups.retentionTitle': 'Backup Retention',
+  'cloudSync.localBackups.retentionDesc': 'Choose how many local backups Netcatty should keep.',
   'cloudSync.localBackups.maxCount': 'Max backups',
   'cloudSync.localBackups.maxSaved': 'Saved backup retention: {count}',
   'cloudSync.localBackups.empty': 'No local backups yet.',

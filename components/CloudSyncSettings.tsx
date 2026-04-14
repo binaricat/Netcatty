@@ -713,114 +713,124 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({ onApplyPayload })
     };
 
     return (
-        <div className="rounded-lg border bg-card p-4 space-y-4">
-            <div className="flex items-start justify-between gap-3">
+        <div className="space-y-4">
+            <div className="rounded-lg border bg-card p-4 space-y-4">
                 <div>
-                    <div className="text-sm font-medium">{t('cloudSync.localBackups.title')}</div>
+                    <div className="text-sm font-medium">{t('cloudSync.localBackups.retentionTitle')}</div>
                     <div className="text-xs text-muted-foreground mt-1">
-                        {t('cloudSync.localBackups.desc')}
+                        {t('cloudSync.localBackups.retentionDesc')}
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-end gap-2">
+                    <div className="space-y-2">
+                        <Label>{t('cloudSync.localBackups.maxCount')}</Label>
+                        <Input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={maxBackupsInput}
+                            onChange={(e) => setMaxBackupsInput(e.target.value)}
+                            className="w-28"
+                        />
+                    </div>
                     <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void refreshBackups()}
-                        disabled={isLoading}
-                        className="gap-1"
+                        variant="outline"
+                        onClick={() => void handleSaveMaxBackups()}
+                        disabled={isSavingMaxBackups}
+                        className="gap-2"
                     >
-                        <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
-                        {t('settings.system.refresh')}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleOpenBackupDirectory()}
-                        className="gap-1"
-                    >
-                        <FolderOpen size={14} />
-                        {t('settings.system.openFolder')}
+                        {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
+                        {t('common.save')}
                     </Button>
                 </div>
             </div>
 
-            <div className="flex items-end gap-2">
-                <div className="space-y-2">
-                    <Label>{t('cloudSync.localBackups.maxCount')}</Label>
-                    <Input
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={maxBackupsInput}
-                        onChange={(e) => setMaxBackupsInput(e.target.value)}
-                        className="w-28"
-                    />
-                </div>
-                <Button
-                    variant="outline"
-                    onClick={() => void handleSaveMaxBackups()}
-                    disabled={isSavingMaxBackups}
-                    className="gap-2"
-                >
-                    {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
-                    {t('common.save')}
-                </Button>
-            </div>
-
-            {backups.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
-                    {t('cloudSync.localBackups.empty')}
-                </div>
-            ) : (
-                <div className="space-y-2">
-                    {backups.map((backup) => (
-                        <div
-                            key={backup.id}
-                            className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
-                        >
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-medium">
-                                        {getReasonLabel(backup.reason)}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {formatTimestamp(backup.createdAt)}
-                                    </span>
-                                    {backup.sourceAppVersion && backup.targetAppVersion && (
-                                        <span className="text-xs text-muted-foreground">
-                                            {t('cloudSync.localBackups.versionChange', {
-                                                from: backup.sourceAppVersion,
-                                                to: backup.targetAppVersion,
-                                            })}
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                    {t('cloudSync.localBackups.counts', {
-                                        hosts: String(backup.preview.hostCount),
-                                        keys: String(backup.preview.keyCount),
-                                        snippets: String(backup.preview.snippetCount),
-                                    })}
-                                </div>
-                            </div>
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void handleRestoreBackup(backup.id)}
-                                disabled={restoringBackupId === backup.id}
-                                className="gap-2"
-                            >
-                                {restoringBackupId === backup.id ? (
-                                    <Loader2 size={14} className="animate-spin" />
-                                ) : (
-                                    <Download size={14} />
-                                )}
-                                {t('cloudSync.localBackups.restore')}
-                            </Button>
+            <div className="rounded-lg border bg-card p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <div className="text-sm font-medium">{t('cloudSync.localBackups.title')}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                            {t('cloudSync.localBackups.desc')}
                         </div>
-                    ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void refreshBackups()}
+                            disabled={isLoading}
+                            className="gap-1"
+                        >
+                            <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
+                            {t('settings.system.refresh')}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleOpenBackupDirectory()}
+                            className="gap-1"
+                        >
+                            <FolderOpen size={14} />
+                            {t('settings.system.openFolder')}
+                        </Button>
+                    </div>
                 </div>
-            )}
+
+                {backups.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
+                        {t('cloudSync.localBackups.empty')}
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {backups.map((backup) => (
+                            <div
+                                key={backup.id}
+                                className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
+                            >
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-sm font-medium">
+                                            {getReasonLabel(backup.reason)}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                            {formatTimestamp(backup.createdAt)}
+                                        </span>
+                                        {backup.sourceAppVersion && backup.targetAppVersion && (
+                                            <span className="text-xs text-muted-foreground">
+                                                {t('cloudSync.localBackups.versionChange', {
+                                                    from: backup.sourceAppVersion,
+                                                    to: backup.targetAppVersion,
+                                                })}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                        {t('cloudSync.localBackups.counts', {
+                                            hosts: String(backup.preview.hostCount),
+                                            keys: String(backup.preview.keyCount),
+                                            snippets: String(backup.preview.snippetCount),
+                                        })}
+                                    </div>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => void handleRestoreBackup(backup.id)}
+                                    disabled={restoringBackupId === backup.id}
+                                    className="gap-2"
+                                >
+                                    {restoringBackupId === backup.id ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                    ) : (
+                                        <Download size={14} />
+                                    )}
+                                    {t('cloudSync.localBackups.restore')}
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

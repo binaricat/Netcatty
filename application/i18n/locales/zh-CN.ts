@@ -1006,6 +1006,8 @@ const zhCN: Messages = {
   'cloudSync.history.error': '错误',
   'cloudSync.localBackups.title': '本地备份历史',
   'cloudSync.localBackups.desc': 'Netcatty 会在版本变化前，以及恢复主机库前，自动留下一份本地恢复点。',
+  'cloudSync.localBackups.retentionTitle': '备份保留数量',
+  'cloudSync.localBackups.retentionDesc': '设置 Netcatty 最多保留多少份本地备份。',
   'cloudSync.localBackups.maxCount': '最多保留',
   'cloudSync.localBackups.maxSaved': '已保存保留数量：{count}',
   'cloudSync.localBackups.empty': '还没有本地备份。',
