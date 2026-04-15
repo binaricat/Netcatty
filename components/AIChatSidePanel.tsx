@@ -389,6 +389,18 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setActiveSessionId,
   ]);
 
+  // When the resolved view is draft but activeSessionIdMap still points at a
+  // previously-shown session, clear that stale entry. Otherwise
+  // activeTerminalTargetIds keeps claiming ownership of the old session's
+  // target and getSessionScopeMatchRank suppresses matching history from
+  // other terminals until another action rewrites the map.
+  useEffect(() => {
+    if (!isVisible) return;
+    if (normalizedPanelView.mode !== 'draft') return;
+    if (persistedSessionId == null) return;
+    setActiveSessionId(null);
+  }, [isVisible, normalizedPanelView.mode, persistedSessionId, setActiveSessionId]);
+
   const ensureScopeDraft = useCallback((agentId: string) => {
     ensureDraftForScope(scopeKey, agentId);
   }, [ensureDraftForScope, scopeKey]);

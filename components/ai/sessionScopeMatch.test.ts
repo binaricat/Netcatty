@@ -49,3 +49,32 @@ test("host-matched terminal session remains resumable when no active terminal ow
     1,
   );
 });
+
+test("session targeting the current scope is an exact match (rank 2)", () => {
+  const session = createSession("session-1", "terminal-current", ["host-a"]);
+
+  assert.equal(
+    getSessionScopeMatchRank(
+      session,
+      "terminal",
+      "terminal-current",
+      ["host-a"],
+      new Set(),
+    ),
+    2,
+  );
+});
+
+test("scope type mismatch returns 0 regardless of target or hosts", () => {
+  const session = createSession("session-1", "terminal-current", ["host-a"]);
+
+  assert.equal(
+    getSessionScopeMatchRank(
+      session,
+      "workspace",
+      "terminal-current",
+      ["host-a"],
+    ),
+    0,
+  );
+});
