@@ -129,3 +129,35 @@ test("pruneInactiveScopedSessions preserves original sessions when orphaned rest
   assert.deepEqual(next.orphanedSessionIds, ["terminal-restorable"]);
   assert.equal(next.sessions, sessions);
 });
+
+test("pruneInactiveScopedSessions treats sessions displayed elsewhere as in-use, not orphaned", () => {
+  // terminal-restorable's original scope (terminal-closed-A) is gone, but
+  // the user resumed it into terminal-open-B from history. The session's
+  // externalSessionId must be preserved and it must not appear in the
+  // orphaned list, otherwise the active chat loses ACP continuity.
+  const resumedElsewhere = createSession("terminal-restorable", {
+    type: "terminal",
+    targetId: "terminal-closed-A",
+    hostIds: ["host-1"],
+  }, "ext-resumed");
+
+  const trulyOrphaned = createSession("terminal-stale", {
+    type: "terminal",
+    targetId: "terminal-closed-C",
+    hostIds: ["host-2"],
+  }, "ext-stale");
+
+  const sessions = [resumedElsewhere, trulyOrphaned];
+
+  const next = pruneInactiveScopedSessions(
+    sessions,
+    new Set(["terminal-open-B"]),
+    new Set(["terminal-restorable"]),
+  );
+
+  // Only the one not being displayed anywhere should show up as orphaned.
+  assert.deepEqual(next.orphanedSessionIds, ["terminal-stale"]);
+  // The resumed session must retain its externalSessionId.
+  const resumedNext = next.sessions.find((s) => s.id === "terminal-restorable");
+  assert.equal(resumedNext?.externalSessionId, "ext-resumed");
+});

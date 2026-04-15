@@ -20,7 +20,7 @@ function createSession(id: string, targetId: string, hostIds: string[]): AISessi
   };
 }
 
-test("host-matched terminal session is excluded when another active terminal already owns it", () => {
+test("host-matched terminal session is excluded when another active terminal already displays it", () => {
   const session = createSession("session-1", "terminal-other", ["host-a"]);
 
   assert.equal(
@@ -29,13 +29,13 @@ test("host-matched terminal session is excluded when another active terminal alr
       "terminal",
       "terminal-current",
       ["host-a"],
-      new Set(["terminal-other"]),
+      new Set(["session-1"]),
     ),
     0,
   );
 });
 
-test("host-matched terminal session remains resumable when no active terminal owns it", () => {
+test("host-matched terminal session remains resumable when no terminal is displaying it", () => {
   const session = createSession("session-1", "terminal-closed", ["host-a"]);
 
   assert.equal(
@@ -44,9 +44,30 @@ test("host-matched terminal session remains resumable when no active terminal ow
       "terminal",
       "terminal-current",
       ["host-a"],
-      new Set(["terminal-other"]),
+      new Set(["session-other"]),
     ),
     1,
+  );
+});
+
+test("ownership is tracked by session id, not scope.targetId", () => {
+  // Session was created in terminal-A but a different terminal (B) is now
+  // displaying it after the user resumed it from history. Opening a third
+  // terminal (C) should not see this session as owned, because the new
+  // ownership check is keyed on session id, not the stale targetId.
+  const session = createSession("session-1", "terminal-A", ["host-a"]);
+
+  assert.equal(
+    getSessionScopeMatchRank(
+      session,
+      "terminal",
+      "terminal-C",
+      ["host-a"],
+      // terminal-B is displaying session-1; pass session-1 as an
+      // active-id so C sees it as in-use
+      new Set(["session-1"]),
+    ),
+    0,
   );
 });
 

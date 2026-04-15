@@ -94,9 +94,26 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   const currentSessions = latestAISessionsSnapshot
     ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
     ?? [];
+
+  // Sessions shown by a still-live scope must be protected from cleanup
+  // even when their own `scope.targetId` points at a closed terminal —
+  // history can be resumed into a different terminal and we must not
+  // clear its `externalSessionId` (or delete it outright) while it's
+  // actively being used.
+  const preCleanupActiveSessionMap = latestAIActiveSessionMapSnapshot
+    ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
+    ?? {};
+  const activeSessionIds = new Set<string>();
+  for (const [scopeKey, sessionId] of Object.entries(preCleanupActiveSessionMap)) {
+    if (!sessionId) continue;
+    if (!isScopeKeyActive(scopeKey, activeTargetIds)) continue;
+    activeSessionIds.add(sessionId);
+  }
+
   const nextSessionCleanup = pruneInactiveScopedSessions(
     currentSessions,
     activeTargetIds,
+    activeSessionIds,
   );
 
   if (nextSessionCleanup.orphanedSessionIds.length > 0) {
@@ -112,9 +129,7 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
     emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
   }
 
-  const activeSessionIdMap = latestAIActiveSessionMapSnapshot
-    ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
-    ?? {};
+  const activeSessionIdMap = preCleanupActiveSessionMap;
   let activeSessionMapChanged = false;
   const nextActiveSessionIdMap = { ...activeSessionIdMap };
 

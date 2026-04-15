@@ -285,16 +285,16 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setActiveSessionIdForScope(scopeKey, id);
   }, [scopeKey, setActiveSessionIdForScope]);
 
-  const activeTerminalTargetIds = useMemo(() => {
-    const targetIds = new Set<string>();
-    for (const [sessionScopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
+  const activeTerminalSessionIds = useMemo(() => {
+    const sessionIds = new Set<string>();
+    const entries = Object.entries(activeSessionIdMap) as Array<[string, string | null]>;
+    for (const [sessionScopeKey, sessionId] of entries) {
       if (!sessionScopeKey.startsWith('terminal:') || !sessionId) continue;
-      const targetId = sessionScopeKey.slice('terminal:'.length);
-      if (!targetId || targetId === scopeTargetId) continue;
-      targetIds.add(targetId);
+      if (sessionScopeKey === scopeKey) continue;
+      sessionIds.add(sessionId);
     }
-    return targetIds;
-  }, [activeSessionIdMap, scopeTargetId]);
+    return sessionIds;
+  }, [activeSessionIdMap, scopeKey]);
 
   const historySessions = useMemo(
     () =>
@@ -306,13 +306,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             scopeType,
             scopeTargetId,
             scopeHostIds,
-            activeTerminalTargetIds,
+            activeTerminalSessionIds,
           ),
         }))
         .filter(({ matchRank }) => matchRank > 0)
         .sort((a, b) => b.matchRank - a.matchRank || b.session.updatedAt - a.session.updatedAt)
         .map(({ session }) => session),
-    [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds],
+    [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds],
   );
 
   const explicitPanelView = panelViewByScope[scopeKey];

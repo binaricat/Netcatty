@@ -99,12 +99,21 @@ function isRestorableTerminalSession(session: AISession): boolean {
 export function pruneInactiveScopedSessions(
   sessions: AISession[],
   activeTargetIds: Set<string>,
+  /**
+   * Session ids currently displayed by any live scope. A session whose
+   * `scope.targetId` is inactive but whose id is still in use somewhere
+   * (e.g. resumed from history into a different terminal) must not be
+   * treated as orphaned — clearing its `externalSessionId` or deleting
+   * it outright would break the chat the user is actively continuing.
+   */
+  activeSessionIds: Set<string> = new Set(),
 ): {
   sessions: AISession[];
   orphanedSessionIds: string[];
 } {
   const orphanedSessionIds = sessions
     .filter((session) => session.scope.targetId && !activeTargetIds.has(session.scope.targetId))
+    .filter((session) => !activeSessionIds.has(session.id))
     .map((session) => session.id);
 
   if (orphanedSessionIds.length === 0) {

@@ -5,7 +5,13 @@ export function getSessionScopeMatchRank(
   scopeType: "terminal" | "workspace",
   scopeTargetId?: string,
   scopeHostIds?: string[],
-  activeTerminalTargetIds?: Set<string>,
+  /**
+   * Session ids currently displayed by other terminal scopes. Tracked by
+   * session id rather than `scope.targetId` so that a host-matched session
+   * resumed from a different terminal is still recognised as in-use and
+   * not offered (or cleaned) as if it were orphaned.
+   */
+  activeTerminalSessionIds?: Set<string>,
 ): number {
   if (session.scope.type !== scopeType) return 0;
   if (session.scope.targetId === scopeTargetId) return 2;
@@ -14,7 +20,7 @@ export function getSessionScopeMatchRank(
     return 0;
   }
 
-  if (session.scope.targetId && activeTerminalTargetIds?.has(session.scope.targetId)) {
+  if (activeTerminalSessionIds?.has(session.id)) {
     return 0;
   }
 
