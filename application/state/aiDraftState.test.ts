@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   activateDraftView,
+  bumpDraftMutationVersionState,
+  bumpDraftUploadGenerationState,
   clearScopeDraftState,
   createEmptyDraft,
   ensureDraftForScopeState,
+  getDraftMutationVersionState,
+  getDraftUploadGenerationState,
   pruneTerminalScopeState,
   pruneTerminalTransientState,
   resolvePanelView,
@@ -166,6 +170,28 @@ test("ensureDraftForScopeState returns the original ref when the scope already e
   );
 
   assert.equal(next, draftsByScope);
+});
+
+test("draft mutation version increments on every mutation for the same scope", () => {
+  const scopeKey = "terminal:1";
+  const initialVersion = getDraftMutationVersionState({}, scopeKey);
+  const nextVersions = bumpDraftMutationVersionState({}, scopeKey);
+  const finalVersions = bumpDraftMutationVersionState(nextVersions, scopeKey);
+
+  assert.equal(initialVersion, 0);
+  assert.equal(getDraftMutationVersionState(nextVersions, scopeKey), 1);
+  assert.equal(getDraftMutationVersionState(finalVersions, scopeKey), 2);
+});
+
+test("draft upload generation only increments when the draft lifecycle rolls over", () => {
+  const scopeKey = "terminal:1";
+  const initialGeneration = getDraftUploadGenerationState({}, scopeKey);
+  const nextGenerations = bumpDraftUploadGenerationState({}, scopeKey);
+  const finalGenerations = bumpDraftUploadGenerationState(nextGenerations, scopeKey);
+
+  assert.equal(initialGeneration, 0);
+  assert.equal(getDraftUploadGenerationState(nextGenerations, scopeKey), 1);
+  assert.equal(getDraftUploadGenerationState(finalGenerations, scopeKey), 2);
 });
 
 test("pruneTerminalScopeState removes closed terminal drafts and views only", () => {

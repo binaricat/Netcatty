@@ -6,6 +6,7 @@ import type {
   AISession,
 } from "../../infrastructure/ai/types.ts";
 import {
+  applyDraftEntrySelection,
   applyHistorySessionSelection,
   normalizePanelView,
   resolveDisplayedPanelView,
@@ -136,5 +137,23 @@ test("history selection switches to the chosen session without touching draft st
     "view:session-2",
     "active:session-2",
     "close-history",
+  ]);
+});
+
+test("draft entry ensures a draft exists before switching the panel to draft mode", () => {
+  const calls: string[] = [];
+
+  applyDraftEntrySelection({
+    ensureDraft: () => {
+      calls.push("ensure-draft");
+    },
+    showDraftView: () => {
+      calls.push("show-draft");
+    },
+  });
+
+  assert.deepEqual(calls, [
+    "ensure-draft",
+    "show-draft",
   ]);
 });

@@ -6,6 +6,8 @@ import type {
 type DraftsByScope = Partial<Record<string, AIDraft>>;
 type PanelViewByScope = Partial<Record<string, AIPanelView>>;
 type ActiveSessionIdMap = Record<string, string | null>;
+type DraftMutationVersionByScope = Record<string, number>;
+type DraftUploadGenerationByScope = Record<string, number>;
 
 const DEFAULT_PANEL_VIEW: AIPanelView = { mode: 'draft' };
 
@@ -16,6 +18,40 @@ export function createEmptyDraft(agentId: string): AIDraft {
     attachments: [],
     selectedUserSkillSlugs: [],
     updatedAt: Date.now(),
+  };
+}
+
+export function getDraftMutationVersionState(
+  versionsByScope: DraftMutationVersionByScope,
+  scopeKey: string,
+): number {
+  return versionsByScope[scopeKey] ?? 0;
+}
+
+export function bumpDraftMutationVersionState(
+  versionsByScope: DraftMutationVersionByScope,
+  scopeKey: string,
+): DraftMutationVersionByScope {
+  return {
+    ...versionsByScope,
+    [scopeKey]: getDraftMutationVersionState(versionsByScope, scopeKey) + 1,
+  };
+}
+
+export function getDraftUploadGenerationState(
+  generationsByScope: DraftUploadGenerationByScope,
+  scopeKey: string,
+): number {
+  return generationsByScope[scopeKey] ?? 0;
+}
+
+export function bumpDraftUploadGenerationState(
+  generationsByScope: DraftUploadGenerationByScope,
+  scopeKey: string,
+): DraftUploadGenerationByScope {
+  return {
+    ...generationsByScope,
+    [scopeKey]: getDraftUploadGenerationState(generationsByScope, scopeKey) + 1,
   };
 }
 

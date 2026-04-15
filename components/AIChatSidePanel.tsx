@@ -47,10 +47,16 @@ import {
   type UserSkillOption,
 } from './ai/userSkillsState';
 import {
+  applyDraftEntrySelection,
   applyHistorySessionSelection,
   resolveDisplayedPanelView,
   resolveDisplayedSession,
 } from './ai/aiPanelViewState';
+import {
+  endDraftSend,
+  tryBeginDraftSend,
+} from './ai/draftSendGate';
+import { getSessionScopeMatchRank } from './ai/sessionScopeMatch';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
@@ -200,27 +206,6 @@ function buildAcpHistoryMessages(messages: ChatMessage[]): Array<{ role: 'user' 
   });
 }
 
-function getSessionScopeMatchRank(
-  session: AISession,
-  scopeType: 'terminal' | 'workspace',
-  scopeTargetId?: string,
-  scopeHostIds?: string[],
-  activeTerminalTargetIds?: Set<string>,
-): number {
-  if (session.scope.type !== scopeType) return 0;
-  if (session.scope.targetId === scopeTargetId) return 2;
-
-  if (scopeType !== 'terminal' || !scopeHostIds?.length || !session.scope.hostIds?.length) {
-    return 0;
-  }
-
-  if (session.scope.targetId && activeTerminalTargetIds?.has(session.scope.targetId)) {
-    return 0;
-  }
-
-  return session.scope.hostIds.some((hostId) => scopeHostIds.includes(hostId)) ? 1 : 0;
-}
-
 // -------------------------------------------------------------------
 // Component
 // -------------------------------------------------------------------
@@ -300,17 +285,34 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setActiveSessionIdForScope(scopeKey, id);
   }, [scopeKey, setActiveSessionIdForScope]);
 
+  const activeTerminalTargetIds = useMemo(() => {
+    const targetIds = new Set<string>();
+    for (const [sessionScopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
+      if (!sessionScopeKey.startsWith('terminal:') || !sessionId) continue;
+      const targetId = sessionScopeKey.slice('terminal:'.length);
+      if (!targetId || targetId === scopeTargetId) continue;
+      targetIds.add(targetId);
+    }
+    return targetIds;
+  }, [activeSessionIdMap, scopeTargetId]);
+
   const historySessions = useMemo(
     () =>
       sessions
         .map((session) => ({
           session,
-          matchRank: getSessionScopeMatchRank(session, scopeType, scopeTargetId, scopeHostIds),
+          matchRank: getSessionScopeMatchRank(
+            session,
+            scopeType,
+            scopeTargetId,
+            scopeHostIds,
+            activeTerminalTargetIds,
+          ),
         }))
         .filter(({ matchRank }) => matchRank > 0)
         .sort((a, b) => b.matchRank - a.matchRank || b.session.updatedAt - a.session.updatedAt)
         .map(({ session }) => session),
-    [sessions, scopeType, scopeTargetId, scopeHostIds],
+    [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalTargetIds],
   );
 
   const explicitPanelView = panelViewByScope[scopeKey];
@@ -335,6 +337,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   currentDraftRef.current = currentDraft;
   const activeSessionRef = useRef(activeSession);
   activeSessionRef.current = activeSession;
+  const draftSendInFlightRef = useRef(false);
 
   const defaultTargetSession = useMemo<DefaultTargetSessionHint | undefined>(() => {
     const connectedSessions = terminalSessions.filter((session) => session.connected !== false);
@@ -409,16 +412,25 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     clearDraftForScope(scopeKey);
   }, [clearDraftForScope, scopeKey]);
 
+  const enterScopeDraftMode = useCallback((agentId: string) => {
+    applyDraftEntrySelection({
+      ensureDraft: () => ensureScopeDraft(agentId),
+      showDraftView: showScopeDraftView,
+    });
+  }, [ensureScopeDraft, showScopeDraftView]);
+
   const setInputValue = useCallback((value: string) => {
+    enterScopeDraftMode(currentAgentId);
     updateScopeDraft(currentAgentId, (draft) => ({
       ...draft,
       text: value,
     }));
-  }, [currentAgentId, updateScopeDraft]);
+  }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
   const addFiles = useCallback(async (inputFiles: File[]) => {
+    enterScopeDraftMode(currentAgentId);
     await addDraftFiles(scopeKey, currentAgentId, inputFiles);
-  }, [addDraftFiles, scopeKey, currentAgentId]);
+  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey]);
 
   const removeFile = useCallback((fileId: string) => {
     removeDraftFile(scopeKey, currentAgentId, fileId);
@@ -758,6 +770,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const addSelectedUserSkill = useCallback((slug: string) => {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
     if (!normalizedSlug) return;
+    enterScopeDraftMode(currentAgentId);
     updateScopeDraft(currentAgentId, (draft) => {
       if (draft.selectedUserSkillSlugs.includes(normalizedSlug)) {
         return draft;
@@ -767,11 +780,12 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         selectedUserSkillSlugs: [...draft.selectedUserSkillSlugs, normalizedSlug],
       };
     });
-  }, [currentAgentId, updateScopeDraft]);
+  }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
   const removeSelectedUserSkill = useCallback((slug: string) => {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
     if (!normalizedSlug) return;
+    enterScopeDraftMode(currentAgentId);
     updateScopeDraft(currentAgentId, (draft) => {
       const nextSelectedUserSkillSlugs = draft.selectedUserSkillSlugs.filter(
         (entry) => entry !== normalizedSlug,
@@ -784,7 +798,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         selectedUserSkillSlugs: nextSelectedUserSkillSlugs,
       };
     });
-  }, [currentAgentId, updateScopeDraft]);
+  }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
   // -------------------------------------------------------------------
   // Main send handler (thin orchestrator)
@@ -807,110 +821,120 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       filename: file.filename,
       filePath: file.filePath,
     }));
+    const isDraftMode = currentPanelView.mode === 'draft';
 
-    let sessionId = currentSessionView?.id ?? null;
-    let currentSession = currentSessionView ?? null;
-    let sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
-
-    if (currentPanelView.mode === 'draft') {
-      const scope: AISessionScope = { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds };
-      const createdSession = createSession(scope, sendAgentId);
-      sessionId = createdSession.id;
-      currentSession = createdSession;
-      clearScopeDraft();
-      showScopeSessionView(createdSession.id);
-      setActiveSessionId(createdSession.id);
-    }
-
-    if (!sessionId) {
+    if (isDraftMode && !tryBeginDraftSend(draftSendInFlightRef)) {
       return;
     }
 
-    const isExternalAgent = sendAgentId !== 'catty';
+    try {
+      let sessionId = currentSessionView?.id ?? null;
+      let currentSession = currentSessionView ?? null;
+      const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
 
-    // No provider configured for built-in agent
-    if (!isExternalAgent && !activeProvider) {
-      addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
-      addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
-      if (currentPanelView.mode === 'session') {
+      if (isDraftMode) {
+        const scope: AISessionScope = { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds };
+        const createdSession = createSession(scope, sendAgentId);
+        sessionId = createdSession.id;
+        currentSession = createdSession;
         clearScopeDraft();
-        showScopeSessionView(sessionId);
+        showScopeSessionView(createdSession.id);
+        setActiveSessionId(createdSession.id);
       }
-      return;
-    }
 
-    // Add user message
-    addMessageToSession(sessionId, {
-      id: generateId(), role: 'user', content: trimmed,
-      ...(attachments.length > 0 ? { attachments } : {}),
-      timestamp: Date.now(),
-    });
-    clearScopeDraft();
-    showScopeSessionView(sessionId);
-    setActiveSessionId(sessionId);
-    setStreamingForScope(sessionId, true);
-
-    // Create assistant message placeholder with a tracked ID
-    const agentConfig = isExternalAgent ? externalAgents.find((agent) => agent.id === sendAgentId) : undefined;
-    const assistantMsgId = generateId();
-    addMessageToSession(sessionId, {
-      id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now(),
-      model: isExternalAgent
-        ? (selectedAgentModel || agentConfig?.name || 'external')
-        : (activeModelId || activeProvider?.defaultModel || ''),
-      providerId: isExternalAgent ? undefined : activeProvider?.providerId,
-    });
-
-    const abortController = new AbortController();
-    abortControllersRef.current.set(sessionId, abortController);
-    currentSession = currentSession ?? sessionsRef.current.find((session) => session.id === sessionId) ?? null;
-
-    if (isExternalAgent) {
-      if (!agentConfig) {
-        updateMessageById(sessionId, assistantMsgId, msg => ({ ...msg, content: 'External agent not found. Please check settings.', executionStatus: 'failed' }));
-        setStreamingForScope(sessionId, false);
+      if (!sessionId) {
         return;
       }
-      try {
-        await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachments, {
-          existingSessionId: currentSession?.externalSessionId,
-          updateExternalSessionId: updateSessionExternalSessionId,
-          historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
-          terminalSessions,
-          defaultTargetSession,
-          providers,
-          selectedAgentModel,
-          toolIntegrationMode,
-          selectedUserSkillSlugs: selectedSkillSlugs,
-        });
-      } catch (err) {
-        reportStreamError(sessionId, abortController.signal, err);
+
+      const isExternalAgent = sendAgentId !== 'catty';
+
+      // No provider configured for built-in agent
+      if (!isExternalAgent && !activeProvider) {
+        addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
+        addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
+        if (currentPanelView.mode === 'session') {
+          clearScopeDraft();
+          showScopeSessionView(sessionId);
+        }
+        return;
       }
-      // Clear any lingering statusText when the external agent stream finishes
-      updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
-      setStreamingForScope(sessionId, false);
-      abortControllersRef.current.delete(sessionId);
-      autoTitleSession(sessionId, trimmed);
-    } else {
-      const toolScope = {
-        type: scopeType,
-        targetId: scopeTargetId,
-        label: scopeLabel,
-      } as const;
-      await sendToCattyAgent(sessionId, sendScopeKey, trimmed, abortController, currentSession ?? undefined, assistantMsgId, {
-        activeProvider,
-        activeModelId,
-        scopeType,
-        scopeTargetId,
-        scopeLabel,
-        globalPermissionMode,
-        commandBlocklist,
-        terminalSessions,
-        webSearchConfig,
-        getExecutorContext: () => buildExecutorContextForScope(toolScope),
-        autoTitleSession,
-        selectedUserSkillSlugs: selectedSkillSlugs,
-      }, attachments.length > 0 ? attachments : undefined);
+
+      // Add user message
+      addMessageToSession(sessionId, {
+        id: generateId(), role: 'user', content: trimmed,
+        ...(attachments.length > 0 ? { attachments } : {}),
+        timestamp: Date.now(),
+      });
+      clearScopeDraft();
+      showScopeSessionView(sessionId);
+      setActiveSessionId(sessionId);
+      setStreamingForScope(sessionId, true);
+
+      // Create assistant message placeholder with a tracked ID
+      const agentConfig = isExternalAgent ? externalAgents.find((agent) => agent.id === sendAgentId) : undefined;
+      const assistantMsgId = generateId();
+      addMessageToSession(sessionId, {
+        id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now(),
+        model: isExternalAgent
+          ? (selectedAgentModel || agentConfig?.name || 'external')
+          : (activeModelId || activeProvider?.defaultModel || ''),
+        providerId: isExternalAgent ? undefined : activeProvider?.providerId,
+      });
+
+      const abortController = new AbortController();
+      abortControllersRef.current.set(sessionId, abortController);
+      currentSession = currentSession ?? sessionsRef.current.find((session) => session.id === sessionId) ?? null;
+
+      if (isExternalAgent) {
+        if (!agentConfig) {
+          updateMessageById(sessionId, assistantMsgId, msg => ({ ...msg, content: 'External agent not found. Please check settings.', executionStatus: 'failed' }));
+          setStreamingForScope(sessionId, false);
+          return;
+        }
+        try {
+          await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachments, {
+            existingSessionId: currentSession?.externalSessionId,
+            updateExternalSessionId: updateSessionExternalSessionId,
+            historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
+            terminalSessions,
+            defaultTargetSession,
+            providers,
+            selectedAgentModel,
+            toolIntegrationMode,
+            selectedUserSkillSlugs: selectedSkillSlugs,
+          });
+        } catch (err) {
+          reportStreamError(sessionId, abortController.signal, err);
+        }
+        updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
+        setStreamingForScope(sessionId, false);
+        abortControllersRef.current.delete(sessionId);
+        autoTitleSession(sessionId, trimmed);
+      } else {
+        const toolScope = {
+          type: scopeType,
+          targetId: scopeTargetId,
+          label: scopeLabel,
+        } as const;
+        await sendToCattyAgent(sessionId, sendScopeKey, trimmed, abortController, currentSession ?? undefined, assistantMsgId, {
+          activeProvider,
+          activeModelId,
+          scopeType,
+          scopeTargetId,
+          scopeLabel,
+          globalPermissionMode,
+          commandBlocklist,
+          terminalSessions,
+          webSearchConfig,
+          getExecutorContext: () => buildExecutorContextForScope(toolScope),
+          autoTitleSession,
+          selectedUserSkillSlugs: selectedSkillSlugs,
+        }, attachments.length > 0 ? attachments : undefined);
+      }
+    } finally {
+      if (isDraftMode) {
+        endDraftSend(draftSendInFlightRef);
+      }
     }
   }, [
     isStreaming, activeProvider, scopeKey, currentAgentId,

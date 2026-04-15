@@ -11,6 +11,11 @@ interface HistorySessionSelectionActions {
   closeHistory?: () => void;
 }
 
+interface DraftEntrySelectionActions {
+  ensureDraft: () => void;
+  showDraftView: () => void;
+}
+
 export function resolveDisplayedPanelView(
   panelView: AIPanelView | undefined,
   hasDraft: boolean,
@@ -76,4 +81,11 @@ export function applyHistorySessionSelection(
   actions.showSessionView(sessionId);
   actions.setActiveSessionId(sessionId);
   actions.closeHistory?.();
+}
+
+export function applyDraftEntrySelection(
+  actions: DraftEntrySelectionActions,
+): void {
+  actions.ensureDraft();
+  actions.showDraftView();
 }

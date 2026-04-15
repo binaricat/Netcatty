@@ -33,8 +33,11 @@ import type {
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
 import {
   activateDraftView,
+  bumpDraftMutationVersionState,
+  bumpDraftUploadGenerationState,
   clearScopeDraftState,
   ensureDraftForScopeState,
+  getDraftUploadGenerationState,
   setSessionView,
   updateDraftForScope,
 } from './aiDraftState';
@@ -152,6 +155,7 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
     for (const scopeKey of Object.keys(currentDraftsByScope)) {
       if (scopeKey in prunedScopedTransientState.draftsByScope) continue;
       bumpDraftMutationVersion(scopeKey);
+      bumpDraftUploadGeneration(scopeKey);
     }
     setLatestAIDraftsByScopeSnapshot(prunedScopedTransientState.draftsByScope);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
@@ -198,6 +202,7 @@ let latestAIActiveSessionMapSnapshot: Record<string, string | null> | null = nul
 let latestAIDraftsByScopeSnapshot: DraftsByScope | null = null;
 let latestAIPanelViewByScopeSnapshot: PanelViewByScope | null = null;
 let latestAIDraftMutationVersionByScopeSnapshot: Record<string, number> = {};
+let latestAIDraftUploadGenerationByScopeSnapshot: Record<string, number> = {};
 
 function setLatestAISessionsSnapshot(sessions: AISession[]) {
   latestAISessionsSnapshot = sessions;
@@ -215,15 +220,25 @@ function setLatestAIPanelViewByScopeSnapshot(panelViewByScope: PanelViewByScope)
   latestAIPanelViewByScopeSnapshot = panelViewByScope;
 }
 
-function getDraftMutationVersion(scopeKey: string) {
-  return latestAIDraftMutationVersionByScopeSnapshot[scopeKey] ?? 0;
+function bumpDraftMutationVersion(scopeKey: string) {
+  latestAIDraftMutationVersionByScopeSnapshot = bumpDraftMutationVersionState(
+    latestAIDraftMutationVersionByScopeSnapshot,
+    scopeKey,
+  );
 }
 
-function bumpDraftMutationVersion(scopeKey: string) {
-  latestAIDraftMutationVersionByScopeSnapshot = {
-    ...latestAIDraftMutationVersionByScopeSnapshot,
-    [scopeKey]: getDraftMutationVersion(scopeKey) + 1,
-  };
+function getDraftUploadGeneration(scopeKey: string) {
+  return getDraftUploadGenerationState(
+    latestAIDraftUploadGenerationByScopeSnapshot,
+    scopeKey,
+  );
+}
+
+function bumpDraftUploadGeneration(scopeKey: string) {
+  latestAIDraftUploadGenerationByScopeSnapshot = bumpDraftUploadGenerationState(
+    latestAIDraftUploadGenerationByScopeSnapshot,
+    scopeKey,
+  );
 }
 
 export function useAIState() {
@@ -880,12 +895,15 @@ export function useAIState() {
       emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
       return next;
     });
+    bumpDraftMutationVersion(scopeKey);
   }, []);
 
   const updateDraftIfPresent = useCallback((
     scopeKey: string,
     updater: (draft: AIDraft) => AIDraft,
   ): void => {
+    let updated = false;
+
     setDraftsByScopeRaw((prev) => {
       const currentDraft = prev[scopeKey];
       if (!currentDraft) return prev;
@@ -898,10 +916,15 @@ export function useAIState() {
         ...prev,
         [scopeKey]: nextDraft,
       };
+      updated = true;
       setLatestAIDraftsByScopeSnapshot(next);
       emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
       return next;
     });
+
+    if (updated) {
+      bumpDraftMutationVersion(scopeKey);
+    }
   }, []);
 
   const showDraftView = useCallback((scopeKey: string) => {
@@ -964,6 +987,7 @@ export function useAIState() {
     if (!draftsChanged && !panelViewChanged) return;
 
     bumpDraftMutationVersion(scopeKey);
+    bumpDraftUploadGeneration(scopeKey);
 
     if (draftsChanged && nextDraftsByScope) {
       setLatestAIDraftsByScopeSnapshot(nextDraftsByScope);
@@ -983,11 +1007,11 @@ export function useAIState() {
     inputFiles: File[],
   ) => {
     ensureDraftForScope(scopeKey, fallbackAgentId);
-    const initialMutationVersion = getDraftMutationVersion(scopeKey);
+    const initialUploadGeneration = getDraftUploadGeneration(scopeKey);
     const uploads = await convertFilesToUploads(inputFiles);
     if (uploads.length === 0) return;
 
-    if (getDraftMutationVersion(scopeKey) !== initialMutationVersion) {
+    if (getDraftUploadGeneration(scopeKey) !== initialUploadGeneration) {
       return;
     }
 
