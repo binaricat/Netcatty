@@ -412,15 +412,16 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     clearDraftForScope(scopeKey);
   }, [clearDraftForScope, scopeKey]);
 
-  const enterScopeDraftMode = useCallback((agentId: string) => {
+  const enterScopeDraftMode = useCallback((agentId: string, preserveSessionView = false) => {
     applyDraftEntrySelection({
       ensureDraft: () => ensureScopeDraft(agentId),
       showDraftView: showScopeDraftView,
+      preserveSessionView,
     });
   }, [ensureScopeDraft, showScopeDraftView]);
 
   const setInputValue = useCallback((value: string) => {
-    enterScopeDraftMode(currentAgentId);
+    enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     updateScopeDraft(currentAgentId, (draft) => ({
       ...draft,
       text: value,
@@ -428,7 +429,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
   const addFiles = useCallback(async (inputFiles: File[]) => {
-    enterScopeDraftMode(currentAgentId);
+    enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     await addDraftFiles(scopeKey, currentAgentId, inputFiles);
   }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey]);
 
@@ -770,7 +771,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const addSelectedUserSkill = useCallback((slug: string) => {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
     if (!normalizedSlug) return;
-    enterScopeDraftMode(currentAgentId);
+    enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     updateScopeDraft(currentAgentId, (draft) => {
       if (draft.selectedUserSkillSlugs.includes(normalizedSlug)) {
         return draft;
@@ -785,7 +786,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const removeSelectedUserSkill = useCallback((slug: string) => {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
     if (!normalizedSlug) return;
-    enterScopeDraftMode(currentAgentId);
+    enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     updateScopeDraft(currentAgentId, (draft) => {
       const nextSelectedUserSkillSlugs = draft.selectedUserSkillSlugs.filter(
         (entry) => entry !== normalizedSlug,

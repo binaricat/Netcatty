@@ -157,3 +157,21 @@ test("draft entry ensures a draft exists before switching the panel to draft mod
     "show-draft",
   ]);
 });
+
+test("draft entry can preserve the current session view while ensuring draft state", () => {
+  const calls: string[] = [];
+
+  applyDraftEntrySelection({
+    ensureDraft: () => {
+      calls.push("ensure-draft");
+    },
+    showDraftView: () => {
+      calls.push("show-draft");
+    },
+    preserveSessionView: true,
+  });
+
+  assert.deepEqual(calls, [
+    "ensure-draft",
+  ]);
+});

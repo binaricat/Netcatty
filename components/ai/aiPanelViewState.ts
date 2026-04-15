@@ -14,6 +14,7 @@ interface HistorySessionSelectionActions {
 interface DraftEntrySelectionActions {
   ensureDraft: () => void;
   showDraftView: () => void;
+  preserveSessionView?: boolean;
 }
 
 export function resolveDisplayedPanelView(
@@ -87,5 +88,7 @@ export function applyDraftEntrySelection(
   actions: DraftEntrySelectionActions,
 ): void {
   actions.ensureDraft();
-  actions.showDraftView();
+  if (!actions.preserveSessionView) {
+    actions.showDraftView();
+  }
 }
