@@ -363,7 +363,8 @@ export type SyncEvent =
   | { type: 'CONFLICT_RESOLVED'; resolution: ConflictResolution }
   | { type: 'AUTH_REQUIRED'; provider: CloudProvider }
   | { type: 'AUTH_COMPLETED'; provider: CloudProvider; account: ProviderAccount }
-  | { type: 'SECURITY_STATE_CHANGED'; state: SecurityState };
+  | { type: 'SECURITY_STATE_CHANGED'; state: SecurityState }
+  | { type: 'SYNC_BLOCKED_CLEARED' };
 
 // ============================================================================
 // Storage Keys

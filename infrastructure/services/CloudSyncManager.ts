@@ -956,6 +956,12 @@ export class CloudSyncManager {
     this.removeFromStorage(this.syncBaseKey(provider));
     this.clearSyncAnchor(provider);
     this.removeFromStorage(this.providerAccountIdKey(provider));
+    // Reset BLOCKED state if it was present — disconnect implicitly resolves
+    // any pending shrink-block warning since there's no provider to push to.
+    this.exitBlockedState();
+    if (this.state.syncState === 'BLOCKED') {
+      this.state.syncState = 'IDLE';
+    }
     this.notifyStateChange(); // Ensure UI updates immediately after disconnect
   }
 
@@ -1308,6 +1314,7 @@ export class CloudSyncManager {
 
     this.updateProviderStatus(provider, 'syncing');
     this.state.lastError = null;
+    this.exitBlockedState();
     this.state.syncState = 'SYNCING';
     this.emit({ type: 'SYNC_STARTED', provider });
 
@@ -1380,6 +1387,7 @@ export class CloudSyncManager {
             // Base was persisted inside uploadToProvider before the
             // anchor advanced, so a crash between them cannot leave a
             // stale base pointing at pre-merge state.
+            this.exitBlockedState();
             this.state.syncState = 'IDLE';
 
             this.addSyncHistoryEntry({
@@ -1400,6 +1408,7 @@ export class CloudSyncManager {
           }
 
           // Upload after merge failed — set ERROR so sync isn't stuck in SYNCING
+          this.exitBlockedState();
           this.state.syncState = 'ERROR';
           this.state.lastError = uploadResult.error || 'Upload failed after merge';
           return uploadResult;
@@ -1407,6 +1416,7 @@ export class CloudSyncManager {
           // Merge failed — fall back to conflict UI
           console.error('[CloudSyncManager] Merge failed, falling back to conflict UI', mergeError);
           const remoteFile = checkResult.remoteFile;
+          this.exitBlockedState();
           this.state.syncState = 'CONFLICT';
           this.state.currentConflict = {
             provider,
@@ -1471,9 +1481,11 @@ export class CloudSyncManager {
       const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
 
       if (result.success) {
+        this.exitBlockedState();
         this.state.syncState = 'IDLE';
         this.state.lastShrinkFinding = undefined;
       } else {
+        this.exitBlockedState();
         this.state.syncState = 'ERROR';
         if (result.error) {
           this.state.lastError = result.error;
@@ -1482,6 +1494,7 @@ export class CloudSyncManager {
       return result;
 
     } catch (error) {
+      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       this.state.lastError = String(error);
       this.updateProviderStatus(provider, 'error', String(error));
@@ -1645,15 +1658,32 @@ export class CloudSyncManager {
       // Download and return remote data
       const payload = await this.downloadFromProvider(provider);
       this.state.currentConflict = null;
+      this.exitBlockedState();
       this.state.syncState = 'IDLE';
       this.notifyStateChange(); // Notify UI of conflict resolution
       return payload;
     } else {
       // USE_LOCAL - just clear conflict, caller will re-sync
       this.state.currentConflict = null;
+      this.exitBlockedState();
       this.state.syncState = 'IDLE';
       this.notifyStateChange(); // Notify UI of conflict resolution
       return null;
+    }
+  }
+
+  /**
+   * Side-effect helper: called BEFORE any syncState assignment that transitions
+   * away from BLOCKED. Clears lastShrinkFinding and emits SYNC_BLOCKED_CLEARED
+   * so the UI banner (and any other subscriber) gets a single, authoritative
+   * "block resolved" signal. The guard on syncState === 'BLOCKED' makes it safe
+   * to call unconditionally at every non-BLOCKED assignment site — it no-ops
+   * when the state was already non-BLOCKED.
+   */
+  private exitBlockedState(): void {
+    if (this.state.syncState === 'BLOCKED') {
+      this.state.lastShrinkFinding = undefined;
+      this.emit({ type: 'SYNC_BLOCKED_CLEARED' });
     }
   }
 
@@ -1665,8 +1695,8 @@ export class CloudSyncManager {
    */
   clearShrinkBlockedState(): void {
     if (this.state.syncState === 'BLOCKED') {
+      this.exitBlockedState();
       this.state.syncState = 'IDLE';
-      this.state.lastShrinkFinding = undefined;
       this.notifyStateChange();
     }
   }
@@ -1726,6 +1756,7 @@ export class CloudSyncManager {
     }
 
     this.state.lastError = null;
+    this.exitBlockedState();
     this.state.syncState = 'SYNCING';
 
     // 1. Parallel Checks
@@ -1822,6 +1853,7 @@ export class CloudSyncManager {
         const { provider, check } = conflicts[0];
         const remoteFile = check!.remoteFile!;
 
+        this.exitBlockedState();
         this.state.syncState = 'CONFLICT';
         this.state.currentConflict = {
           provider: provider as CloudProvider,
@@ -1961,6 +1993,7 @@ export class CloudSyncManager {
           this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
         }
       });
+      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       return results;
     }
@@ -1986,6 +2019,7 @@ export class CloudSyncManager {
       );
     } catch (error) {
       const msg = String(error);
+      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       this.state.lastError = msg;
 
@@ -2018,6 +2052,7 @@ export class CloudSyncManager {
     // 5. Final State Update
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
+      this.exitBlockedState();
       this.state.syncState = 'IDLE';
       this.state.lastShrinkFinding = undefined;
 
@@ -2031,6 +2066,7 @@ export class CloudSyncManager {
         }
       }
     } else {
+      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       // lastError is set by uploadToProvider
     }

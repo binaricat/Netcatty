@@ -43,7 +43,7 @@ import { useI18n } from '../application/i18n/I18nProvider';
 import {
     findSyncPayloadEncryptedCredentialPaths,
 } from '../domain/credentials';
-import { isProviderReadyForSync, type CloudProvider, type ConflictInfo, type SyncPayload, type WebDAVAuthType, type WebDAVConfig, type S3Config } from '../domain/sync';
+import { isProviderReadyForSync, type CloudProvider, type ConflictInfo, type SyncPayload, type SyncResult, type WebDAVAuthType, type WebDAVConfig, type S3Config } from '../domain/sync';
 import type { ShrinkFinding } from '../domain/syncGuards';
 import { SyncBlockedBanner } from './sync/SyncBlockedBanner';
 import { cn } from '../lib/utils';
@@ -1251,7 +1251,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 if (event.finding.suspicious) {
                     setBlockedFinding(event.finding);
                 }
-            } else if (event.type === 'SYNC_COMPLETED' && event.result?.success) {
+            } else if (event.type === 'SYNC_BLOCKED_CLEARED') {
                 setBlockedFinding(null);
             }
         });
@@ -1509,9 +1509,30 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 // window's push, not ours.
                 const localPayload = onBuildPayload();
                 if (!ensureSyncablePayload(localPayload)) return;
+
+                let results: Map<CloudProvider, SyncResult> | null = null;
                 await withRestoreBarrier(async () => {
-                    await sync.syncNow(localPayload, { overrideShrink: true });
+                    results = await sync.syncNow(localPayload, { overrideShrink: true });
                 });
+
+                if (results) {
+                    // Apply any merged payload BEFORE closing the modal so local state
+                    // reflects what's now on cloud (in case remote changed during the merge).
+                    for (const result of (results as Map<CloudProvider, SyncResult>).values()) {
+                        if (result.mergedPayload) {
+                            await Promise.resolve(onApplyPayload(result.mergedPayload));
+                            break;
+                        }
+                    }
+                    const allOk = Array.from((results as Map<CloudProvider, SyncResult>).values()).every((r) => r.success);
+                    if (!allOk) {
+                        const firstError = Array.from((results as Map<CloudProvider, SyncResult>).values())
+                            .find((r) => !r.success)?.error
+                            ?? t('common.unknownError');
+                        toast.error(firstError, t('cloudSync.resolve.failedTitle'));
+                        return; // KEEP the modal open so user can retry / pick USE_REMOTE
+                    }
+                }
                 toast.success(t('cloudSync.resolve.uploaded'));
             }
             setShowConflictModal(false);
