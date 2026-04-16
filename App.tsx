@@ -1119,7 +1119,7 @@ function App({ settings }: { settings: SettingsState }) {
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
 
         const focusIsInsideTerminal = !!document.activeElement?.closest('[data-session-id]');
-        const activeSidePanel = workspace ? activeSidePanelTabRef.current : null;
+        const activeSidePanel = activeSidePanelTabRef.current;
 
         const intent = resolveCloseIntent({
           activeTabId: currentId,

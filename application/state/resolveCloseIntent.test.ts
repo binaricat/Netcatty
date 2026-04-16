@@ -21,6 +21,17 @@ test("non-workspace tab → closeSingleTab with session id", () => {
   assert.deepEqual(result, { kind: "closeSingleTab", sessionId: "s1" });
 });
 
+test("non-workspace session tab + sidebar open → closeSidePanel (sidebar beats session close)", () => {
+  const r = resolveCloseIntent({
+    activeTabId: "s1",
+    workspace: null,
+    sessionForTab: { id: "s1" },
+    activeSidePanelTab: "ai",
+    focusIsInsideTerminal: true, // focus IS in terminal, but sidebar wins
+  });
+  assert.deepEqual(r, { kind: "closeSidePanel" });
+});
+
 test("vault/sftp tab → noop", () => {
   const r = resolveCloseIntent({
     activeTabId: "vault",

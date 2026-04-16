@@ -18,6 +18,13 @@ export function resolveCloseIntent(input: ResolveCloseInput): CloseIntent {
 
   if (!activeTabId) return { kind: 'noop' };
 
+  // Sidebar always wins — applies to any tab type (workspace, single-session, etc.).
+  // Modals take priority over this but are intercepted upstream in App.tsx before the
+  // hotkey reaches resolveCloseIntent.
+  if (activeSidePanelTab !== null) {
+    return { kind: 'closeSidePanel' };
+  }
+
   if (sessionForTab && !workspace) {
     return { kind: 'closeSingleTab', sessionId: sessionForTab.id };
   }
@@ -25,10 +32,6 @@ export function resolveCloseIntent(input: ResolveCloseInput): CloseIntent {
   if (!workspace) {
     // e.g. 'vault', 'sftp', or any non-closable pinned tab
     return { kind: 'noop' };
-  }
-
-  if (activeSidePanelTab !== null) {
-    return { kind: 'closeSidePanel' };
   }
 
   const focusedSessionId = workspace.focusedSessionId;
