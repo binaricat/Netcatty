@@ -1295,7 +1295,11 @@ export class CloudSyncManager {
           // state is trustworthy — but a degraded local (keychain failure,
           // partial load) can make merge produce a smaller-than-expected result.
           const mergedShrink = detectSuspiciousShrink(mergeResult.payload, base);
-          if (mergedShrink.suspicious && !this.overrideShrinkOnce) {
+          const shouldBlockMerged = mergedShrink.suspicious && !this.overrideShrinkOnce;
+          const shouldForceMerged = mergedShrink.suspicious && this.overrideShrinkOnce;
+          // Reset FIRST so the flag clears even when we early-return on block.
+          this.overrideShrinkOnce = false;
+          if (shouldBlockMerged) {
             this.state.syncState = 'BLOCKED';
             this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: mergedShrink });
             return {
@@ -1306,10 +1310,9 @@ export class CloudSyncManager {
               finding: mergedShrink,
             };
           }
-          if (mergedShrink.suspicious && this.overrideShrinkOnce) {
+          if (shouldForceMerged) {
             this.emit({ type: 'SYNC_FORCED', provider, finding: mergedShrink });
           }
-          this.overrideShrinkOnce = false;
 
           // Encrypt and upload merged payload
           const mergedSyncedFile = await EncryptionService.encryptPayload(
@@ -1388,7 +1391,11 @@ export class CloudSyncManager {
       // refuse a payload that drops entities versus the stored base.
       const directBase = await this.loadSyncBase(provider);
       const directShrink = detectSuspiciousShrink(payload, directBase);
-      if (directShrink.suspicious && !this.overrideShrinkOnce) {
+      const shouldBlockDirect = directShrink.suspicious && !this.overrideShrinkOnce;
+      const shouldForceDirect = directShrink.suspicious && this.overrideShrinkOnce;
+      // Reset FIRST so the flag clears even when we early-return on block.
+      this.overrideShrinkOnce = false;
+      if (shouldBlockDirect) {
         this.state.syncState = 'BLOCKED';
         this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
         return {
@@ -1399,10 +1406,9 @@ export class CloudSyncManager {
           finding: directShrink,
         };
       }
-      if (directShrink.suspicious && this.overrideShrinkOnce) {
+      if (shouldForceDirect) {
         this.emit({ type: 'SYNC_FORCED', provider, finding: directShrink });
       }
-      this.overrideShrinkOnce = false;
 
       // 2. Encrypt
       const syncedFile = await EncryptionService.encryptPayload(
