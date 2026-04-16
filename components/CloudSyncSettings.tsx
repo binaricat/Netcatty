@@ -2450,11 +2450,14 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                             <Button
                                 variant="destructive"
                                 onClick={async () => {
-                                    setShowForcePushConfirm(false);
-                                    sync.forcePushOverrideShrink();
                                     const localPayload = onBuildPayload();
+                                    if (!ensureSyncablePayload(localPayload)) {
+                                        setShowForcePushConfirm(false);
+                                        return;
+                                    }
+                                    setShowForcePushConfirm(false);
                                     try {
-                                        await sync.syncNow(localPayload);
+                                        await sync.syncNow(localPayload, { overrideShrink: true });
                                     } catch (err) {
                                         toast.error(String(err), t('sync.toast.errorTitle'));
                                     }

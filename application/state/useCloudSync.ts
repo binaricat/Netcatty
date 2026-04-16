@@ -87,8 +87,8 @@ export interface CloudSyncHook {
   resetProviderStatus: (provider: CloudProvider) => void;
 
   // Sync Actions
-  syncNow: (payload: SyncPayload) => Promise<Map<CloudProvider, SyncResult>>;
-  syncToProvider: (provider: CloudProvider, payload: SyncPayload) => Promise<SyncResult>;
+  syncNow: (payload: SyncPayload, opts?: { overrideShrink?: boolean }) => Promise<Map<CloudProvider, SyncResult>>;
+  syncToProvider: (provider: CloudProvider, payload: SyncPayload, opts?: { overrideShrink?: boolean }) => Promise<SyncResult>;
   downloadFromProvider: (provider: CloudProvider) => Promise<SyncPayload | null>;
   resolveConflict: (resolution: ConflictResolution) => Promise<SyncPayload | null>;
 
@@ -112,9 +112,6 @@ export interface CloudSyncHook {
 
   // Local Data Reset
   resetLocalVersion: () => void;
-
-  // Force-push override (bypass shrink-block once)
-  forcePushOverrideShrink: () => void;
 
   // Utilities
   formatLastSync: (timestamp?: number) => string;
@@ -429,14 +426,14 @@ export const useCloudSync = (): CloudSyncHook => {
     throw new Error('Vault is locked');
   }, []);
 
-  const syncNowWithUnlock = useCallback(async (payload: SyncPayload) => {
+  const syncNowWithUnlock = useCallback(async (payload: SyncPayload, opts?: { overrideShrink?: boolean }) => {
     await ensureUnlocked();
-    return await manager.syncAllProviders(payload);
+    return await manager.syncAllProviders(payload, opts);
   }, [ensureUnlocked]);
 
-  const syncToProviderWithUnlock = useCallback(async (provider: CloudProvider, payload: SyncPayload) => {
+  const syncToProviderWithUnlock = useCallback(async (provider: CloudProvider, payload: SyncPayload, opts?: { overrideShrink?: boolean }) => {
     await ensureUnlocked();
-    return await manager.syncToProvider(provider, payload);
+    return await manager.syncToProvider(provider, payload, opts);
   }, [ensureUnlocked]);
 
   const downloadFromProviderWithUnlock = useCallback(async (provider: CloudProvider) => {
@@ -512,9 +509,6 @@ export const useCloudSync = (): CloudSyncHook => {
 
     // Local Data Reset
     resetLocalVersion: () => manager.resetLocalVersion(),
-
-    // Force-push override
-    forcePushOverrideShrink: useCallback(() => manager.forcePushOverrideShrink(), []),
 
     // Utilities
     formatLastSync,

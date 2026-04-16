@@ -103,7 +103,6 @@ export class CloudSyncManager {
   private stateChangeListeners: Set<() => void> = new Set(); // For useSyncExternalStore
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private masterPassword: string | null = null; // In memory only!
-  private overrideShrinkOnce = false;
   private hasStorageListener = false;
   // Promise that resolves once startup provider secret decryption finishes.
   // Awaited by getConnectedAdapter() to prevent using still-encrypted tokens.
@@ -1254,7 +1253,8 @@ export class CloudSyncManager {
    */
   async syncToProvider(
     provider: CloudProvider,
-    payload: SyncPayload
+    payload: SyncPayload,
+    opts: { overrideShrink?: boolean } = {},
   ): Promise<SyncResult> {
     if (this.state.securityState !== 'UNLOCKED') {
       return {
@@ -1274,13 +1274,7 @@ export class CloudSyncManager {
       };
     }
 
-    // Snapshot+consume the one-shot force-push override IMMEDIATELY so an
-    // early return below cannot leave the flag armed for an unrelated next
-    // sync. The flag's contract is "next sync attempt only" — that contract
-    // must hold even when the next sync exits without reaching the shrink
-    // check.
-    const overrideShrinkRequested = this.overrideShrinkOnce;
-    this.overrideShrinkOnce = false;
+    const overrideShrinkRequested = opts.overrideShrink === true;
 
     let adapter: CloudAdapter;
     try {
@@ -1616,16 +1610,6 @@ export class CloudSyncManager {
   }
 
   /**
-   * Set a one-shot flag that causes the next `syncToProvider` call to
-   * bypass the shrink-detection guard. The flag self-clears after the
-   * next sync attempt (success, failure, or block). Used by the
-   * "Force push anyway" UI path.
-   */
-  forcePushOverrideShrink(): void {
-    this.overrideShrinkOnce = true;
-  }
-
-  /**
    * Resolve a sync conflict
    */
   async resolveConflict(resolution: ConflictResolution): Promise<SyncPayload | null> {
@@ -1655,18 +1639,15 @@ export class CloudSyncManager {
   /**
    * Sync to all connected providers
    */
-  async syncAllProviders(inputPayload?: SyncPayload): Promise<Map<CloudProvider, SyncResult>> {
+  async syncAllProviders(
+    inputPayload?: SyncPayload,
+    opts: { overrideShrink?: boolean } = {},
+  ): Promise<Map<CloudProvider, SyncResult>> {
     const results = new Map<CloudProvider, SyncResult>();
     let payload = inputPayload;
     let wasMerged = false;
 
-    // Snapshot+consume the one-shot force-push override IMMEDIATELY so an
-    // early return below cannot leave the flag armed for an unrelated next
-    // sync. The flag's contract is "next sync attempt only" — that contract
-    // must hold even when the next sync exits without reaching the shrink
-    // check.
-    const overrideShrinkRequested = this.overrideShrinkOnce;
-    this.overrideShrinkOnce = false;
+    const overrideShrinkRequested = opts.overrideShrink === true;
 
     if (!payload) {
       // Caller should provide payload from app state
