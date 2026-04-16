@@ -1495,7 +1495,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 const localPayload = onBuildPayload();
                 if (!ensureSyncablePayload(localPayload)) return;
                 await withRestoreBarrier(async () => {
-                    await sync.syncNow(localPayload);
+                    await sync.syncNow(localPayload, { overrideShrink: true });
                 });
                 toast.success(t('cloudSync.resolve.uploaded'));
             }

@@ -56,7 +56,7 @@ export interface CloudSyncHook {
   // Computed
   hasAnyConnectedProvider: boolean;
   connectedProviderCount: number;
-  overallSyncStatus: 'none' | 'synced' | 'syncing' | 'error' | 'conflict';
+  overallSyncStatus: 'none' | 'synced' | 'syncing' | 'error' | 'conflict' | 'blocked';
   
   // Master Key Actions
   setupMasterKey: (password: string, confirmPassword: string) => Promise<void>;
@@ -194,7 +194,8 @@ export const useCloudSync = (): CloudSyncHook => {
     ).length;
   }, [state.providers]);
   
-  const overallSyncStatus = useMemo((): 'none' | 'synced' | 'syncing' | 'error' | 'conflict' => {
+  const overallSyncStatus = useMemo((): 'none' | 'synced' | 'syncing' | 'error' | 'conflict' | 'blocked' => {
+    if (state.syncState === 'BLOCKED') return 'blocked';
     if (state.syncState === 'CONFLICT') return 'conflict';
     if (state.syncState === 'ERROR') return 'error';
     if (state.syncState === 'SYNCING') return 'syncing';

@@ -1649,6 +1649,19 @@ export class CloudSyncManager {
   }
 
   /**
+   * Reset BLOCKED back to IDLE without going through a successful sync.
+   * Used by post-merge round-trip to avoid wedging the manager in BLOCKED
+   * when the merge already produced safe local state and the round-trip
+   * push is just an optimization.
+   */
+  clearShrinkBlockedState(): void {
+    if (this.state.syncState === 'BLOCKED') {
+      this.state.syncState = 'IDLE';
+      this.notifyStateChange();
+    }
+  }
+
+  /**
    * Sync to all connected providers
    */
   async syncAllProviders(

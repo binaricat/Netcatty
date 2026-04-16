@@ -483,7 +483,20 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // that only approximated the correct ordering.
       if (mergeResult.payload) {
         try {
-          await manager.syncAllProviders(mergeResult.payload);
+          const roundTripResults = await manager.syncAllProviders(mergeResult.payload);
+          const wasShrinkBlocked = Array.from(roundTripResults.values()).some(
+            (r) => r.shrinkBlocked === true,
+          );
+          if (wasShrinkBlocked) {
+            // The merged payload is already applied locally and is the source of truth
+            // for THIS device. The blocking only prevents pushing it to cloud, which
+            // is acceptable here — the next user-edit-triggered sync will re-check
+            // (and the user can also force-push from the Settings banner if they
+            // navigate there). Reset syncState so we don't leave the manager wedged
+            // in BLOCKED with no banner visible.
+            console.warn('[AutoSync] Post-merge round-trip was shrink-blocked; merged data applied locally, reset syncState to IDLE for next attempt.');
+            manager.clearShrinkBlockedState();
+          }
           // Suppress the debounced follow-up tick that otherwise fires
           // once React commits the applied state, since we've just
           // already pushed that exact payload upstream.
