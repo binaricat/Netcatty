@@ -417,6 +417,70 @@ test("createBackup accepts a legitimate SemVer-ish version string", async () => 
   }
 });
 
+test("createBackup persists syncDataVersion when given a positive integer", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const result = await service.createBackup({
+      payload: samplePayload(),
+      reason: "before_restore",
+      syncDataVersion: 5,
+    });
+    assert.equal(result.created, true);
+    assert.equal(result.backup.syncDataVersion, 5);
+
+    // Round-trip via list
+    const listed = await service.listBackups();
+    assert.equal(listed[0].syncDataVersion, 5);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup drops invalid syncDataVersion values (zero, negative, non-finite, non-numeric)", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const cases = [0, -1, NaN, Infinity, "5", null, undefined];
+    let idx = 0;
+    for (const syncDataVersion of cases) {
+      // Vary an actual content-bearing field to avoid fingerprint dedupe
+      // (top-level syncedAt is normalized away in the fingerprint).
+      const payload = samplePayload({
+        hosts: [{ ...samplePayload().hosts[0], id: `h-case-${idx}` }],
+      });
+      const result = await service.createBackup({
+        payload,
+        reason: "before_restore",
+        syncDataVersion,
+      });
+      assert.equal(result.created, true, `iteration ${idx}: created should be true`);
+      assert.equal(result.backup.syncDataVersion, undefined, `value ${String(syncDataVersion)} should be dropped`);
+      idx += 1;
+    }
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("createBackup floors a fractional syncDataVersion", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const result = await service.createBackup({
+      payload: samplePayload(),
+      reason: "before_restore",
+      syncDataVersion: 7.9,
+    });
+    assert.equal(result.backup.syncDataVersion, 7);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("createBackup rejects an array payload (not an object)", async () => {
   const rootDir = createTempRoot();
   const service = createService(rootDir);

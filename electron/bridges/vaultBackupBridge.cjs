@@ -97,6 +97,7 @@ function toBackupSummary(record) {
     id: record.id,
     createdAt: record.createdAt,
     reason: record.reason,
+    syncDataVersion: record.syncDataVersion,
     sourceAppVersion: record.sourceAppVersion,
     targetAppVersion: record.targetAppVersion,
     preview: record.preview,
@@ -129,6 +130,15 @@ function sanitizeOptionalVersionString(value) {
   if (!trimmed) return undefined;
   if (!VERSION_STRING_PATTERN.test(trimmed)) return undefined;
   return trimmed;
+}
+
+// Sync data version is the integer that the CloudSyncManager increments
+// on each successful cloud sync. Reject anything non-finite, non-positive,
+// or non-integer so the persisted record only carries meaningful values.
+function sanitizeOptionalSyncDataVersion(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value < 1) return undefined;
+  return Math.floor(value);
 }
 
 // UTF-8 byte length of a payload's JSON serialization. Earlier revisions
@@ -415,6 +425,7 @@ function createVaultBackupService({ app, safeStorage, shell }) {
       id,
       createdAt,
       reason: sanitizeReason(options.reason),
+      syncDataVersion: sanitizeOptionalSyncDataVersion(options.syncDataVersion),
       sourceAppVersion: sanitizeOptionalVersionString(options.sourceAppVersion),
       targetAppVersion: sanitizeOptionalVersionString(options.targetAppVersion),
       fingerprint,

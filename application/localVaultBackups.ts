@@ -6,8 +6,24 @@ import {
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
 } from '../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { getCloudSyncManager } from '../infrastructure/services/CloudSyncManager';
 import { netcattyBridge } from '../infrastructure/services/netcattyBridge';
 import { hasMeaningfulSyncData } from './syncPayload';
+
+/**
+ * Snapshot the current sync data version (the integer that increments
+ * on each successful cloud sync). Returns undefined when the value is
+ * 0 (never synced) or unavailable, so the UI can fall back to timestamp.
+ */
+function captureCurrentSyncDataVersion(): number | undefined {
+  try {
+    const state = getCloudSyncManager().getState();
+    const v = state.localVersion;
+    return typeof v === 'number' && v > 0 ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type LocalVaultBackupReason = 'app_version_change' | 'before_restore';
 
@@ -15,6 +31,13 @@ export interface LocalVaultBackupPreview {
   id: string;
   createdAt: number;
   reason: LocalVaultBackupReason;
+  /** Sync-data version at the time the snapshot was taken (the integer
+   * that the CloudSyncManager increments on each successful cloud sync).
+   * Undefined when the user had never synced yet, or for legacy backups
+   * persisted before this field was added. */
+  syncDataVersion?: number;
+  /** App version transition fields, only for `app_version_change` records.
+   * Kept for backward compatibility with already-persisted backups. */
   sourceAppVersion?: string;
   targetAppVersion?: string;
   fingerprint: string;
@@ -94,6 +117,7 @@ export async function createLocalVaultBackup(
   payload: SyncPayload,
   options: {
     reason: LocalVaultBackupReason;
+    syncDataVersion?: number;
     sourceAppVersion?: string;
     targetAppVersion?: string;
     maxCount?: number;
@@ -118,6 +142,10 @@ export async function createLocalVaultBackup(
     const result = await bridge.createVaultBackup({
       payload,
       reason: options.reason,
+      // Default to the live cloud-sync version so every new backup carries
+      // it even when the caller didn't pass one explicitly. Bridge sanitizer
+      // drops invalid values (non-positive / non-finite), so this is safe.
+      syncDataVersion: options.syncDataVersion ?? captureCurrentSyncDataVersion(),
       sourceAppVersion: options.sourceAppVersion,
       targetAppVersion: options.targetAppVersion,
       maxCount: options.maxCount ?? getLocalVaultBackupMaxCount(),
