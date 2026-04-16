@@ -7,7 +7,7 @@
  * - Sync status and conflict resolution
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
     AlertTriangle,
     Check,
@@ -1174,10 +1174,12 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Clear local data dialog
     const [showClearLocalDialog, setShowClearLocalDialog] = useState(false);
 
-    // Sync-blocked banner (Task 7)
+    // Sync-blocked banner (Task 7) + force-push confirmation modal (Task 8)
     const [blockedFinding, setBlockedFinding] = useState<Extract<ShrinkFinding, { suspicious: true }> | null>(null);
-    // Task 8 will render the force-push confirmation modal; stub the state here.
-    const [_showForcePushConfirm, setShowForcePushConfirm] = useState(false);
+    const [showForcePushConfirm, setShowForcePushConfirm] = useState(false);
+
+    // Ref for scrolling to LocalBackupsPanel when the banner's Restore button is clicked
+    const localBackupsRef = useRef<HTMLDivElement>(null);
 
     // Active tab state — lets the banner's "Restore" button switch to the
     // local-backups tab without a separate DOM query.
@@ -1582,7 +1584,12 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             {blockedFinding && (
                 <SyncBlockedBanner
                     finding={blockedFinding}
-                    onRestore={() => setActiveTab('status')}
+                    onRestore={() => {
+                        setActiveTab('status');
+                        requestAnimationFrame(() => {
+                            localBackupsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+                    }}
                     onForcePush={() => setShowForcePushConfirm(true)}
                 />
             )}
@@ -1772,9 +1779,11 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                         </div>
                     )}
 
-                    <LocalBackupsPanel
-                        onApplyPayload={onApplyPayload}
-                    />
+                    <div ref={localBackupsRef}>
+                        <LocalBackupsPanel
+                            onApplyPayload={onApplyPayload}
+                        />
+                    </div>
 
                     {/* Clear Local Data */}
                     <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
@@ -2394,6 +2403,44 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Force-push confirmation modal (Task 8) */}
+            {showForcePushConfirm && blockedFinding && (
+                <Dialog open onOpenChange={(open) => !open && setShowForcePushConfirm(false)}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>{t('sync.forcePush.title')}</DialogTitle>
+                        </DialogHeader>
+                        <p className="text-sm">
+                            {t('sync.forcePush.body', {
+                                lost: blockedFinding.lost,
+                                entityType: t(`sync.entityType.${blockedFinding.entityType}`),
+                            })}
+                        </p>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowForcePushConfirm(false)}>
+                                {t('sync.forcePush.cancel')}
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={async () => {
+                                    setShowForcePushConfirm(false);
+                                    sync.forcePushOverrideShrink();
+                                    const localPayload = onBuildPayload();
+                                    try {
+                                        await sync.syncNow(localPayload);
+                                    } catch (err) {
+                                        toast.error(String(err), t('sync.toast.errorTitle'));
+                                    }
+                                    setBlockedFinding(null);
+                                }}
+                            >
+                                {t('sync.forcePush.confirm')}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     );
 };

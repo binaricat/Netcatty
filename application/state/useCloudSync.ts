@@ -113,6 +113,9 @@ export interface CloudSyncHook {
   // Local Data Reset
   resetLocalVersion: () => void;
 
+  // Force-push override (bypass shrink-block once)
+  forcePushOverrideShrink: () => void;
+
   // Utilities
   formatLastSync: (timestamp?: number) => string;
   getProviderDotColor: (provider: CloudProvider) => string;
@@ -509,6 +512,9 @@ export const useCloudSync = (): CloudSyncHook => {
 
     // Local Data Reset
     resetLocalVersion: () => manager.resetLocalVersion(),
+
+    // Force-push override
+    forcePushOverrideShrink: useCallback(() => manager.forcePushOverrideShrink(), []),
 
     // Utilities
     formatLastSync,
