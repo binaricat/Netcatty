@@ -2457,11 +2457,33 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                                     }
                                     setShowForcePushConfirm(false);
                                     try {
-                                        await sync.syncNow(localPayload, { overrideShrink: true });
+                                        const results = await sync.syncNow(localPayload, { overrideShrink: true });
+
+                                        // Apply any merged payload BEFORE clearing the banner. If a merge happened
+                                        // during force-push (remote changed), the merged result is what the cloud
+                                        // now has — applying it to local state prevents the next sync from
+                                        // re-deleting the remote additions we just merged in.
+                                        for (const result of results.values()) {
+                                            if (result.mergedPayload) {
+                                                await Promise.resolve(onApplyPayload(result.mergedPayload));
+                                                break; // All providers share the same merged payload
+                                            }
+                                        }
+
+                                        const allOk = Array.from(results.values()).every((r) => r.success);
+                                        if (allOk) {
+                                            setBlockedFinding(null);
+                                        } else {
+                                            // Surface the failure but KEEP the banner so the user can retry or
+                                            // restore. Find the first error string to display.
+                                            const firstError = Array.from(results.values())
+                                                .find((r) => !r.success)
+                                                ?.error ?? t('sync.toast.errorTitle');
+                                            toast.error(firstError, t('sync.toast.errorTitle'));
+                                        }
                                     } catch (err) {
                                         toast.error(String(err), t('sync.toast.errorTitle'));
                                     }
-                                    setBlockedFinding(null);
                                 }}
                             >
                                 {t('sync.forcePush.confirm')}

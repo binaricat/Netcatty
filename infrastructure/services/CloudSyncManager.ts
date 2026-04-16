@@ -1339,7 +1339,7 @@ export class CloudSyncManager {
           if (shouldBlockMerged) {
             this.state.syncState = 'BLOCKED';
             this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: mergedShrink });
-            this.updateProviderStatus(provider, 'connected');
+            this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
             return {
               success: false,
               provider,
@@ -1434,7 +1434,7 @@ export class CloudSyncManager {
       if (shouldBlockDirect) {
         this.state.syncState = 'BLOCKED';
         this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
-        this.updateProviderStatus(provider, 'connected');
+        this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
         return {
           success: false,
           provider,
