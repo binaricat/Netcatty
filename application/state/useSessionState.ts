@@ -163,7 +163,15 @@ export const useSessionState = () => {
   const closeSession = useCallback((sessionId: string, e?: MouseEvent) => {
     e?.stopPropagation();
 
-    let workspaceIdToMaybeClose: string | undefined;
+    // Pre-compute outside the setSessions updater so we don't depend on React
+    // having run the updater by the time we queue the microtask. React 18+ does
+    // not guarantee updater execution timing under concurrent scheduling.
+    const sessionBeingClosed = sessions.find(s => s.id === sessionId);
+    const workspaceIdToMaybeClose =
+      sessionBeingClosed?.workspaceId &&
+      sessions.every(s => s.id === sessionId || s.workspaceId !== sessionBeingClosed.workspaceId)
+        ? sessionBeingClosed.workspaceId
+        : undefined;
 
     setSessions(prevSessions => {
       const targetSession = prevSessions.find(s => s.id === sessionId);
@@ -240,23 +248,13 @@ export const useSessionState = () => {
         }
       }
 
-      // Auto-close workspace if this was its last session
-      if (targetSession?.workspaceId) {
-        const remaining = prevSessions.filter(
-          s => s.id !== sessionId && s.workspaceId === targetSession.workspaceId,
-        );
-        if (remaining.length === 0) {
-          workspaceIdToMaybeClose = targetSession.workspaceId;
-        }
-      }
-
       return prevSessions.filter(s => s.id !== sessionId);
     });
 
     if (workspaceIdToMaybeClose) {
       queueMicrotask(() => closeWorkspace(workspaceIdToMaybeClose!));
     }
-  }, [workspaces, setActiveTabId, closeWorkspace]);
+  }, [sessions, workspaces, setActiveTabId, closeWorkspace]);
 
   const startSessionRename = useCallback((sessionId: string) => {
     setSessions(prevSessions => {
