@@ -899,20 +899,21 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                                 className="flex items-center gap-3 rounded-lg border border-border/60 p-3"
                             >
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm font-medium">
-                                            {getReasonLabel(backup.reason)}
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {formatTimestamp(backup.createdAt)}
-                                        </span>
+                                    <div className="text-sm font-medium">
+                                        {backup.sourceAppVersion && backup.targetAppVersion
+                                            ? t('cloudSync.localBackups.versionChange', {
+                                                from: backup.sourceAppVersion,
+                                                to: backup.targetAppVersion,
+                                            })
+                                            : formatTimestamp(backup.createdAt)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
+                                        <span>{getReasonLabel(backup.reason)}</span>
                                         {backup.sourceAppVersion && backup.targetAppVersion && (
-                                            <span className="text-xs text-muted-foreground">
-                                                {t('cloudSync.localBackups.versionChange', {
-                                                    from: backup.sourceAppVersion,
-                                                    to: backup.targetAppVersion,
-                                                })}
-                                            </span>
+                                            <>
+                                                <span aria-hidden="true">·</span>
+                                                <span>{formatTimestamp(backup.createdAt)}</span>
+                                            </>
                                         )}
                                     </div>
                                     <div className="text-xs text-muted-foreground mt-1">
@@ -976,13 +977,22 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                     </DialogHeader>
                     {pendingRestoreBackup && (
                         <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium">
-                                    {getReasonLabel(pendingRestoreBackup.reason)}
-                                </span>
-                                <span className="text-muted-foreground">
-                                    {formatTimestamp(pendingRestoreBackup.createdAt)}
-                                </span>
+                            <div className="font-medium">
+                                {pendingRestoreBackup.sourceAppVersion && pendingRestoreBackup.targetAppVersion
+                                    ? t('cloudSync.localBackups.versionChange', {
+                                        from: pendingRestoreBackup.sourceAppVersion,
+                                        to: pendingRestoreBackup.targetAppVersion,
+                                    })
+                                    : formatTimestamp(pendingRestoreBackup.createdAt)}
+                            </div>
+                            <div className="text-muted-foreground flex items-center gap-1 flex-wrap">
+                                <span>{getReasonLabel(pendingRestoreBackup.reason)}</span>
+                                {pendingRestoreBackup.sourceAppVersion && pendingRestoreBackup.targetAppVersion && (
+                                    <>
+                                        <span aria-hidden="true">·</span>
+                                        <span>{formatTimestamp(pendingRestoreBackup.createdAt)}</span>
+                                    </>
+                                )}
                             </div>
                             <div className="text-muted-foreground">
                                 {t('cloudSync.localBackups.counts', {
