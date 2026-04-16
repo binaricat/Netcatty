@@ -1,9 +1,11 @@
 /**
  * Cloud Sync Domain Types & Interfaces
- * 
+ *
  * Zero-Knowledge Encrypted Multi-Cloud Sync System
  * Supports: GitHub Gist, Google Drive, Microsoft OneDrive, WebDAV, S3 Compatible
  */
+
+import type { ShrinkFinding } from './syncGuards';
 
 // ============================================================================
 // Security State Machine
@@ -22,10 +24,11 @@ export type SecurityState =
  * Sync Operation State Machine
  * Tracks the current sync operation status
  */
-export type SyncState = 
+export type SyncState =
   | 'IDLE'       // Waiting for sync trigger
   | 'SYNCING'    // Active sync operation in progress
   | 'CONFLICT'   // Version conflict detected - needs resolution
+  | 'BLOCKED'    // Outgoing payload would delete too much — user must choose restore or force-push
   | 'ERROR';     // Operation failed - needs attention
 
 /**
@@ -351,6 +354,8 @@ export type SyncEvent =
   | { type: 'SYNC_COMPLETED'; provider: CloudProvider; result: SyncResult }
   | { type: 'SYNC_ERROR'; provider: CloudProvider; error: string }
   | { type: 'CONFLICT_DETECTED'; conflict: ConflictInfo }
+  | { type: 'SYNC_BLOCKED_SHRINK'; provider: CloudProvider; finding: ShrinkFinding }
+  | { type: 'SYNC_FORCED'; provider: CloudProvider; finding: ShrinkFinding }
   | { type: 'CONFLICT_RESOLVED'; resolution: ConflictResolution }
   | { type: 'AUTH_REQUIRED'; provider: CloudProvider }
   | { type: 'AUTH_COMPLETED'; provider: CloudProvider; account: ProviderAccount }
