@@ -45,7 +45,7 @@ import {
   encryptProviderSecrets,
 } from '../persistence/secureFieldAdapter';
 import { mergeSyncPayloads } from '../../domain/syncMerge';
-import { detectSuspiciousShrink } from '../../domain/syncGuards';
+import { detectSuspiciousShrink, type ShrinkFinding } from '../../domain/syncGuards';
 // Extracted into a plain ESM module so the signature logic is covered by
 // the node --test harness (see syncSignature.test.mjs). The previous
 // inline implementation only hashed a handful of meta fields and was
@@ -1799,6 +1799,67 @@ export class CloudSyncManager {
           }
         }
         return results;
+      }
+    }
+
+    // Shrink guard (multi-provider): check the final outgoing payload against
+    // each provider's stored base. If ANY provider would suffer a suspicious
+    // shrink, block ALL uploads — the same payload goes to every provider, so
+    // any one provider's "would lose too much" is a global block. Override flag
+    // is one-shot and clears regardless of outcome.
+    const shrinkSuspectByProvider: Array<{
+      provider: CloudProvider;
+      finding: Extract<ShrinkFinding, { suspicious: true }>;
+    }> = [];
+    const candidateProviders = checkResults
+      .filter((r) => !r.error && !r.check?.conflict && r.adapter)
+      .map((r) => r.provider as CloudProvider);
+    for (const provider of candidateProviders) {
+      const providerBase = await this.loadSyncBase(provider);
+      const finding = detectSuspiciousShrink(payload, providerBase);
+      if (finding.suspicious) {
+        shrinkSuspectByProvider.push({ provider, finding });
+      }
+    }
+    const shouldBlockAll = shrinkSuspectByProvider.length > 0 && !this.overrideShrinkOnce;
+    const shouldForceAll = shrinkSuspectByProvider.length > 0 && this.overrideShrinkOnce;
+    // Reset FIRST so the flag clears even when we early-return on block.
+    this.overrideShrinkOnce = false;
+
+    if (shouldBlockAll) {
+      this.state.syncState = 'BLOCKED';
+      for (const { provider, finding } of shrinkSuspectByProvider) {
+        this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding });
+        this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
+        results.set(provider, {
+          success: false,
+          provider,
+          action: 'none',
+          shrinkBlocked: true,
+          finding,
+        });
+      }
+      // Providers in candidateProviders that didn't trip the shrink check still
+      // share the same payload — mark them as not-uploaded so the caller doesn't
+      // think a "successful" no-op happened.
+      const blockedProviders = new Set(shrinkSuspectByProvider.map((e) => e.provider));
+      for (const provider of candidateProviders) {
+        if (!blockedProviders.has(provider)) {
+          results.set(provider, {
+            success: false,
+            provider,
+            action: 'none',
+            error: 'Sync blocked: another provider would lose too much data',
+          });
+          this.updateProviderStatus(provider, 'error', 'Sync blocked due to peer provider');
+        }
+      }
+      return results;
+    }
+
+    if (shouldForceAll) {
+      for (const { provider, finding } of shrinkSuspectByProvider) {
+        this.emit({ type: 'SYNC_FORCED', provider, finding });
       }
     }
 
