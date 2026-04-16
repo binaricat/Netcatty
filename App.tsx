@@ -992,6 +992,8 @@ function App({ settings }: { settings: SettingsState }) {
   const addConnectionLogRef = useRef(addConnectionLog);
   addConnectionLogRef.current = addConnectionLog;
 
+  const closeSidePanelRef = useRef<(() => void) | null>(null);
+
   const createLocalTerminalWithCurrentShell = useCallback(() => {
     const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
     const matchedShell = discoveredShells.find(s => s.id === terminalSettings.localShell);
@@ -1684,6 +1686,7 @@ function App({ settings }: { settings: SettingsState }) {
           sessionLogsEnabled={sessionLogsEnabled}
           sessionLogsDir={sessionLogsDir}
           sessionLogsFormat={sessionLogsFormat}
+          closeSidePanelRef={closeSidePanelRef}
         />
 
         {/* Log Views - readonly terminal replays */}
