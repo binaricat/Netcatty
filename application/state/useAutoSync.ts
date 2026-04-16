@@ -247,19 +247,23 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         throw new Error(t('sync.credentialsUnavailable'));
       }
 
-      // Prevent pushing an empty vault to cloud. This is almost always
+      // Refuse to push an empty vault to cloud. This is almost always
       // a sign that the local state was lost (update, import failure,
       // storage corruption) rather than a deliberate "delete everything".
-      // We only block auto-sync — manual trigger from Settings can still
-      // push if the user explicitly wants to.
+      // Both auto and manual triggers are blocked; the user can still
+      // use Force Push from the SyncBlocked banner if they genuinely
+      // want to wipe the cloud.
       //
       // This pairs with the inspect-failure "fail open" behavior in
       // checkRemoteVersion below: if inspect transiently errors we still
       // let auto-sync run, trusting this guard to refuse if local is
       // truly empty rather than letting an empty state clobber remote.
-      if (!hasMeaningfulSyncData(payload) && trigger === 'auto') {
-        console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
-        return;
+      if (!hasMeaningfulSyncData(payload)) {
+        if (trigger === 'auto') {
+          console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
+          return;
+        }
+        throw new Error(t('sync.autoSync.emptyVaultManual'));
       }
 
       const results = await sync.syncNow(payload);
