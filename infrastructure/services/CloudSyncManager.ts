@@ -771,9 +771,20 @@ export class CloudSyncManager {
       }
 
       await this.saveProviderConnection('github', this.state.providers.github);
-      // Clear merge base when (re)authenticating to a potentially different account
-      this.removeFromStorage(this.syncBaseKey('github'));
-      this.clearSyncAnchor('github');
+
+      // Only clear the merge base if the authenticated account identity differs
+      // from the previously-stored one. See notes in completePKCEAuth.
+      const newId = ghAdapter.accountInfo?.id ?? null;
+      const previousId = this.loadProviderAccountId('github');
+      const sameAccount = newId !== null && previousId !== null && newId === previousId;
+      if (!sameAccount) {
+        this.removeFromStorage(this.syncBaseKey('github'));
+        this.clearSyncAnchor('github');
+      }
+      if (newId) {
+        this.saveProviderAccountId('github', newId);
+      }
+
       this.emit({
         type: 'AUTH_COMPLETED',
         provider: 'github',
@@ -827,9 +838,22 @@ export class CloudSyncManager {
       }
 
       await this.saveProviderConnection(provider, this.state.providers[provider]);
-      // Clear merge base when (re)authenticating to a potentially different account
-      this.removeFromStorage(this.syncBaseKey(provider));
-      this.clearSyncAnchor(provider);
+
+      // Only clear the merge base if the authenticated account identity differs
+      // from the previously-stored one. Same-account re-auth preserves the base
+      // so the next sync computes correct local-deletions instead of treating
+      // it as "first sync" and resurrecting zombie entries via null-base union.
+      const newId = account?.id ?? null;
+      const previousId = this.loadProviderAccountId(provider);
+      const sameAccount = newId !== null && previousId !== null && newId === previousId;
+      if (!sameAccount) {
+        this.removeFromStorage(this.syncBaseKey(provider));
+        this.clearSyncAnchor(provider);
+      }
+      if (newId) {
+        this.saveProviderAccountId(provider, newId);
+      }
+
       this.emit({
         type: 'AUTH_COMPLETED',
         provider,
@@ -914,6 +938,7 @@ export class CloudSyncManager {
     // account/resource doesn't reuse an unrelated snapshot
     this.removeFromStorage(this.syncBaseKey(provider));
     this.clearSyncAnchor(provider);
+    this.removeFromStorage(this.providerAccountIdKey(provider));
     this.notifyStateChange(); // Ensure UI updates immediately after disconnect
   }
 
@@ -2040,6 +2065,18 @@ export class CloudSyncManager {
   private syncBaseKey(provider?: CloudProvider): string {
     const suffix = provider ? `_${provider}` : '';
     return `${SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD}${suffix}`;
+  }
+
+  private providerAccountIdKey(provider: CloudProvider): string {
+    return `netcatty.sync.accountId.${provider}`;
+  }
+
+  private loadProviderAccountId(provider: CloudProvider): string | null {
+    return this.loadFromStorage<string>(this.providerAccountIdKey(provider)) ?? null;
+  }
+
+  private saveProviderAccountId(provider: CloudProvider, id: string): void {
+    this.saveToStorage(this.providerAccountIdKey(provider), id);
   }
 
   async saveSyncBase(payload: SyncPayload, provider?: CloudProvider): Promise<void> {
