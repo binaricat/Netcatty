@@ -858,6 +858,10 @@ const api = {
 
   // App info
   getAppInfo: () => ipcRenderer.invoke("netcatty:app:getInfo"),
+  ptyGetChildProcesses: (sessionId) =>
+    ipcRenderer.invoke("netcatty:pty:childProcesses", sessionId),
+  confirmCloseBusy: (payload) =>
+    ipcRenderer.invoke("netcatty:dialog:confirmCloseBusy", payload),
   getVaultBackupCapabilities: () =>
     ipcRenderer.invoke("netcatty:vaultBackups:capabilities"),
   createVaultBackup: (payload) =>
