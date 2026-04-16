@@ -1205,7 +1205,9 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     useEffect(() => {
         const unsub = sync.subscribeToEvents((event) => {
             if (event.type === 'SYNC_BLOCKED_SHRINK') {
-                setBlockedFinding(event.finding as Extract<ShrinkFinding, { suspicious: true }>);
+                if (event.finding.suspicious) {
+                    setBlockedFinding(event.finding);
+                }
             } else if (event.type === 'SYNC_STARTED' || event.type === 'SYNC_FORCED') {
                 setBlockedFinding(null);
             }

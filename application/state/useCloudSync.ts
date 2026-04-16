@@ -441,6 +441,11 @@ export const useCloudSync = (): CloudSyncHook => {
     return await manager.downloadFromProvider(provider);
   }, [ensureUnlocked]);
 
+  const subscribeToEvents = useCallback(
+    (callback: SyncEventCallback) => manager.subscribe(callback),
+    [],
+  );
+
   const resolveConflictWithUnlock = useCallback(async (resolution: ConflictResolution) => {
     await ensureUnlocked();
     return await manager.resolveConflict(resolution);
@@ -511,7 +516,7 @@ export const useCloudSync = (): CloudSyncHook => {
     refresh,
 
     // Event subscription
-    subscribeToEvents: (callback: SyncEventCallback) => manager.subscribe(callback),
+    subscribeToEvents,
   };
 };
 
