@@ -1274,6 +1274,14 @@ export class CloudSyncManager {
       };
     }
 
+    // Snapshot+consume the one-shot force-push override IMMEDIATELY so an
+    // early return below cannot leave the flag armed for an unrelated next
+    // sync. The flag's contract is "next sync attempt only" — that contract
+    // must hold even when the next sync exits without reaching the shrink
+    // check.
+    const overrideShrinkRequested = this.overrideShrinkOnce;
+    this.overrideShrinkOnce = false;
+
     let adapter: CloudAdapter;
     try {
       adapter = await this.getConnectedAdapter(provider);
@@ -1320,13 +1328,12 @@ export class CloudSyncManager {
           // state is trustworthy — but a degraded local (keychain failure,
           // partial load) can make merge produce a smaller-than-expected result.
           const mergedShrink = detectSuspiciousShrink(mergeResult.payload, base);
-          const shouldBlockMerged = mergedShrink.suspicious && !this.overrideShrinkOnce;
-          const shouldForceMerged = mergedShrink.suspicious && this.overrideShrinkOnce;
-          // Reset FIRST so the flag clears even when we early-return on block.
-          this.overrideShrinkOnce = false;
+          const shouldBlockMerged = mergedShrink.suspicious && !overrideShrinkRequested;
+          const shouldForceMerged = mergedShrink.suspicious && overrideShrinkRequested;
           if (shouldBlockMerged) {
             this.state.syncState = 'BLOCKED';
             this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: mergedShrink });
+            this.updateProviderStatus(provider, 'connected');
             return {
               success: false,
               provider,
@@ -1416,13 +1423,12 @@ export class CloudSyncManager {
       // refuse a payload that drops entities versus the stored base.
       const directBase = await this.loadSyncBase(provider);
       const directShrink = detectSuspiciousShrink(payload, directBase);
-      const shouldBlockDirect = directShrink.suspicious && !this.overrideShrinkOnce;
-      const shouldForceDirect = directShrink.suspicious && this.overrideShrinkOnce;
-      // Reset FIRST so the flag clears even when we early-return on block.
-      this.overrideShrinkOnce = false;
+      const shouldBlockDirect = directShrink.suspicious && !overrideShrinkRequested;
+      const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
       if (shouldBlockDirect) {
         this.state.syncState = 'BLOCKED';
         this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
+        this.updateProviderStatus(provider, 'connected');
         return {
           success: false,
           provider,
@@ -1654,6 +1660,14 @@ export class CloudSyncManager {
     let payload = inputPayload;
     let wasMerged = false;
 
+    // Snapshot+consume the one-shot force-push override IMMEDIATELY so an
+    // early return below cannot leave the flag armed for an unrelated next
+    // sync. The flag's contract is "next sync attempt only" — that contract
+    // must hold even when the next sync exits without reaching the shrink
+    // check.
+    const overrideShrinkRequested = this.overrideShrinkOnce;
+    this.overrideShrinkOnce = false;
+
     if (!payload) {
       // Caller should provide payload from app state
       return results;
@@ -1846,10 +1860,8 @@ export class CloudSyncManager {
         shrinkSuspectByProvider.push({ provider, finding });
       }
     }
-    const shouldBlockAll = shrinkSuspectByProvider.length > 0 && !this.overrideShrinkOnce;
-    const shouldForceAll = shrinkSuspectByProvider.length > 0 && this.overrideShrinkOnce;
-    // Reset FIRST so the flag clears even when we early-return on block.
-    this.overrideShrinkOnce = false;
+    const shouldBlockAll = shrinkSuspectByProvider.length > 0 && !overrideShrinkRequested;
+    const shouldForceAll = shrinkSuspectByProvider.length > 0 && overrideShrinkRequested;
 
     if (shouldBlockAll) {
       this.state.syncState = 'BLOCKED';
@@ -1864,12 +1876,26 @@ export class CloudSyncManager {
           finding,
         });
       }
+      // Process check errors from the parallel check phase so a provider that
+      // failed during checkProviderConflict is not silently dropped from results.
+      checkResults.forEach((r) => {
+        if (r.error) {
+          results.set(r.provider as CloudProvider, {
+            success: false,
+            provider: r.provider as CloudProvider,
+            action: 'none',
+            error: r.error,
+          });
+          this.updateProviderStatus(r.provider as CloudProvider, 'error', r.error);
+          this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
+        }
+      });
       // Providers in candidateProviders that didn't trip the shrink check still
       // share the same payload — mark them as not-uploaded so the caller doesn't
       // think a "successful" no-op happened.
       const blockedProviders = new Set(shrinkSuspectByProvider.map((e) => e.provider));
       for (const provider of candidateProviders) {
-        if (!blockedProviders.has(provider)) {
+        if (!results.has(provider) && !blockedProviders.has(provider)) {
           results.set(provider, {
             success: false,
             provider,
