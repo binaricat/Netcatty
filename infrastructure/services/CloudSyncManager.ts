@@ -78,6 +78,12 @@ export interface SyncManagerState {
   autoSyncEnabled: boolean;
   autoSyncInterval: number;
   syncHistory: SyncHistoryEntry[];
+  /** Last shrink finding that put us into BLOCKED state, retained until
+   * a sync actually succeeds (SYNC_COMPLETED with result.success) or
+   * `clearShrinkBlockedState()` is called. Renderer hydrates the banner
+   * from this on mount so a block that happened off-screen is still
+   * visible to the user. */
+  lastShrinkFinding?: Extract<ShrinkFinding, { suspicious: true }>;
 }
 
 export type SyncEventCallback = (event: SyncEvent) => void;
@@ -1338,6 +1344,7 @@ export class CloudSyncManager {
           const shouldForceMerged = mergedShrink.suspicious && overrideShrinkRequested;
           if (shouldBlockMerged) {
             this.state.syncState = 'BLOCKED';
+            this.state.lastShrinkFinding = mergedShrink;
             this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: mergedShrink });
             this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
             return {
@@ -1433,6 +1440,7 @@ export class CloudSyncManager {
       const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
       if (shouldBlockDirect) {
         this.state.syncState = 'BLOCKED';
+        this.state.lastShrinkFinding = directShrink;
         this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
         this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
         return {
@@ -1464,6 +1472,7 @@ export class CloudSyncManager {
 
       if (result.success) {
         this.state.syncState = 'IDLE';
+        this.state.lastShrinkFinding = undefined;
       } else {
         this.state.syncState = 'ERROR';
         if (result.error) {
@@ -1657,8 +1666,20 @@ export class CloudSyncManager {
   clearShrinkBlockedState(): void {
     if (this.state.syncState === 'BLOCKED') {
       this.state.syncState = 'IDLE';
+      this.state.lastShrinkFinding = undefined;
       this.notifyStateChange();
     }
+  }
+
+  /**
+   * Returns the last shrink finding that triggered BLOCKED state, or
+   * null if not currently blocked. Used by the renderer to hydrate the
+   * SyncBlockedBanner when opening Settings after a block happened
+   * off-screen.
+   */
+  getShrinkBlockedFinding(): Extract<ShrinkFinding, { suspicious: true }> | null {
+    if (this.state.syncState !== 'BLOCKED') return null;
+    return this.state.lastShrinkFinding ?? null;
   }
 
   /**
@@ -1871,6 +1892,7 @@ export class CloudSyncManager {
 
     if (shouldBlockAll) {
       this.state.syncState = 'BLOCKED';
+      this.state.lastShrinkFinding = shrinkSuspectByProvider[0].finding;
       for (const { provider, finding } of shrinkSuspectByProvider) {
         this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding });
         this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
@@ -1997,6 +2019,7 @@ export class CloudSyncManager {
     const hasSuccess = Array.from(results.values()).some((r) => r.success);
     if (hasSuccess) {
       this.state.syncState = 'IDLE';
+      this.state.lastShrinkFinding = undefined;
 
       // If a merge happened, attach the merged payload to successful results
       // so callers can apply remote additions to local state

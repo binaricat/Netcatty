@@ -28,6 +28,7 @@ import {
   type SyncManagerState,
   type SyncEventCallback,
 } from '../../infrastructure/services/CloudSyncManager';
+import type { ShrinkFinding } from '../../domain/syncGuards';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import type { DeviceFlowState } from '../../infrastructure/services/adapters/GitHubAdapter';
 
@@ -120,6 +121,9 @@ export interface CloudSyncHook {
 
   // Event subscription (for non-state events like SYNC_BLOCKED_SHRINK)
   subscribeToEvents: (callback: SyncEventCallback) => () => void;
+
+  // Shrink-block state query (for banner hydration on mount)
+  getShrinkBlockedFinding: () => Extract<ShrinkFinding, { suspicious: true }> | null;
 }
 
 // ============================================================================
@@ -447,6 +451,11 @@ export const useCloudSync = (): CloudSyncHook => {
     [],
   );
 
+  const getShrinkBlockedFinding = useCallback(
+    () => manager.getShrinkBlockedFinding(),
+    [],
+  );
+
   const resolveConflictWithUnlock = useCallback(async (resolution: ConflictResolution) => {
     await ensureUnlocked();
     return await manager.resolveConflict(resolution);
@@ -518,6 +527,9 @@ export const useCloudSync = (): CloudSyncHook => {
 
     // Event subscription
     subscribeToEvents,
+
+    // Shrink-block state query
+    getShrinkBlockedFinding,
   };
 };
 

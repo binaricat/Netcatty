@@ -1232,14 +1232,26 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Subscribe to sync events to show/clear the blocked-shrink banner.
     // Destructure the stable useCallback reference so the effect runs once on
     // mount rather than re-subscribing on every render when `sync` object ref changes.
-    const { subscribeToEvents } = sync;
+    const { subscribeToEvents, getShrinkBlockedFinding } = sync;
+
+    // Hydrate from current manager state in case a shrink-block happened
+    // before this component mounted (e.g., auto-sync ran while the user
+    // was on a different tab). Without this, the banner only shows
+    // blocks that occur after Settings is open.
+    useEffect(() => {
+        const existing = getShrinkBlockedFinding();
+        if (existing) {
+            setBlockedFinding(existing);
+        }
+    }, [getShrinkBlockedFinding]);
+
     useEffect(() => {
         const unsub = subscribeToEvents((event) => {
             if (event.type === 'SYNC_BLOCKED_SHRINK') {
                 if (event.finding.suspicious) {
                     setBlockedFinding(event.finding);
                 }
-            } else if (event.type === 'SYNC_STARTED' || event.type === 'SYNC_FORCED') {
+            } else if (event.type === 'SYNC_COMPLETED' && event.result?.success) {
                 setBlockedFinding(null);
             }
         });
