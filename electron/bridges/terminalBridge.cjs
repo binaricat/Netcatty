@@ -1175,6 +1175,9 @@ function cleanupAllSessions() {
       // Ignore cleanup errors
     }
   }
+  for (const [sessionId] of sessions) {
+    ptyProcessTree.unregisterPid(sessionId);
+  }
   sessions.clear();
 }
 
