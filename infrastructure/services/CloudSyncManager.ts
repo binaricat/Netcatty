@@ -45,6 +45,7 @@ import {
   encryptProviderSecrets,
 } from '../persistence/secureFieldAdapter';
 import { mergeSyncPayloads } from '../../domain/syncMerge';
+import { detectSuspiciousShrink } from '../../domain/syncGuards';
 // Extracted into a plain ESM module so the signature logic is covered by
 // the node --test harness (see syncSignature.test.mjs). The previous
 // inline implementation only hashed a handful of meta fields and was
@@ -102,6 +103,7 @@ export class CloudSyncManager {
   private stateChangeListeners: Set<() => void> = new Set(); // For useSyncExternalStore
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private masterPassword: string | null = null; // In memory only!
+  private overrideShrinkOnce = false;
   private hasStorageListener = false;
   // Promise that resolves once startup provider secret decryption finishes.
   // Awaited by getConnectedAdapter() to prevent using still-encrypted tokens.
@@ -1288,6 +1290,27 @@ export class CloudSyncManager {
 
           console.info('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
 
+          // Shrink guard: refuse to push a merged payload that silently deletes
+          // entities we still have in base. The merge itself is correct if local
+          // state is trustworthy — but a degraded local (keychain failure,
+          // partial load) can make merge produce a smaller-than-expected result.
+          const mergedShrink = detectSuspiciousShrink(mergeResult.payload, base);
+          if (mergedShrink.suspicious && !this.overrideShrinkOnce) {
+            this.state.syncState = 'BLOCKED';
+            this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: mergedShrink });
+            return {
+              success: false,
+              provider,
+              action: 'none',
+              shrinkBlocked: true,
+              finding: mergedShrink,
+            };
+          }
+          if (mergedShrink.suspicious && this.overrideShrinkOnce) {
+            this.emit({ type: 'SYNC_FORCED', provider, finding: mergedShrink });
+          }
+          this.overrideShrinkOnce = false;
+
           // Encrypt and upload merged payload
           const mergedSyncedFile = await EncryptionService.encryptPayload(
             mergeResult.payload,
@@ -1360,6 +1383,26 @@ export class CloudSyncManager {
           };
         }
       }
+
+      // Shrink guard (no-conflict path): same rationale as the merge branch —
+      // refuse a payload that drops entities versus the stored base.
+      const directBase = await this.loadSyncBase(provider);
+      const directShrink = detectSuspiciousShrink(payload, directBase);
+      if (directShrink.suspicious && !this.overrideShrinkOnce) {
+        this.state.syncState = 'BLOCKED';
+        this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
+        return {
+          success: false,
+          provider,
+          action: 'none',
+          shrinkBlocked: true,
+          finding: directShrink,
+        };
+      }
+      if (directShrink.suspicious && this.overrideShrinkOnce) {
+        this.emit({ type: 'SYNC_FORCED', provider, finding: directShrink });
+      }
+      this.overrideShrinkOnce = false;
 
       // 2. Encrypt
       const syncedFile = await EncryptionService.encryptPayload(
@@ -1533,6 +1576,16 @@ export class CloudSyncManager {
         portForwardingRuleCount: payload.portForwardingRules?.length ?? 0,
       },
     };
+  }
+
+  /**
+   * Set a one-shot flag that causes the next `syncToProvider` call to
+   * bypass the shrink-detection guard. The flag self-clears after the
+   * next sync attempt (success, failure, or block). Used by the
+   * "Force push anyway" UI path.
+   */
+  forcePushOverrideShrink(): void {
+    this.overrideShrinkOnce = true;
   }
 
   /**

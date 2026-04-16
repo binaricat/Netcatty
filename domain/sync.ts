@@ -287,6 +287,10 @@ export interface SyncResult {
   conflictDetected?: boolean;
   /** Present when action === 'merge'; caller should apply this to update local state */
   mergedPayload?: import('./sync').SyncPayload;
+  /** True when a shrink-detection guard blocked the upload */
+  shrinkBlocked?: boolean;
+  /** The finding that triggered the shrink block or force-push */
+  finding?: ShrinkFinding;
 }
 
 /**
