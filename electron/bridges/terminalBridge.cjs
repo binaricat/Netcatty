@@ -10,6 +10,7 @@ const path = require("node:path");
 const { StringDecoder } = require("node:string_decoder");
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
+const ptyProcessTree = require("./ptyProcessTree.cjs");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const { detectShellKind } = require("./ai/ptyExec.cjs");
@@ -326,6 +327,7 @@ function startLocalSession(event, payload) {
     _promptTrackTail: "",
   };
   sessions.set(sessionId, session);
+  ptyProcessTree.registerPid(sessionId, proc.pid);
 
   // Start real-time session log stream if configured
   if (payload?.sessionLog?.enabled && payload?.sessionLog?.directory) {
@@ -382,6 +384,7 @@ function startLocalSession(event, payload) {
   proc.onExit((evt) => {
     flushLocal();
     sessionLogStreamManager.stopStream(sessionId);
+    ptyProcessTree.unregisterPid(sessionId);
     sessions.delete(sessionId);
     const contents = electronModule.webContents.fromId(session.webContentsId);
     // Signal present = killed externally (show disconnected UI).
@@ -648,6 +651,7 @@ async function startTelnetSession(event, options) {
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
         }
+        ptyProcessTree.unregisterPid(sessionId);
         sessions.delete(sessionId);
       }
     });
@@ -664,6 +668,7 @@ async function startTelnetSession(event, options) {
         const contents = electronModule.webContents.fromId(session.webContentsId);
         contents?.send("netcatty:exit", { sessionId, exitCode: hadError ? 1 : 0, reason: hadError ? "error" : "closed" });
       }
+      ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
     });
 
@@ -802,6 +807,7 @@ async function startMoshSession(event, options) {
     proc.onExit((evt) => {
       flushMosh();
       sessionLogStreamManager.stopStream(sessionId);
+      ptyProcessTree.unregisterPid(sessionId);
       sessions.delete(sessionId);
       const contents = electronModule.webContents.fromId(session.webContentsId);
       // Mosh non-zero exit typically means connection/auth failure — show error UI
@@ -931,6 +937,7 @@ async function startSerialSession(event, options) {
           sessionLogStreamManager.stopStream(sessionId);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
+          ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
         });
 
@@ -940,6 +947,7 @@ async function startSerialSession(event, options) {
           sessionLogStreamManager.stopStream(sessionId);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
+          ptyProcessTree.unregisterPid(sessionId);
           sessions.delete(sessionId);
         });
 
@@ -1043,6 +1051,7 @@ function closeSession(event, payload) {
   } catch (err) {
     console.warn("Close failed", err);
   }
+  ptyProcessTree.unregisterPid(payload.sessionId);
   sessions.delete(payload.sessionId);
 }
 
