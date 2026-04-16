@@ -1314,7 +1314,6 @@ export class CloudSyncManager {
 
     this.updateProviderStatus(provider, 'syncing');
     this.state.lastError = null;
-    this.exitBlockedState();
     this.state.syncState = 'SYNCING';
     this.emit({ type: 'SYNC_STARTED', provider });
 
@@ -1408,7 +1407,6 @@ export class CloudSyncManager {
           }
 
           // Upload after merge failed — set ERROR so sync isn't stuck in SYNCING
-          this.exitBlockedState();
           this.state.syncState = 'ERROR';
           this.state.lastError = uploadResult.error || 'Upload failed after merge';
           return uploadResult;
@@ -1416,7 +1414,6 @@ export class CloudSyncManager {
           // Merge failed — fall back to conflict UI
           console.error('[CloudSyncManager] Merge failed, falling back to conflict UI', mergeError);
           const remoteFile = checkResult.remoteFile;
-          this.exitBlockedState();
           this.state.syncState = 'CONFLICT';
           this.state.currentConflict = {
             provider,
@@ -1485,7 +1482,6 @@ export class CloudSyncManager {
         this.state.syncState = 'IDLE';
         this.state.lastShrinkFinding = undefined;
       } else {
-        this.exitBlockedState();
         this.state.syncState = 'ERROR';
         if (result.error) {
           this.state.lastError = result.error;
@@ -1494,7 +1490,6 @@ export class CloudSyncManager {
       return result;
 
     } catch (error) {
-      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       this.state.lastError = String(error);
       this.updateProviderStatus(provider, 'error', String(error));
@@ -1756,7 +1751,6 @@ export class CloudSyncManager {
     }
 
     this.state.lastError = null;
-    this.exitBlockedState();
     this.state.syncState = 'SYNCING';
 
     // 1. Parallel Checks
@@ -1853,7 +1847,6 @@ export class CloudSyncManager {
         const { provider, check } = conflicts[0];
         const remoteFile = check!.remoteFile!;
 
-        this.exitBlockedState();
         this.state.syncState = 'CONFLICT';
         this.state.currentConflict = {
           provider: provider as CloudProvider,
@@ -1993,7 +1986,6 @@ export class CloudSyncManager {
           this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
         }
       });
-      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       return results;
     }
@@ -2019,7 +2011,6 @@ export class CloudSyncManager {
       );
     } catch (error) {
       const msg = String(error);
-      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       this.state.lastError = msg;
 
@@ -2066,7 +2057,6 @@ export class CloudSyncManager {
         }
       }
     } else {
-      this.exitBlockedState();
       this.state.syncState = 'ERROR';
       // lastError is set by uploadToProvider
     }
