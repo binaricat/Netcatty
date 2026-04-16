@@ -5,6 +5,11 @@ function createProcessTree({ platform, listPosix, listWindows } = {}) {
 
   function registerPid(sessionId, pid) {
     if (!sessionId || typeof pid !== "number") return;
+    if (sessionPidMap.has(sessionId) && sessionPidMap.get(sessionId) !== pid) {
+      console.warn(
+        `[ptyProcessTree] sessionId "${sessionId}" already registered with pid ${sessionPidMap.get(sessionId)}; overwriting with ${pid}.`,
+      );
+    }
     sessionPidMap.set(sessionId, pid);
   }
 
@@ -26,9 +31,10 @@ function createProcessTree({ platform, listPosix, listWindows } = {}) {
 
 function defaultListPosix(ppid) {
   return new Promise((resolve) => {
-    // `ps -A -o pid=,ppid=,comm=` works on both BSD (macOS) and GNU (Linux).
+    // `ps -A -o pid=,ppid=,args=` works on both BSD (macOS) and GNU (Linux).
+    // `args=` shows the full command line (not truncated like `comm=`).
     // The trailing `=` on each column suppresses the header row.
-    execFile("ps", ["-A", "-o", "pid=,ppid=,comm="], (err, stdout) => {
+    execFile("ps", ["-A", "-o", "pid=,ppid=,args="], (err, stdout) => {
       if (err || typeof stdout !== "string") return resolve([]);
       const out = [];
       for (const line of stdout.split("\n")) {

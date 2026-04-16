@@ -59,3 +59,21 @@ test("getChildProcesses returns [] when listWindows missing on windows", async (
   tree.registerPid("s1", 3000);
   assert.deepEqual(await tree.getChildProcesses("s1"), []);
 });
+
+test("registerPid warns when overwriting an existing sessionId with a different pid", async () => {
+  const warnCalls = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnCalls.push(args);
+  try {
+    const tree = createProcessTree({ platform: "darwin", listPosix: async () => [] });
+    tree.registerPid("s1", 1234);
+    tree.registerPid("s1", 1234); // same pid — no warn
+    tree.registerPid("s1", 5678); // different — should warn
+    assert.equal(warnCalls.length, 1);
+    assert.match(warnCalls[0][0], /s1/);
+    assert.match(warnCalls[0][0], /1234/);
+    assert.match(warnCalls[0][0], /5678/);
+  } finally {
+    console.warn = origWarn;
+  }
+});
