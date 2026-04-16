@@ -753,6 +753,12 @@ export class CloudSyncManager {
     const ghAdapter = adapter as GitHubAdapter;
 
     try {
+      // Snapshot the prior account BEFORE we overwrite providers[provider].
+      // Used as a fallback for the same-account comparison when the persisted
+      // accountId key is absent (e.g., first re-auth after upgrading to this
+      // version, where the key didn't exist yet).
+      const previousAccount = this.state.providers.github?.account;
+
       const tokens = await ghAdapter.completeAuth(deviceCode, interval, expiresAt, onPending);
 
       ++this.providerDecryptSeq.github;
@@ -774,7 +780,7 @@ export class CloudSyncManager {
       // Only clear the merge base if the authenticated account identity differs
       // from the previously-stored one. See notes in completePKCEAuth.
       const newId = ghAdapter.accountInfo?.id ?? null;
-      const previousId = this.loadProviderAccountId('github');
+      const previousId = this.loadProviderAccountId('github') ?? previousAccount?.id ?? null;
       const sameAccount = newId !== null && previousId !== null && newId === previousId;
       if (!sameAccount) {
         this.removeFromStorage(this.syncBaseKey('github'));
@@ -809,6 +815,12 @@ export class CloudSyncManager {
     }
 
     try {
+      // Snapshot the prior account BEFORE we overwrite providers[provider].
+      // Used as a fallback for the same-account comparison when the persisted
+      // accountId key is absent (e.g., first re-auth after upgrading to this
+      // version, where the key didn't exist yet).
+      const previousAccount = this.state.providers[provider]?.account;
+
       let tokens: OAuthTokens;
       let account;
 
@@ -843,7 +855,7 @@ export class CloudSyncManager {
       // so the next sync computes correct local-deletions instead of treating
       // it as "first sync" and resurrecting zombie entries via null-base union.
       const newId = account?.id ?? null;
-      const previousId = this.loadProviderAccountId(provider);
+      const previousId = this.loadProviderAccountId(provider) ?? previousAccount?.id ?? null;
       const sameAccount = newId !== null && previousId !== null && newId === previousId;
       if (!sameAccount) {
         this.removeFromStorage(this.syncBaseKey(provider));
