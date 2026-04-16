@@ -513,7 +513,13 @@ declare global {
     // App info (name/version/platform) for About screens
     getAppInfo?(): Promise<{ name: string; version: string; platform: string }>;
     ptyGetChildProcesses?(sessionId: string): Promise<Array<{ pid: number; command: string }>>;
-    confirmCloseBusy?(payload: { command: string }): Promise<boolean>;
+    confirmCloseBusy?(payload: {
+      command: string;
+      title?: string;
+      message?: string;
+      cancelLabel?: string;
+      closeLabel?: string;
+    }): Promise<boolean>;
     getVaultBackupCapabilities?(): Promise<{ encryptionAvailable: boolean }>;
     createVaultBackup?(payload: {
       payload: import('./domain/sync').SyncPayload;

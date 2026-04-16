@@ -430,6 +430,7 @@ interface TerminalLayerProps {
   sessionLogsDir?: string;
   sessionLogsFormat?: string;
   closeSidePanelRef?: React.MutableRefObject<(() => void) | null>;
+  activeSidePanelTabRef?: React.MutableRefObject<string | null>;
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
@@ -484,6 +485,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sessionLogsDir,
   sessionLogsFormat,
   closeSidePanelRef,
+  activeSidePanelTabRef,
 }) => {
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
@@ -1311,6 +1313,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       closeSidePanelRef.current = null;
     };
   }, [closeSidePanelRef, handleCloseSidePanel]);
+
+  useEffect(() => {
+    if (!activeSidePanelTabRef) return;
+    activeSidePanelTabRef.current = activeSidePanelTab ?? null;
+  }, [activeSidePanelTabRef, activeSidePanelTab]);
 
   // Switch side panel to a specific tab (or toggle if already on that tab)
   const handleSwitchSidePanelTab = useCallback((tab: SidePanelTab) => {

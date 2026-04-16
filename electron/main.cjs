@@ -697,13 +697,19 @@ const registerBridges = (win) => {
     "netcatty:dialog:confirmCloseBusy",
     async (event, payload) => {
       const command = typeof payload?.command === "string" ? payload.command : "unknown";
+      const title = typeof payload?.title === "string" ? payload.title : "Confirm close";
+      const message = typeof payload?.message === "string"
+        ? payload.message
+        : `Process "${command}" is still running and will be terminated.`;
+      const cancelLabel = typeof payload?.cancelLabel === "string" ? payload.cancelLabel : "Cancel";
+      const closeLabel = typeof payload?.closeLabel === "string" ? payload.closeLabel : "Close";
       const { dialog } = electronModule;
       const win = BrowserWindow.fromWebContents(event.sender);
       const { response } = await dialog.showMessageBox(win || undefined, {
         type: "warning",
-        title: "Confirm close",
-        message: `Process "${command}" is still running and will be terminated.`,
-        buttons: ["Cancel", "Close"],
+        title,
+        message,
+        buttons: [cancelLabel, closeLabel],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
