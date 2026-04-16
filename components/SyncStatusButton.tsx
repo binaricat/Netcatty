@@ -136,7 +136,13 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
     // Determine overall status for the button indicator
     const getOverallStatus = (): StatusIndicatorProps['status'] => {
         if (sync.overallSyncStatus === 'syncing') return 'syncing';
-        if (sync.overallSyncStatus === 'error' || sync.overallSyncStatus === 'conflict') return 'error';
+        if (
+            sync.overallSyncStatus === 'error' ||
+            sync.overallSyncStatus === 'conflict' ||
+            sync.overallSyncStatus === 'blocked'
+        ) {
+            return 'error';
+        }
         if (sync.overallSyncStatus === 'synced') return 'synced';
         return 'none';
     };

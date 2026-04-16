@@ -1230,8 +1230,11 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     }, [sync.currentConflict]);
 
     // Subscribe to sync events to show/clear the blocked-shrink banner.
+    // Destructure the stable useCallback reference so the effect runs once on
+    // mount rather than re-subscribing on every render when `sync` object ref changes.
+    const { subscribeToEvents } = sync;
     useEffect(() => {
-        const unsub = sync.subscribeToEvents((event) => {
+        const unsub = subscribeToEvents((event) => {
             if (event.type === 'SYNC_BLOCKED_SHRINK') {
                 if (event.finding.suspicious) {
                     setBlockedFinding(event.finding);
@@ -1241,7 +1244,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             }
         });
         return unsub;
-    }, [sync]);
+    }, [subscribeToEvents]);
 
     // If we have a master key but we're still locked (e.g. older installs),
     // prompt once and persist the password via safeStorage.
