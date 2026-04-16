@@ -30,7 +30,7 @@
     "tool:cli": "node electron/cli/netcatty-tool-cli.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node --test --import tsx electron/bridges/*.test.cjs application/state/*.test.ts"
+    "test": "node --test --import tsx electron/bridges/*.test.cjs application/state/*.test.ts domain/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
