@@ -58,6 +58,7 @@ const en: Messages = {
   'confirm.removeProvider': 'Remove provider "{name}"?',
   'confirm.closeBusyTerminal.title': 'Confirm close',
   'confirm.closeBusyTerminal.message': 'Process "{command}" is still running and will be terminated.',
+  'confirm.closeBusyTerminal.messageWithMore': 'Process "{command}" and {count} other running process(es) will be terminated.',
   'confirm.closeBusyTerminal.cancel': 'Cancel',
   'confirm.closeBusyTerminal.close': 'Close',
   'dialog.createWorkspace.title': 'Create Workspace',

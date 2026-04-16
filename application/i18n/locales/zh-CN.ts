@@ -45,6 +45,7 @@ const zhCN: Messages = {
   'confirm.removeProvider': '移除提供商 "{name}"？',
   'confirm.closeBusyTerminal.title': '确认关闭',
   'confirm.closeBusyTerminal.message': '进程 "{command}" 仍在运行，关闭后会被终止。',
+  'confirm.closeBusyTerminal.messageWithMore': '进程 "{command}" 及其他 {count} 个正在运行的进程将被终止。',
   'confirm.closeBusyTerminal.cancel': '取消',
   'confirm.closeBusyTerminal.close': '关闭',
   'dialog.renameWorkspace.title': '重命名工作区',

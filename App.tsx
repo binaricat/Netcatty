@@ -995,6 +995,7 @@ function App({ settings }: { settings: SettingsState }) {
 
   const closeSidePanelRef = useRef<(() => void) | null>(null);
   const activeSidePanelTabRef = useRef<string | null>(null);
+  const closeTabInFlightRef = useRef(false);
 
   const createLocalTerminalWithCurrentShell = useCallback(() => {
     const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
@@ -1031,26 +1032,38 @@ function App({ settings }: { settings: SettingsState }) {
 
   const confirmIfBusyLocalTerminal = useCallback(
     async (sessionIds: string[]): Promise<boolean> => {
+      const bridge = netcattyBridge.get();
       const localIds = sessionIds.filter((id) => {
         const s = sessions.find((x) => x.id === id);
         return s?.protocol === 'local';
       });
+      const busyCommands: string[] = [];
       for (const id of localIds) {
-        const bridge = netcattyBridge.get();
-        const children = await bridge?.ptyGetChildProcesses?.(id) ?? [];
+        const children = (await bridge?.ptyGetChildProcesses?.(id)) ?? [];
         if (children.length > 0) {
-          const command = children[0].command;
-          const ok = await bridge?.confirmCloseBusy?.({
-            command,
-            title: t('confirm.closeBusyTerminal.title'),
-            message: t('confirm.closeBusyTerminal.message', { command }),
-            cancelLabel: t('confirm.closeBusyTerminal.cancel'),
-            closeLabel: t('confirm.closeBusyTerminal.close'),
-          });
-          return ok === true;
+          busyCommands.push(children[0].command);
         }
       }
-      return true;
+      if (busyCommands.length === 0) return true;
+
+      const primary = busyCommands[0];
+      const extraCount = busyCommands.length - 1;
+      const message =
+        extraCount > 0
+          ? t('confirm.closeBusyTerminal.messageWithMore', {
+              command: primary,
+              count: extraCount,
+            })
+          : t('confirm.closeBusyTerminal.message', { command: primary });
+
+      const ok = await bridge?.confirmCloseBusy?.({
+        command: primary,
+        title: t('confirm.closeBusyTerminal.title'),
+        message,
+        cancelLabel: t('confirm.closeBusyTerminal.cancel'),
+        closeLabel: t('confirm.closeBusyTerminal.close'),
+      });
+      return ok === true;
     },
     [sessions, t],
   );
@@ -1100,6 +1113,7 @@ function App({ settings }: { settings: SettingsState }) {
       case 'closeTab': {
         const currentId = activeTabStore.getActiveTabId();
         if (!currentId || currentId === 'vault' || currentId === 'sftp') break;
+        if (closeTabInFlightRef.current) break;
 
         const session = sessions.find((s) => s.id === currentId) ?? null;
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
@@ -1115,31 +1129,32 @@ function App({ settings }: { settings: SettingsState }) {
           focusIsInsideTerminal,
         });
 
+        closeTabInFlightRef.current = true;
         (async () => {
-          switch (intent.kind) {
-            case 'closeTerminal': {
-              const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
-              if (ok) closeSession(intent.sessionId);
-              return;
+          try {
+            switch (intent.kind) {
+              case 'closeTerminal':
+              case 'closeSingleTab': {
+                const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
+                if (ok) closeSession(intent.sessionId);
+                return;
+              }
+              case 'closeSidePanel': {
+                closeSidePanelRef.current?.();
+                return;
+              }
+              case 'closeWorkspace': {
+                const ids = sessions.filter((s) => s.workspaceId === intent.workspaceId).map((s) => s.id);
+                const ok = await confirmIfBusyLocalTerminal(ids);
+                if (ok) closeWorkspace(intent.workspaceId);
+                return;
+              }
+              case 'noop':
+              default:
+                return;
             }
-            case 'closeSingleTab': {
-              const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
-              if (ok) closeSession(intent.sessionId);
-              return;
-            }
-            case 'closeSidePanel': {
-              closeSidePanelRef.current?.();
-              return;
-            }
-            case 'closeWorkspace': {
-              const ids = sessions.filter((s) => s.workspaceId === intent.workspaceId).map((s) => s.id);
-              const ok = await confirmIfBusyLocalTerminal(ids);
-              if (ok) closeWorkspace(intent.workspaceId);
-              return;
-            }
-            case 'noop':
-            default:
-              return;
+          } finally {
+            closeTabInFlightRef.current = false;
           }
         })();
 

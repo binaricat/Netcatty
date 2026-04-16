@@ -666,6 +666,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Whether side panel is open for the currently active tab and which sub-panel
   const isSidePanelOpenForCurrentTab = activeTabId ? sidePanelOpenTabs.has(activeTabId) : false;
   const activeSidePanelTab = activeTabId ? sidePanelOpenTabs.get(activeTabId) ?? null : null;
+  if (activeSidePanelTabRef) {
+    activeSidePanelTabRef.current = activeSidePanelTab;
+  }
 
   // Legacy compatibility helpers for SFTP-specific logic
   const isSftpOpenForCurrentTab = activeSidePanelTab === 'sftp';
@@ -1313,11 +1316,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       closeSidePanelRef.current = null;
     };
   }, [closeSidePanelRef, handleCloseSidePanel]);
-
-  useEffect(() => {
-    if (!activeSidePanelTabRef) return;
-    activeSidePanelTabRef.current = activeSidePanelTab ?? null;
-  }, [activeSidePanelTabRef, activeSidePanelTab]);
 
   // Switch side panel to a specific tab (or toggle if already on that tab)
   const handleSwitchSidePanelTab = useCallback((tab: SidePanelTab) => {
