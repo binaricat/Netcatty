@@ -44,6 +44,8 @@ import {
     findSyncPayloadEncryptedCredentialPaths,
 } from '../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type ConflictInfo, type SyncPayload, type WebDAVAuthType, type WebDAVConfig, type S3Config } from '../domain/sync';
+import type { ShrinkFinding } from '../domain/syncGuards';
+import { SyncBlockedBanner } from './sync/SyncBlockedBanner';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -1172,6 +1174,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Clear local data dialog
     const [showClearLocalDialog, setShowClearLocalDialog] = useState(false);
 
+    // Sync-blocked banner (Task 7)
+    const [blockedFinding, setBlockedFinding] = useState<Extract<ShrinkFinding, { suspicious: true }> | null>(null);
+    // Task 8 will render the force-push confirmation modal; stub the state here.
+    const [_showForcePushConfirm, setShowForcePushConfirm] = useState(false);
+
+    // Active tab state — lets the banner's "Restore" button switch to the
+    // local-backups tab without a separate DOM query.
+    const [activeTab, setActiveTab] = useState<'providers' | 'status'>('providers');
+
     const ensureSyncablePayload = useCallback(
         (payload: SyncPayload): boolean => {
             const encryptedCredentialPaths = findSyncPayloadEncryptedCredentialPaths(payload);
@@ -1189,6 +1200,18 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             setShowConflictModal(true);
         }
     }, [sync.currentConflict]);
+
+    // Subscribe to sync events to show/clear the blocked-shrink banner.
+    useEffect(() => {
+        const unsub = sync.subscribeToEvents((event) => {
+            if (event.type === 'SYNC_BLOCKED_SHRINK') {
+                setBlockedFinding(event.finding as Extract<ShrinkFinding, { suspicious: true }>);
+            } else if (event.type === 'SYNC_STARTED' || event.type === 'SYNC_FORCED') {
+                setBlockedFinding(null);
+            }
+        });
+        return unsub;
+    }, [sync]);
 
     // If we have a master key but we're still locked (e.g. older installs),
     // prompt once and persist the password via safeStorage.
@@ -1554,7 +1577,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 </div>
             </div>
 
-            <Tabs defaultValue="providers" className="space-y-4">
+            {blockedFinding && (
+                <SyncBlockedBanner
+                    finding={blockedFinding}
+                    onRestore={() => setActiveTab('status')}
+                    onForcePush={() => setShowForcePushConfirm(true)}
+                />
+            )}
+
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'providers' | 'status')} className="space-y-4">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="providers">{t('cloudSync.providers.title')}</TabsTrigger>
                     <TabsTrigger value="status">{t('cloudSync.status.title')}</TabsTrigger>

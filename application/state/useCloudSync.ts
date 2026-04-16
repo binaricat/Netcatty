@@ -26,6 +26,7 @@ import {
 import {
   getCloudSyncManager,
   type SyncManagerState,
+  type SyncEventCallback,
 } from '../../infrastructure/services/CloudSyncManager';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import type { DeviceFlowState } from '../../infrastructure/services/adapters/GitHubAdapter';
@@ -116,6 +117,9 @@ export interface CloudSyncHook {
   formatLastSync: (timestamp?: number) => string;
   getProviderDotColor: (provider: CloudProvider) => string;
   refresh: () => void;
+
+  // Event subscription (for non-state events like SYNC_BLOCKED_SHRINK)
+  subscribeToEvents: (callback: SyncEventCallback) => () => void;
 }
 
 // ============================================================================
@@ -505,6 +509,9 @@ export const useCloudSync = (): CloudSyncHook => {
     formatLastSync,
     getProviderDotColor,
     refresh,
+
+    // Event subscription
+    subscribeToEvents: (callback: SyncEventCallback) => manager.subscribe(callback),
   };
 };
 
