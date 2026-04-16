@@ -25,11 +25,18 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
 ## Core Rules
 
 - Treat the host-provided CLI prefix as the only supported entrypoint for this session.
+- If a command launcher is needed, prefer the operating system's built-in launcher for the current environment; do not require optional shells that may not be installed.
 - Run Netcatty CLI commands strictly serially.
 - Treat Netcatty CLI errors as authoritative.
 - Never ask the user for SSH credentials, key paths, proxy settings, or jump-host details when Netcatty session access already exists.
 - Do not pause to explain the plan, re-read this skill, or design scripts before trying that shortest path.
 - When presenting structured results, prefer a concise table if it fits clearly.
+
+Examples:
+
+- On Windows, if a literal shell command line is required, use the host-provided prefix with the system launcher available in the environment, such as `cmd.exe` or Windows PowerShell; do not assume PowerShell 7 `pwsh.exe` exists.
+- On macOS or Linux, use the host-provided prefix directly, or the system shell already available in that environment when a shell command line is unavoidable.
+- When the execution surface accepts argv-style calls, use the Netcatty launcher path as the executable and pass subcommands and flags as separate arguments instead of wrapping it in another shell.
 
 ## References
 
