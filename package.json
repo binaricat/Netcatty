@@ -29,7 +29,8 @@
     "rebuild": "electron-builder install-app-deps",
     "tool:cli": "node electron/cli/netcatty-tool-cli.cjs",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test": "node --test --import tsx electron/bridges/*.test.cjs application/state/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
@@ -70,6 +71,7 @@
     "lucide-react": "0.560.0",
     "monaco-editor": "^0.55.1",
     "node-pty": "1.1.0",
+    "ps-node": "^0.1.6",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "serialport": "^13.0.0",
@@ -100,9 +102,13 @@
     "eslint-plugin-unused-imports": "^4.3.0",
     "patch-package": "^8.0.0",
     "tailwindcss": "^4.1.17",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.7",
     "wait-on": "^9.0.3"
+  },
+  "optionalDependencies": {
+    "@vscode/windows-process-tree": "^0.7.0"
   },
   "overrides": {
     "cpu-features": "npm:empty-npm-package@1.0.0",
