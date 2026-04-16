@@ -32,7 +32,7 @@ test("vault/sftp tab → noop", () => {
   assert.deepEqual(r, { kind: "noop" });
 });
 
-test("workspace + focus in terminal + sidebar open → closeTerminal wins", () => {
+test("workspace + focus in terminal + sidebar open → closeSidePanel wins (sidebar beats focus)", () => {
   const r = resolveCloseIntent({
     activeTabId: "w1",
     workspace: baseWorkspace,
@@ -40,7 +40,7 @@ test("workspace + focus in terminal + sidebar open → closeTerminal wins", () =
     activeSidePanelTab: "ai",
     focusIsInsideTerminal: true,
   });
-  assert.deepEqual(r, { kind: "closeTerminal", sessionId: "s1" });
+  assert.deepEqual(r, { kind: "closeSidePanel" });
 });
 
 test("workspace + focus NOT in terminal + sidebar open → closeSidePanel", () => {

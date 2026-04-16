@@ -27,13 +27,13 @@ export function resolveCloseIntent(input: ResolveCloseInput): CloseIntent {
     return { kind: 'noop' };
   }
 
+  if (activeSidePanelTab !== null) {
+    return { kind: 'closeSidePanel' };
+  }
+
   const focusedSessionId = workspace.focusedSessionId;
   if (focusedSessionId && focusIsInsideTerminal) {
     return { kind: 'closeTerminal', sessionId: focusedSessionId };
-  }
-
-  if (activeSidePanelTab !== null) {
-    return { kind: 'closeSidePanel' };
   }
 
   return { kind: 'closeWorkspace', workspaceId: workspace.id };
