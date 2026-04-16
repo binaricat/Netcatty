@@ -93,6 +93,15 @@ test("large-shrink absolute 10 regardless of ratio → suspicious", () => {
   });
 });
 
+test("dual-trigger (large-shrink AND bulk-shrink both satisfied) → reason is 'large-shrink'", () => {
+  // base=20, lost=10: satisfies large-shrink (>=10) AND bulk-shrink (50%, >=3)
+  const base = payload({ hosts: hosts(20) });
+  const out = payload({ hosts: hosts(10) });
+  const result = detectSuspiciousShrink(out, base);
+  assert.equal(result.suspicious, true);
+  if (result.suspicious) assert.equal(result.reason, "large-shrink");
+});
+
 test("multiple entity types shrinking — returns first in declaration order (hosts before keys)", () => {
   const base = payload({ hosts: hosts(6), keys: Array.from({ length: 6 }, (_, i) => ({ id: `k${i}`, label: `k${i}`, privateKey: "x" })) as SyncPayload["keys"] });
   const out = payload({ hosts: hosts(3), keys: Array.from({ length: 3 }, (_, i) => ({ id: `k${i}`, label: `k${i}`, privateKey: "x" })) as SyncPayload["keys"] });
@@ -122,7 +131,7 @@ test("knownHosts shrink triggers (security-sensitive)", () => {
   if (result.suspicious) assert.equal(result.entityType, "knownHosts");
 });
 
-test("empty base sanity — treated as null path", () => {
+test("empty base (all zeros) — no shrink possible, returns not suspicious", () => {
   const base = payload();
   const out = payload({ hosts: hosts(5) });
   // All base counts are 0; no shrink possible

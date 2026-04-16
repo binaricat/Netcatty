@@ -20,6 +20,9 @@ export type ShrinkFinding =
       lost: number;
     };
 
+// Keep in sync with all array-typed fields of SyncPayload. When a new
+// array entity type is added there, add it here too — there is no
+// compile-time check enforcing this.
 const CHECKED_ENTITIES = [
   'hosts',
   'keys',
@@ -39,7 +42,7 @@ const BULK_SHRINK_MIN_ABSOLUTE = 3;
 const LARGE_SHRINK_ABSOLUTE = 10;
 
 function countOf(p: SyncPayload, key: CheckedEntityType): number {
-  const v = (p as unknown as Record<CheckedEntityType, unknown[] | undefined>)[key];
+  const v = p[key];
   return Array.isArray(v) ? v.length : 0;
 }
 
