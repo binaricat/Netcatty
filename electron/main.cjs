@@ -691,13 +691,15 @@ const registerBridges = (win) => {
   });
 
   // Native confirmation dialog when closing a session with a running process
+  // Returns true only if the user explicitly clicks "Close". ESC/dialog-dismiss
+  // resolves as cancelId (0) → false, which is the safe default (do not close).
   ipcMain.handle(
     "netcatty:dialog:confirmCloseBusy",
     async (event, payload) => {
       const command = typeof payload?.command === "string" ? payload.command : "unknown";
       const { dialog } = electronModule;
       const win = BrowserWindow.fromWebContents(event.sender);
-      const { response } = await dialog.showMessageBox(win, {
+      const { response } = await dialog.showMessageBox(win || undefined, {
         type: "warning",
         title: "Confirm close",
         message: `Process "${command}" is still running and will be terminated.`,
