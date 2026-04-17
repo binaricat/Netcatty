@@ -99,6 +99,69 @@ test("keeps every explicitly selected skill in the built context", async () => {
   );
 });
 
+test("uses longer skill descriptions for routing matches without injecting the full index text", async () => {
+  const longDescription = [
+    "Use when the user needs a detailed workflow for operating Netcatty through ACP skills and CLI.",
+    "Includes platform launcher guidance, scoped command execution, recovery behavior, and constraints.",
+    "This intentionally exceeds the older short description budget so routing has enough signal.",
+    "It also names edge cases such as unavailable optional shells, strict chat-session scoping, and fallback-only history replay so the agent can choose the skill without reading the whole body first.",
+  ].join(" ");
+
+  assert.ok(longDescription.length > 320);
+
+  await withUserSkills(
+    [
+      {
+        directoryName: "Detailed Router",
+        name: "Detailed Router",
+        description: longDescription,
+        body: "Detailed router body",
+      },
+    ],
+    async (electronApp) => {
+      const status = await scanUserSkills(electronApp);
+      const result = await buildUserSkillsContext(
+        electronApp,
+        "Need fallback-only history replay guidance for ACP recovery.",
+        [],
+      );
+
+      assert.equal(status.readyCount, 1);
+      assert.equal(status.warningCount, 0);
+      assert.equal(result.context.includes("### Detailed Router"), true);
+      assert.equal(result.context.includes("Detailed router body"), true);
+      assert.equal(result.context.includes(longDescription), false);
+    },
+  );
+});
+
+test("caps the injected available-skills index when descriptions are very long", async () => {
+  const longDescription = "signal ".repeat(65);
+
+  await withUserSkills(
+    Array.from({ length: 8 }, (_, index) => ({
+      directoryName: `Skill ${index + 1}`,
+      name: `Skill ${index + 1}`,
+      description: `${longDescription}${index + 1}`,
+      body: `Body ${index + 1}`,
+    })),
+    async (electronApp) => {
+      const result = await buildUserSkillsContext(
+        electronApp,
+        "plain prompt",
+        [],
+      );
+
+      const availableLine = result.context
+        .split("\n")
+        .find((line) => line.startsWith("Available user skills: "));
+
+      assert.ok(availableLine, "expected available-skills index line");
+      assert.ok(availableLine.length < 1800, `expected capped index line, got ${availableLine.length}`);
+    },
+  );
+});
+
 test("preserves an unavailable explicit selection in the built context", async () => {
   await withUserSkills(
     [

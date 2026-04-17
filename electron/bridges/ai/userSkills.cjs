@@ -4,8 +4,10 @@ const path = require("node:path");
 const USER_SKILLS_DIR_NAME = "Skills";
 const USER_SKILLS_README_NAME = "README.txt";
 const MAX_SKILL_BYTES = 24 * 1024;
-const MAX_DESCRIPTION_LENGTH = 280;
+const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_INDEX_SKILLS = 8;
+const MAX_INDEX_DESCRIPTION_CHARS = 160;
+const MAX_INDEX_LINE_CHARS = 1400;
 const MAX_EXPLICIT_SKILLS = 4;
 const MAX_MATCHED_SKILLS = 2;
 const MAX_MATCHED_SKILL_CHARS = 6000;
@@ -65,6 +67,12 @@ function tokenize(value) {
 
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function truncateInlineText(value, maxChars) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function formatSkillReadWarning(error) {
@@ -354,11 +362,22 @@ async function buildUserSkillsContext(electronApp, prompt, selectedSkillSlugs = 
   }
 
   const indexSkills = readySkills.slice(0, MAX_INDEX_SKILLS);
-  const remainingCount = Math.max(readySkills.length - indexSkills.length, 0);
+  let remainingCount = Math.max(readySkills.length - indexSkills.length, 0);
+  const indexEntries = [];
+  let indexChars = 0;
 
-  const indexLine = indexSkills
-    .map((skill) => `${skill.name}: ${skill.description}`)
-    .join("; ");
+  for (const skill of indexSkills) {
+    const entry = `${skill.name}: ${truncateInlineText(skill.description, MAX_INDEX_DESCRIPTION_CHARS)}`;
+    const separatorChars = indexEntries.length > 0 ? 2 : 0;
+    if (indexChars + separatorChars + entry.length > MAX_INDEX_LINE_CHARS) {
+      remainingCount += indexSkills.length - indexEntries.length;
+      break;
+    }
+    indexEntries.push(entry);
+    indexChars += separatorChars + entry.length;
+  }
+
+  const indexLine = indexEntries.join("; ");
 
   const orderedExplicitSlugs = [];
   const seenExplicitSlugs = new Set();

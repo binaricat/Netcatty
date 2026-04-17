@@ -2476,9 +2476,18 @@ function registerHandlers(ipcMain) {
         providerEntry.mcpFingerprint === mcpSnapshot.fingerprint &&
         providerEntry.permissionMode === currentPermissionMode,
       );
+      const shouldResetProviderForHistoryReplay = Boolean(
+        shouldReuseProvider &&
+        providerEntry?.historyReplayFallback &&
+        Array.isArray(historyMessages) &&
+        historyMessages.length > 0,
+      );
 
-      if (!shouldReuseProvider) {
-        const resumeSessionId = providerEntry?.provider?.getSessionId?.() || existingSessionId || undefined;
+      if (!shouldReuseProvider || shouldResetProviderForHistoryReplay) {
+        const resumeSessionId = shouldResetProviderForHistoryReplay
+          ? undefined
+          : providerEntry?.provider?.getSessionId?.() || existingSessionId || undefined;
+        const preserveHistoryReplayFallback = shouldResetProviderForHistoryReplay;
         cleanupAcpProvider(chatSessionId);
 
         const agentEnv = withCliDiscoveryEnv({ ...shellEnv });
@@ -2555,7 +2564,7 @@ function registerHandlers(ipcMain) {
           authFingerprint,
           mcpFingerprint: mcpSnapshot.fingerprint,
           permissionMode: currentPermissionMode,
-          historyReplayFallback: false,
+          historyReplayFallback: preserveHistoryReplayFallback,
         };
         acpProviders.set(chatSessionId, providerEntry);
       }
@@ -2726,14 +2735,17 @@ function registerHandlers(ipcMain) {
         role: "user",
         content: buildMessageContent(contextualPrompt, images),
       };
+      const shouldReplayHistory = Boolean(
+        providerEntry.historyReplayFallback &&
+        Array.isArray(historyMessages) &&
+        historyMessages.length > 0,
+      );
 
       const result = streamText({
         model: modelInstance,
-        messages: providerEntry.historyReplayFallback
+        messages: shouldReplayHistory
           ? [
-              ...(Array.isArray(historyMessages)
-                ? historyMessages.map((msg) => ({ role: msg.role, content: msg.content }))
-                : []),
+              ...historyMessages.map((msg) => ({ role: msg.role, content: msg.content })),
               latestPromptMessage,
             ]
           : [latestPromptMessage],
@@ -2819,6 +2831,12 @@ function registerHandlers(ipcMain) {
             : "Agent returned an empty response.",
         });
       } else {
+        // Clear replay fallback only after the recovered turn completed with
+        // actual streamed content. Empty/error retries should keep the replay
+        // history available for the next attempt on the fresh ACP session.
+        if (shouldReplayHistory && !abortController.signal.aborted) {
+          providerEntry.historyReplayFallback = false;
+        }
         debugMcpLog("ACP stream done", { requestId, chatSessionId, hasContent });
         if (!isActiveAcpRun(chatSessionId, requestId)) {
           return { ok: true };

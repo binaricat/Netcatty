@@ -64,6 +64,7 @@ import {
   getNetcattyBridge,
   type DefaultTargetSessionHint,
 } from './ai/hooks/useAIChatStreaming';
+import { buildAcpHistoryMessagesForBridge } from './ai/acpHistory';
 import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
@@ -175,35 +176,6 @@ interface AIChatSidePanelProps {
 
 function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function buildAcpHistoryMessages(messages: ChatMessage[]): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return messages.flatMap((message): Array<{ role: 'user' | 'assistant'; content: string }> => {
-    if (message.role === 'system') return [];
-
-    if (message.role === 'user') {
-      return message.content ? [{ role: 'user', content: message.content }] : [];
-    }
-
-    if (message.role === 'assistant') {
-      const parts: string[] = [];
-      if (message.content) parts.push(message.content);
-      if (message.toolCalls?.length) {
-        parts.push(...message.toolCalls.map((tc) => `Tool call: ${tc.name}(${JSON.stringify(tc.arguments ?? {})})`));
-      }
-      if (!parts.length) return [];
-      return [{ role: 'assistant', content: parts.join('\n\n') }];
-    }
-
-    if (message.role === 'tool' && message.toolResults?.length) {
-      return message.toolResults.map((tr) => ({
-        role: 'assistant',
-        content: `Tool result:\n${tr.content}`,
-      }));
-    }
-
-    return [];
-  });
 }
 
 // -------------------------------------------------------------------
@@ -905,10 +877,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           return;
         }
         try {
+          const existingExternalSessionId = currentSession?.externalSessionId;
           await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachments, {
-            existingSessionId: currentSession?.externalSessionId,
+            existingSessionId: existingExternalSessionId,
             updateExternalSessionId: updateSessionExternalSessionId,
-            historyMessages: buildAcpHistoryMessages(currentSession?.messages ?? []),
+            historyMessages: buildAcpHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
             terminalSessions,
             defaultTargetSession,
             providers,
