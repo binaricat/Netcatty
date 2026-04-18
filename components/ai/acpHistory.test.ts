@@ -347,15 +347,16 @@ test("buildAcpHistoryMessages inlines tool_call name+args so tool_result is inte
 test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) work per send on long chats", () => {
   // Regression target: codex review flagged that the compaction path
   // scanned messages.entries() over the full transcript. Build a very
-  // long chat and verify that only messages within MAX_DURABLE_SCAN_MESSAGES
-  // (200) of the end contribute durable candidates.
-
+  // long chat (>> MAX_DURABLE_SCAN_TURNS user turns) and verify that
+  // only messages within the recent user-turn window contribute
+  // durable candidates.
   const messages: ChatMessage[] = [];
   // An ancient high-priority constraint that MUST be aged out.
   messages.push(message("old-important", "user", "不要提交 old-marker-xyz"));
   messages.push(message("old-ack", "assistant", "收到"));
 
-  // 300 filler turns between the ancient constraint and the window.
+  // 300 filler turns between the ancient constraint and the window —
+  // well past MAX_DURABLE_SCAN_TURNS (100).
   for (let i = 0; i < 300; i += 1) {
     messages.push(
       message(`u${i}`, "user", `filler user message ${i}`),
@@ -379,6 +380,55 @@ test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) wo
   assert.match(flat, /recent-marker-abc/);
   // Ancient one past the scan window is dropped — proof the bound holds.
   assert.doesNotMatch(flat, /old-marker-xyz/);
+});
+
+test("buildAcpHistoryMessages preserves an early constraint in a tool-heavy chat where message count balloons past the raw-count limit", () => {
+  // Regression: the previous bound was MAX_DURABLE_SCAN_MESSAGES=200 on
+  // the raw message array. In a tool-heavy chat, each user turn can
+  // expand to 5+ messages (user + assistant w/ toolCalls + N tool
+  // results + follow-up assistant), so 200 messages might be only
+  // ~40 user turns. An instruction like "不要提交" from turn 5 would
+  // fall out of the scan before the turn count justified aging it out.
+  //
+  // Now the bound is MAX_DURABLE_SCAN_TURNS=100 user turns. Build a
+  // chat with only 30 user turns but many messages per turn — the
+  // early constraint must still survive.
+  const messages: ChatMessage[] = [];
+  messages.push(message("early-important", "user", "不要提交 EARLY_CONSTRAINT_MARKER"));
+  messages.push(message("early-ack", "assistant", "收到"));
+
+  // 35 additional turns, each with 6 messages (bloats the total
+  // message count to >200 without exceeding 100 user turns).
+  for (let turn = 1; turn < 36; turn += 1) {
+    messages.push(message(`u${turn}`, "user", `turn ${turn} request`));
+    messages.push(message(`a${turn}-plan`, "assistant", "let me check", {
+      toolCalls: [
+        { id: `c${turn}a`, name: "terminal_exec", arguments: { cmd: "echo a" } },
+        { id: `c${turn}b`, name: "terminal_exec", arguments: { cmd: "echo b" } },
+        { id: `c${turn}c`, name: "terminal_exec", arguments: { cmd: "echo c" } },
+      ],
+    }));
+    messages.push(message(`t${turn}a`, "tool", "", {
+      toolResults: [{ toolCallId: `c${turn}a`, content: `result a of turn ${turn}`, isError: false }],
+    }));
+    messages.push(message(`t${turn}b`, "tool", "", {
+      toolResults: [{ toolCallId: `c${turn}b`, content: `result b of turn ${turn}`, isError: false }],
+    }));
+    messages.push(message(`t${turn}c`, "tool", "", {
+      toolResults: [{ toolCallId: `c${turn}c`, content: `result c of turn ${turn}`, isError: false }],
+    }));
+    messages.push(message(`a${turn}-done`, "assistant", `turn ${turn} done`));
+  }
+
+  // Sanity: the message count is over 200 even though user turns are 30.
+  assert.ok(messages.length > 200, `setup: expected > 200 messages, got ${messages.length}`);
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // Under the old raw-count bound, the early constraint would age out;
+  // under the turn-based bound it survives.
+  assert.match(flat, /EARLY_CONSTRAINT_MARKER/);
 });
 
 test("buildAcpHistoryMessages preserves short non-trivial assistant decisions that miss the keyword heuristic", () => {

@@ -10,7 +10,11 @@ type DurableUserLine = {
 
 const MAX_RECENT_RAW_MESSAGES = 6;
 const MAX_MESSAGES_TO_SCAN = 20;
-const MAX_DURABLE_SCAN_MESSAGES = 200;
+// Bound the scan by user turns, not raw message count: a tool-heavy ACP
+// chat can produce 5+ messages per logical turn (user + assistant +
+// several tool_results + follow-up assistant), so a plain
+// message-count cap ages out early constraints much sooner than intended.
+const MAX_DURABLE_SCAN_TURNS = 100;
 const MAX_COMPACT_CONTEXT_CHARS = 3000;
 const MAX_RAW_MESSAGE_CHARS = 2000;
 const MAX_TOOL_SUMMARY_CHARS = 500;
@@ -263,18 +267,11 @@ function toRawHistoryMessage(
 
 function buildCompactContext(
   messages: ChatMessage[],
+  durableScanStart: number,
   recentRawSourceIds: Set<string>,
   toolCallIndex: Map<string, ToolCallInfo>,
 ): AcpHistoryMessage[] {
   const scanned = messages.slice(-MAX_MESSAGES_TO_SCAN);
-  // Bound the durable-scan window too — a long-running ACP chat would
-  // otherwise pay O(N) regex + sort cost on every send. 200 is enough to
-  // capture durable constraints across realistically-long sessions (the
-  // 99th-percentile chat is << 200 turns) while giving a constant-time
-  // worst case. Constraints older than this age out of the compact
-  // replay; the live ACP provider's own session history still carries
-  // them when it can resume, which is the common path.
-  const durableScanStart = Math.max(0, messages.length - MAX_DURABLE_SCAN_MESSAGES);
   const summaryLines: string[] = [];
   const durableUserCandidates: DurableUserLine[] = [];
   const selectedDurableUserLines: DurableUserLine[] = [];
@@ -381,13 +378,47 @@ function buildCompactContext(
   }];
 }
 
+/**
+ * Find the index of the first message to include in the scan window,
+ * bounded by MAX_DURABLE_SCAN_TURNS user turns (not raw message count).
+ * Walking backwards stops at the target turn count, so the cost is
+ * bounded even when the transcript is huge.
+ */
+function computeDurableScanStart(messages: ChatMessage[]): number {
+  let userTurns = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user") {
+      userTurns += 1;
+      if (userTurns >= MAX_DURABLE_SCAN_TURNS) return i;
+    }
+  }
+  return 0;
+}
+
 export function buildAcpHistoryMessages(messages: ChatMessage[]): AcpHistoryMessage[] {
-  const toolCallIndex = buildToolCallIndex(messages);
-  const rawHistory = messages
+  // Compute the scan start once, then do all subsequent work over the
+  // already-sliced tail. This avoids O(N) walks over the whole transcript
+  // on every send — previously buildToolCallIndex + the flatMap-to-take-
+  // last-6 raw history both traversed every message in the chat.
+  const durableScanStart = computeDurableScanStart(messages);
+  const scannedTail = messages.slice(durableScanStart);
+
+  // The tool-call provenance index only needs entries for tool_results
+  // that might appear in our output. Building from the scanned tail is
+  // correct for any tool_result whose paired assistant tool_call is
+  // also within the window, which covers >99% of realistic patterns
+  // (tool_calls and tool_results are always adjacent or near-adjacent).
+  // If an ancient tool_call's result stays within the window while the
+  // call itself is outside, that single result loses its [from X(Y)]
+  // label — an acceptable trade for eliminating the per-send O(N) walk.
+  const toolCallIndex = buildToolCallIndex(scannedTail);
+
+  const rawHistory = scannedTail
     .flatMap((message) => toRawHistoryMessage(message, toolCallIndex))
     .slice(-MAX_RECENT_RAW_MESSAGES);
   const compactContext = buildCompactContext(
     messages,
+    durableScanStart,
     new Set(rawHistory.map((message) => message.sourceId)),
     toolCallIndex,
   );
