@@ -75,12 +75,14 @@ function getDurableUserPriority(value: string): number {
 function isSubstantiveAssistantMessage(value: string): boolean {
   const normalized = normalizeWhitespace(value);
   if (!normalized) return false;
-  if (TRIVIAL_ASSISTANT_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalized))) return false;
-  return (
-    normalized.length >= 40 ||
-    /\b(plan|step|steps|approach|migration|design|refactor|hook|test|implement)\b/i.test(normalized) ||
-    /\b\d+\./.test(normalized)
-  );
+  // Mirror the user-side loosening: don't blanket-drop short assistant
+  // messages just because they're under 40 chars or don't match the small
+  // English keyword list. Short but load-bearing decisions ("Use ssh2",
+  // "rebase instead", "中文输出") aren't realistically enumerable and
+  // they're the exact things a later "do what you suggested" references.
+  // TRIVIAL_ASSISTANT_MESSAGE_PATTERNS still catches the actual filler
+  // ("ok", "ack", "got it", "明白").
+  return !TRIVIAL_ASSISTANT_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function getDurableAssistantPriority(value: string): number {
@@ -105,18 +107,35 @@ function appendUniqueLine(
   sectionCharsRef.value = nextChars;
 }
 
-function summarizeToolMessage(message: ChatMessage): string[] {
+function summarizeToolMessage(
+  message: ChatMessage,
+  toolCallIndex: Map<string, ToolCallInfo>,
+): string[] {
   if (!message.toolResults?.length) return [];
   return message.toolResults.map((result) => {
     const prefix = result.isError ? "Tool error" : "Tool result";
     const content = normalizeWhitespace(result.content || "");
-    return `${prefix} (${result.toolCallId}): ${truncateText(content, MAX_TOOL_SUMMARY_CHARS)}`;
+    // Same provenance problem as the raw-window path: once a tool result
+    // lands in the compact section (older than the 6-item raw window),
+    // its paired assistant tool_call is almost always gone. Without the
+    // call label, multiple older results collapse into indistinguishable
+    // "Tool result (callN): ..." lines and follow-ups like "use the
+    // resolv.conf output" can't be resolved. Inline the name+args here
+    // the same way toRawHistoryMessage does.
+    const callInfo = toolCallIndex.get(result.toolCallId);
+    const callLabel = callInfo
+      ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
+      : "";
+    return `${prefix}${callLabel} (${result.toolCallId}): ${truncateText(content, MAX_TOOL_SUMMARY_CHARS)}`;
   });
 }
 
-function summarizeMessage(message: ChatMessage): string[] {
+function summarizeMessage(
+  message: ChatMessage,
+  toolCallIndex: Map<string, ToolCallInfo>,
+): string[] {
   if (message.role === "system") return [];
-  if (message.role === "tool") return summarizeToolMessage(message);
+  if (message.role === "tool") return summarizeToolMessage(message, toolCallIndex);
 
   const lines: string[] = [];
   if (message.content && isImportantText(message.content)) {
@@ -212,7 +231,11 @@ function toRawHistoryMessage(
   return [];
 }
 
-function buildCompactContext(messages: ChatMessage[], recentRawSourceIds: Set<string>): AcpHistoryMessage[] {
+function buildCompactContext(
+  messages: ChatMessage[],
+  recentRawSourceIds: Set<string>,
+  toolCallIndex: Map<string, ToolCallInfo>,
+): AcpHistoryMessage[] {
   const scanned = messages.slice(-MAX_MESSAGES_TO_SCAN);
   // Bound the durable-scan window too — a long-running ACP chat would
   // otherwise pay O(N) regex + sort cost on every send. 200 is enough to
@@ -289,7 +312,7 @@ function buildCompactContext(messages: ChatMessage[], recentRawSourceIds: Set<st
   }
 
   for (const message of scanned) {
-    for (const line of summarizeMessage(message)) {
+    for (const line of summarizeMessage(message, toolCallIndex)) {
       appendUniqueLine(summaryLines, seen, line, MAX_RECENT_SUMMARY_CONTEXT_CHARS, summaryChars);
     }
   }
@@ -330,6 +353,7 @@ export function buildAcpHistoryMessages(messages: ChatMessage[]): AcpHistoryMess
   const compactContext = buildCompactContext(
     messages,
     new Set(rawHistory.map((message) => message.sourceId)),
+    toolCallIndex,
   );
   const recentRaw = rawHistory.map(({ role, content }) => ({ role, content }));
 

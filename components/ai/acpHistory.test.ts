@@ -296,11 +296,13 @@ test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the 
   const result = buildAcpHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
-  // The actual tool output (or at least its prefix) must appear — not
-  // just the compact summary which would have been truncated to ~500 chars.
-  assert.match(flat, /Tool result \(call1\): DATA DATA DATA/);
+  // Raw-window tool result carries both the [from ...] provenance label
+  // and the actual bytes (not just the 500-char compact summary).
+  assert.match(flat, /Tool result \[from terminal.*?cat \/etc\/hosts.*?\] \(call1\): DATA DATA DATA/);
   // Confirm we kept enough bytes to exceed the compact-summary cap.
-  const toolResultChunk = flat.slice(flat.indexOf("Tool result (call1)"));
+  const toolResultIdx = flat.indexOf("Tool result [from terminal");
+  assert.ok(toolResultIdx >= 0, "tool result line must appear in raw window");
+  const toolResultChunk = flat.slice(toolResultIdx);
   assert.ok(
     toolResultChunk.length > 600,
     `expected tool result chunk to exceed compact cap (~500 chars), got ${toolResultChunk.length}`,
@@ -377,6 +379,114 @@ test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) wo
   assert.match(flat, /recent-marker-abc/);
   // Ancient one past the scan window is dropped — proof the bound holds.
   assert.doesNotMatch(flat, /old-marker-xyz/);
+});
+
+test("buildAcpHistoryMessages preserves short non-trivial assistant decisions that miss the keyword heuristic", () => {
+  // Regression: isSubstantiveAssistantMessage previously required length
+  // >= 40 OR a small English keyword match OR a numbered list. Short
+  // load-bearing replies like "Use ssh2" / "rebase instead" / "中文输出"
+  // satisfied none of those and were silently dropped. After a stale-
+  // session recovery, "do what you suggested earlier" would then replay
+  // only the user's question without the assistant's actual decision.
+  const messages: ChatMessage[] = [
+    message("u1", "user", "which client should I use"),
+    message("a1", "assistant", "Use ssh2"),
+    message("u2", "user", "output language?"),
+    message("a2", "assistant", "中文输出"),
+    message("u3", "user", "merge or rebase?"),
+    message("a3", "assistant", "rebase instead"),
+  ];
+
+  // Pad so u1..a3 fall outside the recent raw window (last 6 items) and
+  // must flow through the durable-assistant compact pass.
+  for (let index = 4; index <= 13; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `Ack ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  assert.match(flat, /Use ssh2/);
+  assert.match(flat, /中文输出/);
+  assert.match(flat, /rebase instead/);
+});
+
+test("buildAcpHistoryMessages still drops trivial assistant filler like 'ack' / 'ok' / '明白'", () => {
+  // Sanity: removing the length/keyword gate must not let assistant
+  // filler leak into the compact durable-assistant section.
+  const messages: ChatMessage[] = [
+    message("u1", "user", "prompt 1"),
+    message("a1", "assistant", "ack"),
+    message("u2", "user", "prompt 2"),
+    message("a2", "assistant", "明白"),
+    message("u3", "user", "prompt 3"),
+    message("a3", "assistant", "got it"),
+  ];
+
+  for (let index = 4; index <= 13; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `more filler ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  assert.doesNotMatch(flat, /Assistant context: ack\b/);
+  assert.doesNotMatch(flat, /Assistant context: got it\b/);
+  assert.doesNotMatch(flat, /Assistant context: 明白/);
+});
+
+test("buildAcpHistoryMessages inlines tool_call context on OLDER summarized tool results", () => {
+  // Regression: the raw-window fix covered the last 6 items, but once
+  // a tool result fell into the compact section (summarizeToolMessage
+  // path) the `[from <name>(<args>)]` provenance label was absent.
+  // With multiple older tool outputs, all surfacing as identical
+  // `Tool result (callN): ...`, follow-ups like "use the resolv.conf
+  // output" have no way to map to the right call.
+  const messages: ChatMessage[] = [
+    // Two distinct tool interactions, both pushed well outside the
+    // recent raw window by later turns.
+    message("u1", "user", "show hosts"),
+    message("a1", "assistant", "", {
+      toolCalls: [{ id: "call-hosts", name: "terminal_exec", arguments: { command: "cat /etc/hosts" } }],
+    }),
+    message("tool1", "tool", "", {
+      toolResults: [{ toolCallId: "call-hosts", content: "127.0.0.1 localhost", isError: false }],
+    }),
+    message("u2", "user", "show resolv.conf"),
+    message("a2", "assistant", "", {
+      toolCalls: [{ id: "call-resolv", name: "terminal_exec", arguments: { command: "cat /etc/resolv.conf" } }],
+    }),
+    message("tool2", "tool", "", {
+      toolResults: [{ toolCallId: "call-resolv", content: "nameserver 8.8.8.8", isError: false }],
+    }),
+    // Important user text so summarizeMessage picks these up via the
+    // important-text branch; tool results themselves are always
+    // summarized regardless of IMPORTANT_PATTERNS.
+    message("u3", "user", "fallback plan"),
+  ];
+
+  // Filler to push the early tool results out of the 6-item raw window
+  // and into the compact summary section (scanned = last 20).
+  for (let index = 4; index <= 10; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `Ack ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // Both older tool results must now carry provenance labels so a
+  // follow-up can disambiguate them.
+  assert.match(flat, /Tool result \[from terminal_exec.*?cat \/etc\/hosts/);
+  assert.match(flat, /Tool result \[from terminal_exec.*?cat \/etc\/resolv\.conf/);
 });
 
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
