@@ -273,6 +273,40 @@ test("buildAcpHistoryMessages still drops one-word filler user messages", () => 
   }
 });
 
+test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the raw budget) for follow-up references", () => {
+  // Regression: tool results used to only reach fallback replay via the
+  // 500-char compact summary. If the user's last interaction produced a
+  // large tool output (cat/rg/fetched file), any "use that output"-style
+  // follow-up lost the actual bytes. Now tool messages flow through the
+  // recent raw window at MAX_RAW_MESSAGE_CHARS (2000).
+  const bigToolOutput = "DATA ".repeat(300); // ~1500 chars — bigger than summary cap but smaller than raw cap
+  const messages: ChatMessage[] = [
+    message("u1", "user", "cat /etc/hosts"),
+    message("a1", "assistant", "", {
+      toolCalls: [{ id: "call1", name: "terminal", arguments: { cmd: "cat /etc/hosts" } }],
+    }),
+    message("tool1", "tool", "", {
+      toolResults: [
+        { toolCallId: "call1", content: bigToolOutput, isError: false },
+      ],
+    }),
+    message("u2", "user", "use that output"),
+  ];
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // The actual tool output (or at least its prefix) must appear — not
+  // just the compact summary which would have been truncated to ~500 chars.
+  assert.match(flat, /Tool result \(call1\): DATA DATA DATA/);
+  // Confirm we kept enough bytes to exceed the compact-summary cap.
+  const toolResultChunk = flat.slice(flat.indexOf("Tool result (call1)"));
+  assert.ok(
+    toolResultChunk.length > 600,
+    `expected tool result chunk to exceed compact cap (~500 chars), got ${toolResultChunk.length}`,
+  );
+});
+
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "ok"),

@@ -52,7 +52,10 @@ function loadBridgeWithMocks(options = {}) {
       getOrCreateHost: async () => 4010,
       getScopedSessionIds: () => [],
       buildMcpServerConfig: () => ({ name: "netcatty-remote-hosts", type: "http", url: "http://127.0.0.1:4010" }),
-      getPermissionMode: () => "default",
+      getPermissionMode: () =>
+        typeof options.getPermissionMode === "function"
+          ? options.getPermissionMode()
+          : "default",
       getMaxIterations: () => 20,
       setChatSessionCancelled() {},
       cancelPtyExecsForSession() {},
@@ -92,7 +95,10 @@ function loadBridgeWithMocks(options = {}) {
       getCodexCustomConfigPreflightError: () => null,
       extractCodexError: (err) => ({ message: err?.message || String(err) }),
       isCodexAuthError: () => false,
-      getCodexAuthFingerprint: () => "auth-fingerprint",
+      getCodexAuthFingerprint: (...args) =>
+        typeof options.getCodexAuthFingerprint === "function"
+          ? options.getCodexAuthFingerprint(...args)
+          : "auth-fingerprint",
       getCodexMcpFingerprint: () => "mcp-fingerprint",
       invalidateCodexValidationCache() {},
       getCodexValidationCache: () => null,
@@ -397,6 +403,115 @@ test("clears replay fallback after a user-cancelled recovered turn so the fresh 
     1,
     "follow-up after cancel must not re-replay compact history",
   );
+});
+
+test("preserves history-replay across provider recreation caused by permission-mode / MCP / auth change", async () => {
+  // Regression: after a stale-session recovery left historyReplayFallback=true
+  // (e.g. the recovered turn returned empty), an orthogonal change that
+  // flips shouldReuseProvider to false (permission mode, MCP scope, auth
+  // fingerprint) used to recreate the provider with historyReplayFallback:
+  // false. The next turn then sent only the latest prompt and dropped the
+  // recovered conversation context. We now preserve the flag on any
+  // recreation where a history-replay is still pending.
+
+  // Use permission mode as the orthogonal change — auth fingerprint would
+  // drag in Codex-specific auth validation we can't stub cleanly.
+  let permissionMode = "default";
+  function createStreamResult(chunks) {
+    let idx = 0;
+    return {
+      fullStream: {
+        getReader: () => ({
+          async read() {
+            if (idx < chunks.length) {
+              return { done: false, value: chunks[idx++] };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock() {},
+        }),
+      },
+    };
+  }
+
+  const { bridge, streamCalls, providerCreationArgs, restore } = loadBridgeWithMocks({
+    getPermissionMode: () => permissionMode,
+    streamText({ streamCalls: callsRef }) {
+      // Turn 1: empty stream — the recovered turn returned no content, so
+      // the empty-non-aborted branch keeps historyReplayFallback=true.
+      if (callsRef.length === 1) return createEmptyStreamResult();
+      // Turn 2: content streams — confirms the replay actually reached
+      // the recreated provider.
+      return createStreamResult([{ type: "text-delta", text: "ok" }]);
+    },
+  });
+
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const streamHandler = ipcMain.handlers.get("netcatty:ai:acp:stream");
+  const historyMessages = [{ role: "user", content: "prior recovered context" }];
+  const event = { sender: { id: 1 } };
+
+  try {
+    // Turn 1: stale-session recovery + empty response (flag stays set).
+    await streamHandler(event, {
+      requestId: "req-1",
+      chatSessionId: "chat-preserve",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "first turn",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "stale-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+
+    // Simulate the user toggling the MCP permission mode between turns.
+    // This flips shouldReuseProvider to false and forces recreation via
+    // the non-reset branch — exactly where the preserve-flag gap lived.
+    permissionMode = "auto";
+
+    await streamHandler(event, {
+      requestId: "req-2",
+      chatSessionId: "chat-preserve",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "second turn after permission change",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "fresh-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+  } finally {
+    restore();
+  }
+
+  assert.equal(streamCalls.length, 2);
+  // Turn 2 must include history + latest; regression would make it just 1.
+  assert.equal(
+    streamCalls[1].length,
+    2,
+    "second turn must re-replay compact history onto the recreated provider",
+  );
+  assert.deepEqual(streamCalls[1][0], historyMessages[0]);
+
+  // 3 provider creations: stale attempt + first fallback + permission-change recreation.
+  assert.equal(providerCreationArgs.length, 3);
 });
 
 test("keeps replay fallback enabled after an empty recovered turn by retrying in a fresh ACP session", async () => {

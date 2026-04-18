@@ -161,6 +161,25 @@ function toRawHistoryMessage(message: ChatMessage): RawHistoryMessage[] {
       : [];
   }
 
+  if (message.role === "tool" && message.toolResults?.length) {
+    // Keep tool output in the recent raw window (up to MAX_RAW_MESSAGE_CHARS
+    // per message, ~2000). Without this, follow-up turns after stale-session
+    // recovery would only see the 500-char compact summary in
+    // summarizeToolMessage, losing the actual bytes the user might reference
+    // ("use that output", "what did cat show?"). ACP only supports user/
+    // assistant roles, so we flatten to "assistant" — the tool results were
+    // produced during the assistant's turn.
+    const parts = message.toolResults.map((result) => {
+      const prefix = result.isError ? "Tool error" : "Tool result";
+      return `${prefix} (${result.toolCallId}): ${result.content || ""}`;
+    });
+    return [{
+      sourceId: message.id,
+      role: "assistant",
+      content: truncateText(parts.join("\n\n"), MAX_RAW_MESSAGE_CHARS),
+    }];
+  }
+
   return [];
 }
 

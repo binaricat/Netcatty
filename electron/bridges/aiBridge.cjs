@@ -2487,7 +2487,19 @@ function registerHandlers(ipcMain) {
         const resumeSessionId = shouldResetProviderForHistoryReplay
           ? undefined
           : providerEntry?.provider?.getSessionId?.() || existingSessionId || undefined;
-        const preserveHistoryReplayFallback = shouldResetProviderForHistoryReplay;
+        // Preserve the replay-fallback flag across any recreation where
+        // history recovery is still pending, not just the reset-for-replay
+        // path. Otherwise a provider recreation driven by an orthogonal
+        // change (permission mode / MCP scope / auth fingerprint) between
+        // a still-empty recovered turn and its retry would drop the flag
+        // and lose the recovered conversation on the next turn.
+        const preserveHistoryReplayFallback =
+          shouldResetProviderForHistoryReplay ||
+          Boolean(
+            providerEntry?.historyReplayFallback &&
+            Array.isArray(historyMessages) &&
+            historyMessages.length > 0,
+          );
         cleanupAcpProvider(chatSessionId);
 
         const agentEnv = withCliDiscoveryEnv({ ...shellEnv });
