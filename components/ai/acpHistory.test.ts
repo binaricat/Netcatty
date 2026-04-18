@@ -489,6 +489,54 @@ test("buildAcpHistoryMessages inlines tool_call context on OLDER summarized tool
   assert.match(flat, /Tool result \[from terminal_exec.*?cat \/etc\/resolv\.conf/);
 });
 
+test("buildAcpHistoryMessages does not duplicate recent raw turns into the compact summary section", () => {
+  // Regression: the scanned loop (last 20) overlaps with recentRaw (last 6).
+  // Without skipping raw-window items, the same last-6 turns would be
+  // summarized in the compact section AND appended verbatim in the raw
+  // section — doubling the budget cost of important user turns / large
+  // tool output and crowding out older durable context.
+  //
+  // Setup: enough filler upfront that u3 ends up OUTSIDE the raw window
+  // (so it can be asserted absent from raw), then a distinctive "raw
+  // only" marker that should appear only in the last-6 raw slice.
+  const messages: ChatMessage[] = [];
+  for (let index = 1; index <= 6; index += 1) {
+    messages.push(
+      message(`uf${index}`, "user", `filler user ${index}`),
+      message(`af${index}`, "assistant", `filler assistant ${index}`),
+    );
+  }
+  // These are the last 4 user/assistant messages — guaranteed to be in
+  // the last-6 raw slice. The IMPORTANT markers below would ordinarily
+  // also get summarized into the compact section, duplicating the cost.
+  messages.push(
+    message("u-rec1", "user", "commit now IMPORTANT_RAW_MARKER please"),
+    message("a-rec1", "assistant", "", {
+      toolCalls: [{ id: "c1", name: "git", arguments: { op: "commit" } }],
+    }),
+    message("tool-rec", "tool", "", {
+      toolResults: [{ toolCallId: "c1", content: "committed abc123 RAW_TOOL_MARKER", isError: false }],
+    }),
+    message("u-rec2", "user", "now push"),
+  );
+
+  const result = buildAcpHistoryMessages(messages);
+
+  const compact = result.find((m) => m.content.includes("[Compact prior Netcatty UI context]"));
+  assert.ok(compact, "expected a compact context message");
+
+  // Both markers belong to messages inside the raw window — they must
+  // not be summarized into compact (which would double-bill them).
+  assert.doesNotMatch(compact.content, /IMPORTANT_RAW_MARKER/);
+  assert.doesNotMatch(compact.content, /RAW_TOOL_MARKER/);
+
+  // Raw section still carries them verbatim.
+  const raw = result.filter((m) => !m.content.includes("[Compact prior Netcatty UI context]"));
+  const rawFlat = raw.map((m) => m.content).join("\n");
+  assert.match(rawFlat, /IMPORTANT_RAW_MARKER/);
+  assert.match(rawFlat, /RAW_TOOL_MARKER/);
+});
+
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "ok"),

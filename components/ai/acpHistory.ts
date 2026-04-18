@@ -311,7 +311,13 @@ function buildCompactContext(
     seen.add(normalizeWhitespace(line));
   }
 
+  // Skip messages that are already appended verbatim in the raw window —
+  // otherwise the same last-6 turns get summarized here AND re-sent as
+  // raw, doubling the budget cost of important user turns / large tool
+  // output and crowding out older durable context the replay is meant
+  // to preserve. Matches the recentRawSourceIds skip in the durable pass.
   for (const message of scanned) {
+    if (recentRawSourceIds.has(message.id)) continue;
     for (const line of summarizeMessage(message, toolCallIndex)) {
       appendUniqueLine(summaryLines, seen, line, MAX_RECENT_SUMMARY_CONTEXT_CHARS, summaryChars);
     }
