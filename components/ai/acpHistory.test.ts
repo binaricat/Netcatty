@@ -537,6 +537,57 @@ test("buildAcpHistoryMessages does not duplicate recent raw turns into the compa
   assert.match(rawFlat, /RAW_TOOL_MARKER/);
 });
 
+test("buildAcpHistoryMessages resolves tool_call provenance correctly when tool ids are reused across turns", () => {
+  // Regression: keying toolCallIndex by raw toolCall.id alone let a later
+  // assistant tool_call with the same id overwrite the older one. An
+  // older tool_result in the replay history would then be annotated
+  // with the wrong command (e.g. a /etc/hosts result labeled as
+  // /etc/resolv.conf). Now each tool_result is indexed by its own
+  // messageId + toolCallId and resolved to the most recent preceding
+  // call with that id.
+  const messages: ChatMessage[] = [
+    message("u1", "user", "show hosts"),
+    message("a1", "assistant", "", {
+      toolCalls: [{ id: "call1", name: "terminal_exec", arguments: { command: "cat /etc/hosts" } }],
+    }),
+    message("tool-hosts", "tool", "", {
+      toolResults: [{ toolCallId: "call1", content: "127.0.0.1 localhost HOSTS_BYTES", isError: false }],
+    }),
+    // A later assistant turn reuses the id "call1" for a different call.
+    message("u2", "user", "show resolv"),
+    message("a2", "assistant", "", {
+      toolCalls: [{ id: "call1", name: "terminal_exec", arguments: { command: "cat /etc/resolv.conf" } }],
+    }),
+    message("tool-resolv", "tool", "", {
+      toolResults: [{ toolCallId: "call1", content: "nameserver 8.8.8.8 RESOLV_BYTES", isError: false }],
+    }),
+    message("u3", "user", "ok"),
+  ];
+
+  // Pad so the first interaction lands in the compact summary pass.
+  for (let index = 4; index <= 10; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `Ack ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // Each tool_result must be annotated with ITS OWN preceding call's
+  // args — not whichever assistant tool_call happened to win the
+  // last-write on the shared id.
+  //
+  // Extract the two Tool-result lines and match each to its expected
+  // args. Use non-greedy .*? — the args JSON can contain parentheses.
+  const hostsMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/hosts[^\]]*?\][^\n]*HOSTS_BYTES/);
+  const resolvMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/resolv\.conf[^\]]*?\][^\n]*RESOLV_BYTES/);
+
+  assert.ok(hostsMatch, "hosts result must still be labeled with cat /etc/hosts despite later id reuse");
+  assert.ok(resolvMatch, "resolv result must be labeled with cat /etc/resolv.conf");
+});
+
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "ok"),

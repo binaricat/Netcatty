@@ -405,6 +405,136 @@ test("clears replay fallback after a user-cancelled recovered turn so the fresh 
   );
 });
 
+test("preserves recovered ACP session when user cancels then immediately sends the next prompt", async () => {
+  // Regression: after a user-cancel of a recovered turn, the existingRun
+  // path in the next stream handler used to call cleanupAcpProvider
+  // unconditionally — destroying the fresh ACP session the cancel IPC
+  // had just promised to preserve. Combined with historyReplayFallback
+  // still being true at that moment, the follow-up turn then recreated
+  // a bare new provider via shouldResetProviderForHistoryReplay and
+  // the user lost all recovered conversation context.
+  //
+  // With the fix: (a) the cancel IPC synchronously clears the replay
+  // flag on the preserved provider, and (b) the existingRun path skips
+  // cleanupAcpProvider when the prior run was already cancelled via
+  // the cancel IPC. The next stream then reuses the recovered session
+  // and sends only the latest prompt.
+
+  let releaseRead;
+  const readReleased = new Promise((resolve) => {
+    releaseRead = resolve;
+  });
+
+  const { bridge, streamCalls, providerCreationArgs, restore } = loadBridgeWithMocks({
+    streamText({ streamCalls: callsRef }) {
+      // Turn 1: block in read() so the test can fire cancel, then
+      // immediately fire the next stream request while the aborted
+      // stream is still unwinding.
+      if (callsRef.length === 1) {
+        return {
+          fullStream: {
+            getReader: () => ({
+              async read() {
+                await readReleased;
+                return { done: true, value: undefined };
+              },
+              releaseLock() {},
+            }),
+          },
+        };
+      }
+      return createEmptyStreamResult();
+    },
+  });
+
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const streamHandler = ipcMain.handlers.get("netcatty:ai:acp:stream");
+  const cancelHandler = ipcMain.handlers.get("netcatty:ai:acp:cancel");
+
+  const historyMessages = [{ role: "user", content: "prior recovered context" }];
+  const event = { sender: { id: 1 } };
+
+  try {
+    // Turn 1 starts and blocks in read().
+    const firstTurn = streamHandler(event, {
+      requestId: "req-cancel-1",
+      chatSessionId: "chat-race",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "first turn",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "stale-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+
+    // Yield so the handler reaches the streamText/read phase.
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+
+    // User clicks Stop.
+    await cancelHandler(event, {
+      requestId: "req-cancel-1",
+      chatSessionId: "chat-race",
+    });
+
+    // User immediately sends the next prompt BEFORE releasing the read
+    // — i.e. before the first stream handler's post-stream code can
+    // run. This is the exact timing window codex flagged.
+    const secondTurn = streamHandler(event, {
+      requestId: "req-cancel-2",
+      chatSessionId: "chat-race",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "immediate follow-up",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "fresh-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+
+    // Let the first turn unwind now.
+    releaseRead();
+    await firstTurn;
+    await secondTurn;
+  } finally {
+    restore();
+  }
+
+  // 2 provider creations: the stale attempt + fallback recovery.
+  // If the regression is back, there would be a 3rd creation (the
+  // existingRun cleanup + reset-for-replay path discarding the
+  // recovered session).
+  assert.equal(
+    providerCreationArgs.length,
+    2,
+    "expected recovered fresh session to be preserved across cancel+immediate-send",
+  );
+
+  // Second turn must NOT re-replay compact history — the preserved
+  // session already has that context.
+  assert.equal(
+    streamCalls[1].length,
+    1,
+    "follow-up after cancel must not re-replay compact history",
+  );
+});
+
 test("preserves history-replay across provider recreation caused by permission-mode / MCP / auth change", async () => {
   // Regression: after a stale-session recovery left historyReplayFallback=true
   // (e.g. the recovered turn returned empty), an orthogonal change that

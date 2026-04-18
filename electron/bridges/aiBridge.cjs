@@ -2317,6 +2317,14 @@ function registerHandlers(ipcMain) {
     try {
       const existingRun = acpChatRuns.get(chatSessionId);
       if (existingRun && existingRun.requestId !== requestId) {
+        // Capture whether the prior run was already cancelled (via the
+        // cancel IPC) BEFORE we set the flag ourselves — the cancel IPC
+        // contract explicitly preserves the provider session so the
+        // next prompt can continue in the same conversation. Tearing
+        // down the provider here would silently break that contract in
+        // the "click Stop, then immediately send next prompt" flow,
+        // discarding the recovered ACP session.
+        const alreadyCancelledViaIpc = existingRun.cancelRequested;
         existingRun.cancelRequested = true;
         const existingController = acpActiveStreams.get(existingRun.requestId);
         if (existingController) {
@@ -2324,7 +2332,15 @@ function registerHandlers(ipcMain) {
           acpActiveStreams.delete(existingRun.requestId);
         }
         acpRequestSessions.delete(existingRun.requestId);
-        cleanupAcpProvider(chatSessionId);
+        // Only tear down the provider for true interrupt-and-restart
+        // flows (user typed a new prompt while the old one was still
+        // streaming, no explicit cancel). When we do skip cleanup here,
+        // the reuse/reset logic below still handles auth/MCP/permission
+        // changes correctly — the provider is preserved only when
+        // nothing else would require rebuilding it.
+        if (!alreadyCancelledViaIpc) {
+          cleanupAcpProvider(chatSessionId);
+        }
       }
 
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, false);
@@ -2909,6 +2925,18 @@ function registerHandlers(ipcMain) {
     mcpServerBridge.clearPendingApprovals(effectiveChatSessionId);
     if (activeRun && activeRun.requestId === effectiveRequestId) {
       activeRun.cancelRequested = true;
+    }
+    // Synchronously clear historyReplayFallback on the preserved provider
+    // entry. Without this, a user pressing Stop and immediately sending
+    // the next prompt can have their new request enter the stream
+    // handler before the aborted run's post-stream clearing code runs.
+    // The new turn would then see historyReplayFallback=true, trigger
+    // shouldResetProviderForHistoryReplay, and recreate the provider
+    // without the recovered existingSessionId — discarding the very
+    // session the cancel contract promised to preserve.
+    if (effectiveChatSessionId) {
+      const preservedEntry = acpProviders.get(effectiveChatSessionId);
+      if (preservedEntry) preservedEntry.historyReplayFallback = false;
     }
     const controller = acpActiveStreams.get(effectiveRequestId);
     let cancelled = false;

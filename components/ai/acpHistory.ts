@@ -122,7 +122,7 @@ function summarizeToolMessage(
     // "Tool result (callN): ..." lines and follow-ups like "use the
     // resolv.conf output" can't be resolved. Inline the name+args here
     // the same way toRawHistoryMessage does.
-    const callInfo = toolCallIndex.get(result.toolCallId);
+    const callInfo = lookupToolCallInfo(toolCallIndex, message.id, result.toolCallId);
     const callLabel = callInfo
       ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
       : "";
@@ -166,16 +166,46 @@ function summarizeDurableAssistantMessage(message: ChatMessage): string | null {
   return `Assistant context: ${truncateText(normalizeWhitespace(message.content), MAX_DURABLE_ASSISTANT_MESSAGE_CHARS)}`;
 }
 
+/**
+ * Build a per-tool-result provenance index. Keys are
+ * `${toolResultMessageId}:${toolCallId}` rather than the bare toolCall.id
+ * so that provider-reused ids (e.g. "call1" across unrelated turns) don't
+ * cause later calls to overwrite older ones in the lookup — each
+ * tool_result resolves to the most recent assistant tool_call that
+ * preceded it with matching id, which preserves historical correctness
+ * when rebuilding older compact summaries.
+ */
 function buildToolCallIndex(messages: ChatMessage[]): Map<string, ToolCallInfo> {
-  const index = new Map<string, ToolCallInfo>();
+  const provenance = new Map<string, ToolCallInfo>();
+  // Rolling map of the latest tool_call seen (by id) up to the current
+  // point in the message stream.
+  const latestByCallId = new Map<string, ToolCallInfo>();
   for (const message of messages) {
-    if (message.role !== "assistant" || !message.toolCalls?.length) continue;
-    for (const toolCall of message.toolCalls) {
-      if (!toolCall.id) continue;
-      index.set(toolCall.id, { name: toolCall.name, arguments: toolCall.arguments });
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      for (const toolCall of message.toolCalls) {
+        if (!toolCall.id) continue;
+        latestByCallId.set(toolCall.id, { name: toolCall.name, arguments: toolCall.arguments });
+      }
+      continue;
+    }
+    if (message.role === "tool" && message.toolResults?.length) {
+      for (const result of message.toolResults) {
+        const info = latestByCallId.get(result.toolCallId);
+        if (info) {
+          provenance.set(`${message.id}:${result.toolCallId}`, info);
+        }
+      }
     }
   }
-  return index;
+  return provenance;
+}
+
+function lookupToolCallInfo(
+  index: Map<string, ToolCallInfo>,
+  toolMessageId: string,
+  toolCallId: string,
+): ToolCallInfo | undefined {
+  return index.get(`${toolMessageId}:${toolCallId}`);
 }
 
 function toRawHistoryMessage(
@@ -215,7 +245,7 @@ function toRawHistoryMessage(
     // is opaque bytes and "use that output" becomes ambiguous.
     const parts = message.toolResults.map((result) => {
       const prefix = result.isError ? "Tool error" : "Tool result";
-      const callInfo = toolCallIndex.get(result.toolCallId);
+      const callInfo = lookupToolCallInfo(toolCallIndex, message.id, result.toolCallId);
       const callLabel = callInfo
         ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
         : "";
