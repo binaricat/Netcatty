@@ -20,7 +20,7 @@ const MAX_DURABLE_USER_MESSAGE_CHARS = 280;
 const MAX_DURABLE_ASSISTANT_MESSAGE_CHARS = 360;
 
 const IMPORTANT_PATTERNS = [
-  /不要|别|不能|不允许|必须|希望|只|最小|先|暂时|fallback|pwsh|powershell|cmd\.exe|windows|mcp|skills|cli|commit|pr|打包|内存|历史|压缩|慢/i,
+  /不要|别|不能|不允许|必须|希望|只|最小|先|暂时|fallback|pwsh|powershell|cmd\.exe|windows|mcp|skills|cli|commit|\bpr\b|打包|内存|历史|压缩|慢/i,
   /error|failed|failure|exit code|exception|cannot|unable|timeout|crash|fallback|commit|pull request|PR #\d+/i,
 ];
 const DURABLE_CONSTRAINT_PATTERNS = [

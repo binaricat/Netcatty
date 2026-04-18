@@ -123,6 +123,32 @@ test("buildAcpHistoryMessages preserves short important user constraints outside
   assert.match(result[0].content, /不要提交/);
 });
 
+test("buildAcpHistoryMessages does not treat pr inside ordinary words as important", () => {
+  const messages: ChatMessage[] = [
+    message("u1", "user", "不要提交"),
+    message("a1", "assistant", "收到"),
+    message("u2", "user", "approach"),
+    message("a2", "assistant", "ack"),
+    message("u3", "user", "improve"),
+    message("a3", "assistant", "ack"),
+    message("u4", "user", "prepare"),
+    message("a4", "assistant", "ack"),
+  ];
+
+  for (let index = 5; index <= 13; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `filler assistant message ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+
+  assert.equal(result[0].role, "user");
+  assert.match(result[0].content, /不要提交/);
+  assert.doesNotMatch(result[0].content, /approach|improve|prepare/);
+});
+
 test("buildAcpHistoryMessages prioritizes later durable instructions over older filler prompts", () => {
   const messages: ChatMessage[] = [];
 
