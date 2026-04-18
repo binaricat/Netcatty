@@ -309,6 +309,9 @@ const en: Messages = {
   'settings.terminal.behavior.clearWipesScrollback': '`clear` wipes scrollback',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     'When the shell `clear` command (or any program) sends CSI 3 J, also wipe the scrollback buffer. Standard POSIX/ncurses behavior since 2013. Disable to keep history visible after `clear` (matches iTerm2). The right-click "Clear Buffer" menu item always preserves scrollback regardless of this setting.',
+  'settings.terminal.behavior.preserveSelectionOnInput': 'Keep selection while typing',
+  'settings.terminal.behavior.preserveSelectionOnInput.desc':
+    'Stop xterm.js from clearing your mouse-selected text the moment you press a key. Useful for selecting a path, typing a command prefix like `sz `, then pasting the still-live selection. Matches iTerm2 / GNOME Terminal / Windows Terminal default. Selection is still cleared on mouse click in empty space or when the terminal scrolls past it.',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 clipboard',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Allow remote programs (tmux, vim, etc.) to access the local clipboard via OSC-52 escape sequences.',
