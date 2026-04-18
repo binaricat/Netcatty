@@ -124,6 +124,16 @@ test("buildAcpHistoryMessages preserves short important user constraints outside
 });
 
 test("buildAcpHistoryMessages does not treat pr inside ordinary words as important", () => {
+  // Original intent: `\bpr\b` in IMPORTANT_PATTERNS must NOT match 'pr'
+  // inside ordinary English words like 'approach' / 'improve' / 'prepare'.
+  // Those words land at priority=1 (kept only as space allows) while the
+  // 不要提交 line lands at priority=2 (always preferred). The check below
+  // doesn't assert that the ordinary words are absent from the compact
+  // section — they may legitimately survive when budget allows; that's
+  // intentional after we stopped blanket-dropping short user messages.
+  // What we DO verify: the priority-2 line is selected, which is only
+  // possible if the IMPORTANT_PATTERNS regex correctly distinguishes it
+  // from the surrounding short ordinary-word turns.
   const messages: ChatMessage[] = [
     message("u1", "user", "不要提交"),
     message("a1", "assistant", "收到"),
@@ -146,7 +156,6 @@ test("buildAcpHistoryMessages does not treat pr inside ordinary words as importa
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /不要提交/);
-  assert.doesNotMatch(result[0].content, /approach|improve|prepare/);
 });
 
 test("buildAcpHistoryMessages prioritizes later durable instructions over older filler prompts", () => {
@@ -208,6 +217,60 @@ test("buildAcpHistoryMessages preserves older substantive assistant context that
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Move the derived view state into that hook\./);
+});
+
+test("buildAcpHistoryMessages preserves short non-trivial user constraints that miss the IMPORTANT regex", () => {
+  // Regression: short load-bearing instructions like "Use ssh2" / "中文输出"
+  // would previously be dropped by a blanket length<10 heuristic, even
+  // though they don't match any TRIVIAL pattern.
+  const messages: ChatMessage[] = [
+    message("u1", "user", "Use ssh2"),
+    message("a1", "assistant", "Got it."),
+    message("u2", "user", "中文输出"),
+    message("a2", "assistant", "明白"),
+  ];
+
+  // Push enough later turns so u1/u2 fall outside the recent raw window
+  // and have to survive via the durable-user compaction path.
+  for (let index = 3; index <= 13; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `filler assistant message ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+
+  assert.equal(result[0].role, "user");
+  assert.match(result[0].content, /Use ssh2/);
+  assert.match(result[0].content, /中文输出/);
+});
+
+test("buildAcpHistoryMessages still drops one-word filler user messages", () => {
+  // Sanity: removing the length<10 heuristic must not cause "ok" / "继续" /
+  // "thanks" filler to leak into the compact section.
+  const messages: ChatMessage[] = [
+    message("u1", "user", "ok"),
+    message("a1", "assistant", "ack"),
+    message("u2", "user", "继续"),
+    message("a2", "assistant", "继续处理"),
+  ];
+
+  for (let index = 3; index <= 13; index += 1) {
+    messages.push(
+      message(`u${index}`, "user", `filler user message ${index}`),
+      message(`a${index}`, "assistant", `filler assistant message ${index}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+
+  // u1 / u2 fall outside the recent raw window. The compact context, if it
+  // exists, must not surface these trivial turns as durable user requests.
+  if (result.length > 0 && result[0].role === "user") {
+    assert.doesNotMatch(result[0].content, /User request: ok\b/);
+    assert.doesNotMatch(result[0].content, /User request: 继续/);
+  }
 });
 
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {

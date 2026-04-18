@@ -143,10 +143,11 @@ function loadBridgeWithMocks(options = {}) {
     },
     ai: {
       stepCountIs: () => Symbol("stopWhen"),
-      streamText({ messages }) {
+      streamText(args) {
+        const { messages } = args;
         streamCalls.push(messages);
         if (typeof options.streamText === "function") {
-          return options.streamText({ messages, streamCalls });
+          return options.streamText({ ...args, streamCalls });
         }
         if (streamCalls.length === 1) {
           throw new Error("transport failed before replayed turn completed");
@@ -260,6 +261,142 @@ test("replays fallback history only after creating a fresh ACP session when the 
   assert.equal(providerCreationArgs[0].existingSessionId, "stale-session");
   assert.equal("existingSessionId" in providerCreationArgs[1], false);
   assert.equal("existingSessionId" in providerCreationArgs[2], false);
+});
+
+test("clears replay fallback after a user-cancelled recovered turn so the fresh ACP session is preserved", async () => {
+  // Regression: if the user stops the first turn after stale-session
+  // recovery, historyReplayFallback must still be cleared. Otherwise the
+  // next turn triggers shouldResetProviderForHistoryReplay, which discards
+  // the freshly recovered ACP session (resumeSessionId is forced to
+  // undefined in that path) and re-spends tokens on another compact
+  // replay. That would break the cancel-preserves-session contract.
+
+  // Gate that the test releases AFTER cancel has been dispatched, so the
+  // bridge's reader loop wakes up to find signal.aborted=true.
+  let releaseRead;
+  const readReleased = new Promise((resolve) => {
+    releaseRead = resolve;
+  });
+
+  const { bridge, streamCalls, providerCreationArgs, restore } = loadBridgeWithMocks({
+    streamText({ streamCalls: callsRef }) {
+      // First call (the recovered turn) — block in read() so the test can
+      // fire cancel before any chunk arrives, simulating "user clicks Stop
+      // before the agent emits content". Second call (follow-up) — return
+      // an immediately-done empty stream.
+      if (callsRef.length === 1) {
+        return {
+          fullStream: {
+            getReader: () => ({
+              async read() {
+                await readReleased;
+                // After cancel, signal.aborted is true; return done so the
+                // loop exits cleanly. Never produced a content chunk →
+                // hasContent stays false, aborted is true → we hit the
+                // else-branch where the fix lives.
+                return { done: true, value: undefined };
+              },
+              releaseLock() {},
+            }),
+          },
+        };
+      }
+      return createEmptyStreamResult();
+    },
+  });
+
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const streamHandler = ipcMain.handlers.get("netcatty:ai:acp:stream");
+  const cancelHandler = ipcMain.handlers.get("netcatty:ai:acp:cancel");
+  assert.equal(typeof streamHandler, "function");
+  assert.equal(typeof cancelHandler, "function");
+
+  const historyMessages = [{ role: "user", content: "prior recovered context" }];
+  const event = { sender: { id: 1 } };
+
+  try {
+    // Kick off the first turn; it will block at reader.read().
+    const firstTurn = streamHandler(event, {
+      requestId: "req-cancel-1",
+      chatSessionId: "chat-cancel",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "first recovered turn",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "stale-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+
+    // Yield enough microtasks so the handler reaches the streamText/read
+    // path before we cancel.
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+
+    // Fire cancel — this calls controller.abort() inside the bridge.
+    await cancelHandler(event, {
+      requestId: "req-cancel-1",
+      chatSessionId: "chat-cancel",
+    });
+
+    // Now release the blocked read so the loop wakes, sees aborted, and
+    // exits. The else-branch should clear historyReplayFallback.
+    releaseRead();
+    await firstTurn;
+
+    // Second turn — should reuse the recovered fresh-session and send
+    // only the latest prompt (no compact replay).
+    await streamHandler(event, {
+      requestId: "req-cancel-2",
+      chatSessionId: "chat-cancel",
+      acpCommand: "fake-acp",
+      acpArgs: [],
+      prompt: "follow-up after cancel",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: "fresh-session",
+      historyMessages,
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+    });
+  } finally {
+    restore();
+  }
+
+  // Two streamText calls: the cancelled one + the follow-up.
+  assert.equal(streamCalls.length, 2);
+
+  // Provider creation count: 1 stale attempt + 1 fallback recovery = 2.
+  // If the bug regresses, the follow-up turn would force a 3rd creation
+  // (shouldResetProviderForHistoryReplay → cleanupAcpProvider → recreate
+  // without existingSessionId).
+  assert.equal(
+    providerCreationArgs.length,
+    2,
+    "expected the recovered fresh session to be preserved across user cancel",
+  );
+
+  // Follow-up turn should send only the latest prompt — the recovered
+  // session has the prior context; replaying compact history again would
+  // waste tokens and visually feel like the conversation forgot itself.
+  assert.equal(
+    streamCalls[1].length,
+    1,
+    "follow-up after cancel must not re-replay compact history",
+  );
 });
 
 test("keeps replay fallback enabled after an empty recovered turn by retrying in a fresh ACP session", async () => {

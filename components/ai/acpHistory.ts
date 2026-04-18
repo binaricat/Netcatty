@@ -54,7 +54,11 @@ function isDurableConstraintText(value: string): boolean {
 function isTrivialUserMessage(value: string): boolean {
   const normalized = normalizeWhitespace(value);
   if (isImportantText(normalized) || isDurableConstraintText(normalized)) return false;
-  if (normalized.length < 10) return true;
+  // Don't blanket-drop short messages — short user turns are often
+  // load-bearing constraints ("Use ssh2", "中文输出", "no logs", "more
+  // verbose") that the IMPORTANT/DURABLE regexes can't realistically
+  // enumerate. The trivial-phrase regex already catches actual filler
+  // ("ok", "yes", "thanks", "继续").
   return TRIVIAL_USER_MESSAGE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 

@@ -2831,10 +2831,19 @@ function registerHandlers(ipcMain) {
             : "Agent returned an empty response.",
         });
       } else {
-        // Clear replay fallback only after the recovered turn completed with
-        // actual streamed content. Empty/error retries should keep the replay
-        // history available for the next attempt on the fresh ACP session.
-        if (shouldReplayHistory && !abortController.signal.aborted) {
+        // Clear replay fallback when the recovered turn either streamed
+        // content OR was user-aborted. The empty-but-not-aborted case is
+        // handled in the if-branch above and intentionally keeps the flag
+        // so a follow-up retry can re-replay onto a fresh session.
+        //
+        // Why also clear on abort: if the user actively cancelled, the
+        // freshly recovered ACP session has whatever state was built up so
+        // far. Leaving the flag set would make the next turn trigger
+        // shouldResetProviderForHistoryReplay, which discards the recovered
+        // session (resumeSessionId is forced to undefined in that path) and
+        // re-spends tokens on another compact replay. That breaks the
+        // cancel-preserves-session contract for users who stop early.
+        if (shouldReplayHistory) {
           providerEntry.historyReplayFallback = false;
         }
         debugMcpLog("ACP stream done", { requestId, chatSessionId, hasContent });
