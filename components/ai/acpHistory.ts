@@ -10,6 +10,7 @@ type DurableUserLine = {
 
 const MAX_RECENT_RAW_MESSAGES = 6;
 const MAX_MESSAGES_TO_SCAN = 20;
+const MAX_DURABLE_SCAN_MESSAGES = 200;
 const MAX_COMPACT_CONTEXT_CHARS = 3000;
 const MAX_RAW_MESSAGE_CHARS = 2000;
 const MAX_TOOL_SUMMARY_CHARS = 500;
@@ -18,6 +19,9 @@ const MAX_DURABLE_ASSISTANT_CONTEXT_CHARS = 900;
 const MAX_RECENT_SUMMARY_CONTEXT_CHARS = 1200;
 const MAX_DURABLE_USER_MESSAGE_CHARS = 280;
 const MAX_DURABLE_ASSISTANT_MESSAGE_CHARS = 360;
+const MAX_TOOL_CALL_LABEL_CHARS = 200;
+
+type ToolCallInfo = { name: string; arguments: unknown };
 
 const IMPORTANT_PATTERNS = [
   /不要|别|不能|不允许|必须|希望|只|最小|先|暂时|fallback|pwsh|powershell|cmd\.exe|windows|mcp|skills|cli|commit|\bpr\b|打包|内存|历史|压缩|慢/i,
@@ -143,7 +147,22 @@ function summarizeDurableAssistantMessage(message: ChatMessage): string | null {
   return `Assistant context: ${truncateText(normalizeWhitespace(message.content), MAX_DURABLE_ASSISTANT_MESSAGE_CHARS)}`;
 }
 
-function toRawHistoryMessage(message: ChatMessage): RawHistoryMessage[] {
+function buildToolCallIndex(messages: ChatMessage[]): Map<string, ToolCallInfo> {
+  const index = new Map<string, ToolCallInfo>();
+  for (const message of messages) {
+    if (message.role !== "assistant" || !message.toolCalls?.length) continue;
+    for (const toolCall of message.toolCalls) {
+      if (!toolCall.id) continue;
+      index.set(toolCall.id, { name: toolCall.name, arguments: toolCall.arguments });
+    }
+  }
+  return index;
+}
+
+function toRawHistoryMessage(
+  message: ChatMessage,
+  toolCallIndex: Map<string, ToolCallInfo>,
+): RawHistoryMessage[] {
   if (message.role === "user") {
     return message.content
       ? [{ sourceId: message.id, role: "user", content: truncateText(message.content, MAX_RAW_MESSAGE_CHARS) }]
@@ -169,9 +188,19 @@ function toRawHistoryMessage(message: ChatMessage): RawHistoryMessage[] {
     // ("use that output", "what did cat show?"). ACP only supports user/
     // assistant roles, so we flatten to "assistant" — the tool results were
     // produced during the assistant's turn.
+    //
+    // Inline the originating tool_call's name+args. Tool calls and their
+    // results live in separate messages; if the last six raw items start
+    // in the middle of a tool interaction, the preceding assistant tool
+    // call can be outside the window. Without the call label the result
+    // is opaque bytes and "use that output" becomes ambiguous.
     const parts = message.toolResults.map((result) => {
       const prefix = result.isError ? "Tool error" : "Tool result";
-      return `${prefix} (${result.toolCallId}): ${result.content || ""}`;
+      const callInfo = toolCallIndex.get(result.toolCallId);
+      const callLabel = callInfo
+        ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
+        : "";
+      return `${prefix}${callLabel} (${result.toolCallId}): ${result.content || ""}`;
     });
     return [{
       sourceId: message.id,
@@ -185,6 +214,14 @@ function toRawHistoryMessage(message: ChatMessage): RawHistoryMessage[] {
 
 function buildCompactContext(messages: ChatMessage[], recentRawSourceIds: Set<string>): AcpHistoryMessage[] {
   const scanned = messages.slice(-MAX_MESSAGES_TO_SCAN);
+  // Bound the durable-scan window too — a long-running ACP chat would
+  // otherwise pay O(N) regex + sort cost on every send. 200 is enough to
+  // capture durable constraints across realistically-long sessions (the
+  // 99th-percentile chat is << 200 turns) while giving a constant-time
+  // worst case. Constraints older than this age out of the compact
+  // replay; the live ACP provider's own session history still carries
+  // them when it can resume, which is the common path.
+  const durableScanStart = Math.max(0, messages.length - MAX_DURABLE_SCAN_MESSAGES);
   const summaryLines: string[] = [];
   const durableUserCandidates: DurableUserLine[] = [];
   const selectedDurableUserLines: DurableUserLine[] = [];
@@ -195,7 +232,8 @@ function buildCompactContext(messages: ChatMessage[], recentRawSourceIds: Set<st
   const durableAssistantChars = { value: 0 };
   const summaryChars = { value: 0 };
 
-  for (const [messageIndex, message] of messages.entries()) {
+  for (let messageIndex = durableScanStart; messageIndex < messages.length; messageIndex += 1) {
+    const message = messages[messageIndex];
     if (recentRawSourceIds.has(message.id)) continue;
     const durableUserLine = summarizeDurableUserMessage(message);
     if (durableUserLine) {
@@ -285,8 +323,9 @@ function buildCompactContext(messages: ChatMessage[], recentRawSourceIds: Set<st
 }
 
 export function buildAcpHistoryMessages(messages: ChatMessage[]): AcpHistoryMessage[] {
+  const toolCallIndex = buildToolCallIndex(messages);
   const rawHistory = messages
-    .flatMap(toRawHistoryMessage)
+    .flatMap((message) => toRawHistoryMessage(message, toolCallIndex))
     .slice(-MAX_RECENT_RAW_MESSAGES);
   const compactContext = buildCompactContext(
     messages,

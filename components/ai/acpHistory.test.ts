@@ -307,6 +307,78 @@ test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the 
   );
 });
 
+test("buildAcpHistoryMessages inlines tool_call name+args so tool_result is interpretable without the preceding assistant turn", () => {
+  // Regression: if the raw window starts mid-tool-interaction, the
+  // preceding assistant tool_call message may be outside the 6-item
+  // slice. Without the call's name/args inline on the result line, the
+  // AI sees opaque bytes and "use that output" becomes ambiguous.
+  const messages: ChatMessage[] = [
+    // Early filler to push the tool_call off the raw window
+    message("u0", "user", "prior chatter"),
+    message("a0", "assistant", "prior reply"),
+    message("u1", "user", "cat /etc/hosts"),
+    message("a1", "assistant", "", {
+      toolCalls: [
+        { id: "call1", name: "terminal_exec", arguments: { command: "cat /etc/hosts" } },
+      ],
+    }),
+    message("tool1", "tool", "", {
+      toolResults: [
+        { toolCallId: "call1", content: "127.0.0.1 localhost", isError: false },
+      ],
+    }),
+    message("u2", "user", "use that output"),
+    message("a2", "assistant", "acknowledged"),
+    message("u3", "user", "now do the same for /etc/resolv.conf"),
+  ];
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // The tool_result line must carry the originating tool_call's name and
+  // args, so even if a1 was pushed out of the raw window, the result is
+  // self-describing.
+  assert.match(flat, /Tool result \[from terminal_exec/);
+  assert.match(flat, /cat \/etc\/hosts/);
+});
+
+test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) work per send on long chats", () => {
+  // Regression target: codex review flagged that the compaction path
+  // scanned messages.entries() over the full transcript. Build a very
+  // long chat and verify that only messages within MAX_DURABLE_SCAN_MESSAGES
+  // (200) of the end contribute durable candidates.
+
+  const messages: ChatMessage[] = [];
+  // An ancient high-priority constraint that MUST be aged out.
+  messages.push(message("old-important", "user", "不要提交 old-marker-xyz"));
+  messages.push(message("old-ack", "assistant", "收到"));
+
+  // 300 filler turns between the ancient constraint and the window.
+  for (let i = 0; i < 300; i += 1) {
+    messages.push(
+      message(`u${i}`, "user", `filler user message ${i}`),
+      message(`a${i}`, "assistant", `filler assistant message ${i}`),
+    );
+  }
+
+  // A recent constraint that should survive.
+  messages.push(message("recent-important", "user", "不要提交 recent-marker-abc"));
+  for (let i = 0; i < 5; i += 1) {
+    messages.push(
+      message(`t${i}`, "user", `tail user message ${i}`),
+      message(`ta${i}`, "assistant", `tail assistant message ${i}`),
+    );
+  }
+
+  const result = buildAcpHistoryMessages(messages);
+  const flat = result.map((m) => m.content).join("\n---\n");
+
+  // Recent priority-2 constraint is kept.
+  assert.match(flat, /recent-marker-abc/);
+  // Ancient one past the scan window is dropped — proof the bound holds.
+  assert.doesNotMatch(flat, /old-marker-xyz/);
+});
+
 test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "ok"),
