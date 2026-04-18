@@ -1097,14 +1097,62 @@ async function createWindow(electronModule, options) {
 /**
  * Create or focus the settings window
  */
+/**
+ * Show + reliably focus a window's renderer. Works around two Windows-specific
+ * Electron quirks that surface when a prewarmed/hidden window is later shown
+ * (see issue #760):
+ *
+ *   1. SetForegroundWindow restrictions: `BrowserWindow.focus()` invoked from
+ *      a non-foreground process is often silently rejected by Windows. The
+ *      window appears on top but never receives true OS foreground focus, so
+ *      `document.hasFocus()` stays false in the renderer.
+ *   2. Chromium suppresses the input caret + keyboard routing whenever
+ *      `document.hasFocus()` is false, even if an `<input>` is the active
+ *      element. The classic symptom: clicking an input selects/deletes work
+ *      but the caret never blinks and typed characters don't appear.
+ *
+ * The alwaysOnTop toggle is the established workaround for (1); explicitly
+ * calling `webContents.focus()` covers (2) so the renderer marks the page as
+ * focused regardless of whether the OS granted foreground.
+ */
+function showAndFocusWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.show();
+  } catch {
+    // ignore
+  }
+  if (process.platform === "win32") {
+    try {
+      win.setAlwaysOnTop(true);
+      win.focus();
+      win.setAlwaysOnTop(false);
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      win.focus();
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    if (win.webContents && !win.webContents.isDestroyed()) {
+      win.webContents.focus();
+    }
+  } catch {
+    // ignore
+  }
+}
+
 async function openSettingsWindow(electronModule, options, { showOnLoad = true } = {}) {
   const { BrowserWindow, shell } = electronModule;
   const { preload, devServerUrl, isDev, appIcon, isMac, electronDir } = options;
 
   // If settings window already exists, show and focus it
   if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.show();
-    settingsWindow.focus();
+    showAndFocusWindow(settingsWindow);
     return settingsWindow;
   }
 
@@ -1264,7 +1312,7 @@ async function openSettingsWindow(electronModule, options, { showOnLoad = true }
     try {
       const baseUrl = getDevRendererBaseUrl(devServerUrl);
       await win.loadURL(`${baseUrl}${settingsPath}`);
-      if (showOnLoad) { win.show(); win.focus(); }
+      if (showOnLoad) { showAndFocusWindow(win); }
       return win;
     } catch (e) {
       console.warn("Dev server not reachable for settings window", e);
@@ -1273,7 +1321,7 @@ async function openSettingsWindow(electronModule, options, { showOnLoad = true }
 
   // Production mode - load via custom protocol.
   await win.loadURL("app://netcatty/index.html#/settings");
-  if (showOnLoad) { win.show(); win.focus(); }
+  if (showOnLoad) { showAndFocusWindow(win); }
 
   return win;
 }
