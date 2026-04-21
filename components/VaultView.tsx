@@ -1977,6 +1977,52 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           </div>
         </header>
 
+        {isMultiSelectMode && isHostsSectionActive && (
+          <div className="px-4 py-1.5 bg-background border-b border-border/40 flex items-center gap-2">
+            <span className="flex items-center h-7 text-xs text-muted-foreground leading-none">
+              {t("vault.hosts.selected", { count: selectedHostIds.size })}
+            </span>
+            <div className="flex-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                const allIds = new Set(displayedHosts.map(h => h.id));
+                setSelectedHostIds(allIds);
+              }}
+            >
+              {t("vault.hosts.selectAll")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={clearHostSelection}
+            >
+              {t("vault.hosts.deselectAll")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={selectedHostIds.size === 0}
+              onClick={deleteSelectedHosts}
+            >
+              <Trash2 size={12} className="mr-1" />
+              {t("vault.hosts.deleteSelected", { count: selectedHostIds.size })}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={clearHostSelection}
+            >
+              <X size={12} />
+            </Button>
+          </div>
+        )}
+
         {/* Keep hosts mounted so switching sections does not reset scroll or remount the list. */}
         <div
           className={cn(
@@ -2410,49 +2456,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                       </div>
                     </div>
                   </div>
-
-                  {isMultiSelectMode && (
-                    <div className="flex items-center gap-2 p-2 bg-secondary/60 rounded-lg border border-border/40">
-                      <span className="text-sm text-muted-foreground">
-                        {t("vault.hosts.selected", { count: selectedHostIds.size })}
-                      </span>
-                      <div className="flex-1" />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const allIds = new Set(displayedHosts.map(h => h.id));
-                          setSelectedHostIds(allIds);
-                        }}
-                      >
-                        {t("vault.hosts.selectAll")}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearHostSelection}
-                      >
-                        {t("vault.hosts.deselectAll")}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={selectedHostIds.size === 0}
-                        onClick={deleteSelectedHosts}
-                      >
-                        <Trash2 size={14} className="mr-1" />
-                        {t("vault.hosts.deleteSelected", { count: selectedHostIds.size })}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={clearHostSelection}
-                      >
-                        <X size={14} />
-                      </Button>
-                    </div>
-                  )}
 
                   {viewMode === "tree" ? (
                     <HostTreeView
