@@ -66,6 +66,14 @@ export interface CompletionContext {
   isOptionArg: boolean;
 }
 
+function shellEscape(name: string): string {
+  if (!name) return name;
+  if (/[\\$'"|!<>;#~` ]/.test(name)) {
+    return `'${name.replace(/'/g, "'\\''")}'`;
+  }
+  return name;
+}
+
 /**
  * Parse a command line string into tokens, handling quoting.
  */
@@ -241,9 +249,9 @@ export async function getCompletions(
     const { pathPrefix, quoteSuffix } = resolvePathComponents(ctx.currentWord, options.cwd);
     const isQuotedPath = ctx.currentWord.startsWith('"') || ctx.currentWord.startsWith("'");
     for (const entry of pathEntries) {
-      const insertName = isQuotedPath || !entry.name.includes(" ")
+      const insertName = isQuotedPath || !/[ '"]/.test(entry.name)
         ? entry.name
-        : entry.name.replace(/ /g, "\\ ");
+        : shellEscape(entry.name);
       const suffix = entry.type === "directory" ? "/" : "";
       const fullPath = pathPrefix + insertName + suffix + quoteSuffix;
       const suggestion = {

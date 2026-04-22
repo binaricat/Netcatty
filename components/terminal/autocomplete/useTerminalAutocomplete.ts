@@ -64,6 +64,14 @@ export interface SubDirPanel {
   dirPath: string;
 }
 
+function shellEscape(name: string): string {
+  if (!name) return name;
+  if (/[\\$'"|!<>;#~` ]/.test(name)) {
+    return `'${name.replace(/'/g, "'\\''")}'`;
+  }
+  return name;
+}
+
 export interface AutocompleteState {
   suggestions: CompletionSuggestion[];
   selectedIndex: number;
@@ -412,9 +420,9 @@ export function useTerminalAutocomplete(
       : "";
     const quoteSuffix = quotePrefix && currentToken.endsWith(quotePrefix) ? quotePrefix : "";
     const suffix = entry.type === "directory" ? "/" : "";
-    const entryName = quotePrefix || !entry.name.includes(" ")
+    const entryName = quotePrefix || !/[ '"]/.test(entry.name)
       ? entry.name
-      : entry.name.replace(/ /g, "\\ ");
+      : shellEscape(entry.name);
     const fullPath = panel.dirPath + entryName + suffix;
     const replacementPath = `${quotePrefix}${fullPath}${quoteSuffix}`;
 

@@ -6,6 +6,8 @@
 
 // Passphrase request pending map
 // Map of requestId -> { resolveCallback, rejectCallback, webContentsId, keyPath, createdAt, timeoutId }
+const { randomUUID } = require("node:crypto");
+
 const passphraseRequests = new Map();
 
 // TTL for abandoned requests (2 minutes)
@@ -15,7 +17,7 @@ const REQUEST_TTL_MS = 2 * 60 * 1000;
  * Generate a unique request ID for passphrase requests
  */
 function generateRequestId(prefix = 'pp') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${randomUUID()}`;
 }
 
 /**

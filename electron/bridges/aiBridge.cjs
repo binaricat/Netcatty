@@ -9,6 +9,7 @@ const https = require("node:https");
 const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
+const { randomUUID } = require("node:crypto");
 const { spawn, execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const { existsSync } = fs;
@@ -1854,7 +1855,7 @@ function registerHandlers(ipcMain) {
     try {
       const shellEnv = await getShellEnv();
       const codexCliPath = resolveCliFromPath("codex", shellEnv) || "codex";
-      const sessionId = `codex_login_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const sessionId = `codex_login_${randomUUID()}`;
       const child = spawn(codexCliPath, ["login"], {
         stdio: ["ignore", "pipe", "pipe"],
         env: shellEnv,

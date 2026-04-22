@@ -6,6 +6,8 @@
 
 // Keyboard-interactive authentication pending requests
 // Map of requestId -> { finishCallback, webContentsId, sessionId, createdAt, timeoutId }
+const { randomUUID } = require("node:crypto");
+
 const keyboardInteractiveRequests = new Map();
 
 // TTL for abandoned requests (5 minutes)
@@ -15,7 +17,7 @@ const REQUEST_TTL_MS = 5 * 60 * 1000;
  * Generate a unique request ID for keyboard-interactive requests
  */
 function generateRequestId(prefix = 'ki') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${randomUUID()}`;
 }
 
 /**

@@ -1,5 +1,6 @@
 const { ipcRenderer, contextBridge, webUtils } = require("electron");
 const os = require("node:os");
+const { randomUUID } = require("node:crypto");
 
 const dataListeners = new Map();
 const exitListeners = new Map();
@@ -928,7 +929,7 @@ const api = {
   },
   // Chain progress listener for jump host connections
   onChainProgress: (cb) => {
-    const id = Date.now().toString() + Math.random().toString(16).slice(2);
+    const id = randomUUID();
     chainProgressListeners.set(id, cb);
     return () => {
       chainProgressListeners.delete(id);

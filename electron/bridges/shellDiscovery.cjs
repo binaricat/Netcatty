@@ -204,14 +204,18 @@ function detectPowerShell() {
     }
 
     // Fallback: well-known path.
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
     const fallback = path.join(
-      process.env.SystemRoot || "C:\\Windows",
+      systemRoot,
       "System32",
       "WindowsPowerShell",
       "v1.0",
       "powershell.exe",
     );
-    if (fs.existsSync(fallback)) {
+    if (
+      fs.existsSync(fallback) &&
+      path.dirname(fallback).toLowerCase().endsWith("system32")
+    ) {
       return {
         id: "powershell",
         name: "Windows PowerShell",
@@ -266,7 +270,7 @@ function detectPwsh() {
       "7",
       "pwsh.exe",
     );
-    if (fs.existsSync(fallback)) {
+    if (fs.existsSync(fallback) && fallback.toLowerCase().includes("powershell")) {
       return {
         id: "pwsh",
         name: "PowerShell 7",
@@ -286,12 +290,14 @@ function detectPwsh() {
  * @returns {object[]} Array of DiscoveredShell objects (may be empty).
  */
 function detectWslDistros() {
-  const wslExe = path.join(
-    process.env.SystemRoot || "C:\\Windows",
-    "System32",
-    "wsl.exe",
-  );
-  if (!fs.existsSync(wslExe)) return [];
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const wslExe = path.join(systemRoot, "System32", "wsl.exe");
+  if (
+    !fs.existsSync(wslExe) ||
+    !path.dirname(wslExe).toLowerCase().endsWith("system32")
+  ) {
+    return [];
+  }
 
   const distros = [];
 

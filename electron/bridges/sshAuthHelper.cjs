@@ -14,6 +14,19 @@ const passphraseHandler = require("./passphraseHandler.cjs");
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
 const SSH_KEY_PATTERN = /^id_[\w-]+$/;
 
+async function readFileNoFollow(filePath) {
+  const fd = await fs.promises.open(filePath, "r", 0o0);
+  try {
+    const stat = await fd.stat();
+    if (!stat.isFile()) return null;
+    const buffer = Buffer.alloc(stat.size);
+    await fd.read(buffer, 0, stat.size, 0);
+    return buffer.toString("utf8");
+  } finally {
+    await fd.close();
+  }
+}
+
 /**
  * Quick check if file content looks like an SSH private key.
  * Rejects non-key files that happen to match the id_* filename pattern.
@@ -107,9 +120,8 @@ async function findDefaultPrivateKey() {
   for (const name of sorted) {
     const keyPath = path.join(sshDir, name);
     try {
-      const stat = await fs.promises.stat(keyPath);
-      if (!stat.isFile()) continue; // Skip directories, FIFOs, sockets, etc.
-      const privateKey = await fs.promises.readFile(keyPath, "utf8");
+      const privateKey = await readFileNoFollow(keyPath);
+      if (!privateKey) continue;
       if (!looksLikePrivateKey(privateKey)) continue;
       if (isKeyEncrypted(privateKey)) continue;
       return { privateKey, keyPath, keyName: name };
@@ -144,9 +156,8 @@ async function findAllDefaultPrivateKeys(options = {}) {
   const promises = sorted.map(async (name) => {
     const keyPath = path.join(sshDir, name);
     try {
-      const stat = await fs.promises.stat(keyPath);
-      if (!stat.isFile()) return null;
-      const privateKey = await fs.promises.readFile(keyPath, "utf8");
+      const privateKey = await readFileNoFollow(keyPath);
+      if (!privateKey) return null;
       if (!looksLikePrivateKey(privateKey)) return null;
       const encrypted = isKeyEncrypted(privateKey);
       if (encrypted && !includeEncrypted) {
@@ -659,4 +670,5 @@ module.exports = {
   applyAuthToConnOpts,
   safeSend,
   requestPassphrasesForEncryptedKeys,
+  readFileNoFollow,
 };
