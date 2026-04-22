@@ -3,3 +3,4 @@ export type { AutocompleteSettings, AutocompleteState, TerminalAutocompleteHandl
 export { default as AutocompletePopup } from "./AutocompletePopup";
 export type { CompletionSuggestion, SuggestionSource } from "./completionEngine";
 export { recordCommand, clearHistory, deleteHistoryEntry, getHistoryCount } from "./commandHistoryStore";
+export { shellEscape } from "./completionEngine";

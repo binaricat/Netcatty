@@ -14,6 +14,7 @@ import { GhostTextAddon } from "./GhostTextAddon";
 import { detectPrompt, type PromptDetectionResult } from "./promptDetector";
 import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import { recordCommand } from "./commandHistoryStore";
+import { shellEscape } from "./completionEngine";
 import { preloadCommonSpecs } from "./figSpecLoader";
 import { getXTermCellDimensions } from "./xtermUtils";
 import { listDirectoryEntries, normalizePathTokenForLookup } from "./remotePathCompleter";
@@ -64,13 +65,7 @@ export interface SubDirPanel {
   dirPath: string;
 }
 
-function shellEscape(name: string): string {
-  if (!name) return name;
-  if (/[\\$'"|!<>;#~` ]/.test(name)) {
-    return `'${name.replace(/'/g, "'\\''")}'`;
-  }
-  return name;
-}
+
 
 export interface AutocompleteState {
   suggestions: CompletionSuggestion[];
@@ -420,7 +415,7 @@ export function useTerminalAutocomplete(
       : "";
     const quoteSuffix = quotePrefix && currentToken.endsWith(quotePrefix) ? quotePrefix : "";
     const suffix = entry.type === "directory" ? "/" : "";
-    const entryName = quotePrefix || !/[ '"]/.test(entry.name)
+    const entryName = quotePrefix || !/[\\$'"|!<>;#~` ]/.test(entry.name)
       ? entry.name
       : shellEscape(entry.name);
     const fullPath = panel.dirPath + entryName + suffix;
