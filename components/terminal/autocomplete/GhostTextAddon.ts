@@ -115,6 +115,27 @@ export class GhostTextAddon implements IDisposable {
     this.currentInput = "";
   }
 
+  /**
+   * Re-align the ghost against a freshly-updated user input without
+   * waiting for the next debounced suggestion fetch. Called from every
+   * handleInput keystroke that mutates the typed buffer so the ghost
+   * never shows stale bytes for what the user has typed.
+   *
+   * If the current suggestion still prefix-matches the new input, just
+   * shrink / grow the tail. If it no longer matches, hide — a later
+   * fetchSuggestions will replace it with something that does. Without
+   * this, a fast "type + press →" sequence would paste the old
+   * pre-update tail on top of the new input and corrupt the command.
+   */
+  adjustToInput(newInput: string): void {
+    if (this.disposed || !this.ghostElement || !this.currentSuggestion) return;
+    if (this.currentSuggestion.startsWith(newInput)) {
+      this.show(this.currentSuggestion, newInput);
+    } else {
+      this.hide();
+    }
+  }
+
   getSuggestion(): string {
     return this.currentSuggestion;
   }
