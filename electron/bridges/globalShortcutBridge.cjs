@@ -589,12 +589,21 @@ function createTray() {
     const resolvedIconPath = resolveTrayIconPath();
     if (resolvedIconPath) {
       trayIcon = nativeImage.createFromPath(resolvedIconPath);
-      // Resize for tray (16x16 on most platforms, 22x22 on some Linux)
       if (process.platform === "darwin") {
         trayIcon = trayIcon.resize({ width: 16, height: 16 });
         trayIcon.setTemplateImage(true);
       } else {
-        trayIcon = trayIcon.resize({ width: 16, height: 16 });
+        // Windows/Linux: attach the @2x representation so the OS can pick
+        // the right pixel size per DPI scale. Force-resizing to 16x16 here
+        // produces blurry icons on HiDPI displays where the tray slot is
+        // rendered larger than 16px.
+        const hiDpiPath = resolvedIconPath.replace(/\.png$/i, "@2x.png");
+        if (fs.existsSync(hiDpiPath)) {
+          trayIcon.addRepresentation({
+            scaleFactor: 2,
+            buffer: fs.readFileSync(hiDpiPath),
+          });
+        }
       }
     }
 
