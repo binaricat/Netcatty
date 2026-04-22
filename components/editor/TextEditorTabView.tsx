@@ -46,25 +46,30 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   );
 
   const handleToggleWordWrap = useCallback(() => {
-    if (!tab) return;
-    editorTabStore.setWordWrap(tabId, !tab.wordWrap);
-  }, [tabId, tab]);
+    const current = editorTabStore.getTab(tabId);
+    if (!current) return;
+    editorTabStore.setWordWrap(tabId, !current.wordWrap);
+  }, [tabId]);
 
   const handleSave = useCallback(async () => {
-    if (!tab) return;
-    if (tab.savingState === 'saving') return;
+    // Read live store state at call time — React state snapshot lags the store
+    // by one microtask, so a keystroke between onChange and this save would
+    // otherwise leave us writing stale content and marking a stale baseline.
+    const current = editorTabStore.getTab(tabId);
+    if (!current) return;
+    if (current.savingState === 'saving') return;
 
     editorTabStore.setSavingState(tabId, 'saving');
     try {
-      await editorSftpWrite(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
-      editorTabStore.markSaved(tabId, tab.content);
+      await editorSftpWrite(current.sessionId, current.hostId, current.remotePath, current.content);
+      editorTabStore.markSaved(tabId, current.content);
       toast.success(t('sftp.editor.saved'), 'SFTP');
     } catch (e) {
       const msg = e instanceof Error ? e.message : t('sftp.editor.saveFailed');
       editorTabStore.setSavingState(tabId, 'error', msg);
       toast.error(msg, 'SFTP');
     }
-  }, [tab, tabId, t]);
+  }, [tabId, t]);
 
   // Tab has been closed — render nothing (parent should remove this instance,
   // but guard here in case of a transient render before unmount).
