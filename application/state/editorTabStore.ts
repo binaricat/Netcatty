@@ -1,6 +1,8 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type * as Monaco from "monaco-editor";
 
+import { activeTabStore, fromEditorTabId, isEditorTabId } from "./activeTabStore";
+
 // POSIX-style normalization: collapse "/./" and duplicate slashes, not ".." (remote paths
 // may contain semantic ".." segments we don't want to resolve client-side).
 const normalizePath = (p: string): string => {
@@ -95,6 +97,19 @@ export class EditorTabStore {
     if (removed.length === 0) return [];
     this.tabs = this.tabs.filter((t) => !idSet.has(t.sessionId));
     this.notify();
+
+    // If the current active tab was one of the editor tabs we just removed,
+    // fall back to 'vault' so the user doesn't end up on a stale id (empty
+    // chrome + no content). Any better neighbor choice would need the full
+    // orderedTabs list, which isn't available here; 'vault' is always valid.
+    const activeId = activeTabStore.getActiveTabId();
+    if (isEditorTabId(activeId)) {
+      const activeEditorId = fromEditorTabId(activeId);
+      if (activeEditorId && removed.includes(activeEditorId)) {
+        activeTabStore.setActiveTabId('vault');
+      }
+    }
+
     return removed;
   };
 
