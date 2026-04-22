@@ -740,13 +740,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setChainProgress,
     t,
     onSessionAttached: (id: string) => {
-      // Sync terminal encoding to the backend before first data arrives.
-      // Local PTY follows the OS locale and mosh frames in UTF-8 itself,
-      // so those protocols don't need (and don't support) runtime encoding
-      // swaps — see TerminalToolbar's encodingSwitchSupported gate.
-      const isLocal = host.protocol === 'local' || host.id?.startsWith('local-');
-      const isMosh = host.protocol === 'mosh' || host.moshEnabled;
-      if (!isLocal && !isMosh && host.hostname !== 'localhost') {
+      // SSH alone needs this sync: its backend starts in utf-8 regardless
+      // of host.charset, so we push the UI state (utf-8 / gb18030) to
+      // line them up before the first byte arrives. Telnet and serial
+      // already honor host.charset through startTelnetSession /
+      // startSerialSession options — including arbitrary iconv labels
+      // like latin1 / shift_jis that the UI's two-value state can't
+      // represent — so syncing them here would clobber that config with
+      // whichever of the two the toolbar menu happens to hold.
+      const isSSH = host.protocol !== 'local' && host.protocol !== 'serial' && host.protocol !== 'telnet' && host.protocol !== 'mosh' && !host.moshEnabled && !host.id?.startsWith('local-') && !host.id?.startsWith('serial-') && host.hostname !== 'localhost';
+      if (isSSH) {
         setSessionEncoding(id, terminalEncodingRef.current);
       }
     },
