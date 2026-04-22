@@ -10,7 +10,7 @@ import { useSettingsState } from './application/state/useSettingsState';
 import { useUpdateCheck } from './application/state/useUpdateCheck';
 import { useVaultState } from './application/state/useVaultState';
 import { useWindowControls } from './application/state/useWindowControls';
-import { useEditorTabs } from './application/state/editorTabStore';
+import { useEditorTabs, editorTabStore } from './application/state/editorTabStore';
 import { initializeFonts } from './application/state/fontStore';
 import { initializeUIFonts } from './application/state/uiFontStore';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
@@ -1690,6 +1690,17 @@ function App({ settings }: { settings: SettingsState }) {
     e.preventDefault();
   }, []);
 
+  // Stub close handler for editor tabs — Task 12 will replace with dirty-confirm flow.
+  const handleRequestCloseEditorTab = useCallback((id: string) => {
+    editorTabStore.close(id);
+  }, []);
+
+  // Combined ordered tab list including editor tab ids (for TopTabs scrollable area)
+  const orderedTabsWithEditors = useMemo(
+    () => [...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))],
+    [orderedTabs, editorTabs],
+  );
+
   return (
     <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>
       <TopTabs
@@ -1700,7 +1711,7 @@ function App({ settings }: { settings: SettingsState }) {
         orphanSessions={orphanSessions}
         workspaces={workspaces}
         logViews={logViews}
-        orderedTabs={orderedTabs}
+        orderedTabs={orderedTabsWithEditors}
         draggingSessionId={draggingSessionId}
         isMacClient={isMacClient}
         onCloseSession={closeSession}
@@ -1719,6 +1730,9 @@ function App({ settings }: { settings: SettingsState }) {
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderTabs}
         showSftpTab={settings.showSftpTab}
+        editorTabs={editorTabs}
+        onRequestCloseEditorTab={handleRequestCloseEditorTab}
+        hostById={hostById}
       />
 
       <div className="flex-1 relative min-h-0">
