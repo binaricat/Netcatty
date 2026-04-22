@@ -570,6 +570,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onOpenFileWith={callbacks.onOpenFileWith}
         onEditFile={callbacks.onEditFile}
         onDownloadFile={callbacks.onDownloadFile}
+        onDownloadFiles={callbacks.onDownloadFiles}
         onEditPermissions={callbacks.onEditPermissions}
         openRenameDialog={openRenameDialog}
         openDeleteConfirm={openDeleteConfirm}

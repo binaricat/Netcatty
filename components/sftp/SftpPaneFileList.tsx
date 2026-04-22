@@ -58,6 +58,7 @@ interface SftpPaneFileListProps {
   onOpenFileWith?: (entry: SftpFileEntry) => void;
   onEditFile?: (entry: SftpFileEntry) => void;
   onDownloadFile?: (entry: SftpFileEntry) => void;
+  onDownloadFiles?: (entries: SftpFileEntry[]) => void;
   onEditPermissions?: (entry: SftpFileEntry) => void;
   openRenameDialog: (name: string) => void;
   openDeleteConfirm: (targets: string[]) => void;
@@ -143,6 +144,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   onOpenFileWith,
   onEditFile,
   onDownloadFile,
+  onDownloadFiles,
   onEditPermissions,
   openRenameDialog,
   openDeleteConfirm,
@@ -243,7 +245,23 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             )}
             {onDownloadFile &&
               (!isNavigableDirectory(entry) || !pane.connection?.isLocal) && (
-              <ContextMenuItem onClick={() => onDownloadFile(entry)}>
+              <ContextMenuItem
+                onClick={() => {
+                  const currentSelected = selectedFilesRef.current;
+                  if (
+                    onDownloadFiles &&
+                    currentSelected.has(entry.name) &&
+                    currentSelected.size > 1
+                  ) {
+                    const entries = Array.from(currentSelected)
+                      .map((name) => filesByName.get(String(name)))
+                      .filter((f): f is SftpFileEntry => !!f);
+                    onDownloadFiles(entries);
+                  } else {
+                    onDownloadFile(entry);
+                  }
+                }}
+              >
                 <Download size={14} className="mr-2" />{" "}
                 {t("sftp.context.download")}
               </ContextMenuItem>
@@ -349,6 +367,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       onCopyToOtherPane,
       onMoveEntriesToPath,
       onDownloadFile,
+      onDownloadFiles,
       onDragEnd,
       onEditFile,
       onEditPermissions,

@@ -52,6 +52,7 @@ export interface SftpPaneCallbacks {
     onOpenFile?: (entry: SftpFileEntry, fullPath?: string) => void;
     onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;  // Always show opener dialog
     onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
+    onDownloadFiles?: (entries: SftpFileEntry[]) => void;  // Batch download — picks one target directory for remote panes
     // External file upload (supports folders via DataTransfer)
     onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
     onListDirectory: (path: string) => Promise<SftpFileEntry[]>;
