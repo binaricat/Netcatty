@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from './application/state/activeTabStore';
+import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive, toEditorTabId } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
 import { useImmersiveMode } from './application/state/useImmersiveMode';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
@@ -10,6 +10,7 @@ import { useSettingsState } from './application/state/useSettingsState';
 import { useUpdateCheck } from './application/state/useUpdateCheck';
 import { useVaultState } from './application/state/useVaultState';
 import { useWindowControls } from './application/state/useWindowControls';
+import { useEditorTabs } from './application/state/editorTabStore';
 import { initializeFonts } from './application/state/fontStore';
 import { initializeUIFonts } from './application/state/uiFontStore';
 import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
@@ -54,6 +55,7 @@ import { ConnectionLog, Host, HostProtocol, SerialConfig, TerminalSession, Termi
 import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
+import { TextEditorTabView } from './components/editor/TextEditorTabView';
 
 // Initialize fonts eagerly at app startup
 initializeFonts();
@@ -330,6 +332,7 @@ function App({ settings }: { settings: SettingsState }) {
   // ---------------------------------------------------------------------------
   const activeTabId = useActiveTabId();
   const customThemes = useCustomThemes();
+  const editorTabs = useEditorTabs();
 
   useEffect(() => {
     if (!settings.showSftpTab && activeTabId === 'sftp') {
@@ -1127,13 +1130,13 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Shared hotkey action handler - used by both global handler and terminal callback
   const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
-    // Build complete tab list: vault + (sftp when visible) + sessions/workspaces.
+    // Build complete tab list: vault + (sftp when visible) + sessions/workspaces + editor tabs.
     // Hiding the SFTP tab must also remove it from keyboard cycling so nextTab
     // doesn't land on a hidden tab (which would get redirected back) and so
     // number shortcuts don't shift.
     const allTabs = settings.showSftpTab
-      ? ['vault', 'sftp', ...orderedTabs]
-      : ['vault', ...orderedTabs];
+      ? ['vault', 'sftp', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))]
+      : ['vault', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))];
     switch (action) {
       case 'switchToTab': {
         // Get the number key pressed (1-9)
@@ -1333,7 +1336,7 @@ function App({ settings }: { settings: SettingsState }) {
         break;
       }
     }
-  }, [orderedTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSessionWithCurrentShell, moveFocusInWorkspace, toggleBroadcast, settings.showSftpTab, confirmIfBusyLocalTerminal]);
+  }, [orderedTabs, editorTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSessionWithCurrentShell, moveFocusInWorkspace, toggleBroadcast, settings.showSftpTab, confirmIfBusyLocalTerminal]);
 
   // Callback for terminal to invoke app-level hotkey actions
   const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -1860,6 +1863,17 @@ function App({ settings }: { settings: SettingsState }) {
             />
           );
         })}
+
+        {/* Editor Tabs — kept mounted for Monaco instance persistence; visibility toggled via CSS */}
+        {editorTabs.map((tab) => (
+          <TextEditorTabView
+            key={tab.id}
+            tabId={tab.id}
+            isVisible={activeTabId === toEditorTabId(tab.id)}
+            hotkeyScheme={hotkeyScheme}
+            keyBindings={keyBindings}
+          />
+        ))}
       </div>
 
       {/* Global "quick add / edit snippet" dialog, triggered by the
