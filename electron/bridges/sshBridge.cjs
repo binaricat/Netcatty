@@ -285,6 +285,17 @@ function buildAlgorithms(legacyEnabled) {
       'rsa-sha2-512', 'rsa-sha2-256',
       'ssh-rsa', 'ssh-dss',
     ];
+    // Legacy HMACs — required by very old servers (e.g. FreeBSD 6.1 OpenSSH
+    // ~2006, issue #807). Without hmac-sha1/md5 in the offered list, the
+    // handshake exchange-hash MAC never agrees and the host-key signature
+    // verification that depends on it fails with
+    // "Handshake failed: signature verification failed" — which looks like
+    // a host-key problem but is really a MAC negotiation mismatch.
+    algorithms.hmac = [
+      'hmac-sha2-256-etm@openssh.com', 'hmac-sha2-512-etm@openssh.com',
+      'hmac-sha2-256', 'hmac-sha2-512',
+      'hmac-sha1', 'hmac-md5',
+    ];
   }
 
   return algorithms;
