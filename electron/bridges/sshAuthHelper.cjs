@@ -16,7 +16,7 @@ const SSH_KEY_PATTERN = /^id_[\w-]+$/;
 
 async function readFileNoFollow(filePath) {
   const lstat = await fs.promises.lstat(filePath);
-  if (!lstat.isFile()) return null;
+  if (!lstat.isFile() && !lstat.isSymbolicLink()) return null;
   const fd = await fs.promises.open(filePath, "r", 0o0);
   try {
     const buffer = Buffer.alloc(lstat.size);
