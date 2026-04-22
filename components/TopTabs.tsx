@@ -20,6 +20,9 @@ import { SyncStatusButton } from './SyncStatusButton';
 const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
 const dragRegionNoSelect = { WebkitAppRegion: 'drag', userSelect: 'none' } as React.CSSProperties;
 
+// File extensions that render the code-file icon instead of the plain text icon.
+const CODE_EXTENSIONS_RE = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
+
 interface TopTabsProps {
   theme: 'dark' | 'light';
   followAppTerminalTheme?: boolean;
@@ -564,9 +567,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const suffix = dupes.length > 1
           ? ` · ${editorTab.remotePath.split('/').slice(-2, -1)[0] || '/'}`
           : '';
-        // Use FileCode for code-like extensions, FileText for others
-        const codeExtensions = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
-        const FileIcon = codeExtensions.test(editorTab.fileName) ? FileCode : FileText;
+        const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
 
         return (
           <div
@@ -574,7 +575,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             data-tab-id={tabId}
             data-tab-type="editor"
             data-state={isActive ? 'active' : 'inactive'}
-            onClick={() => activeTabStore.setActiveTabId(tabId)}
+            onClick={() => onSelectTab(tabId)}
             title={tooltip}
             className={cn(
               "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
