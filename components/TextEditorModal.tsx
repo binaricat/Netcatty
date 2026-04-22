@@ -14,12 +14,16 @@ import type { HotkeyScheme, KeyBinding } from '../domain/models';
 
 /** Snapshot passed to `onPromoteToTab` when the user clicks the maximize button. */
 export interface TextEditorModalSnapshot {
+  /** The file name at the time of promotion (modal's fileName prop). */
+  fileName: string;
   /** The clean baseline content at the time the modal was opened. */
   baselineContent: string;
   /** The current (possibly-dirty) editor content. */
   content: string;
   /** The current language ID selected by the user (may differ from file-detected default). */
   languageId: string;
+  /** The current word-wrap state (carried over so the tab opens with the same setting). */
+  wordWrap: boolean;
   /** The latest Monaco view state (scroll position, cursor, etc.) — may be null before first edit. */
   viewState: Monaco.editor.ICodeEditorViewState | null;
 }
@@ -106,12 +110,14 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const handlePromote = useCallback(() => {
     if (!onPromoteToTab) return;
     onPromoteToTab({
+      fileName,
       baselineContent: initialContent,
       content,
       languageId,
+      wordWrap: editorWordWrap,
       viewState: viewStateRef.current,
     });
-  }, [onPromoteToTab, initialContent, content, languageId]);
+  }, [onPromoteToTab, fileName, initialContent, content, languageId, editorWordWrap]);
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
