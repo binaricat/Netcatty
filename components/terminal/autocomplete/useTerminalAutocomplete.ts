@@ -663,12 +663,21 @@ export function useTerminalAutocomplete(
         // executing each segment — meaning we must preserve the whole
         // content in the buffer, not just the post-final-newline tail
         // (Codex #814 P2).
+        //
+        // Reliability is *inherited*, not reset: if the buffer was
+        // already aligned with the line (reliable=true), appending this
+        // paste keeps it aligned; if the buffer was unreliable (e.g.
+        // after ↑ recalled a history command so line ≠ buffer), the
+        // paste only extends the tail but the head is still whatever
+        // the shell had, so the buffer stays unreliable. Without this,
+        // a paste-after-recall flow would flip reliability back on and
+        // Enter would record just the pasted suffix as the command
+        // (Codex #814 P1 follow-up).
         const endIdx = data.indexOf("\x1b[201~");
         const content = endIdx >= 0
           ? data.slice("\x1b[200~".length, endIdx)
           : data.slice("\x1b[200~".length);
         typedInputBufferRef.current += content;
-        typedBufferReliableRef.current = true;
         clearState();
         return;
       } else if (data.startsWith("\x1b") && data !== "\x1b") {
