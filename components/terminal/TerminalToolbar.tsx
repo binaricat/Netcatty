@@ -157,28 +157,30 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     {encodingSwitchSupported && onSetTerminalEncoding && (
                         <>
                             <div className="h-px bg-border/60 my-1 mx-1" />
-                            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                                <Languages size={11} />
-                                {t("terminal.toolbar.encoding")}
-                            </div>
-                            {(["utf-8", "gb18030"] as const).map((enc) => (
-                                <PopoverClose asChild key={enc}>
-                                    <button
-                                        type="button"
-                                        className={cn(menuItemClass, "pl-6", terminalEncoding === enc && "font-medium")}
-                                        onClick={() => onSetTerminalEncoding(enc)}
-                                    >
-                                        <Check
-                                            size={12}
-                                            className={cn(
-                                                "shrink-0",
-                                                terminalEncoding === enc ? "opacity-100" : "opacity-0",
-                                            )}
-                                        />
-                                        {t(`terminal.toolbar.encoding.${enc === "utf-8" ? "utf8" : enc}`)}
-                                    </button>
-                                </PopoverClose>
-                            ))}
+                            {(["utf-8", "gb18030"] as const).map((enc) => {
+                                const isActive = terminalEncoding === enc;
+                                return (
+                                    <PopoverClose asChild key={enc}>
+                                        <button
+                                            type="button"
+                                            className={cn(menuItemClass, isActive && "font-medium")}
+                                            onClick={() => onSetTerminalEncoding(enc)}
+                                        >
+                                            <Languages size={12} className="shrink-0" />
+                                            <span className="flex-1 text-left truncate">
+                                                {t(`terminal.toolbar.encoding.${enc === "utf-8" ? "utf8" : enc}`)}
+                                            </span>
+                                            <Check
+                                                size={12}
+                                                className={cn(
+                                                    "shrink-0",
+                                                    isActive ? "opacity-100" : "opacity-0",
+                                                )}
+                                            />
+                                        </button>
+                                    </PopoverClose>
+                                );
+                            })}
                         </>
                     )}
                 </PopoverContent>
