@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays SFTP, Scripts, Theme, Highlight, Search buttons and close button in terminal status bar
  */
-import { Check, FolderInput, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
+import { Check, ChevronRight, FolderInput, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host } from '../../types';
@@ -50,6 +50,12 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
 }) => {
     const { t } = useI18n();
     const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
+    // Overflow popover + encoding submenu are both controlled so that
+    // picking an encoding closes the whole chain, and so the parent popover
+    // can ignore clicks that land in the submenu portal (otherwise the
+    // submenu click would read as "outside" and dismiss the parent).
+    const [overflowOpen, setOverflowOpen] = useState(false);
+    const [encodingSubmenuOpen, setEncodingSubmenuOpen] = useState(false);
     const buttonBase = "h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent";
 
     const isLocalTerminal = host?.protocol === 'local' || host?.id?.startsWith('local-');
@@ -110,7 +116,13 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 single ⋮ trigger so the toolbar doesn't feel crowded.
                 Highlight / Compose / Search stay visible because they
                 are toggled mid-session, not just once. */}
-            <Popover>
+            <Popover
+                open={overflowOpen}
+                onOpenChange={(open) => {
+                    setOverflowOpen(open);
+                    if (!open) setEncodingSubmenuOpen(false);
+                }}
+            >
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <PopoverTrigger asChild>
@@ -126,7 +138,19 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     </TooltipTrigger>
                     <TooltipContent>{t("terminal.toolbar.more")}</TooltipContent>
                 </Tooltip>
-                <PopoverContent className="w-48 p-1" align="end">
+                <PopoverContent
+                    className="w-48 p-1"
+                    align="end"
+                    onInteractOutside={(e) => {
+                        // Radix treats the submenu's portalled content as
+                        // "outside" this popover; without this guard a click
+                        // in the submenu would dismiss the parent.
+                        const target = e.target as Element | null;
+                        if (target?.closest('[data-encoding-submenu="true"]')) {
+                            e.preventDefault();
+                        }
+                    }}
+                >
                     {!hidesSftp && (
                         <PopoverClose asChild>
                             <button
@@ -155,16 +179,41 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                         </button>
                     </PopoverClose>
                     {encodingSwitchSupported && onSetTerminalEncoding && (
-                        <>
-                            <div className="h-px bg-border/60 my-1 mx-1" />
-                            {(["utf-8", "gb18030"] as const).map((enc) => {
-                                const isActive = terminalEncoding === enc;
-                                return (
-                                    <PopoverClose asChild key={enc}>
+                        <Popover open={encodingSubmenuOpen} onOpenChange={setEncodingSubmenuOpen}>
+                            <PopoverTrigger asChild>
+                                <button
+                                    type="button"
+                                    className={menuItemClass}
+                                    aria-haspopup="menu"
+                                    aria-expanded={encodingSubmenuOpen}
+                                >
+                                    <Languages size={12} className="shrink-0" />
+                                    <span className="flex-1 text-left truncate">{t("terminal.toolbar.encoding")}</span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {t(`terminal.toolbar.encoding.${terminalEncoding === "utf-8" ? "utf8" : "gb18030"}`)}
+                                    </span>
+                                    <ChevronRight size={12} className="shrink-0 text-muted-foreground" />
+                                </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                                data-encoding-submenu="true"
+                                className="w-40 p-1"
+                                side="right"
+                                align="start"
+                                sideOffset={6}
+                            >
+                                {(["utf-8", "gb18030"] as const).map((enc) => {
+                                    const isActive = terminalEncoding === enc;
+                                    return (
                                         <button
+                                            key={enc}
                                             type="button"
                                             className={cn(menuItemClass, isActive && "font-medium")}
-                                            onClick={() => onSetTerminalEncoding(enc)}
+                                            onClick={() => {
+                                                onSetTerminalEncoding(enc);
+                                                setEncodingSubmenuOpen(false);
+                                                setOverflowOpen(false);
+                                            }}
                                         >
                                             <Languages size={12} className="shrink-0" />
                                             <span className="flex-1 text-left truncate">
@@ -178,10 +227,10 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                                                 )}
                                             />
                                         </button>
-                                    </PopoverClose>
-                                );
-                            })}
-                        </>
+                                    );
+                                })}
+                            </PopoverContent>
+                        </Popover>
                     )}
                 </PopoverContent>
             </Popover>
