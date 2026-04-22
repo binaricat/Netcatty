@@ -689,6 +689,10 @@ export function useTerminalAutocomplete(
           ? data.slice("\x1b[200~".length, endIdx)
           : data.slice("\x1b[200~".length);
         typedInputBufferRef.current += content;
+        // Paste extends the line past whatever was accepted, so the
+        // Enter fast-path must not record the pre-paste accepted
+        // command — mirrors the non-bracketed paste branch below.
+        lastAcceptedCommandRef.current = null;
         clearState();
         return;
       } else if (data.startsWith("\x1b") && data !== "\x1b") {
