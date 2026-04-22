@@ -313,9 +313,13 @@ function buildAlgorithms(legacyEnabled) {
     // negotiation, turning the legacy toggle into a hard failure for FIPS
     // users. hmac-sha1 is allowed for HMAC even under FIPS 140-2 so it
     // stays unconditionally.
+    // hmac-sha1-etm@openssh.com is in ssh2's default MAC set — keep it so
+    // hosts that only accept EtM SHA-1 MACs don't regress to "no matching
+    // C->S MAC" when legacy mode replaces the default list.
     algorithms.hmac = [
       'hmac-sha2-256-etm@openssh.com', 'hmac-sha2-512-etm@openssh.com',
       'hmac-sha2-256', 'hmac-sha2-512',
+      'hmac-sha1-etm@openssh.com',
       'hmac-sha1',
     ];
     if (md5Supported()) {
