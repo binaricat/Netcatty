@@ -740,9 +740,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setChainProgress,
     t,
     onSessionAttached: (id: string) => {
-      // Sync terminal encoding to SSH backend before first data arrives
-      const isSSH = host.protocol !== 'local' && host.protocol !== 'serial' && host.protocol !== 'telnet' && host.protocol !== 'mosh' && !host.moshEnabled && !host.id?.startsWith('local-') && !host.id?.startsWith('serial-') && host.hostname !== 'localhost';
-      if (isSSH) {
+      // Sync terminal encoding to the backend before first data arrives.
+      // Local PTY follows the OS locale and mosh frames in UTF-8 itself,
+      // so those protocols don't need (and don't support) runtime encoding
+      // swaps — see TerminalToolbar's encodingSwitchSupported gate.
+      const isLocal = host.protocol === 'local' || host.id?.startsWith('local-');
+      const isMosh = host.protocol === 'mosh' || host.moshEnabled;
+      if (!isLocal && !isMosh && host.hostname !== 'localhost') {
         setSessionEncoding(id, terminalEncodingRef.current);
       }
     },

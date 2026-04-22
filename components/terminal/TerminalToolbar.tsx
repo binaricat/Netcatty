@@ -54,7 +54,11 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
 
     const isLocalTerminal = host?.protocol === 'local' || host?.id?.startsWith('local-');
     const isSerialTerminal = host?.protocol === 'serial' || host?.id?.startsWith('serial-');
-    const isSSHSession = !isLocalTerminal && !isSerialTerminal && host?.protocol !== 'telnet' && host?.protocol !== 'mosh' && !host?.moshEnabled && host?.hostname !== 'localhost';
+    const isMoshSession = host?.protocol === 'mosh' || host?.moshEnabled;
+    // Local PTY inherits the OS locale and mosh always uses its own UTF-8
+    // framing, so the quick-switch menu only makes sense for sessions whose
+    // backend decoder we actually control (SSH, telnet, serial).
+    const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && host?.hostname !== 'localhost';
     const hidesSftp = isLocalTerminal || isSerialTerminal;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
@@ -150,7 +154,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                             <span className="flex-1 text-left truncate">{t("terminal.toolbar.terminalSettings")}</span>
                         </button>
                     </PopoverClose>
-                    {isSSHSession && onSetTerminalEncoding && (
+                    {encodingSwitchSupported && onSetTerminalEncoding && (
                         <>
                             <div className="h-px bg-border/60 my-1 mx-1" />
                             <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">

@@ -598,8 +598,14 @@ const api = {
   closeSession: (sessionId) => {
     ipcRenderer.send("netcatty:close", { sessionId });
   },
-  setSessionEncoding: (sessionId, encoding) =>
-    ipcRenderer.invoke("netcatty:ssh:setEncoding", { sessionId, encoding }),
+  setSessionEncoding: async (sessionId, encoding) => {
+    // Try the SSH handler first; it returns { ok: false } for non-SSH
+    // sessions (no session.stream). Telnet and serial sessions fall
+    // through to terminalBridge's handler.
+    const ssh = await ipcRenderer.invoke("netcatty:ssh:setEncoding", { sessionId, encoding });
+    if (ssh?.ok) return ssh;
+    return ipcRenderer.invoke("netcatty:terminal:setEncoding", { sessionId, encoding });
+  },
   onZmodemEvent: (sessionId, cb) => {
     if (!zmodemListeners.has(sessionId)) zmodemListeners.set(sessionId, new Set());
     zmodemListeners.get(sessionId).add(cb);

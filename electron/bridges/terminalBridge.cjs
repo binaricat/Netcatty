@@ -10,6 +10,7 @@ const path = require("node:path");
 const { StringDecoder } = require("node:string_decoder");
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
+const iconv = require("iconv-lite");
 const ptyProcessTree = require("./ptyProcessTree.cjs");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
@@ -22,18 +23,18 @@ const { discoverShells } = require("./shellDiscovery.cjs");
 let sessions = null;
 let electronModule = null;
 
-// Map user-facing charset names to Node.js StringDecoder/Buffer encoding names.
-// Falls back to utf8 for unrecognized charsets (StringDecoder only supports a
-// small set; for CJK encodings like GB18030/Big5 we'd need iconv-lite, which
-// is out of scope for this change — utf8 is still the safer default).
-function charsetToNodeEncoding(charset) {
-  if (!charset) return 'utf8';
-  const normalized = String(charset).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (['utf8', 'utf-8'].includes(normalized)) return 'utf8';
-  if (['latin1', 'iso88591', 'iso-8859-1', 'binary'].includes(normalized)) return 'latin1';
-  if (normalized === 'ascii') return 'ascii';
-  if (['utf16le', 'ucs2'].includes(normalized)) return 'utf16le';
-  return 'utf8';
+// Normalize user-facing charset names into an iconv-lite encoding identifier.
+// iconv-lite accepts a wide range of aliases directly ("utf-8", "gbk", etc.),
+// so mostly this just lowercases + collapses non-alphanumerics and maps a few
+// obvious GB* variants to gb18030 which is the superset we ship the encoding
+// switcher with. Anything iconv doesn't recognize falls back to utf-8.
+function normalizeTerminalEncoding(charset) {
+  if (!charset) return 'utf-8';
+  const raw = String(charset).trim().toLowerCase();
+  const normalized = raw.replace(/[^a-z0-9]/g, '');
+  if (['utf8', 'utf-8'].includes(normalized)) return 'utf-8';
+  if (normalized === 'gb18030' || normalized === 'gbk' || normalized === 'gb2312') return 'gb18030';
+  return iconv.encodingExists(raw) ? raw : 'utf-8';
 }
 
 const DEFAULT_UTF8_LOCALE = "en_US.UTF-8";
@@ -556,6 +557,8 @@ async function startTelnetSession(event, options) {
         lastIdlePrompt: "",
         lastIdlePromptAt: 0,
         _promptTrackTail: "",
+        encoding: initialTelnetEncoding,
+        decoderRef: telnetDecoderRef,
       };
       session.flushPendingData = flushTelnet;
       sessions.set(sessionId, session);
@@ -574,7 +577,11 @@ async function startTelnetSession(event, options) {
       resolve({ sessionId });
     });
 
-    const telnetDecoder = new StringDecoder(charsetToNodeEncoding(options.charset));
+    // Wrap the iconv decoder in a mutable ref so the encoding switcher
+    // (setSessionEncoding IPC) can swap in a fresh decoder mid-session
+    // without having to rewrite the closures below.
+    const initialTelnetEncoding = normalizeTerminalEncoding(options.charset);
+    const telnetDecoderRef = { current: iconv.getDecoder(initialTelnetEncoding) };
 
     const telnetWebContentsId = event.sender.id;
     const { bufferData: bufferTelnetData, flush: flushTelnet } = createPtyBuffer((data) => {
@@ -585,7 +592,7 @@ async function startTelnetSession(event, options) {
     const telnetZmodemSentry = createZmodemSentry({
       sessionId,
       onData(buf) {
-        const decoded = telnetDecoder.write(buf);
+        const decoded = telnetDecoderRef.current.write(buf);
         if (!decoded) return;
         const session = sessions.get(sessionId);
         if (session) trackSessionIdlePrompt(session, decoded);
@@ -883,15 +890,19 @@ async function startSerialSession(event, options) {
 
         console.log(`[Serial] Connected to ${portPath}`);
 
-        const serialEncoding = charsetToNodeEncoding(options.charset);
-        const serialDecoder = new StringDecoder(serialEncoding);
+        const initialSerialEncoding = normalizeTerminalEncoding(options.charset);
+        const serialDecoderRef = { current: iconv.getDecoder(initialSerialEncoding) };
 
         const session = {
           serialPort,
           type: 'serial',
           protocol: 'serial',
           shellKind: 'raw',
-          serialEncoding,
+          encoding: initialSerialEncoding,
+          // Kept for backward compatibility with aiBridge / mcpServerBridge
+          // which read session.serialEncoding for exec calls.
+          serialEncoding: initialSerialEncoding,
+          decoderRef: serialDecoderRef,
           webContentsId: event.sender.id,
         };
         sessions.set(sessionId, session);
@@ -910,7 +921,7 @@ async function startSerialSession(event, options) {
         const serialZmodemSentry = createZmodemSentry({
           sessionId,
           onData(buf) {
-            const decoded = serialDecoder.write(buf);
+            const decoded = serialDecoderRef.current.write(buf);
             if (!decoded) return;
             const contents = electronModule.webContents.fromId(session.webContentsId);
             contents?.send("netcatty:data", { sessionId, data: decoded });
@@ -1056,6 +1067,32 @@ function closeSession(event, payload) {
 }
 
 /**
+ * Set terminal decoder encoding for an active telnet or serial session.
+ * SSH sessions are handled by sshBridge's own setEncoding IPC — this one
+ * only responds to sessions that carry a decoderRef (telnet + serial).
+ */
+function setSessionEncoding(_event, { sessionId, encoding }) {
+  const session = sessions?.get(sessionId);
+  if (!session || !session.decoderRef) {
+    return { ok: false, encoding: encoding || 'utf-8' };
+  }
+  const enc = normalizeTerminalEncoding(encoding);
+  if (!iconv.encodingExists(enc)) {
+    return { ok: false, encoding: enc };
+  }
+  session.encoding = enc;
+  // Keep serialEncoding mirror in sync so aiBridge / mcpServerBridge exec
+  // calls pick up the new encoding too.
+  if (session.type === 'serial') {
+    session.serialEncoding = enc;
+  }
+  // iconv stateful decoders carry partial-byte state from the previous
+  // encoding, so swap in a fresh decoder rather than reconfiguring.
+  session.decoderRef.current = iconv.getDecoder(enc);
+  return { ok: true, encoding: enc };
+}
+
+/**
  * Register IPC handlers for terminal operations
  */
 function registerHandlers(ipcMain) {
@@ -1067,6 +1104,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
+  ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
   ipcMain.on("netcatty:write", writeToSession);
   ipcMain.on("netcatty:resize", resizeSession);
   ipcMain.on("netcatty:close", closeSession);
