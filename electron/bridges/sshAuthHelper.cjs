@@ -15,12 +15,12 @@ const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
 const SSH_KEY_PATTERN = /^id_[\w-]+$/;
 
 async function readFileNoFollow(filePath) {
+  const lstat = await fs.promises.lstat(filePath);
+  if (!lstat.isFile()) return null;
   const fd = await fs.promises.open(filePath, "r", 0o0);
   try {
-    const stat = await fd.stat();
-    if (!stat.isFile()) return null;
-    const buffer = Buffer.alloc(stat.size);
-    await fd.read(buffer, 0, stat.size, 0);
+    const buffer = Buffer.alloc(lstat.size);
+    await fd.read(buffer, 0, lstat.size, 0);
     return buffer.toString("utf8");
   } finally {
     await fd.close();

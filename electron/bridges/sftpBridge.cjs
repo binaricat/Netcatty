@@ -547,7 +547,7 @@ function buildStagedRemotePath(remotePath) {
   const dir = lastSeparatorIndex >= 0 ? remotePath.slice(0, lastSeparatorIndex + 1) : "";
   const baseName = lastSeparatorIndex >= 0 ? remotePath.slice(lastSeparatorIndex + 1) : remotePath;
   const safeBaseName = baseName || "upload";
-  const stagedName = `.netcatty-upload-${randomUUID()}-${safeBaseName}.part`;
+  const stagedName = `.netcatty-upload-${randomUUID().slice(0, 8)}-${safeBaseName}.part`;
   return dir ? `${dir}${stagedName}` : stagedName;
 }
 
@@ -556,7 +556,7 @@ function buildBackupRemotePath(remotePath) {
   const dir = lastSeparatorIndex >= 0 ? remotePath.slice(0, lastSeparatorIndex + 1) : "";
   const baseName = lastSeparatorIndex >= 0 ? remotePath.slice(lastSeparatorIndex + 1) : remotePath;
   const safeBaseName = baseName || "upload";
-  const backupName = `.netcatty-backup-${randomUUID()}-${safeBaseName}.bak`;
+  const backupName = `.netcatty-backup-${randomUUID().slice(0, 8)}-${safeBaseName}.bak`;
   return dir ? `${dir}${backupName}` : backupName;
 }
 
