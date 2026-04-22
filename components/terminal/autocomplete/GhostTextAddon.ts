@@ -260,6 +260,16 @@ export class GhostTextAddon implements IDisposable {
   private updatePosition(): void {
     if (!this.term || !this.ghostElement) return;
 
+    // Self-heal a stale anchor: when show() fires during the SSH
+    // keystroke→echo gap, cursorX captured there is still the
+    // pre-echo column. While no adjustToInput has moved us from the
+    // show-time baseline, re-read live cursor on each render tick so
+    // the anchor snaps to the echoed position once it arrives.
+    if (this.currentInput.length === this.anchorInputLength) {
+      this.anchorCursorX = this.term.buffer.active.cursorX;
+      this.anchorCursorY = this.term.buffer.active.cursorY;
+    }
+
     const dims = getXTermCellDimensions(this.term);
 
     // Advance (or walk back) the anchor column by the cell width of
@@ -270,23 +280,27 @@ export class GhostTextAddon implements IDisposable {
     const cellDelta = this.currentInput.length >= this.anchorInputLength
       ? stringCellWidth(this.currentInput.slice(this.anchorInputLength))
       : -stringCellWidth(
-          // Best-effort negative delta — we don't remember the removed
-          // glyphs' widths, so fall back to code-unit count (correct for
-          // ASCII, slightly off for multi-cell). Good enough since the
-          // real fix for backspace-with-wide-chars needs per-grapheme
-          // history we don't keep.
+          // currentSuggestion[0..anchorInputLength] equals what was typed
+          // when show() fired (prefix-match invariant), so its slice gives
+          // the correct cell widths for the deleted glyphs.
           this.currentSuggestion.slice(this.currentInput.length, this.anchorInputLength),
         );
     const cols = Math.max(1, this.term.cols);
-    const targetCol = Math.max(0, this.anchorCursorX + cellDelta);
-    // Wrap the predicted cursor position across line boundaries — the
-    // real xterm cursor wraps once it crosses cols, so if we keep piling
-    // pixels onto `left` the ghost walks off the right edge instead of
-    // following the cursor to the next row.
-    const col = targetCol % cols;
-    const rowOffset = Math.floor(targetCol / cols);
+    const targetCol = this.anchorCursorX + cellDelta;
+    // Wrap the predicted cursor position across line boundaries in both
+    // directions — the real xterm cursor wraps to the next row once it
+    // crosses cols forward, and to the previous row when a deletion
+    // crosses back past column 0. JS `%` returns negative for negative
+    // dividends, so normalize both col and rowOffset explicitly.
+    let col = targetCol % cols;
+    let rowOffset = Math.floor(targetCol / cols);
+    if (col < 0) {
+      col += cols;
+    }
+    // Clamp to the visible top row so a runaway negative delta (e.g.
+    // deleted past the prompt) doesn't render above the terminal.
+    const top = Math.max(0, this.anchorCursorY + rowOffset) * dims.height;
     const left = col * dims.width;
-    const top = (this.anchorCursorY + rowOffset) * dims.height;
 
     // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)
     if (left === this.lastLeft && top === this.lastTop) return;

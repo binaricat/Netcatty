@@ -248,6 +248,59 @@ test("wraps the ghost to the next row when the predicted column crosses cols", (
   }
 });
 
+test("self-heals a stale anchor on render while no adjustToInput has fired", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    // show() captures cursorX=2 — simulate this firing during the
+    // keystroke→echo gap by later advancing the live cursor and
+    // verifying the ghost anchor snaps to the echoed position.
+    addon.show("docker", "do");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.style.left, "18px");
+
+    term.buffer.active.cursorX = 5;
+    fireRender();
+
+    // Input hasn't moved from the show-time baseline, so updatePosition
+    // re-reads live cursor: new left = 5 * 9 = 45px.
+    assert.equal(ghost.style.left, "45px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("wraps the ghost to the previous row when deletion crosses a row boundary", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    term.cols = 10;
+    term.buffer.active.cursorX = 1;
+    term.buffer.active.cursorY = 1;
+    addon.activate(term as never);
+    // Anchored at row 1 col 1 with 5 chars already typed.
+    addon.show("abcdefghij", "abcde");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+
+    // Backspace back to 2 chars — delta = -3 across a row boundary.
+    addon.adjustToInput("ab");
+
+    // targetCol = 1 - 3 = -2 → col = 8 (wrapped) on row 0.
+    assert.equal(ghost.textContent, "cdefghij");
+    assert.equal(ghost.style.left, "72px");
+    assert.equal(ghost.style.top, "0px");
+  } finally {
+    restoreDocument();
+  }
+});
+
 test("hides ghost immediately when input no longer matches suggestion", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();
