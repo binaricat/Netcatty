@@ -810,23 +810,36 @@ export function useTerminalAutocomplete(
         if (ghost?.isActive()) {
           e.preventDefault();
           const fullSuggestion = ghost.getSuggestion();
-          // Recompute the tail against the *live* typed buffer rather
-          // than the input captured at show() time. If the user typed a
-          // char right before this accept and adjustToInput hasn't
-          // caught up, ghost.getGhostText() would return the pre-update
-          // tail and we'd paste it on top of the new char (jitter →
-          // corrupt command). When the suggestion no longer prefixes
-          // the live buffer, the suggestion is stale — hide instead of
-          // writing.
-          const live = typedBufferReliableRef.current ? typedInputBufferRef.current : "";
-          const ghostText = fullSuggestion && fullSuggestion.startsWith(live)
-            ? fullSuggestion.substring(live.length)
-            : "";
+          // When the keystroke buffer is reliable, recompute the tail
+          // against the *live* buffer so a fast "type + →" in the
+          // hide-until-render gap still writes the correct tail. When
+          // it's not reliable (post history-recall / Ctrl-R), we can't
+          // treat empty buffer as "nothing typed" — the line actually
+          // has content we're not tracking — so fall back to the
+          // ghost's own cached tail instead of writing the entire
+          // suggestion onto an already-populated line.
+          let ghostText: string;
+          let newBuffer: string | null;
+          if (typedBufferReliableRef.current) {
+            const live = typedInputBufferRef.current;
+            if (fullSuggestion && fullSuggestion.startsWith(live)) {
+              ghostText = fullSuggestion.substring(live.length);
+              newBuffer = fullSuggestion;
+            } else {
+              ghostText = "";
+              newBuffer = null;
+            }
+          } else {
+            ghostText = ghost.getGhostText();
+            newBuffer = null; // buffer is unreliable; don't flip it back on
+          }
           if (ghostText) {
             writeToTerminal(ghostText);
             lastAcceptedCommandRef.current = fullSuggestion;
-            typedInputBufferRef.current = fullSuggestion;
-            typedBufferReliableRef.current = true;
+            if (newBuffer !== null) {
+              typedInputBufferRef.current = newBuffer;
+              typedBufferReliableRef.current = true;
+            }
             ghost.hide();
             clearState();
           } else {
@@ -841,17 +854,29 @@ export function useTerminalAutocomplete(
         if (ghost?.isActive()) {
           e.preventDefault();
           const fullSuggestion = ghost.getSuggestion();
-          // Resync the ghost to the live buffer before picking the next
-          // word — otherwise a keystroke that landed right before this
-          // accept (and whose adjustToInput hasn't run in a race) would
-          // leave getNextWord returning a word off the stale tail.
-          const live = typedBufferReliableRef.current ? typedInputBufferRef.current : "";
-          if (fullSuggestion && fullSuggestion.startsWith(live)) {
-            ghost.show(fullSuggestion, live);
-          } else {
+          if (!fullSuggestion) {
             ghost.hide();
             return false;
           }
+          // Determine the baseline the next word should extend. Reliable
+          // buffer: resync the ghost to the live buffer so getNextWord
+          // operates on the up-to-date tail. Unreliable buffer (post
+          // history-recall / Ctrl-R): don't reanchor to "" — that would
+          // make getNextWord hand back the very first word and the shell
+          // would duplicate leading tokens on top of the recalled line.
+          // Fall back to the ghost's existing cached input instead.
+          if (typedBufferReliableRef.current) {
+            const live = typedInputBufferRef.current;
+            if (fullSuggestion.startsWith(live)) {
+              ghost.show(fullSuggestion, live);
+            } else {
+              ghost.hide();
+              return false;
+            }
+          }
+          const base = ghost.getGhostText().length > 0
+            ? fullSuggestion.substring(0, fullSuggestion.length - ghost.getGhostText().length)
+            : fullSuggestion;
           const nextWord = ghost.getNextWord();
           if (nextWord) {
             writeToTerminal(nextWord);
@@ -862,7 +887,7 @@ export function useTerminalAutocomplete(
               typedInputBufferRef.current += nextWord;
             }
             // Shrink the ghost to reflect what's left after the accept.
-            const newInput = live + nextWord;
+            const newInput = base + nextWord;
             if (fullSuggestion.startsWith(newInput) && fullSuggestion.length > newInput.length) {
               ghost.show(fullSuggestion, newInput);
             } else {
