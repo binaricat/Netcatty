@@ -24,7 +24,7 @@ loader.config({ paths: { vs: monacoBasePath } });
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useClipboardBackend } from '../../application/state/useClipboardBackend';
 import { HotkeyScheme, KeyBinding, matchesKeyBinding } from '../../domain/models';
-import { getLanguageId, getLanguageName, getSupportedLanguages } from '../../lib/sftpFileUtils';
+import { getLanguageName, getSupportedLanguages } from '../../lib/sftpFileUtils';
 import { Button } from '../ui/button';
 import { Combobox } from '../ui/combobox';
 
