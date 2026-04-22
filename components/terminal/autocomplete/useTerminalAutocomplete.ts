@@ -652,6 +652,11 @@ export function useTerminalAutocomplete(
       if (data === "\x03" || data === "\x15") {
         typedInputBufferRef.current = "";
         typedBufferReliableRef.current = true;
+        // Same rationale as the ctrl/escape early returns below: any
+        // previously-accepted suggestion is gone from the line too, so
+        // accept → Ctrl-C → type "foo" → Enter must not log the stale
+        // accepted command via the Enter fast path.
+        lastAcceptedCommandRef.current = null;
         clearState();
         return;
       }
