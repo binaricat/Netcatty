@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { Button } from "../ui/button";
 import {
@@ -26,14 +26,29 @@ export const UnsavedChangesProvider: React.FC<{
 }> = ({ children }) => {
   const { t } = useI18n();
   const [pending, setPending] = useState<Pending | null>(null);
+  const pendingRef = useRef<Pending | null>(null);
+  pendingRef.current = pending;
 
   const prompt = useCallback(
     (fileName: string) =>
       new Promise<UnsavedChoice>((resolve) => {
+        // Re-entrance: if a prior prompt is still pending, cancel it so its caller
+        // doesn't hang forever waiting for a resolve that now belongs to a new prompt.
+        const prior = pendingRef.current;
+        if (prior) prior.resolve("cancel");
         setPending({ fileName, resolve });
       }),
     [],
   );
+
+  // On unmount, resolve any in-flight prompt as "cancel" so awaiting callers don't leak.
+  useEffect(() => () => {
+    const prior = pendingRef.current;
+    if (prior) {
+      prior.resolve("cancel");
+      pendingRef.current = null;
+    }
+  }, []);
 
   const resolveWith = useCallback((choice: UnsavedChoice) => {
     if (!pending) return;
