@@ -1789,6 +1789,7 @@ const zhCN: Messages = {
 
   // Text Editor
   'sftp.editor.wordWrap': '自动换行',
+  'sftp.editor.maximize': '最大化',
 
   // AI Settings
   'ai.agentSettings': 'Agent 设置',

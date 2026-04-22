@@ -1780,6 +1780,7 @@ const en: Messages = {
 
   // Text Editor
   'sftp.editor.wordWrap': 'Word Wrap',
+  'sftp.editor.maximize': 'Maximize',
 
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
