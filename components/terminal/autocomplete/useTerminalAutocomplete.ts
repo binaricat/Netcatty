@@ -11,7 +11,7 @@
 import { startTransition, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { GhostTextAddon } from "./GhostTextAddon";
-import { detectPrompt, reconcilePromptWithTypedInput, type PromptDetectionResult } from "./promptDetector";
+import { getAlignedPrompt, type PromptDetectionResult } from "./promptDetector";
 import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import { recordCommand } from "./commandHistoryStore";
 import { preloadCommonSpecs } from "./figSpecLoader";
@@ -155,9 +155,10 @@ export function useTerminalAutocomplete(
    *
    * detectPrompt parses the xterm buffer and can misattribute theme
    * content — e.g. oh-my-zsh robbyrussell's "➜  ~ " — as user input.
-   * Keeping an independent keystroke log lets reconcilePromptWithTypedInput
-   * snap the detected userInput back to what was actually typed, which
-   * in turn keeps history recording and Tab insertion honest (#806).
+   * Keeping an independent keystroke log lets getAlignedPrompt snap the
+   * detected userInput back to what was actually typed (and only when
+   * the buffer matches the live line's tail), which in turn keeps
+   * history recording and Tab insertion honest (#806).
    */
   const typedInputBufferRef = useRef<string>("");
   /**
@@ -270,8 +271,12 @@ export function useTerminalAutocomplete(
       return;
     }
     const term = termRef.current;
-    const livePrompt = term ? detectPrompt(term) : null;
-    const activePrompt = livePrompt?.isAtPrompt ? livePrompt : lastPromptRef.current;
+    const { prompt: livePrompt } = getAlignedPrompt(
+      term,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    const activePrompt = livePrompt.isAtPrompt ? livePrompt : lastPromptRef.current;
     const activeWord = activePrompt?.isAtPrompt
       ? parseCommandLine(activePrompt.userInput).currentWord
       : parseCommandLine(item.text).currentWord;
@@ -421,12 +426,9 @@ export function useTerminalAutocomplete(
     if (!panel) return;
 
     // Get current prompt to know what command prefix to keep (e.g., "cd ").
-    // Reconcile with the typed buffer so robbyrussell-style themes don't
-    // fold their cwd marker ("~ ") into the parsed command prefix (#806).
-    const prompt = reconcilePromptWithTypedInput(
-      detectPrompt(term),
-      typedBufferReliableRef.current ? typedInputBufferRef.current : "",
-    );
+    // getAlignedPrompt handles robbyrussell-style themes by trimming the
+    // cwd marker out of userInput when the typed buffer is aligned (#806).
+    const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
     if (!prompt.isAtPrompt) return;
 
     // Find the command part (everything before the path argument)
@@ -479,10 +481,7 @@ export function useTerminalAutocomplete(
     // Capture version at start — if it changes during async work, discard results
     const version = ++fetchVersionRef.current;
 
-    const prompt = reconcilePromptWithTypedInput(
-      detectPrompt(term),
-      typedBufferReliableRef.current ? typedInputBufferRef.current : "",
-    );
+    const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
     lastPromptRef.current = prompt;
 
     if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
@@ -523,10 +522,7 @@ export function useTerminalAutocomplete(
 
     // Discard stale results: if the user kept typing while getCompletions was running,
     // the current prompt input will have changed. Re-detect and compare.
-    const currentPrompt = reconcilePromptWithTypedInput(
-      detectPrompt(term),
-      typedBufferReliableRef.current ? typedInputBufferRef.current : "",
-    );
+    const { prompt: currentPrompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
     if (!currentPrompt.isAtPrompt || currentPrompt.userInput !== input) {
       return; // Input changed — these completions are stale
     }
@@ -612,25 +608,21 @@ export function useTerminalAutocomplete(
             // Require a live prompt before trusting either keystroke buffer
             // or buffer-based detection — otherwise sudo password Enter
             // would record the typed password as a command.
-            const bufferReliable = typedBufferReliableRef.current;
-            const livePrompt = termRef.current
-              ? reconcilePromptWithTypedInput(
-                  detectPrompt(termRef.current),
-                  bufferReliable ? typedInputBufferRef.current : "",
-                )
-              : null;
-            if (livePrompt?.isAtPrompt) {
-              // Only prefer the keystroke buffer when it's reliable AND
-              // actually aligned with the live line. Non-keyboard inserts
-              // that bypass handleInput (hotkey / middle-click / context
-              // paste in createXTermRuntime) can leave the buffer holding
-              // only a stale prefix of what the shell now sees; trusting
-              // it here would record that prefix as the command (#814 P1).
-              const typedRaw = bufferReliable ? typedInputBufferRef.current : "";
-              const typedAligned =
-                typedRaw.length > 0 && livePrompt.userInput.endsWith(typedRaw);
-              if (typedAligned && typedRaw.trim()) {
-                recordCommand(typedRaw.trim(), hostIdRef.current, hostOsRef.current);
+            const { prompt: livePrompt, alignedTyped } = getAlignedPrompt(
+              termRef.current,
+              typedInputBufferRef.current,
+              typedBufferReliableRef.current,
+            );
+            if (livePrompt.isAtPrompt) {
+              // alignedTyped is only non-null when the buffer is reliable
+              // AND matches the live line's tail — that single signal
+              // covers both the robbyrussell "~ " case (#806) and the
+              // stale-buffer cases from out-of-band pastes / history
+              // recall (#814 P1/P2). When it's null we fall back to the
+              // reconciled livePrompt.userInput, which for paste-bypass
+              // scenarios lands on pre-PR behavior (no regression).
+              if (alignedTyped && alignedTyped.trim()) {
+                recordCommand(alignedTyped.trim(), hostIdRef.current, hostOsRef.current);
               } else if (livePrompt.userInput.trim()) {
                 recordCommand(livePrompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
               }
@@ -989,11 +981,8 @@ export function useTerminalAutocomplete(
       if (!term) return;
 
       // Always use real-time prompt detection — lastPromptRef may be stale
-      // if the user typed more characters after suggestions were fetched
-      const prompt = reconcilePromptWithTypedInput(
-        detectPrompt(term),
-        typedBufferReliableRef.current ? typedInputBufferRef.current : "",
-      );
+      // if the user typed more characters after suggestions were fetched.
+      const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
       if (!prompt.isAtPrompt) return;
 
       // If suggestion starts with the current input, insert only the remaining part.

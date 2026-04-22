@@ -38,6 +38,18 @@ const NO_PROMPT: PromptDetectionResult = {
   isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0,
 };
 
+export interface AlignedPromptResult {
+  /** The prompt view every consumer should use for parsing / suggestion lookup / line rewrites. */
+  prompt: PromptDetectionResult;
+  /**
+   * The keystroke buffer, but only when it's both marked reliable AND
+   * actually matches the tail of the raw detected userInput. Returns
+   * null otherwise — the single signal downstream uses to decide
+   * whether to record it as the executed command.
+   */
+  alignedTyped: string | null;
+}
+
 /**
  * Detect whether the terminal cursor is at a shell prompt and extract the current user input.
  */
@@ -243,6 +255,37 @@ export function reconcilePromptWithTypedInput(
     };
   }
   return prompt;
+}
+
+/**
+ * Unified entry point for any autocomplete code path that needs a prompt
+ * view. Every consumer (fetchSuggestions, insertSuggestion,
+ * handleSubDirSelect, Enter-record) goes through this one helper so the
+ * alignment policy lives in exactly one place — if another out-of-band
+ * line-rewrite path gets added later and forgets to notify the keystroke
+ * buffer, the worst that happens is reconcile no-ops and we degrade to
+ * pre-#806 behavior, not a worse pollution.
+ *
+ * Alignment rule: the keystroke buffer is usable only when it's marked
+ * reliable AND the raw detected userInput ends with it. Otherwise the
+ * buffer is ignored and the raw detector result passes through.
+ */
+export function getAlignedPrompt(
+  term: XTerm | null,
+  typedBuffer: string,
+  typedReliable: boolean,
+): AlignedPromptResult {
+  if (!term) return { prompt: NO_PROMPT, alignedTyped: null };
+  const raw = detectPrompt(term);
+  const aligned =
+    typedReliable &&
+    typedBuffer.length > 0 &&
+    raw.isAtPrompt &&
+    raw.userInput.endsWith(typedBuffer);
+  return {
+    prompt: aligned ? reconcilePromptWithTypedInput(raw, typedBuffer) : raw,
+    alignedTyped: aligned ? typedBuffer : null,
+  };
 }
 
 /**
