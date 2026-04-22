@@ -748,7 +748,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       // like latin1 / shift_jis that the UI's two-value state can't
       // represent — so syncing them here would clobber that config with
       // whichever of the two the toolbar menu happens to hold.
-      const isSSH = host.protocol !== 'local' && host.protocol !== 'serial' && host.protocol !== 'telnet' && host.protocol !== 'mosh' && !host.moshEnabled && !host.id?.startsWith('local-') && !host.id?.startsWith('serial-') && host.hostname !== 'localhost';
+      // Hostname intentionally isn't part of the gate (matches the
+       // TerminalToolbar encoding menu) — SSH pointed at localhost is
+       // still a real SSH session whose backend starts in utf-8, and
+       // skipping the sync would leave it mismatched with the UI state
+       // the user already picked before reconnecting.
+      const isSSH = host.protocol !== 'local' && host.protocol !== 'serial' && host.protocol !== 'telnet' && host.protocol !== 'mosh' && !host.moshEnabled && !host.id?.startsWith('local-') && !host.id?.startsWith('serial-');
       if (isSSH) {
         setSessionEncoding(id, terminalEncodingRef.current);
       }
