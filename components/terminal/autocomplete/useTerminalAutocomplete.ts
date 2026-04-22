@@ -11,7 +11,7 @@
 import { startTransition, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { GhostTextAddon } from "./GhostTextAddon";
-import { detectPrompt, type PromptDetectionResult } from "./promptDetector";
+import { detectPrompt, reconcilePromptWithTypedInput, type PromptDetectionResult } from "./promptDetector";
 import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import { recordCommand } from "./commandHistoryStore";
 import { preloadCommonSpecs } from "./figSpecLoader";
@@ -149,6 +149,17 @@ export function useTerminalAutocomplete(
   const lastAcceptedCommandRef = useRef<string | null>(null);
   /** Monotonic counter to invalidate stale async sub-dir fetches */
   const subDirFetchVersionRef = useRef(0);
+  /**
+   * Keystroke buffer mirroring what the user has typed since the last
+   * prompt boundary (Enter / Ctrl-C / Ctrl-U / cursor movement).
+   *
+   * detectPrompt parses the xterm buffer and can misattribute theme
+   * content — e.g. oh-my-zsh robbyrussell's "➜  ~ " — as user input.
+   * Keeping an independent keystroke log lets reconcilePromptWithTypedInput
+   * snap the detected userInput back to what was actually typed, which
+   * in turn keeps history recording and Tab insertion honest (#806).
+   */
+  const typedInputBufferRef = useRef<string>("");
 
   // Preload common specs on first mount (only if enabled)
   useEffect(() => {
@@ -444,7 +455,7 @@ export function useTerminalAutocomplete(
     // Capture version at start — if it changes during async work, discard results
     const version = ++fetchVersionRef.current;
 
-    const prompt = detectPrompt(term);
+    const prompt = reconcilePromptWithTypedInput(detectPrompt(term), typedInputBufferRef.current);
     lastPromptRef.current = prompt;
 
     if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
@@ -485,7 +496,7 @@ export function useTerminalAutocomplete(
 
     // Discard stale results: if the user kept typing while getCompletions was running,
     // the current prompt input will have changed. Re-detect and compare.
-    const currentPrompt = detectPrompt(term);
+    const currentPrompt = reconcilePromptWithTypedInput(detectPrompt(term), typedInputBufferRef.current);
     if (!currentPrompt.isAtPrompt || currentPrompt.userInput !== input) {
       return; // Input changed — these completions are stale
     }
@@ -568,25 +579,65 @@ export function useTerminalAutocomplete(
           if (lastAcceptedCommandRef.current) {
             recordCommand(lastAcceptedCommandRef.current, hostIdRef.current, hostOsRef.current);
           } else {
-            // Try real-time detection; fall back to cached prompt
-            const livePrompt = termRef.current ? detectPrompt(termRef.current) : null;
-            const prompt = (livePrompt?.isAtPrompt && livePrompt.userInput.trim())
-              ? livePrompt
-              : lastPromptRef.current;
-            if (prompt?.isAtPrompt && prompt.userInput.trim()) {
-              recordCommand(prompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
+            // Require a live prompt before trusting either keystroke buffer
+            // or buffer-based detection — otherwise sudo password Enter
+            // would record the typed password as a command.
+            const livePrompt = termRef.current
+              ? reconcilePromptWithTypedInput(detectPrompt(termRef.current), typedInputBufferRef.current)
+              : null;
+            if (livePrompt?.isAtPrompt) {
+              // Typed buffer wins when present: it can't have been polluted
+              // by a theme that renders cwd after the prompt char (#806).
+              const typedCommand = typedInputBufferRef.current.trim();
+              if (typedCommand) {
+                recordCommand(typedCommand, hostIdRef.current, hostOsRef.current);
+              } else if (livePrompt.userInput.trim()) {
+                recordCommand(livePrompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
+              }
+            } else if (lastPromptRef.current?.isAtPrompt && lastPromptRef.current.userInput.trim()) {
+              // Only fall back to the cached prompt when we have no live
+              // reading at all — guards against recording during interactive
+              // prompts where detectPrompt correctly bails out.
+              recordCommand(lastPromptRef.current.userInput.trim(), hostIdRef.current, hostOsRef.current);
             }
           }
           lastAcceptedCommandRef.current = null;
         }
+        typedInputBufferRef.current = "";
         clearState();
         return;
       }
 
       // Ctrl+C, Ctrl+U — clear
       if (data === "\x03" || data === "\x15") {
+        typedInputBufferRef.current = "";
         clearState();
         return;
+      }
+
+      // Backspace / DEL: drop the last typed char so the buffer stays aligned
+      // with what the shell actually holds.
+      if (data === "\x7f" || data === "\b") {
+        typedInputBufferRef.current = typedInputBufferRef.current.slice(0, -1);
+      } else if (data === "\x17") {
+        // Ctrl+W: word-erase — kill the trailing whitespace + word.
+        typedInputBufferRef.current = typedInputBufferRef.current.replace(/\s*\S+\s*$/, "");
+      } else if (data.startsWith("\x1b") && data !== "\x1b") {
+        // Cursor-movement / function keys — we lose track of where the
+        // cursor sits relative to our append-only buffer, so drop it
+        // and let detectPrompt take over until the next Enter.
+        typedInputBufferRef.current = "";
+      } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+        typedInputBufferRef.current += data;
+      } else if (data.length > 1 && !data.startsWith("\x1b")) {
+        // Paste: treat as literal text.
+        typedInputBufferRef.current += data;
+      } else if (data.length === 1 && data.charCodeAt(0) < 32) {
+        // Any other single control char (Ctrl-A, Ctrl-E, Ctrl-B, Ctrl-F,
+        // Ctrl-R, etc.) moves the cursor or swaps the line in ways this
+        // append-only buffer can't follow. Drop it so we don't hand out
+        // stale reconciliation data until the next Enter.
+        typedInputBufferRef.current = "";
       }
 
       // Escape sequences (arrow keys, Home, End, etc.): clear stale suggestions
@@ -660,7 +711,9 @@ export function useTerminalAutocomplete(
           const ghostText = ghost.getGhostText();
           if (ghostText) {
             writeToTerminal(ghostText);
-            lastAcceptedCommandRef.current = ghost.getSuggestion();
+            const fullSuggestion = ghost.getSuggestion();
+            lastAcceptedCommandRef.current = fullSuggestion;
+            if (fullSuggestion) typedInputBufferRef.current = fullSuggestion;
             ghost.hide();
             clearState();
           }
@@ -675,6 +728,7 @@ export function useTerminalAutocomplete(
           const nextWord = ghost.getNextWord();
           if (nextWord) {
             writeToTerminal(nextWord);
+            typedInputBufferRef.current += nextWord;
             // Update ghost text to show remaining
             const fullSuggestion = ghost.getSuggestion();
             const currentInput = ghost.getGhostText().substring(nextWord.length);
@@ -847,7 +901,7 @@ export function useTerminalAutocomplete(
 
       // Always use real-time prompt detection — lastPromptRef may be stale
       // if the user typed more characters after suggestions were fetched
-      const prompt = detectPrompt(term);
+      const prompt = reconcilePromptWithTypedInput(detectPrompt(term), typedInputBufferRef.current);
       if (!prompt.isAtPrompt) return;
 
       // If suggestion starts with the current input, insert only the remaining part.
@@ -869,6 +923,16 @@ export function useTerminalAutocomplete(
 
       if (payload) {
         writeToTerminal(payload);
+      }
+
+      // Keystroke buffer now reflects the accepted text (either extended by
+      // the insertion suffix, or wholesale replaced by the fuzzy-match path
+      // that emits Ctrl-U first). Re-aligning it here keeps the subsequent
+      // Enter-record honest.
+      if (execute) {
+        typedInputBufferRef.current = "";
+      } else {
+        typedInputBufferRef.current = suggestion.text;
       }
 
       // Track accepted command for accurate history recording on fast Enter

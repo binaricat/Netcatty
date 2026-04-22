@@ -206,6 +206,46 @@ function findPromptBoundary(lineText: string): number {
 }
 
 /**
+ * Reconcile a buffer-parsed prompt with the user's own keystroke history.
+ *
+ * findPromptBoundary stops at the first `PROMPT_CHAR + space` it sees, so
+ * themes that render additional content after the prompt char — e.g.
+ * oh-my-zsh's robbyrussell prints "➜  ~ " where `~` is the cwd — get
+ * parsed as prompt="➜ " + userInput="~ lo". Every consumer downstream
+ * (history recording, suggestion matching, insertion) then treats the
+ * theme's cwd marker as part of the user's command, which pollutes
+ * history with entries like "~ sudo id" and makes Tab insertions prepend
+ * a phantom "~ " to the typed command (issue #806).
+ *
+ * Whenever we have an independent record of what the user actually typed
+ * since the last Enter (keystroke buffer), we can detect this case: the
+ * real input is always a suffix of the over-captured userInput. When it
+ * is, reattribute the leading garbage back to promptText so the rest of
+ * the pipeline sees the clean split.
+ */
+export function reconcilePromptWithTypedInput(
+  prompt: PromptDetectionResult,
+  typedInput: string,
+): PromptDetectionResult {
+  if (!prompt.isAtPrompt) return prompt;
+  if (!typedInput) return prompt;
+  if (prompt.userInput === typedInput) return prompt;
+  if (
+    prompt.userInput.length > typedInput.length &&
+    prompt.userInput.endsWith(typedInput)
+  ) {
+    const extra = prompt.userInput.slice(0, prompt.userInput.length - typedInput.length);
+    return {
+      isAtPrompt: true,
+      promptText: prompt.promptText + extra,
+      userInput: typedInput,
+      cursorOffset: typedInput.length,
+    };
+  }
+  return prompt;
+}
+
+/**
  * Simplified prompt detection: just check if we're likely at a prompt.
  */
 export function isLikelyAtPrompt(term: XTerm): boolean {
