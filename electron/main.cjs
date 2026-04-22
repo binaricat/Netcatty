@@ -1203,7 +1203,19 @@ if (!gotLock) {
     quitGuardChannelBusy = true;
     event.preventDefault();
     win.webContents.send("app:query-dirty-editors");
+
+    // Timeout fallback: if the renderer never replies (crash, unhandled
+    // exception in the listener, etc.) we would otherwise be stuck with
+    // quitGuardChannelBusy=true and the app becomes un-quittable. After
+    // 5 s assume no dirty editors and proceed.
+    const timeoutId = setTimeout(() => {
+      _ipcMain.removeAllListeners("app:dirty-editors-result");
+      quitGuardChannelBusy = false;
+      app.quit();
+    }, 5000);
+
     _ipcMain.once("app:dirty-editors-result", (_evt, { hasDirty }) => {
+      clearTimeout(timeoutId);
       quitGuardChannelBusy = false;
       if (!hasDirty) {
         // No dirty editors — proceed with quit.
