@@ -1939,6 +1939,7 @@ function App({ settings }: { settings: SettingsState }) {
             isVisible={activeTabId === toEditorTabId(tab.id)}
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
+            hostById={hostById}
           />
         ))}
       </div>

@@ -11,6 +11,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { editorSftpWrite } from '../../application/state/editorSftpBridge';
 import { editorTabStore, useEditorTab, type EditorTabId } from '../../application/state/editorTabStore';
 import type { HotkeyScheme, KeyBinding } from '../../domain/models';
+import type { Host } from '../../types';
 import { toast } from '../ui/toast';
 import { TextEditorPane } from './TextEditorPane';
 
@@ -20,6 +21,8 @@ export interface TextEditorTabViewProps {
   isVisible: boolean;
   hotkeyScheme: HotkeyScheme;
   keyBindings: KeyBinding[];
+  /** Host lookup for building the `host:remotePath` subtitle next to the filename. */
+  hostById: Map<string, Host>;
 }
 
 export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
@@ -27,6 +30,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   isVisible,
   hotkeyScheme,
   keyBindings,
+  hostById,
 }) => {
   const { t } = useI18n();
   const tab = useEditorTab(tabId);
@@ -76,6 +80,12 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   if (!tab) return null;
 
   const isDirty = tab.content !== tab.baselineContent;
+  // Subtitle shown next to the filename in the Pane header, e.g.
+  // "Rainyun-114.66.26.174:/root/hello-server.go". Falls back to hostId when
+  // we don't have a Host record (session may have been removed).
+  const host = hostById.get(tab.hostId);
+  const hostLabel = host?.label ?? tab.hostId;
+  const subtitle = `${hostLabel}:${tab.remotePath}`;
 
   return (
     // Sibling tab panels (VaultView, SftpView, TerminalLayerMount, LogView)
@@ -92,6 +102,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
       <TextEditorPane
         chrome="tab"
         fileName={`${tab.fileName}${isDirty ? ' *' : ''}`}
+        subtitle={subtitle}
         content={tab.content}
         languageId={tab.languageId}
         wordWrap={tab.wordWrap}

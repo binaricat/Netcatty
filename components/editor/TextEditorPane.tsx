@@ -159,6 +159,8 @@ export interface TextEditorPaneProps {
   keyBindings: KeyBinding[];
   /** Layout mode — affects header chrome (modal shows close+maximize; tab-form only shows content controls since tab has its own close). */
   chrome: 'modal' | 'tab';
+  /** Optional secondary label shown next to the filename in muted text — used by the tab form to display `host:remotePath`. */
+  subtitle?: string;
   onContentChange: (content: string, viewState: Monaco.editor.ICodeEditorViewState | null) => void;
   onLanguageChange: (nextLanguageId: string) => void;
   onToggleWordWrap: () => void;
@@ -178,6 +180,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
   hotkeyScheme,
   keyBindings,
   chrome,
+  subtitle,
   onContentChange,
   onLanguageChange,
   onToggleWordWrap,
@@ -422,11 +425,16 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
       {/* Header */}
       <div className="px-4 py-3 border-b border-border/60 flex-shrink-0">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <span className="text-sm font-semibold truncate">
+          <div className="flex items-baseline gap-2 flex-1 min-w-0">
+            <span className="text-sm font-semibold truncate flex-shrink-0">
               {fileName}
             </span>
-            {saveError && <span className="text-xs text-destructive">{saveError}</span>}
+            {subtitle && (
+              <span className="text-xs text-muted-foreground truncate" title={subtitle}>
+                {subtitle}
+              </span>
+            )}
+            {saveError && <span className="text-xs text-destructive truncate">{saveError}</span>}
           </div>
           <div className="flex items-center gap-2 min-w-0">
             {/* Search button */}
