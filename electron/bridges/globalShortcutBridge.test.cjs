@@ -97,6 +97,7 @@ function createElectronStub() {
             return this;
           },
           setTemplateImage() {},
+          addRepresentation() {},
         };
       },
       createEmpty() {
