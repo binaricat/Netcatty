@@ -63,8 +63,11 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     const isMoshSession = host?.protocol === 'mosh' || host?.moshEnabled;
     // Local PTY inherits the OS locale and mosh always uses its own UTF-8
     // framing, so the quick-switch menu only makes sense for sessions whose
-    // backend decoder we actually control (SSH, telnet, serial).
-    const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && host?.hostname !== 'localhost';
+    // backend decoder we actually control (SSH, telnet, serial). Hostname
+    // isn't part of the gate — telnet/SSH targets pointed at localhost
+    // (test daemons, forwarded endpoints) still have a real backend
+    // decoder we can drive.
+    const encodingSwitchSupported = !isLocalTerminal && !isMoshSession;
     const hidesSftp = isLocalTerminal || isSerialTerminal;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
@@ -189,9 +192,6 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                                 >
                                     <Languages size={12} className="shrink-0" />
                                     <span className="flex-1 text-left truncate">{t("terminal.toolbar.encoding")}</span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                        {t(`terminal.toolbar.encoding.${terminalEncoding === "utf-8" ? "utf8" : "gb18030"}`)}
-                                    </span>
                                     <ChevronRight size={12} className="shrink-0 text-muted-foreground" />
                                 </button>
                             </PopoverTrigger>
