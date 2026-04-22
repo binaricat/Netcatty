@@ -27,7 +27,7 @@ import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import { Host, Identity, SSHKey } from "../types";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
-import { registerEditorSftpWriter } from "../application/state/editorSftpBridge";
+import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
 import { toast } from "./ui/toast";
 
 // Import extracted components
@@ -120,13 +120,15 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
 
   const sftp = useSftpState(effectiveHosts, keys, identities, sftpOptions);
 
-  // Register writeTextFileByConnection with the editorSftpBridge singleton so that
-  // the editor tab's save path can use the active SFTP session.
+  // Register this useSftpState's writeTextFileByConnection with the bridge so
+  // the editor tab's save path can reach the active SFTP session. The bridge
+  // supports multiple simultaneous writers (SftpSidePanel inside terminals
+  // also registers its own instance) and dispatches by trying each until one
+  // owns the target connectionId.
   useEffect(() => {
-    registerEditorSftpWriter((connectionId, expectedHostId, filePath, content, encoding) =>
+    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
       sftp.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
     );
-    return () => registerEditorSftpWriter(null);
   }, [sftp]);
 
   // Get backend helpers for file downloads and local filesystem writes.

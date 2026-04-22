@@ -14,6 +14,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "
 import { formatHostPort } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
+import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { getParentPath } from "../application/state/sftp/utils";
@@ -124,6 +125,15 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
+
+  // Register this instance's writeTextFileByConnection with the editor bridge
+  // so editor tabs promoted from SFTP files opened in a terminal side panel
+  // can still route saves through this useSftpState.
+  useEffect(() => {
+    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
+      sftp.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
+    );
+  }, [sftp]);
 
   const behaviorRef = useRef(sftpDoubleClickBehavior);
   behaviorRef.current = sftpDoubleClickBehavior;
