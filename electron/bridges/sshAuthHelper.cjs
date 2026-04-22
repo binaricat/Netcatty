@@ -19,8 +19,9 @@ async function readFileNoFollow(filePath) {
   if (!lstat.isFile() && !lstat.isSymbolicLink()) return null;
   const fd = await fs.promises.open(filePath, "r", 0o0);
   try {
-    const buffer = Buffer.alloc(lstat.size);
-    await fd.read(buffer, 0, lstat.size, 0);
+    const stat = await fd.stat();
+    const buffer = Buffer.alloc(stat.size);
+    await fd.read(buffer, 0, stat.size, 0);
     return buffer.toString("utf8");
   } finally {
     await fd.close();
