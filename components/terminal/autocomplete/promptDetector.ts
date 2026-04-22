@@ -38,6 +38,18 @@ const NO_PROMPT: PromptDetectionResult = {
   isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0,
 };
 
+export interface AlignedPromptResult {
+  /** The prompt view every consumer should use for parsing / suggestion lookup / line rewrites. */
+  prompt: PromptDetectionResult;
+  /**
+   * The keystroke buffer, but only when it's both marked reliable AND
+   * actually matches the tail of the raw detected userInput. Returns
+   * null otherwise — the single signal downstream uses to decide
+   * whether to record it as the executed command.
+   */
+  alignedTyped: string | null;
+}
+
 /**
  * Detect whether the terminal cursor is at a shell prompt and extract the current user input.
  */
@@ -203,6 +215,77 @@ function findPromptBoundary(lineText: string): number {
   }
 
   return lastBoundary;
+}
+
+/**
+ * Reconcile a buffer-parsed prompt with the user's own keystroke history.
+ *
+ * findPromptBoundary stops at the first `PROMPT_CHAR + space` it sees, so
+ * themes that render additional content after the prompt char — e.g.
+ * oh-my-zsh's robbyrussell prints "➜  ~ " where `~` is the cwd — get
+ * parsed as prompt="➜ " + userInput="~ lo". Every consumer downstream
+ * (history recording, suggestion matching, insertion) then treats the
+ * theme's cwd marker as part of the user's command, which pollutes
+ * history with entries like "~ sudo id" and makes Tab insertions prepend
+ * a phantom "~ " to the typed command (issue #806).
+ *
+ * Whenever we have an independent record of what the user actually typed
+ * since the last Enter (keystroke buffer), we can detect this case: the
+ * real input is always a suffix of the over-captured userInput. When it
+ * is, reattribute the leading garbage back to promptText so the rest of
+ * the pipeline sees the clean split.
+ */
+export function reconcilePromptWithTypedInput(
+  prompt: PromptDetectionResult,
+  typedInput: string,
+): PromptDetectionResult {
+  if (!prompt.isAtPrompt) return prompt;
+  if (!typedInput) return prompt;
+  if (prompt.userInput === typedInput) return prompt;
+  if (
+    prompt.userInput.length > typedInput.length &&
+    prompt.userInput.endsWith(typedInput)
+  ) {
+    const extra = prompt.userInput.slice(0, prompt.userInput.length - typedInput.length);
+    return {
+      isAtPrompt: true,
+      promptText: prompt.promptText + extra,
+      userInput: typedInput,
+      cursorOffset: typedInput.length,
+    };
+  }
+  return prompt;
+}
+
+/**
+ * Unified entry point for any autocomplete code path that needs a prompt
+ * view. Every consumer (fetchSuggestions, insertSuggestion,
+ * handleSubDirSelect, Enter-record) goes through this one helper so the
+ * alignment policy lives in exactly one place — if another out-of-band
+ * line-rewrite path gets added later and forgets to notify the keystroke
+ * buffer, the worst that happens is reconcile no-ops and we degrade to
+ * pre-#806 behavior, not a worse pollution.
+ *
+ * Alignment rule: the keystroke buffer is usable only when it's marked
+ * reliable AND the raw detected userInput ends with it. Otherwise the
+ * buffer is ignored and the raw detector result passes through.
+ */
+export function getAlignedPrompt(
+  term: XTerm | null,
+  typedBuffer: string,
+  typedReliable: boolean,
+): AlignedPromptResult {
+  if (!term) return { prompt: NO_PROMPT, alignedTyped: null };
+  const raw = detectPrompt(term);
+  const aligned =
+    typedReliable &&
+    typedBuffer.length > 0 &&
+    raw.isAtPrompt &&
+    raw.userInput.endsWith(typedBuffer);
+  return {
+    prompt: aligned ? reconcilePromptWithTypedInput(raw, typedBuffer) : raw,
+    alignedTyped: aligned ? typedBuffer : null,
+  };
 }
 
 /**
