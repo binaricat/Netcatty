@@ -687,6 +687,11 @@ export function useTerminalAutocomplete(
         if (nlIdx >= 0) {
           typedInputBufferRef.current = data.slice(nlIdx + 1);
           typedBufferReliableRef.current = true;
+          // The embedded newline flushed any previously-accepted
+          // suggestion too — clearing the cache here prevents the next
+          // Enter from falling into the lastAcceptedCommandRef fast path
+          // and recording that stale command.
+          lastAcceptedCommandRef.current = null;
           clearState();
           return;
         }
