@@ -16,8 +16,8 @@ interface UseSftpViewPaneActionsResult {
   draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onConnectLeft: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
   onConnectRight: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
-  onDisconnectLeft: () => void;
-  onDisconnectRight: () => void;
+  onDisconnectLeft: () => Promise<void>;
+  onDisconnectRight: () => Promise<void>;
   onPrepareSelectionLeft: () => void;
   onPrepareSelectionRight: () => void;
   onNavigateToLeft: (path: string) => void;

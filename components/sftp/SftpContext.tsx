@@ -20,7 +20,7 @@ export interface SftpTransferSource {
 // Types for the context
 export interface SftpPaneCallbacks {
     onConnect: (host: Host | "local") => void;
-    onDisconnect: () => void;
+    onDisconnect: () => Promise<void>;
     onPrepareSelection: () => void;
     onNavigateTo: (path: string) => void;
     onNavigateUp: () => void;

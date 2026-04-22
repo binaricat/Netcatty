@@ -61,7 +61,7 @@ interface SftpPaneDialogsProps {
   hostSearch: string;
   setHostSearch: (value: string) => void;
   onConnect: (host: Host | "local") => void;
-  onDisconnect: () => void;
+  onDisconnect: () => Promise<void>;
 }
 
 const HostHint: React.FC<{ label?: string }> = ({ label }) =>
@@ -357,12 +357,12 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
       side={side}
       hostSearch={hostSearch}
       onHostSearchChange={setHostSearch}
-      onSelectLocal={() => {
-        onDisconnect();
+      onSelectLocal={async () => {
+        await onDisconnect();
         onConnect("local");
       }}
-      onSelectHost={(host) => {
-        onDisconnect();
+      onSelectHost={async (host) => {
+        await onDisconnect();
         onConnect(host);
       }}
     />
