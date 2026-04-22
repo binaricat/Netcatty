@@ -10,8 +10,23 @@
 "use strict";
 
 const crypto = require("crypto");
+const iconv = require("iconv-lite");
 const { stripAnsi } = require("./shellUtils.cjs");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
+
+// Decode a Buffer using the session's chosen encoding. Serial sessions can
+// now carry iconv-only labels (e.g. gb18030) that Buffer.toString rejects
+// as "Unknown encoding" — route those through iconv-lite instead of
+// throwing inside the data listener.
+function decodeBufferAs(buf, encoding) {
+  const enc = encoding || "utf8";
+  if (Buffer.isEncoding(enc)) return buf.toString(enc);
+  try {
+    return iconv.decode(buf, enc);
+  } catch {
+    return buf.toString("utf8");
+  }
+}
 
 function detectShellKind(shellPath, platform = process.platform) {
   return classifyLocalShellType(shellPath, platform);
@@ -1011,8 +1026,10 @@ function execViaRawPty(serialPort, command, options) {
     const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
 
     const onData = (data) => {
-      // latin1 for serial ports (matches terminalBridge.cjs decoder); utf8 for SSH PTY streams.
-      const chunk = typeof data === "string" ? data : data.toString(encoding);
+      // Encoding follows the session: utf8 for SSH PTY streams, whatever the
+      // user picked for serial (utf-8/gb18030/...). decodeBufferAs falls back
+      // to iconv-lite for labels Buffer.toString can't handle.
+      const chunk = typeof data === "string" ? data : decodeBufferAs(data, encoding);
       chunkCount++;
       // Cancel the no-response fallback on first data
       if (noResponseTimer) {
