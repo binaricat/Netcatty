@@ -728,6 +728,10 @@ export function useTerminalAutocomplete(
         // recalled line (Codex #815 follow-up).
         typedInputBufferRef.current = "";
         typedBufferReliableRef.current = false;
+        // Null the fast-path accepted-command cache: accept-then-Ctrl-R
+        // should not let an old accepted command sneak back in via the
+        // Enter fast path after reverse-search picks a different one.
+        lastAcceptedCommandRef.current = null;
         clearState();
         return;
       }
@@ -736,6 +740,10 @@ export function useTerminalAutocomplete(
       // since cursor position may have changed, making current suggestions invalid.
       // Up/Down/Right/Tab are handled by handleKeyEvent; other sequences land here.
       if (data.startsWith("\x1b") && data !== "\x1b") {
+        // Same fast-path reset as the single-byte ctrl-char branch above —
+        // accept-then-↑/↓ must not record the stale accepted command if
+        // the user then presses Enter on a different recalled line.
+        lastAcceptedCommandRef.current = null;
         clearState();
         return;
       }
