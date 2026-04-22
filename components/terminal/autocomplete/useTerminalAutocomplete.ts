@@ -420,8 +420,13 @@ export function useTerminalAutocomplete(
     const panel = s.subDirPanels[level];
     if (!panel) return;
 
-    // Get current prompt to know what command prefix to keep (e.g., "cd ")
-    const prompt = detectPrompt(term);
+    // Get current prompt to know what command prefix to keep (e.g., "cd ").
+    // Reconcile with the typed buffer so robbyrussell-style themes don't
+    // fold their cwd marker ("~ ") into the parsed command prefix (#806).
+    const prompt = reconcilePromptWithTypedInput(
+      detectPrompt(term),
+      typedBufferReliableRef.current ? typedInputBufferRef.current : "",
+    );
     if (!prompt.isAtPrompt) return;
 
     // Find the command part (everything before the path argument)
@@ -447,7 +452,13 @@ export function useTerminalAutocomplete(
     const clearSeq = isWindows
       ? "\b".repeat(prompt.userInput.length)
       : "\x15";
-    writeToTerminal(clearSeq + cmdPrefix + replacementPath);
+    const newCommand = cmdPrefix + replacementPath;
+    writeToTerminal(clearSeq + newCommand);
+    // Sub-dir selection rewrote the whole command line; re-align the
+    // keystroke buffer so the next Enter records the executed command
+    // instead of whatever partial input we had before (P2 from #814).
+    typedInputBufferRef.current = newCommand;
+    typedBufferReliableRef.current = true;
     clearState();
 
     if (entry.type === "directory") {
