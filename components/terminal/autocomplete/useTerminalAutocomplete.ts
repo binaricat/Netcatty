@@ -112,7 +112,17 @@ export function useTerminalAutocomplete(
     ...DEFAULT_AUTOCOMPLETE_SETTINGS,
     ...userSettings,
   };
-  const settings: AutocompleteSettings = rawSettings;
+  // Mutual-exclusivity guard matching the repo-wide contract:
+  //   - SettingsTerminalTab toggles one off when the other is enabled.
+  //   - domain/models.ts normalizes stored settings so popup wins.
+  // Keep the guard here too so callers that pass DEFAULT_AUTOCOMPLETE_SETTINGS
+  // directly (e.g. tests or future embedders) don't end up rendering both
+  // systems at once. In the normal Terminal.tsx → store path only one of
+  // the two arrives as true, so this is defensive, not load-bearing.
+  const settings: AutocompleteSettings = {
+    ...rawSettings,
+    showGhostText: rawSettings.showPopupMenu ? false : rawSettings.showGhostText,
+  };
 
   // Use refs for values accessed in callbacks to avoid stale closures
   const settingsRef = useRef(settings);
