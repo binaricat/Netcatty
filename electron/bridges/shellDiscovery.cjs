@@ -212,10 +212,7 @@ function detectPowerShell() {
       "v1.0",
       "powershell.exe",
     );
-    if (
-      fs.existsSync(fallback) &&
-      path.dirname(fallback).toLowerCase().endsWith("system32")
-    ) {
+    if (fs.existsSync(fallback)) {
       return {
         id: "powershell",
         name: "Windows PowerShell",

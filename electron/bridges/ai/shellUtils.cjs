@@ -183,9 +183,7 @@ async function getShellEnv() {
   // On macOS/Linux, spawn a login shell to capture the real environment.
   try {
     let shell = process.env.SHELL || "/bin/zsh";
-    if (!shell.startsWith("/bin/") && !shell.startsWith("/usr/")) {
-      shell = "/bin/zsh";
-    } else if (!fs.existsSync(shell)) {
+    if (!path.isAbsolute(shell) || !fs.existsSync(shell)) {
       shell = "/bin/zsh";
     }
     const envOutput = execFileSync(shell, ['-ilc', 'env'], {
