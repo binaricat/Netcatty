@@ -78,7 +78,14 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   const isDirty = tab.content !== tab.baselineContent;
 
   return (
-    <div style={{ display: isVisible ? undefined : 'none' }} className="h-full">
+    // Sibling tab panels (VaultView, SftpView, TerminalLayerMount, LogView)
+    // all fill their flex-1 parent via `absolute inset-0`. Match that here so
+    // an inactive editor tab doesn't collapse to zero height in normal flow,
+    // and an active one fills the viewport instead of stacking beneath others.
+    <div
+      style={{ display: isVisible ? undefined : 'none' }}
+      className="absolute inset-0 min-h-0 flex flex-col"
+    >
       <TextEditorPane
         chrome="tab"
         fileName={`${tab.fileName}${isDirty ? ' *' : ''}`}

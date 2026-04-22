@@ -6,7 +6,7 @@ import type * as Monaco from 'monaco-editor';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getLanguageId } from '../lib/sftpFileUtils';
-import { Dialog, DialogContent } from './ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { toast } from './ui/toast';
 import { TextEditorPane } from './editor/TextEditorPane';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -125,6 +125,10 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
         className="max-w-5xl h-[85vh] flex flex-col p-0 gap-0"
         hideCloseButton
       >
+        {/* Radix requires a DialogTitle inside every DialogContent for a11y.
+            The Pane's own header already shows the filename visually, so we
+            mirror it here inside an sr-only DialogTitle for screen readers. */}
+        <DialogTitle className="sr-only">{fileName}</DialogTitle>
         <TextEditorPane
           chrome="modal"
           fileName={`${fileName}${hasChanges ? ' *' : ''}`}
