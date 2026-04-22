@@ -1954,6 +1954,7 @@ function App({ settings }: { settings: SettingsState }) {
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
             hostById={hostById}
+            onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
           />
         ))}
       </div>

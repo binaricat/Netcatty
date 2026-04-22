@@ -23,6 +23,9 @@ export interface TextEditorTabViewProps {
   keyBindings: KeyBinding[];
   /** Host lookup for building the `host:remotePath` subtitle next to the filename. */
   hostById: Map<string, Host>;
+  /** Routed into Monaco's Cmd/Ctrl+W command so closing the editor tab works
+   * even when focus is inside the editor (Monaco otherwise swallows the event). */
+  onRequestClose: (tabId: EditorTabId) => void;
 }
 
 export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
@@ -31,6 +34,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   hotkeyScheme,
   keyBindings,
   hostById,
+  onRequestClose,
 }) => {
   const { t } = useI18n();
   const tab = useEditorTab(tabId);
@@ -103,6 +107,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
         chrome="tab"
         fileName={`${tab.fileName}${isDirty ? ' *' : ''}`}
         subtitle={subtitle}
+        onRequestClose={() => onRequestClose(tabId)}
         content={tab.content}
         languageId={tab.languageId}
         wordWrap={tab.wordWrap}

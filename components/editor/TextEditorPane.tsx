@@ -196,6 +196,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
 
   // Ref to store the latest save function to avoid stale closure in keyboard shortcut
   const handleSaveRef = useRef<() => void>(() => {});
+  const handleCloseRef = useRef<(() => void) | null>(null);
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const readClipboardTextRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
 
@@ -280,6 +281,12 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
     handleSaveRef.current = handleSave;
   }, [handleSave]);
 
+  // Keep the close ref fresh so the Monaco Cmd/Ctrl+W command invokes the
+  // latest onRequestClose handler without re-binding the Monaco command.
+  useEffect(() => {
+    handleCloseRef.current = onRequestClose ?? null;
+  }, [onRequestClose]);
+
   const readClipboardText = useCallback(async (): Promise<string | null> => {
     try {
       if (navigator.clipboard?.readText) {
@@ -351,6 +358,14 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
       handleSaveRef.current();
     });
 
+    // Close-tab shortcut inside Monaco. The capture-phase keydown on the
+    // Pane's root div also tries to handle this, but Monaco's internal
+    // key-event dispatcher fires first for focused editor keystrokes, so
+    // registering the command here is the reliable path.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => {
+      handleCloseRef.current?.();
+    });
+
     // Add find shortcut (Ctrl+F / Cmd+F)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => {
       // Trigger Monaco's built-in find widget
@@ -388,8 +403,11 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
     editor.focus();
   }, [initialViewState]);
 
+  // Capture-phase close-tab hotkey handler. Runs in both modal and tab chrome
+  // so Cmd/Ctrl+W works even when focus is inside Monaco (which otherwise
+  // swallows the event). Requires an `onRequestClose` prop from the parent.
   const handleDialogKeyDownCapture = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (chrome !== 'modal' || hotkeyScheme === 'disabled' || !closeTabBinding || !onRequestClose) return;
+    if (hotkeyScheme === 'disabled' || !closeTabBinding || !onRequestClose) return;
 
     const isMac = hotkeyScheme === 'mac';
     const keyStr = isMac ? closeTabBinding.mac : closeTabBinding.pc;
@@ -399,7 +417,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
     e.stopPropagation();
     e.nativeEvent.stopPropagation();
     onRequestClose();
-  }, [chrome, closeTabBinding, hotkeyScheme, onRequestClose]);
+  }, [closeTabBinding, hotkeyScheme, onRequestClose]);
 
   // Trigger search dialog
   const handleSearch = useCallback(() => {
