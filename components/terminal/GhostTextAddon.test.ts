@@ -76,6 +76,8 @@ function createFakeTerm() {
 
   const term = {
     element,
+    cols: 80,
+    rows: 24,
     options: {
       fontSize: 14,
       fontFamily: "monospace",
@@ -187,6 +189,60 @@ test("walks the anchor column backwards on backspace so the ghost re-aligns", ()
     addon.adjustToInput("");
     assert.equal(ghost.textContent, "docker");
     assert.equal(ghost.style.left, "0px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("advances the anchor by two cells when a CJK glyph is typed", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    // Suggestion starts with a CJK char so the prefix-match survives
+    // the next keystroke.
+    addon.show("你好世界", "");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    // show() anchored at cursorX=2. Input length 0 → delta 0 → left=18.
+    assert.equal(ghost.style.left, "18px");
+
+    addon.adjustToInput("你");
+
+    // One CJK char = 2 cells. Predicted col = 2 + 2 = 4 → left 36px.
+    assert.equal(ghost.textContent, "好世界");
+    assert.equal(ghost.style.left, "36px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("wraps the ghost to the next row when the predicted column crosses cols", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // Shrink the terminal to 10 cols to keep the math obvious. Anchor at
+    // col 8 with 5 ASCII chars to type → predicted col = 13, which should
+    // wrap to col 3 of row 1.
+    term.cols = 10;
+    term.buffer.active.cursorX = 8;
+    addon.activate(term as never);
+    addon.show("abcdefghij", "ab");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.style.top, "0px");
+
+    addon.adjustToInput("abcde");
+
+    // Predicted col = 8 + (5-2) = 11 → wraps to col 1 on next row.
+    // cellWidth=9, cellHeight=18.
+    assert.equal(ghost.textContent, "fghij");
+    assert.equal(ghost.style.left, "9px");
+    assert.equal(ghost.style.top, "18px");
   } finally {
     restoreDocument();
   }
