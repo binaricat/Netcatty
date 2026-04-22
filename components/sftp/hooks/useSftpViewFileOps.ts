@@ -5,8 +5,11 @@ import { getParentPath, joinPath as joinFsPath } from "../../../application/stat
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { logger } from "../../../lib/logger";
 import { toast } from "../../ui/toast";
-import { getFileExtension, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
+import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../index";
+import { editorTabStore } from "../../../application/state/editorTabStore";
+import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
+import type { TextEditorModalSnapshot } from "../../TextEditorModal";
 
 interface UseSftpViewFileOpsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -80,6 +83,7 @@ interface UseSftpViewFileOpsResult {
     } | null>
   >;
   handleSaveTextFile: (content: string) => Promise<void>;
+  onPromoteToTab: (snapshot: TextEditorModalSnapshot) => void;
   handleFileOpenerSelect: (
     openerType: FileOpenerType,
     setAsDefault: boolean,
@@ -297,6 +301,31 @@ export const useSftpViewFileOps = ({
     },
     [sftpRef],
   );
+
+  const handlePromoteToTab = useCallback((snapshot: TextEditorModalSnapshot) => {
+    const target = textEditorTargetRef.current;
+    if (!target) return;
+    const pane = target.side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+    const connection = pane.connection;
+    if (!connection || !target.hostId) return;
+
+    const editorId = editorTabStore.promoteFromModal({
+      sessionId: connection.id,
+      hostId: target.hostId,
+      remotePath: target.fullPath,
+      fileName: target.file.name,
+      languageId: snapshot.languageId || getLanguageId(target.file.name),
+      content: snapshot.content,
+      baselineContent: snapshot.baselineContent,
+      wordWrap: snapshot.wordWrap,
+      viewState: snapshot.viewState,
+    });
+    activeTabStore.setActiveTabId(toEditorTabId(editorId));
+    // Close the modal
+    setShowTextEditor(false);
+    setTextEditorTarget(null);
+    setTextEditorContent("");
+  }, [sftpRef]);
 
   const onEditFileLeft = useCallback(
     (file: SftpFileEntry, fullPath?: string) => handleEditFileForSide("left", file, fullPath),
@@ -664,6 +693,7 @@ export const useSftpViewFileOps = ({
     fileOpenerTarget,
     setFileOpenerTarget,
     handleSaveTextFile,
+    onPromoteToTab: handlePromoteToTab,
     handleFileOpenerSelect,
     handleSelectSystemApp,
     onEditPermissionsLeft,

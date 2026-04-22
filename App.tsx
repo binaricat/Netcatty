@@ -56,6 +56,8 @@ import { LogView as LogViewType } from './application/state/useSessionState';
 import type { SftpView as SftpViewComponent } from './components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
 import { TextEditorTabView } from './components/editor/TextEditorTabView';
+import { UnsavedChangesProvider } from './components/editor/UnsavedChangesDialog';
+import { editorSftpWrite } from './application/state/editorSftpBridge';
 
 // Initialize fonts eagerly at app startup
 initializeFonts();
@@ -1690,11 +1692,6 @@ function App({ settings }: { settings: SettingsState }) {
     e.preventDefault();
   }, []);
 
-  // Stub close handler for editor tabs — Task 12 will replace with dirty-confirm flow.
-  const handleRequestCloseEditorTab = useCallback((id: string) => {
-    editorTabStore.close(id);
-  }, []);
-
   // Combined ordered tab list including editor tab ids (for TopTabs scrollable area)
   const orderedTabsWithEditors = useMemo(
     () => [...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))],
@@ -1702,6 +1699,49 @@ function App({ settings }: { settings: SettingsState }) {
   );
 
   return (
+    <UnsavedChangesProvider>
+      {({ prompt }) => {
+        // Helper: close an editor tab and activate the neighbor (left-preference), or vault.
+        const closeEditorAndActivateNeighbor = (id: string) => {
+          const closingTabId = toEditorTabId(id);
+          const list = orderedTabsWithEditors;
+          const idx = list.indexOf(closingTabId);
+          editorTabStore.close(id);
+          if (activeTabStore.getActiveTabId() !== closingTabId) return;
+          const next = list[idx - 1] ?? list[idx + 1] ?? 'vault';
+          activeTabStore.setActiveTabId(next === closingTabId ? 'vault' : next);
+        };
+
+        // Real dirty-confirm close handler.
+        const handleRequestCloseEditorTab = async (id: string) => {
+          const tab = editorTabStore.getTab(id);
+          if (!tab) return;
+          const dirty = tab.content !== tab.baselineContent;
+          if (!dirty) {
+            closeEditorAndActivateNeighbor(id);
+            return;
+          }
+          const choice = await prompt(tab.fileName);
+          if (choice === 'cancel') return;
+          if (choice === 'discard') {
+            closeEditorAndActivateNeighbor(id);
+            return;
+          }
+          if (choice === 'save') {
+            try {
+              editorTabStore.setSavingState(id, 'saving');
+              await editorSftpWrite(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
+              editorTabStore.markSaved(id, tab.content);
+              closeEditorAndActivateNeighbor(id);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Save failed';
+              editorTabStore.setSavingState(id, 'error', msg);
+              toast.error(msg, 'SFTP');
+            }
+          }
+        };
+
+        return (
     <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>
       <TopTabs
         theme={resolvedTheme}
@@ -2134,6 +2174,9 @@ function App({ settings }: { settings: SettingsState }) {
         </DialogContent>
       </Dialog>
     </div>
+        );
+      }}
+    </UnsavedChangesProvider>
   );
 }
 

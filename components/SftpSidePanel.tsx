@@ -224,6 +224,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     fileOpenerTarget,
     setFileOpenerTarget,
     handleSaveTextFile,
+    onPromoteToTab,
     handleFileOpenerSelect,
     handleSelectSystemApp,
   } = useSftpViewPaneCallbacks({
@@ -679,6 +680,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
           setFileOpenerTarget={setFileOpenerTarget}
           handleFileOpenerSelect={handleFileOpenerSelect}
           handleSelectSystemApp={handleSelectSystemApp}
+          onPromoteToTab={onPromoteToTab}
           t={t}
         />
       )}
