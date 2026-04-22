@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useMemo } from "react";
-import { TransferTask, TransferStatus } from "../../../domain/models";
+import { TransferTask, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
@@ -20,6 +20,7 @@ export type { UploadResult };
 
 interface UseSftpExternalOperationsParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
+  getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
@@ -35,6 +36,13 @@ interface SftpExternalOperationsResult {
   readTextFile: (side: "left" | "right", filePath: string) => Promise<string>;
   readBinaryFile: (side: "left" | "right", filePath: string) => Promise<ArrayBuffer>;
   writeTextFile: (side: "left" | "right", filePath: string, content: string) => Promise<void>;
+  writeTextFileByConnection: (
+    connectionId: string,
+    expectedHostId: string,
+    filePath: string,
+    content: string,
+    filenameEncoding?: SftpFilenameEncoding,
+  ) => Promise<void>;
   downloadToTempAndOpen: (
     side: "left" | "right",
     remotePath: string,
@@ -62,6 +70,7 @@ export const useSftpExternalOperations = (
 ): SftpExternalOperationsResult => {
   const {
     getActivePane,
+    getPaneByConnectionId,
     refresh,
     sftpSessionsRef,
     connectionCacheKeyMapRef,
@@ -171,6 +180,41 @@ export const useSftpExternalOperations = (
       await bridge.writeSftp(sftpId, filePath, content, pane.filenameEncoding);
     },
     [getActivePane, sftpSessionsRef],
+  );
+
+  const writeTextFileByConnection = useCallback(
+    async (
+      connectionId: string,
+      expectedHostId: string,
+      filePath: string,
+      content: string,
+      filenameEncoding?: SftpFilenameEncoding,
+    ): Promise<void> => {
+      const pane = getPaneByConnectionId(connectionId);
+      if (!pane?.connection) {
+        throw new Error("SFTP connection is no longer available");
+      }
+      if (pane.connection.hostId !== expectedHostId) {
+        throw new Error("SFTP connection changed while editing — file not saved to prevent writing to wrong host");
+      }
+
+      if (pane.connection.isLocal) {
+        const bridge = netcattyBridge.get();
+        if (!bridge?.writeLocalFile) throw new Error("Local file writing not supported");
+        const data = new TextEncoder().encode(content);
+        await bridge.writeLocalFile(filePath, data.buffer);
+        return;
+      }
+
+      const sftpId = sftpSessionsRef.current.get(pane.connection.id);
+      if (!sftpId) throw new Error("SFTP session not found");
+
+      const bridge = netcattyBridge.get();
+      if (!bridge) throw new Error("Bridge not available");
+
+      await bridge.writeSftp(sftpId, filePath, content, filenameEncoding ?? pane.filenameEncoding);
+    },
+    [getPaneByConnectionId, sftpSessionsRef],
   );
 
   const downloadToTempAndOpen = useCallback(
@@ -693,6 +737,7 @@ export const useSftpExternalOperations = (
     readTextFile,
     readBinaryFile,
     writeTextFile,
+    writeTextFileByConnection,
     downloadToTempAndOpen,
     uploadExternalFiles,
     uploadExternalEntries,
