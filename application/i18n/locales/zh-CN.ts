@@ -1794,6 +1794,7 @@ const zhCN: Messages = {
   'sftp.editor.unsavedMessage': '{fileName} 有未保存的修改，是否保存后关闭？',
   'sftp.editor.discardChanges': '不保存',
   'sftp.editor.saveAndClose': '保存并关闭',
+  'sftp.editor.quitBlockedByDirty': '存在未保存的编辑器，请先处理后再退出',
 
   // AI Settings
   'ai.agentSettings': 'Agent 设置',

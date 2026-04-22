@@ -894,6 +894,16 @@ const api = {
 
   // Tell main process the renderer has mounted/painted (used to avoid initial blank screen).
   rendererReady: () => ipcRenderer.send("netcatty:renderer:ready"),
+
+  // Quit guard: main process asks whether any editor tabs have unsaved changes.
+  // Returns an unsubscribe function so React effects can clean up on unmount.
+  onCheckDirtyEditors: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on("app:query-dirty-editors", handler);
+    return () => ipcRenderer.removeListener("app:query-dirty-editors", handler);
+  },
+  // Renderer reports the dirty-check result back to the main process.
+  reportDirtyEditorsResult: (hasDirty) => ipcRenderer.send("app:dirty-editors-result", { hasDirty }),
   
   // Port Forwarding API
   startPortForward: async (options) => {

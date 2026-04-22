@@ -874,6 +874,19 @@ function App({ settings }: { settings: SettingsState }) {
     };
   }, []);
 
+  // Quit guard: block app exit while any editor tab has unsaved changes.
+  // Main process sends "app:query-dirty-editors"; we respond with the result.
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onCheckDirtyEditors) return;
+    const unsub = bridge.onCheckDirtyEditors(() => {
+      const hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
+      if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
+      bridge.reportDirtyEditorsResult?.(hasDirty);
+    });
+    return unsub;
+  }, [t]);
+
   // Keyboard-interactive authentication (2FA/MFA) event listener
   useEffect(() => {
     const bridge = netcattyBridge.get();

@@ -1184,8 +1184,33 @@ if (!gotLock) {
     }
   });
 
-  app.on("before-quit", () => {
+  // Re-entry guard: prevents the handler from firing a second time while the
+  // async dirty-editor check is still in flight.
+  let quitGuardChannelBusy = false;
+
+  app.on("before-quit", (event) => {
     getWindowManager().setIsQuitting(true);
+
+    // If the guard is busy we're in the second pass triggered by app.quit()
+    // after the renderer confirmed no dirty editors — let it through.
+    if (quitGuardChannelBusy) return;
+
+    const { ipcMain: _ipcMain } = electronModule;
+    const win = BrowserWindow.getAllWindows()[0];
+    // No window — nothing to check; let the quit proceed.
+    if (!win || win.isDestroyed?.()) return;
+
+    quitGuardChannelBusy = true;
+    event.preventDefault();
+    win.webContents.send("app:query-dirty-editors");
+    _ipcMain.once("app:dirty-editors-result", (_evt, { hasDirty }) => {
+      quitGuardChannelBusy = false;
+      if (!hasDirty) {
+        // No dirty editors — proceed with quit.
+        app.quit();
+      }
+      // If hasDirty === true the renderer has shown a toast; stay put.
+    });
   });
 
   // Cleanup all PTY sessions and port forwarding tunnels before quitting
