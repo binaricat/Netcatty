@@ -798,8 +798,10 @@ export function useTerminalAutocomplete(
             return false;
           }
         }
-        // Otherwise: accept ghost text
-        if (ghost?.isVisible()) {
+        // Otherwise: accept ghost text. Use isActive(), not isVisible(),
+        // so a fast "type + →" that lands in the hide-until-render gap
+        // still hits this branch and accepts the pending ghost.
+        if (ghost?.isActive()) {
           e.preventDefault();
           const fullSuggestion = ghost.getSuggestion();
           // Recompute the tail against the *live* typed buffer rather
@@ -830,7 +832,7 @@ export function useTerminalAutocomplete(
 
       // Ctrl+Right / Alt+Right (Mac): accept next word
       if (e.key === "ArrowRight" && (e.ctrlKey || e.altKey) && !e.metaKey && !e.shiftKey) {
-        if (ghost?.isVisible()) {
+        if (ghost?.isActive()) {
           e.preventDefault();
           const fullSuggestion = ghost.getSuggestion();
           // Resync the ghost to the live buffer before picking the next
@@ -877,7 +879,7 @@ export function useTerminalAutocomplete(
         }
         // Hide stale ghost text before Tab reaches the shell — the shell's
         // completion will rewrite the line and the old ghost would mislead.
-        if (ghost?.isVisible()) {
+        if (ghost?.isActive()) {
           ghost.hide();
         }
       }
