@@ -82,9 +82,12 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
     // all fill their flex-1 parent via `absolute inset-0`. Match that here so
     // an inactive editor tab doesn't collapse to zero height in normal flow,
     // and an active one fills the viewport instead of stacking beneath others.
+    // z-index high enough to stay above the TerminalLayer's inner `z-10` panels
+    // (TerminalLayer root is visibility:hidden when editor tabs are active, but
+    // its children's stacking contexts can still overlap without an explicit z.)
     <div
-      style={{ display: isVisible ? undefined : 'none' }}
-      className="absolute inset-0 min-h-0 flex flex-col"
+      style={{ display: isVisible ? undefined : 'none', zIndex: 20 }}
+      className="absolute inset-0 min-h-0 flex flex-col bg-background"
     >
       <TextEditorPane
         chrome="tab"
