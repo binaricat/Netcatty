@@ -5,6 +5,17 @@ module.exports = {
     appId: 'com.netcatty.app',
     productName: 'Netcatty',
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+    // Platform-split icons (#813):
+    //   - public/icon.png keeps Apple's HIG grid margin so the rendered
+    //     squircle sits at ~88% of the PNG canvas. macOS needs this —
+    //     the dock renders icons with its own rounding/shadow and most
+    //     third-party apps (#803) leave that grid margin alone so the
+    //     squircle lines up with neighbors.
+    //   - public/icon-win.png uses a tight-crop viewBox so the squircle
+    //     fills 100% of the PNG. Windows / Linux taskbars render icons
+    //     full-bleed, so the Apple margin showed up as visible padding,
+    //     making the app icon look smaller than other apps in taskbar /
+    //     Start menu / desktop shortcuts.
     icon: 'public/icon.png',
     // npmRebuild must stay enabled for macOS and Windows builds — without it,
     // node-pty's native module is not recompiled for the Electron ABI, causing
@@ -84,6 +95,7 @@ module.exports = {
         ]
     },
     win: {
+        icon: 'public/icon-win.png',
         target: [
             {
                 target: 'nsis',
@@ -108,6 +120,10 @@ module.exports = {
         shortcutName: 'Netcatty'
     },
     linux: {
+        // Linux desktop icons render full-bleed like Windows — use the
+        // tight-crop source so the app icon doesn't look padded in KDE /
+        // GNOME launchers or AppImage integrations.
+        icon: 'public/icon-win.png',
         target: ['AppImage', 'deb', 'rpm'],
         category: 'Development'
     },
