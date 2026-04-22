@@ -3,6 +3,9 @@ import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 import { keepOnlyActivePaneSelections } from "./selectionScope";
+import { editorTabStore } from "../../../application/state/editorTabStore";
+import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
+import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 
 interface UseSftpViewPaneActionsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -127,8 +130,36 @@ export const useSftpViewPaneActions = ({
     (host: Parameters<SftpStateApi["connect"]>[1]) => sftpRef.current.connect("right", host),
     [sftpRef],
   );
-  const onDisconnectLeft = useCallback(() => sftpRef.current.disconnect("left"), [sftpRef]);
-  const onDisconnectRight = useCallback(() => sftpRef.current.disconnect("right"), [sftpRef]);
+  const onDisconnectLeft = useCallback(async () => {
+    const connectionId = sftpRef.current.getActivePane("left")?.connection?.id;
+    if (connectionId) {
+      const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
+      const saveTab = async (id: EditorTabId) => {
+        const tab = editorTabStore.getTab(id);
+        if (!tab) return;
+        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
+        editorTabStore.markSaved(id, tab.content);
+      };
+      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      if (!ok) return;
+    }
+    sftpRef.current.disconnect("left");
+  }, [sftpRef]);
+  const onDisconnectRight = useCallback(async () => {
+    const connectionId = sftpRef.current.getActivePane("right")?.connection?.id;
+    if (connectionId) {
+      const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
+      const saveTab = async (id: EditorTabId) => {
+        const tab = editorTabStore.getTab(id);
+        if (!tab) return;
+        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
+        editorTabStore.markSaved(id, tab.content);
+      };
+      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      if (!ok) return;
+    }
+    sftpRef.current.disconnect("right");
+  }, [sftpRef]);
   const onPrepareSelectionLeft = useCallback(() => {
     keepOnlyActivePaneSelections(sftpRef.current, "left");
   }, [sftpRef]);

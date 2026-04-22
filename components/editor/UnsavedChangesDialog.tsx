@@ -41,6 +41,13 @@ export const UnsavedChangesProvider: React.FC<{
     [],
   );
 
+  // Register the prompt function as the module-level singleton so it can be
+  // called from outside the React tree (e.g. useSftpViewPaneActions).
+  useEffect(() => {
+    promptSingleton = prompt;
+    return () => { promptSingleton = null; };
+  }, [prompt]);
+
   // On unmount, resolve any in-flight prompt as "cancel" so awaiting callers don't leak.
   useEffect(() => () => {
     const prior = pendingRef.current;
@@ -82,4 +89,16 @@ export const UnsavedChangesProvider: React.FC<{
       </Dialog>
     </>
   );
+};
+
+// ---------------------------------------------------------------------------
+// Module-level singleton — lets non-React code call the dialog without
+// prop-drilling. Registered/unregistered by UnsavedChangesProvider above.
+// ---------------------------------------------------------------------------
+
+let promptSingleton: ((fileName: string) => Promise<UnsavedChoice>) | null = null;
+
+export const promptUnsavedChanges = (fileName: string): Promise<UnsavedChoice> => {
+  if (!promptSingleton) return Promise.resolve("cancel");
+  return promptSingleton(fileName);
 };

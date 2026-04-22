@@ -14,7 +14,7 @@
  * - components/sftp/SftpHostPicker.tsx - Host selection dialog
  */
 
-import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
@@ -27,6 +27,7 @@ import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import { Host, Identity, SSHKey } from "../types";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
+import { registerEditorSftpWriter } from "../application/state/editorSftpBridge";
 import { toast } from "./ui/toast";
 
 // Import extracted components
@@ -118,6 +119,15 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   );
 
   const sftp = useSftpState(effectiveHosts, keys, identities, sftpOptions);
+
+  // Register writeTextFileByConnection with the editorSftpBridge singleton so that
+  // the editor tab's save path can use the active SFTP session.
+  useEffect(() => {
+    registerEditorSftpWriter((connectionId, expectedHostId, filePath, content, encoding) =>
+      sftp.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
+    );
+    return () => registerEditorSftpWriter(null);
+  }, [sftp]);
 
   // Get backend helpers for file downloads and local filesystem writes.
   const {
