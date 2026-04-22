@@ -723,9 +723,13 @@ export function useTerminalAutocomplete(
         // Any other single control char (Ctrl-A, Ctrl-E, Ctrl-B, Ctrl-F,
         // Ctrl-R, Ctrl-P, Ctrl-N, ...) moves the cursor or swaps the
         // line in ways this append-only buffer can't follow. Same story
-        // as escape sequences above.
+        // as escape sequences above — and hide the ghost too, so the
+        // unreliable-accept fallback doesn't pull a stale tail onto a
+        // recalled line (Codex #815 follow-up).
         typedInputBufferRef.current = "";
         typedBufferReliableRef.current = false;
+        clearState();
+        return;
       }
 
       // Escape sequences (arrow keys, Home, End, etc.): clear stale suggestions
