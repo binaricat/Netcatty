@@ -120,17 +120,6 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
 
   const sftp = useSftpState(effectiveHosts, keys, identities, sftpOptions);
 
-  // Register this useSftpState's writeTextFileByConnection with the bridge so
-  // the editor tab's save path can reach the active SFTP session. The bridge
-  // supports multiple simultaneous writers (SftpSidePanel inside terminals
-  // also registers its own instance) and dispatches by trying each until one
-  // owns the target connectionId.
-  useEffect(() => {
-    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
-      sftp.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
-    );
-  }, [sftp]);
-
   // Get backend helpers for file downloads and local filesystem writes.
   const {
     showSaveDialog,
@@ -146,6 +135,23 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   // without needing to re-create when sftp changes
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
+
+  // Register this useSftpState's writeTextFileByConnection with the bridge so
+  // the editor tab's save path can reach the active SFTP session. The bridge
+  // supports multiple simultaneous writers (SftpSidePanel inside terminals
+  // also registers its own instance) and dispatches by trying each until one
+  // owns the target connectionId.
+  //
+  // Intentionally no deps: `sftp` identity churns on every SFTP state change
+  // (transfers, pane updates, tab switches), which would make this effect
+  // unregister+reregister constantly. Route through sftpRef so the closure
+  // always reads the latest writeTextFileByConnection; that method is stable
+  // across sftp re-renders (it's a methodsRef-backed dispatcher).
+  useEffect(() => {
+    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
+      sftpRef.current.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
+    );
+  }, []);
 
   // Store behavior setting in ref for stable callbacks
   const behaviorRef = useRef(sftpDoubleClickBehavior);

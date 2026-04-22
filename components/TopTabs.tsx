@@ -494,6 +494,14 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return map;
   }, [editorTabs]);
 
+  // fileName → count, for the rename-disambiguation suffix in the render loop.
+  // Memoed so we don't do a per-tab O(n) filter on every render (was O(n²)).
+  const editorTabFileNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of editorTabs) counts.set(t.fileName, (counts.get(t.fileName) ?? 0) + 1);
+    return counts;
+  }, [editorTabs]);
+
   // Build ordered tab items using pre-computed maps for O(1) lookups
   const orderedTabItems = useMemo(() => {
     return orderedTabs.map((tabId) => {
@@ -562,9 +570,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const host = hostById.get(editorTab.hostId);
         const dirty = editorTab.content !== editorTab.baselineContent;
         const tooltip = `${host?.label ?? editorTab.hostId}@${host?.hostname ?? ''}:${editorTab.remotePath}`;
-        // Disambiguate duplicate filenames within editor tabs (O(n) scan)
-        const dupes = editorTabs.filter((t) => t.fileName === editorTab.fileName);
-        const suffix = dupes.length > 1
+        // Disambiguate duplicate filenames using the memoed counts map.
+        const suffix = (editorTabFileNameCounts.get(editorTab.fileName) ?? 0) > 1
           ? ` · ${editorTab.remotePath.split('/').slice(-2, -1)[0] || '/'}`
           : '';
         const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
