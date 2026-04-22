@@ -82,10 +82,17 @@ export class GhostTextAddon implements IDisposable {
       }),
     );
 
-    // Invalidate cell dimension cache on resize so measurements stay accurate
+    // Invalidate cell dimension cache on resize so measurements stay
+    // accurate, and force a pixel-coord recompute on the next render —
+    // otherwise the lastLeft/lastTop short-circuit in updatePosition
+    // would keep the ghost at stale pixel coordinates until the user
+    // typed again.
     this.disposables.push(
       term.onResize(() => {
         invalidateCellDimensionCache();
+        this.lastLeft = -1;
+        this.lastTop = -1;
+        if (this.isVisible()) this.updatePosition();
       }),
     );
   }
@@ -219,12 +226,13 @@ export class GhostTextAddon implements IDisposable {
 
     const dims = getXTermCellDimensions(this.term);
 
-    // Advance the anchor column by however many chars the user has typed
-    // since show() was called. This mirrors where the real cursor will
-    // land after the echo, so the ghost's first visible column lines up
-    // with the tail we want it to show.
-    const charsSinceAnchor = Math.max(0, this.currentInput.length - this.anchorInputLength);
-    const left = (this.anchorCursorX + charsSinceAnchor) * dims.width;
+    // Advance (or walk back) the anchor column by however many chars
+    // the user has typed since show() was called. This mirrors where
+    // the real cursor will land after the echo — including on backspace
+    // / Ctrl-W shrinks where the delta is negative and the ghost needs
+    // to move left, not stay pinned at the anchor.
+    const charsSinceAnchor = this.currentInput.length - this.anchorInputLength;
+    const left = Math.max(0, this.anchorCursorX + charsSinceAnchor) * dims.width;
     const top = this.anchorCursorY * dims.height;
 
     // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)

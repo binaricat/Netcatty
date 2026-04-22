@@ -158,6 +158,40 @@ test("shifts ghost to predicted cursor column as matching input is typed", () =>
   }
 });
 
+test("walks the anchor column backwards on backspace so the ghost re-aligns", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    addon.show("docker", "do");
+
+    const ghost = ghostElement();
+    assert.ok(ghost);
+
+    addon.adjustToInput("doc");
+    assert.equal(ghost.textContent, "ker");
+    assert.equal(ghost.style.left, "27px");
+
+    // Backspace below the anchor input — the ghost should shift *left*,
+    // not stay pinned at the show-time anchor column. Pinning would
+    // leave a visual gap between the real cursor and the ghost.
+    addon.adjustToInput("d");
+    assert.equal(ghost.textContent, "ocker");
+    // anchor was cursorX=2 captured at show(); "d" is 1 char below
+    // anchorInputLength=2 → predicted cursor column = 1.
+    assert.equal(ghost.style.left, "9px");
+
+    // Backspace past the anchor back to empty: left is clamped at 0.
+    addon.adjustToInput("");
+    assert.equal(ghost.textContent, "docker");
+    assert.equal(ghost.style.left, "0px");
+  } finally {
+    restoreDocument();
+  }
+});
+
 test("hides ghost immediately when input no longer matches suggestion", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();
