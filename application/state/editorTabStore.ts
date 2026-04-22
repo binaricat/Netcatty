@@ -63,6 +63,10 @@ export class EditorTabStore {
     this.patch(id, { wordWrap: value });
   };
 
+  setLanguage = (id: EditorTabId, languageId: string) => {
+    this.patch(id, { languageId });
+  };
+
   setSavingState = (id: EditorTabId, state: EditorSavingState, error: string | null = null) => {
     const patch: Partial<EditorTab> = { savingState: state };
     if (state === "idle") patch.saveError = null;
