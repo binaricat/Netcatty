@@ -620,15 +620,17 @@ export function useTerminalAutocomplete(
                 )
               : null;
             if (livePrompt?.isAtPrompt) {
-              // Only prefer the keystroke buffer when it's reliable. After
-              // Up-arrow / Ctrl-R / cursor moves the buffer may hold just a
-              // post-navigation suffix of the real line — recording that
-              // instead of the executed command would pollute history.
-              const typedCommand = bufferReliable
-                ? typedInputBufferRef.current.trim()
-                : "";
-              if (typedCommand) {
-                recordCommand(typedCommand, hostIdRef.current, hostOsRef.current);
+              // Only prefer the keystroke buffer when it's reliable AND
+              // actually aligned with the live line. Non-keyboard inserts
+              // that bypass handleInput (hotkey / middle-click / context
+              // paste in createXTermRuntime) can leave the buffer holding
+              // only a stale prefix of what the shell now sees; trusting
+              // it here would record that prefix as the command (#814 P1).
+              const typedRaw = bufferReliable ? typedInputBufferRef.current : "";
+              const typedAligned =
+                typedRaw.length > 0 && livePrompt.userInput.endsWith(typedRaw);
+              if (typedAligned && typedRaw.trim()) {
+                recordCommand(typedRaw.trim(), hostIdRef.current, hostOsRef.current);
               } else if (livePrompt.userInput.trim()) {
                 recordCommand(livePrompt.userInput.trim(), hostIdRef.current, hostOsRef.current);
               }
