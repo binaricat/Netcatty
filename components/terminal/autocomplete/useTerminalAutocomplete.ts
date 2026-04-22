@@ -226,6 +226,17 @@ export function useTerminalAutocomplete(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, settings.enabled]);
 
+  // Hide any active ghost when the user turns showGhostText off mid-
+  // session. The fetchSuggestions branch (~L531) already gates new
+  // shows on the flag, but a ghost that was already on screen at toggle
+  // time would otherwise keep sliding around under a disabled setting
+  // until something unrelated called clearState (Codex #815 P2).
+  useEffect(() => {
+    if (!settings.showGhostText) {
+      ghostAddonRef.current?.hide();
+    }
+  }, [settings.showGhostText]);
+
   /**
    * Write accepted text to the terminal via callback (no CustomEvent).
    */
@@ -767,8 +778,11 @@ export function useTerminalAutocomplete(
       // pre-update tail on top of the new input ("doc" + "cker ls" →
       // "doccker ls"). Only safe to call when the buffer is reliable —
       // otherwise its content doesn't correspond to the live line and
-      // adjustToInput would make the ghost lie.
-      if (typedBufferReliableRef.current) {
+      // adjustToInput would make the ghost lie. Also skip when the user
+      // has turned showGhostText off mid-session: otherwise a ghost that
+      // was active before the toggle would keep moving around under a
+      // setting the user just said to disable (Codex #815 P2).
+      if (typedBufferReliableRef.current && settingsRef.current.showGhostText) {
         ghostAddonRef.current?.adjustToInput(typedInputBufferRef.current);
       }
 
