@@ -16,8 +16,8 @@ interface UseSftpViewPaneActionsResult {
   draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onConnectLeft: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
   onConnectRight: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
-  onDisconnectLeft: () => Promise<void>;
-  onDisconnectRight: () => Promise<void>;
+  onDisconnectLeft: () => Promise<boolean>;
+  onDisconnectRight: () => Promise<boolean>;
   onPrepareSelectionLeft: () => void;
   onPrepareSelectionRight: () => void;
   onNavigateToLeft: (path: string) => void;
@@ -130,7 +130,11 @@ export const useSftpViewPaneActions = ({
     (host: Parameters<SftpStateApi["connect"]>[1]) => sftpRef.current.connect("right", host),
     [sftpRef],
   );
-  const onDisconnectLeft = useCallback(async () => {
+  // Returns `true` if the disconnect actually happened, `false` if the user
+  // canceled the dirty-editor prompt. Callers that kick off a replacement
+  // connect (e.g. the host picker) MUST gate their follow-up on this result
+  // so a canceled prompt doesn't silently drop the user onto a new host.
+  const onDisconnectLeft = useCallback(async (): Promise<boolean> => {
     const connectionId = sftpRef.current.getActivePane("left")?.connection?.id;
     if (connectionId) {
       const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
@@ -141,11 +145,12 @@ export const useSftpViewPaneActions = ({
         editorTabStore.markSaved(id, tab.content);
       };
       const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
-      if (!ok) return;
+      if (!ok) return false;
     }
     sftpRef.current.disconnect("left");
+    return true;
   }, [sftpRef]);
-  const onDisconnectRight = useCallback(async () => {
+  const onDisconnectRight = useCallback(async (): Promise<boolean> => {
     const connectionId = sftpRef.current.getActivePane("right")?.connection?.id;
     if (connectionId) {
       const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
@@ -156,9 +161,10 @@ export const useSftpViewPaneActions = ({
         editorTabStore.markSaved(id, tab.content);
       };
       const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
-      if (!ok) return;
+      if (!ok) return false;
     }
     sftpRef.current.disconnect("right");
+    return true;
   }, [sftpRef]);
   const onPrepareSelectionLeft = useCallback(() => {
     keepOnlyActivePaneSelections(sftpRef.current, "left");

@@ -20,7 +20,10 @@ export interface SftpTransferSource {
 // Types for the context
 export interface SftpPaneCallbacks {
     onConnect: (host: Host | "local") => void;
-    onDisconnect: () => Promise<void>;
+    /** Resolves true if disconnect completed, false if the user canceled the
+     * dirty-editor prompt. Callers that follow up with a replacement connect
+     * must gate on the result. */
+    onDisconnect: () => Promise<boolean>;
     onPrepareSelection: () => void;
     onNavigateTo: (path: string) => void;
     onNavigateUp: () => void;

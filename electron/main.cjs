@@ -1201,14 +1201,24 @@ if (!gotLock) {
   // back, short enough that a hung renderer doesn't strand the app forever.
   const QUIT_GUARD_TIMEOUT_MS = 5000;
 
-  app.on("before-quit", (event) => {
+  // Commit the window manager to "we're quitting" state. Must only run once
+  // we've decided to actually proceed — if we set it unconditionally on every
+  // before-quit, a dirty-cancelled quit leaves isQuitting=true and changes
+  // later window-close behavior (e.g. close-to-tray hooks that gate on
+  // !isQuitting would stop firing).
+  const commitQuit = () => {
     getWindowManager().setIsQuitting(true);
+    quitConfirmed = true;
+    app.quit();
+  };
 
-    // Fast path: we've already confirmed the quit once; let this re-entry through.
+  app.on("before-quit", (event) => {
+    // Fast path: we've already confirmed the quit once (commitQuit ran) and
+    // app.quit() re-fired before-quit. Let it through.
     if (quitConfirmed) return;
 
     // A check is already in flight — swallow this event; the in-flight handler
-    // will issue app.quit() when it completes if appropriate.
+    // will issue commitQuit() when it completes if appropriate.
     if (quitGuardChannelBusy) {
       event.preventDefault();
       return;
@@ -1216,8 +1226,11 @@ if (!gotLock) {
 
     const { ipcMain: _ipcMain } = electronModule;
     const win = BrowserWindow.getAllWindows()[0];
-    // No window — nothing to check; let the quit proceed.
-    if (!win || win.isDestroyed?.()) return;
+    // No window — nothing to check; commit to quit directly.
+    if (!win || win.isDestroyed?.()) {
+      commitQuit();
+      return;
+    }
 
     quitGuardChannelBusy = true;
     event.preventDefault();
@@ -1229,20 +1242,17 @@ if (!gotLock) {
     const timeoutId = setTimeout(() => {
       _ipcMain.removeAllListeners("app:dirty-editors-result");
       quitGuardChannelBusy = false;
-      quitConfirmed = true;
-      app.quit();
+      commitQuit();
     }, QUIT_GUARD_TIMEOUT_MS);
 
     _ipcMain.once("app:dirty-editors-result", (_evt, { hasDirty }) => {
       clearTimeout(timeoutId);
       quitGuardChannelBusy = false;
       if (!hasDirty) {
-        // No dirty editors — commit to quitting before app.quit() re-fires
-        // before-quit so the re-entry hits the quitConfirmed fast path.
-        quitConfirmed = true;
-        app.quit();
+        commitQuit();
       }
-      // If hasDirty === true the renderer has shown a toast; stay put.
+      // If hasDirty === true the renderer has shown a toast; stay put. Do not
+      // touch isQuitting so tray/close-to-tray gating keeps working.
     });
   });
 

@@ -141,13 +141,23 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   // save channel is gone with the SFTP session and there's no way to recover
   // it. Dirty state is dropped intentionally; the user closed the terminal
   // knowing the file was open.
+  //
+  // Collect every connection id across all left/right tabs — the panel can
+  // host multiple SFTP tabs per side, and an editor tab promoted from an
+  // inactive-pane tab would otherwise be stranded by the unmount.
   useEffect(() => {
     return () => {
+      const s = sftpRef.current;
+      if (!s) return;
       const owned = new Set<string>();
-      const l = sftpRef.current?.leftPane?.connection?.id;
-      const r = sftpRef.current?.rightPane?.connection?.id;
-      if (l) owned.add(l);
-      if (r) owned.add(r);
+      for (const tab of s.leftTabs?.tabs ?? []) {
+        const id = tab.connection?.id;
+        if (id) owned.add(id);
+      }
+      for (const tab of s.rightTabs?.tabs ?? []) {
+        const id = tab.connection?.id;
+        if (id) owned.add(id);
+      }
       if (owned.size === 0) return;
       editorTabStore.forceCloseBySessions([...owned]);
     };
