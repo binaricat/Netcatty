@@ -61,7 +61,7 @@ interface SftpPaneDialogsProps {
   hostSearch: string;
   setHostSearch: (value: string) => void;
   onConnect: (host: Host | "local") => void;
-  onDisconnect: () => void;
+  onDisconnect: () => Promise<boolean>;
 }
 
 const HostHint: React.FC<{ label?: string }> = ({ label }) =>
@@ -357,13 +357,16 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
       side={side}
       hostSearch={hostSearch}
       onHostSearchChange={setHostSearch}
-      onSelectLocal={() => {
-        onDisconnect();
-        onConnect("local");
+      onSelectLocal={async () => {
+        // Only connect to the new target if the disconnect actually happened.
+        // A cancel on the dirty-editor prompt must keep the user on the
+        // current host instead of silently switching and stranding tabs.
+        const ok = await onDisconnect();
+        if (ok) onConnect("local");
       }}
-      onSelectHost={(host) => {
-        onDisconnect();
-        onConnect(host);
+      onSelectHost={async (host) => {
+        const ok = await onDisconnect();
+        if (ok) onConnect(host);
       }}
     />
   </>

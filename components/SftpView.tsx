@@ -14,7 +14,7 @@
  * - components/sftp/SftpHostPicker.tsx - Host selection dialog
  */
 
-import React, { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
@@ -27,6 +27,7 @@ import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
 import { Host, Identity, SSHKey } from "../types";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
+import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
 import { toast } from "./ui/toast";
 
 // Import extracted components
@@ -135,6 +136,23 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
 
+  // Register this useSftpState's writeTextFileByConnection with the bridge so
+  // the editor tab's save path can reach the active SFTP session. The bridge
+  // supports multiple simultaneous writers (SftpSidePanel inside terminals
+  // also registers its own instance) and dispatches by trying each until one
+  // owns the target connectionId.
+  //
+  // Intentionally no deps: `sftp` identity churns on every SFTP state change
+  // (transfers, pane updates, tab switches), which would make this effect
+  // unregister+reregister constantly. Route through sftpRef so the closure
+  // always reads the latest writeTextFileByConnection; that method is stable
+  // across sftp re-renders (it's a methodsRef-backed dispatcher).
+  useEffect(() => {
+    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
+      sftpRef.current.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
+    );
+  }, []);
+
   // Store behavior setting in ref for stable callbacks
   const behaviorRef = useRef(sftpDoubleClickBehavior);
   behaviorRef.current = sftpDoubleClickBehavior;
@@ -219,6 +237,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     fileOpenerTarget,
     setFileOpenerTarget,
     handleSaveTextFile,
+    onPromoteToTab,
     handleFileOpenerSelect,
     handleSelectSystemApp,
   } = useSftpViewPaneCallbacks({
@@ -475,6 +494,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
           setFileOpenerTarget={setFileOpenerTarget}
           handleFileOpenerSelect={handleFileOpenerSelect}
           handleSelectSystemApp={handleSelectSystemApp}
+          onPromoteToTab={onPromoteToTab}
           t={t}
         />
       </div>

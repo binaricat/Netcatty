@@ -5,6 +5,7 @@ import type { useSftpState } from "../../application/state/useSftpState";
 import type { HotkeyScheme, KeyBinding } from "../../domain/models";
 import FileOpenerDialog from "../FileOpenerDialog";
 import TextEditorModal from "../TextEditorModal";
+import type { TextEditorModalSnapshot } from "../TextEditorModal";
 import { SftpConflictDialog, SftpHostPicker, SftpPermissionsDialog } from "./index";
 import { SftpTransferQueue } from "./SftpTransferQueue";
 
@@ -44,6 +45,7 @@ interface SftpOverlaysProps {
   setFileOpenerTarget: (target: { file: SftpFileEntry; side: "left" | "right"; fullPath: string } | null) => void;
   handleFileOpenerSelect: (openerType: FileOpenerType, setAsDefault: boolean, systemApp?: SystemAppInfo) => void;
   handleSelectSystemApp: (systemApp: { path: string; name: string }) => void;
+  onPromoteToTab?: (snapshot: TextEditorModalSnapshot) => void;
 }
 
 export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
@@ -80,6 +82,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
   setFileOpenerTarget,
   handleFileOpenerSelect,
   handleSelectSystemApp,
+  onPromoteToTab,
 }) => {
   return (
     <>
@@ -146,6 +149,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
         onToggleWordWrap={() => setEditorWordWrap(!editorWordWrap)}
         hotkeyScheme={hotkeyScheme}
         keyBindings={keyBindings}
+        onPromoteToTab={onPromoteToTab}
       />
 
       {/* File Opener Dialog */}

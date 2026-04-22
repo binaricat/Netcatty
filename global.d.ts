@@ -587,6 +587,12 @@ declare global {
     // Notify main process the renderer has mounted/painted (used to avoid initial blank screen).
     rendererReady?(): void;
 
+    // Quit guard: subscribe to main-process quit requests that query for dirty editors.
+    // Listener is called with no arguments; return value is an unsubscribe function.
+    onCheckDirtyEditors?(listener: () => void): () => void;
+    // Report the dirty-check result back to the main process.
+    reportDirtyEditorsResult?(hasDirty: boolean): void;
+
     onLanguageChanged?(cb: (language: string) => void): () => void;
 
     // Chain progress listener for jump host connections

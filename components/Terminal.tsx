@@ -374,6 +374,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   });
   const terminalEncodingRef = useRef(terminalEncoding);
   terminalEncodingRef.current = terminalEncoding;
+  // True only after the user actively picks an encoding from the toolbar.
+  // onSessionAttached uses this to decide whether to override the backend's
+  // initial charset for telnet/serial reconnects — on a first attach we
+  // must not overwrite arbitrary host.charset values (latin1/shift_jis/...)
+  // that the UI's two-value state can't represent.
+  const userPickedEncodingRef = useRef(false);
 
   const terminalSearch = useTerminalSearch({ searchAddonRef, termRef });
   const {
@@ -740,9 +746,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setChainProgress,
     t,
     onSessionAttached: (id: string) => {
-      // Sync terminal encoding to SSH backend before first data arrives
-      const isSSH = host.protocol !== 'local' && host.protocol !== 'serial' && host.protocol !== 'telnet' && host.protocol !== 'mosh' && !host.moshEnabled && !host.id?.startsWith('local-') && !host.id?.startsWith('serial-') && host.hostname !== 'localhost';
+      // SSH: always sync. Its backend starts in utf-8 regardless of
+      // host.charset, so the push is what keeps the UI state aligned
+      // across reconnects — including localhost SSH targets, hence
+      // hostname isn't in the gate.
+      const isLocal = host.protocol === 'local' || host.id?.startsWith('local-');
+      const isSerial = host.protocol === 'serial' || host.id?.startsWith('serial-');
+      const isTelnet = host.protocol === 'telnet';
+      const isMosh = host.protocol === 'mosh' || host.moshEnabled;
+      const isSSH = !isLocal && !isSerial && !isTelnet && !isMosh;
       if (isSSH) {
+        setSessionEncoding(id, terminalEncodingRef.current);
+        return;
+      }
+      // Telnet / serial: the backend already applied host.charset
+      // (including arbitrary iconv labels like latin1 / shift_jis that
+      // the UI's two-value state can't represent) through start*Session
+      // options, so don't clobber it on first attach. Only re-sync once
+      // the user has explicitly picked from the toolbar menu — that's
+      // the signal they want the UI choice to win on reconnect.
+      if ((isTelnet || isSerial) && userPickedEncodingRef.current) {
         setSessionEncoding(id, terminalEncodingRef.current);
       }
     },
@@ -1387,6 +1410,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const handleSetTerminalEncoding = (encoding: 'utf-8' | 'gb18030') => {
     setTerminalEncoding(encoding);
+    userPickedEncodingRef.current = true;
     if (sessionRef.current) {
       setSessionEncoding(sessionRef.current, encoding);
     }

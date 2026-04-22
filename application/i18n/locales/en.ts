@@ -1780,6 +1780,12 @@ const en: Messages = {
 
   // Text Editor
   'sftp.editor.wordWrap': 'Word Wrap',
+  'sftp.editor.maximize': 'Maximize',
+  'sftp.editor.unsavedTitle': 'Unsaved changes',
+  'sftp.editor.unsavedMessage': '{fileName} has unsaved changes. Save before closing?',
+  'sftp.editor.discardChanges': 'Discard',
+  'sftp.editor.saveAndClose': 'Save and close',
+  'sftp.editor.quitBlockedByDirty': 'Unsaved editors — please save or discard before quitting',
 
   // AI Settings
   'ai.agentSettings': 'Agent Settings',

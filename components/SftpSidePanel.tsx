@@ -14,6 +14,8 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "
 import { formatHostPort } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
+import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
+import { editorTabStore } from "../application/state/editorTabStore";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { getParentPath } from "../application/state/sftp/utils";
@@ -125,6 +127,46 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
 
+  // Register this instance's writeTextFileByConnection with the editor bridge
+  // so editor tabs promoted from SFTP files opened in a terminal side panel
+  // can still route saves through this useSftpState.
+  //
+  // Intentionally no deps — go through sftpRef so SFTP state churn (transfers,
+  // tab switches, listings) doesn't make this unregister+reregister on every
+  // re-render.
+  useEffect(() => {
+    return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding) =>
+      sftpRef.current.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
+    );
+  }, []);
+
+  // When this side panel unmounts (its hosting terminal tab was closed) we
+  // force-close any editor tabs bound to connections this panel owned — the
+  // save channel is gone with the SFTP session and there's no way to recover
+  // it. Dirty state is dropped intentionally; the user closed the terminal
+  // knowing the file was open.
+  //
+  // Collect every connection id across all left/right tabs — the panel can
+  // host multiple SFTP tabs per side, and an editor tab promoted from an
+  // inactive-pane tab would otherwise be stranded by the unmount.
+  useEffect(() => {
+    return () => {
+      const s = sftpRef.current;
+      if (!s) return;
+      const owned = new Set<string>();
+      for (const tab of s.leftTabs?.tabs ?? []) {
+        const id = tab.connection?.id;
+        if (id) owned.add(id);
+      }
+      for (const tab of s.rightTabs?.tabs ?? []) {
+        const id = tab.connection?.id;
+        if (id) owned.add(id);
+      }
+      if (owned.size === 0) return;
+      editorTabStore.forceCloseBySessions([...owned]);
+    };
+  }, []);
+
   const behaviorRef = useRef(sftpDoubleClickBehavior);
   behaviorRef.current = sftpDoubleClickBehavior;
 
@@ -224,6 +266,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     fileOpenerTarget,
     setFileOpenerTarget,
     handleSaveTextFile,
+    onPromoteToTab,
     handleFileOpenerSelect,
     handleSelectSystemApp,
   } = useSftpViewPaneCallbacks({
@@ -679,6 +722,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
           setFileOpenerTarget={setFileOpenerTarget}
           handleFileOpenerSelect={handleFileOpenerSelect}
           handleSelectSystemApp={handleSelectSystemApp}
+          onPromoteToTab={onPromoteToTab}
           t={t}
         />
       )}

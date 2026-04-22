@@ -3,6 +3,9 @@ import type { MutableRefObject } from "react";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 import { keepOnlyActivePaneSelections } from "./selectionScope";
+import { editorTabStore } from "../../../application/state/editorTabStore";
+import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
+import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 
 interface UseSftpViewPaneActionsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -13,8 +16,8 @@ interface UseSftpViewPaneActionsResult {
   draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
   onConnectLeft: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
   onConnectRight: (host: Parameters<SftpStateApi["connect"]>[1]) => void;
-  onDisconnectLeft: () => void;
-  onDisconnectRight: () => void;
+  onDisconnectLeft: () => Promise<boolean>;
+  onDisconnectRight: () => Promise<boolean>;
   onPrepareSelectionLeft: () => void;
   onPrepareSelectionRight: () => void;
   onNavigateToLeft: (path: string) => void;
@@ -127,8 +130,42 @@ export const useSftpViewPaneActions = ({
     (host: Parameters<SftpStateApi["connect"]>[1]) => sftpRef.current.connect("right", host),
     [sftpRef],
   );
-  const onDisconnectLeft = useCallback(() => sftpRef.current.disconnect("left"), [sftpRef]);
-  const onDisconnectRight = useCallback(() => sftpRef.current.disconnect("right"), [sftpRef]);
+  // Returns `true` if the disconnect actually happened, `false` if the user
+  // canceled the dirty-editor prompt. Callers that kick off a replacement
+  // connect (e.g. the host picker) MUST gate their follow-up on this result
+  // so a canceled prompt doesn't silently drop the user onto a new host.
+  const onDisconnectLeft = useCallback(async (): Promise<boolean> => {
+    const connectionId = sftpRef.current.getActivePane("left")?.connection?.id;
+    if (connectionId) {
+      const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
+      const saveTab = async (id: EditorTabId) => {
+        const tab = editorTabStore.getTab(id);
+        if (!tab) return;
+        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
+        editorTabStore.markSaved(id, tab.content);
+      };
+      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      if (!ok) return false;
+    }
+    sftpRef.current.disconnect("left");
+    return true;
+  }, [sftpRef]);
+  const onDisconnectRight = useCallback(async (): Promise<boolean> => {
+    const connectionId = sftpRef.current.getActivePane("right")?.connection?.id;
+    if (connectionId) {
+      const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
+      const saveTab = async (id: EditorTabId) => {
+        const tab = editorTabStore.getTab(id);
+        if (!tab) return;
+        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
+        editorTabStore.markSaved(id, tab.content);
+      };
+      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      if (!ok) return false;
+    }
+    sftpRef.current.disconnect("right");
+    return true;
+  }, [sftpRef]);
   const onPrepareSelectionLeft = useCallback(() => {
     keepOnlyActivePaneSelections(sftpRef.current, "left");
   }, [sftpRef]);

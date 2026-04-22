@@ -1,6 +1,7 @@
-import { Bell, Copy, FileText, Folder, FolderLock, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
+import { Bell, Copy, FileCode, FileText, Folder, FolderLock, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
+import { activeTabStore, fromEditorTabId, isEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
+import type { EditorTab } from '../application/state/editorTabStore';
 import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import { LogView } from '../application/state/useSessionState';
@@ -18,6 +19,9 @@ import { SyncStatusButton } from './SyncStatusButton';
 // Helper styles for Electron drag regions (use type assertion to include non-standard WebkitAppRegion)
 const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
 const dragRegionNoSelect = { WebkitAppRegion: 'drag', userSelect: 'none' } as React.CSSProperties;
+
+// File extensions that render the code-file icon instead of the plain text icon.
+const CODE_EXTENSIONS_RE = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
 
 interface TopTabsProps {
   theme: 'dark' | 'light';
@@ -46,6 +50,9 @@ interface TopTabsProps {
   onEndSessionDrag: () => void;
   onReorderTabs: (draggedId: string, targetId: string, position: 'before' | 'after') => void;
   showSftpTab: boolean;
+  editorTabs: readonly EditorTab[];
+  onRequestCloseEditorTab: (editorTabId: string) => void;
+  hostById: Map<string, Host>;
 }
 
 // Detect local OS for local terminal tab icons
@@ -255,6 +262,9 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onEndSessionDrag,
   onReorderTabs,
   showSftpTab,
+  editorTabs,
+  onRequestCloseEditorTab,
+  hostById,
 }) => {
   const { t } = useI18n();
   // Subscribe to activeTabId from external store
@@ -477,9 +487,30 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return styles;
   }, [dropIndicator, isDraggingForReorder, orderedTabs]);
 
+  // Pre-compute editor tab map for O(1) access
+  const editorTabMap = useMemo(() => {
+    const map = new Map<string, EditorTab>();
+    for (const t of editorTabs) map.set(t.id, t);
+    return map;
+  }, [editorTabs]);
+
+  // fileName → count, for the rename-disambiguation suffix in the render loop.
+  // Memoed so we don't do a per-tab O(n) filter on every render (was O(n²)).
+  const editorTabFileNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of editorTabs) counts.set(t.fileName, (counts.get(t.fileName) ?? 0) + 1);
+    return counts;
+  }, [editorTabs]);
+
   // Build ordered tab items using pre-computed maps for O(1) lookups
   const orderedTabItems = useMemo(() => {
     return orderedTabs.map((tabId) => {
+      if (isEditorTabId(tabId)) {
+        const editorId = fromEditorTabId(tabId);
+        const editorTab = editorTabMap.get(editorId);
+        if (!editorTab) return null;
+        return { type: 'editor' as const, id: tabId, editorTab };
+      }
       const session = orphanSessionMap.get(tabId);
       const workspace = workspaceMap.get(tabId);
       const logView = logViewMap.get(tabId);
@@ -494,7 +525,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       }
       return null;
     }).filter(Boolean);
-  }, [orderedTabs, orphanSessionMap, workspaceMap, logViewMap, workspacePaneCounts]);
+  }, [orderedTabs, editorTabMap, orphanSessionMap, workspaceMap, logViewMap, workspacePaneCounts]);
 
   // Bulk-close menu items shared by session and workspace context menus.
   // Anchor is the tab the user right-clicked on (matches VSCode/JetBrains UX).
@@ -531,6 +562,77 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const renderOrderedTabs = () => {
     return orderedTabItems.map((item) => {
       if (!item) return null;
+
+      if (item.type === 'editor') {
+        const { editorTab } = item;
+        const tabId = item.id;
+        const isActive = activeTabId === tabId;
+        const host = hostById.get(editorTab.hostId);
+        const dirty = editorTab.content !== editorTab.baselineContent;
+        const tooltip = `${host?.label ?? editorTab.hostId}@${host?.hostname ?? ''}:${editorTab.remotePath}`;
+        // Disambiguate duplicate filenames using the memoed counts map.
+        const suffix = (editorTabFileNameCounts.get(editorTab.fileName) ?? 0) > 1
+          ? ` · ${editorTab.remotePath.split('/').slice(-2, -1)[0] || '/'}`
+          : '';
+        const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
+
+        return (
+          <div
+            key={tabId}
+            data-tab-id={tabId}
+            data-tab-type="editor"
+            data-state={isActive ? 'active' : 'inactive'}
+            onClick={() => onSelectTab(tabId)}
+            title={tooltip}
+            className={cn(
+              "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+            )}
+            style={{
+              backgroundColor: isActive
+                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                : 'transparent',
+              color: isActive
+                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+              }
+            }}
+          >
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <FileIcon
+                size={14}
+                className="shrink-0"
+                style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+              />
+              <span className="truncate flex items-center gap-0.5">
+                {dirty && <span className="text-primary mr-0.5">●</span>}
+                {editorTab.fileName}
+                {suffix && <span className="text-muted-foreground ml-1">{suffix}</span>}
+              </span>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestCloseEditorTab(editorTab.id);
+              }}
+              className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+              aria-label="Close editor tab"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        );
+      }
 
       if (item.type === 'session') {
         const session = item.session;

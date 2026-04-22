@@ -55,6 +55,9 @@ coverage
 # Serena MCP project config (local only)
 /.serena/
 
+# Git worktrees (local isolated workspaces)
+/.worktrees/
+
 # Windows VS Build environment scripts (local dev only)
 Directory.Build.props
 Directory.Build.targets

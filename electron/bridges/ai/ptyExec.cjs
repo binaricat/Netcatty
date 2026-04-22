@@ -10,8 +10,28 @@
 "use strict";
 
 const crypto = require("crypto");
+const { StringDecoder } = require("node:string_decoder");
+const iconv = require("iconv-lite");
 const { stripAnsi } = require("./shellUtils.cjs");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
+
+// Build a stateful decoder for a full exec call. Serial data events can
+// split multi-byte characters across chunks (very common on GBK/GB18030
+// consoles), and a stateless iconv.decode per chunk would emit
+// replacement bytes for the leading half. StringDecoder and
+// iconv.getDecoder both preserve partial-byte state across write() calls
+// and flush any trailing bytes on end(), which is what we need.
+function createStatefulDecoder(encoding) {
+  const enc = encoding || "utf8";
+  if (Buffer.isEncoding(enc)) {
+    return new StringDecoder(enc);
+  }
+  try {
+    return iconv.getDecoder(enc);
+  } catch {
+    return new StringDecoder("utf8");
+  }
+}
 
 function detectShellKind(shellPath, platform = process.platform) {
   return classifyLocalShellType(shellPath, platform);
@@ -943,6 +963,7 @@ function execViaRawPty(serialPort, command, options) {
     let overallTimer = null;
     let idleTimer = null;
     const cleanupFns = [];
+    const decoder = createStatefulDecoder(encoding);
 
     function safeWrite(data) {
       try {
@@ -962,7 +983,12 @@ function execViaRawPty(serialPort, command, options) {
         trackForCancellation.delete(cancelKey);
       }
 
-      let cleaned = stripAnsi(stdout || "").replace(/\r/g, "");
+      // Flush any bytes the decoder is still holding (e.g. the leading
+      // half of a multi-byte char that arrived right before finish).
+      let tail = "";
+      try { tail = decoder.end() || ""; } catch { /* ignore */ }
+      const complete = (stdout || "") + tail;
+      let cleaned = stripAnsi(complete).replace(/\r/g, "");
 
       // Strip echoed command from the beginning of output.
       // Network devices typically echo back the typed command on the first line,
@@ -1011,8 +1037,11 @@ function execViaRawPty(serialPort, command, options) {
     const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
 
     const onData = (data) => {
-      // latin1 for serial ports (matches terminalBridge.cjs decoder); utf8 for SSH PTY streams.
-      const chunk = typeof data === "string" ? data : data.toString(encoding);
+      // Encoding follows the session: utf8 for SSH PTY streams, whatever the
+      // user picked for serial (utf-8/gb18030/...). The decoder is stateful
+      // so multi-byte characters split across chunks get stitched back
+      // together instead of emitting replacement bytes.
+      const chunk = typeof data === "string" ? data : decoder.write(data);
       chunkCount++;
       // Cancel the no-response fallback on first data
       if (noResponseTimer) {
