@@ -673,7 +673,23 @@ export function useTerminalAutocomplete(
       } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
         typedInputBufferRef.current += data;
       } else if (data.length > 1 && !data.startsWith("\x1b")) {
-        // Paste: treat as literal text.
+        // Paste chunk. Any \r / \n inside executes the preceding text as
+        // a command in the shell, so keeping the pre-newline portion in
+        // our buffer would leave stale content that a later Enter could
+        // record (Codex #814 P2). Drop everything up to and including
+        // the last terminator and keep only the tail as new content.
+        // Intermediate executed lines aren't synthesized back into
+        // recordCommand here — the onCommandExecuted path in
+        // createXTermRuntime still captures them independently.
+        const lastCR = data.lastIndexOf("\r");
+        const lastLF = data.lastIndexOf("\n");
+        const nlIdx = Math.max(lastCR, lastLF);
+        if (nlIdx >= 0) {
+          typedInputBufferRef.current = data.slice(nlIdx + 1);
+          typedBufferReliableRef.current = true;
+          clearState();
+          return;
+        }
         typedInputBufferRef.current += data;
       } else if (data.length === 1 && data.charCodeAt(0) < 32) {
         // Any other single control char (Ctrl-A, Ctrl-E, Ctrl-B, Ctrl-F,
