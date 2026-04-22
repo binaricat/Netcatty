@@ -482,13 +482,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
               ctx.onBroadcastInputRef.current(snippetData, ctx.sessionId);
             }
-            // Let the autocomplete hook observe the raw (pre-wrap) bytes so
-            // its keystroke buffer tracks out-of-band writes too — otherwise
-            // a subsequent Enter would record a stale typed prefix (#814 P1).
-            ctx.onAutocompleteInput?.(snippetData);
             // Wrap for this terminal only, after broadcasting
             const snippetIsMultiLine = snippetData.includes("\n");
             if (snippetIsMultiLine && term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste) snippetData = wrapBracketedPaste(snippetData);
+            // Notify autocomplete with the final (possibly bracket-wrapped)
+            // bytes so its keystroke buffer can tell literal multi-line
+            // paste ("\x1b[200~...\x1b[201~") from the non-bracketed path
+            // where each \n executes an intermediate command (#814 P2).
+            ctx.onAutocompleteInput?.(snippetData);
             ctx.terminalBackend.writeToSession(id, snippetData);
             if (!snippet.noAutoRun && ctx.onCommandExecuted) {
               const cmd = snippet.command.trim();
@@ -530,12 +531,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             const id = ctx.sessionRef.current;
             if (id) {
               const rawData = normalizeLineEndings(text);
-              // Notify autocomplete with the raw bytes so its keystroke
-              // buffer stays aligned with what the shell is about to see.
-              ctx.onAutocompleteInput?.(rawData);
               const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
                 ? wrapBracketedPaste(rawData)
                 : rawData;
+              // Notify autocomplete with the final bytes so bracketed
+              // pastes preserve their inner newlines as literal input.
+              ctx.onAutocompleteInput?.(data);
               ctx.terminalBackend.writeToSession(id, data);
               scrollToBottomAfterPaste();
             }
@@ -547,10 +548,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           const id = ctx.sessionRef.current;
           if (selection && id) {
             const rawData = normalizeLineEndings(selection);
-            ctx.onAutocompleteInput?.(rawData);
             const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
               ? wrapBracketedPaste(rawData)
               : rawData;
+            ctx.onAutocompleteInput?.(data);
             ctx.terminalBackend.writeToSession(id, data);
             scrollToBottomAfterPaste();
           }
@@ -585,10 +586,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         const text = await navigator.clipboard.readText();
         if (text && ctx.sessionRef.current) {
           const rawData = normalizeLineEndings(text);
-          ctx.onAutocompleteInput?.(rawData);
           const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
             ? wrapBracketedPaste(rawData)
             : rawData;
+          ctx.onAutocompleteInput?.(data);
           ctx.terminalBackend.writeToSession(ctx.sessionRef.current, data);
           scrollToBottomAfterPaste();
         }

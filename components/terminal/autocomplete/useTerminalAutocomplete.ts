@@ -665,6 +665,20 @@ export function useTerminalAutocomplete(
       } else if (data === "\x17") {
         // Ctrl+W: word-erase — kill the trailing whitespace + word.
         typedInputBufferRef.current = typedInputBufferRef.current.replace(/\s*\S+\s*$/, "");
+      } else if (data.startsWith("\x1b[200~")) {
+        // Bracketed paste: "\x1b[200~...\x1b[201~". The inner bytes are
+        // literal input, so newlines stay on the zle line instead of
+        // executing each segment — meaning we must preserve the whole
+        // content in the buffer, not just the post-final-newline tail
+        // (Codex #814 P2).
+        const endIdx = data.indexOf("\x1b[201~");
+        const content = endIdx >= 0
+          ? data.slice("\x1b[200~".length, endIdx)
+          : data.slice("\x1b[200~".length);
+        typedInputBufferRef.current += content;
+        typedBufferReliableRef.current = true;
+        clearState();
+        return;
       } else if (data.startsWith("\x1b") && data !== "\x1b") {
         // Cursor-movement / function keys — we lose track of where the
         // cursor sits relative to our append-only buffer. Mark the
