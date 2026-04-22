@@ -148,10 +148,10 @@ export const CustomThemeModal: React.FC<CustomThemeModalProps> = ({
             className="fixed inset-0 z-[300] flex items-center justify-center"
         >
             {/* Backdrop — clicking it dismisses the modal */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+            <div className="absolute inset-0 bg-black/60 supports-[backdrop-filter]:backdrop-blur-sm" onClick={onCancel} />
 
             {/* Modal */}
-            <div className="relative z-10 bg-popover/95 backdrop-blur-xl rounded-xl shadow-2xl border border-border/50 flex flex-col"
+            <div className="relative z-10 bg-popover/95 supports-[backdrop-filter]:backdrop-blur-sm rounded-xl shadow-2xl border border-border/50 flex flex-col"
                 style={{ width: 'min(820px, 90vw)', height: 'min(600px, 85vh)' }}
                 onClick={(e) => e.stopPropagation()}
             >

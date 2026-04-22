@@ -325,7 +325,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
 
   return (
     <div
-      className="border-t border-border/70 bg-secondary/80 backdrop-blur-sm shrink-0"
+      className="border-t border-border/70 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm shrink-0"
       style={{ height: clampPanelHeight(panelHeight) }}
     >
       <div

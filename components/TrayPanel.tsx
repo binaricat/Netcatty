@@ -202,7 +202,7 @@ const TrayPanelContent: React.FC = () => {
   }, [quitApp]);
 
   return (
-    <div id="tray-panel-root" className="w-full h-full bg-background/95 backdrop-blur border border-border/60 rounded-lg shadow-lg overflow-hidden flex flex-col">
+    <div id="tray-panel-root" className="w-full h-full bg-background/95 supports-[backdrop-filter]:backdrop-blur-sm border border-border/60 rounded-lg shadow-lg overflow-hidden flex flex-col">
       <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between app-no-drag">
         <div className="flex items-center gap-2">
           <AppLogo className="w-5 h-5" />

@@ -59,7 +59,7 @@ const ConversationExport: React.FC<ConversationExportProps> = ({
       <DropdownContent
         align="end"
         sideOffset={6}
-        className="w-40 rounded-xl border border-border/45 bg-[#111111]/98 p-1.5 text-foreground shadow-[0_20px_48px_rgba(0,0,0,0.48)] supports-[backdrop-filter]:bg-[#111111]/92 supports-[backdrop-filter]:backdrop-blur-xl"
+        className="w-40 rounded-xl border border-border/45 bg-[#111111]/98 p-1.5 text-foreground shadow-[0_20px_48px_rgba(0,0,0,0.48)] supports-[backdrop-filter]:bg-[#111111]/92 supports-[backdrop-filter]:backdrop-blur-sm"
       >
         <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/48">
           {t('ai.chat.exportAs')}

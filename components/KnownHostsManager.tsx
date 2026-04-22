@@ -455,7 +455,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="h-14 px-4 py-2 flex items-center gap-3 border-b border-border/50 bg-secondary/80 backdrop-blur">
+      <div className="h-14 px-4 py-2 flex items-center gap-3 border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm">
         <div className="flex-1 min-w-0 flex items-center gap-2">
           <div className="relative flex-1 max-w-xs">
             <Search

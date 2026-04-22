@@ -983,7 +983,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     <TooltipProvider delayDuration={300}>
     <div className="h-full min-h-0 flex relative">
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-        <header className="border-b border-border/50 bg-secondary/80 backdrop-blur">
+        <header className="border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm">
           <div className="h-14 px-4 py-2 flex items-center gap-3">
             {/* Search box */}
             <div className="relative w-64">

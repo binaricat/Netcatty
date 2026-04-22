@@ -567,7 +567,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         )}
       >
         {/* Toolbar */}
-        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 backdrop-blur border-b border-border/50 relative z-20">
+        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm border-b border-border/50 relative z-20">
           <Dropdown open={showNewMenu} onOpenChange={setShowNewMenu}>
             <DropdownTrigger asChild>
               <Button

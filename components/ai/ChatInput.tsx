@@ -512,6 +512,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         {showSlashSkillPicker && filteredUserSkills.length > 0 && inputPanelPos && createPortal(
           <>
             <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+            <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
             <div
               role="listbox"
               aria-label="Insert user skill"
@@ -578,6 +579,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {showAttachMenu && menuPos && createPortal(
               <>
                 <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+                <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
                 <div
                   role="menu"
                   className="fixed z-[1000] min-w-[170px] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
@@ -658,10 +660,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
             {showModelPicker && hasModelPicker && menuPos && createPortal(
-              <>
-                <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
-                <div
-                  role="listbox"
+<>
+            <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+            <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
+            <div
+              role="listbox"
                   aria-label="Select model"
                   className="fixed z-[1000] w-max min-w-[160px] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
                   style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: MODEL_PICKER_MAX_WIDTH }}
@@ -770,6 +773,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 {showPermPicker && menuPos && createPortal(
                   <>
                     <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+                    <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
                     <div
                       role="listbox"
                       aria-label="Permission mode"

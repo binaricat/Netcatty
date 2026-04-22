@@ -270,7 +270,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     );
 
     return (
-        <div className="border-t border-border/40 bg-background/60 px-3 py-2.5 backdrop-blur-sm">
+        <div className="border-t border-border/40 bg-background/60 px-3 py-2.5 supports-[backdrop-filter]:backdrop-blur-sm">
             <div className="flex items-center gap-1">
                 <div className="flex h-5 w-5 items-center justify-center shrink-0 -translate-y-px">
                     {statusIcon}

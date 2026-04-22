@@ -234,7 +234,7 @@ export const DARK_UI_THEMES: UiThemePreset[] = [
     id: "midnight",
     name: "Midnight",
     tokens: {
-      background: "220 28% 8%",
+      background: "220 28% 10%",
       foreground: "210 40% 95%",
       card: "220 22% 12%",
       cardForeground: "210 40% 95%",

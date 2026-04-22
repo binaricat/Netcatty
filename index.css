@@ -150,10 +150,7 @@
 body {
   min-height: 100vh;
   font-family: var(--font-sans);
-  background:
-    radial-gradient(900px circle at 15% 0%, hsl(var(--primary) / 0.10), transparent 38%),
-    radial-gradient(1200px circle at 85% 10%, hsl(var(--accent) / 0.16), transparent 40%),
-    hsl(var(--background));
+  background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
 
@@ -169,10 +166,7 @@ body {
 }
 
 .dark body {
-  background:
-    radial-gradient(1200px circle at 10% 0%, hsl(var(--primary) / 0.08), transparent 32%),
-    radial-gradient(900px circle at 85% 10%, hsl(var(--accent) / 0.12), transparent 36%),
-    hsl(var(--background));
+  background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
 
@@ -258,7 +252,6 @@ body {
 .glass-panel {
   background: hsl(var(--secondary) / 0.95);
   border: 1px solid hsl(var(--border) / 0.8);
-  backdrop-filter: blur(12px);
   box-shadow: 0 14px 40px hsl(var(--foreground) / 0.12);
 }
 

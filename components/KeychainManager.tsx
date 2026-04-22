@@ -520,7 +520,7 @@ echo $3 >> "$FILE"`);
         )}
       >
         {/* Toolbar */}
-        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 backdrop-blur border-b border-border/50 shrink-0">
+        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm border-b border-border/50 shrink-0">
           {/* Filter Tabs */}
           <div className="flex items-center gap-1">
             {/* KEY button with split interaction: left=switch view, right=dropdown */}
