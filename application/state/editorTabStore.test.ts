@@ -152,3 +152,47 @@ test("dedup scope is per-sessionId — same path on different sessions are disti
   assert.notEqual(a, b);
   assert.equal(store.getTabs().length, 2);
 });
+
+test("confirmCloseBySession returns true when no tabs match", async () => {
+  const store = new EditorTabStore();
+  store._debugInsert(makeTab());
+  const ok = await store.confirmCloseBySession("other_conn", async () => "discard");
+  assert.equal(ok, true);
+  assert.equal(store.getTabs().length, 1);
+});
+
+test("confirmCloseBySession discards all dirty matching tabs when prompt returns 'discard'", async () => {
+  const store = new EditorTabStore();
+  store._debugInsert(makeTab({ id: "edt_1", content: "x", baselineContent: "y" }));
+  store._debugInsert(makeTab({ id: "edt_2", remotePath: "/b.txt", fileName: "b.txt", content: "x", baselineContent: "y" }));
+  const ok = await store.confirmCloseBySession("conn_1", async () => "discard");
+  assert.equal(ok, true);
+  assert.equal(store.getTabs().length, 0);
+});
+
+test("confirmCloseBySession closes clean tabs without prompting; aborts on cancel", async () => {
+  const store = new EditorTabStore();
+  store._debugInsert(makeTab({ id: "edt_clean" })); // content == baseline
+  store._debugInsert(makeTab({ id: "edt_dirty", remotePath: "/b.txt", fileName: "b.txt", content: "x", baselineContent: "y" }));
+  let prompts = 0;
+  const ok = await store.confirmCloseBySession("conn_1", async () => { prompts++; return "cancel"; });
+  assert.equal(ok, false);
+  assert.equal(prompts, 1, "prompt fires only for dirty tab");
+  // clean tab was closed before the dirty cancel aborted the batch
+  assert.equal(store.getTab("edt_clean"), undefined);
+  assert.ok(store.getTab("edt_dirty"));
+});
+
+test("confirmCloseBySession invokes save callback for 'save' choice and only closes on save success", async () => {
+  const store = new EditorTabStore();
+  store._debugInsert(makeTab({ id: "edt_1", content: "new", baselineContent: "old" }));
+  let saved = false;
+  const ok = await store.confirmCloseBySession("conn_1", async () => "save", async (id) => {
+    assert.equal(id, "edt_1");
+    saved = true;
+    store.markSaved(id, "new");
+  });
+  assert.equal(saved, true);
+  assert.equal(ok, true);
+  assert.equal(store.getTab("edt_1"), undefined);
+});

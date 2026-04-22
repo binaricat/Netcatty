@@ -123,6 +123,40 @@ export class EditorTabStore {
     return tab.id;
   };
 
+  /**
+   * Walk all editor tabs bound to `sessionId`. Clean tabs close silently; dirty tabs
+   * prompt via `promptChoice`. 'save' invokes `saveTab` and closes only on its success.
+   * Any 'cancel' aborts the batch (subsequent dirty tabs are preserved) and returns false.
+   */
+  confirmCloseBySession = async (
+    sessionId: string,
+    promptChoice: (tab: EditorTab) => Promise<"save" | "discard" | "cancel">,
+    saveTab?: (tabId: EditorTabId) => Promise<void>,
+  ): Promise<boolean> => {
+    const matching = this.tabs.filter((t) => t.sessionId === sessionId);
+    for (const tab of matching) {
+      const dirty = tab.content !== tab.baselineContent;
+      if (!dirty) {
+        this.close(tab.id);
+        continue;
+      }
+      const choice = await promptChoice(tab);
+      if (choice === "cancel") return false;
+      if (choice === "discard") { this.close(tab.id); continue; }
+      if (choice === "save") {
+        if (!saveTab) throw new Error("saveTab callback required when 'save' choice is possible");
+        try {
+          await saveTab(tab.id);
+        } catch {
+          // Save failed — treat like cancel (keep tab open, abort batch so the user sees the error)
+          return false;
+        }
+        this.close(tab.id);
+      }
+    }
+    return true;
+  };
+
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
