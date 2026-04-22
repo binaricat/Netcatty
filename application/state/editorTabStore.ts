@@ -82,6 +82,22 @@ export class EditorTabStore {
     }
   };
 
+  /**
+   * Force-close every tab bound to any of the given sessionIds, with no dirty
+   * prompt. Intended for cases where the owning SFTP instance has gone away
+   * entirely (e.g. the hosting terminal tab was closed) and there is no
+   * realistic save channel anyway. Returns the closed tab ids.
+   */
+  forceCloseBySessions = (sessionIds: readonly string[]): EditorTabId[] => {
+    if (sessionIds.length === 0) return [];
+    const idSet = new Set(sessionIds);
+    const removed = this.tabs.filter((t) => idSet.has(t.sessionId)).map((t) => t.id);
+    if (removed.length === 0) return [];
+    this.tabs = this.tabs.filter((t) => !idSet.has(t.sessionId));
+    this.notify();
+    return removed;
+  };
+
   promoteFromModal = (snapshot: {
     sessionId: string;
     hostId: string;

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive, toEditorTabId } from './application/state/activeTabStore';
+import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive, toEditorTabId, fromEditorTabId, isEditorTabId } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
 import { useImmersiveMode } from './application/state/useImmersiveMode';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
@@ -1027,6 +1027,10 @@ function App({ settings }: { settings: SettingsState }) {
   const closeSidePanelRef = useRef<(() => void) | null>(null);
   const activeSidePanelTabRef = useRef<string | null>(null);
   const closeTabInFlightRef = useRef(false);
+  // Populated by UnsavedChangesProvider render-prop below so that the hotkey
+  // dispatcher (defined outside that scope) can still reach the dirty-confirm
+  // close flow.
+  const handleRequestCloseEditorTabRef = useRef<(id: string) => void>(() => {});
 
   const createLocalTerminalWithCurrentShell = useCallback(() => {
     const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
@@ -1189,6 +1193,13 @@ function App({ settings }: { settings: SettingsState }) {
         const currentId = activeTabStore.getActiveTabId();
         if (!currentId || currentId === 'vault' || currentId === 'sftp') break;
         if (closeTabInFlightRef.current) break;
+
+        // Editor tabs route through their own dirty-confirm close flow.
+        if (isEditorTabId(currentId)) {
+          const editorId = fromEditorTabId(currentId);
+          if (editorId) handleRequestCloseEditorTabRef.current(editorId);
+          break;
+        }
 
         const session = sessions.find((s) => s.id === currentId) ?? null;
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
@@ -1753,6 +1764,9 @@ function App({ settings }: { settings: SettingsState }) {
             }
           }
         };
+
+        // Expose to the hotkey dispatcher (Cmd/Ctrl+W).
+        handleRequestCloseEditorTabRef.current = handleRequestCloseEditorTab;
 
         return (
     <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>

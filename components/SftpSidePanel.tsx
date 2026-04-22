@@ -15,6 +15,7 @@ import { formatHostPort } from "../domain/host";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
 import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
+import { editorTabStore } from "../application/state/editorTabStore";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { getParentPath } from "../application/state/sftp/utils";
@@ -134,6 +135,23 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       sftp.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding),
     );
   }, [sftp]);
+
+  // When this side panel unmounts (its hosting terminal tab was closed) we
+  // force-close any editor tabs bound to connections this panel owned — the
+  // save channel is gone with the SFTP session and there's no way to recover
+  // it. Dirty state is dropped intentionally; the user closed the terminal
+  // knowing the file was open.
+  useEffect(() => {
+    return () => {
+      const owned = new Set<string>();
+      const l = sftpRef.current?.leftPane?.connection?.id;
+      const r = sftpRef.current?.rightPane?.connection?.id;
+      if (l) owned.add(l);
+      if (r) owned.add(r);
+      if (owned.size === 0) return;
+      editorTabStore.forceCloseBySessions([...owned]);
+    };
+  }, []);
 
   const behaviorRef = useRef(sftpDoubleClickBehavior);
   behaviorRef.current = sftpDoubleClickBehavior;
