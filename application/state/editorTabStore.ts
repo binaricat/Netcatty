@@ -1,6 +1,13 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type * as Monaco from "monaco-editor";
 
+// POSIX-style normalization: collapse "/./" and duplicate slashes, not ".." (remote paths
+// may contain semantic ".." segments we don't want to resolve client-side).
+const normalizePath = (p: string): string => {
+  const collapsed = p.replace(/\/+/g, "/").replace(/\/\.(?=\/|$)/g, "");
+  return collapsed.length > 1 && collapsed.endsWith("/") ? collapsed.slice(0, -1) : collapsed;
+};
+
 export type EditorTabId = string;
 
 export type EditorSavingState = "idle" | "saving" | "error";
@@ -69,6 +76,51 @@ export class EditorTabStore {
       this.tabs = next;
       this.notify();
     }
+  };
+
+  promoteFromModal = (snapshot: {
+    sessionId: string;
+    hostId: string;
+    remotePath: string;
+    fileName: string;
+    languageId: string;
+    content: string;
+    baselineContent: string;
+    wordWrap: boolean;
+    viewState: Monaco.editor.ICodeEditorViewState | null;
+  }): EditorTabId => {
+    const normalized = normalizePath(snapshot.remotePath);
+    const existing = this.tabs.find(
+      (t) => t.sessionId === snapshot.sessionId && normalizePath(t.remotePath) === normalized,
+    );
+    if (existing) {
+      this.patch(existing.id, {
+        content: snapshot.content,
+        baselineContent: snapshot.baselineContent,
+        wordWrap: snapshot.wordWrap,
+        viewState: snapshot.viewState,
+        // keep languageId/hostId/fileName stable; they shouldn't change for the same path
+      });
+      return existing.id;
+    }
+    const tab: EditorTab = {
+      id: this.makeId(),
+      kind: "editor",
+      sessionId: snapshot.sessionId,
+      hostId: snapshot.hostId,
+      remotePath: snapshot.remotePath,
+      fileName: snapshot.fileName,
+      languageId: snapshot.languageId,
+      content: snapshot.content,
+      baselineContent: snapshot.baselineContent,
+      wordWrap: snapshot.wordWrap,
+      viewState: snapshot.viewState,
+      savingState: "idle",
+      saveError: null,
+    };
+    this.tabs = [...this.tabs, tab];
+    this.notify();
+    return tab.id;
   };
 
   subscribe = (listener: Listener): (() => void) => {

@@ -82,3 +82,73 @@ test("subscribers fire on change and not on read", () => {
     unsub();
   });
 });
+
+test("promoteFromModal creates a new tab and returns its id", () => {
+  const store = new EditorTabStore();
+  const id = store.promoteFromModal({
+    sessionId: "conn_1",
+    hostId: "host_1",
+    remotePath: "/etc/nginx/nginx.conf",
+    fileName: "nginx.conf",
+    languageId: "ini",
+    content: "x",
+    baselineContent: "x",
+    wordWrap: false,
+    viewState: null,
+  });
+  const tab = store.getTab(id)!;
+  assert.equal(tab.remotePath, "/etc/nginx/nginx.conf");
+  assert.equal(tab.fileName, "nginx.conf");
+  assert.equal(tab.kind, "editor");
+});
+
+test("promoteFromModal focuses existing tab for same sessionId+normalized path and overrides content", () => {
+  const store = new EditorTabStore();
+  const first = store.promoteFromModal({
+    sessionId: "conn_1",
+    hostId: "host_1",
+    remotePath: "/etc/nginx/./nginx.conf",
+    fileName: "nginx.conf",
+    languageId: "ini",
+    content: "v1",
+    baselineContent: "v1",
+    wordWrap: false,
+    viewState: null,
+  });
+  const second = store.promoteFromModal({
+    sessionId: "conn_1",
+    hostId: "host_1",
+    remotePath: "/etc/nginx/nginx.conf",
+    fileName: "nginx.conf",
+    languageId: "ini",
+    content: "v2",
+    baselineContent: "v1",
+    wordWrap: false,
+    viewState: null,
+  });
+  assert.equal(second, first);
+  assert.equal(store.getTab(first)!.content, "v2");
+  assert.equal(store.getTabs().length, 1);
+});
+
+test("dedup scope is per-sessionId — same path on different sessions are distinct tabs", () => {
+  const store = new EditorTabStore();
+  const a = store.promoteFromModal({
+    sessionId: "conn_A",
+    hostId: "host_1",
+    remotePath: "/etc/hosts",
+    fileName: "hosts",
+    languageId: "plaintext",
+    content: "", baselineContent: "", wordWrap: false, viewState: null,
+  });
+  const b = store.promoteFromModal({
+    sessionId: "conn_B",
+    hostId: "host_2",
+    remotePath: "/etc/hosts",
+    fileName: "hosts",
+    languageId: "plaintext",
+    content: "", baselineContent: "", wordWrap: false, viewState: null,
+  });
+  assert.notEqual(a, b);
+  assert.equal(store.getTabs().length, 2);
+});
