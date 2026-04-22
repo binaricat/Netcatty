@@ -50,6 +50,18 @@ export interface AlignedPromptResult {
   alignedTyped: string | null;
 }
 
+function replacePromptUserInput(
+  prompt: PromptDetectionResult,
+  userInput: string,
+): PromptDetectionResult {
+  return {
+    isAtPrompt: true,
+    promptText: prompt.promptText,
+    userInput,
+    cursorOffset: userInput.length,
+  };
+}
+
 /**
  * Detect whether the terminal cursor is at a shell prompt and extract the current user input.
  */
@@ -267,8 +279,13 @@ export function reconcilePromptWithTypedInput(
  * pre-#806 behavior, not a worse pollution.
  *
  * Alignment rule: the keystroke buffer is usable only when it's marked
- * reliable AND the raw detected userInput ends with it. Otherwise the
- * buffer is ignored and the raw detector result passes through.
+ * reliable AND the raw detected prompt still looks like the same shell
+ * line. When the raw buffer has either over-captured prompt chrome
+ * (`raw.userInput.endsWith(typedBuffer)`) or under-captured because the
+ * shell echo/render is lagging behind local keystrokes
+ * (`typedBuffer.startsWith(raw.userInput)`), prefer the typed buffer.
+ * Otherwise the buffer is ignored and the raw detector result passes
+ * through.
  */
 export function getAlignedPrompt(
   term: XTerm | null,
@@ -277,15 +294,25 @@ export function getAlignedPrompt(
 ): AlignedPromptResult {
   if (!term) return { prompt: NO_PROMPT, alignedTyped: null };
   const raw = detectPrompt(term);
-  const aligned =
-    typedReliable &&
-    typedBuffer.length > 0 &&
-    raw.isAtPrompt &&
-    raw.userInput.endsWith(typedBuffer);
-  return {
-    prompt: aligned ? reconcilePromptWithTypedInput(raw, typedBuffer) : raw,
-    alignedTyped: aligned ? typedBuffer : null,
-  };
+  if (!typedReliable || typedBuffer.length === 0 || !raw.isAtPrompt) {
+    return { prompt: raw, alignedTyped: null };
+  }
+  if (raw.userInput === typedBuffer) {
+    return { prompt: raw, alignedTyped: typedBuffer };
+  }
+  if (raw.userInput.length > typedBuffer.length && raw.userInput.endsWith(typedBuffer)) {
+    return {
+      prompt: reconcilePromptWithTypedInput(raw, typedBuffer),
+      alignedTyped: typedBuffer,
+    };
+  }
+  if (typedBuffer.length > raw.userInput.length && typedBuffer.startsWith(raw.userInput)) {
+    return {
+      prompt: replacePromptUserInput(raw, typedBuffer),
+      alignedTyped: typedBuffer,
+    };
+  }
+  return { prompt: raw, alignedTyped: null };
 }
 
 /**

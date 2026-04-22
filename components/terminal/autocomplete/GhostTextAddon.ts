@@ -16,20 +16,18 @@ export class GhostTextAddon implements IDisposable {
   private containerElement: HTMLDivElement | null = null;
   private currentSuggestion: string = "";
   private currentInput: string = "";
+  /** Cursor column captured at show() time — the anchor the ghost was painted from. */
+  private anchorCursorX = 0;
+  /** Cursor row captured at show() time. */
+  private anchorCursorY = 0;
+  /** Length of currentInput at show() time — lets adjustToInput shift left
+   *  by (newInput.length - anchorInputLength) cells without having to
+   *  re-read xterm's cursorX (which hasn't advanced yet at keystroke time). */
+  private anchorInputLength = 0;
   private disposed = false;
   private disposables: IDisposable[] = [];
   private lastLeft = -1;
   private lastTop = -1;
-  /**
-   * Input that adjustToInput() wants to reflect on the ghost, deferred
-   * until the next xterm render. We don't apply it synchronously because
-   * at adjustToInput call time the triggering keystroke hasn't been
-   * echoed yet — cursorX is still at the pre-keystroke position, so
-   * painting a shrunken ghost there would overlap with the char xterm
-   * is about to draw. Hiding during the gap and re-showing on the
-   * render tick that follows the echo gives a clean transition.
-   */
-  private pendingInput: string | null = null;
 
   activate(term: XTerm): void {
     this.term = term;
@@ -47,6 +45,9 @@ export class GhostTextAddon implements IDisposable {
       height: "100%",
       pointerEvents: "none",
       overflow: "hidden",
+      // Sit above xterm's canvas — xterm's default renderer paints its
+      // theme.background across every cell including empty ones, so a
+      // ghost placed beneath the canvas would be completely occluded.
       zIndex: "1",
     });
 
@@ -73,16 +74,9 @@ export class GhostTextAddon implements IDisposable {
       termElement.appendChild(this.containerElement);
     }
 
-    // Every xterm render tick is also our chance to apply a pending
-    // adjustToInput: at this point the echoed keystroke has advanced
-    // cursorX, so the recomputed ghost can paint at the correct column.
     this.disposables.push(
       term.onRender(() => {
-        if (this.pendingInput !== null) {
-          const input = this.pendingInput;
-          this.pendingInput = null;
-          this.applyInputUpdate(input);
-        } else if (this.isVisible()) {
+        if (this.isVisible()) {
           this.updatePosition();
         }
       }),
@@ -113,11 +107,14 @@ export class GhostTextAddon implements IDisposable {
       return;
     }
 
-    // Explicit show() supersedes any pending adjust — caller already
-    // passed the input they want reflected.
-    this.pendingInput = null;
     this.currentSuggestion = fullSuggestion;
     this.currentInput = currentInput;
+    this.anchorCursorX = this.term.buffer.active.cursorX;
+    this.anchorCursorY = this.term.buffer.active.cursorY;
+    this.anchorInputLength = currentInput.length;
+    // Force position recalc since the text also changed.
+    this.lastLeft = -1;
+    this.lastTop = -1;
 
     this.updatePosition();
     this.ghostElement.textContent = ghostText;
@@ -134,56 +131,41 @@ export class GhostTextAddon implements IDisposable {
     }
     this.currentSuggestion = "";
     this.currentInput = "";
-    this.pendingInput = null;
+    this.anchorInputLength = 0;
   }
 
   /**
-   * Re-align the ghost against a freshly-updated user input without
-   * waiting for the next debounced suggestion fetch. Called from every
-   * handleInput keystroke that mutates the typed buffer.
+   * Re-align the ghost against a freshly-updated user input synchronously.
+   * Called from handleInput on every keystroke that mutates the typed
+   * buffer so ghost text never falls out of sync with what the user has
+   * actually typed.
    *
-   * Painting the updated tail synchronously would misalign it, because
-   * at keystroke time xterm hasn't echoed the char yet (cursorX hasn't
-   * advanced). We therefore hide the ghost immediately to avoid an
-   * overlap flicker with the char xterm is about to draw, and stash
-   * the desired state. The onRender listener above then paints at the
-   * correct column once xterm has processed the echo.
-   *
-   * If the current suggestion no longer prefix-matches the new input,
-   * we drop it entirely — a later fetchSuggestions will replace it.
+   * Implementation relies on the predict-anchor-shift trick rather than
+   * re-reading xterm's live cursorX: xterm hasn't echoed the triggering
+   * keystroke yet at this point, so cursorX still points at the
+   * pre-keystroke column. Instead we track the cursor column captured
+   * at show() time and advance the ghost's left by the number of chars
+   * typed since — so the tail aligns with where the real cursor *will*
+   * land once the echo arrives, even across SSH round-trip latency.
    */
   adjustToInput(newInput: string): void {
     if (this.disposed || !this.ghostElement || !this.currentSuggestion) return;
-    if (this.currentSuggestion.startsWith(newInput)) {
-      this.pendingInput = newInput;
-      // Hide the stale tail but keep currentSuggestion so applyInputUpdate
-      // can restore it on the next render.
-      this.ghostElement.style.display = "none";
-    } else {
-      this.pendingInput = null;
-      this.hide();
-    }
-  }
-
-  /** Apply a pending input update — called from the onRender hook. */
-  private applyInputUpdate(input: string): void {
-    if (this.disposed || !this.ghostElement || !this.term) return;
-    if (!this.currentSuggestion || !this.currentSuggestion.startsWith(input)) {
+    if (!this.currentSuggestion.startsWith(newInput)) {
       this.hide();
       return;
     }
-    const ghostText = this.currentSuggestion.substring(input.length);
+    this.currentInput = newInput;
+    const ghostText = this.currentSuggestion.substring(newInput.length);
     if (!ghostText) {
       this.hide();
       return;
     }
-    this.currentInput = input;
-    this.ghostElement.textContent = ghostText;
-    this.ghostElement.style.fontSize = `${this.term.options.fontSize}px`;
-    this.ghostElement.style.fontFamily = this.term.options.fontFamily || "inherit";
-    // Force position recomputation after reshowing.
+    // Force position recomputation — updatePosition skips DOM writes
+    // when the left/top cache hasn't changed, but we also need the new
+    // textContent to flush.
     this.lastLeft = -1;
     this.lastTop = -1;
+    this.ghostElement.textContent = ghostText;
     this.updatePosition();
     this.ghostElement.style.display = "block";
   }
@@ -199,9 +181,10 @@ export class GhostTextAddon implements IDisposable {
 
   /**
    * True when the ghost has a live suggestion even if it's momentarily
-   * hidden waiting for a render-tick (post-adjustToInput). Accept-path
-   * gates should use this instead of isVisible() so a fast "type + →"
-   * during the hide/re-show gap still accepts the correct suggestion.
+   * shown underneath the real text while the user keeps typing within
+   * the prediction. Accept-path gates should use this instead of
+   * isVisible() so the suggestion remains available even while its
+   * leading characters are fully covered by real glyphs.
    */
   isActive(): boolean {
     return !this.disposed && !!this.currentSuggestion;
@@ -236,9 +219,13 @@ export class GhostTextAddon implements IDisposable {
 
     const dims = getXTermCellDimensions(this.term);
 
-    const buffer = this.term.buffer.active;
-    const left = buffer.cursorX * dims.width;
-    const top = buffer.cursorY * dims.height;
+    // Advance the anchor column by however many chars the user has typed
+    // since show() was called. This mirrors where the real cursor will
+    // land after the echo, so the ghost's first visible column lines up
+    // with the tail we want it to show.
+    const charsSinceAnchor = Math.max(0, this.currentInput.length - this.anchorInputLength);
+    const left = (this.anchorCursorX + charsSinceAnchor) * dims.width;
+    const top = this.anchorCursorY * dims.height;
 
     // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)
     if (left === this.lastLeft && top === this.lastTop) return;

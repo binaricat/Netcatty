@@ -17,6 +17,7 @@ import { recordCommand } from "./commandHistoryStore";
 import { preloadCommonSpecs } from "./figSpecLoader";
 import { getXTermCellDimensions } from "./xtermUtils";
 import { listDirectoryEntries, normalizePathTokenForLookup } from "./remotePathCompleter";
+import { decideGhostSuggestion } from "./ghostSuggestionPolicy";
 
 export interface AutocompleteSettings {
   enabled: boolean;
@@ -111,10 +112,7 @@ export function useTerminalAutocomplete(
     ...DEFAULT_AUTOCOMPLETE_SETTINGS,
     ...userSettings,
   };
-  const settings: AutocompleteSettings = {
-    ...rawSettings,
-    showGhostText: rawSettings.showPopupMenu ? false : rawSettings.showGhostText,
-  };
+  const settings: AutocompleteSettings = rawSettings;
 
   // Use refs for values accessed in callbacks to avoid stale closures
   const settingsRef = useRef(settings);
@@ -527,11 +525,19 @@ export function useTerminalAutocomplete(
       return; // Input changed — these completions are stale
     }
 
-    // Ghost text: use the best suggestion
-    if (settingsRef.current.showGhostText && completions.length > 0) {
-      ghostAddonRef.current?.show(completions[0].text, input);
-    } else {
-      ghostAddonRef.current?.hide();
+    // Ghost text: keep the active prediction stable while the user's
+    // input still fits within it. Only swap to a fresh prediction once
+    // the current one no longer matches the typed prefix.
+    if (settingsRef.current.showGhostText) {
+      const ghost = ghostAddonRef.current;
+      const activeSuggestion = ghost?.isActive() ? ghost.getSuggestion() : null;
+      const nextSuggestion = completions.length > 0 ? completions[0].text : null;
+      const ghostDecision = decideGhostSuggestion(activeSuggestion, input, nextSuggestion);
+      if (ghostDecision.type === "show") {
+        ghost?.show(ghostDecision.suggestion, input);
+      } else if (ghostDecision.type === "hide") {
+        ghost?.hide();
+      }
     }
 
     // Popup
