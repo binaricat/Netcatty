@@ -616,14 +616,21 @@ export const useSettingsState = () => {
         setHotkeyScheme(value);
       }
       if (key === STORAGE_KEY_CUSTOM_KEY_BINDINGS) {
-        if (typeof value === 'string') {
+        // Same equality guard as the storage-event path above (#818).
+        // IPC broadcasts also ship fresh object references; without the
+        // guard they loop through the persist effect and cause races.
+        const incoming =
+          typeof value === 'string'
+            ? value
+            : value && typeof value === 'object'
+              ? JSON.stringify(value)
+              : null;
+        if (incoming !== null && incoming !== JSON.stringify(settingsSnapshotRef.current.customKeyBindings)) {
           try {
-            setCustomKeyBindings(JSON.parse(value) as CustomKeyBindings);
+            setCustomKeyBindings(JSON.parse(incoming) as CustomKeyBindings);
           } catch {
             // ignore parse errors
           }
-        } else if (value && typeof value === 'object') {
-          setCustomKeyBindings(value as CustomKeyBindings);
         }
       }
       if (key === STORAGE_KEY_HOTKEY_RECORDING && typeof value === 'boolean') {
@@ -687,7 +694,7 @@ export const useSettingsState = () => {
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, customKeyBindings,
   });
   settingsSnapshotRef.current = {
     theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent,
@@ -697,7 +704,7 @@ export const useSettingsState = () => {
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, customKeyBindings,
   };
 
   // Listen for storage changes from other windows (cross-window sync)
@@ -752,11 +759,19 @@ export const useSettingsState = () => {
         }
       }
       if (e.key === STORAGE_KEY_CUSTOM_KEY_BINDINGS && e.newValue) {
-        try {
-          const newBindings = JSON.parse(e.newValue) as CustomKeyBindings;
-          setCustomKeyBindings(newBindings);
-        } catch {
-          // ignore parse errors
+        // Equality guard: without this, every cross-window broadcast
+        // re-sets state with a parsed (new-reference) object, which
+        // triggers the persist effect to re-broadcast, echoing forever
+        // across windows. See #818 — during the echo window a rapid
+        // second click can be clobbered by an in-flight older echo,
+        // causing the "disable then jumps back" bounce.
+        if (e.newValue !== JSON.stringify(s.customKeyBindings)) {
+          try {
+            const newBindings = JSON.parse(e.newValue) as CustomKeyBindings;
+            setCustomKeyBindings(newBindings);
+          } catch {
+            // ignore parse errors
+          }
         }
       }
       // Sync terminal settings from other windows
