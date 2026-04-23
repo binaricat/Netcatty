@@ -419,10 +419,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-    if (e.type !== "keydown") {
-      return true;
-    }
-
     // Preserve mouse selection across keystrokes when enabled. xterm.js
     // unconditionally clears the selection on user input
     // (SelectionService.ts: coreService.onUserInput → clearSelection).
@@ -430,7 +426,17 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // processed the key + cleared. The microtask runs after both
     // synchronous listeners, so by then either the selection is gone (and
     // we restore) or it's still there (we no-op).
+    //
+    // Both keydown AND keypress must be hooked: xterm routes Space
+    // (keyCode 32 fails Keyboard.ts: `ev.keyCode >= 48`) and A–Z
+    // (CoreBrowserTerminal.ts:_keyDown A–Z IME HACK) through the
+    // `keypress` event, calling triggerDataEvent in _keyPress rather
+    // than _keyDown. For those keys, keydown's microtask drains before
+    // keypress fires, so hasSelection is still true → no-op. Attaching
+    // to keypress gives us a second microtask that drains after
+    // _keyPress clears the selection, so the restore runs.
     if (
+      (e.type === "keydown" || e.type === "keypress") &&
       ctx.terminalSettingsRef.current?.preserveSelectionOnInput &&
       term.hasSelection()
     ) {
@@ -453,6 +459,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           }
         });
       }
+    }
+
+    if (e.type !== "keydown") {
+      return true;
     }
 
     // Autocomplete key handler (must be checked before other handlers)
