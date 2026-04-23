@@ -40,6 +40,15 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
+import {
+  areCustomKeyBindingsEqual,
+  nextCustomKeyBindingsSyncVersion,
+  parseCustomKeyBindingsStorageRecord,
+  resetCustomKeyBinding,
+  serializeCustomKeyBindingsStorageRecord,
+  shouldApplyIncomingCustomKeyBindingsRecord,
+  updateCustomKeyBinding as updateCustomKeyBindingRecord,
+} from '../../domain/customKeyBindings';
 import { getTerminalThemeForUiTheme } from '../../domain/terminalAppearance';
 import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
 import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
@@ -48,12 +57,6 @@ import { UI_FONTS, DEFAULT_UI_FONT_ID } from '../../infrastructure/config/uiFont
 import { uiFontStore, useUIFontsLoaded } from './uiFontStore';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
-import {
-  createSyncedJsonStateTracker,
-  finalizeSyncedJsonStateBroadcast,
-  recordIncomingSyncedJsonStateChange,
-  recordLocalSyncedJsonStateChange,
-} from './syncedJsonState';
 
 const DEFAULT_THEME: 'light' | 'dark' | 'system' = 'dark';
 
@@ -130,26 +133,12 @@ const serializeTerminalSettings = (settings: TerminalSettings): string =>
 const areTerminalSettingsEqual = (a: TerminalSettings, b: TerminalSettings): boolean =>
   serializeTerminalSettings(a) === serializeTerminalSettings(b);
 
-const serializeCustomKeyBindings = (bindings: CustomKeyBindings): string =>
-  JSON.stringify(bindings);
-
-const areCustomKeyBindingsEqual = (a: CustomKeyBindings, b: CustomKeyBindings): boolean =>
-  serializeCustomKeyBindings(a) === serializeCustomKeyBindings(b);
-
-const parseCustomKeyBindings = (value: unknown): CustomKeyBindings | null => {
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value) as CustomKeyBindings;
-    } catch {
-      return null;
-    }
+const createCustomKeyBindingsSyncOrigin = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
   }
 
-  if (value && typeof value === 'object') {
-    return value as CustomKeyBindings;
-  }
-
-  return null;
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
 const applyThemeTokens = (
@@ -197,6 +186,8 @@ const applyThemeTokens = (
 };
 
 export const useSettingsState = () => {
+  const initialCustomKeyBindingsRecord =
+    parseCustomKeyBindingsStorageRecord(localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS));
   const uiFontsLoaded = useUIFontsLoaded();
   const [theme, setTheme] = useState<'dark' | 'light' | 'system'>(() => {
     const stored = readStoredString(STORAGE_KEY_THEME);
@@ -260,7 +251,7 @@ export const useSettingsState = () => {
     return DEFAULT_HOTKEY_SCHEME;
   });
   const [customKeyBindings, setCustomKeyBindingsState] = useState<CustomKeyBindings>(() =>
-    localStorageAdapter.read<CustomKeyBindings>(STORAGE_KEY_CUSTOM_KEY_BINDINGS) || {}
+    initialCustomKeyBindingsRecord?.bindings || {}
   );
   const [isHotkeyRecording, setIsHotkeyRecordingState] = useState(false);
   const [customCSS, setCustomCSS] = useState<string>(() =>
@@ -358,7 +349,10 @@ export const useSettingsState = () => {
   const incomingTerminalSettingsSignatureRef = useRef<string | null>(null);
   const localTerminalSettingsVersionRef = useRef(0);
   const broadcastedLocalTerminalSettingsVersionRef = useRef(0);
-  const customKeyBindingsSyncTrackerRef = useRef(createSyncedJsonStateTracker());
+  const customKeyBindingsVersionRef = useRef(initialCustomKeyBindingsRecord?.version || 0);
+  const customKeyBindingsOriginRef = useRef(initialCustomKeyBindingsRecord?.origin || 'legacy');
+  const customKeyBindingsLocalOriginRef = useRef(createCustomKeyBindingsSyncOrigin());
+  const customKeyBindingsMutationSourceRef = useRef<'local' | 'incoming'>('local');
 
   // Fix 1: Mount guard — skip redundant IPC broadcasts & localStorage writes on initial mount.
   // Set to true by the LAST useEffect declaration; all persist effects see false on first render.
@@ -398,26 +392,40 @@ export const useSettingsState = () => {
       if (areCustomKeyBindingsEqual(prev, candidate)) {
         return prev;
       }
-      customKeyBindingsSyncTrackerRef.current = recordLocalSyncedJsonStateChange(
-        customKeyBindingsSyncTrackerRef.current,
-        serializeCustomKeyBindings(prev),
-        serializeCustomKeyBindings(candidate),
+      customKeyBindingsVersionRef.current = nextCustomKeyBindingsSyncVersion(
+        customKeyBindingsVersionRef.current,
       );
+      customKeyBindingsOriginRef.current = customKeyBindingsLocalOriginRef.current;
+      customKeyBindingsMutationSourceRef.current = 'local';
       return candidate;
     });
   }, []);
 
-  const applyIncomingCustomKeyBindings = useCallback((incoming: CustomKeyBindings) => {
+  const applyIncomingCustomKeyBindings = useCallback((incoming: {
+    bindings: CustomKeyBindings;
+    version: number;
+    origin: string;
+  }) => {
     setCustomKeyBindingsState((prev) => {
-      if (areCustomKeyBindingsEqual(prev, incoming)) {
+      if (!shouldApplyIncomingCustomKeyBindingsRecord(
+        {
+          version: customKeyBindingsVersionRef.current,
+          origin: customKeyBindingsOriginRef.current,
+        },
+        {
+          version: incoming.version,
+          origin: incoming.origin,
+        },
+      )) {
         return prev;
       }
-      customKeyBindingsSyncTrackerRef.current = recordIncomingSyncedJsonStateChange(
-        customKeyBindingsSyncTrackerRef.current,
-        serializeCustomKeyBindings(prev),
-        serializeCustomKeyBindings(incoming),
-      );
-      return incoming;
+      customKeyBindingsVersionRef.current = incoming.version;
+      customKeyBindingsOriginRef.current = incoming.origin;
+      customKeyBindingsMutationSourceRef.current = 'incoming';
+      if (areCustomKeyBindingsEqual(prev, incoming.bindings)) {
+        return prev;
+      }
+      return incoming.bindings;
     });
   }, []);
 
@@ -516,12 +524,11 @@ export const useSettingsState = () => {
     }
 
     // Keyboard
-    const storedKb = readStoredString(STORAGE_KEY_CUSTOM_KEY_BINDINGS);
+    const storedKb = parseCustomKeyBindingsStorageRecord(
+      localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS),
+    );
     if (storedKb) {
-      const parsed = parseCustomKeyBindings(storedKb);
-      if (parsed) {
-        applyIncomingCustomKeyBindings(parsed);
-      }
+      applyIncomingCustomKeyBindings(storedKb);
     }
 
     // Editor
@@ -677,7 +684,7 @@ export const useSettingsState = () => {
         setHotkeyScheme(value);
       }
       if (key === STORAGE_KEY_CUSTOM_KEY_BINDINGS) {
-        const parsed = parseCustomKeyBindings(value);
+        const parsed = parseCustomKeyBindingsStorageRecord(value);
         if (parsed) {
           applyIncomingCustomKeyBindings(parsed);
         }
@@ -808,7 +815,7 @@ export const useSettingsState = () => {
         }
       }
       if (e.key === STORAGE_KEY_CUSTOM_KEY_BINDINGS && e.newValue) {
-        const parsed = parseCustomKeyBindings(e.newValue);
+        const parsed = parseCustomKeyBindingsStorageRecord(e.newValue);
         if (parsed) {
           applyIncomingCustomKeyBindings(parsed);
         }
@@ -1010,16 +1017,21 @@ export const useSettingsState = () => {
   }, [hotkeyScheme, notifySettingsChanged]);
 
   useEffect(() => {
-    localStorageAdapter.write(STORAGE_KEY_CUSTOM_KEY_BINDINGS, customKeyBindings);
+    const payload = serializeCustomKeyBindingsStorageRecord({
+      version: customKeyBindingsVersionRef.current,
+      origin: customKeyBindingsOriginRef.current,
+      bindings: customKeyBindings,
+    });
+    if (localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS) !== payload) {
+      localStorageAdapter.writeString(STORAGE_KEY_CUSTOM_KEY_BINDINGS, payload);
+    }
     if (!persistMountedRef.current) return;
-    const currentSignature = serializeCustomKeyBindings(customKeyBindings);
-    const { nextTracker, shouldBroadcast } = finalizeSyncedJsonStateBroadcast(
-      customKeyBindingsSyncTrackerRef.current,
-      currentSignature,
-    );
-    customKeyBindingsSyncTrackerRef.current = nextTracker;
-    if (!shouldBroadcast) return;
-    notifySettingsChanged(STORAGE_KEY_CUSTOM_KEY_BINDINGS, customKeyBindings);
+    if (customKeyBindingsMutationSourceRef.current === 'incoming') return;
+    notifySettingsChanged(STORAGE_KEY_CUSTOM_KEY_BINDINGS, {
+      version: customKeyBindingsVersionRef.current,
+      origin: customKeyBindingsOriginRef.current,
+      bindings: customKeyBindings,
+    });
   }, [customKeyBindings, notifySettingsChanged]);
 
   const setIsHotkeyRecording = useCallback((isRecording: boolean) => {
@@ -1231,31 +1243,12 @@ export const useSettingsState = () => {
 
   // Update a single key binding
   const updateKeyBinding = useCallback((bindingId: string, scheme: 'mac' | 'pc', newKey: string) => {
-    setCustomKeyBindings(prev => ({
-      ...prev,
-      [bindingId]: {
-        ...prev[bindingId],
-        [scheme]: newKey,
-      },
-    }));
+    setCustomKeyBindings(prev => updateCustomKeyBindingRecord(prev, bindingId, scheme, newKey));
   }, [setCustomKeyBindings]);
 
   // Reset a key binding to default
   const resetKeyBinding = useCallback((bindingId: string, scheme?: 'mac' | 'pc') => {
-    setCustomKeyBindings(prev => {
-      const next = { ...prev };
-      if (scheme) {
-        if (next[bindingId]) {
-          delete next[bindingId][scheme];
-          if (Object.keys(next[bindingId]).length === 0) {
-            delete next[bindingId];
-          }
-        }
-      } else {
-        delete next[bindingId];
-      }
-      return next;
-    });
+    setCustomKeyBindings(prev => resetCustomKeyBinding(prev, bindingId, scheme));
   }, [setCustomKeyBindings]);
 
   // Reset all key bindings to defaults

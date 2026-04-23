@@ -18,6 +18,11 @@ import type {
   SSHKey,
 } from '../domain/models';
 import type { SyncPayload } from '../domain/sync';
+import {
+  nextCustomKeyBindingsSyncVersion,
+  parseCustomKeyBindingsStorageRecord,
+  serializeCustomKeyBindingsStorageRecord,
+} from '../domain/customKeyBindings';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
 import { rehydrateGlobalBookmarks } from '../components/sftp/hooks/useGlobalSftpBookmarks';
 import {
@@ -50,6 +55,8 @@ import {
 // ---------------------------------------------------------------------------
 // Input types
 // ---------------------------------------------------------------------------
+
+const CUSTOM_KEY_BINDINGS_SYNC_PAYLOAD_ORIGIN = 'sync-payload';
 
 /** All vault-owned data that participates in cloud sync. */
 export interface SyncableVaultData {
@@ -171,9 +178,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   // Keyboard
   const kb = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS);
   if (kb) {
-    try {
-      settings.customKeyBindings = JSON.parse(kb);
-    } catch { /* ignore */ }
+    const parsed = parseCustomKeyBindingsStorageRecord(kb);
+    if (parsed) settings.customKeyBindings = parsed.bindings;
   }
 
   // Editor
@@ -250,7 +256,17 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
 
   // Keyboard
   if (settings.customKeyBindings != null) {
-    localStorageAdapter.writeString(STORAGE_KEY_CUSTOM_KEY_BINDINGS, JSON.stringify(settings.customKeyBindings));
+    const previous = parseCustomKeyBindingsStorageRecord(
+      localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS),
+    );
+    localStorageAdapter.writeString(
+      STORAGE_KEY_CUSTOM_KEY_BINDINGS,
+      serializeCustomKeyBindingsStorageRecord({
+        version: nextCustomKeyBindingsSyncVersion(previous?.version || 0),
+        origin: CUSTOM_KEY_BINDINGS_SYNC_PAYLOAD_ORIGIN,
+        bindings: settings.customKeyBindings,
+      }),
+    );
   }
 
   // Editor
