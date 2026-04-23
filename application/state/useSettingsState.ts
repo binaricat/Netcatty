@@ -48,6 +48,12 @@ import { UI_FONTS, DEFAULT_UI_FONT_ID } from '../../infrastructure/config/uiFont
 import { uiFontStore, useUIFontsLoaded } from './uiFontStore';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+import {
+  createSyncedJsonStateTracker,
+  finalizeSyncedJsonStateBroadcast,
+  recordIncomingSyncedJsonStateChange,
+  recordLocalSyncedJsonStateChange,
+} from './syncedJsonState';
 
 const DEFAULT_THEME: 'light' | 'dark' | 'system' = 'dark';
 
@@ -123,6 +129,28 @@ const serializeTerminalSettings = (settings: TerminalSettings): string =>
 
 const areTerminalSettingsEqual = (a: TerminalSettings, b: TerminalSettings): boolean =>
   serializeTerminalSettings(a) === serializeTerminalSettings(b);
+
+const serializeCustomKeyBindings = (bindings: CustomKeyBindings): string =>
+  JSON.stringify(bindings);
+
+const areCustomKeyBindingsEqual = (a: CustomKeyBindings, b: CustomKeyBindings): boolean =>
+  serializeCustomKeyBindings(a) === serializeCustomKeyBindings(b);
+
+const parseCustomKeyBindings = (value: unknown): CustomKeyBindings | null => {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as CustomKeyBindings;
+    } catch {
+      return null;
+    }
+  }
+
+  if (value && typeof value === 'object') {
+    return value as CustomKeyBindings;
+  }
+
+  return null;
+};
 
 const applyThemeTokens = (
   themeSource: 'light' | 'dark' | 'system',
@@ -231,7 +259,7 @@ export const useSettingsState = () => {
     }
     return DEFAULT_HOTKEY_SCHEME;
   });
-  const [customKeyBindings, setCustomKeyBindings] = useState<CustomKeyBindings>(() =>
+  const [customKeyBindings, setCustomKeyBindingsState] = useState<CustomKeyBindings>(() =>
     localStorageAdapter.read<CustomKeyBindings>(STORAGE_KEY_CUSTOM_KEY_BINDINGS) || {}
   );
   const [isHotkeyRecording, setIsHotkeyRecordingState] = useState(false);
@@ -330,6 +358,7 @@ export const useSettingsState = () => {
   const incomingTerminalSettingsSignatureRef = useRef<string | null>(null);
   const localTerminalSettingsVersionRef = useRef(0);
   const broadcastedLocalTerminalSettingsVersionRef = useRef(0);
+  const customKeyBindingsSyncTrackerRef = useRef(createSyncedJsonStateTracker());
 
   // Fix 1: Mount guard — skip redundant IPC broadcasts & localStorage writes on initial mount.
   // Set to true by the LAST useEffect declaration; all persist effects see false on first render.
@@ -358,6 +387,37 @@ export const useSettingsState = () => {
       // Mark the exact incoming snapshot so only this state is skipped for IPC rebroadcast.
       incomingTerminalSettingsSignatureRef.current = serializeTerminalSettings(next);
       return next;
+    });
+  }, []);
+
+  const setCustomKeyBindings = useCallback((nextValue: SetStateAction<CustomKeyBindings>) => {
+    setCustomKeyBindingsState((prev) => {
+      const candidate = typeof nextValue === 'function'
+        ? (nextValue as (prevState: CustomKeyBindings) => CustomKeyBindings)(prev)
+        : nextValue;
+      if (areCustomKeyBindingsEqual(prev, candidate)) {
+        return prev;
+      }
+      customKeyBindingsSyncTrackerRef.current = recordLocalSyncedJsonStateChange(
+        customKeyBindingsSyncTrackerRef.current,
+        serializeCustomKeyBindings(prev),
+        serializeCustomKeyBindings(candidate),
+      );
+      return candidate;
+    });
+  }, []);
+
+  const applyIncomingCustomKeyBindings = useCallback((incoming: CustomKeyBindings) => {
+    setCustomKeyBindingsState((prev) => {
+      if (areCustomKeyBindingsEqual(prev, incoming)) {
+        return prev;
+      }
+      customKeyBindingsSyncTrackerRef.current = recordIncomingSyncedJsonStateChange(
+        customKeyBindingsSyncTrackerRef.current,
+        serializeCustomKeyBindings(prev),
+        serializeCustomKeyBindings(incoming),
+      );
+      return incoming;
     });
   }, []);
 
@@ -458,9 +518,10 @@ export const useSettingsState = () => {
     // Keyboard
     const storedKb = readStoredString(STORAGE_KEY_CUSTOM_KEY_BINDINGS);
     if (storedKb) {
-      try {
-        setCustomKeyBindings(JSON.parse(storedKb));
-      } catch { /* ignore */ }
+      const parsed = parseCustomKeyBindings(storedKb);
+      if (parsed) {
+        applyIncomingCustomKeyBindings(parsed);
+      }
     }
 
     // Editor
@@ -493,7 +554,7 @@ export const useSettingsState = () => {
 
     // Custom terminal themes
     customThemeStore.loadFromStorage();
-  }, [syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
+  }, [applyIncomingCustomKeyBindings, syncAppearanceFromStorage, syncCustomCssFromStorage, setTerminalSettings]);
 
   useLayoutEffect(() => {
     const tokens = getUiThemeById(resolvedTheme, resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId).tokens;
@@ -616,21 +677,9 @@ export const useSettingsState = () => {
         setHotkeyScheme(value);
       }
       if (key === STORAGE_KEY_CUSTOM_KEY_BINDINGS) {
-        // Same equality guard as the storage-event path above (#818).
-        // IPC broadcasts also ship fresh object references; without the
-        // guard they loop through the persist effect and cause races.
-        const incoming =
-          typeof value === 'string'
-            ? value
-            : value && typeof value === 'object'
-              ? JSON.stringify(value)
-              : null;
-        if (incoming !== null && incoming !== JSON.stringify(settingsSnapshotRef.current.customKeyBindings)) {
-          try {
-            setCustomKeyBindings(JSON.parse(incoming) as CustomKeyBindings);
-          } catch {
-            // ignore parse errors
-          }
+        const parsed = parseCustomKeyBindings(value);
+        if (parsed) {
+          applyIncomingCustomKeyBindings(parsed);
         }
       }
       if (key === STORAGE_KEY_HOTKEY_RECORDING && typeof value === 'boolean') {
@@ -664,7 +713,7 @@ export const useSettingsState = () => {
         // ignore
       }
     };
-  }, [mergeIncomingTerminalSettings, syncAppearanceFromStorage, syncCustomCssFromStorage]);
+  }, [applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings, syncAppearanceFromStorage, syncCustomCssFromStorage]);
 
   useEffect(() => {
     const bridge = netcattyBridge.get();
@@ -694,7 +743,7 @@ export const useSettingsState = () => {
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled, customKeyBindings,
+    globalHotkeyEnabled, autoUpdateEnabled,
   });
   settingsSnapshotRef.current = {
     theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent,
@@ -704,7 +753,7 @@ export const useSettingsState = () => {
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat,
-    globalHotkeyEnabled, autoUpdateEnabled, customKeyBindings,
+    globalHotkeyEnabled, autoUpdateEnabled,
   };
 
   // Listen for storage changes from other windows (cross-window sync)
@@ -759,19 +808,9 @@ export const useSettingsState = () => {
         }
       }
       if (e.key === STORAGE_KEY_CUSTOM_KEY_BINDINGS && e.newValue) {
-        // Equality guard: without this, every cross-window broadcast
-        // re-sets state with a parsed (new-reference) object, which
-        // triggers the persist effect to re-broadcast, echoing forever
-        // across windows. See #818 — during the echo window a rapid
-        // second click can be clobbered by an in-flight older echo,
-        // causing the "disable then jumps back" bounce.
-        if (e.newValue !== JSON.stringify(s.customKeyBindings)) {
-          try {
-            const newBindings = JSON.parse(e.newValue) as CustomKeyBindings;
-            setCustomKeyBindings(newBindings);
-          } catch {
-            // ignore parse errors
-          }
+        const parsed = parseCustomKeyBindings(e.newValue);
+        if (parsed) {
+          applyIncomingCustomKeyBindings(parsed);
         }
       }
       // Sync terminal settings from other windows
@@ -923,7 +962,7 @@ export const useSettingsState = () => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, [mergeIncomingTerminalSettings]); // Fix 4: stable deps only — state comparisons use settingsSnapshotRef
+  }, [applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings]); // Fix 4: stable deps only — state comparisons use settingsSnapshotRef
 
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, terminalThemeId);
@@ -973,6 +1012,13 @@ export const useSettingsState = () => {
   useEffect(() => {
     localStorageAdapter.write(STORAGE_KEY_CUSTOM_KEY_BINDINGS, customKeyBindings);
     if (!persistMountedRef.current) return;
+    const currentSignature = serializeCustomKeyBindings(customKeyBindings);
+    const { nextTracker, shouldBroadcast } = finalizeSyncedJsonStateBroadcast(
+      customKeyBindingsSyncTrackerRef.current,
+      currentSignature,
+    );
+    customKeyBindingsSyncTrackerRef.current = nextTracker;
+    if (!shouldBroadcast) return;
     notifySettingsChanged(STORAGE_KEY_CUSTOM_KEY_BINDINGS, customKeyBindings);
   }, [customKeyBindings, notifySettingsChanged]);
 
@@ -1192,7 +1238,7 @@ export const useSettingsState = () => {
         [scheme]: newKey,
       },
     }));
-  }, []);
+  }, [setCustomKeyBindings]);
 
   // Reset a key binding to default
   const resetKeyBinding = useCallback((bindingId: string, scheme?: 'mac' | 'pc') => {
@@ -1210,12 +1256,12 @@ export const useSettingsState = () => {
       }
       return next;
     });
-  }, []);
+  }, [setCustomKeyBindings]);
 
   // Reset all key bindings to defaults
   const resetAllKeyBindings = useCallback(() => {
     setCustomKeyBindings({});
-  }, []);
+  }, [setCustomKeyBindings]);
 
   const updateSyncConfig = useCallback((config: SyncConfig | null) => {
     setSyncConfig(config);
