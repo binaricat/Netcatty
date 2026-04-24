@@ -1050,6 +1050,19 @@ export class CloudSyncManager {
     this.updateProviderStatus(provider, 'error', error);
   }
 
+  /**
+   * Release the transient 'connecting' UI state without disturbing the adapter
+   * or the auth restore snapshot. Used by PKCE flows after the browser handoff
+   * has succeeded, so the settings page isn't visually stuck at "connecting"
+   * while we wait for the redirect callback in the background.
+   */
+  clearConnectingStatus(provider: CloudProvider): void {
+    if (this.state.providers[provider]?.status !== 'connecting') {
+      return;
+    }
+    this.updateProviderStatus(provider, 'disconnected');
+  }
+
   clearProviderError(provider: CloudProvider): void {
     const connection = this.state.providers[provider];
     if (!connection?.error && connection?.status !== 'error') {

@@ -550,7 +550,10 @@ export const useCloudSync = (): CloudSyncHook => {
         // Release the transient "connecting" UI once the browser handoff has
         // happened. The callback session remains active in the background and
         // will mark the provider connected when the redirect completes.
-        manager.resetProviderStatus(provider);
+        // Do NOT use resetProviderStatus here — it would restore from the
+        // auth snapshot and delete the adapter we just created, making the
+        // eventual completePKCEAuth call fail with "adapter not initialized".
+        manager.clearConnectingStatus(provider);
         manager.clearProviderError(provider);
         void completionPromise;
         return data.url;
