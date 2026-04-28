@@ -809,6 +809,16 @@ async function startMoshSession(event, options) {
   const explicitClient = typeof options.moshClientPath === "string" ? options.moshClientPath.trim() : "";
   if (explicitClient) {
     const expanded = expandHomePath(explicitClient);
+    // Reject relative paths up front. validatePath in the renderer is shared
+    // with localShell and resolves bare names through PATH (so "mosh.exe"
+    // would look valid in the UI), but here moshClientPath is taken as a
+    // literal filesystem path and any non-absolute value would be resolved
+    // against the app's cwd and silently fail.
+    if (!path.isAbsolute(expanded)) {
+      throw new Error(
+        `Mosh client path must be absolute: "${explicitClient}". Use Settings → Terminal → Mosh to pick the binary, leave it empty to auto-detect, or enter an absolute path.`,
+      );
+    }
     if (!isExecutableFile(expanded)) {
       throw new Error(
         `Configured Mosh client not usable: ${explicitClient}. Update Settings → Terminal → Mosh, leave it empty to auto-detect, or pick another binary.`,

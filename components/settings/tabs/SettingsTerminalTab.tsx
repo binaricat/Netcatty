@@ -472,6 +472,23 @@ export default function SettingsTerminalTab(props: {
       setMoshValidation(null);
       return;
     }
+    // The shared validatePath bridge resolves bare names through PATH (good
+    // for localShell where "powershell.exe" is a valid choice), but
+    // startMoshSession treats moshClientPath as a literal filesystem path —
+    // so any non-absolute entry would look valid here yet fail at connect
+    // time. Gate on absolute paths first; accept ~ since the main process
+    // will expand it. Tolerant across platforms so e.g. a user pasting a
+    // Windows-style absolute path on macOS still gets a real error
+    // downstream rather than a misleading "not absolute".
+    const looksAbsolute =
+      moshPath.startsWith("/") ||
+      moshPath.startsWith("~") ||
+      /^[a-zA-Z]:[\\/]/.test(moshPath) ||
+      moshPath.startsWith("\\\\");
+    if (!looksAbsolute) {
+      setMoshValidation({ valid: false, message: t("settings.terminal.mosh.client.notAbsolute") });
+      return;
+    }
     if (!bridge?.validatePath) {
       setMoshValidation(null);
       return;

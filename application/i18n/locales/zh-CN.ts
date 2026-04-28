@@ -1468,6 +1468,7 @@ const zhCN: Messages = {
   'settings.terminal.mosh.client.notFound': '该路径下未找到文件。',
   'settings.terminal.mosh.client.isDirectory': '该路径指向目录而非可执行文件。',
   'settings.terminal.mosh.client.notExecutable': '文件存在但不可执行。请对其执行 `chmod +x`，或选择其它二进制文件。',
+  'settings.terminal.mosh.client.notAbsolute': '路径必须为绝对路径。请使用 浏览… 选择二进制、留空以自动探测，或输入完整路径。',
   'settings.terminal.mosh.detect': '探测',
   'settings.terminal.mosh.browse': '浏览…',
   'settings.terminal.mosh.detected': '已找到',

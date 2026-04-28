@@ -384,6 +384,7 @@ const en: Messages = {
   'settings.terminal.mosh.client.notFound': 'File not found at that path.',
   'settings.terminal.mosh.client.isDirectory': 'Path points to a directory, not an executable.',
   'settings.terminal.mosh.client.notExecutable': 'File exists but is not executable. Run `chmod +x` on it or pick another binary.',
+  'settings.terminal.mosh.client.notAbsolute': 'Path must be absolute. Use Browse… to pick the binary, leave the field empty to auto-detect, or enter a full path.',
   'settings.terminal.mosh.detect': 'Detect',
   'settings.terminal.mosh.browse': 'Browse…',
   'settings.terminal.mosh.detected': 'Detected at',
