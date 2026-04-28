@@ -478,7 +478,11 @@ export default function SettingsTerminalTab(props: {
     }
     const timeoutId = setTimeout(() => {
       bridge.validatePath(moshPath, "file").then((result) => {
-        if (result.exists && result.isFile) {
+        if (result.exists && result.isFile && !result.isExecutable) {
+          // Stays consistent with startMoshSession's isExecutableFile check —
+          // a regular file without the execute bit can't actually launch.
+          setMoshValidation({ valid: false, message: t("settings.terminal.mosh.client.notExecutable") });
+        } else if (result.exists && result.isFile) {
           setMoshValidation({ valid: true });
         } else if (result.exists && result.isDirectory) {
           setMoshValidation({ valid: false, message: t("settings.terminal.mosh.client.isDirectory") });

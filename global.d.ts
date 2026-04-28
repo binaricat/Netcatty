@@ -216,7 +216,7 @@ declare global {
     }>>;
     getDefaultShell?(): Promise<string>;
     discoverShells?(): Promise<DiscoveredShell[]>;
-    validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean }>;
+    validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; isExecutable: boolean }>;
     generateKeyPair?(options: {
       type: 'RSA' | 'ECDSA' | 'ED25519';
       bits?: number;
