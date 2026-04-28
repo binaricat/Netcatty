@@ -28,16 +28,37 @@ const CJK_FALLBACK_FONTS = [
   '"SimSun"',
 ];
 
+// Nerd Font symbol-only fallback. Appended after CJK fallbacks so the browser
+// can locate Private Use Area glyphs (powerline / devicons / etc.) when the
+// primary font does not ship them — without forcing the user to pick a Nerd
+// Font variant manually. Mono variants come first to preserve cell width.
+const NERD_FONT_FALLBACK_FONTS = [
+  '"Symbols Nerd Font Mono"',
+  '"Symbols Nerd Font"',
+];
+
 const CJK_FALLBACK_STACK = CJK_FALLBACK_FONTS.join(', ');
+const NERD_FONT_FALLBACK_STACK = NERD_FONT_FALLBACK_FONTS.join(', ');
 
 export const withCjkFallback = (family: string) => {
   const trimmed = family.trim();
-  if (!CJK_FALLBACK_STACK) return trimmed;
-  // Avoid double-appending if a custom stack already includes one of these fonts.
-  if (CJK_FALLBACK_FONTS.some((f) => trimmed.includes(f.replace(/"/g, "")))) {
-    return trimmed;
+  const segments: string[] = [trimmed];
+
+  if (
+    CJK_FALLBACK_STACK &&
+    !CJK_FALLBACK_FONTS.some((f) => trimmed.includes(f.replace(/"/g, '')))
+  ) {
+    segments.push(CJK_FALLBACK_STACK);
   }
-  return `${trimmed}, ${CJK_FALLBACK_STACK}`;
+
+  if (
+    NERD_FONT_FALLBACK_STACK &&
+    !NERD_FONT_FALLBACK_FONTS.some((f) => trimmed.includes(f.replace(/"/g, '')))
+  ) {
+    segments.push(NERD_FONT_FALLBACK_STACK);
+  }
+
+  return segments.join(', ');
 };
 
 const BASE_TERMINAL_FONTS: TerminalFont[] = [

@@ -55,6 +55,8 @@ const KNOWN_MONOSPACE_FONTS = new Set([
     'sarasa mono',
     'maple mono',
     'meslolgs nf',
+    'symbols nerd font mono',
+    'symbols nerd font',
 ]);
 
 /**

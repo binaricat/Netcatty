@@ -54,7 +54,7 @@ try {
   electronModule = require("electron");
 }
 
-const { app, BrowserWindow, Menu, protocol, shell, clipboard } = electronModule || {};
+const { app, BrowserWindow, Menu, protocol, shell, clipboard, session } = electronModule || {};
 if (!app || !BrowserWindow) {
   throw new Error("Failed to load Electron runtime. Ensure the app is launched with the Electron binary.");
 }
@@ -1077,6 +1077,29 @@ if (!gotLock) {
   // Application lifecycle
   app.whenReady().then(() => {
     registerAppProtocol();
+
+    // Grant the Local Font Access API (queryLocalFonts) for the app's own
+    // session so the terminal font picker can enumerate user-installed
+    // monospace fonts (Nerd Font variants etc.). The fallback browser uses
+    // an isolated partition and is not affected.
+    try {
+      const defaultSession = session?.defaultSession;
+      if (defaultSession) {
+        defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+          if (permission === "local-fonts") {
+            callback(true);
+            return;
+          }
+          callback(true);
+        });
+        defaultSession.setPermissionCheckHandler((_wc, permission) => {
+          if (permission === "local-fonts") return true;
+          return true;
+        });
+      }
+    } catch (err) {
+      console.warn("[Main] Failed to install permission handlers:", err);
+    }
 
     // Set dock icon on macOS
     if (isMac && appIcon && app.dock?.setIcon) {
