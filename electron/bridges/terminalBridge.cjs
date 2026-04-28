@@ -797,7 +797,22 @@ async function startMoshSession(event, options) {
 
   let moshCmd;
   let resolvedMoshDir = null;
-  if (process.platform === "win32") {
+  // 1. Honor user-supplied moshClientPath (Settings → Terminal → Mosh).
+  //    Strict failure: a missing/non-executable file produces a clear error
+  //    instead of silently falling back, so users notice typos / stale paths.
+  const explicitClient = typeof options.moshClientPath === "string" ? options.moshClientPath.trim() : "";
+  if (explicitClient) {
+    const expanded = expandHomePath(explicitClient);
+    if (!isExecutableFile(expanded)) {
+      throw new Error(
+        `Configured Mosh client not usable: ${explicitClient}. Update Settings → Terminal → Mosh, leave it empty to auto-detect, or pick another binary.`,
+      );
+    }
+    moshCmd = path.resolve(expanded);
+    if (process.platform !== "win32") {
+      resolvedMoshDir = path.dirname(moshCmd);
+    }
+  } else if (process.platform === "win32") {
     moshCmd = findExecutable("mosh") || "mosh.exe";
   } else {
     const resolved = resolvePosixExecutable("mosh", { pathOverride: mergedPathForResolution });
@@ -807,7 +822,7 @@ async function startMoshSession(event, options) {
           ? "macOS: brew install mosh"
           : "Linux: sudo apt install mosh / sudo dnf install mosh / sudo pacman -S mosh";
       throw new Error(
-        `Mosh client not found on PATH. Install it (${installHint}) or place the 'mosh' binary somewhere on PATH such as /opt/homebrew/bin or /usr/local/bin.`,
+        `Mosh client not found on PATH. Install it (${installHint}) or place the 'mosh' binary somewhere on PATH such as /opt/homebrew/bin or /usr/local/bin. You can also point Settings → Terminal → Mosh at an absolute path.`,
       );
     }
     moshCmd = resolved;
@@ -1229,6 +1244,8 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:start", startLocalSession);
   ipcMain.handle("netcatty:telnet:start", startTelnetSession);
   ipcMain.handle("netcatty:mosh:start", startMoshSession);
+  ipcMain.handle("netcatty:mosh:detectClient", () => detectMoshClient());
+  ipcMain.handle("netcatty:mosh:pickClient", () => pickMoshClient());
   ipcMain.handle("netcatty:serial:start", startSerialSession);
   ipcMain.handle("netcatty:serial:list", listSerialPorts);
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
@@ -1308,6 +1325,72 @@ function validatePath(event, payload) {
 }
 
 /**
+ * Run the same auto-discovery startMoshSession uses, surfacing the result
+ * (and the search list when nothing was found) to the Settings UI.
+ */
+function detectMoshClient() {
+  if (process.platform === "win32") {
+    const resolved = findExecutable("mosh");
+    const found = !!resolved && resolved !== "mosh" && fs.existsSync(resolved);
+    return {
+      platform: "win32",
+      found,
+      path: found ? resolved : null,
+      searchedPaths: [],
+    };
+  }
+  const dirs = [];
+  const seen = new Set();
+  for (const dir of (process.env.PATH || "").split(":")) {
+    if (dir && !seen.has(dir)) { seen.add(dir); dirs.push(dir); }
+  }
+  for (const dir of POSIX_EXTRA_PATH_DIRS) {
+    if (!seen.has(dir)) { seen.add(dir); dirs.push(dir); }
+  }
+  const home = process.env.HOME;
+  if (home) {
+    for (const sub of [".nix-profile/bin", ".cargo/bin", ".local/bin"]) {
+      const dir = path.join(home, sub);
+      if (!seen.has(dir)) { seen.add(dir); dirs.push(dir); }
+    }
+  }
+  const resolved = resolvePosixExecutable("mosh");
+  return {
+    platform: process.platform,
+    found: !!resolved,
+    path: resolved,
+    searchedPaths: dirs,
+  };
+}
+
+/**
+ * Open a native file picker so the user can select a Mosh client binary.
+ * Returns { canceled, filePath } so the renderer can decide what to do.
+ */
+async function pickMoshClient() {
+  const { dialog, BrowserWindow } = electronModule || {};
+  if (!dialog) {
+    return { canceled: true, filePath: null };
+  }
+  const win = BrowserWindow?.getFocusedWindow?.() || undefined;
+  const isWin = process.platform === "win32";
+  const result = await dialog.showOpenDialog(win, {
+    title: "Select Mosh client",
+    properties: ["openFile", "showHiddenFiles"],
+    filters: isWin
+      ? [
+          { name: "Executables", extensions: ["exe", "bat", "cmd"] },
+          { name: "All Files", extensions: ["*"] },
+        ]
+      : [{ name: "All Files", extensions: ["*"] }],
+  });
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return { canceled: true, filePath: null };
+  }
+  return { canceled: false, filePath: result.filePaths[0] };
+}
+
+/**
  * Cleanup all sessions - call before app quit
  */
 function cleanupAllSessions() {
@@ -1356,6 +1439,8 @@ module.exports = {
   startLocalSession,
   startTelnetSession,
   startMoshSession,
+  detectMoshClient,
+  pickMoshClient,
   startSerialSession,
   listSerialPorts,
   writeToSession,

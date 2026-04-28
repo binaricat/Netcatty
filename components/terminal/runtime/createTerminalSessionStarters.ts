@@ -761,6 +761,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         username: ctx.host.username || "root",
         port: ctx.host.port || 22,
         moshServerPath: ctx.host.moshServerPath,
+        moshClientPath: ctx.terminalSettings?.moshClientPath || undefined,
         agentForwarding: ctx.host.agentForwarding,
         cols: term.cols,
         rows: term.rows,

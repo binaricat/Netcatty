@@ -300,6 +300,15 @@ export default function SettingsTerminalTab(props: {
   const [shellValidation, setShellValidation] = useState<{ valid: boolean; message?: string } | null>(null);
   const [dirValidation, setDirValidation] = useState<{ valid: boolean; message?: string } | null>(null);
 
+  // Mosh settings state
+  const [moshValidation, setMoshValidation] = useState<{ valid: boolean; message?: string } | null>(null);
+  const [moshDetectStatus, setMoshDetectStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "running" }
+    | { kind: "found"; path: string }
+    | { kind: "not-found"; searchedPaths: string[] }
+  >({ kind: "idle" });
+
   const discoveredShells = useDiscoveredShells();
   const [showCustomShellInput, setShowCustomShellInput] = useState(() => {
     if (!terminalSettings.localShell) return false;
@@ -454,6 +463,70 @@ export default function SettingsTerminalTab(props: {
 
     return () => clearTimeout(timeoutId);
   }, [terminalSettings.localShell, discoveredShells, t]);
+
+  // Validate mosh client path when it changes (debounced)
+  useEffect(() => {
+    const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+    const moshPath = terminalSettings.moshClientPath;
+    if (!moshPath) {
+      setMoshValidation(null);
+      return;
+    }
+    if (!bridge?.validatePath) {
+      setMoshValidation(null);
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      bridge.validatePath(moshPath, "file").then((result) => {
+        if (result.exists && result.isFile) {
+          setMoshValidation({ valid: true });
+        } else if (result.exists && result.isDirectory) {
+          setMoshValidation({ valid: false, message: t("settings.terminal.mosh.client.isDirectory") });
+        } else {
+          setMoshValidation({ valid: false, message: t("settings.terminal.mosh.client.notFound") });
+        }
+      }).catch(() => {
+        setMoshValidation(null);
+      });
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [terminalSettings.moshClientPath, t]);
+
+  const handleDetectMosh = useCallback(async () => {
+    const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+    if (!bridge?.detectMoshClient) return;
+    setMoshDetectStatus({ kind: "running" });
+    try {
+      const result = await bridge.detectMoshClient();
+      if (result.found && result.path) {
+        setMoshDetectStatus({ kind: "found", path: result.path });
+        // Auto-fill the input only when it is empty so we don't override
+        // a value the user is in the middle of editing.
+        if (!terminalSettings.moshClientPath) {
+          updateTerminalSetting("moshClientPath", result.path);
+        }
+      } else {
+        setMoshDetectStatus({ kind: "not-found", searchedPaths: result.searchedPaths });
+      }
+    } catch (err) {
+      console.error("[Settings] detectMoshClient failed:", err);
+      setMoshDetectStatus({ kind: "not-found", searchedPaths: [] });
+    }
+  }, [terminalSettings.moshClientPath, updateTerminalSetting]);
+
+  const handleBrowseMosh = useCallback(async () => {
+    const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+    if (!bridge?.pickMoshClient) return;
+    try {
+      const result = await bridge.pickMoshClient();
+      if (!result.canceled && result.filePath) {
+        updateTerminalSetting("moshClientPath", result.filePath);
+        setMoshDetectStatus({ kind: "idle" });
+      }
+    } catch (err) {
+      console.error("[Settings] pickMoshClient failed:", err);
+    }
+  }, [updateTerminalSetting]);
 
   // Validate directory path when it changes
   useEffect(() => {
@@ -1044,6 +1117,69 @@ export default function SettingsTerminalTab(props: {
             placeholder={t("settings.terminal.connection.x11Display.placeholder")}
             className="w-48"
           />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.mosh.client")}
+          description={t("settings.terminal.mosh.client.desc")}
+        >
+          <div className="flex flex-col gap-1 w-72">
+            <div className="flex gap-2">
+              <Input
+                value={terminalSettings.moshClientPath}
+                placeholder={t("settings.terminal.mosh.client.placeholder")}
+                onChange={(e) => updateTerminalSetting("moshClientPath", e.target.value)}
+                className={cn(
+                  "flex-1",
+                  moshValidation && !moshValidation.valid && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleDetectMosh}
+                disabled={moshDetectStatus.kind === "running"}
+              >
+                {t("settings.terminal.mosh.detect")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleBrowseMosh}
+              >
+                {t("settings.terminal.mosh.browse")}
+              </Button>
+            </div>
+            {moshValidation && !moshValidation.valid && moshValidation.message && (
+              <span className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle size={12} />
+                {moshValidation.message}
+              </span>
+            )}
+            {moshDetectStatus.kind === "found" && (
+              <span className="text-xs text-muted-foreground">
+                {t("settings.terminal.mosh.detected")}: {moshDetectStatus.path}
+              </span>
+            )}
+            {moshDetectStatus.kind === "not-found" && (
+              <span className="text-xs text-destructive flex items-start gap-1">
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  {t("settings.terminal.mosh.notDetected")}
+                  {moshDetectStatus.searchedPaths.length > 0 && (
+                    <>
+                      {" "}
+                      <span className="text-muted-foreground">
+                        ({moshDetectStatus.searchedPaths.slice(0, 4).join(", ")}
+                        {moshDetectStatus.searchedPaths.length > 4 ? "…" : ""})
+                      </span>
+                    </>
+                  )}
+                </span>
+              </span>
+            )}
+          </div>
         </SettingRow>
       </div>
 

@@ -493,6 +493,12 @@ export interface TerminalSettings {
   keepaliveInterval: number; // Seconds between SSH-level keepalive packets (0 = disabled)
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
 
+  // Mosh Connection
+  // Absolute path to the local `mosh` client binary. Empty triggers
+  // auto-discovery (PATH + Homebrew/MacPorts/nix fallbacks). When set,
+  // the value is used as-is and a missing file produces a clear error.
+  moshClientPath: string;
+
   // Server Stats Display (Linux only)
   showServerStats: boolean; // Show CPU/Memory/Disk in terminal statusbar
   serverStatsRefreshInterval: number; // Seconds between stats refresh (default: 30)
@@ -638,6 +644,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   localStartDir: '', // Empty = use home directory
   keepaliveInterval: 0, // 0 = disabled (use SSH library defaults)
   x11Display: '', // Empty = use DISPLAY/default local X server
+  moshClientPath: '', // Empty = auto-detect mosh on PATH / common install dirs
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   disableBracketedPaste: false, // Bracketed paste enabled by default

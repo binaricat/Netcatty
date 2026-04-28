@@ -179,6 +179,7 @@ declare global {
       username?: string;
       port?: number;
       moshServerPath?: string;
+      moshClientPath?: string;
       agentForwarding?: boolean;
       cols?: number;
       rows?: number;
@@ -186,6 +187,13 @@ declare global {
       env?: Record<string, string>;
       sessionLog?: { enabled: boolean; directory: string; format: string };
     }): Promise<string>;
+    detectMoshClient?(): Promise<{
+      platform: string;
+      found: boolean;
+      path: string | null;
+      searchedPaths: string[];
+    }>;
+    pickMoshClient?(): Promise<{ canceled: boolean; filePath: string | null }>;
     startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; shellArgs?: string[]; cwd?: string; env?: Record<string, string>; sessionLog?: { enabled: boolean; directory: string; format: string } }): Promise<string>;
     startSerialSession?(options: {
       sessionId?: string;
