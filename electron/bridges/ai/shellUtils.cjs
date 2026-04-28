@@ -73,6 +73,32 @@ function trackSessionIdlePrompt(session, chunk) {
   return prompt;
 }
 
+// Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
+// still ends with it. The cached prompt is updated only when
+// extractTrailingIdlePrompt recognizes a known shape (PowerShell or
+// `user@host[:path][#$]`); a remote shell switch into cmd.exe, an
+// oh-my-posh / starship / custom PS1, or any unrecognized prompt would
+// otherwise leave a stale value behind, which `resolveEffectiveShellKind`
+// would then keep using to coerce future commands into a PowerShell
+// wrapper. By re-checking the live tail we self-correct: if the visible
+// last line no longer matches the cached prompt, the prompt is treated
+// as expired and downstream wrapper selection / suffix matching falls
+// back to `shellKind` alone.
+function getFreshIdlePrompt(session) {
+  if (!session) return "";
+  const cached = session.lastIdlePrompt;
+  if (!cached) return "";
+
+  const tail = session._promptTrackTail;
+  if (typeof tail !== "string" || !tail) return "";
+
+  const normalizedTail = stripAnsi(tail).replace(/\r/g, "\n");
+  const normalizedCached = stripAnsi(cached).replace(/\r/g, "\n");
+  if (!normalizedCached) return "";
+
+  return normalizedTail.endsWith(normalizedCached) ? cached : "";
+}
+
 // ── URL helpers ──
 
 function isLocalhostHostname(hostname) {
@@ -338,6 +364,7 @@ function serializeStreamChunk(chunk) {
 module.exports = {
   stripAnsi,
   extractTrailingIdlePrompt,
+  getFreshIdlePrompt,
   isDefaultPowerShellPromptLine,
   trackSessionIdlePrompt,
   isLocalhostHostname,

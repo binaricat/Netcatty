@@ -12,7 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { existsSync } = require("node:fs");
 
-const { toUnpackedAsarPath } = require("./ai/shellUtils.cjs");
+const { toUnpackedAsarPath, getFreshIdlePrompt } = require("./ai/shellUtils.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
@@ -1493,7 +1493,7 @@ function handleExec(params) {
       trackForCancellation: activePtyExecs,
       timeoutMs: commandTimeoutMs,
       shellKind: session.shellKind,
-      expectedPrompt: session.lastIdlePrompt || "",
+      expectedPrompt: getFreshIdlePrompt(session),
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
       chatSessionId,
@@ -1581,7 +1581,7 @@ function handleJobStart(params) {
       timeoutMs,
       shellKind: session.shellKind,
       chatSessionId,
-      expectedPrompt: session.lastIdlePrompt || "",
+      expectedPrompt: getFreshIdlePrompt(session),
       typedInput: true,
       echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
       maxBufferedChars: MAX_BACKGROUND_JOB_OUTPUT_CHARS,

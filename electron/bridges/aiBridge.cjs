@@ -30,6 +30,7 @@ const {
   resolveCliFromPath,
   resolveClaudeAcpBinaryPath,
   getShellEnv,
+  getFreshIdlePrompt,
   invalidateShellEnvCache,
   serializeStreamChunk,
   toUnpackedAsarPath,
@@ -1322,7 +1323,7 @@ function registerHandlers(ipcMain) {
           timeoutMs,
           shellKind: session.shellKind,
           chatSessionId,
-          expectedPrompt: session.lastIdlePrompt || "",
+          expectedPrompt: getFreshIdlePrompt(session),
           typedInput: true,
           echoCommand: (rawCommand) => {
             const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
