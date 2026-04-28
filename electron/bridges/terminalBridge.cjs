@@ -815,9 +815,11 @@ async function startMoshSession(event, options) {
       );
     }
     moshCmd = path.resolve(expanded);
-    if (process.platform !== "win32") {
-      resolvedMoshDir = path.dirname(moshCmd);
-    }
+    // Always remember the directory so we can extend PATH and locate
+    // mosh-client / ssh helpers regardless of platform — Windows
+    // installs outside %PATH% otherwise can't resolve siblings even
+    // though the wrapper itself runs.
+    resolvedMoshDir = path.dirname(moshCmd);
   } else if (process.platform === "win32") {
     moshCmd = findExecutable("mosh") || "mosh.exe";
   } else {
@@ -872,14 +874,25 @@ async function startMoshSession(event, options) {
   // Also point MOSH_CLIENT at the absolute mosh-client when present, so the
   // wrapper picks it up even if PATH is overridden downstream.
   if (resolvedMoshDir) {
+    const sep = path.delimiter; // ":" on POSIX, ";" on Win32
     const existingPath = env.PATH || "";
-    if (!existingPath.split(":").includes(resolvedMoshDir)) {
-      env.PATH = existingPath ? `${resolvedMoshDir}:${existingPath}` : resolvedMoshDir;
+    const onPath = existingPath
+      .split(sep)
+      .some((p) => p && path.normalize(p) === path.normalize(resolvedMoshDir));
+    if (!onPath) {
+      env.PATH = existingPath ? `${resolvedMoshDir}${sep}${existingPath}` : resolvedMoshDir;
     }
     if (!env.MOSH_CLIENT) {
-      const candidateClient = path.join(resolvedMoshDir, "mosh-client");
-      if (isExecutableFile(candidateClient)) {
-        env.MOSH_CLIENT = candidateClient;
+      const clientCandidates =
+        process.platform === "win32"
+          ? ["mosh-client.exe", "mosh-client.bat", "mosh-client.cmd", "mosh-client"]
+          : ["mosh-client"];
+      for (const name of clientCandidates) {
+        const candidate = path.join(resolvedMoshDir, name);
+        if (isExecutableFile(candidate)) {
+          env.MOSH_CLIENT = candidate;
+          break;
+        }
       }
     }
   }
