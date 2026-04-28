@@ -23,7 +23,8 @@ test("uses PowerShell wrapping when shellKind is 'unknown'", () => {
 
 test("does NOT override an explicit non-PowerShell shell kind even if the prompt looks like PowerShell", () => {
   // Defends against a malicious remote process spoofing a `PS ...>` line
-  // on a real bash/zsh session to coerce a single mis-wrapped command.
+  // on a real bash/zsh/cmd/fish/raw session to coerce a single
+  // mis-wrapped command.
   assert.equal(
     resolveEffectiveShellKind("posix", "PS C:\\Users\\alice>"),
     "posix",
@@ -35,6 +36,26 @@ test("does NOT override an explicit non-PowerShell shell kind even if the prompt
   assert.equal(
     resolveEffectiveShellKind("cmd", "PS C:\\Users\\alice>"),
     "cmd",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("raw", "PS C:\\Users\\alice>"),
+    "raw",
+  );
+});
+
+test("keeps powershell wrapping for an explicit powershell session even when nested into a non-PS shell", () => {
+  // After `wsl` or similar, a confirmed PowerShell session may show a
+  // posix prompt. We currently keep PowerShell wrapping (the user's
+  // configured shell is the source of truth). Reverse detection would
+  // be a separate feature; this test locks the current behavior so a
+  // future change is intentional.
+  assert.equal(
+    resolveEffectiveShellKind("powershell", "alice@host:~$"),
+    "powershell",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("powershell", ""),
+    "powershell",
   );
 });
 

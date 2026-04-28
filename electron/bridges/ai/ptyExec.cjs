@@ -104,15 +104,23 @@ function isPowerShellPrompt(prompt) {
   return isDefaultPowerShellPromptLine(lastLine);
 }
 
-// Prompt-driven override is intentionally narrow: only flip when the
-// session has no confirmed POSIX shell. This keeps the issue #841 fix
-// (SSH sessions, where shellKind is undefined) working while preventing
-// a malicious remote process from spoofing a `PS ...>` line on a real
-// POSIX shell to coerce a single mis-wrapped command.
+// Prompt-driven override is intentionally narrow: only flip to PowerShell
+// when the session has no confirmed shell type. This keeps the issue #841
+// fix working (SSH/Telnet sessions never set shellKind — see
+// sshBridge.cjs:1265) while preventing a malicious remote process from
+// spoofing a `PS ...>` line on a real bash/zsh/fish/cmd session to coerce
+// a single mis-wrapped command.
+//
+// Universe of shellKind values (see lib/localShell.cjs:23-33 and
+// terminalBridge.cjs:368, :932, :1074):
+//   "posix" | "powershell" | "cmd" | "fish" | "unknown" | "raw" | "" | undefined
+// Excluded on purpose:
+//   - "posix" / "fish" / "cmd": confirmed POSIX-family or cmd.exe — never override.
+//   - "powershell": already correct; no override needed (would be a no-op).
+//   - "raw": serial / network device — execViaRawPty bypasses buildWrappedCommand.
 const SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE = new Set([
   "",
   "unknown",
-  "powershell",
 ]);
 
 function resolveEffectiveShellKind(shellKind, expectedPrompt) {
