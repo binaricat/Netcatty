@@ -892,7 +892,14 @@ function App({ settings }: { settings: SettingsState }) {
       } catch (err) {
         console.error('[App] dirty-editors check failed:', err);
       }
-      bridge.reportDirtyEditorsResult?.(hasDirty);
+      try {
+        bridge.reportDirtyEditorsResult?.(hasDirty);
+      } catch (err) {
+        // Reporting itself shouldn't throw, but if the IPC bridge is in a
+        // bad state we'd rather log than bubble out of the listener and
+        // disable the quit guard for the rest of the session.
+        console.error('[App] reportDirtyEditorsResult failed:', err);
+      }
     });
     return unsub;
   }, [t]);

@@ -1358,8 +1358,10 @@ if (!gotLock) {
       // misbehaving extension or a future bug that wires the channel
       // elsewhere) is silently ignored so it can't decide the quit.
       // We use `.on` (not `.once`) so a rogue reply doesn't consume
-      // the listener slot and let the real reply fall through.
-      if (evt?.sender && evt.sender !== wc) return;
+      // the listener slot and let the real reply fall through. Reject
+      // strictly: a missing/falsy sender is anomalous in real IPC and
+      // is treated the same as a wrong-window reply.
+      if (evt?.sender !== wc) return;
       const hasDirty = payload && payload.hasDirty === true;
       settle(hasDirty ? "stay" : "commit");
     }
