@@ -147,7 +147,13 @@ const POSIX_EXTRA_PATH_DIRS = [
 function isExecutableFile(candidate) {
   try {
     const st = fs.statSync(candidate);
-    return st.isFile() && (st.mode & 0o111) !== 0;
+    if (!st.isFile()) return false;
+    // Windows has no POSIX execute bit — Node returns mode 0o100666 even for
+    // .exe / .bat / .cmd files, so 0o111 is unreliable there. Treat any
+    // regular file as executable on Win32 and let spawn-time PATHEXT /
+    // extension handling reject non-executables.
+    if (process.platform === "win32") return true;
+    return (st.mode & 0o111) !== 0;
   } catch {
     return false;
   }
