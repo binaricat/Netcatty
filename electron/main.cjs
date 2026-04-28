@@ -1086,10 +1086,18 @@ if (!gotLock) {
     try {
       const defaultSession = session?.defaultSession;
       if (defaultSession) {
-        const allowedOrigins = new Set(["app://netcatty"]);
+        // app:// is registered as a standard scheme in Chromium
+        // (registerSchemesAsPrivileged above) but Node's WHATWG URL parser
+        // doesn't include it in its special-scheme list, so
+        // `new URL('app://netcatty/...').origin` returns the string "null"
+        // — matching against an `app://netcatty` origin string would
+        // therefore fail in packaged builds. Match by protocol + host
+        // instead, and only fall back to .origin for HTTP-family URLs
+        // (the dev server).
+        const allowedHttpOrigins = new Set();
         if (effectiveDevServerUrl) {
           try {
-            allowedOrigins.add(new URL(effectiveDevServerUrl).origin);
+            allowedHttpOrigins.add(new URL(effectiveDevServerUrl).origin);
           } catch {
             // ignore malformed dev server URL
           }
@@ -1097,7 +1105,11 @@ if (!gotLock) {
         const isAppOrigin = (rawUrl) => {
           if (!rawUrl) return false;
           try {
-            return allowedOrigins.has(new URL(String(rawUrl)).origin);
+            const parsed = new URL(String(rawUrl));
+            if (parsed.protocol === "app:") {
+              return parsed.host === "netcatty";
+            }
+            return allowedHttpOrigins.has(parsed.origin);
           } catch {
             return false;
           }
