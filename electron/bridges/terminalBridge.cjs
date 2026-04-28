@@ -153,7 +153,7 @@ function isExecutableFile(candidate) {
   }
 }
 
-function resolvePosixExecutable(name) {
+function resolvePosixExecutable(name, opts = {}) {
   if (process.platform === "win32") return null;
   if (!name || typeof name !== "string") return null;
 
@@ -166,8 +166,14 @@ function resolvePosixExecutable(name) {
   const seen = new Set();
   const dirs = [];
 
-  // 1. Honor the process-inherited PATH first so user/system overrides win.
-  for (const dir of (process.env.PATH || "").split(":")) {
+  // 1. Honor the caller-supplied PATH first so callers that have already
+  //    merged a host-level environmentVariables.PATH override don't see the
+  //    fallback decline a binary that the spawned process would have found.
+  //    Falls back to the main process PATH when no override is provided.
+  const pathOverride = Object.prototype.hasOwnProperty.call(opts, "pathOverride")
+    ? opts.pathOverride
+    : process.env.PATH;
+  for (const dir of (pathOverride || "").split(":")) {
     if (dir && !seen.has(dir)) {
       seen.add(dir);
       dirs.push(dir);
@@ -779,12 +785,22 @@ async function startMoshSession(event, options) {
   // rely on the spawn-time PATH search, which on macOS GUI apps is reduced to
   // `/usr/bin:/bin:/usr/sbin:/sbin` and silently fails for Homebrew installs
   // (see issue #842). On Windows keep the existing behaviour.
+  //
+  // Resolution must consider the same PATH the spawned process will see —
+  // host-level `environmentVariables.PATH` is merged into the child env
+  // below, so the resolver checks that merged value first to avoid
+  // rejecting a binary the child would actually have found.
+  const optionsEnv = options.env || {};
+  const mergedPathForResolution = Object.prototype.hasOwnProperty.call(optionsEnv, "PATH")
+    ? optionsEnv.PATH
+    : process.env.PATH;
+
   let moshCmd;
   let resolvedMoshDir = null;
   if (process.platform === "win32") {
     moshCmd = findExecutable("mosh") || "mosh.exe";
   } else {
-    const resolved = resolvePosixExecutable("mosh");
+    const resolved = resolvePosixExecutable("mosh", { pathOverride: mergedPathForResolution });
     if (!resolved) {
       const installHint =
         process.platform === "darwin"
@@ -824,7 +840,7 @@ async function startMoshSession(event, options) {
 
   const env = {
     ...process.env,
-    ...(options.env || {}),
+    ...optionsEnv,
     TERM: 'xterm-256color',
     LANG: resolveLangFromCharset(options.charset),
   };
