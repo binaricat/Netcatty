@@ -86,6 +86,22 @@ function escapeCmdForNestedShell(text) {
   return String(text || "").replace(/"/g, '""').replace(/%/g, "%%");
 }
 
+function isPowerShellPrompt(prompt) {
+  const lastLine = stripAnsi(String(prompt || ""))
+    .replace(/\r/g, "")
+    .split("\n")
+    .pop()
+    ?.replace(/\s+$/, "") || "";
+  return /^PS(?:\s+.*)?>$/.test(lastLine);
+}
+
+function resolveEffectiveShellKind(shellKind, expectedPrompt) {
+  if (isPowerShellPrompt(expectedPrompt)) {
+    return "powershell";
+  }
+  return shellKind || "posix";
+}
+
 function buildWrappedCommand(command, shellKind, marker) {
   switch (shellKind) {
     case "powershell": {
@@ -305,7 +321,7 @@ function startPtyJob(ptyStream, command, options) {
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
-  const resolvedShellKind = shellKind || "posix";
+  const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt);
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
 
@@ -1133,5 +1149,6 @@ module.exports = {
   execViaChannel,
   execViaRawPty,
   detectShellKind,
+  resolveEffectiveShellKind,
   stripAnsi,
 };

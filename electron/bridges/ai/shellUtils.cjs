@@ -32,6 +32,10 @@ function extractTrailingIdlePrompt(output) {
   const rightTrimmed = lastLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
 
+  if (/^PS(?:\s+.*)?>$/.test(rightTrimmed)) {
+    return lastLine;
+  }
+
   if (/^[^\s@]+@[^\s:]+(?::[^\n\r]*)?[#$]$/.test(rightTrimmed)) {
     return lastLine;
   }
