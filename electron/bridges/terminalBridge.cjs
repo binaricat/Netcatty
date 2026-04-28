@@ -118,6 +118,90 @@ function createPtyBuffer(sendFn) {
 }
 
 /**
+ * Locate an executable on POSIX systems by name.
+ *
+ * macOS GUI Electron apps inherit launchd's minimal PATH
+ * (`/usr/bin:/bin:/usr/sbin:/sbin`), missing Homebrew and other common
+ * package-manager directories. `pty.spawn(name)` then either fails
+ * synchronously with ENOENT or spawns a child that immediately exits
+ * with no useful error surfaced to the renderer (see issue #842 for the
+ * Mosh case).
+ *
+ * Returns the absolute path on success, or null when the binary cannot
+ * be located anywhere we know to look. Win32 callers should keep using
+ * findExecutable() which handles `where.exe` + Windows-specific paths.
+ */
+const POSIX_EXTRA_PATH_DIRS = [
+  "/opt/homebrew/bin",
+  "/opt/homebrew/sbin",
+  "/usr/local/bin",
+  "/usr/local/sbin",
+  "/opt/local/bin",
+  "/opt/local/sbin",
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+];
+
+function isExecutableFile(candidate) {
+  try {
+    const st = fs.statSync(candidate);
+    return st.isFile() && (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolvePosixExecutable(name) {
+  if (process.platform === "win32") return null;
+  if (!name || typeof name !== "string") return null;
+
+  // Already an absolute or relative path: validate as-is.
+  if (name.includes("/")) {
+    return isExecutableFile(name) ? name : null;
+  }
+  if (!/^[a-zA-Z0-9._+-]+$/.test(name)) return null;
+
+  const seen = new Set();
+  const dirs = [];
+
+  // 1. Honor the process-inherited PATH first so user/system overrides win.
+  for (const dir of (process.env.PATH || "").split(":")) {
+    if (dir && !seen.has(dir)) {
+      seen.add(dir);
+      dirs.push(dir);
+    }
+  }
+
+  // 2. Add directories the GUI launcher's PATH typically misses on macOS/Linux.
+  for (const dir of POSIX_EXTRA_PATH_DIRS) {
+    if (!seen.has(dir)) {
+      seen.add(dir);
+      dirs.push(dir);
+    }
+  }
+
+  // 3. User-scoped install locations (nix-profile, cargo, ~/.local).
+  const home = process.env.HOME;
+  if (home) {
+    for (const sub of [".nix-profile/bin", ".cargo/bin", ".local/bin"]) {
+      const dir = path.join(home, sub);
+      if (!seen.has(dir)) {
+        seen.add(dir);
+        dirs.push(dir);
+      }
+    }
+  }
+
+  for (const dir of dirs) {
+    const candidate = path.join(dir, name);
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Find executable path on Windows
  */
 function isWindowsAppExecutionAlias(filePath) {
@@ -691,13 +775,31 @@ async function startMoshSession(event, options) {
   const cols = options.cols || 80;
   const rows = options.rows || 24;
 
-  let moshCmd = 'mosh';
-  if (process.platform === 'win32') {
-    moshCmd = findExecutable('mosh') || 'mosh.exe';
+  // Resolve the mosh client to an absolute path before spawning. Bare names
+  // rely on the spawn-time PATH search, which on macOS GUI apps is reduced to
+  // `/usr/bin:/bin:/usr/sbin:/sbin` and silently fails for Homebrew installs
+  // (see issue #842). On Windows keep the existing behaviour.
+  let moshCmd;
+  let resolvedMoshDir = null;
+  if (process.platform === "win32") {
+    moshCmd = findExecutable("mosh") || "mosh.exe";
+  } else {
+    const resolved = resolvePosixExecutable("mosh");
+    if (!resolved) {
+      const installHint =
+        process.platform === "darwin"
+          ? "macOS: brew install mosh"
+          : "Linux: sudo apt install mosh / sudo dnf install mosh / sudo pacman -S mosh";
+      throw new Error(
+        `Mosh client not found on PATH. Install it (${installHint}) or place the 'mosh' binary somewhere on PATH such as /opt/homebrew/bin or /usr/local/bin.`,
+      );
+    }
+    moshCmd = resolved;
+    resolvedMoshDir = path.dirname(resolved);
   }
 
   const args = [];
-  
+
   if (options.port && options.port !== 22) {
     args.push('--ssh=ssh -p ' + options.port);
   }
@@ -706,7 +808,7 @@ async function startMoshSession(event, options) {
     args.push('--server=' + options.moshServerPath);
   }
 
-  const userHost = options.username 
+  const userHost = options.username
     ? `${options.username}@${options.hostname}`
     : options.hostname;
   args.push(userHost);
@@ -726,6 +828,24 @@ async function startMoshSession(event, options) {
     TERM: 'xterm-256color',
     LANG: resolveLangFromCharset(options.charset),
   };
+
+  // The mosh wrapper is a Perl script that exec's `mosh-client` (and `ssh`)
+  // by name, so it needs them on PATH. Prepend the resolved mosh's directory
+  // to the env PATH (typical layout: mosh + mosh-client live side by side).
+  // Also point MOSH_CLIENT at the absolute mosh-client when present, so the
+  // wrapper picks it up even if PATH is overridden downstream.
+  if (resolvedMoshDir) {
+    const existingPath = env.PATH || "";
+    if (!existingPath.split(":").includes(resolvedMoshDir)) {
+      env.PATH = existingPath ? `${resolvedMoshDir}:${existingPath}` : resolvedMoshDir;
+    }
+    if (!env.MOSH_CLIENT) {
+      const candidateClient = path.join(resolvedMoshDir, "mosh-client");
+      if (isExecutableFile(candidateClient)) {
+        env.MOSH_CLIENT = candidateClient;
+      }
+    }
+  }
 
   if (options.agentForwarding && process.env.SSH_AUTH_SOCK) {
     env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
