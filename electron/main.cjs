@@ -1078,11 +1078,11 @@ if (!gotLock) {
   app.whenReady().then(() => {
     registerAppProtocol();
 
-    // Grant the Local Font Access API (queryLocalFonts) for the app's own
-    // origin so the terminal font picker can enumerate user-installed
-    // monospace fonts (Nerd Font variants etc.). In-app OAuth pop-ups for
-    // third-party providers also share the default session, so non-app
-    // origins must NOT inherit this grant — deny everything else for them.
+    // Grant only the Chromium permissions the app actually uses, and only
+    // to the app's own origin. The default session is shared with in-app
+    // OAuth pop-ups (accounts.google.com, login.microsoftonline.com, ...),
+    // so non-app origins are denied outright; for the app itself we keep
+    // an explicit allow-list rather than blanket-approving everything.
     try {
       const defaultSession = session?.defaultSession;
       if (defaultSession) {
@@ -1103,6 +1103,16 @@ if (!gotLock) {
           }
         };
 
+        // Permissions the renderer is known to need:
+        //   - local-fonts: terminal font picker enumeration (this PR)
+        //   - clipboard-read / clipboard-sanitized-write: terminal & SFTP
+        //     copy-paste flows (navigator.clipboard.{read,write}Text)
+        const APP_ALLOWED_PERMISSIONS = new Set([
+          "local-fonts",
+          "clipboard-read",
+          "clipboard-sanitized-write",
+        ]);
+
         defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
           const requestingUrl =
             details?.requestingUrl ||
@@ -1111,14 +1121,7 @@ if (!gotLock) {
             callback(false);
             return;
           }
-          if (permission === "local-fonts") {
-            callback(true);
-            return;
-          }
-          // Preserve Electron's prior (no-handler) permissive default for
-          // the app's own renderers — installing a handler replaces that
-          // default, and tightening it here is out of scope for this fix.
-          callback(true);
+          callback(APP_ALLOWED_PERMISSIONS.has(permission));
         });
 
         defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
@@ -1127,7 +1130,7 @@ if (!gotLock) {
             details?.requestingUrl ||
             (typeof wc?.getURL === "function" ? wc.getURL() : "");
           if (!isAppOrigin(url)) return false;
-          return true;
+          return APP_ALLOWED_PERMISSIONS.has(permission);
         });
       }
     } catch (err) {
