@@ -10,7 +10,11 @@
    v3.4.0). License: MIT — see public/fonts/SymbolsNerdFont-LICENSE.txt. */
 @font-face {
   font-family: "Symbols Nerd Font Mono";
-  src: url("./fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
+  /* Absolute path resolves against the document origin in both dev
+     (http://localhost:5173) and packaged (app://netcatty), regardless of
+     where the bundled CSS file ends up. A relative ./fonts/... would be
+     resolved against dist/assets/index-*.css in production and 404. */
+  src: url("/fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
   font-weight: normal;
   font-style: normal;
   font-display: block;
