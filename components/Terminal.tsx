@@ -49,6 +49,7 @@ import { ZmodemProgressIndicator } from "./terminal/ZmodemProgressIndicator";
 import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
 import { createTerminalSessionStarters, type PendingAuth } from "./terminal/runtime/createTerminalSessionStarters";
 import { createXTermRuntime, primaryFontFamily, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
+import { applyUserCursorPreference } from "./terminal/runtime/cursorPreference";
 import { shouldPreserveTerminalFocusOnMouseDown } from "./terminal/toolbarFocus";
 import { preserveTerminalViewportInScrollback } from "./terminal/clearTerminalViewport";
 import { XTERM_PERFORMANCE_CONFIG } from "../infrastructure/config/xtermPerformance";
@@ -1061,8 +1062,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       termRef.current.options.fontFamily = resolvedFontFamily;
 
       if (terminalSettings) {
-        termRef.current.options.cursorStyle = terminalSettings.cursorShape;
-        termRef.current.options.cursorBlink = terminalSettings.cursorBlink;
+        applyUserCursorPreference(termRef.current, terminalSettings);
         termRef.current.options.scrollback = terminalSettings.scrollback === 0 ? 999999 : terminalSettings.scrollback;
         termRef.current.options.fontWeight = effectiveFontWeight as
           | 100

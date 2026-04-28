@@ -46,6 +46,7 @@ interface SftpOverlaysProps {
   handleFileOpenerSelect: (openerType: FileOpenerType, setAsDefault: boolean, systemApp?: SystemAppInfo) => void;
   handleSelectSystemApp: (systemApp: { path: string; name: string }) => void;
   onPromoteToTab?: (snapshot: TextEditorModalSnapshot) => void;
+  onRequestTerminalFocus?: () => void;
 }
 
 export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
@@ -83,6 +84,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
   handleFileOpenerSelect,
   handleSelectSystemApp,
   onPromoteToTab,
+  onRequestTerminalFocus,
 }) => {
   return (
     <>
@@ -141,6 +143,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
           setShowTextEditor(false);
           setTextEditorTarget(null);
           setTextEditorContent("");
+          onRequestTerminalFocus?.();
         }}
         fileName={textEditorTarget?.file.name || ""}
         initialContent={textEditorContent}

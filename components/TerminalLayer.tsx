@@ -43,6 +43,7 @@ import Terminal from './Terminal';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
+import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { AIChatSidePanel } from './AIChatSidePanel';
 import { useAIState } from '../application/state/useAIState';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
@@ -1294,9 +1295,26 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     [sidePanelOpenTabs],
   );
 
+  const getActiveTerminalSessionId = useCallback((): string | null => {
+    if (!activeWorkspace) return activeSession?.id ?? null;
+
+    const workspaceSessionIdSet = new Set(collectSessionIds(activeWorkspace.root));
+    const focusedSessionId = activeWorkspace.focusedSessionId;
+    if (focusedSessionId && workspaceSessionIdSet.has(focusedSessionId) && sessions.some((session) => session.id === focusedSessionId)) {
+      return focusedSessionId;
+    }
+
+    return sessions.find((session) => workspaceSessionIdSet.has(session.id))?.id ?? null;
+  }, [activeWorkspace, activeSession?.id, sessions]);
+
+  const syncWorkspaceFocusIfNeeded = useCallback((sessionId: string | null) => {
+    if (!activeWorkspace || !sessionId || activeWorkspace.focusedSessionId === sessionId) return;
+    onSetWorkspaceFocusedSession?.(activeWorkspace.id, sessionId);
+  }, [activeWorkspace, onSetWorkspaceFocusedSession]);
+
   // Get the focused terminal's current working directory
   const getTerminalCwd = useCallback(async (): Promise<string | null> => {
-    const sessionId = activeWorkspace?.focusedSessionId ?? activeSession?.id;
+    const sessionId = getActiveTerminalSessionId();
     if (!sessionId) return null;
     try {
       const result = await terminalBackend.getSessionPwd(sessionId);
@@ -1304,27 +1322,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     } catch {
       return null;
     }
-  }, [activeWorkspace?.focusedSessionId, activeSession?.id, terminalBackend]);
+  }, [getActiveTerminalSessionId, terminalBackend]);
 
   const refocusTerminalSession = useCallback((sessionId?: string | null) => {
-    if (!sessionId) return;
-
-    const focusTarget = () => {
-      const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
-      const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
-      textarea?.focus();
-    };
-
-    requestAnimationFrame(() => {
-      focusTarget();
-      setTimeout(focusTarget, 50);
-    });
+    focusTerminalSessionInput(sessionId);
   }, []);
+
+  const refocusActiveTerminalSession = useCallback(() => {
+    const sessionId = getActiveTerminalSessionId();
+    syncWorkspaceFocusIfNeeded(sessionId);
+    refocusTerminalSession(sessionId);
+  }, [getActiveTerminalSessionId, refocusTerminalSession, syncWorkspaceFocusIfNeeded]);
 
   // Close the entire side panel for the current tab
   const handleCloseSidePanel = useCallback(() => {
     if (!activeTabId) return;
-    const sessionIdToRefocus = activeWorkspace?.focusedSessionId ?? activeSession?.id;
+    const sessionIdToRefocus = getActiveTerminalSessionId();
+    syncWorkspaceFocusIfNeeded(sessionIdToRefocus);
     setSidePanelOpenTabs(prev => {
       const next = new Map(prev);
       next.delete(activeTabId);
@@ -1348,7 +1362,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     refocusTerminalSession(sessionIdToRefocus);
-  }, [activeTabId, activeWorkspace?.focusedSessionId, activeSession?.id, refocusTerminalSession]);
+  }, [activeTabId, getActiveTerminalSessionId, refocusTerminalSession, syncWorkspaceFocusIfNeeded]);
 
   useEffect(() => {
     if (!closeSidePanelRef) return;
@@ -2285,6 +2299,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                           editorWordWrap={editorWordWrap}
                           setEditorWordWrap={setEditorWordWrap}
                           onGetTerminalCwd={getTerminalCwd}
+                          onRequestTerminalFocus={refocusActiveTerminalSession}
                         />
                     );
                   })}

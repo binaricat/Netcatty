@@ -67,6 +67,7 @@ interface SftpSidePanelProps {
   editorWordWrap: boolean;
   setEditorWordWrap: (value: boolean) => void;
   onGetTerminalCwd?: () => Promise<string | null>;
+  onRequestTerminalFocus?: () => void;
 }
 
 const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
@@ -91,6 +92,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   editorWordWrap,
   setEditorWordWrap,
   onGetTerminalCwd,
+  onRequestTerminalFocus,
 }) => {
   const { t } = useI18n();
 
@@ -723,6 +725,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
           handleFileOpenerSelect={handleFileOpenerSelect}
           handleSelectSystemApp={handleSelectSystemApp}
           onPromoteToTab={onPromoteToTab}
+          onRequestTerminalFocus={onRequestTerminalFocus}
           t={t}
         />
       )}
@@ -751,6 +754,7 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.editorWordWrap === next.editorWordWrap &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
   prev.onGetTerminalCwd === next.onGetTerminalCwd &&
+  prev.onRequestTerminalFocus === next.onRequestTerminalFocus &&
   prev.initialLocation?.hostId === next.initialLocation?.hostId &&
   prev.initialLocation?.path === next.initialLocation?.path;
 
