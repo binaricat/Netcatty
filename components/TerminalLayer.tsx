@@ -794,6 +794,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     });
   }, []);
 
+  const handleSftpInitialLocationApplied = useCallback((tabId: string, location: { hostId: string; path: string }) => {
+    setSftpInitialLocationForTab(prev => {
+      const current = prev.get(tabId);
+      if (!current || current.hostId !== location.hostId || current.path !== location.path) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
+  }, []);
+
   // Focus-mode workspace sidebar resize handler. The sidebar is always
   // anchored to the left of the workspace area, so a rightward drag grows it.
   const handleFocusSidebarResizeStart = useCallback((e: React.MouseEvent) => {
@@ -2285,6 +2297,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                               ? (sftpInitialLocationForTab.get(tabId) ?? null)
                               : null
                           }
+                          onInitialLocationApplied={(location) => handleSftpInitialLocationApplied(tabId, location)}
                           showWorkspaceHostHeader={isVisibleSftpPanel && !!activeWorkspace}
                           isVisible={isVisibleSftpPanel}
                           renderOverlays={isVisibleSftpPanel}

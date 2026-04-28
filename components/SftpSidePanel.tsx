@@ -47,6 +47,7 @@ interface SftpSidePanelProps {
   /** The host to connect to (follows focused terminal) */
   activeHost: Host | null;
   initialLocation?: { hostId: string; path: string } | null;
+  onInitialLocationApplied?: (location: { hostId: string; path: string }) => void;
   showWorkspaceHostHeader?: boolean;
   isVisible?: boolean;
   renderOverlays?: boolean;
@@ -78,6 +79,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   sftpDefaultViewMode,
   activeHost,
   initialLocation,
+  onInitialLocationApplied,
   showWorkspaceHostHeader = false,
   isVisible = true,
   renderOverlays = true,
@@ -467,16 +469,18 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     const locationKey = `${connectedKeyRef.current}:${initialLocation.path}`;
     if (lastAppliedInitialLocationKeyRef.current === locationKey) return;
 
+    lastAppliedInitialLocationKeyRef.current = locationKey;
+    onInitialLocationApplied?.(initialLocation);
+
     if (connection.currentPath === initialLocation.path) {
-      lastAppliedInitialLocationKeyRef.current = locationKey;
       return;
     }
 
-    lastAppliedInitialLocationKeyRef.current = locationKey;
     sftpRef.current.navigateTo("left", initialLocation.path);
   }, [
     activeHost,
     initialLocation,
+    onInitialLocationApplied,
     sftp.leftPane,
   ]);
 
