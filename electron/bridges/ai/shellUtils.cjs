@@ -32,6 +32,10 @@ function extractTrailingIdlePrompt(output) {
   const rightTrimmed = lastLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
 
+  // Default PowerShell prompt (e.g. `PS C:\Users\alice>`). Custom prompt
+  // functions intentionally fall through. Keep this regex in sync with
+  // isPowerShellPrompt() in ptyExec.cjs — the wrapper selection there
+  // re-checks the same shape against the captured prompt.
   if (/^PS(?:\s+.*)?>$/.test(rightTrimmed)) {
     return lastLine;
   }

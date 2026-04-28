@@ -86,6 +86,10 @@ function escapeCmdForNestedShell(text) {
   return String(text || "").replace(/"/g, '""').replace(/%/g, "%%");
 }
 
+// Matches PowerShell's default prompt only (e.g. `PS C:\Users\alice>`,
+// `PS>`). Custom prompt functions (oh-my-posh, starship, PSReadLine themes
+// that emit `❯`/`λ`/etc.) intentionally fall through — we'd rather miss
+// the override than wrap a fish/zsh prompt as PowerShell.
 function isPowerShellPrompt(prompt) {
   const lastLine = stripAnsi(String(prompt || ""))
     .replace(/\r/g, "")
