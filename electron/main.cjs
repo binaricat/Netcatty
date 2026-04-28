@@ -1079,21 +1079,54 @@ if (!gotLock) {
     registerAppProtocol();
 
     // Grant the Local Font Access API (queryLocalFonts) for the app's own
-    // session so the terminal font picker can enumerate user-installed
-    // monospace fonts (Nerd Font variants etc.). The fallback browser uses
-    // an isolated partition and is not affected.
+    // origin so the terminal font picker can enumerate user-installed
+    // monospace fonts (Nerd Font variants etc.). In-app OAuth pop-ups for
+    // third-party providers also share the default session, so non-app
+    // origins must NOT inherit this grant — deny everything else for them.
     try {
       const defaultSession = session?.defaultSession;
       if (defaultSession) {
-        defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+        const allowedOrigins = new Set(["app://netcatty"]);
+        if (effectiveDevServerUrl) {
+          try {
+            allowedOrigins.add(new URL(effectiveDevServerUrl).origin);
+          } catch {
+            // ignore malformed dev server URL
+          }
+        }
+        const isAppOrigin = (rawUrl) => {
+          if (!rawUrl) return false;
+          try {
+            return allowedOrigins.has(new URL(String(rawUrl)).origin);
+          } catch {
+            return false;
+          }
+        };
+
+        defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+          const requestingUrl =
+            details?.requestingUrl ||
+            (typeof wc?.getURL === "function" ? wc.getURL() : "");
+          if (!isAppOrigin(requestingUrl)) {
+            callback(false);
+            return;
+          }
           if (permission === "local-fonts") {
             callback(true);
             return;
           }
+          // Preserve Electron's prior (no-handler) permissive default for
+          // the app's own renderers — installing a handler replaces that
+          // default, and tightening it here is out of scope for this fix.
           callback(true);
         });
-        defaultSession.setPermissionCheckHandler((_wc, permission) => {
-          if (permission === "local-fonts") return true;
+
+        defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+          const url =
+            requestingOrigin ||
+            details?.requestingUrl ||
+            (typeof wc?.getURL === "function" ? wc.getURL() : "");
+          if (!isAppOrigin(url)) return false;
           return true;
         });
       }
