@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* Bundled icon-only fallback so terminals show Nerd Font glyphs (powerline,
+   devicons, etc.) regardless of which base font the user picks. The font is
+   referenced last in the fontFamily fallback chain (see withCjkFallback in
+   infrastructure/config/fonts.ts) — base text comes from the user's chosen
+   font, missing PUA glyphs fall through to this face.
+
+   Source: https://github.com/ryanoasis/nerd-fonts (NerdFontsSymbolsOnly,
+   v3.4.0). License: MIT — see public/fonts/SymbolsNerdFont-LICENSE.txt. */
+@font-face {
+  font-family: "Symbols Nerd Font Mono";
+  src: url("./fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
 /* ============================================
    Tailwind CSS v4 Theme Configuration
    ============================================ */
