@@ -12,7 +12,7 @@
 const crypto = require("crypto");
 const { StringDecoder } = require("node:string_decoder");
 const iconv = require("iconv-lite");
-const { stripAnsi } = require("./shellUtils.cjs");
+const { stripAnsi, isDefaultPowerShellPromptLine } = require("./shellUtils.cjs");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
 
 // Build a stateful decoder for a full exec call. Serial data events can
@@ -89,21 +89,41 @@ function escapeCmdForNestedShell(text) {
 // Matches PowerShell's default prompt only (e.g. `PS C:\Users\alice>`,
 // `PS>`). Custom prompt functions (oh-my-posh, starship, PSReadLine themes
 // that emit `❯`/`λ`/etc.) intentionally fall through — we'd rather miss
-// the override than wrap a fish/zsh prompt as PowerShell.
+// the override than wrap a fish/zsh prompt as PowerShell. Pattern lives
+// in shellUtils.cjs so prompt extraction and wrapper selection share one
+// source of truth.
 function isPowerShellPrompt(prompt) {
+  // Treat `\r` as a line break too so a PSReadLine/ConPTY redraw like
+  // `PS C:\old>\rPS C:\new>` is matched against the redrawn last line,
+  // not the doubled string.
   const lastLine = stripAnsi(String(prompt || ""))
-    .replace(/\r/g, "")
+    .replace(/\r/g, "\n")
     .split("\n")
     .pop()
-    ?.replace(/\s+$/, "") || "";
-  return /^PS(?:\s+.*)?>$/.test(lastLine);
+    .replace(/\s+$/, "");
+  return isDefaultPowerShellPromptLine(lastLine);
 }
 
+// Prompt-driven override is intentionally narrow: only flip when the
+// session has no confirmed POSIX shell. This keeps the issue #841 fix
+// (SSH sessions, where shellKind is undefined) working while preventing
+// a malicious remote process from spoofing a `PS ...>` line on a real
+// POSIX shell to coerce a single mis-wrapped command.
+const SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE = new Set([
+  "",
+  "unknown",
+  "powershell",
+]);
+
 function resolveEffectiveShellKind(shellKind, expectedPrompt) {
-  if (isPowerShellPrompt(expectedPrompt)) {
+  const baseKind = shellKind || "";
+  if (
+    SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE.has(baseKind) &&
+    isPowerShellPrompt(expectedPrompt)
+  ) {
     return "powershell";
   }
-  return shellKind || "posix";
+  return baseKind || "posix";
 }
 
 function buildWrappedCommand(command, shellKind, marker) {

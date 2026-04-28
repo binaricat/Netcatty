@@ -24,19 +24,30 @@ function stripAnsi(input) {
   return String(input || "").replace(ANSI_OSC_REGEX, "").replace(ANSI_ESCAPE_REGEX, "");
 }
 
+// Default PowerShell prompt (e.g. `PS C:\Users\alice>`, `PS>`,
+// `PS /home/alice>`). Anchored so command output that merely starts with
+// `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
+// `"PS >"` (which the default prompt never emits) so a script that prints
+// such a line can't trick prompt-driven shell-kind selection.
+const POWERSHELL_PROMPT_PATTERN = /^PS(?:\s+\S.*)?>$/;
+
+function isDefaultPowerShellPromptLine(line) {
+  return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
+}
+
 function extractTrailingIdlePrompt(output) {
-  const normalized = stripAnsi(output).replace(/\r/g, "");
+  // Treat `\r` as a line break, not as a stripped character: PSReadLine /
+  // ConPTY repaints emit bare `\r` to redraw the current line, and we
+  // want only the redrawn line to be considered, not the concatenation
+  // of every overwritten frame.
+  const normalized = stripAnsi(output).replace(/\r/g, "\n");
   if (!normalized || normalized.endsWith("\n")) return "";
 
   const lastLine = normalized.split("\n").pop() || "";
   const rightTrimmed = lastLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
 
-  // Default PowerShell prompt (e.g. `PS C:\Users\alice>`). Custom prompt
-  // functions intentionally fall through. Keep this regex in sync with
-  // isPowerShellPrompt() in ptyExec.cjs — the wrapper selection there
-  // re-checks the same shape against the captured prompt.
-  if (/^PS(?:\s+.*)?>$/.test(rightTrimmed)) {
+  if (isDefaultPowerShellPromptLine(rightTrimmed)) {
     return lastLine;
   }
 
@@ -327,6 +338,7 @@ function serializeStreamChunk(chunk) {
 module.exports = {
   stripAnsi,
   extractTrailingIdlePrompt,
+  isDefaultPowerShellPromptLine,
   trackSessionIdlePrompt,
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,
