@@ -196,7 +196,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
           return (
             <Message key={message.id} from={message.role}>
-              <MessageContent>
+              <MessageContent from={message.role}>
                 {/* Thinking block */}
                 {!isUser && message.thinking && (
                   <ThinkingBlock
