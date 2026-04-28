@@ -880,8 +880,18 @@ function App({ settings }: { settings: SettingsState }) {
     const bridge = netcattyBridge.get();
     if (!bridge?.onCheckDirtyEditors) return;
     const unsub = bridge.onCheckDirtyEditors(() => {
-      const hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
-      if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
+      // Always report SOMETHING so the main process doesn't time out for
+      // 5 s on an unhandled exception. If we can't determine the state,
+      // fail open — losing unsaved work is bad, but stranding the user
+      // on a slow quit and then quitting anyway after the timeout is
+      // exactly the same outcome.
+      let hasDirty = false;
+      try {
+        hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
+        if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
+      } catch (err) {
+        console.error('[App] dirty-editors check failed:', err);
+      }
       bridge.reportDirtyEditorsResult?.(hasDirty);
     });
     return unsub;

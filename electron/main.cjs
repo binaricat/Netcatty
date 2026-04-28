@@ -1318,28 +1318,68 @@ if (!gotLock) {
       return;
     }
 
+    // The renderer needs to be alive for the IPC roundtrip to make sense.
+    // A crashed renderer would silently drop the message and we'd wait
+    // 5 s for nothing — skip straight to quit (we can't ask the user
+    // anyway, the UI is gone).
+    const wc = win.webContents;
+    if (!wc || wc.isDestroyed?.() || wc.isCrashed?.()) {
+      commitQuit();
+      return;
+    }
+
     quitGuardChannelBusy = true;
     event.preventDefault();
-    win.webContents.send("app:query-dirty-editors");
+
+    // The response and the timeout race against each other; whichever
+    // one fires first wins. A naive `clearTimeout` is not enough — once
+    // the timer has already been queued for the next tick, clearTimeout
+    // is a no-op and the timeout callback runs even after the response
+    // arrived, which would commit the quit even on a `hasDirty=true`
+    // reply (i.e. silently override the user's "save first" intent).
+    let settled = false;
+    let timeoutId = null;
+    const settle = (decision) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      _ipcMain.removeListener("app:dirty-editors-result", onResult);
+      quitGuardChannelBusy = false;
+      if (decision === "commit") commitQuit();
+      // decision === "stay": renderer showed a toast for dirty editors.
+      // Do not touch isQuitting so tray / close-to-tray gating keeps working.
+    };
+    function onResult(evt, payload) {
+      // Defence in depth: this channel is queried with a specific
+      // webContents in mind. A reply from any other window (e.g. a
+      // misbehaving extension or a future bug that wires the channel
+      // elsewhere) is silently ignored so it can't decide the quit.
+      // We use `.on` (not `.once`) so a rogue reply doesn't consume
+      // the listener slot and let the real reply fall through.
+      if (evt?.sender && evt.sender !== wc) return;
+      const hasDirty = payload && payload.hasDirty === true;
+      settle(hasDirty ? "stay" : "commit");
+    }
+    _ipcMain.on("app:dirty-editors-result", onResult);
 
     // Timeout fallback: if the renderer never replies (crash, unhandled
     // exception in the listener, etc.) we'd otherwise be stuck with
     // quitGuardChannelBusy=true and the app un-quittable.
-    const timeoutId = setTimeout(() => {
-      _ipcMain.removeAllListeners("app:dirty-editors-result");
-      quitGuardChannelBusy = false;
-      commitQuit();
-    }, QUIT_GUARD_TIMEOUT_MS);
+    timeoutId = setTimeout(() => settle("commit"), QUIT_GUARD_TIMEOUT_MS);
 
-    _ipcMain.once("app:dirty-editors-result", (_evt, { hasDirty }) => {
-      clearTimeout(timeoutId);
-      quitGuardChannelBusy = false;
-      if (!hasDirty) {
-        commitQuit();
-      }
-      // If hasDirty === true the renderer has shown a toast; stay put. Do not
-      // touch isQuitting so tray/close-to-tray gating keeps working.
-    });
+    try {
+      wc.send("app:query-dirty-editors");
+    } catch (err) {
+      // `webContents.send` can throw if the renderer was destroyed
+      // between our `isCrashed?.()` check and this call (a real race
+      // when the GPU process is dying). Tear the listener/timer down
+      // synchronously so we don't strand quitGuardChannelBusy=true.
+      console.warn("[Main] Failed to query renderer for dirty editors:", err);
+      settle("commit");
+    }
   });
 
   // Cleanup all PTY sessions and port forwarding tunnels before quitting
