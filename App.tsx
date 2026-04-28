@@ -20,6 +20,7 @@ import { resolveHostAuth } from './domain/sshAuth';
 import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
 import { collectSessionIds } from './domain/workspace';
 import { resolveCloseIntent } from './application/state/resolveCloseIntent';
+import { resolveSnippetsShortcutIntent } from './application/state/resolveSnippetsShortcutIntent';
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
 import type { SyncPayload } from './domain/sync';
@@ -1042,6 +1043,7 @@ function App({ settings }: { settings: SettingsState }) {
   addConnectionLogRef.current = addConnectionLog;
 
   const closeSidePanelRef = useRef<(() => void) | null>(null);
+  const toggleScriptsSidePanelRef = useRef<(() => void) | null>(null);
   const activeSidePanelTabRef = useRef<string | null>(null);
   const closeTabInFlightRef = useRef(false);
   // Populated by UnsavedChangesProvider render-prop below so that the hotkey
@@ -1303,9 +1305,23 @@ function App({ settings }: { settings: SettingsState }) {
         setNavigateToSection('port');
         break;
       case 'snippets':
-        // Navigate to vault and open snippets section
-        setActiveTabId('vault');
-        setNavigateToSection('snippets');
+        {
+          const currentId = activeTabStore.getActiveTabId();
+          const intent = resolveSnippetsShortcutIntent({
+            activeTabId: currentId,
+            sessionForTab: sessions.find((s) => s.id === currentId) ?? null,
+            workspaceForTab: workspaces.find((w) => w.id === currentId) ?? null,
+            terminalScriptsToggleAvailable: !!toggleScriptsSidePanelRef.current,
+          });
+
+          if (intent.kind === 'toggleTerminalScripts') {
+            toggleScriptsSidePanelRef.current();
+            break;
+          }
+
+          setActiveTabId('vault');
+          setNavigateToSection('snippets');
+        }
         break;
       case 'broadcast': {
         // Toggle broadcast mode for the active workspace
@@ -1943,6 +1959,7 @@ function App({ settings }: { settings: SettingsState }) {
           sessionLogsDir={sessionLogsDir}
           sessionLogsFormat={sessionLogsFormat}
           closeSidePanelRef={closeSidePanelRef}
+          toggleScriptsSidePanelRef={toggleScriptsSidePanelRef}
           activeSidePanelTabRef={activeSidePanelTabRef}
         />
 

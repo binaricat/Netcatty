@@ -54,6 +54,7 @@ import { Input } from './ui/input';
 import { RippleButton } from './ui/ripple';
 import { ScrollArea } from './ui/scroll-area';
 import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
+import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
 
@@ -437,6 +438,7 @@ interface TerminalLayerProps {
   sessionLogsDir?: string;
   sessionLogsFormat?: string;
   closeSidePanelRef?: React.MutableRefObject<(() => void) | null>;
+  toggleScriptsSidePanelRef?: React.MutableRefObject<(() => void) | null>;
   activeSidePanelTabRef?: React.MutableRefObject<string | null>;
 }
 
@@ -493,6 +495,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sessionLogsDir,
   sessionLogsFormat,
   closeSidePanelRef,
+  toggleScriptsSidePanelRef,
   activeSidePanelTabRef,
 }) => {
   // Subscribe to activeTabId from external store
@@ -1416,6 +1419,34 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleOpenScripts = useCallback(() => {
     handleSwitchSidePanelTab('scripts');
   }, [handleSwitchSidePanelTab]);
+
+  const handleToggleScriptsSidePanel = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+
+    const intent = resolveScriptsSidePanelShortcutIntent(
+      sidePanelOpenTabsRef.current.get(tabId) ?? null,
+    );
+
+    if (intent.kind === 'closeTerminalSidePanel') {
+      handleCloseSidePanel();
+      return;
+    }
+
+    setSidePanelOpenTabs(prev => {
+      const next = new Map(prev);
+      next.set(tabId, 'scripts');
+      return next;
+    });
+  }, [handleCloseSidePanel]);
+
+  useEffect(() => {
+    if (!toggleScriptsSidePanelRef) return;
+    toggleScriptsSidePanelRef.current = handleToggleScriptsSidePanel;
+    return () => {
+      toggleScriptsSidePanelRef.current = null;
+    };
+  }, [toggleScriptsSidePanelRef, handleToggleScriptsSidePanel]);
 
   // Open theme side panel (called from Terminal toolbar)
   const handleOpenTheme = useCallback(() => {
@@ -2614,6 +2645,7 @@ const terminalLayerAreEqual = (prev: TerminalLayerProps, next: TerminalLayerProp
     prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
     prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
     prev.onSplitSession === next.onSplitSession &&
+    prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
     prev.identities === next.identities
   );
 };

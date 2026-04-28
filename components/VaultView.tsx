@@ -3199,7 +3199,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 };
 
 // Only re-render when data props change - isActive is now managed internally via store subscription
-const vaultViewAreEqual = (
+export const vaultViewAreEqual = (
   prev: VaultViewProps,
   next: VaultViewProps,
 ): boolean => {
@@ -3217,7 +3217,8 @@ const vaultViewAreEqual = (
     prev.managedSources === next.managedSources &&
     prev.groupConfigs === next.groupConfigs &&
     prev.terminalThemeId === next.terminalThemeId &&
-    prev.terminalFontSize === next.terminalFontSize;
+    prev.terminalFontSize === next.terminalFontSize &&
+    prev.navigateToSection === next.navigateToSection;
 
   return isEqual;
 };
