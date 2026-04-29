@@ -17,7 +17,11 @@ const sshHost: Host = {
   protocol: "ssh",
 };
 
-const renderToolbar = (host: Host, status: "connecting" | "connected" | "disconnected" = "connected") =>
+const renderToolbar = (
+  host: Host,
+  status: "connecting" | "connected" | "disconnected" = "connected",
+  props: Partial<React.ComponentProps<typeof TerminalToolbar>> = {},
+) =>
   renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -28,6 +32,7 @@ const renderToolbar = (host: Host, status: "connecting" | "connected" | "disconn
         onOpenSFTP: () => {},
         onOpenScripts: () => {},
         onOpenTheme: () => {},
+        ...props,
       }),
     ),
   );
@@ -51,4 +56,16 @@ test("hides SFTP for local terminal sessions", () => {
   });
 
   assert.equal(markup.includes('aria-label="Open SFTP"'), false);
+});
+
+test("uses the terminal active button color for pressed toolbar actions", () => {
+  const markup = renderToolbar(sshHost, "connected", {
+    isSearchOpen: true,
+    onToggleSearch: () => {},
+  });
+
+  assert.match(
+    markup,
+    /aria-label="Search terminal"[^>]*style="background-color:var\(--terminal-toolbar-btn-active\)"/,
+  );
 });

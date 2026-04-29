@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
-import { SyncConfig, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
+import { SyncConfig, TerminalTheme, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
 import {
   STORAGE_KEY_COLOR,
   STORAGE_KEY_SYNC,
@@ -49,7 +49,7 @@ import {
   shouldApplyIncomingCustomKeyBindingsRecord,
   updateCustomKeyBinding as updateCustomKeyBindingRecord,
 } from '../../domain/customKeyBindings';
-import { getTerminalThemeForUiTheme } from '../../domain/terminalAppearance';
+import { applyCustomAccentToTerminalTheme, getTerminalThemeForUiTheme } from '../../domain/terminalAppearance';
 import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
 import { DEFAULT_FONT_SIZE } from '../../infrastructure/config/fonts';
 import { DARK_UI_THEMES, LIGHT_UI_THEMES, UiThemeTokens, getUiThemeById } from '../../infrastructure/config/uiThemes';
@@ -1265,6 +1265,7 @@ export const useSettingsState = () => {
   const customThemes = useCustomThemes();
 
   const currentTerminalTheme = useMemo(() => {
+    let baseTheme: TerminalTheme;
     // When "Follow Application Theme" is enabled, pick the terminal theme
     // whose background matches the active UI theme preset.
     if (followAppTerminalTheme) {
@@ -1272,13 +1273,17 @@ export const useSettingsState = () => {
       const mapped = getTerminalThemeForUiTheme(activeUiThemeId);
       if (mapped) {
         const found = TERMINAL_THEMES.find(t => t.id === mapped);
-        if (found) return found;
+        if (found) {
+          baseTheme = found;
+          return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
+        }
       }
     }
-    return TERMINAL_THEMES.find(t => t.id === terminalThemeId)
+    baseTheme = TERMINAL_THEMES.find(t => t.id === terminalThemeId)
       || customThemes.find(t => t.id === terminalThemeId)
       || TERMINAL_THEMES[0];
-  }, [terminalThemeId, customThemes, followAppTerminalTheme, resolvedTheme, lightUiThemeId, darkUiThemeId]);
+    return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
+  }, [terminalThemeId, customThemes, followAppTerminalTheme, resolvedTheme, lightUiThemeId, darkUiThemeId, accentMode, customAccent]);
 
   const updateTerminalSetting = useCallback(<K extends keyof TerminalSettings>(
     key: K,
