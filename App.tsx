@@ -24,7 +24,7 @@ import { resolveSnippetsShortcutIntent } from './application/state/resolveSnippe
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
 import type { SyncPayload } from './domain/sync';
-import { applySyncPayload, buildSyncPayload, hasMeaningfulSyncData } from './application/syncPayload';
+import { applySyncPayload, buildLocalVaultPayload, hasMeaningfulSyncData } from './application/syncPayload';
 import {
   applyProtectedSyncPayload,
   ensureVersionChangeBackup,
@@ -441,7 +441,7 @@ function App({ settings }: { settings: SettingsState }) {
       }
     }
 
-    return buildSyncPayload(
+    return buildLocalVaultPayload(
       {
         hosts,
         keys,
@@ -557,7 +557,6 @@ function App({ settings }: { settings: SettingsState }) {
     customGroups,
     snippetPackages,
     portForwardingRules: portForwardingRulesForSync,
-    knownHosts,
     groupConfigs,
     settingsVersion: settings.settingsVersion,
     startupReady: startupSyncSafetyReady,

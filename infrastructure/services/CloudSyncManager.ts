@@ -1425,7 +1425,6 @@ export class CloudSyncManager {
     customGroups: SyncPayload['customGroups'];
     snippetPackages?: SyncPayload['snippetPackages'];
     portForwardingRules?: SyncPayload['portForwardingRules'];
-    knownHosts?: SyncPayload['knownHosts'];
     settings?: SyncPayload['settings'];
   }): SyncPayload {
     return {

@@ -1,7 +1,12 @@
 import React, { useCallback } from "react";
 import type { PortForwardingRule } from "../../../domain/models";
 import type { SyncPayload } from "../../../domain/sync";
-import { buildSyncPayload, applySyncPayload } from "../../../application/syncPayload";
+import {
+  applyLocalVaultPayload,
+  buildLocalVaultPayload,
+  buildSyncPayload,
+  applySyncPayload,
+} from "../../../application/syncPayload";
 import { applyProtectedSyncPayload } from "../../../application/localVaultBackups";
 import type { SyncableVaultData } from "../../../application/syncPayload";
 import { useI18n } from "../../../application/i18n/I18nProvider";
@@ -29,7 +34,7 @@ export default function SettingsSyncTab(props: {
   } = props;
   const { t } = useI18n();
 
-  const onBuildPayload = useCallback((): SyncPayload => {
+  const getEffectivePortForwardingRules = useCallback((): PortForwardingRule[] => {
     // If hook state is empty but localStorage has data, the async store
     // initialization hasn't finished yet.  Read from localStorage directly
     // to avoid uploading empty arrays and overwriting the remote snapshot.
@@ -51,15 +56,26 @@ export default function SettingsSyncTab(props: {
       }
     }
 
+    return effectiveRules;
+  }, [portForwardingRules]);
+
+  const onBuildPayload = useCallback((): SyncPayload => {
+    return buildSyncPayload(vault, getEffectivePortForwardingRules());
+  }, [vault, getEffectivePortForwardingRules]);
+
+  const onBuildLocalPayload = useCallback((): SyncPayload => {
     const effectiveKnownHosts = getEffectiveKnownHosts(vault.knownHosts);
 
-    return buildSyncPayload({ ...vault, knownHosts: effectiveKnownHosts }, effectiveRules);
-  }, [vault, portForwardingRules]);
+    return buildLocalVaultPayload(
+      { ...vault, knownHosts: effectiveKnownHosts ?? [] },
+      getEffectivePortForwardingRules(),
+    );
+  }, [vault, getEffectivePortForwardingRules]);
 
   const onApplyPayload = useCallback(
     (payload: SyncPayload) =>
       applyProtectedSyncPayload({
-        buildPreApplyPayload: onBuildPayload,
+        buildPreApplyPayload: onBuildLocalPayload,
         applyPayload: () =>
           applySyncPayload(payload, {
             importVaultData: importDataFromString,
@@ -69,7 +85,23 @@ export default function SettingsSyncTab(props: {
         translateProtectiveBackupFailure: (message) =>
           t("cloudSync.localBackups.protectiveBackupFailed", { message }),
       }),
-    [importDataFromString, importPortForwardingRules, onBuildPayload, onSettingsApplied, t],
+    [importDataFromString, importPortForwardingRules, onBuildLocalPayload, onSettingsApplied, t],
+  );
+
+  const onApplyLocalPayload = useCallback(
+    (payload: SyncPayload) =>
+      applyProtectedSyncPayload({
+        buildPreApplyPayload: onBuildLocalPayload,
+        applyPayload: () =>
+          applyLocalVaultPayload(payload, {
+            importVaultData: importDataFromString,
+            importPortForwardingRules,
+            onSettingsApplied,
+          }),
+        translateProtectiveBackupFailure: (message) =>
+          t("cloudSync.localBackups.protectiveBackupFailed", { message }),
+      }),
+    [importDataFromString, importPortForwardingRules, onBuildLocalPayload, onSettingsApplied, t],
   );
 
   const clearAllLocalData = useCallback(() => {
@@ -82,6 +114,7 @@ export default function SettingsSyncTab(props: {
       <CloudSyncSettings
         onBuildPayload={onBuildPayload}
         onApplyPayload={onApplyPayload}
+        onApplyLocalPayload={onApplyLocalPayload}
         onClearLocalData={clearAllLocalData}
       />
     </SettingsTabContent>

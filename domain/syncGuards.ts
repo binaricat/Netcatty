@@ -12,7 +12,6 @@ export type ShrinkFinding =
         | 'snippets'
         | 'customGroups'
         | 'snippetPackages'
-        | 'knownHosts'
         | 'portForwardingRules'
         | 'groupConfigs';
       baseCount: number;
@@ -32,7 +31,6 @@ const CHECKED_ENTITIES = [
   'snippets',
   'customGroups',
   'snippetPackages',
-  'knownHosts',
   'portForwardingRules',
   'groupConfigs',
 ] as const;
