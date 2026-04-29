@@ -158,10 +158,13 @@ jobs:
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          # See matrix job's Set version step for the strict-semver
+          # rationale; identical logic, duplicated because the Linux
+          # legs are standalone jobs.
+          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -229,10 +232,13 @@ jobs:
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          # See matrix job's Set version step for the strict-semver
+          # rationale; identical logic, duplicated because the Linux
+          # legs are standalone jobs.
+          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
