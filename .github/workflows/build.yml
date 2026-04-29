@@ -1,5 +1,19 @@
 name: build-packages
 
+# Trigger philosophy
+#  - Any push to any branch + any PR → run the build matrix so CI is
+#    always testable. Artifacts upload as workflow artifacts only;
+#    *no* GitHub Release is published.
+#  - Tag push matching `v<MAJOR>.<MINOR>.<PATCH>` (with optional
+#    pre-release suffix like `v1.2.3-rc.1`) → run the matrix and
+#    publish a GitHub Release. Loose tags like `v-test`, `vNEXT`, or
+#    `v1.0` no longer auto-publish.
+#  - Manual `workflow_dispatch` → opt-in publish via the
+#    `publish_release` input.
+#
+# The release job's `if:` enforces the exact same rule, so adding
+# branches/PRs above is safe — accidental tag-like branch names won't
+# leak a release.
 on:
   workflow_dispatch:
     inputs:
@@ -8,8 +22,19 @@ on:
         type: boolean
         default: false
   push:
+    branches:
+      - "**"
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  pull_request:
+
+# A new push to the same branch / PR cancels any in-progress build —
+# saves ~30 min per superseded commit when iterating. Tag pushes use
+# a unique group so releases never get cancelled by a follow-up push.
+concurrency:
+  group: build-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
@@ -61,12 +86,15 @@ jobs:
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Tag release: use version from tag
+          # Strict semver matches v<MAJOR>.<MINOR>.<PATCH>[-pre]; loose
+          # tags / branches / PRs fall through to a semver-pre-release
+          # form (`0.0.0-sha.<short-sha>`) so npm pkg / electron-builder
+          # accept it. Non-semver versions (e.g. bare "abc1234") cause
+          # downstream tooling to error or pick weird codepaths.
+          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            # workflow_dispatch: use short commit ID
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -242,7 +270,12 @@ jobs:
     name: release
     runs-on: ubuntu-latest
     needs: [build, build-linux-x64, build-linux-arm64]
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    # Only release on a strict v<MAJOR>.<MINOR>.<PATCH>[-pre] tag, or
+    # on an explicit opt-in via workflow_dispatch. PRs and branch
+    # pushes (even if accidentally named like `vfoo`) skip this job.
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.'))
+      || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     permissions:
       contents: write
       actions: read
