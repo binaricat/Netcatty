@@ -59,6 +59,18 @@ const TruncatedTextWithTooltip: React.FC<{
     </TooltipProvider>
 );
 
+const IconButtonWithTooltip: React.FC<{
+    label: string;
+    children: React.ReactElement;
+}> = ({ label, children }) => (
+    <Tooltip>
+        <TooltipTrigger asChild>
+            {children}
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+);
+
 const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     task,
     isChild = false,
@@ -188,19 +200,25 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const actionButtons = (
         <div className="flex items-center gap-1 shrink-0">
             {task.status === 'failed' && task.retryable !== false && (
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRetry} title="Retry">
-                    <RefreshCw size={12} />
-                </Button>
+                <IconButtonWithTooltip label={t('sftp.transfers.retryAction')}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRetry}>
+                        <RefreshCw size={12} />
+                    </Button>
+                </IconButtonWithTooltip>
             )}
             {(task.status === 'pending' || task.status === 'transferring') && (
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onCancel} title="Cancel">
-                    <X size={12} />
-                </Button>
+                <IconButtonWithTooltip label={t('common.cancel')}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onCancel}>
+                        <X size={12} />
+                    </Button>
+                </IconButtonWithTooltip>
             )}
             {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onDismiss} title="Dismiss">
-                    <X size={12} />
-                </Button>
+                <IconButtonWithTooltip label={t('sftp.transfers.dismissAction')}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onDismiss}>
+                        <X size={12} />
+                    </Button>
+                </IconButtonWithTooltip>
             )}
         </div>
     );
@@ -222,13 +240,17 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         className="min-w-0 text-[11px] font-medium text-foreground/90"
                     />
                 </div>
-                <div
-                    className="flex h-full cursor-col-resize items-center justify-center text-muted-foreground/35 hover:text-foreground/70"
-                    onMouseDown={onResizeNameColumn}
-                    title="Resize file name column"
-                >
-                    <GripVertical size={10} />
-                </div>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div
+                            className="flex h-full cursor-col-resize items-center justify-center text-muted-foreground/35 hover:text-foreground/70"
+                            onMouseDown={onResizeNameColumn}
+                        >
+                            <GripVertical size={10} />
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{t('sftp.transfers.resizeNameColumn')}</TooltipContent>
+                </Tooltip>
                 <div className="min-w-0">
                     {childProgressBar}
                 </div>
@@ -256,15 +278,19 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                 )}
             />
             {canToggleChildren && (
-                <button
-                    type="button"
-                    className="inline-flex shrink-0 items-center gap-1 rounded border border-border/60 bg-secondary/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                    onClick={onToggleChildren}
-                    title={isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList')}
-                >
-                    {isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList')}
-                    {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className="inline-flex shrink-0 items-center gap-1 rounded border border-border/60 bg-secondary/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            onClick={onToggleChildren}
+                        >
+                            {isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList')}
+                            {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList')}</TooltipContent>
+                </Tooltip>
             )}
         </div>
     );
