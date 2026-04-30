@@ -3,8 +3,8 @@
  * Detects whether the user is currently at a shell prompt (vs. inside a running program).
  * Uses xterm.js buffer analysis to identify common prompt patterns.
  *
- * Strategy: scan left-to-right for the FIRST prompt-ending character ($ # % > etc.)
- * followed by a space. Exclude false positives like $HOME, $PATH, etc.
+ * Strategy: scan prompt-looking boundaries ($ # % >, Powerline/Nerd Font glyphs,
+ * etc.) and choose the most reliable split for prompt text vs. user input.
  */
 
 import type { Terminal as XTerm } from "@xterm/xterm";
@@ -60,6 +60,16 @@ function replacePromptUserInput(
     userInput,
     cursorOffset: userInput.length,
   };
+}
+
+function getCursorLinePrefix(term: XTerm): string | null {
+  const buffer = term.buffer.active;
+  const cursorY = buffer.cursorY + buffer.baseY;
+  const line = buffer.getLine(cursorY);
+
+  if (!line) return null;
+
+  return line.translateToString(false).substring(0, Math.max(0, buffer.cursorX));
 }
 
 /**
@@ -144,9 +154,10 @@ const PROMPT_CHARS = new Set(["$", "#", "%", ">", "❯", "❮", "→", "➜", "�
 /**
  * Whether a character lives in the Unicode Private Use Area (U+E000–U+F8FF).
  * Powerline separators (U+E0B0..) and Nerd Font icons (U+E200.., U+F000..) all
- * fall here, and real shell commands almost never contain PUA codepoints — so a
- * PUA char immediately followed by a space is a near-unambiguous signal of a
- * themed-prompt terminator (oh-my-posh, starship, p10k, etc.).
+ * fall here. A PUA char followed by a space is common in themed prompt
+ * terminators (oh-my-posh, starship, p10k, etc.), but commands can still echo
+ * those glyphs, so PUA boundaries are kept lower priority than standard prompt
+ * characters and reconciled with the typed buffer when available.
  */
 function isPuaChar(ch: string): boolean {
   if (!ch) return false;
@@ -167,7 +178,8 @@ function findPromptBoundary(lineText: string): number {
   // confused with shell syntax in a prompt position.
   const lineLen = lineText.trimEnd().length;
   const scanLimit = Math.min(lineLen, 200);
-  let lastBoundary = -1;
+  let lastStandardBoundary = -1;
+  let lastPuaBoundary = -1;
 
   // Ambiguous chars (>) only scan first 60% to avoid matching redirections
   const ambiguousScanLimit = Math.min(scanLimit, Math.max(40, Math.floor(lineLen * 0.6)));
@@ -237,11 +249,17 @@ function findPromptBoundary(lineText: string): number {
       }
     }
 
-    // Record this as a candidate boundary
-    lastBoundary = nextChar === " " ? i + 2 : i + 1;
+    // Record this as a candidate boundary. A standard shell prompt terminator
+    // is more reliable than a later Powerline/Nerd Font glyph in command text.
+    const boundary = nextChar === " " ? i + 2 : i + 1;
+    if (isStandard) {
+      lastStandardBoundary = boundary;
+    } else {
+      lastPuaBoundary = boundary;
+    }
   }
 
-  return lastBoundary;
+  return lastStandardBoundary >= 0 ? lastStandardBoundary : lastPuaBoundary;
 }
 
 /**
@@ -326,6 +344,21 @@ export function getAlignedPrompt(
       prompt: replacePromptUserInput(raw, typedBuffer),
       alignedTyped: typedBuffer,
     };
+  }
+  const cursorLinePrefix = getCursorLinePrefix(term);
+  if (cursorLinePrefix?.endsWith(typedBuffer)) {
+    const promptText = cursorLinePrefix.slice(0, cursorLinePrefix.length - typedBuffer.length);
+    if (promptText.length > 0) {
+      return {
+        prompt: {
+          isAtPrompt: true,
+          promptText,
+          userInput: typedBuffer,
+          cursorOffset: typedBuffer.length,
+        },
+        alignedTyped: typedBuffer,
+      };
+    }
   }
   return { prompt: raw, alignedTyped: null };
 }

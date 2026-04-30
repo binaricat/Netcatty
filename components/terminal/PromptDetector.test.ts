@@ -79,3 +79,40 @@ test("PUA char without trailing space is not a prompt boundary", () => {
 
   assert.equal(result.prompt.isAtPrompt, false);
 });
+
+test("keeps typed command intact when command text contains Powerline glyphs", () => {
+  const typedInput = "echo  foo";
+  const lineText = `$ ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, typedInput);
+  assert.equal(result.alignedTyped, typedInput);
+});
+
+test("prefers standard prompt terminator over later Powerline glyphs", () => {
+  const lineText = "$ echo  foo";
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, "echo  foo");
+});
+
+test("keeps typed command intact for PUA-only prompts when command text contains Powerline glyphs", () => {
+  const typedInput = "echo  foo";
+  const lineText = ` root  ~  ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, " root  ~  ");
+  assert.equal(result.prompt.userInput, typedInput);
+  assert.equal(result.alignedTyped, typedInput);
+});
