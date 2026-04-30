@@ -339,6 +339,12 @@ export async function uploadFromDataTransfer(
 
   // Create scanning placeholder
   const scanningTaskId = crypto.randomUUID();
+  let scanningEnded = false;
+  const endScanning = () => {
+    if (scanningEnded) return;
+    scanningEnded = true;
+    callbacks?.onScanningEnd?.(scanningTaskId);
+  };
   callbacks?.onScanningStart?.(scanningTaskId);
 
   const scanT0 = performance.now();
@@ -346,18 +352,14 @@ export async function uploadFromDataTransfer(
   try {
     entries = await extractDropEntries(dataTransfer);
   } catch (error) {
-    callbacks?.onScanningEnd?.(scanningTaskId);
+    endScanning();
     throw error;
   }
+  endScanning();
   logger.debug(`[SFTP:perf] extractDropEntries — ${entries.length} entries — ${(performance.now() - scanT0).toFixed(0)}ms`);
 
   if (entries.length === 0) {
-    callbacks?.onScanningEnd?.(scanningTaskId);
     return [];
-  }
-
-  if (!entries.some((entry) => !entry.isDirectory && entry.file)) {
-    callbacks?.onScanningEnd?.(scanningTaskId);
   }
 
   // Check if this is a folder upload and compressed upload is enabled

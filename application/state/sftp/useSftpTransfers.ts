@@ -222,6 +222,41 @@ export const useSftpTransfers = ({
     [],
   );
 
+  const cancelBackendTransfers = useCallback(async (transferIds: string[]) => {
+    const idsToCancel = new Set<string>();
+    const currentTransfers = transfersRef.current;
+    for (const transferId of transferIds) {
+      idsToCancel.add(transferId);
+      const trackedChildren = activeChildIdsRef.current.get(transferId);
+      if (trackedChildren) {
+        for (const childId of trackedChildren) {
+          idsToCancel.add(childId);
+          cancelledTasksRef.current.add(childId);
+        }
+      }
+      for (const transfer of currentTransfers) {
+        if (
+          transfer.parentTaskId === transferId &&
+          (transfer.status === "transferring" || transfer.status === "pending")
+        ) {
+          idsToCancel.add(transfer.id);
+          cancelledTasksRef.current.add(transfer.id);
+        }
+      }
+    }
+
+    const cancelTransferAtBackend = netcattyBridge.get()?.cancelTransfer;
+    if (!cancelTransferAtBackend) return;
+
+    await Promise.all(
+      Array.from(idsToCancel).map((id) =>
+        cancelTransferAtBackend(id).catch((err) => {
+          logger.warn("Failed to cancel transfer at backend:", err);
+        }),
+      ),
+    );
+  }, []);
+
   const markBatchStopped = useCallback(
     async (task: TransferTask) => {
       const batchId = task.batchId;
@@ -231,20 +266,30 @@ export const useSftpTransfers = ({
       );
 
       affected.forEach((candidate) => cancelledTasksRef.current.add(candidate.id));
+      const affectedIds = new Set(affected.map((candidate) => candidate.id));
       setConflicts((prev) => prev.filter((conflict) => conflict.transferId !== task.id && (!batchId || conflict.batchId !== batchId)));
-      setTransfers((prev) =>
-        prev.map((candidate) =>
-          affected.some((item) => item.id === candidate.id)
-            ? { ...candidate, status: "cancelled" as TransferStatus, endTime: Date.now() }
-            : candidate,
-        ),
-      );
+      setTransfers((prev) => {
+        for (const candidate of prev) {
+          if (candidate.parentTaskId && affectedIds.has(candidate.parentTaskId)) {
+            cancelledTasksRef.current.add(candidate.id);
+          }
+        }
+
+        return prev
+          .filter((candidate) => !(candidate.parentTaskId && affectedIds.has(candidate.parentTaskId)))
+          .map((candidate) =>
+            affectedIds.has(candidate.id)
+              ? { ...candidate, status: "cancelled" as TransferStatus, endTime: Date.now() }
+              : candidate,
+          );
+      });
+      await cancelBackendTransfers(affected.map((candidate) => candidate.id));
 
       for (const candidate of affected) {
         await completeCancelledTask(candidate);
       }
     },
-    [completeCancelledTask],
+    [cancelBackendTransfers, completeCancelledTask],
   );
 
   const deleteTargetPath = useCallback(
@@ -1005,6 +1050,10 @@ export const useSftpTransfers = ({
         );
       }
 
+      if (cancelledTasksRef.current.has(task.id)) {
+        throw new Error("Transfer cancelled");
+      }
+
       const finalStatus: TransferStatus = dirPartialFailure ? "failed" : "completed";
       setTransfers((prev) => {
         return prev.map((t) => {
@@ -1223,37 +1272,10 @@ export const useSftpTransfers = ({
 
       setConflicts((prev) => prev.filter((c) => c.transferId !== transferId));
 
-      if (netcattyBridge.get()?.cancelTransfer) {
-        // Cancel parent and all active child streams at the backend.
-        // Use activeChildIdsRef for immediate visibility (not subject to
-        // React state batching delays like transfersRef).
-        const idsToCancel = [transferId];
-        const trackedChildren = activeChildIdsRef.current.get(transferId);
-        if (trackedChildren) {
-          for (const childId of trackedChildren) {
-            idsToCancel.push(childId);
-            cancelledTasksRef.current.add(childId);
-          }
-        }
-        // Also check rendered state as fallback for transfers started
-        // via other paths (e.g. startTransfer/processTransfer)
-        const currentTransfers = transfersRef.current;
-        for (const t of currentTransfers) {
-          if (t.parentTaskId === transferId && (t.status === "transferring" || t.status === "pending") && !idsToCancel.includes(t.id)) {
-            idsToCancel.push(t.id);
-          }
-        }
-        await Promise.all(
-          idsToCancel.map((id) =>
-            netcattyBridge.get()!.cancelTransfer!(id).catch((err) => {
-              logger.warn("Failed to cancel transfer at backend:", err);
-            }),
-          ),
-        );
-      }
+      await cancelBackendTransfers([transferId]);
 
     },
-    [],
+    [cancelBackendTransfers],
   );
 
   const retryTransfer = useCallback(
