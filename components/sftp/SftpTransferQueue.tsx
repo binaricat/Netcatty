@@ -40,6 +40,7 @@ interface TransferChildListProps {
   onCancel: (taskId: string) => void;
   onRetry: (taskId: string) => Promise<void>;
   onDismiss: (taskId: string) => void;
+  onSetNameColumnWidth: (width: number) => void;
 }
 
 const TransferChildList: React.FC<TransferChildListProps> = ({
@@ -52,6 +53,7 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
   onCancel,
   onRetry,
   onDismiss,
+  onSetNameColumnWidth,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [contentTop, setContentTop] = useState(0);
@@ -121,7 +123,10 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
                 task={child}
                 isChild
                 childNameColumnWidth={childNameWidth}
+                childNameColumnMinWidth={MIN_CHILD_NAME_WIDTH}
+                childNameColumnMaxWidth={MAX_CHILD_NAME_WIDTH}
                 onResizeNameColumn={onResizeNameColumn}
+                onSetNameColumnWidth={onSetNameColumnWidth}
                 onCancel={() => onCancel(child.id)}
                 onRetry={() => onRetry(child.id)}
                 onDismiss={() => onDismiss(child.id)}
@@ -303,6 +308,12 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
     document.body.style.userSelect = "none";
   }, [childNameWidth]);
 
+  const handleChildColumnWidthSet = useCallback((width: number) => {
+    const nextWidth = Math.max(MIN_CHILD_NAME_WIDTH, Math.min(MAX_CHILD_NAME_WIDTH, width));
+    setChildNameWidth(nextWidth);
+    persistChildNameWidth(nextWidth);
+  }, [persistChildNameWidth, setChildNameWidth]);
+
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedParents((prev) => ({
       ...prev,
@@ -401,6 +412,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
                   childTasks={childTasks}
                   childNameWidth={childNameWidth}
                   onResizeNameColumn={handleChildColumnResizeStart}
+                  onSetNameColumnWidth={handleChildColumnWidthSet}
                   scrollContainerRef={scrollContainerRef}
                   scrollTop={scrollTop}
                   viewportHeight={viewportHeight}
