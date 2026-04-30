@@ -548,12 +548,6 @@ const api = {
     const result = await ipcRenderer.invoke("netcatty:mosh:start", options);
     return result.sessionId;
   },
-  detectMoshClient: async () => {
-    return ipcRenderer.invoke("netcatty:mosh:detectClient");
-  },
-  pickMoshClient: async () => {
-    return ipcRenderer.invoke("netcatty:mosh:pickClient");
-  },
   startLocalSession: async (options) => {
     const result = await ipcRenderer.invoke("netcatty:local:start", options || {});
     return result.sessionId;

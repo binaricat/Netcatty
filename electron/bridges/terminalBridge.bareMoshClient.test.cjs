@@ -54,3 +54,22 @@ test("resolveBareMoshClient honors caller PATH overrides", () => {
 
   assert.equal(resolveBareMoshClient({}, { pathOverride: tmp }), p);
 });
+
+test("mosh fallback messages do not point users to the removed Mosh settings field", () => {
+  const source = fs.readFileSync(path.join(__dirname, "terminalBridge.cjs"), "utf8");
+
+  assert.equal(source.includes("Settings → Terminal → Mosh"), false);
+});
+
+test("removed Mosh client detection APIs are not exposed to the renderer", () => {
+  const bridgeSource = fs.readFileSync(path.join(__dirname, "terminalBridge.cjs"), "utf8");
+  const preloadSource = fs.readFileSync(path.join(__dirname, "..", "preload.cjs"), "utf8");
+  const globalTypes = fs.readFileSync(path.join(__dirname, "..", "..", "global.d.ts"), "utf8");
+
+  for (const source of [bridgeSource, preloadSource, globalTypes]) {
+    assert.equal(source.includes("detectMoshClient"), false);
+    assert.equal(source.includes("pickMoshClient"), false);
+    assert.equal(source.includes("netcatty:mosh:detectClient"), false);
+    assert.equal(source.includes("netcatty:mosh:pickClient"), false);
+  }
+});
