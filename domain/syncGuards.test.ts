@@ -156,13 +156,11 @@ test("only non-hosts entity shrinks → reports that entity", () => {
   }
 });
 
-test("knownHosts shrink triggers (security-sensitive)", () => {
+test("knownHosts shrink is ignored because known hosts are local-only", () => {
   const kh = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `kh${i}`, hostname: `h${i}`, port: 22, keyType: "rsa", fingerprint: "x" })) as unknown as SyncPayload["knownHosts"];
   const base = payload({ knownHosts: kh(12) });
   const out = payload({ knownHosts: kh(2) });
-  const result = detectSuspiciousShrink(out, base);
-  assert.equal(result.suspicious, true);
-  if (result.suspicious) assert.equal(result.entityType, "knownHosts");
+  assert.deepEqual(detectSuspiciousShrink(out, base), { suspicious: false });
 });
 
 test("empty base (all zeros) — no shrink possible, returns not suspicious", () => {

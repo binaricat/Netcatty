@@ -29,9 +29,11 @@ const MAX_CHILD_NAME_WIDTH = 480;
 const CHILD_ROW_HEIGHT = 28;
 const CHILD_VIRTUALIZE_THRESHOLD = 80;
 const CHILD_OVERSCAN = 8;
+const childListIdForTask = (taskId: string) => `sftp-transfer-children-${taskId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
 interface TransferChildListProps {
   childTasks: TransferTask[];
+  childListId: string;
   childNameWidth: number;
   onResizeNameColumn: (event: React.MouseEvent<HTMLDivElement>) => void;
   scrollContainerRef: React.RefObject<HTMLDivElement>;
@@ -40,10 +42,12 @@ interface TransferChildListProps {
   onCancel: (taskId: string) => void;
   onRetry: (taskId: string) => Promise<void>;
   onDismiss: (taskId: string) => void;
+  onSetNameColumnWidth: (width: number) => void;
 }
 
 const TransferChildList: React.FC<TransferChildListProps> = ({
   childTasks,
+  childListId,
   childNameWidth,
   onResizeNameColumn,
   scrollContainerRef,
@@ -52,6 +56,7 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
   onCancel,
   onRetry,
   onDismiss,
+  onSetNameColumnWidth,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [contentTop, setContentTop] = useState(0);
@@ -102,6 +107,7 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
 
   return (
     <div
+      id={childListId}
       ref={containerRef}
       className="border-t border-border/30 bg-background/30"
     >
@@ -121,7 +127,11 @@ const TransferChildList: React.FC<TransferChildListProps> = ({
                 task={child}
                 isChild
                 childNameColumnWidth={childNameWidth}
+                childNameColumnMinWidth={MIN_CHILD_NAME_WIDTH}
+                childNameColumnMaxWidth={MAX_CHILD_NAME_WIDTH}
                 onResizeNameColumn={onResizeNameColumn}
+                onSetNameColumnWidth={onSetNameColumnWidth}
+                resizeHandleTabIndex={visibleIndex === 0 ? 0 : -1}
                 onCancel={() => onCancel(child.id)}
                 onRetry={() => onRetry(child.id)}
                 onDismiss={() => onDismiss(child.id)}
@@ -303,6 +313,12 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
     document.body.style.userSelect = "none";
   }, [childNameWidth]);
 
+  const handleChildColumnWidthSet = useCallback((width: number) => {
+    const nextWidth = Math.max(MIN_CHILD_NAME_WIDTH, Math.min(MAX_CHILD_NAME_WIDTH, width));
+    setChildNameWidth(nextWidth);
+    persistChildNameWidth(nextWidth);
+  }, [persistChildNameWidth, setChildNameWidth]);
+
   const toggleExpanded = useCallback((taskId: string) => {
     setExpandedParents((prev) => ({
       ...prev,
@@ -369,6 +385,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
         {topLevelTransfers.map((task) => {
           const childTasks = childrenByParent.get(task.id) ?? [];
           const isExpanded = expandedParents[task.id] ?? true;
+          const childListId = childListIdForTask(task.id);
 
           return (
             <React.Fragment key={task.id}>
@@ -377,6 +394,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
                 canToggleChildren={childTasks.length > 0}
                 isExpanded={isExpanded}
                 visibleChildCount={childTasks.length}
+                childListId={childListId}
                 onToggleChildren={() => toggleExpanded(task.id)}
                 onCancel={() => {
                   if (task.sourceConnectionId === "external") {
@@ -399,8 +417,10 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
               {isExpanded && childTasks.length > 0 && (
                 <TransferChildList
                   childTasks={childTasks}
+                  childListId={childListId}
                   childNameWidth={childNameWidth}
                   onResizeNameColumn={handleChildColumnResizeStart}
+                  onSetNameColumnWidth={handleChildColumnWidthSet}
                   scrollContainerRef={scrollContainerRef}
                   scrollTop={scrollTop}
                   viewportHeight={viewportHeight}

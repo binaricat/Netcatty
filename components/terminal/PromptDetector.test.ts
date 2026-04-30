@@ -47,3 +47,72 @@ test("still trims prompt decorations out of the detected input", () => {
   assert.equal(result.prompt.cursorOffset, 2);
   assert.equal(result.alignedTyped, "do");
 });
+
+test("detects oh-my-posh Nerd Font chevron (U+F105) prompt terminator", () => {
+  // Real-world PS1 captured from oh-my-posh themed bash on a server:
+  //   "<U+F31B> root@oracle ~ <U+F105> " then user input
+  const term = createFakeTerm(" root@oracle ~  ls", 21);
+
+  const result = getAlignedPrompt(term as never, "ls", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, " root@oracle ~  ");
+  assert.equal(result.prompt.userInput, "ls");
+});
+
+test("detects Powerline right-arrow (U+E0B0) prompt terminator", () => {
+  // oh-my-posh agnoster-style: colored block ending with U+E0B0 + space
+  const term = createFakeTerm(" root  ~  git", 16);
+
+  const result = getAlignedPrompt(term as never, "git", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.userInput, "git");
+  assert.ok(result.prompt.promptText.endsWith(" "));
+});
+
+test("PUA char without trailing space is not a prompt boundary", () => {
+  // A bare PUA glyph mid-token (e.g. paste artifact) should not trigger detection.
+  const term = createFakeTerm("echo foo", 13);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+});
+
+test("keeps typed command intact when command text contains Powerline glyphs", () => {
+  const typedInput = "echo  foo";
+  const lineText = `$ ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, typedInput);
+  assert.equal(result.alignedTyped, typedInput);
+});
+
+test("prefers standard prompt terminator over later Powerline glyphs", () => {
+  const lineText = "$ echo  foo";
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, "echo  foo");
+});
+
+test("keeps typed command intact for PUA-only prompts when command text contains Powerline glyphs", () => {
+  const typedInput = "echo  foo";
+  const lineText = ` root  ~  ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, " root  ~  ");
+  assert.equal(result.prompt.userInput, typedInput);
+  assert.equal(result.alignedTyped, typedInput);
+});

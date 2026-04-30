@@ -638,6 +638,7 @@ const ConflictModal: React.FC<ConflictModalProps> = ({
 interface SyncDashboardProps {
     onBuildPayload: () => SyncPayload;
     onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
+    onApplyLocalPayload?: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;
 }
 
@@ -1055,6 +1056,7 @@ const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
 const SyncDashboard: React.FC<SyncDashboardProps> = ({
     onBuildPayload,
     onApplyPayload,
+    onApplyLocalPayload,
     onClearLocalData,
 }) => {
     const { t, resolvedLocale } = useI18n();
@@ -1916,7 +1918,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 
                     <div ref={localBackupsRef}>
                         <LocalBackupsPanel
-                            onApplyPayload={onApplyPayload}
+                            onApplyPayload={onApplyLocalPayload ?? onApplyPayload}
                         />
                     </div>
 
@@ -2612,6 +2614,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
 interface CloudSyncSettingsProps {
     onBuildPayload: () => SyncPayload;
     onApplyPayload: (payload: SyncPayload) => void | Promise<void>;
+    onApplyLocalPayload?: (payload: SyncPayload) => void | Promise<void>;
     onClearLocalData?: () => void;
 }
 

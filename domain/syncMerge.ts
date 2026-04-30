@@ -347,7 +347,6 @@ export function mergeSyncPayloads(
     snippets: [],
     customGroups: [],
     snippetPackages: [],
-    knownHosts: [],
     portForwardingRules: [],
     settings: undefined,
     syncedAt: 0,
@@ -365,19 +364,6 @@ export function mergeSyncPayloads(
   const keys = mergeEntityArrays(b.keys ?? [], local.keys ?? [], remote.keys ?? []);
   const identities = mergeEntityArrays(b.identities ?? [], local.identities ?? [], remote.identities ?? []);
   const snippets = mergeEntityArrays(b.snippets ?? [], local.snippets ?? [], remote.snippets ?? []);
-  const knownHostsRaw = mergeEntityArrays(b.knownHosts ?? [], local.knownHosts ?? [], remote.knownHosts ?? []);
-  // Deduplicate known hosts by (hostname, port, keyType) since IDs are random per device
-  const knownHostSeen = new Set<string>();
-  const knownHosts = {
-    ...knownHostsRaw,
-    merged: knownHostsRaw.merged.filter((kh) => {
-      const entry = kh as unknown as { hostname: string; port: number; keyType: string };
-      const fp = `${entry.hostname}:${entry.port}:${entry.keyType}`;
-      if (knownHostSeen.has(fp)) return false;
-      knownHostSeen.add(fp);
-      return true;
-    }),
-  };
   const portForwardingRules = mergeEntityArrays(
     b.portForwardingRules ?? [],
     local.portForwardingRules ?? [],
@@ -394,7 +380,7 @@ export function mergeSyncPayloads(
 
   // Aggregate stats
   const entityResults: Pick<EntityMergeResult<unknown>, 'added' | 'deleted' | 'modified' | 'conflicts'>[] =
-    [hosts, keys, identities, snippets, knownHosts, portForwardingRules, groupConfigsResult];
+    [hosts, keys, identities, snippets, portForwardingRules, groupConfigsResult];
   for (const r of entityResults) {
     summary.added.local += r.added.local;
     summary.added.remote += r.added.remote;
@@ -437,7 +423,6 @@ export function mergeSyncPayloads(
     snippets: snippets.merged,
     customGroups,
     snippetPackages,
-    knownHosts: knownHosts.merged,
     portForwardingRules: portForwardingRules.merged,
     groupConfigs: unwrapGC(groupConfigsResult.merged),
     settings,

@@ -1,4 +1,4 @@
-import { Host } from './models';
+import { Host, TerminalTheme } from './models';
 
 const hasLegacyStringValue = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
@@ -69,6 +69,95 @@ const UI_TO_TERMINAL_THEME: Record<string, string> = {
 export const getTerminalThemeForUiTheme = (uiThemeId: string): string | undefined =>
   UI_TO_TERMINAL_THEME[uiThemeId];
 
+type ParsedHslToken = {
+  hue: number;
+  saturation: number;
+  lightness: number;
+};
+
+const parseHslToken = (value: string): ParsedHslToken | null => {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%$/);
+  if (!match) return null;
+
+  const hue = Number(match[1]);
+  const saturation = Number(match[2]);
+  const lightness = Number(match[3]);
+  if (!Number.isFinite(hue) || !Number.isFinite(saturation) || !Number.isFinite(lightness)) return null;
+  if (saturation < 0 || saturation > 100 || lightness < 0 || lightness > 100) return null;
+
+  return {
+    hue: ((hue % 360) + 360) % 360,
+    saturation,
+    lightness,
+  };
+};
+
+const toHexChannel = (value: number): string =>
+  Math.round(Math.max(0, Math.min(255, value)))
+    .toString(16)
+    .padStart(2, '0');
+
+const hslToHex = ({ hue, saturation, lightness }: ParsedHslToken): string => {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = hue / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hp < 1) {
+    r = c;
+    g = x;
+  } else if (hp < 2) {
+    r = x;
+    g = c;
+  } else if (hp < 3) {
+    g = c;
+    b = x;
+  } else if (hp < 4) {
+    g = x;
+    b = c;
+  } else if (hp < 5) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const m = l - c / 2;
+  return `#${toHexChannel((r + m) * 255)}${toHexChannel((g + m) * 255)}${toHexChannel((b + m) * 255)}`;
+};
+
+const terminalSelectionFromAccent = (accent: ParsedHslToken, type: TerminalTheme['type']): ParsedHslToken => ({
+  ...accent,
+  lightness: type === 'dark'
+    ? Math.max(18, Math.min(32, accent.lightness * 0.55))
+    : Math.max(72, Math.min(88, accent.lightness + 42)),
+});
+
+export const applyCustomAccentToTerminalTheme = (
+  theme: TerminalTheme,
+  accentMode: 'theme' | 'custom',
+  customAccent: string,
+): TerminalTheme => {
+  if (accentMode !== 'custom') return theme;
+
+  const accent = parseHslToken(customAccent);
+  if (!accent) return theme;
+
+  return {
+    ...theme,
+    colors: {
+      ...theme.colors,
+      cursor: hslToHex(accent),
+      selection: hslToHex(terminalSelectionFromAccent(accent, theme.type)),
+    },
+  };
+};
+
 export const resolveHostTerminalFontFamilyId = (host: Host | null | undefined, defaultFontFamilyId: string): string =>
   hasHostFontFamilyOverride(host) && host?.fontFamily ? host.fontFamily : defaultFontFamilyId;
 
@@ -86,4 +175,3 @@ export const clearHostFontWeightOverride = (host: Host): Host => ({
 
 export const resolveHostTerminalFontWeight = (host: Host | null | undefined, defaultFontWeight: number): number =>
   hasHostFontWeightOverride(host) && host?.fontWeight != null ? host.fontWeight : defaultFontWeight;
-

@@ -26,6 +26,7 @@ import {
   shouldScrollOnTerminalInput,
 } from "../domain/terminalScroll";
 import {
+  applyCustomAccentToTerminalTheme,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
 import { classifyDistroId } from "../domain/host";
@@ -127,6 +128,8 @@ interface TerminalProps {
   fontSize: number;
   terminalTheme: TerminalTheme;
   followAppTerminalTheme?: boolean;
+  accentMode?: "theme" | "custom";
+  customAccent?: string;
   terminalSettings?: TerminalSettings;
   sessionId: string;
   startupCommand?: string;
@@ -225,6 +228,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   fontSize,
   terminalTheme,
   followAppTerminalTheme = false,
+  accentMode = "theme",
+  customAccent = "",
   terminalSettings,
   sessionId,
   startupCommand,
@@ -682,18 +687,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // When "Follow Application Theme" is on and there's no active
     // preview, skip per-host overrides — all terminals should use the
     // UI-matched theme passed via terminalTheme prop.
-    if (followAppTerminalTheme && !themePreviewId) return terminalTheme;
+    if (followAppTerminalTheme && !themePreviewId) {
+      return applyCustomAccentToTerminalTheme(terminalTheme, accentMode, customAccent);
+    }
     const themeId = themePreviewId ?? resolveHostTerminalThemeId(
       { theme: host.theme, themeOverride: host.themeOverride } as Pick<Host, 'theme' | 'themeOverride'>,
       terminalTheme.id,
     );
+    let baseTheme = terminalTheme;
     if (themeId) {
       const hostTheme = TERMINAL_THEMES.find((t) => t.id === themeId)
         || customThemes.find((t) => t.id === themeId);
-      if (hostTheme) return hostTheme;
+      if (hostTheme) baseTheme = hostTheme;
     }
-    return terminalTheme;
-  }, [customThemes, followAppTerminalTheme, host.theme, host.themeOverride, terminalTheme, themePreviewId]);
+    return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
+  }, [accentMode, customAccent, customThemes, followAppTerminalTheme, host.theme, host.themeOverride, terminalTheme, themePreviewId]);
 
   const resolvedChainHosts =
     chainHosts;
@@ -1725,8 +1733,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     ['--terminal-ui-border' as never]: `var(--terminal-preview-border, color-mix(in srgb, ${effectiveTheme.colors.foreground} 8%, ${effectiveTheme.colors.background} 92%))`,
     ['--terminal-ui-toolbar-btn' as never]: `var(--terminal-preview-toolbar-btn, color-mix(in srgb, ${effectiveTheme.colors.background} 88%, ${effectiveTheme.colors.foreground} 12%))`,
     ['--terminal-ui-toolbar-btn-hover' as never]: `var(--terminal-preview-toolbar-btn-hover, color-mix(in srgb, ${effectiveTheme.colors.background} 78%, ${effectiveTheme.colors.foreground} 22%))`,
-    ['--terminal-ui-toolbar-btn-active' as never]: `var(--terminal-preview-toolbar-btn-active, color-mix(in srgb, ${effectiveTheme.colors.background} 68%, ${effectiveTheme.colors.foreground} 32%))`,
-  }), [effectiveTheme.colors.background, effectiveTheme.colors.foreground]);
+    ['--terminal-ui-toolbar-btn-active' as never]: `var(--terminal-preview-toolbar-btn-active, color-mix(in srgb, ${effectiveTheme.colors.cursor} 78%, ${effectiveTheme.colors.background} 22%))`,
+  }), [effectiveTheme.colors.background, effectiveTheme.colors.cursor, effectiveTheme.colors.foreground]);
 
   return (
     <TerminalContextMenu

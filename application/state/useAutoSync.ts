@@ -16,14 +16,13 @@ import {
   findSyncPayloadEncryptedCredentialPaths,
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
-import { collectSyncableSettings, hasMeaningfulSyncData } from '../syncPayload';
+import { collectSyncableSettings, hasMeaningfulCloudSyncData } from '../syncPayload';
 import { readInterruptedVaultApply } from '../localVaultBackups';
 import {
   STORAGE_KEY_PORT_FORWARDING,
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
 } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
-import { getEffectiveKnownHosts } from '../../infrastructure/syncHelpers';
 import { notify } from '../notification';
 
 interface AutoSyncConfig {
@@ -35,7 +34,6 @@ interface AutoSyncConfig {
   customGroups: SyncPayload['customGroups'];
   snippetPackages?: SyncPayload['snippetPackages'];
   portForwardingRules?: SyncPayload['portForwardingRules'];
-  knownHosts?: SyncPayload['knownHosts'];
   groupConfigs?: SyncPayload['groupConfigs'];
   /** Opaque token that changes whenever a synced setting changes. */
   settingsVersion?: number;
@@ -140,8 +138,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       }
     }
 
-    const effectiveKnownHosts = getEffectiveKnownHosts(config.knownHosts);
-
     return {
       hosts: config.hosts,
       keys: config.keys,
@@ -150,7 +146,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       customGroups: config.customGroups,
       snippetPackages: config.snippetPackages,
       portForwardingRules: effectivePFRules,
-      knownHosts: effectiveKnownHosts,
       groupConfigs: config.groupConfigs,
     };
   }, [
@@ -161,7 +156,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     config.customGroups,
     config.snippetPackages,
     config.portForwardingRules,
-    config.knownHosts,
     config.groupConfigs,
   ]);
 
@@ -283,7 +277,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // checkRemoteVersion below: if inspect transiently errors we still
       // let auto-sync run, trusting this guard to refuse if local is
       // truly empty rather than letting an empty state clobber remote.
-      if (!hasMeaningfulSyncData(payload)) {
+      if (!hasMeaningfulCloudSyncData(payload)) {
         if (trigger === 'auto') {
           console.warn('[AutoSync] Blocked: refusing to auto-sync an empty vault to cloud');
           return;
@@ -437,8 +431,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       const remoteFile = inspection.remoteFile;
       const remotePayload = inspection.payload;
       const localPayload = buildPayloadRef.current();
-      const localIsEmpty = !hasMeaningfulSyncData(localPayload);
-      const remoteHasData = hasMeaningfulSyncData(remotePayload);
+      const localIsEmpty = !hasMeaningfulCloudSyncData(localPayload);
+      const remoteHasData = hasMeaningfulCloudSyncData(remotePayload);
 
       // If local vault is empty but cloud has data, this almost certainly
       // means the user's data was lost (update, storage corruption, etc.).

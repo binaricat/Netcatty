@@ -58,7 +58,7 @@ import {
 
 const CUSTOM_KEY_BINDINGS_SYNC_PAYLOAD_ORIGIN = 'sync-payload';
 
-/** All vault-owned data that participates in cloud sync. */
+/** Vault-owned data. Some fields are local-only and excluded from cloud sync. */
 export interface SyncableVaultData {
   hosts: Host[];
   keys: SSHKey[];
@@ -66,6 +66,7 @@ export interface SyncableVaultData {
   snippets: Snippet[];
   customGroups: string[];
   snippetPackages?: string[];
+  /** Local trust records. Kept in local backups, excluded from cloud sync. */
   knownHosts: KnownHost[];
   groupConfigs?: GroupConfig[];
 }
@@ -93,9 +94,31 @@ export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
   );
 }
 
+/**
+ * Returns true when a payload contains cloud-sync data.
+ * Local-only trust records are intentionally ignored.
+ */
+export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
+  const hasEntities =
+    (payload.hosts?.length ?? 0) > 0 ||
+    (payload.keys?.length ?? 0) > 0 ||
+    (payload.snippets?.length ?? 0) > 0 ||
+    (payload.identities?.length ?? 0) > 0 ||
+    (payload.customGroups?.length ?? 0) > 0 ||
+    (payload.snippetPackages?.length ?? 0) > 0 ||
+    (payload.portForwardingRules?.length ?? 0) > 0 ||
+    (payload.groupConfigs?.length ?? 0) > 0;
+
+  if (hasEntities) return true;
+
+  return Boolean(
+    payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
+  );
+}
+
 /** Callbacks used by `applySyncPayload` to import data into local state. */
 interface SyncPayloadImporters {
-  /** Import vault data (hosts, keys, identities, snippets, customGroups, snippetPackages, knownHosts). */
+  /** Import vault data. Cloud sync excludes local-only known hosts by default. */
   importVaultData: (jsonString: string) => void;
   /** Import port-forwarding rules (lives outside the vault hook). */
   importPortForwardingRules?: (rules: PortForwardingRule[]) => void;
@@ -317,11 +340,21 @@ export function buildSyncPayload(
     snippets: vault.snippets,
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
-    knownHosts: vault.knownHosts,
     groupConfigs: vault.groupConfigs,
     portForwardingRules,
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
+  };
+}
+
+/** Build a local backup/restore payload, including local-only trust records. */
+export function buildLocalVaultPayload(
+  vault: SyncableVaultData,
+  portForwardingRules?: PortForwardingRule[],
+): SyncPayload {
+  return {
+    ...buildSyncPayload(vault, portForwardingRules),
+    knownHosts: vault.knownHosts,
   };
 }
 
@@ -331,14 +364,13 @@ export function buildSyncPayload(
  * This ensures both vault data and port-forwarding rules are imported
  * consistently across windows.
  */
-export function applySyncPayload(
+function applyPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
+  options: { includeLocalOnlyData: boolean },
 ): void {
-  // Build the vault import object.  knownHosts is only included when the
-  // payload explicitly carries the field (even if it's []).  Legacy cloud
-  // snapshots may omit it entirely — in that case we leave the local
-  // known-hosts list untouched rather than destructively wiping it.
+  // Build the vault import object. Cloud sync intentionally ignores
+  // local-only trust records even if legacy cloud snapshots still carry them.
   const vaultImport: Record<string, unknown> = {
     hosts: payload.hosts,
     keys: payload.keys,
@@ -349,7 +381,7 @@ export function applySyncPayload(
   if (payload.snippetPackages !== undefined) {
     vaultImport.snippetPackages = payload.snippetPackages;
   }
-  if (payload.knownHosts !== undefined) {
+  if (options.includeLocalOnlyData && payload.knownHosts !== undefined) {
     vaultImport.knownHosts = payload.knownHosts;
   }
   if (Array.isArray(payload.groupConfigs)) {
@@ -373,4 +405,18 @@ export function applySyncPayload(
     if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalBookmarks();
     importers.onSettingsApplied?.();
   }
+}
+
+export function applySyncPayload(
+  payload: SyncPayload,
+  importers: SyncPayloadImporters,
+): void {
+  applyPayload(payload, importers, { includeLocalOnlyData: false });
+}
+
+export function applyLocalVaultPayload(
+  payload: SyncPayload,
+  importers: SyncPayloadImporters,
+): void {
+  applyPayload(payload, importers, { includeLocalOnlyData: true });
 }

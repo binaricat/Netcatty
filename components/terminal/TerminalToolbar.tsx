@@ -71,6 +71,9 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     const hidesSftp = isLocalTerminal || isSerialTerminal;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
+    const activeButtonStyle: React.CSSProperties = {
+        backgroundColor: 'var(--terminal-toolbar-btn-active)',
+    };
 
     return (
         <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
@@ -111,6 +114,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                         aria-label={t("terminal.toolbar.composeBar")}
                         aria-pressed={isComposeBarOpen}
                         onClick={onToggleComposeBar}
+                        style={isComposeBarOpen ? activeButtonStyle : undefined}
                     >
                         <TextCursorInput size={12} />
                     </Button>
@@ -127,6 +131,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                         aria-label={t("terminal.toolbar.searchTerminal")}
                         aria-pressed={isSearchOpen}
                         onClick={onToggleSearch}
+                        style={isSearchOpen ? activeButtonStyle : undefined}
                     >
                         <Search size={12} />
                     </Button>

@@ -17,14 +17,14 @@ import { I18nProvider, useI18n } from './application/i18n/I18nProvider';
 import { matchesKeyBinding } from './domain/models';
 import { resolveGroupDefaults, applyGroupDefaults } from './domain/groupConfig';
 import { resolveHostAuth } from './domain/sshAuth';
-import { resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from './domain/terminalAppearance';
 import { collectSessionIds } from './domain/workspace';
 import { resolveCloseIntent } from './application/state/resolveCloseIntent';
 import { resolveSnippetsShortcutIntent } from './application/state/resolveSnippetsShortcutIntent';
 import { TERMINAL_THEMES } from './infrastructure/config/terminalThemes';
 import { useCustomThemes } from './application/state/customThemeStore';
 import type { SyncPayload } from './domain/sync';
-import { applySyncPayload, buildSyncPayload, hasMeaningfulSyncData } from './application/syncPayload';
+import { applySyncPayload, buildLocalVaultPayload, hasMeaningfulSyncData } from './application/syncPayload';
 import {
   applyProtectedSyncPayload,
   ensureVersionChangeBackup,
@@ -207,6 +207,8 @@ function App({ settings }: { settings: SettingsState }) {
     theme,
     setTheme,
     resolvedTheme,
+    accentMode,
+    customAccent,
     terminalThemeId,
     setTerminalThemeId,
     followAppTerminalTheme,
@@ -366,14 +368,19 @@ function App({ settings }: { settings: SettingsState }) {
     if (activeTabId === 'vault' || activeTabId === 'sftp') return null;
 
     const resolveTheme = (s: TerminalSession): TerminalTheme => {
+      let baseTheme: TerminalTheme;
       // When "Follow Application Theme" is on, the UI-matched terminal
       // theme overrides everything — including per-host theme overrides.
       // This ensures all terminals match the app chrome regardless of
       // individual host settings.
-      if (followAppTerminalTheme) return currentTerminalTheme;
-      const host = hostById.get(s.hostId) ?? null;
-      const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
-      return themeById.get(themeId) || currentTerminalTheme;
+      if (followAppTerminalTheme) {
+        baseTheme = currentTerminalTheme;
+      } else {
+        const host = hostById.get(s.hostId) ?? null;
+        const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
+        baseTheme = themeById.get(themeId) || currentTerminalTheme;
+      }
+      return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
     };
 
     // Workspace
@@ -403,7 +410,7 @@ function App({ settings }: { settings: SettingsState }) {
     const session = sessionById.get(activeTabId);
     if (!session) return null;
     return resolveTheme(session);
-  }, [activeTabId, currentTerminalTheme, followAppTerminalTheme, hostById, sessionById, themeById, workspaceById]);
+  }, [accentMode, activeTabId, currentTerminalTheme, customAccent, followAppTerminalTheme, hostById, sessionById, themeById, workspaceById]);
 
   useImmersiveMode({
     activeTabId,
@@ -441,7 +448,7 @@ function App({ settings }: { settings: SettingsState }) {
       }
     }
 
-    return buildSyncPayload(
+    return buildLocalVaultPayload(
       {
         hosts,
         keys,
@@ -557,7 +564,6 @@ function App({ settings }: { settings: SettingsState }) {
     customGroups,
     snippetPackages,
     portForwardingRules: portForwardingRulesForSync,
-    knownHosts,
     groupConfigs,
     settingsVersion: settings.settingsVersion,
     startupReady: startupSyncSafetyReady,
@@ -1915,6 +1921,8 @@ function App({ settings }: { settings: SettingsState }) {
           draggingSessionId={draggingSessionId}
           terminalTheme={currentTerminalTheme}
           followAppTerminalTheme={followAppTerminalTheme}
+          accentMode={accentMode}
+          customAccent={customAccent}
           terminalSettings={terminalSettings}
           terminalFontFamilyId={terminalFontFamilyId}
           fontSize={terminalFontSize}
