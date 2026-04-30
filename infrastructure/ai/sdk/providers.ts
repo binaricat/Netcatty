@@ -2,6 +2,14 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { ProviderConfig } from '../types';
+import {
+  applyOpenAIChatContinuationToBody,
+  type OpenAIChatAssistantFields,
+} from '../providerContinuation';
+
+export interface ProviderRequestContext {
+  getOpenAIChatAssistantFields?: () => Array<OpenAIChatAssistantFields | undefined>;
+}
 
 /**
  * Bridge API subset used for SDK fetch adapter.
@@ -100,7 +108,10 @@ function toSafeStatusText(message: string, fallback: string): string {
   return byteStringSafe.slice(0, 120) || fallback;
 }
 
-export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.fetch {
+export function createBridgeFetchForSDK(
+  providerId?: string,
+  requestContext?: ProviderRequestContext,
+): typeof globalThis.fetch {
   return async (
     input: string | URL | Request,
     init?: RequestInit,
@@ -132,6 +143,12 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
     const headers = extractHeaders(resolvedInit?.headers);
     const body =
       resolvedInit?.body != null ? String(resolvedInit.body) : undefined;
+    const requestBody = body != null
+      ? applyOpenAIChatContinuationToBody(
+          body,
+          requestContext?.getOpenAIChatAssistantFields?.() ?? [],
+        )
+      : undefined;
 
     // Streaming path
     if (isStreamingRequest(resolvedInit)) {
@@ -186,7 +203,7 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
         requestId,
         url,
         headers,
-        body || '',
+        requestBody || '',
         providerId,
       );
 
@@ -231,7 +248,7 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
     }
 
     // Non-streaming path
-    const result = await bridge.aiFetch(url, method, headers, body, providerId);
+    const result = await bridge.aiFetch(url, method, headers, requestBody, providerId);
 
     return new Response(result.data, {
       status: result.status,
@@ -249,10 +266,13 @@ export function createBridgeFetchForSDK(providerId?: string): typeof globalThis.
  * process replaces the placeholder with the real decrypted key before
  * making the HTTP request.
  */
-export function createModelFromConfig(config: ProviderConfig) {
+export function createModelFromConfig(
+  config: ProviderConfig,
+  requestContext?: ProviderRequestContext,
+) {
   // Use placeholder API key — the main process will inject the real key
   const safeApiKey = config.apiKey ? API_KEY_PLACEHOLDER : undefined;
-  const customFetch = createBridgeFetchForSDK(config.id);
+  const customFetch = createBridgeFetchForSDK(config.id, requestContext);
   const modelId = config.defaultModel || '';
 
   switch (config.providerId) {

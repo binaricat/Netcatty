@@ -1,4 +1,6 @@
 // AI Provider types
+import type { ProviderContinuation } from './providerContinuation';
+
 export type AIProviderId = 'openai' | 'anthropic' | 'google' | 'ollama' | 'openrouter' | 'custom';
 
 export interface ProviderAdvancedParams {
@@ -69,6 +71,7 @@ export interface ChatMessage {
   images?: ChatMessageAttachment[];
   thinking?: string;
   thinkingDurationMs?: number;
+  providerContinuation?: ProviderContinuation;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
   timestamp: number;
