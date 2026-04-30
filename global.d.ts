@@ -936,6 +936,7 @@ declare global {
     aiCloseAgentStdin?(agentId: string): Promise<{ ok: boolean; error?: string }>;
     aiKillAgent?(agentId: string): Promise<{ ok: boolean; error?: string }>;
     aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string): Promise<{ ok: boolean; error?: string }>;
+    aiAcpListModels?(acpCommand: string, acpArgs?: string[], cwd?: string, providerId?: string, chatSessionId?: string): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
     aiAcpCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiAcpCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
     onAiAcpEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;

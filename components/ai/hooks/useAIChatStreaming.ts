@@ -142,7 +142,7 @@ export interface PanelBridge extends NetcattyBridge {
     cwd?: string,
     providerId?: string,
     chatSessionId?: string,
-  ) => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string }>; currentModelId?: string | null; error?: string }>;
+  ) => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
   aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
   aiUserSkillsGetStatus?: () => Promise<{
     ok: boolean;

@@ -54,6 +54,7 @@ const {
   getCodexValidationCache,
   setCodexValidationCache,
 } = require("./ai/codexHelpers.cjs");
+const { normalizeAcpSessionModels } = require("./ai/acpModels.cjs");
 
 const DEBUG_MCP = process.env.NETCATTY_MCP_DEBUG === "1";
 const NETCATTY_TOOL_SKILL_PATH = toUnpackedAsarPath(
@@ -2269,15 +2270,13 @@ function registerHandlers(ipcMain) {
       });
 
       const sessionInfo = await provider.initSession();
-      const availableModels = Array.isArray(sessionInfo?.models?.availableModels)
-        ? sessionInfo.models.availableModels
-        : [];
+      const modelCatalog = normalizeAcpSessionModels(sessionInfo);
 
       if (isCopilotAgent) {
         logAcpDebug(agentLabel, "Fetched session models", {
           chatSessionId: chatSessionId || null,
-          currentModelId: sessionInfo?.models?.currentModelId || null,
-          availableModelIds: availableModels.map((modelInfo) => modelInfo?.modelId).filter(Boolean),
+          currentModelId: modelCatalog.currentModelId || null,
+          availableModelIds: modelCatalog.models.map((modelInfo) => modelInfo.id),
           copilotHome: copilotConfigInfo?.copilotHome || null,
           copilotMcpConfigPath: copilotConfigInfo?.configPath || null,
         });
@@ -2285,12 +2284,8 @@ function registerHandlers(ipcMain) {
 
       return {
         ok: true,
-        currentModelId: sessionInfo?.models?.currentModelId || null,
-        models: availableModels.map((modelInfo) => ({
-          id: modelInfo?.modelId,
-          name: modelInfo?.name || modelInfo?.displayName || modelInfo?.modelId,
-          description: modelInfo?.description || undefined,
-        })).filter((modelInfo) => Boolean(modelInfo.id)),
+        currentModelId: modelCatalog.currentModelId || null,
+        models: modelCatalog.models,
       };
     } catch (err) {
       console.error("[ACP] Failed to list models:", err?.message || err);
