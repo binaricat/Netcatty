@@ -1,19 +1,21 @@
 name: build-packages
 
 # Trigger philosophy
-#  - Any push to any branch + any PR → run the build matrix so CI is
-#    always testable. Artifacts upload as workflow artifacts only;
-#    *no* GitHub Release is published.
+#  - Any push to any branch + any PR -> run the build matrix so CI is
+#    always testable. Duplicate same-repo push / PR runs cancel each
+#    other through the concurrency group below. Artifacts upload as
+#    workflow artifacts only; *no* GitHub Release is published.
 #  - Tag push matching `v<MAJOR>.<MINOR>.<PATCH>` (with optional
-#    pre-release suffix like `v1.2.3-rc.1`) → run the matrix and
+#    pre-release suffix like `v1.2.3-rc.1`) -> run the matrix and
 #    publish a GitHub Release. Loose tags like `v-test`, `vNEXT`, or
 #    `v1.0` no longer auto-publish.
-#  - Manual `workflow_dispatch` → opt-in publish via the
-#    `publish_release` input.
+#  - Manual `workflow_dispatch` -> run the matrix on the selected ref.
+#    `publish_release` only publishes when the selected ref is also a
+#    strict version tag.
 #
-# The release job's `if:` enforces the exact same rule, so adding
-# branches/PRs above is safe — accidental tag-like branch names won't
-# leak a release.
+# The release job validates the exact same rule before publishing, so
+# adding branches/PRs above is safe; accidental tag-like branch names
+# won't leak a release.
 on:
   workflow_dispatch:
     inputs:
@@ -30,18 +32,20 @@ on:
       - "**"
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-*"
+      - "v[0-9]+.[0-9]+.[0-9]+-[0-9A-Za-z]*"
   pull_request:
 
 # A new push to the same branch / PR cancels any in-progress build —
 # saves ~30 min per superseded commit when iterating. Tag pushes use
 # a unique group so releases never get cancelled by a follow-up push.
 concurrency:
-  group: build-packages-${{ github.workflow }}-${{ github.ref }}
+  group: build-packages-${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.ref_type }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   MOSH_BIN_RELEASE: ${{ github.event.inputs.mosh_bin_release || vars.MOSH_BIN_RELEASE || '' }}
+  BUNDLE_MOSH: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '') }}
+  STRICT_VERSION_REF_RE: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
 
 jobs:
   build:
@@ -94,12 +98,14 @@ jobs:
           fi
 
       - name: Resolve bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
         shell: bash
         run: |
           if [[ "${{ matrix.name }}" == "macos" ]]; then
@@ -113,13 +119,13 @@ jobs:
         run: |
           # Strict semver matches v<MAJOR>.<MINOR>.<PATCH>[-pre]; loose
           # tags / branches / PRs fall through to a semver-pre-release
-          # form (`0.0.0-sha.<short-sha>`) so npm pkg / electron-builder
+          # form (`0.0.0-sha-<short-sha>`) so npm pkg / electron-builder
           # accept it. Non-semver versions (e.g. bare "abc1234") cause
           # downstream tooling to error or pick weird codepaths.
-          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -186,10 +192,10 @@ jobs:
           # See matrix job's Set version step for the strict-semver
           # rationale; identical logic, duplicated because the Linux
           # legs are standalone jobs.
-          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -200,11 +206,13 @@ jobs:
         run: bash scripts/ensure-node-pty-linux.sh prepare x64
 
       - name: Resolve bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
         run: npm run fetch:mosh -- --platform=linux --arch=x64
 
       - name: Build package
@@ -268,10 +276,10 @@ jobs:
           # See matrix job's Set version step for the strict-semver
           # rationale; identical logic, duplicated because the Linux
           # legs are standalone jobs.
-          if [[ "$GITHUB_REF" == refs/tags/v[0-9]*.[0-9]*.[0-9]* ]]; then
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="0.0.0-sha.${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -282,11 +290,13 @@ jobs:
         run: bash scripts/ensure-node-pty-linux.sh prepare arm64
 
       - name: Resolve bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
         run: npm run fetch:mosh -- --platform=linux --arch=arm64
 
       - name: Build package
@@ -317,18 +327,26 @@ jobs:
     name: release
     runs-on: ubuntu-latest
     needs: [build, build-linux-x64, build-linux-arm64]
-    # Only release on a strict v<MAJOR>.<MINOR>.<PATCH>[-pre] tag, or
-    # on an explicit opt-in via workflow_dispatch. PRs and branch
-    # pushes (even if accidentally named like `vfoo`) skip this job.
+    # Only release on a strict v<MAJOR>.<MINOR>.<PATCH>[-pre] tag.
+    # Manual workflow_dispatch can publish only when it is run from one
+    # of those tags. PRs and branch pushes skip this job.
     if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.'))
-      || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+      startsWith(github.ref, 'refs/tags/v')
+      && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     permissions:
       contents: write
       actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
+            echo "::error::Release tags must be v<MAJOR>.<MINOR>.<PATCH> or v<MAJOR>.<MINOR>.<PATCH>-<prerelease>."
+            exit 1
+          fi
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
