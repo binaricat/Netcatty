@@ -50,6 +50,17 @@ test("renders failed transfer actions with custom tooltips and readable labels",
   assert.match(markup, /focus-visible:ring-1/);
 });
 
+test("renders active transfer cancel action with an item-specific label", () => {
+  const markup = renderTransferItem({
+    ...baseTask,
+    status: "transferring",
+    error: undefined,
+    speed: 128,
+  });
+
+  assert.match(markup, /aria-label="Cancel: archive\.tar\.gz"/);
+});
+
 test("renders child resize handle as a keyboard-reachable separator", () => {
   const markup = renderTransferItem(
     {
