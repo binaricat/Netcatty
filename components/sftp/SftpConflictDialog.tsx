@@ -7,12 +7,16 @@ import React, { memo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import type { FileConflictAction } from '../../domain/models';
 
 interface ConflictItem {
     transferId: string;
     fileName: string;
     sourcePath: string;
     targetPath: string;
+    isDirectory: boolean;
+    existingType?: 'file' | 'directory' | 'symlink';
+    applyToAllCount?: number;
     existingSize: number;
     newSize: number;
     existingModified: number;
@@ -21,7 +25,7 @@ interface ConflictItem {
 
 interface SftpConflictDialogProps {
     conflicts: ConflictItem[];
-    onResolve: (conflictId: string, action: 'replace' | 'skip' | 'duplicate') => void;
+    onResolve: (conflictId: string, action: FileConflictAction, applyToAll?: boolean) => void;
     formatFileSize: (size: number) => string;
 }
 
@@ -36,13 +40,14 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
         return new Date(timestamp).toLocaleString();
     };
 
-    const handleAction = (action: 'replace' | 'skip' | 'duplicate') => {
-        if (applyToAll) {
-            // Apply to all conflicts
-            conflicts.forEach(c => onResolve(c.transferId, action));
-        } else {
-            onResolve(conflict.transferId, action);
-        }
+    const sameTypeConflictCount = Math.max(
+        conflict.applyToAllCount ?? 1,
+        conflicts.filter((item) => item.isDirectory === conflict.isDirectory).length,
+    );
+    const canMerge = conflict.isDirectory && conflict.existingType === 'directory';
+
+    const handleAction = (action: FileConflictAction) => {
+        onResolve(conflict.transferId, action, applyToAll);
         setApplyToAll(false);
     };
 
@@ -95,7 +100,7 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
                         </div>
                     </div>
 
-                    {conflicts.length > 1 && (
+                    {sameTypeConflictCount > 1 && (
                         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                             <input
                                 type="checkbox"
@@ -103,12 +108,19 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
                                 onChange={(e) => setApplyToAll(e.target.checked)}
                                 className="rounded border-border"
                             />
-                            {t('sftp.conflict.applyToAll', { count: conflicts.length })}
+                            {t('sftp.conflict.applyToAll', { count: sameTypeConflictCount })}
                         </label>
                     )}
                 </div>
 
-                <DialogFooter className="flex gap-2">
+                <DialogFooter className="flex flex-wrap gap-2 sm:justify-end sm:space-x-0">
+                    <Button
+                        variant="destructive"
+                        onClick={() => handleAction('stop')}
+                        className="flex-1"
+                    >
+                        {t('sftp.conflict.action.stop')}
+                    </Button>
                     <Button
                         variant="outline"
                         onClick={() => handleAction('skip')}
@@ -121,8 +133,18 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
                         onClick={() => handleAction('duplicate')}
                         className="flex-1"
                     >
-                        {t('sftp.conflict.action.keepBoth')}
+                        {t('sftp.conflict.action.duplicate')}
                     </Button>
+                    {conflict.isDirectory && (
+                        <Button
+                            variant="outline"
+                            onClick={() => handleAction('merge')}
+                            disabled={!canMerge}
+                            className="flex-1"
+                        >
+                            {t('sftp.conflict.action.merge')}
+                        </Button>
+                    )}
                     <Button
                         variant="default"
                         onClick={() => handleAction('replace')}

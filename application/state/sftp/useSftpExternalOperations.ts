@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useMemo } from "react";
-import { TransferTask, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
+import React, { useCallback, useRef, useMemo, useState } from "react";
+import { FileConflict, FileConflictAction, TransferTask, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
@@ -63,6 +63,8 @@ interface SftpExternalOperationsResult {
   ) => Promise<UploadResult[]>;
   cancelExternalUpload: () => Promise<void>;
   selectApplication: () => Promise<{ path: string; name: string } | null>;
+  uploadConflicts: FileConflict[];
+  resolveUploadConflict: (conflictId: string, action: FileConflictAction, applyToAll?: boolean) => void;
 }
 
 export const useSftpExternalOperations = (
@@ -88,6 +90,9 @@ export const useSftpExternalOperations = (
   // Track active file watches so the side panel can block host-switching.
   // Reset to 0 when the SFTP session disconnects (handled in SftpSidePanel).
   const activeFileWatchCountRef = useRef(0);
+  const [uploadConflicts, setUploadConflicts] = useState<FileConflict[]>([]);
+  const uploadConflictResolversRef = useRef(new Map<string, (action: FileConflictAction) => void>());
+  const uploadConflictDefaultsRef = useRef(new Map<string, FileConflictAction>());
 
   const readTextFile = useCallback(
     async (side: "left" | "right", filePath: string): Promise<string> => {
@@ -496,16 +501,78 @@ export const useSftpExternalOperations = (
     };
   }, [addExternalUpload, updateExternalUpload, dismissExternalUpload]);
 
+  const resolveUploadConflict = useCallback((conflictId: string, action: FileConflictAction, applyToAll = false) => {
+    const conflict = uploadConflicts.find((item) => item.transferId === conflictId);
+    if (conflict && applyToAll) {
+      uploadConflictDefaultsRef.current.set(conflict.isDirectory ? "directory" : "file", action);
+    }
+    setUploadConflicts((prev) => prev.filter((item) => item.transferId !== conflictId));
+    const resolver = uploadConflictResolversRef.current.get(conflictId);
+    if (!resolver) return;
+    uploadConflictResolversRef.current.delete(conflictId);
+    resolver(action);
+  }, [uploadConflicts]);
+
+  const createUploadConflictResolver = useCallback(() => {
+    return async (conflict: {
+      fileName: string;
+      targetPath: string;
+      isDirectory: boolean;
+      existingType?: 'file' | 'directory' | 'symlink';
+      existingSize: number;
+      newSize: number;
+      existingModified: number;
+      newModified: number;
+      applyToAllCount: number;
+    }): Promise<FileConflictAction> => {
+      const defaultAction = uploadConflictDefaultsRef.current.get(conflict.isDirectory ? "directory" : "file");
+      if (defaultAction) return defaultAction;
+
+      const conflictId = `upload-conflict-${crypto.randomUUID()}`;
+      const fileConflict: FileConflict = {
+        transferId: conflictId,
+        fileName: conflict.fileName,
+        sourcePath: "local",
+        targetPath: conflict.targetPath,
+        isDirectory: conflict.isDirectory,
+        existingType: conflict.existingType,
+        applyToAllCount: conflict.applyToAllCount,
+        existingSize: conflict.existingSize,
+        newSize: conflict.newSize,
+        existingModified: conflict.existingModified,
+        newModified: conflict.newModified,
+      };
+
+      setUploadConflicts((prev) => [...prev, fileConflict]);
+      return new Promise<FileConflictAction>((resolve) => {
+        uploadConflictResolversRef.current.set(conflictId, resolve);
+      });
+    };
+  }, []);
+
   // Create upload bridge that wraps netcattyBridge
   const createUploadBridge = useMemo((): UploadBridge => {
     const bridge = netcattyBridge.get();
     return {
       writeLocalFile: bridge?.writeLocalFile,
       mkdirLocal: bridge?.mkdirLocal,
+      statLocal: bridge?.statLocal,
+      deleteLocalFile: bridge?.deleteLocalFile,
       mkdirSftp: async (sftpId: string, path: string) => {
         const b = netcattyBridge.get();
         if (b?.mkdirSftp) {
           await b.mkdirSftp(sftpId, path);
+        }
+      },
+      statSftp: async (sftpId: string, path: string) => {
+        const b = netcattyBridge.get();
+        if (!b?.statSftp) return null;
+        return b.statSftp(sftpId, path);
+      },
+      deleteSftp: async (sftpId: string, path: string) => {
+        const b = netcattyBridge.get();
+        if (b?.deleteSftp) {
+          await b.deleteSftp(sftpId, path);
         }
       },
       writeSftpBinary: bridge?.writeSftpBinary,
@@ -596,6 +663,7 @@ export const useSftpExternalOperations = (
             joinPath,
             callbacks,
             useCompressedUpload,
+            resolveConflict: createUploadConflictResolver(),
           },
           controller
         );
@@ -624,6 +692,7 @@ export const useSftpExternalOperations = (
       sftpSessionsRef,
       createUploadCallbacks,
       createUploadBridge,
+      createUploadConflictResolver,
       useCompressedUpload,
     ],
   );
@@ -680,6 +749,7 @@ export const useSftpExternalOperations = (
             joinPath,
             callbacks,
             useCompressedUpload,
+            resolveConflict: createUploadConflictResolver(),
           },
           controller,
         );
@@ -707,6 +777,7 @@ export const useSftpExternalOperations = (
       connectionCacheKeyMapRef,
       createUploadCallbacks,
       createUploadBridge,
+      createUploadConflictResolver,
       getActivePane,
       refresh,
       sftpSessionsRef,
@@ -744,5 +815,7 @@ export const useSftpExternalOperations = (
     cancelExternalUpload,
     selectApplication,
     activeFileWatchCountRef,
+    uploadConflicts,
+    resolveUploadConflict,
   };
 };

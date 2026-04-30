@@ -1214,8 +1214,11 @@ const zhCN: Messages = {
   'sftp.conflict.size': '大小：',
   'sftp.conflict.modified': '修改时间：',
   'sftp.conflict.applyToAll': '将此操作应用到剩余的 {count} 个冲突',
+  'sftp.conflict.action.stop': '停止',
   'sftp.conflict.action.skip': '跳过',
   'sftp.conflict.action.keepBoth': '保留两者',
+  'sftp.conflict.action.duplicate': '创建副本',
+  'sftp.conflict.action.merge': '合并',
   'sftp.conflict.action.replace': '替换',
 
   // SFTP Upload Phases

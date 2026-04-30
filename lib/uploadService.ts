@@ -65,7 +65,11 @@ export interface UploadCallbacks {
 export interface UploadBridge {
   writeLocalFile?: (path: string, data: ArrayBuffer) => Promise<void>;
   mkdirLocal?: (path: string) => Promise<void>;
+  statLocal?: (path: string) => Promise<{ type: 'file' | 'directory' | 'symlink'; size: number; lastModified: number } | null>;
+  deleteLocalFile?: (path: string) => Promise<void>;
   mkdirSftp: (sftpId: string, path: string) => Promise<void>;
+  statSftp?: (sftpId: string, path: string) => Promise<{ type: 'file' | 'directory' | 'symlink'; size: number; lastModified: number } | null>;
+  deleteSftp?: (sftpId: string, path: string) => Promise<void>;
   writeSftpBinary?: (sftpId: string, path: string, data: ArrayBuffer) => Promise<void>;
   writeSftpBinaryWithProgress?: (
     sftpId: string,
@@ -111,6 +115,17 @@ export interface UploadConfig {
   callbacks?: UploadCallbacks;
   /** Use compressed upload for folders (requires tar on both local and remote) */
   useCompressedUpload?: boolean;
+  resolveConflict?: (conflict: {
+    fileName: string;
+    targetPath: string;
+    isDirectory: boolean;
+    existingType?: 'file' | 'directory' | 'symlink';
+    existingSize: number;
+    newSize: number;
+    existingModified: number;
+    newModified: number;
+    applyToAllCount: number;
+  }) => Promise<'stop' | 'skip' | 'replace' | 'duplicate' | 'merge'>;
 }
 
 // ============================================================================
@@ -314,7 +329,7 @@ export async function uploadFromDataTransfer(
   config: UploadConfig,
   controller?: UploadController
 ): Promise<UploadResult[]> {
-  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload } = config;
+  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload, resolveConflict } = config;
 
   // Reset controller if provided
   if (controller) {
@@ -346,7 +361,7 @@ export async function uploadFromDataTransfer(
   }
 
   // Check if this is a folder upload and compressed upload is enabled
-  if (useCompressedUpload && !isLocal && sftpId) {
+  if (useCompressedUpload && !resolveConflict && !isLocal && sftpId) {
     const rootFolders = detectRootFolders(entries);
     const folderEntries = Array.from(rootFolders.entries()).filter(([key]) => !key.startsWith("__file__"));
     const standaloneFileEntries = Array.from(rootFolders.entries()).filter(([key]) => key.startsWith("__file__"));
@@ -373,7 +388,7 @@ export async function uploadFromDataTransfer(
           });
 
           if (failedFolderEntries.length > 0) {
-            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
           }
         }
 
@@ -381,19 +396,19 @@ export async function uploadFromDataTransfer(
         let standaloneResults: UploadResult[] = [];
         if (standaloneFileEntries.length > 0) {
           const standaloneEntries = standaloneFileEntries.flatMap(([, entries]) => entries);
-          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
         }
 
         // Combine results: successful compressed + fallback results + standalone files
         return [...successfulFolders, ...fallbackResults, ...standaloneResults];
       } catch {
         // Fall back to regular upload
-        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
       }
     }
   }
 
-  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
 }
 
 /**
@@ -404,7 +419,7 @@ export async function uploadFromFileList(
   config: UploadConfig,
   controller?: UploadController
 ): Promise<UploadResult[]> {
-  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload } = config;
+  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload, resolveConflict } = config;
 
   if (controller) {
     controller.reset();
@@ -433,7 +448,7 @@ export async function uploadFromFileList(
   }
 
   // Check if this is a folder upload and compressed upload is enabled
-  if (useCompressedUpload && !isLocal && sftpId) {
+  if (useCompressedUpload && !resolveConflict && !isLocal && sftpId) {
     const rootFolders = detectRootFolders(entries);
     const folderEntries = Array.from(rootFolders.entries()).filter(([key]) => !key.startsWith("__file__"));
     const standaloneFileEntries = Array.from(rootFolders.entries()).filter(([key]) => key.startsWith("__file__"));
@@ -460,7 +475,7 @@ export async function uploadFromFileList(
           });
 
           if (failedFolderEntries.length > 0) {
-            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
           }
         }
 
@@ -468,19 +483,19 @@ export async function uploadFromFileList(
         let standaloneResults: UploadResult[] = [];
         if (standaloneFileEntries.length > 0) {
           const standaloneEntries = standaloneFileEntries.flatMap(([, entries]) => entries);
-          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
         }
 
         // Combine results: successful compressed + fallback results + standalone files
         return [...successfulFolders, ...fallbackResults, ...standaloneResults];
       } catch {
         // Fall back to regular upload
-        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
       }
     }
   }
 
-  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
 }
 
 /**
@@ -494,10 +509,58 @@ async function uploadEntries(
   bridge: UploadBridge,
   joinPath: (base: string, name: string) => string,
   callbacks?: UploadCallbacks,
-  controller?: UploadController
+  controller?: UploadController,
+  resolveConflict?: UploadConfig["resolveConflict"]
 ): Promise<UploadResult[]> {
   const results: UploadResult[] = [];
   const createdDirs = new Set<string>();
+
+  const statTarget = async (path: string) => {
+    try {
+      if (isLocal) return await bridge.statLocal?.(path);
+      if (sftpId) return await bridge.statSftp?.(sftpId, path);
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const deleteTarget = async (path: string) => {
+    if (isLocal) {
+      await bridge.deleteLocalFile?.(path);
+    } else if (sftpId) {
+      await bridge.deleteSftp?.(sftpId, path);
+    }
+  };
+
+  const splitNameForDuplicate = (name: string, isDirectory: boolean) => {
+    if (isDirectory) return { baseName: name, ext: "" };
+    const lastDot = name.lastIndexOf(".");
+    if (lastDot <= 0) return { baseName: name, ext: "" };
+    return { baseName: name.slice(0, lastDot), ext: name.slice(lastDot) };
+  };
+
+  const getDuplicateName = async (name: string, isDirectory: boolean) => {
+    const { baseName, ext } = splitNameForDuplicate(name, isDirectory);
+    for (let index = 1; index < 1000; index++) {
+      const suffix = index === 1 ? " (copy)" : ` (copy ${index})`;
+      const candidate = `${baseName}${suffix}${ext}`;
+      const candidatePath = joinPath(targetPath, candidate);
+      const existing = await statTarget(candidatePath);
+      if (!existing) return candidate;
+    }
+    return `${baseName} (copy ${Date.now()})${ext}`;
+  };
+
+  const renameRoot = (entry: DropEntry, oldName: string, newName: string): DropEntry => {
+    if (entry.relativePath === oldName) {
+      return { ...entry, relativePath: newName };
+    }
+    if (entry.relativePath.startsWith(`${oldName}/`)) {
+      return { ...entry, relativePath: `${newName}/${entry.relativePath.slice(oldName.length + 1)}` };
+    }
+    return entry;
+  };
 
   const ensureDirectory = async (dirPath: string) => {
     if (createdDirs.has(dirPath)) return;
@@ -518,7 +581,77 @@ async function uploadEntries(
 
   // Group entries by root folder
   const rootFolders = detectRootFolders(entries);
-  const sortedEntries = sortEntries(entries);
+  let resolvedEntries = entries;
+
+  if (resolveConflict) {
+    const resolved: DropEntry[] = [];
+    let stop = false;
+    const groups = Array.from(rootFolders.entries());
+
+    for (const [key, groupEntries] of groups) {
+      if (stop || controller?.isCancelled()) break;
+
+      const isStandaloneFile = key.startsWith("__file__");
+      const rootName = isStandaloneFile ? key.slice("__file__".length) : key;
+      const isDirectory = !isStandaloneFile;
+      const rootTargetPath = joinPath(targetPath, rootName);
+      const existing = await statTarget(rootTargetPath);
+
+      if (!existing) {
+        resolved.push(...groupEntries);
+        continue;
+      }
+
+      const newSize = groupEntries.reduce((sum, entry) => sum + (entry.file?.size ?? 0), 0);
+      const action = await resolveConflict({
+        fileName: rootName,
+        targetPath: rootTargetPath,
+        isDirectory,
+        existingType: existing.type,
+        existingSize: existing.size,
+        newSize,
+        existingModified: existing.lastModified,
+        newModified: Date.now(),
+        applyToAllCount: groups.filter(([groupKey]) => groupKey.startsWith("__file__") !== isDirectory).length,
+      });
+
+      if (action === "stop") {
+        stop = true;
+        await controller?.cancel();
+        resolved.length = 0;
+        results.push({ fileName: rootName, success: false, cancelled: true });
+        break;
+      }
+
+      if (action === "skip") {
+        results.push({ fileName: rootName, success: false, cancelled: true });
+        continue;
+      }
+
+      if (action === "replace") {
+        await deleteTarget(rootTargetPath);
+        resolved.push(...groupEntries);
+        continue;
+      }
+
+      if (action === "duplicate") {
+        const duplicateName = await getDuplicateName(rootName, isDirectory);
+        resolved.push(...groupEntries.map((entry) => renameRoot(entry, rootName, duplicateName)));
+        continue;
+      }
+
+      resolved.push(...groupEntries);
+    }
+
+    resolvedEntries = resolved;
+  }
+
+  if (resolvedEntries.length === 0) {
+    return results;
+  }
+
+  const resolvedRootFolders = detectRootFolders(resolvedEntries);
+  const sortedEntries = sortEntries(resolvedEntries);
 
   // Pre-create all needed directories in batch before file transfers
   const uploadT0 = performance.now();
@@ -572,7 +705,7 @@ async function uploadEntries(
   // Create bundled tasks for each root folder
   const bundleTaskIds = new Map<string, string>(); // rootName -> bundleTaskId
 
-  for (const [rootName, rootEntries] of rootFolders) {
+  for (const [rootName, rootEntries] of resolvedRootFolders) {
     const isStandaloneFile = rootName.startsWith("__file__");
     if (isStandaloneFile) continue;
 
@@ -947,7 +1080,7 @@ export async function uploadEntriesDirect(
   config: UploadConfig,
   controller?: UploadController
 ): Promise<UploadResult[]> {
-  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload } = config;
+  const { targetPath, sftpId, isLocal, bridge, joinPath, callbacks, useCompressedUpload, resolveConflict } = config;
 
   if (controller) {
     controller.reset();
@@ -959,7 +1092,7 @@ export async function uploadEntriesDirect(
   }
 
   // Support compressed folder uploads (same logic as uploadFromDataTransfer)
-  if (useCompressedUpload && !isLocal && sftpId) {
+  if (useCompressedUpload && !resolveConflict && !isLocal && sftpId) {
     const rootFolders = detectRootFolders(entries);
     const folderEntries = Array.from(rootFolders.entries()).filter(([key]) => !key.startsWith("__file__"));
     const standaloneFileEntries = Array.from(rootFolders.entries()).filter(([key]) => key.startsWith("__file__"));
@@ -983,24 +1116,24 @@ export async function uploadEntriesDirect(
             return failedFolderNames.has(topFolder);
           });
           if (failedFolderEntries.length > 0) {
-            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+            fallbackResults = await uploadEntries(failedFolderEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
           }
         }
 
         let standaloneResults: UploadResult[] = [];
         if (standaloneFileEntries.length > 0) {
           const standaloneEntries = standaloneFileEntries.flatMap(([, e]) => e);
-          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+          standaloneResults = await uploadEntries(standaloneEntries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
         }
 
         return [...successfulFolders, ...fallbackResults, ...standaloneResults];
       } catch {
-        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+        return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
       }
     }
   }
 
-  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller);
+  return uploadEntries(entries, targetPath, sftpId, isLocal, bridge, joinPath, callbacks, controller, resolveConflict);
 }
 /**
  * Upload folders using compression

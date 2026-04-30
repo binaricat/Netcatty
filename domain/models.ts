@@ -781,6 +781,7 @@ export type TransferDirection = 'upload' | 'download' | 'remote-to-remote' | 'lo
 
 export interface TransferTask {
   id: string;
+  batchId?: string;
   fileName: string;
   originalFileName?: string;
   sourcePath: string;
@@ -805,14 +806,21 @@ export interface TransferTask {
   parentTaskId?: string;
   sourceLastModified?: number; // Cached from file list to avoid redundant stat
   skipConflictCheck?: boolean; // Skip conflict check for replace operations
+  replaceExistingTarget?: boolean; // Delete the existing target before transferring
   retryable?: boolean; // False for task types that cannot be safely replayed through generic retry
 }
 
+export type FileConflictAction = 'stop' | 'skip' | 'replace' | 'duplicate' | 'merge';
+
 export interface FileConflict {
   transferId: string;
+  batchId?: string;
   fileName: string;
   sourcePath: string;
   targetPath: string;
+  isDirectory: boolean;
+  existingType?: 'file' | 'directory' | 'symlink';
+  applyToAllCount?: number;
   existingSize: number;
   newSize: number;
   existingModified: number;

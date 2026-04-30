@@ -856,8 +856,11 @@ const en: Messages = {
   'sftp.conflict.size': 'Size:',
   'sftp.conflict.modified': 'Modified:',
   'sftp.conflict.applyToAll': 'Apply this action to all {count} remaining conflicts',
+  'sftp.conflict.action.stop': 'Stop',
   'sftp.conflict.action.skip': 'Skip',
   'sftp.conflict.action.keepBoth': 'Keep Both',
+  'sftp.conflict.action.duplicate': 'Duplicate',
+  'sftp.conflict.action.merge': 'Merge',
   'sftp.conflict.action.replace': 'Replace',
 
   // SFTP Upload Phases
