@@ -494,9 +494,8 @@ export interface TerminalSettings {
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
 
   // Mosh Connection
-  // Absolute path to the local `mosh` client binary. Empty triggers
-  // auto-discovery (PATH + Homebrew/MacPorts/nix fallbacks). When set,
-  // the value is used as-is and a missing file produces a clear error.
+  // Legacy override retained for old settings payloads and internal callers.
+  // The normal UI path uses Netcatty's bundled mosh-client.
   moshClientPath: string;
 
   // Server Stats Display (Linux only)
@@ -644,7 +643,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   localStartDir: '', // Empty = use home directory
   keepaliveInterval: 0, // 0 = disabled (use SSH library defaults)
   x11Display: '', // Empty = use DISPLAY/default local X server
-  moshClientPath: '', // Empty = auto-detect mosh on PATH / common install dirs
+  moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   disableBracketedPaste: false, // Bracketed paste enabled by default
