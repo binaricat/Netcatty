@@ -33,11 +33,14 @@ import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import {
   extractProviderContinuationFromRawChunk,
+  isProviderContinuationForSource,
   mergeProviderContinuation,
   normalizeProviderContinuationOptions,
+  withProviderContinuationSource,
   type OpenAIChatAssistantFields,
   type ProviderContinuation,
   type ProviderContinuationOptions,
+  type ProviderContinuationSource,
 } from '../../../infrastructure/ai/providerContinuation';
 
 // -------------------------------------------------------------------
@@ -49,6 +52,7 @@ interface TextDeltaChunk {
   type: 'text' | 'text-delta';
   text?: string;
   textDelta?: string;
+  providerMetadata?: unknown;
 }
 
 /** Shape of a reasoning chunk from the Vercel AI SDK fullStream. */
@@ -73,6 +77,7 @@ interface ToolCallChunk {
   toolName: string;
   input?: unknown;
   args?: unknown;
+  providerMetadata?: unknown;
 }
 
 /** Shape of a tool-result chunk from the Vercel AI SDK fullStream. */
@@ -172,13 +177,21 @@ export interface DefaultTargetSessionHint extends TerminalSessionInfo {
 }
 
 interface CattyProviderContinuationContext {
+  source: ProviderContinuationSource;
   openAIChatAssistantFields: Array<OpenAIChatAssistantFields | undefined>;
 }
 
 type AssistantContentPart =
   | { type: 'reasoning'; text: string; providerOptions?: ProviderContinuationOptions }
-  | { type: 'text'; text: string }
-  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown };
+  | { type: 'text'; text: string; providerOptions?: ProviderContinuationOptions }
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown; providerOptions?: ProviderContinuationOptions };
+
+function toAssistantModelContent(parts: AssistantContentPart[]): string | AssistantContentPart[] {
+  if (parts.length === 1 && parts[0].type === 'text' && !parts[0].providerOptions) {
+    return parts[0].text;
+  }
+  return parts;
+}
 
 /** Typed accessor for the netcatty bridge on the window object. */
 export function getNetcattyBridge(): PanelBridge | undefined {
@@ -459,18 +472,25 @@ export function useAIChatStreaming({
       return activeMsgId;
     };
 
-    const mergeOpenAIChatFields = (
-      messageId: string,
-      fields: OpenAIChatAssistantFields | undefined,
-    ) => {
-      if (!fields || !continuationContext) return;
-
+    const ensureOpenAIChatFieldSlot = (messageId: string): number | undefined => {
+      if (!continuationContext) return undefined;
       let fieldIndex = openAIFieldIndexByMessageId.get(messageId);
       if (fieldIndex === undefined) {
         fieldIndex = continuationContext.openAIChatAssistantFields.length;
         continuationContext.openAIChatAssistantFields.push(undefined);
         openAIFieldIndexByMessageId.set(messageId, fieldIndex);
       }
+      return fieldIndex;
+    };
+
+    const mergeOpenAIChatFields = (
+      messageId: string,
+      fields: OpenAIChatAssistantFields | undefined,
+    ) => {
+      if (!fields || !continuationContext) return;
+
+      const fieldIndex = ensureOpenAIChatFieldSlot(messageId);
+      if (fieldIndex === undefined) return;
 
       const merged = mergeProviderContinuation(
         { openAIChatAssistantFields: continuationContext.openAIChatAssistantFields[fieldIndex] },
@@ -485,9 +505,10 @@ export function useAIChatStreaming({
       thinkingText = '',
     ) => {
       if (!continuation && !thinkingText) return;
-      mergeOpenAIChatFields(messageId, continuation?.openAIChatAssistantFields);
+      const sourcedContinuation = withProviderContinuationSource(continuation, continuationContext?.source);
+      mergeOpenAIChatFields(messageId, sourcedContinuation?.openAIChatAssistantFields);
       updateMessageById(streamSessionId, messageId, msg => {
-        const providerContinuation = mergeProviderContinuation(msg.providerContinuation, continuation);
+        const providerContinuation = mergeProviderContinuation(msg.providerContinuation, sourcedContinuation);
         return {
           ...msg,
           ...(providerContinuation ? { providerContinuation } : {}),
@@ -543,6 +564,11 @@ export function useAIChatStreaming({
         case 'text-delta': {
           const typedChunk = chunk as TextDeltaChunk;
           const text = typedChunk.text ?? typedChunk.textDelta;
+          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
+          if (providerOptions) {
+            const messageId = ensureAssistantMessage();
+            updateAssistantContinuation(messageId, { textProviderOptions: providerOptions });
+          }
           if (text) {
             pendingText += text;
             if (rafId === null) {
@@ -596,7 +622,10 @@ export function useAIChatStreaming({
           cancelPendingFlush();
           flushText();
           const typedChunk = chunk as ToolCallChunk;
-          updateMessageById(streamSessionId, activeMsgId, msg => ({
+          const messageId = ensureAssistantMessage();
+          ensureOpenAIChatFieldSlot(messageId);
+          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
+          updateMessageById(streamSessionId, messageId, msg => ({
             ...msg,
             toolCalls: [...(msg.toolCalls || []), {
               id: typedChunk.toolCallId,
@@ -606,6 +635,13 @@ export function useAIChatStreaming({
             executionStatus: 'running',
             statusText: undefined,
           }));
+          if (providerOptions) {
+            updateAssistantContinuation(messageId, {
+              toolCallProviderOptionsById: {
+                [typedChunk.toolCallId]: providerOptions,
+              },
+            });
+          }
           break;
         }
         case 'tool-result': {
@@ -871,7 +907,13 @@ export function useAIChatStreaming({
       return;
     }
 
+    const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
     const continuationContext: CattyProviderContinuationContext = {
+      source: {
+        providerConfigId: context.activeProvider.id,
+        providerType: context.activeProvider.providerId,
+        modelId: activeModelId,
+      },
       openAIChatAssistantFields: [],
     };
 
@@ -919,12 +961,18 @@ export function useAIChatStreaming({
             sdkMessages.push({ role: 'user', content: m.content });
           }
         } else if (m.role === 'assistant') {
+          const activeContinuation = isProviderContinuationForSource(
+            m.providerContinuation,
+            continuationContext.source,
+          )
+            ? m.providerContinuation
+            : undefined;
           if (m.toolCalls?.length) {
             // Only include tool calls that have matching results
             const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
             const contentParts: AssistantContentPart[] = [];
             if (resolvedCalls.length > 0) {
-              for (const part of m.providerContinuation?.reasoningParts ?? []) {
+              for (const part of activeContinuation?.reasoningParts ?? []) {
                 if (!part.text && !part.providerOptions) continue;
                 contentParts.push({
                   type: 'reasoning' as const,
@@ -934,25 +982,48 @@ export function useAIChatStreaming({
               }
             }
             if (m.content) {
-              contentParts.push({ type: 'text' as const, text: m.content });
+              contentParts.push({
+                type: 'text' as const,
+                text: m.content,
+                ...(activeContinuation?.textProviderOptions ? { providerOptions: activeContinuation.textProviderOptions } : {}),
+              });
             }
             for (const tc of resolvedCalls) {
+              const providerOptions = activeContinuation?.toolCallProviderOptionsById?.[tc.id];
               contentParts.push({
                 type: 'tool-call' as const,
                 toolCallId: tc.id,
                 toolName: tc.name,
                 input: tc.arguments ?? {},
+                ...(providerOptions ? { providerOptions } : {}),
               });
             }
             // If all tool calls were orphaned, just include the text content
             if (contentParts.length > 0) {
-              sdkMessages.push({ role: 'assistant', content: contentParts.length === 1 && contentParts[0].type === 'text' ? (contentParts[0] as { type: 'text'; text: string }).text : contentParts });
+              sdkMessages.push({ role: 'assistant', content: toAssistantModelContent(contentParts) });
               if (resolvedCalls.length > 0) {
-                continuationContext.openAIChatAssistantFields.push(m.providerContinuation?.openAIChatAssistantFields);
+                continuationContext.openAIChatAssistantFields.push(activeContinuation?.openAIChatAssistantFields);
               }
             }
           } else if (m.content) {
-            sdkMessages.push({ role: 'assistant', content: m.content });
+            const contentParts: AssistantContentPart[] = [];
+            for (const part of activeContinuation?.reasoningParts ?? []) {
+              if (!part.text && !part.providerOptions) continue;
+              contentParts.push({
+                type: 'reasoning' as const,
+                text: part.text,
+                ...(part.providerOptions ? { providerOptions: part.providerOptions } : {}),
+              });
+            }
+            contentParts.push({
+              type: 'text' as const,
+              text: m.content,
+              ...(activeContinuation?.textProviderOptions ? { providerOptions: activeContinuation.textProviderOptions } : {}),
+            });
+            sdkMessages.push({
+              role: 'assistant',
+              content: toAssistantModelContent(contentParts),
+            });
           }
         } else if (m.role === 'tool' && m.toolResults?.length) {
           sdkMessages.push({
@@ -990,7 +1061,7 @@ export function useAIChatStreaming({
         model = createModelFromConfig(
           {
             ...context.activeProvider,
-            defaultModel: context.activeModelId || context.activeProvider.defaultModel || '',
+            defaultModel: activeModelId,
           },
           {
             getOpenAIChatAssistantFields: () => continuationContext.openAIChatAssistantFields,

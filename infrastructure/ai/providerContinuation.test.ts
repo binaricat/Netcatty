@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   applyOpenAIChatContinuationToBody,
   extractProviderContinuationFromRawChunk,
+  isProviderContinuationForSource,
   mergeProviderContinuation,
+  normalizeProviderContinuationOptions,
+  withProviderContinuationSource,
 } from './providerContinuation';
 
 test('extracts OpenAI-compatible reasoning deltas from raw provider chunks', () => {
@@ -75,6 +78,97 @@ test('merges provider reasoning metadata into the reasoning part it belongs to',
       providerOptions: { anthropic: { signature: 'sig-1' } },
     },
   ]);
+});
+
+test('normalizes provider metadata without unsafe object keys', () => {
+  const unsafeMetadata = JSON.parse('{"google":{"thoughtSignature":"sig-1","__proto__":{"polluted":true},"nested":{"constructor":{"bad":true},"value":"safe"}},"__proto__":{"ignored":true}}');
+  const normalized = normalizeProviderContinuationOptions(unsafeMetadata);
+
+  assert.deepEqual(normalized, {
+    google: {
+      thoughtSignature: 'sig-1',
+      nested: { value: 'safe' },
+    },
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized?.google ?? {}, '__proto__'), false);
+});
+
+test('merges equivalent provider options without depending on key order', () => {
+  const merged = mergeProviderContinuation(
+    { reasoningParts: [{ text: 'one ', providerOptions: { google: { b: 2, a: 1 } } }] },
+    { reasoningParts: [{ text: 'two', providerOptions: { google: { a: 1, b: 2 } } }] },
+  );
+
+  assert.deepEqual(merged?.reasoningParts, [
+    {
+      text: 'one two',
+      providerOptions: { google: { b: 2, a: 1 } },
+    },
+  ]);
+});
+
+test('cleans nested unsafe provider option keys when merging saved data', () => {
+  const unsafeOptions = JSON.parse('{"google":{"nested":{"prototype":{"bad":true},"value":"safe"}}}');
+  const merged = mergeProviderContinuation(
+    { reasoningParts: [{ text: 'one ', providerOptions: unsafeOptions }] },
+    { reasoningParts: [{ text: 'two' }] },
+  );
+
+  assert.deepEqual(merged?.reasoningParts, [
+    {
+      text: 'one ',
+      providerOptions: { google: { nested: { value: 'safe' } } },
+    },
+    { text: 'two' },
+  ]);
+});
+
+test('tracks continuation source so provider switches do not replay hidden context', () => {
+  const source = { providerConfigId: 'deepseek-custom', providerType: 'custom', modelId: 'deepseek-v4-flash' };
+  const continuation = withProviderContinuationSource(
+    { openAIChatAssistantFields: { reasoning_content: 'think' } },
+    source,
+  );
+
+  assert.equal(isProviderContinuationForSource(continuation, source), true);
+  assert.equal(
+    isProviderContinuationForSource(continuation, {
+      providerConfigId: 'openai',
+      providerType: 'openai',
+      modelId: 'gpt-5',
+    }),
+    false,
+  );
+});
+
+test('drops old hidden context instead of relabeling it when sources differ', () => {
+  const deepseek = { providerConfigId: 'deepseek-custom', providerType: 'custom', modelId: 'deepseek-v4-flash' };
+  const openai = { providerConfigId: 'openai', providerType: 'openai', modelId: 'gpt-5' };
+  const merged = mergeProviderContinuation(
+    { source: deepseek, openAIChatAssistantFields: { reasoning_content: 'old' } },
+    { source: openai, reasoningParts: [{ text: 'new' }] },
+  );
+
+  assert.deepEqual(merged, {
+    source: openai,
+    reasoningParts: [{ text: 'new' }],
+  });
+});
+
+test('merges tool-call provider options by tool call id', () => {
+  const merged = mergeProviderContinuation(
+    { toolCallProviderOptionsById: { call_1: { google: { thoughtSignature: 'sig-1' } } } },
+    { toolCallProviderOptionsById: { call_1: { google: { extra: true } } } },
+  );
+
+  assert.deepEqual(merged?.toolCallProviderOptionsById, {
+    call_1: {
+      google: {
+        thoughtSignature: 'sig-1',
+        extra: true,
+      },
+    },
+  });
 });
 
 test('matches continuation fields only to assistant tool-call messages', () => {
