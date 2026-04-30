@@ -42,6 +42,8 @@ interface SftpTransferItemProps {
     onSetNameColumnWidth?: (width: number) => void;
     childNameColumnMinWidth?: number;
     childNameColumnMaxWidth?: number;
+    childListId?: string;
+    resizeHandleTabIndex?: number;
 }
 
 const TruncatedTextWithTooltip: React.FC<{
@@ -89,6 +91,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     onSetNameColumnWidth,
     childNameColumnMinWidth = 160,
     childNameColumnMaxWidth = 480,
+    childListId,
+    resizeHandleTabIndex = 0,
 }) => {
     const { t } = useI18n();
 
@@ -206,6 +210,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const resizeNameColumnLabel = t('sftp.transfers.resizeNameColumn');
     const toggleChildrenLabel = isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList');
     const actionButtonClass = "h-6 w-6 focus-visible:ring-1 focus-visible:ring-primary/50";
+    const actionAriaLabel = (label: string) => `${label}: ${task.fileName}`;
 
     const setNameColumnWidth = (width: number) => {
         const nextWidth = Math.max(childNameColumnMinWidth, Math.min(childNameColumnMaxWidth, width));
@@ -235,21 +240,21 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         <div className="flex items-center gap-1 shrink-0">
             {task.status === 'failed' && task.retryable !== false && (
                 <IconButtonWithTooltip label={retryActionLabel}>
-                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onRetry} aria-label={retryActionLabel}>
+                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onRetry} aria-label={actionAriaLabel(retryActionLabel)}>
                         <RefreshCw size={12} />
                     </Button>
                 </IconButtonWithTooltip>
             )}
             {(task.status === 'pending' || task.status === 'transferring') && (
                 <IconButtonWithTooltip label={cancelActionLabel}>
-                    <Button variant="ghost" size="icon" className={cn(actionButtonClass, "text-destructive hover:text-destructive")} onClick={onCancel} aria-label={cancelActionLabel}>
+                    <Button variant="ghost" size="icon" className={cn(actionButtonClass, "text-destructive hover:text-destructive")} onClick={onCancel} aria-label={actionAriaLabel(cancelActionLabel)}>
                         <X size={12} />
                     </Button>
                 </IconButtonWithTooltip>
             )}
             {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
                 <IconButtonWithTooltip label={dismissActionLabel}>
-                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onDismiss} aria-label={dismissActionLabel}>
+                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onDismiss} aria-label={actionAriaLabel(dismissActionLabel)}>
                         <X size={12} />
                     </Button>
                 </IconButtonWithTooltip>
@@ -285,7 +290,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                             aria-valuemin={childNameColumnMinWidth}
                             aria-valuemax={childNameColumnMaxWidth}
                             aria-valuenow={childNameColumnWidth}
-                            tabIndex={0}
+                            tabIndex={resizeHandleTabIndex}
                         >
                             <GripVertical size={10} />
                         </div>
@@ -327,6 +332,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         className="inline-flex shrink-0 items-center gap-1 rounded border border-border/60 bg-secondary/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                         onClick={onToggleChildren}
                         aria-label={toggleChildrenLabel}
+                        aria-expanded={isExpanded}
+                        aria-controls={childListId}
                     >
                         {toggleChildrenLabel}
                         {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
@@ -440,6 +447,8 @@ const arePropsEqual = (
     if ((prevProps.visibleChildCount ?? 0) !== (nextProps.visibleChildCount ?? 0)) return false;
     if ((prevProps.childNameColumnMinWidth ?? 160) !== (nextProps.childNameColumnMinWidth ?? 160)) return false;
     if ((prevProps.childNameColumnMaxWidth ?? 480) !== (nextProps.childNameColumnMaxWidth ?? 480)) return false;
+    if ((prevProps.childListId ?? '') !== (nextProps.childListId ?? '')) return false;
+    if ((prevProps.resizeHandleTabIndex ?? 0) !== (nextProps.resizeHandleTabIndex ?? 0)) return false;
 
     if (next.status === 'transferring') {
         if (next.totalBytes <= 0 && prev.transferredBytes !== next.transferredBytes) return false;

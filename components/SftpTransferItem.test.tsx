@@ -45,8 +45,8 @@ const renderTransferItem = (
 test("renders failed transfer actions with custom tooltips and readable labels", () => {
   const markup = renderTransferItem(baseTask);
 
-  assert.match(markup, /aria-label="Retry"/);
-  assert.match(markup, /aria-label="Dismiss"/);
+  assert.match(markup, /aria-label="Retry: archive\.tar\.gz"/);
+  assert.match(markup, /aria-label="Dismiss: archive\.tar\.gz"/);
   assert.match(markup, /focus-visible:ring-1/);
 });
 
@@ -75,6 +75,27 @@ test("renders child resize handle as a keyboard-reachable separator", () => {
   assert.match(markup, /tabindex="0"/);
 });
 
+test("can remove duplicate child resize handles from the tab order", () => {
+  const markup = renderTransferItem(
+    {
+      ...baseTask,
+      id: "child-transfer-2",
+      parentTaskId: "transfer-1",
+      status: "pending",
+      error: undefined,
+    },
+    {
+      isChild: true,
+      onResizeNameColumn: () => {},
+      onSetNameColumnWidth: () => {},
+      resizeHandleTabIndex: -1,
+    },
+  );
+
+  assert.match(markup, /role="separator"/);
+  assert.match(markup, /tabindex="-1"/);
+});
+
 test("keeps reveal target and child toggle as separate buttons", () => {
   const markup = renderTransferItem(
     {
@@ -88,6 +109,7 @@ test("keeps reveal target and child toggle as separate buttons", () => {
       onRevealTarget: () => {},
       canToggleChildren: true,
       isExpanded: false,
+      childListId: "children-transfer-1",
       onToggleChildren: () => {},
     },
   );
@@ -100,4 +122,6 @@ test("keeps reveal target and child toggle as separate buttons", () => {
 
   assert.notEqual(toggleStart, -1);
   assert.ok(toggleStart > revealEnd);
+  assert.match(markup, /aria-expanded="false"/);
+  assert.match(markup, /aria-controls="children-transfer-1"/);
 });
