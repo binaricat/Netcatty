@@ -27,12 +27,16 @@ directly (see `electron/bridges/moshHandshake.cjs` and
    default workflow.
 
 2. The release built by that workflow gets a tag like
-   `mosh-bin-1.4.0-1`, with `SHA256SUMS` attached.
+   `mosh-bin-1.4.0-1`, with `SHA256SUMS` attached. When the workflow
+   publishes a release, it also updates the repository variable
+   `MOSH_BIN_RELEASE` to that tag.
 
-3. Release packaging sets `MOSH_BIN_RELEASE=mosh-bin-1.4.0-1` and runs
-   `npm run fetch:mosh` to pull the binaries into
-   `resources/mosh/<platform-arch>/`. For local packaging, set
-   `MOSH_BIN_RELEASE` yourself before running the same fetch command.
+3. Release packaging runs `scripts/resolve-mosh-bin-release.cjs` before
+   `npm run fetch:mosh`. It uses an explicit workflow input first, then
+   the `MOSH_BIN_RELEASE` repository variable, then the latest
+   non-draft `mosh-bin-*` GitHub Release. The fetch step pulls the
+   binaries into `resources/mosh/<platform-arch>/`. For local packaging,
+   set `MOSH_BIN_RELEASE` yourself before running the same fetch command.
    `electron-builder.config.cjs` then copies the matching binary into
    `Resources/mosh/mosh-client[.exe]`.
 

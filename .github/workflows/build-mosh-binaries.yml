@@ -207,6 +207,7 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - name: Download artifacts
@@ -251,3 +252,8 @@ jobs:
             All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.
           draft: false
           prerelease: false
+      - name: Set default bundled mosh-client release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+        run: gh variable set MOSH_BIN_RELEASE --body "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"

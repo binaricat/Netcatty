@@ -65,13 +65,11 @@ jobs:
             npm install "@zed-industries/codex-acp-win32-x64@${CODEX_VER}" "@zed-industries/codex-acp-win32-arm64@${CODEX_VER}" --no-save --force
           fi
 
-      - name: Require bundled mosh-client release
+      - name: Resolve bundled mosh-client release
         shell: bash
-        run: |
-          if [[ -z "${MOSH_BIN_RELEASE:-}" ]]; then
-            echo "::error::Set workflow input mosh_bin_release or repository variable MOSH_BIN_RELEASE before packaging."
-            exit 1
-          fi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
         shell: bash
@@ -167,12 +165,10 @@ jobs:
           npm_config_arch: x64
         run: bash scripts/ensure-node-pty-linux.sh prepare x64
 
-      - name: Require bundled mosh-client release
-        run: |
-          if [ -z "${MOSH_BIN_RELEASE:-}" ]; then
-            echo "::error::Set workflow input mosh_bin_release or repository variable MOSH_BIN_RELEASE before packaging."
-            exit 1
-          fi
+      - name: Resolve bundled mosh-client release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
         run: npm run fetch:mosh -- --platform=linux --arch=x64
@@ -248,12 +244,10 @@ jobs:
           npm_config_arch: arm64
         run: bash scripts/ensure-node-pty-linux.sh prepare arm64
 
-      - name: Require bundled mosh-client release
-        run: |
-          if [ -z "${MOSH_BIN_RELEASE:-}" ]; then
-            echo "::error::Set workflow input mosh_bin_release or repository variable MOSH_BIN_RELEASE before packaging."
-            exit 1
-          fi
+      - name: Resolve bundled mosh-client release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/resolve-mosh-bin-release.cjs
 
       - name: Fetch bundled mosh-client
         run: npm run fetch:mosh -- --platform=linux --arch=arm64
