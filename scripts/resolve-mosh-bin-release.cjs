@@ -56,7 +56,18 @@ function pickLatestMoshBinRelease(releases) {
     })[0]?.release.tag_name;
 }
 
-function requestJson(url, env, depth = 0) {
+function parseNextLink(linkHeader) {
+  if (!linkHeader) return null;
+  for (const part of String(linkHeader).split(",")) {
+    const match = part.match(/^\s*<([^>]+)>\s*;\s*(.+)\s*$/);
+    if (!match) continue;
+    const rel = match[2].split(";").some((attr) => attr.trim() === 'rel="next"');
+    if (rel) return match[1];
+  }
+  return null;
+}
+
+function requestJsonWithHeaders(url, env, depth = 0) {
   return new Promise((resolve, reject) => {
     if (depth > 5) {
       reject(new Error("too many redirects while looking up mosh binary releases"));
@@ -75,7 +86,7 @@ function requestJson(url, env, depth = 0) {
       const location = res.headers.location;
       if (res.statusCode >= 300 && res.statusCode < 400 && location) {
         res.resume();
-        resolve(requestJson(new URL(location, url).toString(), env, depth + 1));
+        resolve(requestJsonWithHeaders(new URL(location, url).toString(), env, depth + 1));
         return;
       }
 
@@ -88,7 +99,7 @@ function requestJson(url, env, depth = 0) {
           return;
         }
         try {
-          resolve(JSON.parse(body));
+          resolve({ json: JSON.parse(body), headers: res.headers });
         } catch (err) {
           reject(new Error(`GitHub API returned invalid JSON: ${err.message}`));
         }
@@ -98,7 +109,7 @@ function requestJson(url, env, depth = 0) {
   });
 }
 
-async function loadReleases(env) {
+async function loadReleases(env, request = requestJsonWithHeaders) {
   if (env.MOSH_BIN_RELEASES_JSON) {
     const parsed = JSON.parse(env.MOSH_BIN_RELEASES_JSON);
     if (!Array.isArray(parsed)) {
@@ -109,9 +120,24 @@ async function loadReleases(env) {
 
   const { owner, repo } = parseRepository(env);
   const apiBase = (env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
-  const url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=100`;
+  let url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases?per_page=100`;
   log(`looking up latest mosh-bin-* release in ${owner}/${repo}`);
-  return requestJson(url, env);
+  const releases = [];
+  const seen = new Set();
+  while (url) {
+    if (seen.has(url)) {
+      throw new Error(`GitHub API pagination looped while looking up releases: ${url}`);
+    }
+    seen.add(url);
+
+    const { json, headers = {} } = await request(url, env);
+    if (!Array.isArray(json)) {
+      throw new Error("GitHub API releases response was not an array");
+    }
+    releases.push(...json);
+    url = parseNextLink(headers.link);
+  }
+  return releases;
 }
 
 function exportRelease(release, env) {
@@ -150,6 +176,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  loadReleases,
+  parseNextLink,
   validateReleaseTag,
   parseRepository,
   pickLatestMoshBinRelease,

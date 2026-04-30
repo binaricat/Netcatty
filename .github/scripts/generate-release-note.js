@@ -56,8 +56,7 @@ const files = {
     x64: `Netcatty-${version}-mac-x64.dmg`
   },
   win: {
-    x64: `Netcatty-${version}-win-x64.exe`,
-    arm64: `Netcatty-${version}-win-arm64.exe`
+    x64: `Netcatty-${version}-win-x64.exe`
   },
   linux: {
     appimage: {
@@ -77,8 +76,7 @@ const files = {
 
 const badges = {
   win: {
-    setup_x64: `[![Setup x64](https://img.shields.io/badge/Setup-x64-0078D6?style=flat-square&logo=windows)](${baseUrl}/${files.win.x64})`,
-    setup_arm64: `[![Setup arm64](https://img.shields.io/badge/Setup-arm64-0078D6?style=flat-square&logo=windows)](${baseUrl}/${files.win.arm64})`
+    setup_x64: `[![Setup x64](https://img.shields.io/badge/Setup-x64-0078D6?style=flat-square&logo=windows)](${baseUrl}/${files.win.x64})`
   },
   mac: {
     apple_silicon: `[![DMG Apple Silicon](https://img.shields.io/badge/DMG-Apple_Silicon-000000?style=flat-square&logo=apple)](${baseUrl}/${files.mac.arm64})`,
@@ -99,7 +97,7 @@ const content = `
 
 | OS | Download |
 | :--- | :--- |
-| **Windows** | ${badges.win.setup_x64} ${badges.win.setup_arm64} |
+| **Windows** | ${badges.win.setup_x64} |
 | **macOS** | ${badges.mac.apple_silicon} ${badges.mac.intel} |
 | **Linux** | ${badges.linux.appimage_x64} ${badges.linux.deb_x64} ${badges.linux.rpm_x64} <br> ${badges.linux.appimage_arm64} ${badges.linux.deb_arm64} ${badges.linux.rpm_arm64} |
 `;
