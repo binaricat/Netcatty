@@ -1350,13 +1350,31 @@ export const useSftpTransfers = ({
       const conflict = conflictsRef.current.find((c) => c.transferId === conflictId);
       if (!conflict) return;
 
-      setConflicts((prev) => prev.filter((c) => c.transferId !== conflictId));
-
       const task = transfersRef.current.find((t) => t.id === conflictId);
-      if (!task) return;
+      if (!task) {
+        setConflicts((prev) => prev.filter((c) => c.transferId !== conflictId));
+        return;
+      }
+
+      const selectedConflictKey = conflictDefaultKey(task.batchId, task.isDirectory);
+      const affectedConflicts = applyToAll
+        ? conflictsRef.current.filter((candidate) =>
+            conflictDefaultKey(candidate.batchId, candidate.isDirectory) === selectedConflictKey,
+          )
+        : [conflict];
+      const affectedConflictIds = new Set(affectedConflicts.map((candidate) => candidate.transferId));
+      const affectedTasks = affectedConflicts
+        .map((candidate) => transfersRef.current.find((transfer) => transfer.id === candidate.transferId))
+        .filter((candidate): candidate is TransferTask => Boolean(candidate));
 
       if (applyToAll) {
-        conflictDefaultsRef.current.set(conflictDefaultKey(task.batchId, task.isDirectory), action);
+        conflictDefaultsRef.current.set(selectedConflictKey, action);
+      }
+
+      setConflicts((prev) => prev.filter((c) => !affectedConflictIds.has(c.transferId)));
+
+      if (affectedTasks.length === 0) {
+        return;
       }
 
       if (action === "stop") {
@@ -1365,63 +1383,76 @@ export const useSftpTransfers = ({
       }
 
       if (action === "skip") {
-        cancelledTasksRef.current.add(conflictId);
+        for (const affectedTask of affectedTasks) {
+          cancelledTasksRef.current.add(affectedTask.id);
+        }
         setTransfers((prev) =>
-          prev.map((t) =>
-            t.id === conflictId
+          prev.map((t) => affectedConflictIds.has(t.id)
               ? { ...t, status: "cancelled" as TransferStatus, endTime: Date.now() }
               : t,
           ),
         );
-        await completeCancelledTask(task);
+        for (const affectedTask of affectedTasks) {
+          await completeCancelledTask(affectedTask);
+        }
         return;
       }
 
-      let updatedTask = { ...task };
+      const updatedTasks: TransferTask[] = [];
 
-      if (action === "duplicate") {
-        const endpoints = resolveTaskEndpoints(task);
-        if (!endpoints) return;
-        const targetSftpId = endpoints.targetPane.connection?.isLocal
-          ? null
-          : sftpSessionsRef.current.get(endpoints.targetPane.connection!.id) ?? null;
-        const targetEncoding = endpoints.targetPane.connection?.isLocal
-          ? "auto"
-          : endpoints.targetPane.filenameEncoding || "auto";
-        const duplicateTarget = await getDuplicateTarget(task, endpoints.targetPane, targetSftpId, targetEncoding);
-        updatedTask = {
-          ...task,
-          fileName: duplicateTarget.fileName,
-          targetPath: duplicateTarget.targetPath,
-          skipConflictCheck: true,
-        };
-      } else if (action === "replace") {
-        updatedTask = {
-          ...task,
-          skipConflictCheck: true,
-          replaceExistingTarget: true,
-        };
-      } else if (action === "merge") {
-        updatedTask = {
-          ...task,
-          skipConflictCheck: true,
-          replaceExistingTarget: false,
-        };
+      for (const affectedTask of affectedTasks) {
+        let updatedTask = { ...affectedTask };
+
+        if (action === "duplicate") {
+          const endpoints = resolveTaskEndpoints(affectedTask);
+          if (!endpoints) continue;
+          const targetSftpId = endpoints.targetPane.connection?.isLocal
+            ? null
+            : sftpSessionsRef.current.get(endpoints.targetPane.connection!.id) ?? null;
+          const targetEncoding = endpoints.targetPane.connection?.isLocal
+            ? "auto"
+            : endpoints.targetPane.filenameEncoding || "auto";
+          const duplicateTarget = await getDuplicateTarget(affectedTask, endpoints.targetPane, targetSftpId, targetEncoding);
+          updatedTask = {
+            ...affectedTask,
+            fileName: duplicateTarget.fileName,
+            targetPath: duplicateTarget.targetPath,
+            skipConflictCheck: true,
+          };
+        } else if (action === "replace") {
+          updatedTask = {
+            ...affectedTask,
+            skipConflictCheck: true,
+            replaceExistingTarget: true,
+          };
+        } else if (action === "merge") {
+          updatedTask = {
+            ...affectedTask,
+            skipConflictCheck: true,
+            replaceExistingTarget: false,
+          };
+        }
+
+        updatedTasks.push(updatedTask);
       }
 
+      const updatedTaskMap = new Map(updatedTasks.map((updatedTask) => [updatedTask.id, updatedTask]));
       setTransfers((prev) =>
-        prev.map((t) =>
-          t.id === conflictId
+        prev.map((t) => {
+          const updatedTask = updatedTaskMap.get(t.id);
+          return updatedTask
             ? { ...updatedTask, status: "pending" as TransferStatus }
-            : t,
-        ),
+            : t;
+        }),
       );
 
-      setTimeout(async () => {
-        const endpoints = resolveTaskEndpoints(updatedTask);
-        if (!endpoints) return;
-        await processTransfer(updatedTask, endpoints.sourcePane, endpoints.targetPane, endpoints.targetSide);
-      }, 100);
+      for (const updatedTask of updatedTasks) {
+        setTimeout(async () => {
+          const endpoints = resolveTaskEndpoints(updatedTask);
+          if (!endpoints) return;
+          await processTransfer(updatedTask, endpoints.sourcePane, endpoints.targetPane, endpoints.targetSide);
+        }, 100);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline; transfers/conflicts accessed via refs
     [

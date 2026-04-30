@@ -91,8 +91,10 @@ export const useSftpExternalOperations = (
   // Reset to 0 when the SFTP session disconnects (handled in SftpSidePanel).
   const activeFileWatchCountRef = useRef(0);
   const [uploadConflicts, setUploadConflicts] = useState<FileConflict[]>([]);
-  const uploadConflictResolversRef = useRef(new Map<string, (action: FileConflictAction) => void>());
-  const uploadConflictDefaultsRef = useRef(new Map<string, FileConflictAction>());
+  const uploadConflictResolversRef = useRef(new Map<string, {
+    resolve: (action: FileConflictAction) => void;
+    setDefault: (action: FileConflictAction) => void;
+  }>());
 
   const readTextFile = useCallback(
     async (side: "left" | "right", filePath: string): Promise<string> => {
@@ -503,17 +505,30 @@ export const useSftpExternalOperations = (
 
   const resolveUploadConflict = useCallback((conflictId: string, action: FileConflictAction, applyToAll = false) => {
     const conflict = uploadConflicts.find((item) => item.transferId === conflictId);
-    if (conflict && applyToAll) {
-      uploadConflictDefaultsRef.current.set(conflict.isDirectory ? "directory" : "file", action);
-    }
     setUploadConflicts((prev) => prev.filter((item) => item.transferId !== conflictId));
     const resolver = uploadConflictResolversRef.current.get(conflictId);
     if (!resolver) return;
     uploadConflictResolversRef.current.delete(conflictId);
-    resolver(action);
+    if (conflict && applyToAll) {
+      resolver.setDefault(action);
+    }
+    resolver.resolve(action);
   }, [uploadConflicts]);
 
+  const cancelPendingUploadConflicts = useCallback(() => {
+    const resolvers = Array.from(uploadConflictResolversRef.current.values());
+    if (resolvers.length === 0) return;
+
+    uploadConflictResolversRef.current.clear();
+    setUploadConflicts([]);
+    for (const resolver of resolvers) {
+      resolver.resolve("stop");
+    }
+  }, []);
+
   const createUploadConflictResolver = useCallback(() => {
+    const conflictDefaults = new Map<string, FileConflictAction>();
+
     return async (conflict: {
       fileName: string;
       targetPath: string;
@@ -525,7 +540,8 @@ export const useSftpExternalOperations = (
       newModified: number;
       applyToAllCount: number;
     }): Promise<FileConflictAction> => {
-      const defaultAction = uploadConflictDefaultsRef.current.get(conflict.isDirectory ? "directory" : "file");
+      const conflictType = conflict.isDirectory ? "directory" : "file";
+      const defaultAction = conflictDefaults.get(conflictType);
       if (defaultAction) return defaultAction;
 
       const conflictId = `upload-conflict-${crypto.randomUUID()}`;
@@ -545,7 +561,12 @@ export const useSftpExternalOperations = (
 
       setUploadConflicts((prev) => [...prev, fileConflict]);
       return new Promise<FileConflictAction>((resolve) => {
-        uploadConflictResolversRef.current.set(conflictId, resolve);
+        uploadConflictResolversRef.current.set(conflictId, {
+          resolve,
+          setDefault: (action) => {
+            conflictDefaults.set(conflictType, action);
+          },
+        });
       });
     };
   }, []);
@@ -787,11 +808,14 @@ export const useSftpExternalOperations = (
 
   const cancelExternalUpload = useCallback(async () => {
     const controller = uploadControllerRef.current;
+    let cancelPromise: Promise<void> | undefined;
     if (controller) {
       logger.info("[SFTP] Cancelling external upload");
-      await controller.cancel();
+      cancelPromise = controller.cancel();
     }
-  }, []);
+    cancelPendingUploadConflicts();
+    await cancelPromise;
+  }, [cancelPendingUploadConflicts]);
 
   const selectApplication = useCallback(
     async (): Promise<{ path: string; name: string } | null> => {
