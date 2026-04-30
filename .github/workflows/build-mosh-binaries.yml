@@ -1,0 +1,253 @@
+name: build-mosh-binaries
+
+# Trigger philosophy (mirrors build.yml):
+#  - Pushes that touch the mosh build pipeline + PRs run the matrix
+#    so we can validate workflow / script changes without tagging.
+#    Artifacts upload as workflow artifacts only; *no* release.
+#  - Tag push matching `mosh-bin-<version>-<rev>` (e.g.
+#    `mosh-bin-1.4.0-1`) runs the matrix and publishes a Release with
+#    the binaries + SHA256SUMS.
+#  - Manual `workflow_dispatch` → opt-in publish via `release_tag`.
+#
+# `paths` keeps unrelated commits (UI, bridges, etc) from rebuilding
+# mosh on every push — this workflow is expensive (~30min Cygwin leg).
+on:
+  workflow_dispatch:
+    inputs:
+      mosh_ref:
+        description: "mosh upstream git ref (tag/branch/commit) — see https://github.com/mobile-shell/mosh"
+        type: string
+        default: "mosh-1.4.0"
+      release_tag:
+        description: "Optional release tag to attach binaries to (e.g. mosh-bin-1.4.0-1). Empty = artifacts only."
+        type: string
+        default: ""
+  push:
+    branches:
+      - "**"
+    tags:
+      - "mosh-bin-*"
+    paths:
+      - ".gitattributes"
+      - ".github/workflows/build-mosh-binaries.yml"
+      - "electron-builder.config.cjs"
+      - "package.json"
+      - "scripts/build-mosh/**"
+      - "scripts/fetch-mosh-binaries.cjs"
+      - "scripts/mosh-extra-resources.cjs"
+  pull_request:
+    paths:
+      - ".gitattributes"
+      - ".github/workflows/build-mosh-binaries.yml"
+      - "electron-builder.config.cjs"
+      - "package.json"
+      - "scripts/build-mosh/**"
+      - "scripts/fetch-mosh-binaries.cjs"
+      - "scripts/mosh-extra-resources.cjs"
+
+# Cancel superseded branch / PR builds; tag builds use a unique group
+# so a follow-up commit doesn't kill the in-progress release.
+concurrency:
+  group: build-mosh-binaries-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  MOSH_REF: ${{ inputs.mosh_ref || 'mosh-1.4.0' }}
+
+jobs:
+  # ------------------------------------------------------------------
+  # Linux x64 (manylinux2014 / glibc 2.17, broad distro compatibility).
+  # Static-links the heavy third-party deps where possible; the resulting
+  # mosh-client still depends on baseline Linux system libraries.
+  # ------------------------------------------------------------------
+  build-linux-x64:
+    name: build-linux-x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build mosh-client (linux-x64)
+        run: |
+          # Run only the compiler inside manylinux2014. JavaScript actions
+          # need the host runner's newer glibc.
+          docker run --rm \
+            -e MOSH_REF="${MOSH_REF}" \
+            -e OUT_DIR=/work/out \
+            -e ARCH=x64 \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            quay.io/pypa/manylinux2014_x86_64 \
+            bash scripts/build-mosh/build-linux.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosh-client-linux-x64
+          path: out/
+
+  build-linux-arm64:
+    name: build-linux-arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build mosh-client (linux-arm64)
+        run: |
+          # Run only the compiler inside manylinux2014. JavaScript actions
+          # need the host runner's newer glibc.
+          docker run --rm \
+            -e MOSH_REF="${MOSH_REF}" \
+            -e OUT_DIR=/work/out \
+            -e ARCH=arm64 \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            quay.io/pypa/manylinux2014_aarch64 \
+            bash scripts/build-mosh/build-linux.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosh-client-linux-arm64
+          path: out/
+
+  # ------------------------------------------------------------------
+  # macOS universal2 (arm64 + x86_64 lipo).
+  # Min deployment target: macOS 11 (Big Sur) — covers arm64 hardware.
+  # Static-links OpenSSL, protobuf, ncurses for both arches.
+  # ------------------------------------------------------------------
+  build-macos-universal:
+    name: build-macos-universal
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build mosh-client (darwin-universal)
+        env:
+          MOSH_REF: ${{ env.MOSH_REF }}
+          OUT_DIR: ${{ github.workspace }}/out
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: bash scripts/build-mosh/build-macos.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosh-client-darwin-universal
+          path: out/
+
+  # ------------------------------------------------------------------
+  # Windows x64 — in-CI Cygwin build from upstream mobile-shell/mosh
+  # source. Cygwin's POSIX runtime can't be fully statically linked, so
+  # we accept the dynamic Cygwin DLL deps and bundle them alongside the
+  # exe (cygcheck-discovered, ~10 MB total). The pinned-FluentTerminal
+  # path is preserved as `fetch-windows.sh` for emergency fallback.
+  # ------------------------------------------------------------------
+  build-windows-x64:
+    name: build-windows-x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v5
+        with:
+          add-to-path: false
+          # Keep package signature checks, but avoid the setup.exe hash
+          # fetch path that currently fails on windows-latest runners.
+          check-hash: false
+          packages: >
+            gcc-g++ make autoconf automake libtool perl perl_pods pkg-config git
+            openssl-devel libssl-devel libprotobuf-devel libncurses-devel
+            libncursesw-devel zlib-devel protobuf-compiler
+      - name: Build mosh-client.exe (win32-x64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cygwinBin = "C:\cygwin\bin"
+          $workspace = (& "$cygwinBin\cygpath.exe" -u "$env:GITHUB_WORKSPACE").Trim()
+          $scriptPath = Join-Path $env:RUNNER_TEMP "build-mosh-windows.sh"
+          $script = @'
+          set -euo pipefail
+          cd "__WORKSPACE__"
+          export MOSH_REF="${MOSH_REF:?missing MOSH_REF}"
+          export ARCH=x64
+          export OUT_DIR="__WORKSPACE__/out"
+          mkdir -p "$OUT_DIR"
+          bash scripts/build-mosh/build-windows.sh
+          '@
+          $script = $script.Replace("__WORKSPACE__", $workspace).Replace("`r`n", "`n")
+          Set-Content -Path $scriptPath -Value $script -NoNewline -Encoding utf8
+          $scriptPathCygwin = (& "$cygwinBin\cygpath.exe" -u "$scriptPath").Trim()
+          & "$cygwinBin\bash.exe" --login "$scriptPathCygwin"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosh-client-win32-x64
+          path: out/
+
+  # ------------------------------------------------------------------
+  # Windows arm64 — intentionally not built.
+  # Cygwin's arm64 port is still experimental (no stable cygwin1.dll
+  # release for aarch64 as of this commit), so we don't attempt an
+  # arm64 mosh build. arm64 Windows installs fall through to the
+  # legacy `mosh` wrapper path in terminalBridge.startMoshSession.
+  # When upstream Cygwin ships a stable arm64 build, drop the same
+  # cygwin-install-action job below with `platform: arm64`.
+  # ------------------------------------------------------------------
+
+  # ------------------------------------------------------------------
+  # Aggregate + (optional) GitHub Release.
+  # ------------------------------------------------------------------
+  release:
+    name: release
+    needs:
+      - build-linux-x64
+      - build-linux-arm64
+      - build-macos-universal
+      - build-windows-x64
+    runs-on: ubuntu-latest
+    # Release only on a `mosh-bin-*` tag push or an explicit
+    # workflow_dispatch with `release_tag` provided. Branch pushes /
+    # PRs (even on a branch literally called `mosh-bin-foo`) can't
+    # match `refs/tags/mosh-bin-*`, so they never publish.
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mosh-bin-'))
+      || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage release files
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          for d in artifacts/*/; do
+            find "$d" -maxdepth 1 -type f -exec cp {} release/ \;
+          done
+          (cd release && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS)
+          ls -la release
+          cat release/SHA256SUMS
+      - name: Determine tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${RELEASE_TAG}"
+          fi
+          if [[ ! "$tag" =~ ^mosh-bin-[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid mosh binary release tag: $tag" >&2
+            exit 1
+          fi
+          printf 'name=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: release/*
+          body: |
+            Pre-built `mosh-client` binaries consumed by `scripts/fetch-mosh-binaries.cjs`
+            during `npm run pack`. Built from `mobile-shell/mosh` upstream ref `${{ env.MOSH_REF }}`.
+
+            All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.
+          draft: false
+          prerelease: false

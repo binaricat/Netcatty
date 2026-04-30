@@ -63,3 +63,13 @@ Directory.Build.props
 Directory.Build.targets
 build_with_vs.bat
 build_with_vs2022.bat
+
+# Bundled mosh-client binaries fetched at pack time by
+# scripts/fetch-mosh-binaries.cjs. resources/mosh/README.md is
+# committed; the actual binaries (and on Windows the Cygwin DLL
+# bundle that ships alongside mosh-client.exe) are pulled from a
+# release tag, never committed.
+/resources/mosh/*/mosh-client
+/resources/mosh/*/mosh-client.exe
+/resources/mosh/*/mosh-client-*-dlls/
+/resources/mosh/*/*.dll
