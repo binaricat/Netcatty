@@ -1,5 +1,23 @@
 name: build-packages
 
+# Trigger philosophy
+#  - Any push to any branch + any PR -> run the build matrix so CI is
+#    always testable. Same-repo PR runs own package validation; matching
+#    branch push runs become a lightweight mirror only after a current
+#    open PR run for the same commit is visible. If lookup is slow or
+#    unavailable, the push run falls back to the full matrix. Artifacts
+#    upload as workflow artifacts only; *no* GitHub Release is published.
+#  - Tag push matching `v<MAJOR>.<MINOR>.<PATCH>` (with optional
+#    pre-release suffix like `v1.2.3-rc.1`) -> run the matrix and
+#    publish a GitHub Release. Loose tags like `v-test`, `vNEXT`, or
+#    `v1.0` no longer auto-publish.
+#  - Manual `workflow_dispatch` -> run the matrix on the selected ref.
+#    `publish_release` only publishes when the selected ref is also a
+#    strict version tag.
+#
+# The release job validates the exact same rule before publishing, so
+# adding branches/PRs above is safe; accidental tag-like branch names
+# won't leak a release.
 on:
   workflow_dispatch:
     inputs:
@@ -7,13 +25,179 @@ on:
         description: "Publish GitHub Release after build"
         type: boolean
         default: false
+      mosh_bin_release:
+        description: "Release tag containing bundled mosh-client binaries"
+        type: string
+        default: ""
   push:
+    branches:
+      - "**"
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-[0-9A-Za-z]*"
+  pull_request:
+
+# A newer run for the same push branch or PR cancels older in-progress
+# work. Push and PR events stay in separate groups so deduped push runs
+# can mirror PR results cleanly instead of leaving cancelled checks on
+# the PR. Publishing tag runs share a release group across push and
+# manual dispatch; non-publishing manual tag runs use their own group.
+concurrency:
+  group: build-packages-${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'release' || github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.ref_type }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+env:
+  MOSH_BIN_RELEASE: ${{ github.event.inputs.mosh_bin_release || vars.MOSH_BIN_RELEASE || '' }}
+  BUNDLE_MOSH: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '') }}
+  STRICT_VERSION_REF_RE: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
 
 jobs:
+  dedupe:
+    name: dedupe push run
+    runs-on: ubuntu-latest
+    outputs:
+      skip_heavy_ci: ${{ steps.detect.outputs.skip_heavy_ci }}
+      heavy_ci_pr_run_id: ${{ steps.detect.outputs.heavy_ci_pr_run_id }}
+    steps:
+      - name: Detect duplicate heavy CI
+        id: detect
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          HEAD_REF: ${{ github.ref_name }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          skip_heavy_ci=false
+          if [[ "$EVENT_NAME" == "push" && "$REF" == refs/heads/* ]]; then
+            pr_count=0
+            if ! pr_count="$(gh api --method GET "repos/${REPOSITORY}/pulls" \
+              -f state=open \
+              -f "head=${REPOSITORY_OWNER}:${HEAD_REF}" \
+              -F per_page=1 \
+              --jq 'length')"; then
+              echo "::warning::Could not check open PRs; running full push CI."
+              pr_count=0
+            fi
+
+            pr_run_id=""
+            if [[ "$pr_count" != "0" ]]; then
+              cutoff="$(date -u -d '20 minutes ago' +'%Y-%m-%dT%H:%M:%SZ')"
+              for attempt in {1..18}; do
+                if ! pr_run_id="$(gh api --method GET "repos/${REPOSITORY}/actions/workflows/build.yml/runs" \
+                  -f event=pull_request \
+                  -f "branch=${HEAD_REF}" \
+                  -f "head_sha=${HEAD_SHA}" \
+                  -F per_page=20 \
+                  --jq "[.workflow_runs[] | select(.created_at >= \"${cutoff}\" and .conclusion != \"cancelled\" and .conclusion != \"skipped\")] | sort_by(.created_at, .id) | .[0].id // \"\"")"; then
+                  echo "::warning::Could not check PR workflow runs; running full push CI."
+                  pr_run_id=""
+                  break
+                fi
+                if [[ -n "$pr_run_id" ]]; then
+                  skip_heavy_ci=true
+                  break
+                fi
+                if [[ "$attempt" == "18" ]]; then
+                  break
+                fi
+                sleep 10
+              done
+            fi
+            if [[ -n "$pr_run_id" ]]; then
+              echo "heavy_ci_pr_run_id=${pr_run_id}" >> "$GITHUB_OUTPUT"
+              echo "heavy_ci_pr_run_id=${pr_run_id}"
+            fi
+          fi
+          echo "skip_heavy_ci=${skip_heavy_ci}" >> "$GITHUB_OUTPUT"
+          echo "skip_heavy_ci=${skip_heavy_ci}"
+
+  dedupe-result:
+    name: dedupe result
+    needs: dedupe
+    if: needs.dedupe.outputs.skip_heavy_ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror PR build result
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_RUN_ID: ${{ needs.dedupe.outputs.heavy_ci_pr_run_id }}
+        run: |
+          if [[ -z "$PR_RUN_ID" ]]; then
+            echo "::error::No PR workflow run was selected for dedupe."
+            exit 1
+          fi
+
+          for attempt in {1..360}; do
+            if ! result="$(gh run view "$PR_RUN_ID" --repo "$REPOSITORY" --json status,conclusion --jq '.status + "|" + (.conclusion // "")')"; then
+              echo "::warning::Could not read PR workflow run ${PR_RUN_ID}; retrying."
+              sleep 30
+              continue
+            fi
+            status="${result%%|*}"
+            conclusion="${result#*|}"
+            echo "PR run ${PR_RUN_ID}: status=${status} conclusion=${conclusion:-pending}"
+
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$conclusion" == "success" ]]; then
+                exit 0
+              fi
+              echo "::error::PR workflow run ${PR_RUN_ID} completed with conclusion '${conclusion}'."
+              exit 1
+            fi
+
+            sleep 30
+          done
+
+          echo "::error::Timed out waiting for PR workflow run ${PR_RUN_ID}."
+          exit 1
+
+  resolve-mosh:
+    name: resolve bundled mosh-client
+    needs: dedupe
+    if: |
+      needs.dedupe.outputs.skip_heavy_ci != 'true'
+      && (
+        (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)))
+        || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      mosh_bin_release: ${{ steps.resolve.outputs.mosh_bin_release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve bundled mosh-client release
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/resolve-mosh-bin-release.cjs
+          release="$(grep '^MOSH_BIN_RELEASE=' "$GITHUB_ENV" | tail -n 1 | cut -d= -f2-)"
+          if [[ -z "$release" ]]; then
+            echo "::error::MOSH_BIN_RELEASE was not resolved."
+            exit 1
+          fi
+          echo "mosh_bin_release=${release}" >> "$GITHUB_OUTPUT"
+
   build:
-    name: build-${{ matrix.name }}
+    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && format('deduped build-{0}', matrix.name) || format('build-{0}', matrix.name) }}
+    needs: [dedupe, resolve-mosh]
+    if: |
+      always()
+      && needs.dedupe.result == 'success'
+      && needs.dedupe.outputs.skip_heavy_ci != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,13 +208,28 @@ jobs:
             pack_script: pack:mac
           - name: windows
             os: windows-latest
-            pack_script: pack:win
+            # The mosh binary workflow currently produces win32-x64 only.
+            # Keep official packages aligned with bundled-mosh coverage
+            # until Cygwin arm64 is stable enough to build win32-arm64.
+            pack_script: pack:win-x64
     env:
+      MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_ID: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
       VITE_SYNC_ONEDRIVE_CLIENT_ID: ${{ secrets.VITE_SYNC_ONEDRIVE_CLIENT_ID }}
     steps:
+      - name: Validate bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
+        shell: bash
+        env:
+          RESOLVE_MOSH_RESULT: ${{ needs.resolve-mosh.result }}
+        run: |
+          if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
+            echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -46,27 +245,40 @@ jobs:
       - name: Install cross-platform native binaries
         shell: bash
         run: |
-          # npm ci only installs optional deps for the host platform, but
-          # electron-builder produces both arm64 and x64 binaries, so we
-          # need the native codex-acp binary for the other architecture too.
+          # npm ci only installs optional deps for the host platform.
+          # macOS packages still cover both arm64 and x64, so we need
+          # codex-acp for both architectures there.
           # Platform-specific codex-acp packages declare cpu/os constraints,
           # so --force is needed to install the non-host-arch binary.
           CODEX_VER=$(node -e "console.log(require('./node_modules/@zed-industries/codex-acp/package.json').version)")
           if [[ "${{ matrix.name }}" == "macos" ]]; then
             npm install "@zed-industries/codex-acp-darwin-x64@${CODEX_VER}" "@zed-industries/codex-acp-darwin-arm64@${CODEX_VER}" --no-save --force
           elif [[ "${{ matrix.name }}" == "windows" ]]; then
-            npm install "@zed-industries/codex-acp-win32-x64@${CODEX_VER}" "@zed-industries/codex-acp-win32-arm64@${CODEX_VER}" --no-save --force
+            npm install "@zed-industries/codex-acp-win32-x64@${CODEX_VER}" --no-save --force
+          fi
+
+      - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
+        shell: bash
+        run: |
+          if [[ "${{ matrix.name }}" == "macos" ]]; then
+            npm run fetch:mosh -- --platform=darwin --arch=universal
+          elif [[ "${{ matrix.name }}" == "windows" ]]; then
+            npm run fetch:mosh -- --platform=win32 --arch=x64
           fi
 
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Tag release: use version from tag
+          # Strict semver matches v<MAJOR>.<MINOR>.<PATCH>[-pre]; loose
+          # tags / branches / PRs fall through to a semver-pre-release
+          # form (`0.0.0-sha-<short-sha>`) so npm pkg / electron-builder
+          # accept it. Non-semver versions (e.g. bare "abc1234") cause
+          # downstream tooling to error or pick weird codepaths.
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            # workflow_dispatch: use short commit ID
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -105,9 +317,15 @@ jobs:
   # compatible with most current Linux distributions including Arch.
   # See #264.
   build-linux-x64:
-    name: build-linux-x64
+    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-x64' || 'build-linux-x64' }}
+    needs: [dedupe, resolve-mosh]
+    if: |
+      always()
+      && needs.dedupe.result == 'success'
+      && needs.dedupe.outputs.skip_heavy_ci != 'true'
     runs-on: ubuntu-22.04
     env:
+      MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       npm_config_arch: x64
       npm_config_target_arch: x64
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
@@ -115,6 +333,17 @@ jobs:
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
       VITE_SYNC_ONEDRIVE_CLIENT_ID: ${{ secrets.VITE_SYNC_ONEDRIVE_CLIENT_ID }}
     steps:
+      - name: Validate bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
+        shell: bash
+        env:
+          RESOLVE_MOSH_RESULT: ${{ needs.resolve-mosh.result }}
+        run: |
+          if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
+            echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -130,10 +359,13 @@ jobs:
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          # See matrix job's Set version step for the strict-semver
+          # rationale; identical logic, duplicated because the Linux
+          # legs are standalone jobs.
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -142,6 +374,10 @@ jobs:
         env:
           npm_config_arch: x64
         run: bash scripts/ensure-node-pty-linux.sh prepare x64
+
+      - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
+        run: npm run fetch:mosh -- --platform=linux --arch=x64
 
       - name: Build package
         env:
@@ -171,11 +407,17 @@ jobs:
   # to ensure compatibility with older distros like UOS/Deepin (GLIBC 2.28).
   # Key: GLIBC < 2.34 avoids the libpthread-merge symbol requirement.
   build-linux-arm64:
-    name: build-linux-arm64
+    name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-arm64' || 'build-linux-arm64' }}
+    needs: [dedupe, resolve-mosh]
+    if: |
+      always()
+      && needs.dedupe.result == 'success'
+      && needs.dedupe.outputs.skip_heavy_ci != 'true'
     runs-on: ubuntu-24.04-arm
     container:
       image: debian:bullseye
     env:
+      MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
       npm_config_arch: arm64
       npm_config_target_arch: arm64
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
@@ -183,6 +425,17 @@ jobs:
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
       VITE_SYNC_ONEDRIVE_CLIENT_ID: ${{ secrets.VITE_SYNC_ONEDRIVE_CLIENT_ID }}
     steps:
+      - name: Validate bundled mosh-client release
+        if: env.BUNDLE_MOSH == 'true'
+        shell: bash
+        env:
+          RESOLVE_MOSH_RESULT: ${{ needs.resolve-mosh.result }}
+        run: |
+          if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
+            echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: |
           apt-get update
@@ -201,10 +454,13 @@ jobs:
       - name: Set version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          # See matrix job's Set version step for the strict-semver
+          # rationale; identical logic, duplicated because the Linux
+          # legs are standalone jobs.
+          if [[ "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${GITHUB_SHA:0:7}"
+            VERSION="0.0.0-sha-${GITHUB_SHA:0:7}"
           fi
           echo "Setting version to ${VERSION}"
           npm pkg set version="${VERSION}"
@@ -213,6 +469,10 @@ jobs:
         env:
           npm_config_arch: arm64
         run: bash scripts/ensure-node-pty-linux.sh prepare arm64
+
+      - name: Fetch bundled mosh-client
+        if: env.BUNDLE_MOSH == 'true'
+        run: npm run fetch:mosh -- --platform=linux --arch=arm64
 
       - name: Build package
         env:
@@ -242,13 +502,26 @@ jobs:
     name: release
     runs-on: ubuntu-latest
     needs: [build, build-linux-x64, build-linux-arm64]
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    # Only release on a strict v<MAJOR>.<MINOR>.<PATCH>[-pre] tag.
+    # Manual workflow_dispatch can publish only when it is run from one
+    # of those tags. PRs and branch pushes skip this job.
+    if: |
+      startsWith(github.ref, 'refs/tags/v')
+      && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     permissions:
       contents: write
       actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF" =~ $STRICT_VERSION_REF_RE ]]; then
+            echo "::error::Release tags must be v<MAJOR>.<MINOR>.<PATCH> or v<MAJOR>.<MINOR>.<PATCH>-<prerelease>."
+            exit 1
+          fi
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -318,6 +591,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             artifacts/*.dmg
             artifacts/*.zip
