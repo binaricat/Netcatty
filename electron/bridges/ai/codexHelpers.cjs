@@ -353,16 +353,57 @@ function normalizeCodexIntegrationState(rawOutput) {
 
 // ── Error helpers ──
 
+function safeJsonStringify(value) {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(value, (_key, nestedValue) => {
+      if (typeof nestedValue !== "object" || nestedValue === null) {
+        return nestedValue;
+      }
+      if (seen.has(nestedValue)) {
+        return "[Circular]";
+      }
+      seen.add(nestedValue);
+      return nestedValue;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function stringifyErrorValue(value, seen = new WeakSet()) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Error) return value.message || value.name || String(value);
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular error]";
+  seen.add(value);
+
+  const candidates = [
+    value?.data?.message,
+    value?.data?.error,
+    value?.errorText,
+    value?.message,
+    value?.error,
+    value?.cause,
+    value?.data,
+  ];
+  for (const candidate of candidates) {
+    const message = stringifyErrorValue(candidate, seen).trim();
+    if (message && message !== "{}") {
+      return message;
+    }
+  }
+
+  return safeJsonStringify(value) || String(value);
+}
+
 function extractCodexError(error) {
-  const message =
-    error?.data?.message ||
-    error?.errorText ||
-    error?.message ||
-    error?.error ||
-    String(error);
-  const code = error?.data?.code || error?.code;
+  const message = stringifyErrorValue(error) || "Unknown Codex error";
+  const code = error?.data?.code || error?.code || error?.error?.code || error?.data?.error?.code;
   return {
-    message: typeof message === "string" ? message : String(message),
+    message,
     code: typeof code === "string" ? code : undefined,
   };
 }

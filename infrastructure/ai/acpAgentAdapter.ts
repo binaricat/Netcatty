@@ -49,11 +49,11 @@ interface AcpBridge {
     toolIntegrationMode?: AIToolIntegrationMode,
     defaultTargetSession?: DefaultTargetSessionHint,
     userSkillsContext?: string,
-  ): Promise<{ ok: boolean; error?: string }>;
+  ): Promise<{ ok: boolean; error?: unknown }>;
   aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
   onAiAcpDone(requestId: string, cb: () => void): () => void;
-  onAiAcpError(requestId: string, cb: (error: string) => void): () => void;
+  onAiAcpError(requestId: string, cb: (error: unknown) => void): () => void;
 }
 
 interface StreamEvent {
@@ -71,6 +71,61 @@ export interface FileAttachment {
   mediaType: string;
   filename?: string;
   filePath?: string;
+}
+
+function safeJsonStringify(value: unknown): string | null {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value, (_key, nestedValue: unknown) => {
+      if (typeof nestedValue !== 'object' || nestedValue === null) {
+        return nestedValue;
+      }
+      if (seen.has(nestedValue)) {
+        return '[Circular]';
+      }
+      seen.add(nestedValue);
+      return nestedValue;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function formatAcpErrorValue(error: unknown, seen = new WeakSet<object>()): string {
+  if (error == null) return '';
+  if (typeof error === 'string') return error;
+  if (typeof error === 'number' || typeof error === 'boolean') return String(error);
+  if (error instanceof Error) return error.message || error.name || '';
+  if (typeof error !== 'object') return String(error);
+  if (seen.has(error)) return '[Circular error]';
+  seen.add(error);
+
+  const record = error as Record<string, unknown>;
+  const data = record.data as Record<string, unknown> | undefined;
+  const nestedError = record.error as Record<string, unknown> | undefined;
+  const candidates: unknown[] = [
+    data?.message,
+    data?.error,
+    record.errorText,
+    record.message,
+    record.error,
+    record.cause,
+    nestedError?.message,
+    record.data,
+  ];
+
+  for (const candidate of candidates) {
+    const message = formatAcpErrorValue(candidate, seen).trim();
+    if (message && message !== '{}') {
+      return message;
+    }
+  }
+
+  return safeJsonStringify(error) || String(error);
+}
+
+export function formatAcpErrorForDisplay(error: unknown): string {
+  return formatAcpErrorValue(error).trim() || 'Unknown error';
 }
 
 export async function runAcpAgentTurn(
@@ -98,15 +153,11 @@ export async function runAcpAgentTurn(
   }
 
   const cleanupFns: (() => void)[] = [];
-
-  // Set up event listeners before starting stream
-  const unsubEvent = acpBridge.onAiAcpEvent(requestId, (event: StreamEvent) => {
-    handleStreamEvent(event, callbacks);
-  });
-  cleanupFns.push(unsubEvent);
-
   let settled = false;
-  let resolveDone!: () => void;
+  let resolveDone: () => void = () => {};
+  const donePromise = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
   const settle = (fn?: () => void) => {
     if (settled) return false;
     settled = true;
@@ -115,22 +166,28 @@ export async function runAcpAgentTurn(
     return true;
   };
 
-  const donePromise = new Promise<void>((resolve) => {
-    resolveDone = resolve;
-    const unsubDone = acpBridge.onAiAcpDone(requestId, () => {
-      settle(() => {
-        callbacks.onDone();
-      });
-    });
-    cleanupFns.push(unsubDone);
-
-    const unsubError = acpBridge.onAiAcpError(requestId, (error: string) => {
-      settle(() => {
-        callbacks.onError(error);
-      });
-    });
-    cleanupFns.push(unsubError);
+  // Set up event listeners before starting stream
+  const unsubEvent = acpBridge.onAiAcpEvent(requestId, (event: StreamEvent) => {
+    const streamFailed = handleStreamEvent(event, callbacks);
+    if (streamFailed) {
+      settle();
+    }
   });
+  cleanupFns.push(unsubEvent);
+
+  const unsubDone = acpBridge.onAiAcpDone(requestId, () => {
+    settle(() => {
+      callbacks.onDone();
+    });
+  });
+  cleanupFns.push(unsubDone);
+
+  const unsubError = acpBridge.onAiAcpError(requestId, (error: unknown) => {
+    settle(() => {
+      callbacks.onError(formatAcpErrorForDisplay(error));
+    });
+  });
+  cleanupFns.push(unsubError);
 
   // Handle abort
   if (signal) {
@@ -167,12 +224,16 @@ export async function runAcpAgentTurn(
   ).then((result) => {
     if (result?.ok === false) {
       settle(() => {
-        callbacks.onError(result.error || 'Failed to start ACP stream');
+        callbacks.onError(
+          result.error == null
+            ? 'Failed to start ACP stream'
+            : formatAcpErrorForDisplay(result.error),
+        );
       });
     }
-  }).catch((err: Error) => {
+  }).catch((err: unknown) => {
     settle(() => {
-      callbacks.onError(err.message);
+      callbacks.onError(formatAcpErrorForDisplay(err));
     });
   }).finally(() => {
     if (settled) {
@@ -195,32 +256,32 @@ function cleanup(fns: (() => void)[]) {
  * Handle a single stream event from the AI SDK fullStream.
  * Events come from `streamText().fullStream` in the main process.
  */
-function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks) {
+function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks): boolean {
   switch (event.type) {
     case 'text-delta': {
       const text = (event.textDelta as string) || (event.delta as string) || '';
       if (text) callbacks.onTextDelta(text);
-      break;
+      return false;
     }
     case 'reasoning-start': {
       // Reasoning block started — nothing to render yet
-      break;
+      return false;
     }
     case 'reasoning-delta': {
       const text = (event.delta as string) || '';
       if (text) callbacks.onThinkingDelta(text);
-      break;
+      return false;
     }
     case 'reasoning-end': {
       callbacks.onThinkingDone();
-      break;
+      return false;
     }
     case 'tool-call': {
       const toolName = (event.toolName as string) || 'unknown';
       const input = (event.input as Record<string, unknown>) || {};
       const toolCallId = (event.toolCallId as string) || undefined;
       callbacks.onToolCall(toolName, input, toolCallId);
-      break;
+      return false;
     }
     case 'tool-result': {
       const toolCallId = (event.toolCallId as string) || '';
@@ -230,22 +291,24 @@ function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks) {
         ? output
         : JSON.stringify(output);
       callbacks.onToolResult(toolCallId, result, toolName);
-      break;
+      return false;
     }
     case 'status': {
       const msg = (event.message as string) || '';
       if (msg) callbacks.onStatus?.(msg);
-      break;
+      return false;
     }
     case 'session-id': {
       const sessionId = (event.sessionId as string) || '';
       if (sessionId) callbacks.onSessionId?.(sessionId);
-      break;
+      return false;
     }
     case 'error': {
-      callbacks.onError(String(event.error || 'Unknown error'));
-      break;
+      callbacks.onError(formatAcpErrorForDisplay(event.error));
+      return true;
     }
     // step-start, step-finish, etc. — ignore silently
+    default:
+      return false;
   }
 }

@@ -29,6 +29,7 @@ const {
   shouldUseShellForCommand,
   resolveCliFromPath,
   resolveClaudeAcpBinaryPath,
+  isPlausibleCliVersionOutput,
   getShellEnv,
   getFreshIdlePrompt,
   invalidateShellEnvCache,
@@ -1428,6 +1429,67 @@ function registerHandlers(ipcMain) {
     });
   }
 
+  function getCommandOutput(result) {
+    return [result?.stdout, result?.stderr]
+      .filter((chunk) => typeof chunk === "string" && chunk.length > 0)
+      .join("\n")
+      .trim();
+  }
+
+  function getFirstCommandOutputLine(result) {
+    return getCommandOutput(result).split(/\r?\n/)[0] || "";
+  }
+
+  async function probeCliVersion(probeCmd, probeArgs, env) {
+    try {
+      const result = await runCommand(probeCmd, probeArgs, { env });
+      return {
+        launched: true,
+        exitCode: result.exitCode,
+        output: getCommandOutput(result),
+        version: getFirstCommandOutputLine(result),
+      };
+    } catch {
+      return {
+        launched: false,
+        exitCode: null,
+        output: "",
+        version: "",
+      };
+    }
+  }
+
+  function isCodexAcpFallbackPath(command, usesAcpFallback, resolvedPath) {
+    return (
+      command === "codex" &&
+      usesAcpFallback &&
+      path.basename(resolvedPath || "").toLowerCase().startsWith("codex-acp")
+    );
+  }
+
+  function isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) {
+    if (!isCodexAcpFallbackPath(command, usesAcpFallback, resolvedPath) || !probe?.launched) {
+      return false;
+    }
+    const output = String(probe.output || "").toLowerCase();
+    const hasCodexAcpUsage = /\busage:\s*codex-acp(?:\.exe)?\s+\[options\]/.test(output);
+    const rejectedVersionFlag =
+      /(unexpected|unrecognized|unknown)\s+(argument|option|flag)\s+['"]?--version['"]?/.test(output) ||
+      /['"]?--version['"]?\s+(found|is\s+)?(unexpected|unrecognized|unknown)/.test(output);
+    return hasCodexAcpUsage && rejectedVersionFlag;
+  }
+
+  function isClaudeAcpFallbackProbeUsable(command, usesAcpFallback, probe) {
+    return command === "claude" && usesAcpFallback && probe?.launched && probe.exitCode === 0;
+  }
+
+  function isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) {
+    return (
+      isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) ||
+      isClaudeAcpFallbackProbeUsable(command, usesAcpFallback, probe)
+    );
+  }
+
   async function runCodexCli(args, options) {
     const shellEnv = await getShellEnv();
     const codexCliPath = resolveCliFromPath("codex", shellEnv) || "codex";
@@ -1676,11 +1738,17 @@ function registerHandlers(ipcMain) {
       // resolveCodexAcpBinaryPath returns a plain string.
       let versionCommand = null;
       let versionPrependArgs = [];
-      if (!resolvedPath && agent.resolveAcp) {
+      let usesAcpFallback = false;
+      const tryResolveAcpFallback = () => {
+        if (!agent.resolveAcp) return false;
         const result = agent.resolveAcp(shellEnv, electronModule);
         if (typeof result === "string") {
           if (result && result !== agent.acpCommand && existsSync(result)) {
             resolvedPath = result;
+            versionCommand = null;
+            versionPrependArgs = [];
+            usesAcpFallback = true;
+            return true;
           }
         } else if (result?.command) {
           // On Windows the command may be `node` with the script in prependArgs.
@@ -1690,39 +1758,62 @@ function registerHandlers(ipcMain) {
           const displayPath = scriptPath || result.command;
           if (displayPath !== agent.acpCommand && existsSync(displayPath)) {
             resolvedPath = displayPath;
+            usesAcpFallback = true;
             if (scriptPath) {
               versionCommand = result.command;
               versionPrependArgs = result.prependArgs;
+            } else {
+              versionCommand = null;
+              versionPrependArgs = [];
             }
+            return true;
           }
         }
+        return false;
+      };
+      if (!resolvedPath) {
+        tryResolveAcpFallback();
       }
 
       if (!resolvedPath || seenPaths.has(resolvedPath)) {
         continue;
       }
 
-      let version = "";
-      try {
-        // When the agent is invoked via Node (Windows), probe version with
-        // the full command (e.g. `node /path/to/dist/index.js --version`).
-        const probeCmd = versionCommand || resolvedPath;
-        const probeArgs = [...versionPrependArgs, "--version"];
-        const result = await runCommand(probeCmd, probeArgs, { env: shellEnv });
-        version = (result.stdout || result.stderr || "").trim().split("\n")[0];
-      } catch {
-        // --version failed: not a valid CLI executable (e.g. .app bundle)
-        continue;
+      // When the agent is invoked via Node (Windows), probe version with
+      // the full command (e.g. `node /path/to/dist/index.js --version`).
+      let probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
+      let version = probe.version;
+      let hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
+      let hasUsableAcpFallback = isAcpFallbackProbeUsable(
+        agent.command,
+        usesAcpFallback,
+        resolvedPath,
+        probe,
+      );
+
+      if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && agent.command === "codex") {
+        const previousPath = resolvedPath;
+        if (tryResolveAcpFallback() && resolvedPath !== previousPath && !seenPaths.has(resolvedPath)) {
+          probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
+          version = probe.version;
+          hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
+          hasUsableAcpFallback = isAcpFallbackProbeUsable(
+            agent.command,
+            usesAcpFallback,
+            resolvedPath,
+            probe,
+          );
+        }
       }
 
-      if (!version) continue;
+      if (!hasPlausibleVersion && !hasUsableAcpFallback) continue;
 
       const { resolveAcp: _unused, ...agentInfo } = agent;
       agents.push({
         ...agentInfo,
         acpCommand: agent.command === "copilot" ? resolvedPath : agentInfo.acpCommand,
         path: resolvedPath,
-        version,
+        version: hasPlausibleVersion ? version : "Bundled ACP",
         available: true,
       });
       seenPaths.add(resolvedPath);
@@ -1736,6 +1827,50 @@ function registerHandlers(ipcMain) {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const shellEnv = await getShellEnv();
     let resolvedPath = null;
+    let versionCommand = null;
+    let versionPrependArgs = [];
+    let usesAcpFallback = false;
+    const getBundledAcpFallback = () => {
+      if (command === "codex") {
+        const acpPath = resolveCodexAcpBinaryPath(shellEnv, electronModule);
+        if (acpPath && acpPath !== "codex-acp" && existsSync(acpPath)) {
+          return {
+            displayPath: acpPath,
+            command: null,
+            prependArgs: [],
+          };
+        }
+        return null;
+      }
+      if (command === "claude") {
+        const acpPath = resolveClaudeAcpBinaryPath(shellEnv, electronModule);
+        const scriptPath = acpPath?.prependArgs?.[0];
+        const displayPath = scriptPath || acpPath?.command;
+        if (displayPath && displayPath !== "claude-agent-acp" && existsSync(displayPath)) {
+          return {
+            displayPath,
+            command: scriptPath ? acpPath.command : null,
+            prependArgs: scriptPath ? acpPath.prependArgs : [],
+          };
+        }
+      }
+      return null;
+    };
+    const resolveBundledAcpFallback = () => {
+      const fallback = getBundledAcpFallback();
+      if (!fallback) return false;
+      if (resolvedPath === fallback.displayPath) {
+        versionCommand = fallback.command;
+        versionPrependArgs = fallback.prependArgs;
+        usesAcpFallback = true;
+        return true;
+      }
+      resolvedPath = fallback.displayPath;
+      versionCommand = fallback.command;
+      versionPrependArgs = fallback.prependArgs;
+      usesAcpFallback = true;
+      return true;
+    };
 
     if (customPath) {
       // Normalize Windows shim paths like `codex` -> `codex.cmd` when present.
@@ -1745,25 +1880,38 @@ function registerHandlers(ipcMain) {
     } else {
       resolvedPath = resolveCliFromPath(command, shellEnv);
     }
+    if (!resolvedPath) {
+      resolveBundledAcpFallback();
+    } else {
+      const fallback = getBundledAcpFallback();
+      if (fallback && resolvedPath === fallback.displayPath) {
+        versionCommand = fallback.command;
+        versionPrependArgs = fallback.prependArgs;
+        usesAcpFallback = true;
+      }
+    }
 
     if (!resolvedPath) {
       return { path: null, version: null, available: false };
     }
 
-    let version = "";
-    try {
-      const result = await runCommand(resolvedPath, ["--version"], { env: shellEnv });
-      version = (result.stdout || result.stderr || "").trim().split("\n")[0];
-    } catch {
-      // --version failed: not a valid CLI executable
+    let probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
+    let version = probe.version;
+    let hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
+    let hasUsableAcpFallback = isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
+    if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && command === "codex") {
+      if (resolveBundledAcpFallback()) {
+        probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
+        version = probe.version;
+        hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
+        hasUsableAcpFallback = isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
+      }
+    }
+    if (!hasPlausibleVersion && !hasUsableAcpFallback) {
       return { path: resolvedPath, version: null, available: false };
     }
 
-    if (!version) {
-      return { path: resolvedPath, version: null, available: false };
-    }
-
-    return { path: resolvedPath, version, available: true };
+    return { path: resolvedPath, version: hasPlausibleVersion ? version : "Bundled ACP", available: true };
   });
 
   ipcMain.handle("netcatty:ai:codex:get-integration", async (event, options) => {
@@ -2293,8 +2441,9 @@ function registerHandlers(ipcMain) {
         })).filter((modelInfo) => Boolean(modelInfo.id)),
       };
     } catch (err) {
-      console.error("[ACP] Failed to list models:", err?.message || err);
-      return { ok: false, error: err?.message || String(err) };
+      const normalized = extractCodexError(err);
+      console.error("[ACP] Failed to list models:", normalized.message);
+      return { ok: false, error: normalized.message };
     } finally {
       try {
         cleanupAcpProviderInstance(provider, chatSessionId || "transient-model-list");

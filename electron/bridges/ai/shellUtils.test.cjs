@@ -5,6 +5,7 @@ const {
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   isDefaultPowerShellPromptLine,
+  isPlausibleCliVersionOutput,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
 
@@ -63,6 +64,16 @@ test("isDefaultPowerShellPromptLine matches default shapes and rejects look-alik
   assert.equal(isDefaultPowerShellPromptLine("ZIPS>"), false);
   assert.equal(isDefaultPowerShellPromptLine(""), false);
   assert.equal(isDefaultPowerShellPromptLine(null), false);
+});
+
+test("isPlausibleCliVersionOutput rejects stack traces and file URLs", () => {
+  assert.equal(isPlausibleCliVersionOutput("2.1.123 (Claude Code)"), true);
+  assert.equal(isPlausibleCliVersionOutput("codex-cli 0.125.0"), true);
+  assert.equal(isPlausibleCliVersionOutput("file:///opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js:95"), false);
+  assert.equal(isPlausibleCliVersionOutput("TypeError: Cannot read properties of undefined"), false);
+  assert.equal(isPlausibleCliVersionOutput("    at runCli (cli.js:10:1)"), false);
+  assert.equal(isPlausibleCliVersionOutput("permission denied"), false);
+  assert.equal(isPlausibleCliVersionOutput("Usage: claude [options]"), false);
 });
 
 test("tracks PowerShell idle prompt after SSH output", () => {

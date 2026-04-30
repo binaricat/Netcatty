@@ -202,6 +202,15 @@ function toUnpackedAsarPath(filePath) {
   return filePath;
 }
 
+function isPlausibleCliVersionOutput(value) {
+  const line = stripAnsi(String(value || "")).trim().split(/\r?\n/)[0]?.trim() || "";
+  if (!line) return false;
+  if (/^(?:file|node):\/\//i.test(line)) return false;
+  if (/^\s*at\s+/i.test(line)) return false;
+  if (/\b(?:Error|TypeError|ReferenceError|SyntaxError|ERR_[A-Z_]+)\b/.test(line)) return false;
+  return /(?:^|[^\d])v?\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?(?:$|[^\d])/.test(line);
+}
+
 // ── Shell environment (cached) ──
 
 let _cachedShellEnv = null;
@@ -374,6 +383,7 @@ module.exports = {
   resolveCliFromPath,
   resolveClaudeAcpBinaryPath,
   toUnpackedAsarPath,
+  isPlausibleCliVersionOutput,
   getShellEnv,
   invalidateShellEnvCache,
   serializeStreamChunk,

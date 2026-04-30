@@ -17,11 +17,7 @@ import type {
   ProviderConfig,
   WebSearchConfig,
 } from "../../../infrastructure/ai/types";
-import {
-  getManagedAgentStoredPath,
-  matchesManagedAgentConfig,
-  type ManagedAgentKey,
-} from "../../../infrastructure/ai/managedAgents";
+import type { ManagedAgentKey } from "../../../infrastructure/ai/managedAgents";
 import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { TabsContent } from "../../ui/tabs";
@@ -36,7 +32,6 @@ import type {
   UserSkillsStatusResult,
 } from "./ai/types";
 import {
-  AGENT_DEFAULTS,
   getBridge,
   normalizeCodexBridgeError,
 } from "./ai/types";
@@ -48,6 +43,11 @@ import { ClaudeCodeCard } from "./ai/ClaudeCodeCard";
 import { CopilotCliCard } from "./ai/CopilotCliCard";
 import { SafetySettings } from "./ai/SafetySettings";
 import { WebSearchSettings } from "./ai/WebSearchSettings";
+import {
+  areExternalAgentListsEqual,
+  buildManagedAgentState,
+  getInitialManagedAgentPaths,
+} from "./ai/managedAgentState";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -78,54 +78,6 @@ interface SettingsAITabProps {
   setMaxIterations: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
   setWebSearchConfig: (config: WebSearchConfig | null) => void;
-}
-
-function areExternalAgentListsEqual(
-  left: ExternalAgentConfig[],
-  right: ExternalAgentConfig[],
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((agent, index) => JSON.stringify(agent) === JSON.stringify(right[index]));
-}
-
-function buildManagedAgentState(
-  prevAgents: ExternalAgentConfig[],
-  defaultAgentId: string,
-  agentKey: ManagedAgentKey,
-  pathInfo: AgentPathInfo | null,
-): { agents: ExternalAgentConfig[]; defaultAgentId: string } {
-  const managedId = `discovered_${agentKey}`;
-  const managedAgents = prevAgents.filter((agent) => matchesManagedAgentConfig(agent, agentKey));
-  const otherAgents = prevAgents.filter((agent) => !matchesManagedAgentConfig(agent, agentKey));
-  const storedPath = getManagedAgentStoredPath(prevAgents, agentKey);
-
-  if (!pathInfo?.available || !pathInfo.path) {
-    return {
-      agents: storedPath ? prevAgents : otherAgents,
-      defaultAgentId: storedPath
-        ? defaultAgentId
-        : managedAgents.some((agent) => agent.id === defaultAgentId)
-          ? "catty"
-          : defaultAgentId,
-    };
-  }
-
-  const existingManaged = managedAgents.find((agent) => agent.id === managedId);
-  const defaults = AGENT_DEFAULTS[agentKey];
-  const nextManagedAgent: ExternalAgentConfig = {
-    ...existingManaged,
-    ...defaults,
-    id: managedId,
-    command: pathInfo.path,
-    enabled: managedAgents.length === 0 ? true : managedAgents.some((agent) => agent.enabled),
-  };
-
-  return {
-    agents: [...otherAgents, nextManagedAgent],
-    defaultAgentId: managedAgents.some((agent) => agent.id === defaultAgentId)
-      ? managedId
-      : defaultAgentId,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,11 +131,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     copilot: string;
   } | null>(null);
   if (!initialManagedPathsRef.current) {
-    initialManagedPathsRef.current = {
-      codex: getManagedAgentStoredPath(externalAgents, "codex") ?? "",
-      claude: getManagedAgentStoredPath(externalAgents, "claude") ?? "",
-      copilot: getManagedAgentStoredPath(externalAgents, "copilot") ?? "",
-    };
+    initialManagedPathsRef.current = getInitialManagedAgentPaths(externalAgents);
   }
 
   const [copilotPathInfo, setCopilotPathInfo] = useState<AgentPathInfo | null>(null);
