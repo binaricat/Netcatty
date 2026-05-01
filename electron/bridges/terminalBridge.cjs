@@ -792,6 +792,27 @@ function resolveBareMoshClient(_options, opts = {}) {
   return bundledMoshClient(opts);
 }
 
+function createMoshSshPasswordResponder(sshPty, password) {
+  if (typeof password !== "string" || password.length === 0) {
+    return () => {};
+  }
+
+  let answered = false;
+  let tail = "";
+
+  return (chunk) => {
+    if (answered) return;
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || "");
+    if (!text) return;
+
+    tail = (tail + text).slice(-512);
+    if (!/(^|[\r\n]).*password:\s*$/i.test(tail)) return;
+
+    answered = true;
+    sshPty.write(`${password}\r`);
+  };
+}
+
 /**
  * Phase-2 / Phase-3b path: run the SSH bootstrap ourselves *inside the
  * user's terminal PTY* so password / 2FA / known-hosts prompts render
@@ -882,6 +903,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
   session.flushPendingData = flush;
 
   const sniffer = moshHandshake.createMoshConnectSniffer();
+  const respondToPasswordPrompt = createMoshSshPasswordResponder(sshPty, options.password);
 
   // Forward bytes from the ssh PTY to the renderer, redacting the
   // MOSH CONNECT magic line. ZMODEM is intentionally not enabled
@@ -892,6 +914,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
     if (visible && (visible.length || (typeof visible === "string" && visible))) {
       const str = Buffer.isBuffer(visible) ? visible.toString("utf8") : visible;
       if (str.length > 0) {
+        respondToPasswordPrompt(str);
         bufferData(str);
         sessionLogStreamManager.appendData(sessionId, str);
       }

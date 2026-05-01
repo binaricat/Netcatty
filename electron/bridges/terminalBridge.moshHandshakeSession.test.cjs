@@ -206,6 +206,19 @@ test("startMoshSession handshake path sends the existing exit event on failure",
   assert.equal(exit.payload.reason, "error");
 });
 
+test("startMoshSession writes the saved password when ssh prompts for one", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, password: "saved-secret" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("(alice@example.com) Password:");
+
+  assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
+});
+
 test("startMoshSession handshake path sends the existing exit event after mosh-client exits", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });

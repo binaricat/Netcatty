@@ -754,11 +754,28 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
 
     try {
+      const pendingAuth = ctx.pendingAuthRef.current;
+      const resolvedAuth = resolveHostAuth({
+        host: ctx.host,
+        keys: ctx.keys,
+        identities: ctx.identities,
+        override: pendingAuth
+          ? {
+            authMethod: pendingAuth.authMethod,
+            username: pendingAuth.username,
+            password: pendingAuth.password,
+            keyId: pendingAuth.keyId,
+            passphrase: pendingAuth.passphrase,
+          }
+          : null,
+      });
+      const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
       const moshEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
       const id = await ctx.terminalBackend.startMoshSession({
         sessionId: ctx.sessionId,
         hostname: ctx.host.hostname,
-        username: ctx.host.username || "root",
+        username: resolvedAuth.username || "root",
+        password: effectivePassword,
         port: ctx.host.port || 22,
         moshServerPath: ctx.host.moshServerPath,
         agentForwarding: ctx.host.agentForwarding,

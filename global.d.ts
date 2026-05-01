@@ -177,6 +177,7 @@ declare global {
       sessionId?: string;
       hostname: string;
       username?: string;
+      password?: string;
       port?: number;
       moshServerPath?: string;
       moshClientPath?: string;
