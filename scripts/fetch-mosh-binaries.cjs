@@ -254,6 +254,18 @@ async function fetchOne(target, sums, opts) {
 }
 
 async function main(argv = process.argv.slice(2), env = process.env) {
+  const platformArg = (argv.find((a) => a.startsWith("--platform=")) || "").split("=")[1];
+  const archArg = (argv.find((a) => a.startsWith("--arch=")) || "").split("=")[1];
+  let hostTarget = null;
+  if (argv.includes("--host")) {
+    try {
+      hostTarget = resolveHostTarget({ platform: platformArg || process.platform, arch: archArg || process.arch });
+    } catch (err) {
+      warn(`${err.message} - skipping host mosh-client fetch.`);
+      return 0;
+    }
+  }
+
   let release = env.MOSH_BIN_RELEASE;
   if (!release && argv.includes("--resolve-release")) {
     release = await resolveMoshBinRelease(env);
@@ -268,9 +280,8 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     `https://github.com/${owner}/${repo}/releases/download/${encodeURIComponent(release)}`;
   const resDir = path.resolve(env.MOSH_BIN_RES_DIR || DEFAULT_RES_DIR);
   const allowUnverified = env.MOSH_BIN_ALLOW_UNVERIFIED === "true";
-  const hostTarget = argv.includes("--host") ? resolveHostTarget() : null;
-  const platformFilter = hostTarget?.platform || (argv.find((a) => a.startsWith("--platform=")) || "").split("=")[1];
-  const archFilter = hostTarget?.arch || (argv.find((a) => a.startsWith("--arch=")) || "").split("=")[1];
+  const platformFilter = hostTarget?.platform || platformArg;
+  const archFilter = hostTarget?.arch || archArg;
 
   log(`release=${release} owner=${owner} repo=${repo}`);
   const sums = await fetchSums(baseUrl, { allowUnverified });

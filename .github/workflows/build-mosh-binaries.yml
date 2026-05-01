@@ -246,8 +246,17 @@ jobs:
             printf 'Source commit: `%s`\n\n' "${GITHUB_SHA}"
             printf '%s\n' 'All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.'
           } > release-notes.md
-          gh release delete "${RELEASE_TAG}" --repo "${RELEASE_REPO}" --cleanup-tag --yes || true
-          gh release create "${RELEASE_TAG}" release/* \
-            --repo "${RELEASE_REPO}" \
-            --title "${RELEASE_TAG}" \
-            --notes-file release-notes.md
+          if gh release view "${RELEASE_TAG}" --repo "${RELEASE_REPO}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${RELEASE_REPO}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md
+            gh release upload "${RELEASE_TAG}" release/* \
+              --repo "${RELEASE_REPO}" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" release/* \
+              --repo "${RELEASE_REPO}" \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-notes.md
+          fi

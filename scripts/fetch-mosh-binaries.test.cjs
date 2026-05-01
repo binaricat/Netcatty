@@ -70,6 +70,54 @@ test("resolveHostTarget maps the local platform to the bundled target", () => {
   assert.throws(() => resolveHostTarget({ platform: "freebsd", arch: "x64" }), /No bundled mosh-client target/);
 });
 
+test("fetch-mosh-binaries host mode skips unsupported local targets", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const baseUrl = await serveAssets(t, {
+    SHA256SUMS: "",
+  });
+
+  const { stderr } = await execFileAsync(
+    process.execPath,
+    [script, "--host", "--platform=win32", "--arch=arm64"],
+    {
+      env: {
+        ...process.env,
+        MOSH_BIN_RELEASE: "test",
+        MOSH_BIN_BASE_URL: baseUrl,
+        MOSH_BIN_RES_DIR: resDir,
+        CI: "true",
+      },
+      stdio: "pipe",
+    },
+  );
+
+  assert.match(stderr, /No bundled mosh-client target for win32-arm64/);
+  assert.equal(fs.existsSync(resDir), false);
+});
+
+test("fetch-mosh-binaries host mode skips unsupported targets before resolving release", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+
+  const { stdout, stderr } = await execFileAsync(
+    process.execPath,
+    [script, "--host", "--resolve-release", "--platform=win32", "--arch=arm64"],
+    {
+      env: {
+        ...process.env,
+        MOSH_BIN_RELEASE: "",
+        MOSH_BIN_RELEASES_JSON: "[]",
+        MOSH_BIN_RES_DIR: resDir,
+        CI: "true",
+      },
+      stdio: "pipe",
+    },
+  );
+
+  assert.match(stderr, /No bundled mosh-client target for win32-arm64/);
+  assert.doesNotMatch(stdout, /MOSH_BIN_RELEASE is unset/);
+  assert.equal(fs.existsSync(resDir), false);
+});
+
 async function serveAssets(t, assets) {
   const server = http.createServer((req, res) => {
     const name = decodeURIComponent(req.url.split("/").pop());

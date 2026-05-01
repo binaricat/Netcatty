@@ -792,6 +792,70 @@ function resolveBareMoshClient(_options, opts = {}) {
   return bundledMoshClient(opts);
 }
 
+function getEnvPathKey(env) {
+  const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+  if (pathKeys.length === 0) return "PATH";
+  return pathKeys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+
+function getEnvPathDelimiter(opts = {}) {
+  return (opts.platform || process.platform) === "win32" ? ";" : path.delimiter;
+}
+
+function normalizeEnvPathPart(part, opts = {}) {
+  const pathApi = (opts.platform || process.platform) === "win32" ? path.win32 : path;
+  return pathApi.normalize(part).toLowerCase();
+}
+
+function prependEnvPath(env, dir, opts = {}) {
+  if (!dir) return env;
+  const pathKey = getEnvPathKey(env);
+  const duplicatePathKeys = Object.keys(env)
+    .filter((key) => key.toLowerCase() === "path" && key !== pathKey);
+  for (const key of duplicatePathKeys) {
+    delete env[key];
+  }
+  const current = env[pathKey] || "";
+  const delimiter = getEnvPathDelimiter(opts);
+  const parts = String(current).split(delimiter).filter(Boolean);
+  const normalizedDir = normalizeEnvPathPart(dir, opts);
+  if (!parts.some((part) => normalizeEnvPathPart(part, opts) === normalizedDir)) {
+    env[pathKey] = current ? `${dir}${delimiter}${current}` : dir;
+  }
+  return env;
+}
+
+function findBundledMoshDllDir(bareClient, opts = {}) {
+  const platform = opts.platform || process.platform;
+  if (platform !== "win32" || !bareClient) return null;
+
+  const clientDir = path.dirname(bareClient);
+  const arch = opts.arch || process.arch;
+  const preferred = path.join(clientDir, `mosh-client-win32-${arch}-dlls`);
+  if (fs.existsSync(preferred) && fs.statSync(preferred).isDirectory()) {
+    return preferred;
+  }
+
+  try {
+    const match = fs.readdirSync(clientDir)
+      .map((name) => path.join(clientDir, name))
+      .find((candidate) => {
+        const name = path.basename(candidate);
+        return /^mosh-client-win32-.+-dlls$/.test(name)
+          && fs.existsSync(candidate)
+          && fs.statSync(candidate).isDirectory();
+      });
+    return match || null;
+  } catch {
+    return null;
+  }
+}
+
+function addBundledMoshDllPath(env, bareClient, opts = {}) {
+  const dllDir = findBundledMoshDllDir(bareClient, opts);
+  return dllDir ? prependEnvPath(env, dllDir, opts) : env;
+}
+
 function createMoshSshPasswordResponder(sshPty, password) {
   if (typeof password !== "string" || password.length === 0) {
     return () => {};
@@ -988,6 +1052,7 @@ function swapToMoshClient(session, options, ctx) {
     key: parsed.key,
     lang,
   });
+  addBundledMoshDllPath(env, bareClient);
   if (options.agentForwarding && process.env.SSH_AUTH_SOCK) {
     env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
   }
@@ -1561,6 +1626,7 @@ module.exports = {
   startMoshSession,
   bundledMoshClient,
   resolveBareMoshClient,
+  addBundledMoshDllPath,
   startSerialSession,
   listSerialPorts,
   writeToSession,

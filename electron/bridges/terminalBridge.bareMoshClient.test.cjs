@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { resolveBareMoshClient } = require("./terminalBridge.cjs");
+const { addBundledMoshDllPath, resolveBareMoshClient } = require("./terminalBridge.cjs");
 
 function makeTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-resolve-"));
@@ -86,6 +86,38 @@ test("mosh runtime does not fall back to system mosh or mosh-client", () => {
   assert.equal(source.includes('resolvePosixExecutable("mosh"'), false);
   assert.equal(source.includes('findExecutable("mosh"'), false);
   assert.equal(source.includes("brew install mosh"), false);
+});
+
+test("Windows dev mosh-client prepends the bundled DLL directory", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
+  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
+  writeExecutable(client);
+  fs.mkdirSync(dllDir, { recursive: true });
+  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
+
+  const env = { Path: "C:\\Windows\\System32" };
+  addBundledMoshDllPath(env, client, { platform: "win32", arch: "x64" });
+
+  assert.equal(env.Path.split(";")[0], dllDir);
+});
+
+test("Windows dev mosh-client updates the PATH key used by child process env", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
+  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
+  writeExecutable(client);
+  fs.mkdirSync(dllDir, { recursive: true });
+  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
+
+  const env = {
+    Path: "C:\\Windows\\System32",
+    PATH: "C:\\Tools",
+  };
+  addBundledMoshDllPath(env, client, { platform: "win32", arch: "x64" });
+
+  assert.equal(env.PATH.split(";")[0], dllDir);
+  assert.equal(Object.prototype.hasOwnProperty.call(env, "Path"), false);
 });
 
 test("removed Mosh client detection APIs are not exposed to the renderer", () => {
