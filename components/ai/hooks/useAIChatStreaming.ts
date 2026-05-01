@@ -33,6 +33,7 @@ import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import {
   extractProviderContinuationFromRawChunk,
+  getOpenAIChatAssistantFieldsForHistoryMessage,
   isProviderContinuationForSource,
   mergeProviderContinuation,
   normalizeProviderContinuationOptions,
@@ -456,6 +457,8 @@ export function useAIChatStreaming({
     let pendingText = '';
     let rafId: number | null = null;
     const openAIFieldIndexByMessageId = new Map<string, number>();
+    let nextPreseededOpenAIFieldIndex = continuationContext?.openAIChatAssistantFields.length ?? 0;
+    const preseededOpenAIFieldSlots = new Set<number>();
 
     const ensureAssistantMessage = (): string => {
       if (lastAddedRole !== 'tool') return activeMsgId;
@@ -476,8 +479,14 @@ export function useAIChatStreaming({
       if (!continuationContext) return undefined;
       let fieldIndex = openAIFieldIndexByMessageId.get(messageId);
       if (fieldIndex === undefined) {
-        fieldIndex = continuationContext.openAIChatAssistantFields.length;
-        continuationContext.openAIChatAssistantFields.push(undefined);
+        if (nextPreseededOpenAIFieldIndex < continuationContext.openAIChatAssistantFields.length) {
+          fieldIndex = nextPreseededOpenAIFieldIndex;
+          nextPreseededOpenAIFieldIndex += 1;
+          preseededOpenAIFieldSlots.add(fieldIndex);
+        } else {
+          fieldIndex = continuationContext.openAIChatAssistantFields.length;
+          continuationContext.openAIChatAssistantFields.push(undefined);
+        }
         openAIFieldIndexByMessageId.set(messageId, fieldIndex);
       }
       return fieldIndex;
@@ -491,6 +500,7 @@ export function useAIChatStreaming({
 
       const fieldIndex = ensureOpenAIChatFieldSlot(messageId);
       if (fieldIndex === undefined) return;
+      if (preseededOpenAIFieldSlots.has(fieldIndex)) return;
 
       const merged = mergeProviderContinuation(
         { openAIChatAssistantFields: continuationContext.openAIChatAssistantFields[fieldIndex] },
@@ -942,7 +952,9 @@ export function useAIChatStreaming({
       };
 
       const sdkMessages: Array<ModelMessage> = [];
+      let previousHistoryMessageWasToolResult = false;
       for (const m of allMessages) {
+        const currentMessageFollowsToolResult = previousHistoryMessageWasToolResult;
         if (m.role === 'user') {
           // Build multimodal content when attachments are present (fallback to legacy `images` field)
           const messageAttachments = m.attachments ?? m.images;
@@ -967,6 +979,10 @@ export function useAIChatStreaming({
           )
             ? m.providerContinuation
             : undefined;
+          const openAIChatAssistantFields = getOpenAIChatAssistantFieldsForHistoryMessage(
+            m,
+            continuationContext.source,
+          );
           if (m.toolCalls?.length) {
             // Only include tool calls that have matching results
             const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
@@ -1002,7 +1018,7 @@ export function useAIChatStreaming({
             if (contentParts.length > 0) {
               sdkMessages.push({ role: 'assistant', content: toAssistantModelContent(contentParts) });
               if (resolvedCalls.length > 0) {
-                continuationContext.openAIChatAssistantFields.push(activeContinuation?.openAIChatAssistantFields);
+                continuationContext.openAIChatAssistantFields.push(openAIChatAssistantFields);
               }
             }
           } else if (m.content) {
@@ -1024,6 +1040,9 @@ export function useAIChatStreaming({
               role: 'assistant',
               content: toAssistantModelContent(contentParts),
             });
+            if (currentMessageFollowsToolResult) {
+              continuationContext.openAIChatAssistantFields.push(openAIChatAssistantFields);
+            }
           }
         } else if (m.role === 'tool' && m.toolResults?.length) {
           sdkMessages.push({
@@ -1036,6 +1055,7 @@ export function useAIChatStreaming({
             })),
           });
         }
+        previousHistoryMessageWasToolResult = m.role === 'tool' && !!m.toolResults?.length;
       }
       // Build the current user message — include attachments as multimodal content
       if (attachments?.length) {

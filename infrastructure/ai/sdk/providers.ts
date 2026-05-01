@@ -4,6 +4,9 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { ProviderConfig } from '../types';
 import {
   applyOpenAIChatContinuationToBody,
+  extractProviderContinuationFromRawChunk,
+  mergeProviderContinuation,
+  rawOpenAIChatChunkHasToolCalls,
   type OpenAIChatAssistantFields,
 } from '../providerContinuation';
 
@@ -59,6 +62,57 @@ function isStreamingRequest(init?: RequestInit): boolean {
   } catch {
     return false;
   }
+}
+
+function mergeOpenAIChatAssistantFields(
+  current: OpenAIChatAssistantFields | undefined,
+  incoming: OpenAIChatAssistantFields | undefined,
+): OpenAIChatAssistantFields | undefined {
+  return mergeProviderContinuation(
+    { openAIChatAssistantFields: current },
+    { openAIChatAssistantFields: incoming },
+  )?.openAIChatAssistantFields;
+}
+
+function createOpenAIChatStreamFieldCapture(
+  requestContext?: ProviderRequestContext,
+): (data: string) => void {
+  const assistantFields = requestContext?.getOpenAIChatAssistantFields?.();
+  if (!assistantFields) return () => undefined;
+
+  let streamFieldIndex: number | undefined;
+  let pendingFields: OpenAIChatAssistantFields | undefined;
+
+  const ensureStreamFieldSlot = (): number => {
+    if (streamFieldIndex !== undefined) return streamFieldIndex;
+    streamFieldIndex = assistantFields.length;
+    assistantFields.push(undefined);
+    return streamFieldIndex;
+  };
+
+  return (data: string) => {
+    const continuation = extractProviderContinuationFromRawChunk(data);
+    const fields = continuation?.openAIChatAssistantFields;
+    if (fields) {
+      pendingFields = mergeOpenAIChatAssistantFields(pendingFields, fields);
+      if (streamFieldIndex !== undefined) {
+        assistantFields[streamFieldIndex] = mergeOpenAIChatAssistantFields(
+          assistantFields[streamFieldIndex],
+          fields,
+        );
+      }
+    }
+
+    if (rawOpenAIChatChunkHasToolCalls(data)) {
+      const fieldIndex = ensureStreamFieldSlot();
+      if (pendingFields) {
+        assistantFields[fieldIndex] = mergeOpenAIChatAssistantFields(
+          assistantFields[fieldIndex],
+          pendingFields,
+        );
+      }
+    }
+  };
 }
 
 /**
@@ -153,6 +207,7 @@ export function createBridgeFetchForSDK(
     // Streaming path
     if (isStreamingRequest(resolvedInit)) {
       const requestId = `sdk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const captureOpenAIChatFields = createOpenAIChatStreamFieldCapture(requestContext);
 
       // Set up IPC event listeners BEFORE starting the stream to avoid
       // missing early events.
@@ -161,6 +216,7 @@ export function createBridgeFetchForSDK(
       let cleanedUp = false;
 
       const unsubData = bridge.onAiStreamData(requestId, (data: string) => {
+        captureOpenAIChatFields(data);
         // Re-wrap as SSE so the SDK can parse it
         streamController?.enqueue(encoder.encode(`data: ${data}\n\n`));
       });

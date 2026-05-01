@@ -3,9 +3,11 @@ import test from 'node:test';
 import {
   applyOpenAIChatContinuationToBody,
   extractProviderContinuationFromRawChunk,
+  getOpenAIChatAssistantFieldsForHistoryMessage,
   isProviderContinuationForSource,
   mergeProviderContinuation,
   normalizeProviderContinuationOptions,
+  rawOpenAIChatChunkHasToolCalls,
   withProviderContinuationSource,
 } from './providerContinuation';
 
@@ -64,6 +66,106 @@ test('patches OpenAI-compatible assistant tool-call messages with saved continua
   );
 
   assert.equal(patched.messages[2].reasoning_content, 'need shell context');
+});
+
+test('patches the final assistant message after a tool result with saved continuation fields', () => {
+  const body = JSON.stringify({
+    model: 'deepseek-v4-flash',
+    stream: true,
+    messages: [
+      { role: 'user', content: 'inspect the host' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'run_command', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '{"ok":true}' },
+      { role: 'assistant', content: 'host is healthy' },
+      { role: 'user', content: 'continue' },
+    ],
+  });
+
+  const patched = JSON.parse(
+    applyOpenAIChatContinuationToBody(body, [
+      { reasoning_content: 'need shell context' },
+      { reasoning_content: 'summarize result' },
+    ]),
+  );
+
+  assert.equal(patched.messages[1].reasoning_content, 'need shell context');
+  assert.equal(patched.messages[3].reasoning_content, 'summarize result');
+});
+
+test('rebuilds OpenAI-compatible continuation fields from saved thinking for legacy history', () => {
+  const source = { providerConfigId: 'deepseek-custom', providerType: 'custom', modelId: 'deepseek-v4-flash' };
+
+  assert.deepEqual(
+    getOpenAIChatAssistantFieldsForHistoryMessage(
+      {
+        thinking: 'legacy visible reasoning',
+        providerId: 'custom',
+        model: 'deepseek-v4-flash',
+      },
+      source,
+    ),
+    { reasoning_content: 'legacy visible reasoning' },
+  );
+});
+
+test('does not rebuild continuation fields from thinking when provider or model differs', () => {
+  const source = { providerConfigId: 'deepseek-custom', providerType: 'custom', modelId: 'deepseek-v4-flash' };
+
+  assert.equal(
+    getOpenAIChatAssistantFieldsForHistoryMessage(
+      {
+        thinking: 'other provider reasoning',
+        providerId: 'openai',
+        model: 'deepseek-v4-flash',
+      },
+      source,
+    ),
+    undefined,
+  );
+  assert.equal(
+    getOpenAIChatAssistantFieldsForHistoryMessage(
+      {
+        thinking: 'other model reasoning',
+        providerId: 'custom',
+        model: 'another-model',
+      },
+      source,
+    ),
+    undefined,
+  );
+});
+
+test('detects OpenAI-compatible tool calls in raw chunks', () => {
+  assert.equal(rawOpenAIChatChunkHasToolCalls({
+    choices: [
+      {
+        delta: {
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'run_command', arguments: '{}' },
+            },
+          ],
+        },
+      },
+    ],
+  }), true);
+
+  assert.equal(rawOpenAIChatChunkHasToolCalls({
+    choices: [{ delta: { reasoning_content: 'think' } }],
+  }), false);
+  assert.equal(rawOpenAIChatChunkHasToolCalls('[DONE]'), false);
 });
 
 test('merges provider reasoning metadata into the reasoning part it belongs to', () => {
@@ -171,7 +273,7 @@ test('merges tool-call provider options by tool call id', () => {
   });
 });
 
-test('matches continuation fields only to assistant tool-call messages', () => {
+test('skips plain assistant messages that are not part of a tool loop', () => {
   const body = JSON.stringify({
     stream: true,
     messages: [

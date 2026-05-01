@@ -29,6 +29,13 @@ export interface ProviderContinuation {
 
 export type OpenAIChatAssistantFields = Record<string, unknown>;
 
+export interface ProviderContinuationHistoryMessage {
+  providerContinuation?: ProviderContinuation;
+  thinking?: string;
+  model?: string;
+  providerId?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -286,6 +293,25 @@ export function isProviderContinuationForSource(
     && continuation.source.modelId === source.modelId;
 }
 
+export function getOpenAIChatAssistantFieldsForHistoryMessage(
+  message: ProviderContinuationHistoryMessage,
+  source: ProviderContinuationSource | undefined,
+): OpenAIChatAssistantFields | undefined {
+  const activeContinuation = isProviderContinuationForSource(message.providerContinuation, source)
+    ? message.providerContinuation
+    : undefined;
+  if (activeContinuation?.openAIChatAssistantFields) {
+    return activeContinuation.openAIChatAssistantFields;
+  }
+
+  if (!source) return undefined;
+  if (message.providerId && message.providerId !== source.providerType) return undefined;
+  if (message.model && message.model !== source.modelId) return undefined;
+
+  const thinking = typeof message.thinking === 'string' ? message.thinking.trim() : '';
+  return thinking ? { reasoning_content: thinking } : undefined;
+}
+
 export function extractProviderContinuationFromRawChunk(rawValue: unknown): ProviderContinuation | undefined {
   const parsed = parseRawValue(rawValue);
   if (!isRecord(parsed) || !Array.isArray(parsed.choices)) return undefined;
@@ -308,6 +334,21 @@ export function extractProviderContinuationFromRawChunk(rawValue: unknown): Prov
   };
 }
 
+export function rawOpenAIChatChunkHasToolCalls(rawValue: unknown): boolean {
+  const parsed = parseRawValue(rawValue);
+  if (!isRecord(parsed) || !Array.isArray(parsed.choices)) return false;
+
+  for (const choice of parsed.choices) {
+    if (!isRecord(choice)) continue;
+    const delta = isRecord(choice.delta) ? choice.delta : undefined;
+    const message = isRecord(choice.message) ? choice.message : undefined;
+    if (delta && hasToolCalls(delta)) return true;
+    if (message && hasToolCalls(message)) return true;
+  }
+
+  return false;
+}
+
 function hasToolCalls(message: Record<string, unknown>): boolean {
   return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
 }
@@ -326,9 +367,9 @@ function compactAssistantFields(fields: OpenAIChatAssistantFields | undefined): 
 
 export function applyOpenAIChatContinuationToBody(
   body: string,
-  assistantFieldsByToolCallMessage: Array<OpenAIChatAssistantFields | undefined>,
+  assistantFieldsByContinuationMessage: Array<OpenAIChatAssistantFields | undefined>,
 ): string {
-  if (!assistantFieldsByToolCallMessage.length) return body;
+  if (!assistantFieldsByContinuationMessage.length) return body;
 
   let parsed: unknown;
   try {
@@ -341,12 +382,19 @@ export function applyOpenAIChatContinuationToBody(
 
   let fieldIndex = 0;
   let changed = false;
+  let previousMessageWasTool = false;
   const messages = parsed.messages.map((message) => {
-    if (!isRecord(message) || message.role !== 'assistant' || !hasToolCalls(message)) {
+    const isToolMessage = isRecord(message) && message.role === 'tool';
+    const needsContinuationFields = isRecord(message)
+      && message.role === 'assistant'
+      && (hasToolCalls(message) || previousMessageWasTool);
+    previousMessageWasTool = isToolMessage;
+
+    if (!needsContinuationFields) {
       return message;
     }
 
-    const fields = compactAssistantFields(assistantFieldsByToolCallMessage[fieldIndex]);
+    const fields = compactAssistantFields(assistantFieldsByContinuationMessage[fieldIndex]);
     fieldIndex += 1;
     if (!fields) return message;
 
