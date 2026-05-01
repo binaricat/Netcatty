@@ -516,11 +516,12 @@ body {
 }
 
 /* Streamdown table overrides */
-[data-streamdown="table-wrapper"] {
+.ai-chat-message-content[data-role="assistant"] [data-streamdown="table-wrapper"] {
   gap: 4px !important;
   padding: 4px 8px 8px !important;
 }
 
-[data-streamdown="table-wrapper"] > div:first-child:has(button) button {
+.ai-chat-message-content[data-role="assistant"] [data-streamdown="table-wrapper"] > div:first-child > button,
+.ai-chat-message-content[data-role="assistant"] [data-streamdown="table-wrapper"] > div:first-child > div > button {
   padding: 3px !important;
 }
