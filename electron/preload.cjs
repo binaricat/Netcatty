@@ -816,6 +816,7 @@ const api = {
   windowClose: () => ipcRenderer.invoke("netcatty:window:close"),
   windowIsMaximized: () => ipcRenderer.invoke("netcatty:window:isMaximized"),
   windowIsFullscreen: () => ipcRenderer.invoke("netcatty:window:isFullscreen"),
+  windowFocus: () => ipcRenderer.invoke("netcatty:window:focus"),
   onWindowFullScreenChanged: (cb) => {
     fullscreenChangeListeners.add(cb);
     return () => fullscreenChangeListeners.delete(cb);

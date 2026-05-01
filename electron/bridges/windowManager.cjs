@@ -1263,14 +1263,20 @@ async function createWindow(electronModule, options) {
  * calling `webContents.focus()` covers (2) so the renderer marks the page as
  * focused regardless of whether the OS granted foreground.
  */
-function showAndFocusWindow(win) {
-  if (!win || win.isDestroyed()) return;
-  try {
-    win.show();
-  } catch {
-    // ignore
+function restoreWindowInputFocus(win, options = {}) {
+  if (!win || win.isDestroyed()) return false;
+  const shouldShow = options.show === true;
+  const platform = options.platform || process.platform;
+
+  if (shouldShow) {
+    try {
+      win.show();
+    } catch {
+      // ignore
+    }
   }
-  if (process.platform === "win32") {
+
+  if (platform === "win32") {
     try {
       win.setAlwaysOnTop(true);
       win.focus();
@@ -1285,6 +1291,7 @@ function showAndFocusWindow(win) {
       // ignore
     }
   }
+
   try {
     if (win.webContents && !win.webContents.isDestroyed()) {
       win.webContents.focus();
@@ -1292,6 +1299,11 @@ function showAndFocusWindow(win) {
   } catch {
     // ignore
   }
+  return true;
+}
+
+function showAndFocusWindow(win) {
+  restoreWindowInputFocus(win, { show: true });
 }
 
 async function openSettingsWindow(electronModule, options, { showOnLoad = true } = {}) {
@@ -1576,6 +1588,11 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     return false;
   });
 
+  ipcMain.handle("netcatty:window:focus", (event) => {
+    const win = getWindowForIpcEvent(event);
+    return restoreWindowInputFocus(win);
+  });
+
   ipcMain.handle("netcatty:setTheme", (_event, theme) => {
     currentTheme = theme;
     nativeTheme.themeSource = theme;
@@ -1754,6 +1771,7 @@ module.exports = {
   getMainWindow,
   getSettingsWindow,
   isWindowUsable,
+  restoreWindowInputFocus,
   waitForRendererReady,
   setIsQuitting,
   openFallbackBrowser,

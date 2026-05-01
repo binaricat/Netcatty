@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { isWindowUsable } = require("./windowManager.cjs");
+const { isWindowUsable, restoreWindowInputFocus } = require("./windowManager.cjs");
 
 function createWindowStub({ destroyed = false, webContents } = {}) {
   return {
@@ -64,4 +64,68 @@ test("isWindowUsable can require a visible window", () => {
 
   assert.equal(isWindowUsable(hiddenWin, { requireVisible: true }), false);
   assert.equal(isWindowUsable(hiddenWin, { requireVisible: false }), true);
+});
+
+test("restoreWindowInputFocus focuses the window and renderer on Windows without showing hidden windows", () => {
+  const calls = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    show() {
+      calls.push("show");
+    },
+    focus() {
+      calls.push("focus");
+    },
+    setAlwaysOnTop(value) {
+      calls.push(`alwaysOnTop:${value}`);
+    },
+    webContents: {
+      isDestroyed() {
+        return false;
+      },
+      focus() {
+        calls.push("webContents.focus");
+      },
+    },
+  };
+
+  const restored = restoreWindowInputFocus(win, { platform: "win32" });
+
+  assert.equal(restored, true);
+  assert.deepEqual(calls, [
+    "alwaysOnTop:true",
+    "focus",
+    "alwaysOnTop:false",
+    "webContents.focus",
+  ]);
+});
+
+test("restoreWindowInputFocus can show the window when requested", () => {
+  const calls = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    show() {
+      calls.push("show");
+    },
+    focus() {
+      calls.push("focus");
+    },
+    webContents: {
+      isDestroyed() {
+        return false;
+      },
+      focus() {
+        calls.push("webContents.focus");
+      },
+    },
+  };
+
+  const restored = restoreWindowInputFocus(win, { platform: "darwin", show: true });
+
+  assert.equal(restored, true);
+  assert.deepEqual(calls, ["show", "focus", "webContents.focus"]);
 });

@@ -11,6 +11,7 @@ import { toast } from './ui/toast';
 import { TextEditorPane } from './editor/TextEditorPane';
 import { promptUnsavedChanges } from './editor/UnsavedChangesDialog';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { scheduleWindowInputFocus } from '../application/state/windowInputFocus';
 import type { HotkeyScheme, KeyBinding } from '../domain/models';
 
 /** Snapshot passed to `onPromoteToTab` when the user clicks the maximize button. */
@@ -126,6 +127,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
         }
       }
       onClose();
+      scheduleWindowInputFocus();
     })().finally(() => {
       closePromptRef.current = null;
     });
@@ -149,6 +151,10 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
     if (!open) {
       closePromptRef.current = null;
     }
+  }, [open]);
+
+  useEffect(() => {
+    if (open) scheduleWindowInputFocus();
   }, [open]);
 
   const handleContentChange = useCallback(

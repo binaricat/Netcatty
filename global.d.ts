@@ -465,6 +465,7 @@ declare global {
     windowClose?(): Promise<void>;
     windowIsMaximized?(): Promise<boolean>;
     windowIsFullscreen?(): Promise<boolean>;
+    windowFocus?(): Promise<boolean>;
     onWindowFullScreenChanged?(cb: (isFullscreen: boolean) => void): () => void;
 
     // Settings window
