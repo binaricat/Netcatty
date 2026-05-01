@@ -514,3 +514,13 @@ body {
   line-height: 1.5 !important;
   white-space: pre !important;
 }
+
+/* Streamdown table overrides */
+[data-streamdown="table-wrapper"] {
+  gap: 4px !important;
+  padding: 4px 8px 8px !important;
+}
+
+[data-streamdown="table-wrapper"] > div:first-child:has(button) button {
+  padding: 3px !important;
+}

@@ -233,7 +233,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({ messages, isStreaming
 
                 {message.content && (
                   isUser
-                    ? <div className="whitespace-pre-wrap break-words text-[13px]">{message.content}</div>
+                    ? <div className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">{message.content}</div>
                     : <MessageResponse isAnimating={isThisStreaming}>
                         {message.content}
                       </MessageResponse>
