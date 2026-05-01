@@ -90,27 +90,27 @@ function createOpenAIChatStreamFieldCapture(
     return streamFieldIndex;
   };
 
+  const flushPendingFields = (fieldIndex: number) => {
+    if (!pendingFields) return;
+    assistantFields[fieldIndex] = mergeOpenAIChatAssistantFields(
+      assistantFields[fieldIndex],
+      pendingFields,
+    );
+    pendingFields = undefined;
+  };
+
   return (data: string) => {
     const continuation = extractProviderContinuationFromRawChunk(data);
     const fields = continuation?.openAIChatAssistantFields;
     if (fields) {
       pendingFields = mergeOpenAIChatAssistantFields(pendingFields, fields);
       if (streamFieldIndex !== undefined) {
-        assistantFields[streamFieldIndex] = mergeOpenAIChatAssistantFields(
-          assistantFields[streamFieldIndex],
-          fields,
-        );
+        flushPendingFields(streamFieldIndex);
       }
     }
 
     if (rawOpenAIChatChunkHasToolCalls(data)) {
-      const fieldIndex = ensureStreamFieldSlot();
-      if (pendingFields) {
-        assistantFields[fieldIndex] = mergeOpenAIChatAssistantFields(
-          assistantFields[fieldIndex],
-          pendingFields,
-        );
-      }
+      flushPendingFields(ensureStreamFieldSlot());
     }
   };
 }

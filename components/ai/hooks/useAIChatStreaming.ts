@@ -456,10 +456,6 @@ export function useAIChatStreaming({
     // -- Text-delta batching: accumulate deltas and flush periodically --
     let pendingText = '';
     let rafId: number | null = null;
-    const openAIFieldIndexByMessageId = new Map<string, number>();
-    let nextPreseededOpenAIFieldIndex = continuationContext?.openAIChatAssistantFields.length ?? 0;
-    const preseededOpenAIFieldSlots = new Set<number>();
-
     const ensureAssistantMessage = (): string => {
       if (lastAddedRole !== 'tool') return activeMsgId;
 
@@ -475,40 +471,6 @@ export function useAIChatStreaming({
       return activeMsgId;
     };
 
-    const ensureOpenAIChatFieldSlot = (messageId: string): number | undefined => {
-      if (!continuationContext) return undefined;
-      let fieldIndex = openAIFieldIndexByMessageId.get(messageId);
-      if (fieldIndex === undefined) {
-        if (nextPreseededOpenAIFieldIndex < continuationContext.openAIChatAssistantFields.length) {
-          fieldIndex = nextPreseededOpenAIFieldIndex;
-          nextPreseededOpenAIFieldIndex += 1;
-          preseededOpenAIFieldSlots.add(fieldIndex);
-        } else {
-          fieldIndex = continuationContext.openAIChatAssistantFields.length;
-          continuationContext.openAIChatAssistantFields.push(undefined);
-        }
-        openAIFieldIndexByMessageId.set(messageId, fieldIndex);
-      }
-      return fieldIndex;
-    };
-
-    const mergeOpenAIChatFields = (
-      messageId: string,
-      fields: OpenAIChatAssistantFields | undefined,
-    ) => {
-      if (!fields || !continuationContext) return;
-
-      const fieldIndex = ensureOpenAIChatFieldSlot(messageId);
-      if (fieldIndex === undefined) return;
-      if (preseededOpenAIFieldSlots.has(fieldIndex)) return;
-
-      const merged = mergeProviderContinuation(
-        { openAIChatAssistantFields: continuationContext.openAIChatAssistantFields[fieldIndex] },
-        { openAIChatAssistantFields: fields },
-      );
-      continuationContext.openAIChatAssistantFields[fieldIndex] = merged?.openAIChatAssistantFields;
-    };
-
     const updateAssistantContinuation = (
       messageId: string,
       continuation: ProviderContinuation | undefined,
@@ -516,7 +478,6 @@ export function useAIChatStreaming({
     ) => {
       if (!continuation && !thinkingText) return;
       const sourcedContinuation = withProviderContinuationSource(continuation, continuationContext?.source);
-      mergeOpenAIChatFields(messageId, sourcedContinuation?.openAIChatAssistantFields);
       updateMessageById(streamSessionId, messageId, msg => {
         const providerContinuation = mergeProviderContinuation(msg.providerContinuation, sourcedContinuation);
         return {
@@ -633,7 +594,6 @@ export function useAIChatStreaming({
           flushText();
           const typedChunk = chunk as ToolCallChunk;
           const messageId = ensureAssistantMessage();
-          ensureOpenAIChatFieldSlot(messageId);
           const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
           updateMessageById(streamSessionId, messageId, msg => ({
             ...msg,

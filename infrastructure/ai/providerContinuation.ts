@@ -305,8 +305,8 @@ export function getOpenAIChatAssistantFieldsForHistoryMessage(
   }
 
   if (!source) return undefined;
-  if (message.providerId && message.providerId !== source.providerType) return undefined;
-  if (message.model && message.model !== source.modelId) return undefined;
+  if (message.providerId !== source.providerType) return undefined;
+  if (source.modelId && message.model !== source.modelId) return undefined;
 
   const thinking = typeof message.thinking === 'string' ? message.thinking.trim() : '';
   return thinking ? { reasoning_content: thinking } : undefined;

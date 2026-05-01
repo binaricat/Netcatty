@@ -143,6 +143,26 @@ test('does not rebuild continuation fields from thinking when provider or model 
     ),
     undefined,
   );
+  assert.equal(
+    getOpenAIChatAssistantFieldsForHistoryMessage(
+      {
+        thinking: 'missing provider metadata',
+        model: 'deepseek-v4-flash',
+      },
+      source,
+    ),
+    undefined,
+  );
+  assert.equal(
+    getOpenAIChatAssistantFieldsForHistoryMessage(
+      {
+        thinking: 'missing model metadata',
+        providerId: 'custom',
+      },
+      source,
+    ),
+    undefined,
+  );
 });
 
 test('detects OpenAI-compatible tool calls in raw chunks', () => {
