@@ -8,8 +8,8 @@ directly (see `electron/bridges/moshHandshake.cjs` and
 
 ## How binaries land here
 
-1. `.github/workflows/build-mosh-binaries.yml` builds `mosh-client` on a
-   `workflow_dispatch` or `mosh-bin-*` tag push. It uses
+1. `.github/workflows/build-mosh-binaries.yml` builds `mosh-client` on
+   relevant pushes/PRs, or on a manual `workflow_dispatch`. It uses
    `scripts/build-mosh/{build-linux,build-macos,build-windows}.sh` to
    produce one binary per target from upstream `mobile-shell/mosh`
    source:
@@ -26,17 +26,21 @@ directly (see `electron/bridges/moshHandshake.cjs` and
    the FluentTerminal-pinned binary; it's no longer wired into the
    default workflow.
 
-2. The release built by that workflow gets a tag like
-   `mosh-bin-1.4.0-1`, with `SHA256SUMS` attached.
+2. When manually dispatched with `release_tag`, that workflow publishes
+   the binaries to the dedicated `binaricat/Netcatty-mosh-bin`
+   repository. The release gets a tag like `mosh-bin-1.4.0-1`, with
+   `SHA256SUMS` attached.
 
 3. Release packaging runs `scripts/resolve-mosh-bin-release.cjs` before
    `npm run fetch:mosh`. It uses an explicit workflow input first, then
    the `MOSH_BIN_RELEASE` repository variable, then the latest
-   non-draft `mosh-bin-*` GitHub Release. The fetch step pulls the
-   binaries into `resources/mosh/<platform-arch>/`. For local packaging,
-   set `MOSH_BIN_RELEASE` yourself before running the same fetch command.
-   `electron-builder.config.cjs` then copies the matching binary into
-   `Resources/mosh/mosh-client[.exe]`.
+   non-draft `mosh-bin-*` GitHub Release from the dedicated binary
+   repository. The fetch step pulls the binaries into
+   `resources/mosh/<platform-arch>/`. For local packaging, set
+   `MOSH_BIN_RELEASE` yourself before running the same fetch command.
+   Override `MOSH_BIN_OWNER` / `MOSH_BIN_REPO` only when testing a
+   different binary repository. `electron-builder.config.cjs` then
+   copies the matching binary into `Resources/mosh/mosh-client[.exe]`.
 
    Official Windows package builds currently ship x64 only for bundled
    Mosh coverage. Windows arm64 packaging should be re-enabled there

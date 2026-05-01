@@ -4,10 +4,9 @@ name: build-mosh-binaries
 #  - Pushes that touch the mosh build pipeline + PRs run the matrix
 #    so we can validate workflow / script changes without tagging.
 #    Artifacts upload as workflow artifacts only; *no* release.
-#  - Tag push matching `mosh-bin-<version>-<rev>` (e.g.
-#    `mosh-bin-1.4.0-1`) runs the matrix and publishes a Release with
-#    the binaries + SHA256SUMS.
-#  - Manual `workflow_dispatch` → opt-in publish via `release_tag`.
+#  - Manual `workflow_dispatch` with `release_tag` publishes the
+#    binaries + SHA256SUMS to the dedicated binary repository
+#    (`binaricat/Netcatty-mosh-bin` by default).
 #
 # `paths` keeps unrelated commits (UI, bridges, etc) from rebuilding
 # mosh on every push — this workflow is expensive (~30min Cygwin leg).
@@ -22,11 +21,13 @@ on:
         description: "Optional release tag to attach binaries to (e.g. mosh-bin-1.4.0-1). Empty = artifacts only."
         type: string
         default: ""
+      release_repo:
+        description: "Repository that stores mosh-client binary releases."
+        type: string
+        default: "binaricat/Netcatty-mosh-bin"
   push:
     branches:
       - "**"
-    tags:
-      - "mosh-bin-*"
     paths:
       - ".gitattributes"
       - ".github/workflows/build-mosh-binaries.yml"
@@ -45,11 +46,10 @@ on:
       - "scripts/fetch-mosh-binaries.cjs"
       - "scripts/mosh-extra-resources.cjs"
 
-# Cancel superseded branch / PR builds; tag builds use a unique group
-# so a follow-up commit doesn't kill the in-progress release.
+# Cancel superseded branch / PR builds.
 concurrency:
   group: build-mosh-binaries-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: true
 
 env:
   MOSH_REF: ${{ inputs.mosh_ref || 'mosh-1.4.0' }}
@@ -188,7 +188,7 @@ jobs:
   # ------------------------------------------------------------------
 
   # ------------------------------------------------------------------
-  # Aggregate + (optional) GitHub Release.
+  # Aggregate + optional release to the dedicated binary repository.
   # ------------------------------------------------------------------
   release:
     name: release
@@ -198,15 +198,9 @@ jobs:
       - build-macos-universal
       - build-windows-x64
     runs-on: ubuntu-latest
-    # Release only on a `mosh-bin-*` tag push or an explicit
-    # workflow_dispatch with `release_tag` provided. Branch pushes /
-    # PRs (even on a branch literally called `mosh-bin-foo`) can't
-    # match `refs/tags/mosh-bin-*`, so they never publish.
-    if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mosh-bin-'))
-      || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Download artifacts
@@ -228,26 +222,32 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            tag="${GITHUB_REF_NAME}"
-          else
-            tag="${RELEASE_TAG}"
-          fi
+          tag="${RELEASE_TAG}"
           if [[ ! "$tag" =~ ^mosh-bin-[A-Za-z0-9._-]+$ ]]; then
             echo "Invalid mosh binary release tag: $tag" >&2
             exit 1
           fi
           printf 'name=%s\n' "$tag" >> "$GITHUB_OUTPUT"
       - name: Create / update release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          name: ${{ steps.tag.outputs.name }}
-          files: release/*
-          body: |
-            Pre-built `mosh-client` binaries consumed by `scripts/fetch-mosh-binaries.cjs`
-            during `npm run pack`. Built from `mobile-shell/mosh` upstream ref `${{ env.MOSH_REF }}`.
-
-            All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.
-          draft: false
-          prerelease: false
+        env:
+          GH_TOKEN: ${{ secrets.MOSH_BIN_RELEASE_TOKEN }}
+          RELEASE_REPO: ${{ inputs.release_repo }}
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::MOSH_BIN_RELEASE_TOKEN is required to publish into ${RELEASE_REPO}."
+            exit 1
+          fi
+          {
+            printf '%s\n' 'Pre-built `mosh-client` binaries consumed by `scripts/fetch-mosh-binaries.cjs` during `npm run pack`.'
+            printf 'Built from `mobile-shell/mosh` upstream ref `%s`.\n\n' "${MOSH_REF}"
+            printf 'Source workflow: %s/%s/actions/runs/%s\n' "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
+            printf 'Source commit: `%s`\n\n' "${GITHUB_SHA}"
+            printf '%s\n' 'All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.'
+          } > release-notes.md
+          gh release delete "${RELEASE_TAG}" --repo "${RELEASE_REPO}" --cleanup-tag --yes || true
+          gh release create "${RELEASE_TAG}" release/* \
+            --repo "${RELEASE_REPO}" \
+            --title "${RELEASE_TAG}" \
+            --notes-file release-notes.md

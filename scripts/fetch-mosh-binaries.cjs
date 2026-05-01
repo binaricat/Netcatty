@@ -15,10 +15,9 @@
 //   MOSH_BIN_RELEASE  — release tag in ${MOSH_BIN_OWNER}/${MOSH_BIN_REPO}.
 //                       Skip the whole step if unset (printed as a notice
 //                       so the build doesn't silently miss the bundling).
-//   MOSH_BIN_OWNER    — default 'binaricat'
-//   MOSH_BIN_REPO     — default 'Netcatty' (binaries attached to a
-//                       dedicated tag in the netcatty repo to keep
-//                       provenance auditable).
+//   MOSH_BIN_OWNER    — defaults to the GITHUB_REPOSITORY owner, or 'binaricat'
+//   MOSH_BIN_REPO     — default 'Netcatty-mosh-bin' (a dedicated binary
+//                       repository so the client repo stays source-only).
 //   MOSH_BIN_BASE_URL — full override (e.g. for staging / local mirror).
 //   MOSH_BIN_RES_DIR  — override output dir for tests.
 //   MOSH_BIN_ALLOW_UNVERIFIED=true — explicit local escape hatch for mirrors
@@ -135,6 +134,14 @@ function chmodExecutable(filePath) {
   }
 }
 
+function parseMoshBinRepository(env) {
+  const githubOwner = (env.GITHUB_REPOSITORY || "").split("/")[0];
+  return {
+    owner: env.MOSH_BIN_OWNER || githubOwner || "binaricat",
+    repo: env.MOSH_BIN_REPO || "Netcatty-mosh-bin",
+  };
+}
+
 function assertExtractedTreeSafe(root) {
   const stack = [root];
   while (stack.length > 0) {
@@ -242,8 +249,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     return 0;
   }
 
-  const owner = env.MOSH_BIN_OWNER || "binaricat";
-  const repo = env.MOSH_BIN_REPO || "Netcatty";
+  const { owner, repo } = parseMoshBinRepository(env);
   const baseUrl = env.MOSH_BIN_BASE_URL ||
     `https://github.com/${owner}/${repo}/releases/download/${encodeURIComponent(release)}`;
   const resDir = path.resolve(env.MOSH_BIN_RES_DIR || DEFAULT_RES_DIR);
@@ -275,6 +281,7 @@ if (require.main === module) {
 
 module.exports = {
   TARGETS,
+  parseMoshBinRepository,
   parseSums,
   validateTarEntries,
   assertExtractedTreeSafe,

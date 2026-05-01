@@ -10,6 +10,7 @@ const crypto = require("node:crypto");
 
 const script = path.resolve(__dirname, "fetch-mosh-binaries.cjs");
 const execFileAsync = promisify(execFile);
+const { parseMoshBinRepository } = require("./fetch-mosh-binaries.cjs");
 
 function makeTmp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-fetch-mosh-"));
@@ -32,6 +33,18 @@ function makeTarGz(t, entries) {
   execFileSync("tar", ["-czf", tarPath, "-C", dir, "."], { stdio: "pipe" });
   return fs.readFileSync(tarPath);
 }
+
+test("fetch-mosh-binaries defaults to the dedicated mosh binary repository", () => {
+  assert.deepEqual(parseMoshBinRepository({}), { owner: "binaricat", repo: "Netcatty-mosh-bin" });
+  assert.deepEqual(parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project" }), {
+    owner: "owner",
+    repo: "Netcatty-mosh-bin",
+  });
+  assert.deepEqual(
+    parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project", MOSH_BIN_OWNER: "bin", MOSH_BIN_REPO: "binaries" }),
+    { owner: "bin", repo: "binaries" },
+  );
+});
 
 async function serveAssets(t, assets) {
   const server = http.createServer((req, res) => {
