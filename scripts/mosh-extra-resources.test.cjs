@@ -45,13 +45,36 @@ test("moshExtraResources returns concrete Windows arch paths only when that arch
   withCwdAndArch(t, root, "x64");
   writeFile(path.join(root, "resources", "mosh", "win32-x64", "mosh-client.exe"));
   writeFile(path.join(root, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"));
+  writeFile(path.join(root, "resources", "mosh", "win32-x64", "terminfo", "x", "xterm-256color"));
 
   const got = moshExtraResources("win32");
   assert.deepEqual(got, [
     { from: "resources/mosh/win32-x64/", to: "mosh/", filter: ["mosh-client.exe"] },
-    { from: "resources/mosh/win32-x64/mosh-client-win32-x64-dlls/", to: "mosh/", filter: ["**/*"] },
+    {
+      from: "resources/mosh/win32-x64/mosh-client-win32-x64-dlls/",
+      to: "mosh/mosh-client-win32-x64-dlls/",
+      filter: ["**/*"],
+    },
+    { from: "resources/mosh/win32-x64/terminfo/", to: "mosh/terminfo/", filter: ["**/*"] },
   ]);
 
   process.env.npm_config_arch = "arm64";
   assert.deepEqual(moshExtraResources("win32"), []);
+});
+
+test("moshExtraResources keeps legacy Windows bundles packageable", (t) => {
+  const root = makeTmp(t);
+  withCwdAndArch(t, root, "x64");
+  writeFile(path.join(root, "resources", "mosh", "win32-x64", "mosh-client.exe"));
+  writeFile(path.join(root, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll"));
+
+  const got = moshExtraResources("win32");
+  assert.deepEqual(got, [
+    { from: "resources/mosh/win32-x64/", to: "mosh/", filter: ["mosh-client.exe"] },
+    {
+      from: "resources/mosh/win32-x64/mosh-client-win32-x64-dlls/",
+      to: "mosh/mosh-client-win32-x64-dlls/",
+      filter: ["**/*"],
+    },
+  ]);
 });

@@ -183,6 +183,7 @@ test("fetch-mosh-binaries normalizes the Windows tarball to mosh-client.exe", as
   const tar = makeTarGz(t, {
     "mosh-client-win32-x64.exe": "exe",
     "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
+    "terminfo/x/xterm-256color": "terminfo",
   });
   const baseUrl = await serveAssets(t, {
     "mosh-client-win32-x64.tar.gz": tar,
@@ -202,6 +203,63 @@ test("fetch-mosh-binaries normalizes the Windows tarball to mosh-client.exe", as
 
   assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
   assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client-win32-x64-dlls", "cygwin1.dll")), true);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "terminfo", "x", "xterm-256color")), true);
+});
+
+test("fetch-mosh-binaries accepts legacy Windows bundles without terminfo", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const tar = makeTarGz(t, {
+    "mosh-client.exe": "exe",
+    "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
+  });
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-win32-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
+  });
+
+  const { stderr } = await execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
+    env: {
+      ...process.env,
+      MOSH_BIN_RELEASE: "test",
+      MOSH_BIN_BASE_URL: baseUrl,
+      MOSH_BIN_RES_DIR: resDir,
+      CI: "true",
+    },
+    stdio: "pipe",
+  });
+
+  assert.match(stderr, /did not contain terminfo for xterm-256color/);
+  assert.equal(fs.existsSync(path.join(resDir, "win32-x64", "mosh-client.exe")), true);
+});
+
+test("fetch-mosh-binaries rejects invalid Windows terminfo entries", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const srcDir = makeTmp(t);
+  fs.writeFileSync(path.join(srcDir, "mosh-client.exe"), "exe");
+  fs.mkdirSync(path.join(srcDir, "mosh-client-win32-x64-dlls"), { recursive: true });
+  fs.writeFileSync(path.join(srcDir, "mosh-client-win32-x64-dlls", "cygwin1.dll"), "dll");
+  fs.mkdirSync(path.join(srcDir, "terminfo", "x", "xterm-256color"), { recursive: true });
+  const tarPath = path.join(makeTmp(t), "invalid-terminfo.tar.gz");
+  execFileSync("tar", ["-czf", tarPath, "-C", srcDir, "mosh-client.exe", "mosh-client-win32-x64-dlls", "terminfo"], { stdio: "pipe" });
+  const tar = fs.readFileSync(tarPath);
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-win32-x64.tar.gz": tar,
+    SHA256SUMS: `${sha256(tar)}  mosh-client-win32-x64.tar.gz\n`,
+  });
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [script, "--platform=win32", "--arch=x64"], {
+      env: {
+        ...process.env,
+        MOSH_BIN_RELEASE: "test",
+        MOSH_BIN_BASE_URL: baseUrl,
+        MOSH_BIN_RES_DIR: resDir,
+        CI: "true",
+      },
+      stdio: "pipe",
+    }),
+    /invalid terminfo for xterm-256color/,
+  );
 });
 
 test("fetch-mosh-binaries fails when SHA256SUMS lacks the requested asset", async (t) => {
@@ -209,6 +267,7 @@ test("fetch-mosh-binaries fails when SHA256SUMS lacks the requested asset", asyn
   const tar = makeTarGz(t, {
     "mosh-client.exe": "exe",
     "mosh-client-win32-x64-dlls/cygwin1.dll": "dll",
+    "terminfo/x/xterm-256color": "terminfo",
   });
   const baseUrl = await serveAssets(t, {
     "mosh-client-win32-x64.tar.gz": tar,

@@ -46,16 +46,25 @@ function moshExtraResources(platform) {
 
   if (platform === "win32") {
     // Windows ships mosh-client.exe + Cygwin DLL bundle (cygwin1.dll,
-    // cygcrypto-*.dll, etc.) — copy the entire arch directory so the
-    // exe finds its DLLs at runtime via Windows' default search order.
+    // cygcrypto-*.dll, etc.) plus the ncurses terminfo entry used by
+    // TERM=xterm-256color.
     const arch = requestedArch();
     const exe = path.join(moshRoot, `win32-${arch}`, "mosh-client.exe");
     const dllDir = path.join(moshRoot, `win32-${arch}`, `mosh-client-win32-${arch}-dlls`);
     if (!hasFile(exe) || !hasDir(dllDir)) return [];
-    return [
+    const resources = [
       { from: `resources/mosh/win32-${arch}/`, to: "mosh/", filter: ["mosh-client.exe"] },
-      { from: `resources/mosh/win32-${arch}/mosh-client-win32-${arch}-dlls/`, to: "mosh/", filter: ["**/*"] },
+      {
+        from: `resources/mosh/win32-${arch}/mosh-client-win32-${arch}-dlls/`,
+        to: `mosh/mosh-client-win32-${arch}-dlls/`,
+        filter: ["**/*"],
+      },
     ];
+    const terminfoDir = path.join(moshRoot, `win32-${arch}`, "terminfo");
+    if (hasDir(terminfoDir)) {
+      resources.push({ from: `resources/mosh/win32-${arch}/terminfo/`, to: "mosh/terminfo/", filter: ["**/*"] });
+    }
+    return resources;
   }
 
   return [];

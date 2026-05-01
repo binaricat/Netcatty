@@ -856,6 +856,31 @@ function addBundledMoshDllPath(env, bareClient, opts = {}) {
   return dllDir ? prependEnvPath(env, dllDir, opts) : env;
 }
 
+function findBundledMoshTerminfoDir(bareClient, opts = {}) {
+  const platform = opts.platform || process.platform;
+  if (platform !== "win32" || !bareClient) return null;
+
+  const terminfoDir = path.join(path.dirname(bareClient), "terminfo");
+  const hasXterm256 =
+    fs.existsSync(path.join(terminfoDir, "x", "xterm-256color")) ||
+    fs.existsSync(path.join(terminfoDir, "78", "xterm-256color"));
+  return hasXterm256 ? terminfoDir : null;
+}
+
+function addBundledMoshTerminfoEnv(env, bareClient, opts = {}) {
+  const terminfoDir = findBundledMoshTerminfoDir(bareClient, opts);
+  if (!terminfoDir) return env;
+  env.TERMINFO = terminfoDir;
+  env.TERMINFO_DIRS = terminfoDir;
+  return env;
+}
+
+function addBundledMoshRuntimeEnv(env, bareClient, opts = {}) {
+  addBundledMoshDllPath(env, bareClient, opts);
+  addBundledMoshTerminfoEnv(env, bareClient, opts);
+  return env;
+}
+
 function createMoshSshPasswordResponder(sshPty, password) {
   if (typeof password !== "string" || password.length === 0) {
     return () => {};
@@ -1052,7 +1077,7 @@ function swapToMoshClient(session, options, ctx) {
     key: parsed.key,
     lang,
   });
-  addBundledMoshDllPath(env, bareClient);
+  addBundledMoshRuntimeEnv(env, bareClient);
   if (options.agentForwarding && process.env.SSH_AUTH_SOCK) {
     env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
   }
@@ -1627,6 +1652,8 @@ module.exports = {
   bundledMoshClient,
   resolveBareMoshClient,
   addBundledMoshDllPath,
+  addBundledMoshTerminfoEnv,
+  addBundledMoshRuntimeEnv,
   startSerialSession,
   listSerialPorts,
   writeToSession,

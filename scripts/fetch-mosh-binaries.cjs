@@ -196,6 +196,17 @@ function normalizeWindowsBundle(extractDir, target) {
   if (!fs.existsSync(dllDir) || !fs.statSync(dllDir).isDirectory()) {
     throw new Error(`${target.file} did not contain ${path.basename(dllDir)}/`);
   }
+  const terminfoDir = path.join(extractDir, "terminfo");
+  const terminfoEntry = [
+    path.join(terminfoDir, "x", "xterm-256color"),
+    path.join(terminfoDir, "78", "xterm-256color"),
+  ].find((entry) => fs.existsSync(entry));
+  if (terminfoEntry && !fs.lstatSync(terminfoEntry).isFile()) {
+    throw new Error(`${target.file} contained invalid terminfo for xterm-256color`);
+  }
+  if (!terminfoEntry) {
+    warn(`${target.file} did not contain terminfo for xterm-256color; Windows mosh packaging will need a refreshed mosh binary release.`);
+  }
   chmodExecutable(genericExe);
 }
 

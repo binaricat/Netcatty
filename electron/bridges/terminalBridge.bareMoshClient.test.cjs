@@ -4,7 +4,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { addBundledMoshDllPath, resolveBareMoshClient } = require("./terminalBridge.cjs");
+const {
+  addBundledMoshDllPath,
+  addBundledMoshRuntimeEnv,
+  addBundledMoshTerminfoEnv,
+  resolveBareMoshClient,
+} = require("./terminalBridge.cjs");
 
 function makeTmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-resolve-"));
@@ -118,6 +123,40 @@ test("Windows dev mosh-client updates the PATH key used by child process env", (
 
   assert.equal(env.PATH.split(";")[0], dllDir);
   assert.equal(Object.prototype.hasOwnProperty.call(env, "Path"), false);
+});
+
+test("Windows mosh-client points ncurses at bundled terminfo", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
+  const terminfo = path.join(tmp, "resources", "mosh", "win32-x64", "terminfo");
+  writeExecutable(client);
+  fs.mkdirSync(path.join(terminfo, "x"), { recursive: true });
+  fs.writeFileSync(path.join(terminfo, "x", "xterm-256color"), "terminfo");
+
+  const env = {};
+  addBundledMoshTerminfoEnv(env, client, { platform: "win32" });
+
+  assert.equal(env.TERMINFO, terminfo);
+  assert.equal(env.TERMINFO_DIRS, terminfo);
+});
+
+test("Windows mosh runtime env includes DLL path and terminfo", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");
+  const dllDir = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client-win32-x64-dlls");
+  const terminfo = path.join(tmp, "resources", "mosh", "win32-x64", "terminfo");
+  writeExecutable(client);
+  fs.mkdirSync(dllDir, { recursive: true });
+  fs.writeFileSync(path.join(dllDir, "cygwin1.dll"), "dll");
+  fs.mkdirSync(path.join(terminfo, "78"), { recursive: true });
+  fs.writeFileSync(path.join(terminfo, "78", "xterm-256color"), "terminfo");
+
+  const env = { Path: "C:\\Windows\\System32" };
+  addBundledMoshRuntimeEnv(env, client, { platform: "win32", arch: "x64" });
+
+  assert.equal(env.Path.split(";")[0], dllDir);
+  assert.equal(env.TERMINFO, terminfo);
+  assert.equal(env.TERMINFO_DIRS, terminfo);
 });
 
 test("removed Mosh client detection APIs are not exposed to the renderer", () => {

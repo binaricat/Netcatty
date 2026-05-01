@@ -19,6 +19,7 @@
 # Output:
 #   $OUT_DIR/mosh-client-win32-<arch>.exe
 #   $OUT_DIR/mosh-client-win32-<arch>-dlls/*.dll
+#   $OUT_DIR/terminfo/<first-letter-or-hash>/xterm-256color
 #   $OUT_DIR/mosh-client-win32-<arch>.sha256
 #
 # Expected to run inside a Cygwin bash login shell (set up by the CI's
@@ -76,6 +77,7 @@ make -j"$(nproc)"
 
 OUT_EXE="$OUT_DIR/mosh-client-win32-x64.exe"
 DLL_DIR="$OUT_DIR/mosh-client-win32-x64-dlls"
+TERMINFO_DIR="$OUT_DIR/terminfo"
 mkdir -p "$DLL_DIR"
 cp src/frontend/mosh-client.exe "$OUT_EXE"
 strip "$OUT_EXE"
@@ -122,6 +124,20 @@ fi
 echo "--- bundled DLLs ---"
 ls -lh "$DLL_DIR"
 
+# mosh-client is linked to ncurses and looks up TERM=xterm-256color at
+# startup. A bare Cygwin DLL bundle does not include the compiled terminfo
+# database, so ship the exact entry that Netcatty uses.
+TERMINFO_ENTRY=$(find /usr/share/terminfo -type f -name xterm-256color | head -n 1 || true)
+if [ -z "$TERMINFO_ENTRY" ]; then
+  echo "ERROR: failed to find /usr/share/terminfo/**/xterm-256color for mosh-client.exe." >&2
+  exit 1
+fi
+mkdir -p "$TERMINFO_DIR/$(basename "$(dirname "$TERMINFO_ENTRY")")"
+cp "$TERMINFO_ENTRY" "$TERMINFO_DIR/$(basename "$(dirname "$TERMINFO_ENTRY")")/xterm-256color"
+
+echo "--- bundled terminfo ---"
+find "$TERMINFO_DIR" -type f -print
+
 # License: the Cygwin DLLs ship under various GPL-compatible licenses.
 # Ship a top-level NOTICE so end users can see what we redistributed.
 cat > "$DLL_DIR/README.txt" <<'EOF'
@@ -147,9 +163,11 @@ BUNDLE_DIR="$WORK/win32-x64-bundle"
 mkdir -p "$BUNDLE_DIR"
 cp "$OUT_EXE" "$BUNDLE_DIR/mosh-client.exe"
 cp -R "$DLL_DIR" "$BUNDLE_DIR/mosh-client-win32-x64-dlls"
+cp -R "$TERMINFO_DIR" "$BUNDLE_DIR/terminfo"
 ( cd "$BUNDLE_DIR" && tar -czf "$BUNDLE_TGZ" \
   "mosh-client.exe" \
-  "mosh-client-win32-x64-dlls" )
+  "mosh-client-win32-x64-dlls" \
+  "terminfo" )
 
 ( cd "$OUT_DIR" && sha256sum "mosh-client-win32-x64.exe" > "mosh-client-win32-x64.sha256" )
 ( cd "$OUT_DIR" && sha256sum "mosh-client-win32-x64.tar.gz" > "mosh-client-win32-x64.tar.gz.sha256" )
