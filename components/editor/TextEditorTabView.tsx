@@ -8,7 +8,7 @@ import type * as Monaco from 'monaco-editor';
 import React, { useCallback } from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { editorSftpWrite } from '../../application/state/editorSftpBridge';
+import { saveEditorTab } from '../../application/state/editorTabSave';
 import { editorTabStore, useEditorTab, type EditorTabId } from '../../application/state/editorTabStore';
 import type { HotkeyScheme, KeyBinding } from '../../domain/models';
 import type { Host } from '../../types';
@@ -60,21 +60,11 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   }, [tabId]);
 
   const handleSave = useCallback(async () => {
-    // Read live store state at call time — React state snapshot lags the store
-    // by one microtask, so a keystroke between onChange and this save would
-    // otherwise leave us writing stale content and marking a stale baseline.
-    const current = editorTabStore.getTab(tabId);
-    if (!current) return;
-    if (current.savingState === 'saving') return;
-
-    editorTabStore.setSavingState(tabId, 'saving');
-    try {
-      await editorSftpWrite(current.sessionId, current.hostId, current.remotePath, current.content);
-      editorTabStore.markSaved(tabId, current.content);
+    const ok = await saveEditorTab(tabId);
+    if (ok) {
       toast.success(t('sftp.editor.saved'), 'SFTP');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : t('sftp.editor.saveFailed');
-      editorTabStore.setSavingState(tabId, 'error', msg);
+    } else {
+      const msg = editorTabStore.getTab(tabId)?.saveError ?? t('sftp.editor.saveFailed');
       toast.error(msg, 'SFTP');
     }
   }, [tabId, t]);

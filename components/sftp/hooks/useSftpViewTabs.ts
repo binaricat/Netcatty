@@ -2,6 +2,10 @@ import React, { useCallback, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { Host } from "../../../types";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
+import { editorTabStore } from "../../../application/state/editorTabStore";
+import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
+import { releaseEditorTabSaveCoordinator, saveEditorTab } from "../../../application/state/editorTabSave";
+import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 
 interface UseSftpViewTabsParams {
   sftp: SftpStateApi;
@@ -23,8 +27,8 @@ interface UseSftpViewTabsResult {
   setHostSearchRight: React.Dispatch<React.SetStateAction<string>>;
   handleAddTabLeft: () => string;
   handleAddTabRight: () => string;
-  handleCloseTabLeft: (tabId: string) => void;
-  handleCloseTabRight: (tabId: string) => void;
+  handleCloseTabLeft: (tabId: string) => Promise<void>;
+  handleCloseTabRight: (tabId: string) => Promise<void>;
   handleSelectTabLeft: (tabId: string) => void;
   handleSelectTabRight: (tabId: string) => void;
   handleReorderTabsLeft: (draggedId: string, targetId: string, position: "before" | "after") => void;
@@ -53,13 +57,41 @@ export const useSftpViewTabs = ({ sftp, sftpRef }: UseSftpViewTabsParams): UseSf
     return tabId;
   }, [sftpRef]);
 
-  const handleCloseTabLeft = useCallback((tabId: string) => {
-    sftpRef.current.closeTab("left", tabId);
-  }, [sftpRef]);
+  const confirmCloseEditorTabsByConnection = useCallback(async (connectionId: string): Promise<boolean> => {
+    const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
+    const saveTab = async (id: EditorTabId) => {
+      const ok = await saveEditorTab(id);
+      const tab = editorTabStore.getTab(id);
+      if (!ok || (tab && tab.content !== tab.baselineContent)) {
+        throw new Error(tab?.saveError ?? "Save failed");
+      }
+    };
+    return editorTabStore.confirmCloseBySession(
+      connectionId,
+      choice,
+      saveTab,
+      releaseEditorTabSaveCoordinator,
+    );
+  }, []);
 
-  const handleCloseTabRight = useCallback((tabId: string) => {
-    sftpRef.current.closeTab("right", tabId);
-  }, [sftpRef]);
+  const handleCloseSftpTab = useCallback(async (side: "left" | "right", tabId: string) => {
+    const sideTabs = side === "left" ? sftpRef.current.leftTabs : sftpRef.current.rightTabs;
+    const pane = sideTabs.tabs.find((tab) => tab.id === tabId);
+    const connectionId = pane?.connection?.id;
+    if (connectionId) {
+      const ok = await confirmCloseEditorTabsByConnection(connectionId);
+      if (!ok) return;
+    }
+    sftpRef.current.closeTab(side, tabId);
+  }, [confirmCloseEditorTabsByConnection, sftpRef]);
+
+  const handleCloseTabLeft = useCallback((tabId: string) => (
+    handleCloseSftpTab("left", tabId)
+  ), [handleCloseSftpTab]);
+
+  const handleCloseTabRight = useCallback((tabId: string) => (
+    handleCloseSftpTab("right", tabId)
+  ), [handleCloseSftpTab]);
 
   const handleSelectTabLeft = useCallback((tabId: string) => {
     sftpRef.current.selectTab("left", tabId);

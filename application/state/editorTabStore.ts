@@ -167,17 +167,23 @@ export class EditorTabStore {
     sessionId: string,
     promptChoice: (tab: EditorTab) => Promise<"save" | "discard" | "cancel">,
     saveTab?: (tabId: EditorTabId) => Promise<void>,
+    onCloseTab?: (tabId: EditorTabId) => void,
   ): Promise<boolean> => {
     const matching = this.tabs.filter((t) => t.sessionId === sessionId);
     for (const tab of matching) {
       const dirty = tab.content !== tab.baselineContent;
       if (!dirty) {
+        onCloseTab?.(tab.id);
         this.close(tab.id);
         continue;
       }
       const choice = await promptChoice(tab);
       if (choice === "cancel") return false;
-      if (choice === "discard") { this.close(tab.id); continue; }
+      if (choice === "discard") {
+        onCloseTab?.(tab.id);
+        this.close(tab.id);
+        continue;
+      }
       if (choice === "save") {
         if (!saveTab) throw new Error("saveTab callback required when 'save' choice is possible");
         try {
@@ -186,6 +192,7 @@ export class EditorTabStore {
           // Save failed — treat like cancel (keep tab open, abort batch so the user sees the error)
           return false;
         }
+        onCloseTab?.(tab.id);
         this.close(tab.id);
       }
     }

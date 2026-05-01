@@ -5,6 +5,7 @@ import type { SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 import { keepOnlyActivePaneSelections } from "./selectionScope";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
+import { releaseEditorTabSaveCoordinator, saveEditorTab } from "../../../application/state/editorTabSave";
 import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 
 interface UseSftpViewPaneActionsParams {
@@ -139,12 +140,18 @@ export const useSftpViewPaneActions = ({
     if (connectionId) {
       const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
       const saveTab = async (id: EditorTabId) => {
+        const ok = await saveEditorTab(id);
         const tab = editorTabStore.getTab(id);
-        if (!tab) return;
-        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
-        editorTabStore.markSaved(id, tab.content);
+        if (!ok || (tab && tab.content !== tab.baselineContent)) {
+          throw new Error(tab?.saveError ?? "Save failed");
+        }
       };
-      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      const ok = await editorTabStore.confirmCloseBySession(
+        connectionId,
+        choice,
+        saveTab,
+        releaseEditorTabSaveCoordinator,
+      );
       if (!ok) return false;
     }
     sftpRef.current.disconnect("left");
@@ -155,12 +162,18 @@ export const useSftpViewPaneActions = ({
     if (connectionId) {
       const choice = (tab: EditorTab) => promptUnsavedChanges(tab.fileName);
       const saveTab = async (id: EditorTabId) => {
+        const ok = await saveEditorTab(id);
         const tab = editorTabStore.getTab(id);
-        if (!tab) return;
-        await sftpRef.current.writeTextFileByConnection(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
-        editorTabStore.markSaved(id, tab.content);
+        if (!ok || (tab && tab.content !== tab.baselineContent)) {
+          throw new Error(tab?.saveError ?? "Save failed");
+        }
       };
-      const ok = await editorTabStore.confirmCloseBySession(connectionId, choice, saveTab);
+      const ok = await editorTabStore.confirmCloseBySession(
+        connectionId,
+        choice,
+        saveTab,
+        releaseEditorTabSaveCoordinator,
+      );
       if (!ok) return false;
     }
     sftpRef.current.disconnect("right");

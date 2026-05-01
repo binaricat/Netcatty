@@ -16,9 +16,10 @@ import type * as Monaco from 'monaco-editor';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // Configure Monaco to use local files instead of CDN
-const monacoBasePath = import.meta.env.DEV
+const viteEnv = import.meta.env ?? { BASE_URL: "/" };
+const monacoBasePath = viteEnv.DEV
   ? './node_modules/monaco-editor/min/vs'
-  : `${import.meta.env.BASE_URL}monaco/vs`;
+  : `${viteEnv.BASE_URL}monaco/vs`;
 loader.config({ paths: { vs: monacoBasePath } });
 
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -116,6 +117,9 @@ const hslToHex = (hslString: string): string => {
 
 // Read a CSS custom-property and convert from HSL to hex
 const getCssColor = (varName: string, fallback: string): string => {
+  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') {
+    return fallback;
+  }
   const value = getComputedStyle(document.documentElement)
     .getPropertyValue(varName)
     .trim();
@@ -143,6 +147,9 @@ const getEditorColors = (isDark: boolean): EditorColors => ({
 
 /** Build a fingerprint string so we can detect immersive-mode color changes cheaply. */
 const getThemeSignal = (): string => {
+  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') {
+    return '';
+  }
   const root = document.documentElement;
   return root.dataset.immersiveTheme
     ?? getComputedStyle(root).getPropertyValue('--background').trim();
@@ -169,6 +176,27 @@ export interface TextEditorPaneProps {
   onPromoteToTab?: () => void;   // modal only — omit to hide the maximize button
   initialViewState?: Monaco.editor.ICodeEditorViewState | null;
 }
+
+export const isTextEditorReadOnly = ({ saving }: { saving: boolean }): boolean => saving;
+
+export const canPromoteTextEditor = ({ saving }: { saving: boolean }): boolean => !saving;
+
+export const TextEditorPromoteButton: React.FC<{
+  saving: boolean;
+  onPromoteToTab: () => void;
+  title: string;
+}> = ({ saving, onPromoteToTab, title }) => (
+  <Button
+    variant="ghost"
+    size="icon"
+    className="h-7 w-7"
+    onClick={onPromoteToTab}
+    disabled={!canPromoteTextEditor({ saving })}
+    title={title}
+  >
+    <Maximize2 size={14} />
+  </Button>
+);
 
 export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
   fileName,
@@ -202,7 +230,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
 
   // Track theme from document.documentElement class (syncs with app theme)
   const [isDarkTheme, setIsDarkTheme] = useState(() =>
-    document.documentElement.classList.contains('dark')
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   );
 
   // Track a signal that changes whenever immersive-mode or base theme colors change
@@ -253,6 +281,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
 
   // Listen for theme changes via MutationObserver on <html> class, style, and immersive data attr
   useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
     const root = document.documentElement;
     const updateTheme = () => {
       setIsDarkTheme(root.classList.contains('dark'));
@@ -309,6 +338,7 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
   }, [readClipboardText]);
 
   const handlePaste = useCallback(async () => {
+    if (saving) return;
     const editor = editorRef.current;
     if (!editor) return;
 
@@ -337,16 +367,17 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
       })),
     );
     editor.focus();
-  }, [readClipboardText]);
+  }, [readClipboardText, saving]);
 
   useEffect(() => {
     handlePasteRef.current = handlePaste;
   }, [handlePaste]);
 
   const handleEditorChange = useCallback((value: string | undefined) => {
+    if (saving) return;
     const editor = editorRef.current;
     onContentChange(value ?? '', editor ? editor.saveViewState() : null);
-  }, [onContentChange]);
+  }, [onContentChange, saving]);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
@@ -504,15 +535,11 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
 
             {/* Maximize button — modal chrome only, when onPromoteToTab is provided */}
             {chrome === 'modal' && onPromoteToTab && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={onPromoteToTab}
+              <TextEditorPromoteButton
+                saving={saving}
+                onPromoteToTab={onPromoteToTab}
                 title={t('sftp.editor.maximize')}
-              >
-                <Maximize2 size={14} />
-              </Button>
+              />
             )}
 
             {/* Close button — modal chrome only */}
@@ -556,6 +583,8 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
             tabSize: 2,
             insertSpaces: true,
             wordWrap: wordWrap ? 'on' : 'off',
+            readOnly: isTextEditorReadOnly({ saving }),
+            domReadOnly: isTextEditorReadOnly({ saving }),
             folding: true,
             renderWhitespace: 'selection',
             bracketPairColorization: { enabled: true },

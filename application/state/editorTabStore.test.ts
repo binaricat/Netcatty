@@ -196,3 +196,24 @@ test("confirmCloseBySession invokes save callback for 'save' choice and only clo
   assert.equal(ok, true);
   assert.equal(store.getTab("edt_1"), undefined);
 });
+
+test("confirmCloseBySession reports every closed editor tab to cleanup callback", async () => {
+  const store = new EditorTabStore();
+  store._debugInsert(makeTab({ id: "edt_clean" }));
+  store._debugInsert(makeTab({ id: "edt_dirty", remotePath: "/b.txt", fileName: "b.txt", content: "new", baselineContent: "old" }));
+  const closed: string[] = [];
+
+  const ok = await store.confirmCloseBySession(
+    "conn_1",
+    async () => "save",
+    async (id) => {
+      const tab = store.getTab(id)!;
+      store.markSaved(id, tab.content);
+    },
+    (id) => closed.push(id),
+  );
+
+  assert.equal(ok, true);
+  assert.deepEqual(closed, ["edt_clean", "edt_dirty"]);
+  assert.equal(store.getTabs().length, 0);
+});

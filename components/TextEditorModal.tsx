@@ -12,6 +12,10 @@ import { TextEditorPane } from './editor/TextEditorPane';
 import { promptUnsavedChanges } from './editor/UnsavedChangesDialog';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { scheduleWindowInputFocus } from '../application/state/windowInputFocus';
+import {
+  createTextEditorSaveCoordinator,
+  type TextEditorSaveCoordinator,
+} from '../application/state/textEditorSaveCoordinator';
 import type { HotkeyScheme, KeyBinding } from '../domain/models';
 
 /** Snapshot passed to `onPromoteToTab` when the user clicks the maximize button. */
@@ -29,6 +33,31 @@ export interface TextEditorModalSnapshot {
   /** The latest Monaco view state (scroll position, cursor, etc.) — may be null before first edit. */
   viewState: Monaco.editor.ICodeEditorViewState | null;
 }
+
+export interface TextEditorModalSnapshotSource {
+  fileName: string;
+  getBaselineContent: () => string;
+  getContent: () => string;
+  languageId: string;
+  wordWrap: boolean;
+  getViewState: () => Monaco.editor.ICodeEditorViewState | null;
+  isSaving: () => boolean;
+}
+
+export const createTextEditorModalSnapshot = (
+  source: TextEditorModalSnapshotSource,
+): TextEditorModalSnapshot | null => {
+  if (source.isSaving()) return null;
+  return {
+    fileName: source.fileName,
+    baselineContent: source.getBaselineContent(),
+    content: source.getContent(),
+    languageId: source.languageId,
+    wordWrap: source.wordWrap,
+    viewState: source.getViewState(),
+  };
+};
+
 
 interface TextEditorModalProps {
   open: boolean;
@@ -67,6 +96,9 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const baselineContentRef = useRef(initialContent);
   const savingRef = useRef(false);
   const closePromptRef = useRef<Promise<void> | null>(null);
+  const onSaveRef = useRef(onSave);
+  const tRef = useRef(t);
+  const saveCoordinatorRef = useRef<TextEditorSaveCoordinator | null>(null);
 
   // Latest view state captured from Pane's onContentChange — used by handlePromote
   const viewStateRef = useRef<Monaco.editor.ICodeEditorViewState | null>(null);
@@ -74,8 +106,42 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   // Derived: whether the current content differs from the clean baseline
   const hasChanges = content !== baselineContent;
 
+  if (!saveCoordinatorRef.current) {
+    saveCoordinatorRef.current = createTextEditorSaveCoordinator({
+      onSave: (contentToSave) => onSaveRef.current(contentToSave),
+      onSaveStart: () => {
+        setSaveError(null);
+      },
+      onSaveSuccess: (savedContent) => {
+        setBaselineContent(savedContent);
+        baselineContentRef.current = savedContent;
+        toast.success(tRef.current('sftp.editor.saved'), 'SFTP');
+      },
+      onSaveError: (error) => {
+        const msg = error instanceof Error
+          ? error.message
+          : tRef.current('sftp.editor.saveFailed');
+        setSaveError(msg);
+        toast.error(msg, 'SFTP');
+      },
+      onSavingChange: (nextSaving) => {
+        savingRef.current = nextSaving;
+        setSaving(nextSaving);
+      },
+    });
+  }
+
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
   // Reset all state when a new file is opened
   useEffect(() => {
+    saveCoordinatorRef.current?.reset();
     setContent(initialContent);
     setBaselineContent(initialContent);
     setSaveError(null);
@@ -89,26 +155,8 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   }, [initialContent, fileName]);
 
   const saveContent = useCallback(async (contentToSave = contentRef.current): Promise<boolean> => {
-    if (savingRef.current) return false;
-    savingRef.current = true;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await onSave(contentToSave);
-      setBaselineContent(contentToSave);
-      baselineContentRef.current = contentToSave;
-      toast.success(t('sftp.editor.saved'), 'SFTP');
-      return true;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : t('sftp.editor.saveFailed');
-      setSaveError(msg);
-      toast.error(msg, 'SFTP');
-      return false;
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  }, [onSave, t]);
+    return saveCoordinatorRef.current?.save(contentToSave) ?? false;
+  }, []);
 
   const handleSave = useCallback(async () => {
     await saveContent();
@@ -124,6 +172,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
         if (choice === 'save') {
           const saved = await saveContent();
           if (!saved) return;
+          if (contentRef.current !== baselineContentRef.current) return;
         }
       }
       onClose();
@@ -168,15 +217,17 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
 
   const handlePromote = useCallback(() => {
     if (!onPromoteToTab) return;
-    onPromoteToTab({
+    const snapshot = createTextEditorModalSnapshot({
       fileName,
-      baselineContent,
-      content,
+      getBaselineContent: () => baselineContentRef.current,
+      getContent: () => contentRef.current,
       languageId,
       wordWrap: editorWordWrap,
-      viewState: viewStateRef.current,
+      getViewState: () => viewStateRef.current,
+      isSaving: () => savingRef.current,
     });
-  }, [onPromoteToTab, fileName, baselineContent, content, languageId, editorWordWrap]);
+    if (snapshot) onPromoteToTab(snapshot);
+  }, [onPromoteToTab, fileName, languageId, editorWordWrap]);
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>

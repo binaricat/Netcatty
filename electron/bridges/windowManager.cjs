@@ -1279,10 +1279,19 @@ function restoreWindowInputFocus(win, options = {}) {
   if (platform === "win32") {
     try {
       win.setAlwaysOnTop(true);
-      win.focus();
-      win.setAlwaysOnTop(false);
     } catch {
       // ignore
+    }
+    try {
+      win.focus();
+    } catch {
+      // ignore
+    } finally {
+      try {
+        win.setAlwaysOnTop(false);
+      } catch {
+        // ignore
+      }
     }
   } else {
     try {
@@ -1771,6 +1780,7 @@ module.exports = {
   getMainWindow,
   getSettingsWindow,
   isWindowUsable,
+  registerWindowHandlers,
   restoreWindowInputFocus,
   waitForRendererReady,
   setIsQuitting,

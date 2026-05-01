@@ -16,6 +16,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useSftpState } from "../application/state/useSftpState";
 import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
 import { editorTabStore } from "../application/state/editorTabStore";
+import { releaseEditorTabSaveCoordinator } from "../application/state/editorTabSave";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
 import { getParentPath } from "../application/state/sftp/utils";
@@ -167,7 +168,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         if (id) owned.add(id);
       }
       if (owned.size === 0) return;
-      editorTabStore.forceCloseBySessions([...owned]);
+      const closed = editorTabStore.forceCloseBySessions([...owned]);
+      closed.forEach(releaseEditorTabSaveCoordinator);
     };
   }, []);
 

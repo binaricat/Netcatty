@@ -58,7 +58,7 @@ import type { SftpView as SftpViewComponent } from './components/SftpView';
 import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
 import { TextEditorTabView } from './components/editor/TextEditorTabView';
 import { UnsavedChangesProvider } from './components/editor/UnsavedChangesDialog';
-import { editorSftpWrite } from './application/state/editorSftpBridge';
+import { releaseEditorTabSaveCoordinator, saveEditorTab } from './application/state/editorTabSave';
 
 // Initialize fonts eagerly at app startup
 initializeFonts();
@@ -1769,6 +1769,7 @@ function App({ settings }: { settings: SettingsState }) {
           const closingTabId = toEditorTabId(id);
           const list = orderedTabsWithEditors;
           const idx = list.indexOf(closingTabId);
+          releaseEditorTabSaveCoordinator(id);
           editorTabStore.close(id);
           if (activeTabStore.getActiveTabId() !== closingTabId) return;
           const next = list[idx - 1] ?? list[idx + 1] ?? 'vault';
@@ -1791,16 +1792,15 @@ function App({ settings }: { settings: SettingsState }) {
             return;
           }
           if (choice === 'save') {
-            try {
-              editorTabStore.setSavingState(id, 'saving');
-              await editorSftpWrite(tab.sessionId, tab.hostId, tab.remotePath, tab.content);
-              editorTabStore.markSaved(id, tab.content);
-              closeEditorAndActivateNeighbor(id);
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : 'Save failed';
-              editorTabStore.setSavingState(id, 'error', msg);
+            const ok = await saveEditorTab(id);
+            if (!ok) {
+              const msg = editorTabStore.getTab(id)?.saveError ?? 'Save failed';
               toast.error(msg, 'SFTP');
+              return;
             }
+            const latest = editorTabStore.getTab(id);
+            if (!latest || latest.content !== latest.baselineContent) return;
+            closeEditorAndActivateNeighbor(id);
           }
         };
 
