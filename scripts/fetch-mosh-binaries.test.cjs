@@ -10,7 +10,7 @@ const crypto = require("node:crypto");
 
 const script = path.resolve(__dirname, "fetch-mosh-binaries.cjs");
 const execFileAsync = promisify(execFile);
-const { parseMoshBinRepository } = require("./fetch-mosh-binaries.cjs");
+const { parseMoshBinRepository, resolveHostTarget } = require("./fetch-mosh-binaries.cjs");
 
 function makeTmp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-fetch-mosh-"));
@@ -44,6 +44,30 @@ test("fetch-mosh-binaries defaults to the dedicated mosh binary repository", () 
     parseMoshBinRepository({ GITHUB_REPOSITORY: "owner/project", MOSH_BIN_OWNER: "bin", MOSH_BIN_REPO: "binaries" }),
     { owner: "bin", repo: "binaries" },
   );
+});
+
+test("resolveHostTarget maps the local platform to the bundled target", () => {
+  assert.deepEqual(resolveHostTarget({ platform: "darwin", arch: "arm64" }), {
+    platform: "darwin",
+    arch: "universal",
+  });
+  assert.deepEqual(resolveHostTarget({ platform: "darwin", arch: "x64" }), {
+    platform: "darwin",
+    arch: "universal",
+  });
+  assert.deepEqual(resolveHostTarget({ platform: "linux", arch: "x64" }), {
+    platform: "linux",
+    arch: "x64",
+  });
+  assert.deepEqual(resolveHostTarget({ platform: "linux", arch: "arm64" }), {
+    platform: "linux",
+    arch: "arm64",
+  });
+  assert.deepEqual(resolveHostTarget({ platform: "win32", arch: "x64" }), {
+    platform: "win32",
+    arch: "x64",
+  });
+  assert.throws(() => resolveHostTarget({ platform: "freebsd", arch: "x64" }), /No bundled mosh-client target/);
 });
 
 async function serveAssets(t, assets) {

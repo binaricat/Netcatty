@@ -10,6 +10,7 @@
 // Usage:
 //   node scripts/fetch-mosh-binaries.cjs                # all platforms
 //   node scripts/fetch-mosh-binaries.cjs --platform=darwin --arch=universal
+//   node scripts/fetch-mosh-binaries.cjs --host --resolve-release
 //
 // Env knobs:
 //   MOSH_BIN_RELEASE  — release tag in ${MOSH_BIN_OWNER}/${MOSH_BIN_REPO}.
@@ -30,6 +31,7 @@ const https = require("node:https");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
+const { main: resolveMoshBinRelease } = require("./resolve-mosh-bin-release.cjs");
 
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_RES_DIR = path.join(ROOT, "resources", "mosh");
@@ -142,6 +144,15 @@ function parseMoshBinRepository(env) {
   };
 }
 
+function resolveHostTarget(opts = {}) {
+  const platform = opts.platform || process.platform;
+  const arch = opts.arch || process.arch;
+  if (platform === "darwin") return { platform: "darwin", arch: "universal" };
+  if (platform === "linux" && (arch === "x64" || arch === "arm64")) return { platform, arch };
+  if (platform === "win32" && arch === "x64") return { platform, arch };
+  throw new Error(`No bundled mosh-client target for ${platform}-${arch}`);
+}
+
 function assertExtractedTreeSafe(root) {
   const stack = [root];
   while (stack.length > 0) {
@@ -243,7 +254,10 @@ async function fetchOne(target, sums, opts) {
 }
 
 async function main(argv = process.argv.slice(2), env = process.env) {
-  const release = env.MOSH_BIN_RELEASE;
+  let release = env.MOSH_BIN_RELEASE;
+  if (!release && argv.includes("--resolve-release")) {
+    release = await resolveMoshBinRelease(env);
+  }
   if (!release) {
     log("MOSH_BIN_RELEASE is unset - skipping. Set it (e.g. mosh-bin-1.4.0-1) to bundle mosh-client into the package.");
     return 0;
@@ -254,8 +268,9 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     `https://github.com/${owner}/${repo}/releases/download/${encodeURIComponent(release)}`;
   const resDir = path.resolve(env.MOSH_BIN_RES_DIR || DEFAULT_RES_DIR);
   const allowUnverified = env.MOSH_BIN_ALLOW_UNVERIFIED === "true";
-  const platformFilter = (argv.find((a) => a.startsWith("--platform=")) || "").split("=")[1];
-  const archFilter = (argv.find((a) => a.startsWith("--arch=")) || "").split("=")[1];
+  const hostTarget = argv.includes("--host") ? resolveHostTarget() : null;
+  const platformFilter = hostTarget?.platform || (argv.find((a) => a.startsWith("--platform=")) || "").split("=")[1];
+  const archFilter = hostTarget?.arch || (argv.find((a) => a.startsWith("--arch=")) || "").split("=")[1];
 
   log(`release=${release} owner=${owner} repo=${repo}`);
   const sums = await fetchSums(baseUrl, { allowUnverified });
@@ -282,6 +297,7 @@ if (require.main === module) {
 module.exports = {
   TARGETS,
   parseMoshBinRepository,
+  resolveHostTarget,
   parseSums,
   validateTarEntries,
   assertExtractedTreeSafe,

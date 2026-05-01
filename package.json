@@ -12,10 +12,11 @@
     "netcatty-tool-cli": "./electron/cli/netcatty-tool-cli.cjs"
   },
   "scripts": {
-    "dev": "npm run lint && concurrently -k \"vite\" \"npm:dev:electron\"",
+    "dev": "npm run fetch:mosh:dev && npm run lint && concurrently -k \"vite\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
     "prebuild": "node scripts/copy-monaco.cjs",
     "fetch:mosh": "node scripts/fetch-mosh-binaries.cjs",
+    "fetch:mosh:dev": "node scripts/fetch-mosh-binaries.cjs --host --resolve-release",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node electron/launch.cjs",

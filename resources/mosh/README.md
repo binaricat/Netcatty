@@ -42,6 +42,13 @@ directly (see `electron/bridges/moshHandshake.cjs` and
    different binary repository. `electron-builder.config.cjs` then
    copies the matching binary into `Resources/mosh/mosh-client[.exe]`.
 
+   Local dev uses the same binary path: `npm run dev` runs
+   `npm run fetch:mosh:dev` first, which downloads the host platform's
+   bundled `mosh-client` into this gitignored directory. Netcatty does
+   not fall back to a system-installed `mosh` or `mosh-client`; if the
+   bundled binary is missing, Mosh startup fails loudly instead of using
+   whatever happens to be installed on the developer machine.
+
    Official Windows package builds currently ship x64 only for bundled
    Mosh coverage. Windows arm64 packaging should be re-enabled there
    after the `build-mosh-binaries` workflow can produce `win32-arm64`.
@@ -88,11 +95,9 @@ For macOS the build needs an Xcode toolchain; see
   to a freshly-spawned `mosh-client` PTY when `MOSH CONNECT` is
   detected. Keystrokes that arrive after the swap go to mosh-client
   because `writeToSession` reads `session.proc` lazily.
-- Preferred whenever a bare `mosh-client` (bundled / explicit /
-  system) and `ssh` (in-box OpenSSH on Win10 1809+, system everywhere
-  else) are both detectable. The legacy path through the system
-  `mosh` Perl wrapper is preserved as a fallback so existing setups
-  don't regress.
+- Mosh startup requires Netcatty's bundled `mosh-client` and a usable
+  `ssh` client for the remote bootstrap. System-installed `mosh` /
+  `mosh-client` binaries are intentionally ignored.
 - Windows binary built in-CI from upstream source via Cygwin GCC; ships
   alongside `cygwin1.dll` + transitive deps so it runs on a stock
   Windows machine without a Cygwin install.

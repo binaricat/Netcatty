@@ -83,7 +83,7 @@ function makeHarness(t) {
 
   const binDir = path.join(tmp, "bin");
   const sshPath = path.join(binDir, "ssh");
-  const moshClientPath = path.join(binDir, "mosh-client");
+  const moshClientPath = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
   writeExecutable(sshPath);
   writeExecutable(moshClientPath);
 
@@ -115,29 +115,36 @@ function makeHarness(t) {
       sessionId: "mosh-test-session",
       hostname: "example.com",
       username: "alice",
-      moshClientPath,
       cols: 80,
       rows: 24,
     },
     event: { sender: { id: 42 } },
+    lookupOpts: {
+      platform: "linux",
+      arch: "x64",
+      projectRoot: tmp,
+      resourcesPath: path.join(tmp, "missing"),
+    },
   };
 }
 
 test("startMoshSession handshake path returns the same shape as the legacy path", async (t) => {
   const h = makeHarness(t);
-  const result = await h.bridge.startMoshSession(h.event, h.options);
+  const result = await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
   assert.deepEqual(result, { sessionId: "mosh-test-session" });
 });
 
-test("startMoshSession handshake path honors configured PATH during discovery", async (t) => {
+test("startMoshSession uses bundled mosh-client even when PATH contains another client", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-session-path-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
   const binDir = path.join(tmp, "bin");
   const sshPath = path.join(binDir, "ssh");
-  const moshClientPath = path.join(binDir, "mosh-client");
+  const pathMoshClient = path.join(binDir, "mosh-client");
+  const bundledMoshClient = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
   writeExecutable(sshPath);
-  writeExecutable(moshClientPath);
+  writeExecutable(pathMoshClient);
+  writeExecutable(bundledMoshClient);
 
   const oldPath = process.env.PATH;
   process.env.PATH = "";
@@ -168,6 +175,14 @@ test("startMoshSession handshake path honors configured PATH during discovery", 
       rows: 24,
       env: { PATH: binDir },
     },
+    {
+      moshClientLookup: {
+        platform: "linux",
+        arch: "x64",
+        projectRoot: tmp,
+        resourcesPath: path.join(tmp, "missing"),
+      },
+    },
   );
 
   assert.deepEqual(result, { sessionId: "mosh-path-session" });
@@ -176,12 +191,12 @@ test("startMoshSession handshake path honors configured PATH during discovery", 
   spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
   spawns[0].emitExit({ exitCode: 0, signal: 0 });
 
-  assert.equal(spawns[1].command, moshClientPath);
+  assert.equal(spawns[1].command, bundledMoshClient);
 });
 
 test("startMoshSession handshake path sends the existing exit event on failure", async (t) => {
   const h = makeHarness(t);
-  await h.bridge.startMoshSession(h.event, h.options);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
 
   h.spawns[0].emitExit({ exitCode: 255, signal: 0 });
 
@@ -193,7 +208,7 @@ test("startMoshSession handshake path sends the existing exit event on failure",
 
 test("startMoshSession handshake path sends the existing exit event after mosh-client exits", async (t) => {
   const h = makeHarness(t);
-  await h.bridge.startMoshSession(h.event, h.options);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
 
   h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
   h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
@@ -205,4 +220,48 @@ test("startMoshSession handshake path sends the existing exit event after mosh-c
   assert.ok(exit);
   assert.equal(exit.payload.sessionId, "mosh-test-session");
   assert.equal(exit.payload.reason, "exited");
+});
+
+test("startMoshSession fails when bundled mosh-client is missing even if PATH has mosh-client", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-session-missing-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  const binDir = path.join(tmp, "bin");
+  writeExecutable(path.join(binDir, "ssh"));
+  writeExecutable(path.join(binDir, "mosh-client"));
+
+  const spawns = [];
+  const bridge = loadBridgeWithFakePty(spawns);
+  bridge.init({
+    sessions: new Map(),
+    electronModule: {
+      webContents: {
+        fromId() {
+          return { send() {} };
+        },
+      },
+    },
+  });
+
+  await assert.rejects(
+    bridge.startMoshSession(
+      { sender: { id: 42 } },
+      {
+        sessionId: "mosh-missing-bundled",
+        hostname: "example.com",
+        username: "alice",
+        env: { PATH: binDir },
+      },
+      {
+        moshClientLookup: {
+          platform: "linux",
+          arch: "x64",
+          projectRoot: tmp,
+          resourcesPath: path.join(tmp, "missing"),
+        },
+      },
+    ),
+    /Bundled mosh-client not found/,
+  );
+  assert.equal(spawns.length, 0);
 });
