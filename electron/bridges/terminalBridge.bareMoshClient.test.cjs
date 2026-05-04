@@ -125,6 +125,61 @@ test("Windows dev mosh-client updates the PATH key used by child process env", (
   assert.equal(Object.prototype.hasOwnProperty.call(env, "Path"), false);
 });
 
+test("Linux mosh-client points ncurses at standard distro terminfo paths", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
+  writeExecutable(client);
+
+  const env = {};
+  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
+
+  assert.equal(env.TERMINFO, undefined);
+  const dirs = env.TERMINFO_DIRS.split(":");
+  assert.ok(dirs.includes("/etc/terminfo"));
+  assert.ok(dirs.includes("/lib/terminfo"));
+  assert.ok(dirs.includes("/usr/share/terminfo"));
+});
+
+test("Linux mosh-client prepends a sibling bundled terminfo dir when present", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
+  const terminfo = path.join(tmp, "resources", "mosh", "linux-x64", "terminfo");
+  writeExecutable(client);
+  fs.mkdirSync(path.join(terminfo, "x"), { recursive: true });
+  fs.writeFileSync(path.join(terminfo, "x", "xterm-256color"), "terminfo");
+
+  const env = {};
+  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
+
+  const dirs = env.TERMINFO_DIRS.split(":");
+  assert.equal(dirs[0], terminfo);
+  assert.ok(dirs.includes("/usr/share/terminfo"));
+});
+
+test("Linux mosh-client does not overwrite a caller-supplied TERMINFO_DIRS", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "linux-x64", "mosh-client");
+  writeExecutable(client);
+
+  const env = { TERMINFO_DIRS: "/home/user/.terminfo:/usr/share/terminfo" };
+  addBundledMoshTerminfoEnv(env, client, { platform: "linux" });
+
+  assert.equal(env.TERMINFO_DIRS, "/home/user/.terminfo:/usr/share/terminfo");
+});
+
+test("Darwin mosh-client uses macOS-aware terminfo search paths", () => {
+  const tmp = makeTmp();
+  const client = path.join(tmp, "resources", "mosh", "darwin-universal", "mosh-client");
+  writeExecutable(client);
+
+  const env = {};
+  addBundledMoshTerminfoEnv(env, client, { platform: "darwin" });
+
+  const dirs = env.TERMINFO_DIRS.split(":");
+  assert.ok(dirs.includes("/usr/share/terminfo"));
+  assert.ok(dirs.includes("/opt/homebrew/share/terminfo"));
+});
+
 test("Windows mosh-client points ncurses at bundled terminfo", () => {
   const tmp = makeTmp();
   const client = path.join(tmp, "resources", "mosh", "win32-x64", "mosh-client.exe");

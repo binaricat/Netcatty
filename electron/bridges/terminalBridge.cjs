@@ -857,9 +857,7 @@ function addBundledMoshDllPath(env, bareClient, opts = {}) {
 }
 
 function findBundledMoshTerminfoDir(bareClient, opts = {}) {
-  const platform = opts.platform || process.platform;
-  if (platform !== "win32" || !bareClient) return null;
-
+  if (!bareClient) return null;
   const terminfoDir = path.join(path.dirname(bareClient), "terminfo");
   const hasXterm256 =
     fs.existsSync(path.join(terminfoDir, "x", "xterm-256color")) ||
@@ -867,11 +865,49 @@ function findBundledMoshTerminfoDir(bareClient, opts = {}) {
   return hasXterm256 ? terminfoDir : null;
 }
 
+// Standard locations where distros / package managers install the compiled
+// terminfo database. Our bundled mosh-client links a privately-built ncurses
+// whose compiled-in default points at the build-time prefix (a temp dir),
+// so without these hints `setupterm()` fails with
+// "Terminfo database could not be found." See issue #890.
+const LINUX_SYSTEM_TERMINFO_DIRS = [
+  "/etc/terminfo",
+  "/lib/terminfo",
+  "/usr/share/terminfo",
+  "/usr/lib/terminfo",
+];
+
+const DARWIN_SYSTEM_TERMINFO_DIRS = [
+  "/usr/share/terminfo",
+  "/opt/homebrew/share/terminfo",
+  "/usr/local/share/terminfo",
+  "/opt/local/share/terminfo",
+];
+
 function addBundledMoshTerminfoEnv(env, bareClient, opts = {}) {
+  const platform = opts.platform || process.platform;
   const terminfoDir = findBundledMoshTerminfoDir(bareClient, opts);
-  if (!terminfoDir) return env;
-  env.TERMINFO = terminfoDir;
-  env.TERMINFO_DIRS = terminfoDir;
+
+  if (platform === "win32") {
+    if (!terminfoDir) return env;
+    env.TERMINFO = terminfoDir;
+    env.TERMINFO_DIRS = terminfoDir;
+    return env;
+  }
+
+  // POSIX: leave any caller-/user-set value alone (e.g. exported in the
+  // launching shell). Otherwise fall back to a search list that includes
+  // the bundled dir (when present) and the standard distro paths.
+  if (typeof env.TERMINFO_DIRS === "string" && env.TERMINFO_DIRS.length > 0) {
+    return env;
+  }
+  const systemDirs = platform === "darwin" ? DARWIN_SYSTEM_TERMINFO_DIRS : LINUX_SYSTEM_TERMINFO_DIRS;
+  const dirs = [];
+  if (terminfoDir) dirs.push(terminfoDir);
+  for (const dir of systemDirs) {
+    if (!dirs.includes(dir)) dirs.push(dir);
+  }
+  env.TERMINFO_DIRS = dirs.join(":");
   return env;
 }
 
