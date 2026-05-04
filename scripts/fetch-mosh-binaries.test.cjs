@@ -15,6 +15,7 @@ const {
   replaceDir,
   resolveHostTarget,
   resolveTarArchiveInvocation,
+  selectReleaseAsset,
 } = require("./fetch-mosh-binaries.cjs");
 
 function makeTmp(t) {
@@ -286,6 +287,65 @@ test("fetch-mosh-binaries fails when SHA256SUMS lacks the requested asset", asyn
       stdio: "pipe",
     }),
   );
+});
+
+test("selectReleaseAsset prefers the bundled tarball when listed in SHA256SUMS", () => {
+  const target = {
+    platform: "linux", arch: "x64",
+    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
+    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
+  };
+  const sums = new Map([
+    ["mosh-client-linux-x64.tar.gz", "abc"],
+    ["mosh-client-linux-x64", "def"],
+  ]);
+  assert.equal(selectReleaseAsset(target, sums).file, "mosh-client-linux-x64.tar.gz");
+});
+
+test("selectReleaseAsset falls back to the legacy flat asset when only it is published", () => {
+  const target = {
+    platform: "linux", arch: "x64",
+    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
+    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
+  };
+  const sums = new Map([["mosh-client-linux-x64", "def"]]);
+  const asset = selectReleaseAsset(target, sums);
+  assert.equal(asset.file, "mosh-client-linux-x64");
+  assert.equal(asset.local, "linux-x64/mosh-client");
+  assert.equal(asset.extract, undefined);
+});
+
+test("selectReleaseAsset stays on the primary when SHA256SUMS is empty (unverified mirror)", () => {
+  const target = {
+    platform: "linux", arch: "x64",
+    file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz",
+    legacy: { file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
+  };
+  assert.equal(selectReleaseAsset(target, new Map()).file, "mosh-client-linux-x64.tar.gz");
+});
+
+test("fetch-mosh-binaries falls back to the legacy flat asset for older releases", async (t) => {
+  const resDir = path.join(makeTmp(t), "resources", "mosh");
+  const flat = Buffer.from("legacy-binary");
+  const baseUrl = await serveAssets(t, {
+    "mosh-client-linux-x64": flat,
+    SHA256SUMS: `${sha256(flat)}  mosh-client-linux-x64\n`,
+  });
+
+  await execFileAsync(process.execPath, [script, "--platform=linux", "--arch=x64"], {
+    env: {
+      ...process.env,
+      MOSH_BIN_RELEASE: "test",
+      MOSH_BIN_BASE_URL: baseUrl,
+      MOSH_BIN_RES_DIR: resDir,
+      CI: "true",
+    },
+    stdio: "pipe",
+  });
+
+  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "mosh-client")), true);
+  assert.equal(fs.readFileSync(path.join(resDir, "linux-x64", "mosh-client"), "utf8"), "legacy-binary");
+  assert.equal(fs.existsSync(path.join(resDir, "linux-x64", "terminfo")), false);
 });
 
 test("fetch-mosh-binaries unpacks the Linux tarball with bundled terminfo", async (t) => {
