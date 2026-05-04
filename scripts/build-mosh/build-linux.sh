@@ -4,11 +4,17 @@
 # Inputs (env):
 #   MOSH_REF  — git ref of mobile-shell/mosh to build (e.g. mosh-1.4.0)
 #   ARCH      — x64 | arm64 (for output naming only; container is already that arch)
-#   OUT_DIR   — directory to write mosh-client-linux-<arch> + sha256
+#   OUT_DIR   — directory to write mosh-client-linux-<arch>.tar.gz + sha256
 #
 # Output:
-#   $OUT_DIR/mosh-client-linux-<arch>
-#   $OUT_DIR/mosh-client-linux-<arch>.sha256
+#   $OUT_DIR/mosh-client-linux-<arch>.tar.gz       (binary + terminfo bundle)
+#   $OUT_DIR/mosh-client-linux-<arch>.tar.gz.sha256
+#
+# The bundle ships a private terminfo database next to the binary because
+# our statically-linked ncurses has its compiled-in TERMINFO path pointing
+# at the build-time prefix (a temp dir). Without bundling, mosh-client on
+# distros lacking /usr/share/terminfo (or stripped containers) fails with
+# "Terminfo database could not be found." See issue #890.
 #
 # Strategy: build OpenSSL, protobuf, ncurses as static archives in a
 # scratch prefix, then build mosh against those and link libstdc++/libgcc
@@ -87,7 +93,9 @@ git -C mosh checkout --detach FETCH_HEAD
     LIBS="-ldl -lpthread"
   make -j"$(nproc)" )
 
-OUT_BIN="$OUT_DIR/mosh-client-linux-$ARCH"
+BUNDLE_DIR="$WORK/linux-$ARCH-bundle"
+mkdir -p "$BUNDLE_DIR"
+OUT_BIN="$BUNDLE_DIR/mosh-client"
 cp mosh/src/frontend/mosh-client "$OUT_BIN"
 strip "$OUT_BIN"
 
@@ -110,5 +118,38 @@ if grep -Ev '^(linux-vdso\.so\.1|lib(c|m|pthread|rt|dl|resolv|util|z)\.so\.[0-9]
   exit 1
 fi
 
-( cd "$OUT_DIR" && sha256sum "mosh-client-linux-$ARCH" > "mosh-client-linux-$ARCH.sha256" )
-cat "$OUT_DIR/mosh-client-linux-$ARCH.sha256"
+# Bundle the terminfo entries our statically-linked ncurses needs. The
+# ncurses `make install` above populated $PREFIX/share/terminfo/ with the
+# full upstream terminfo.src. Ship a curated subset so users hit a
+# working entry regardless of TERM.
+TERMINFO_SRC="$PREFIX/share/terminfo"
+TERMINFO_OUT="$BUNDLE_DIR/terminfo"
+mkdir -p "$TERMINFO_OUT"
+copy_terminfo_entry() {
+  local name="$1"
+  for src in "$TERMINFO_SRC"/?/"$name" "$TERMINFO_SRC"/??/"$name"; do
+    [ -f "$src" ] || continue
+    local rel
+    rel=$(basename "$(dirname "$src")")
+    mkdir -p "$TERMINFO_OUT/$rel"
+    cp "$src" "$TERMINFO_OUT/$rel/$name"
+    return 0
+  done
+  return 1
+}
+for entry in xterm-256color xterm xterm-color vt100 vt220 ansi screen screen-256color tmux tmux-256color dumb linux; do
+  copy_terminfo_entry "$entry" || echo "WARN: terminfo entry $entry not found in $TERMINFO_SRC" >&2
+done
+if [ ! -f "$TERMINFO_OUT/x/xterm-256color" ] && [ ! -f "$TERMINFO_OUT/78/xterm-256color" ]; then
+  echo "ERROR: failed to bundle xterm-256color terminfo for mosh-client (linux-$ARCH)." >&2
+  exit 1
+fi
+
+echo "--- bundled terminfo ---"
+find "$TERMINFO_OUT" -type f -print
+
+BUNDLE_TGZ="$OUT_DIR/mosh-client-linux-$ARCH.tar.gz"
+( cd "$BUNDLE_DIR" && tar -czf "$BUNDLE_TGZ" "mosh-client" "terminfo" )
+
+( cd "$OUT_DIR" && sha256sum "mosh-client-linux-$ARCH.tar.gz" > "mosh-client-linux-$ARCH.tar.gz.sha256" )
+cat "$OUT_DIR/mosh-client-linux-$ARCH.tar.gz.sha256"

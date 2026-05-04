@@ -40,14 +40,15 @@ const DEFAULT_RES_DIR = path.join(ROOT, "resources", "mosh");
 // Using flat names in the release for SHA256SUMS readability, then
 // fanning out into platform-arch subdirs locally.
 //
-// `extract` indicates a tar.gz archive containing the binary + helper
-// DLLs (Windows). The tarball is unpacked into the platform-arch
-// directory so resources/mosh/win32-x64/ ends up with mosh-client.exe
-// alongside cygwin1.dll, cygcrypto-*.dll, etc.
+// All targets are tar.gz bundles containing the binary plus the runtime
+// helpers each platform needs: ncurses terminfo on every platform, plus
+// the Cygwin DLL set on Windows. Bundling terminfo lets the bundled
+// statically-linked mosh-client work on minimal hosts that don't have a
+// system ncurses-base — see issue #890.
 const TARGETS = [
-  { platform: "linux", arch: "x64", file: "mosh-client-linux-x64", local: "linux-x64/mosh-client" },
-  { platform: "linux", arch: "arm64", file: "mosh-client-linux-arm64", local: "linux-arm64/mosh-client" },
-  { platform: "darwin", arch: "universal", file: "mosh-client-darwin-universal", local: "darwin-universal/mosh-client" },
+  { platform: "linux", arch: "x64", file: "mosh-client-linux-x64.tar.gz", localDir: "linux-x64", extract: "tar.gz" },
+  { platform: "linux", arch: "arm64", file: "mosh-client-linux-arm64.tar.gz", localDir: "linux-arm64", extract: "tar.gz" },
+  { platform: "darwin", arch: "universal", file: "mosh-client-darwin-universal.tar.gz", localDir: "darwin-universal", extract: "tar.gz" },
   { platform: "win32", arch: "x64", file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz" },
 ];
 
@@ -183,6 +184,20 @@ function assertExtractedTreeSafe(root) {
   }
 }
 
+function assertBundledTerminfo(extractDir, target) {
+  const terminfoDir = path.join(extractDir, "terminfo");
+  const terminfoEntry = [
+    path.join(terminfoDir, "x", "xterm-256color"),
+    path.join(terminfoDir, "78", "xterm-256color"),
+  ].find((entry) => fs.existsSync(entry));
+  if (terminfoEntry && !fs.lstatSync(terminfoEntry).isFile()) {
+    throw new Error(`${target.file} contained invalid terminfo for xterm-256color`);
+  }
+  if (!terminfoEntry) {
+    warn(`${target.file} did not contain terminfo for xterm-256color; ${target.platform}-${target.arch} mosh packaging will fall back to host system terminfo (issue #890).`);
+  }
+}
+
 function normalizeWindowsBundle(extractDir, target) {
   const genericExe = path.join(extractDir, "mosh-client.exe");
   const legacyExe = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}.exe`);
@@ -196,18 +211,26 @@ function normalizeWindowsBundle(extractDir, target) {
   if (!fs.existsSync(dllDir) || !fs.statSync(dllDir).isDirectory()) {
     throw new Error(`${target.file} did not contain ${path.basename(dllDir)}/`);
   }
-  const terminfoDir = path.join(extractDir, "terminfo");
-  const terminfoEntry = [
-    path.join(terminfoDir, "x", "xterm-256color"),
-    path.join(terminfoDir, "78", "xterm-256color"),
-  ].find((entry) => fs.existsSync(entry));
-  if (terminfoEntry && !fs.lstatSync(terminfoEntry).isFile()) {
-    throw new Error(`${target.file} contained invalid terminfo for xterm-256color`);
-  }
-  if (!terminfoEntry) {
-    warn(`${target.file} did not contain terminfo for xterm-256color; Windows mosh packaging will need a refreshed mosh binary release.`);
-  }
+  assertBundledTerminfo(extractDir, target);
   chmodExecutable(genericExe);
+}
+
+function normalizePosixBundle(extractDir, target) {
+  const binary = path.join(extractDir, "mosh-client");
+  const legacyBinary = path.join(extractDir, `mosh-client-${target.platform}-${target.arch}`);
+  if (!fs.existsSync(binary) && fs.existsSync(legacyBinary)) {
+    fs.renameSync(legacyBinary, binary);
+  }
+  if (!fs.existsSync(binary) || !fs.lstatSync(binary).isFile()) {
+    throw new Error(`${target.file} did not contain mosh-client`);
+  }
+  assertBundledTerminfo(extractDir, target);
+  chmodExecutable(binary);
+}
+
+function normalizeBundle(extractDir, target) {
+  if (target.platform === "win32") return normalizeWindowsBundle(extractDir, target);
+  return normalizePosixBundle(extractDir, target);
 }
 
 function replaceDir(srcDir, destDir) {
@@ -237,9 +260,7 @@ function unpackTarGz(buf, target, { resDir }) {
       stdio: "inherit",
     });
     assertExtractedTreeSafe(extractDir);
-    if (target.platform === "win32") {
-      normalizeWindowsBundle(extractDir, target);
-    }
+    normalizeBundle(extractDir, target);
     replaceDir(extractDir, destDir);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });

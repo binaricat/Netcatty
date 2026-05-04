@@ -32,16 +32,28 @@ function moshExtraResources(platform) {
   if (platform === "darwin") {
     const file = path.join(moshRoot, "darwin-universal", "mosh-client");
     if (!hasFile(file)) return [];
-    return [
+    const resources = [
       { from: "resources/mosh/darwin-universal/", to: "mosh/", filter: ["mosh-client"] },
     ];
+    const terminfoDir = path.join(moshRoot, "darwin-universal", "terminfo");
+    if (hasDir(terminfoDir)) {
+      resources.push({ from: "resources/mosh/darwin-universal/terminfo/", to: "mosh/terminfo/", filter: ["**/*"] });
+    }
+    return resources;
   }
 
   if (platform === "linux") {
     const arch = requestedArch();
     const file = path.join(moshRoot, `linux-${arch}`, "mosh-client");
     if (!hasFile(file)) return [];
-    return [{ from: `resources/mosh/linux-${arch}/`, to: "mosh/", filter: ["mosh-client"] }];
+    const resources = [
+      { from: `resources/mosh/linux-${arch}/`, to: "mosh/", filter: ["mosh-client"] },
+    ];
+    const terminfoDir = path.join(moshRoot, `linux-${arch}`, "terminfo");
+    if (hasDir(terminfoDir)) {
+      resources.push({ from: `resources/mosh/linux-${arch}/terminfo/`, to: "mosh/terminfo/", filter: ["**/*"] });
+    }
+    return resources;
   }
 
   if (platform === "win32") {

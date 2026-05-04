@@ -7,8 +7,13 @@
 #   MACOSX_DEPLOYMENT_TARGET  — minimum macOS version (default 11.0)
 #
 # Output:
-#   $OUT_DIR/mosh-client-darwin-universal
-#   $OUT_DIR/mosh-client-darwin-universal.sha256
+#   $OUT_DIR/mosh-client-darwin-universal.tar.gz       (binary + terminfo bundle)
+#   $OUT_DIR/mosh-client-darwin-universal.tar.gz.sha256
+#
+# The bundle ships a private terminfo database next to the binary because
+# our statically-linked ncurses has its compiled-in TERMINFO path pointing
+# at the build-time prefix (a temp dir). Without bundling, mosh-client
+# fails with "Terminfo database could not be found." See issue #890.
 #
 # Strategy: build OpenSSL/protobuf/ncurses for arm64 and x86_64
 # (cross-compile via Apple clang's -arch flag), link mosh-client per arch,
@@ -110,7 +115,16 @@ build_arch() {
       CFLAGS="$CFLAGS_COMMON" CXXFLAGS="$CFLAGS_COMMON" LDFLAGS="$LDFLAGS_COMMON"
     make -j"$(sysctl -n hw.ncpu)"
     make -C include install
-    make -C ncurses install )
+    make -C ncurses install
+    # Compile + install the terminfo database for the native arch only.
+    # `tic` runs on the build host, so a cross-target build can't compile
+    # terminfo entries — but the .src database is arch-independent, so a
+    # single native-arch install populates $PREFIX/share/terminfo/ with
+    # the data we bundle below.
+    if [ "$ARCH" = "$NATIVE_ARCH" ]; then
+      make -C progs install
+      make -C misc install
+    fi )
 
   # mosh per-arch build
   ( cd mosh-src
@@ -138,7 +152,9 @@ else
   build_arch arm64
 fi
 
-OUT_BIN="$OUT_DIR/mosh-client-darwin-universal"
+BUNDLE_DIR="$WORK/darwin-universal-bundle"
+mkdir -p "$BUNDLE_DIR"
+OUT_BIN="$BUNDLE_DIR/mosh-client"
 lipo -create "$WORK/mosh-client-arm64" "$WORK/mosh-client-x86_64" -output "$OUT_BIN"
 strip -x "$OUT_BIN" || true
 
@@ -157,5 +173,36 @@ if otool -L "$OUT_BIN" | tail -n +2 | awk '{print $1}' | grep -Ev "^(/usr/lib/|/
   exit 1
 fi
 
-( cd "$OUT_DIR" && shasum -a 256 "mosh-client-darwin-universal" > "mosh-client-darwin-universal.sha256" )
-cat "$OUT_DIR/mosh-client-darwin-universal.sha256"
+# Bundle the terminfo entries our statically-linked ncurses needs. Pull
+# from the native-arch prefix where `make -C misc install` ran tic above.
+TERMINFO_SRC="$WORK/prefix-$NATIVE_ARCH/share/terminfo"
+TERMINFO_OUT="$BUNDLE_DIR/terminfo"
+mkdir -p "$TERMINFO_OUT"
+copy_terminfo_entry() {
+  local name="$1"
+  for src in "$TERMINFO_SRC"/?/"$name" "$TERMINFO_SRC"/??/"$name"; do
+    [ -f "$src" ] || continue
+    local rel
+    rel=$(basename "$(dirname "$src")")
+    mkdir -p "$TERMINFO_OUT/$rel"
+    cp "$src" "$TERMINFO_OUT/$rel/$name"
+    return 0
+  done
+  return 1
+}
+for entry in xterm-256color xterm xterm-color vt100 vt220 ansi screen screen-256color tmux tmux-256color dumb; do
+  copy_terminfo_entry "$entry" || echo "WARN: terminfo entry $entry not found in $TERMINFO_SRC" >&2
+done
+if [ ! -f "$TERMINFO_OUT/x/xterm-256color" ] && [ ! -f "$TERMINFO_OUT/78/xterm-256color" ]; then
+  echo "ERROR: failed to bundle xterm-256color terminfo for mosh-client (darwin-universal)." >&2
+  exit 1
+fi
+
+echo "--- bundled terminfo ---"
+find "$TERMINFO_OUT" -type f -print
+
+BUNDLE_TGZ="$OUT_DIR/mosh-client-darwin-universal.tar.gz"
+( cd "$BUNDLE_DIR" && tar -czf "$BUNDLE_TGZ" "mosh-client" "terminfo" )
+
+( cd "$OUT_DIR" && shasum -a 256 "mosh-client-darwin-universal.tar.gz" > "mosh-client-darwin-universal.tar.gz.sha256" )
+cat "$OUT_DIR/mosh-client-darwin-universal.tar.gz.sha256"
