@@ -66,10 +66,11 @@ build_with_vs2022.bat
 
 # Bundled mosh-client binaries fetched at pack time by
 # scripts/fetch-mosh-binaries.cjs. resources/mosh/README.md is
-# committed; the actual binaries (and on Windows the Cygwin DLL
-# bundle that ships alongside mosh-client.exe) are pulled from the
+# committed; the actual binaries, the Cygwin DLL bundle (Windows),
+# and the bundled ncurses terminfo database are all pulled from the
 # dedicated mosh binary repository, never committed.
 /resources/mosh/*/mosh-client
 /resources/mosh/*/mosh-client.exe
 /resources/mosh/*/mosh-client-*-dlls/
 /resources/mosh/*/*.dll
+/resources/mosh/*/terminfo/
