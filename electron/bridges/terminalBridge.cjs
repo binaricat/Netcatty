@@ -7,7 +7,9 @@ const os = require("node:os");
 const fs = require("node:fs");
 const net = require("node:net");
 const { randomUUID } = require("node:crypto");
+const { execFile } = require("node:child_process");
 const path = require("node:path");
+const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const pty = require("node-pty");
 const { SerialPort } = require("serialport");
@@ -20,6 +22,9 @@ const { trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
+const tempDirBridge = require("./tempDirBridge.cjs");
+
+const execFileAsync = promisify(execFile);
 
 // Shared references
 let sessions = null;
@@ -924,25 +929,164 @@ function addBundledMoshRuntimeEnv(env, bareClient, opts = {}) {
   return env;
 }
 
-function createMoshSshPasswordResponder(sshPty, password) {
-  if (typeof password !== "string" || password.length === 0) {
+function createMoshSshPasswordResponder(sshPty, password, passphrase) {
+  if (
+    (typeof password !== "string" || password.length === 0) &&
+    (typeof passphrase !== "string" || passphrase.length === 0)
+  ) {
     return () => {};
   }
 
-  let answered = false;
+  let answeredPassword = false;
+  let answeredPassphrase = false;
   let tail = "";
 
   return (chunk) => {
-    if (answered) return;
+    if (answeredPassword && answeredPassphrase) return;
     const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || "");
     if (!text) return;
 
     tail = (tail + text).slice(-512);
+    if (typeof passphrase === "string" && passphrase.length > 0 && !answeredPassphrase && /(^|[\r\n]).*passphrase.*:\s*$/i.test(tail)) {
+      answeredPassphrase = true;
+      sshPty.write(`${passphrase}\r`);
+      return;
+    }
+
+    if (typeof password !== "string" || password.length === 0 || answeredPassword) return;
     if (!/(^|[\r\n]).*password:\s*$/i.test(tail)) return;
 
-    answered = true;
+    answeredPassword = true;
     sshPty.write(`${password}\r`);
   };
+}
+
+function normalizeMoshIdentityPath(keyPath) {
+  if (typeof keyPath !== "string") return null;
+  const trimmed = keyPath.trim();
+  if (!trimmed) return null;
+  if (trimmed === "~") return os.homedir();
+  if (trimmed.startsWith("~/")) return path.join(os.homedir(), trimmed.slice(2));
+  return trimmed;
+}
+
+function safeMoshAuthFileName(sessionId, keyId, suffix) {
+  const safeId = String(keyId || sessionId || randomUUID())
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 80);
+  return `mosh-auth-${safeId}-${randomUUID()}${suffix}`;
+}
+
+async function writeMoshAuthTempFile(fileName, content) {
+  const target = tempDirBridge.getTempFilePath(fileName);
+  const normalized = content.endsWith("\n") ? content : `${content}\n`;
+  let created = false;
+  try {
+    const handle = await fs.promises.open(target, "wx", 0o600);
+    created = true;
+    await handle.close();
+    await restrictMoshAuthFilePermissions(target, { failClosed: true });
+    await fs.promises.writeFile(target, normalized, { flag: "w", mode: 0o600 });
+    try {
+      await fs.promises.chmod(target, 0o600);
+    } catch {
+      // Best effort on Windows; ACL hardening above is the security boundary.
+    }
+  } catch (err) {
+    if (created) cleanupMoshAuthTempFiles([target]);
+    throw err;
+  }
+  return target;
+}
+
+async function restrictMoshAuthFilePermissions(target, opts = {}) {
+  if (process.platform !== "win32") return true;
+
+  let username = process.env.USERNAME;
+  if (!username) {
+    try {
+      username = os.userInfo().username;
+    } catch {
+      username = "";
+    }
+  }
+  if (!username) {
+    if (opts.failClosed) {
+      throw new Error("Failed to restrict private key ACLs: unable to resolve current Windows user");
+    }
+    return false;
+  }
+
+  const identities = [];
+  if (process.env.USERDOMAIN) identities.push(`${process.env.USERDOMAIN}\\${username}`);
+  identities.push(username);
+
+  let lastError = null;
+  for (const identity of identities) {
+    try {
+      await execFileAsync("icacls.exe", [target, "/grant:r", `${identity}:F`], { windowsHide: true });
+      await execFileAsync("icacls.exe", [target, "/inheritance:r"], { windowsHide: true });
+      await execFileAsync("icacls.exe", [target, "/grant:r", `${identity}:F`], { windowsHide: true });
+      return true;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const message = lastError?.message || String(lastError || "unknown error");
+  if (opts.failClosed) {
+    throw new Error(`Failed to restrict private key ACLs: ${message}`);
+  }
+  console.warn("[Mosh] Failed to restrict private key ACLs:", message);
+  return false;
+}
+
+function cleanupMoshAuthTempFiles(files) {
+  for (const file of files || []) {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      // Best effort cleanup; Settings > System can clear Netcatty temp files.
+    }
+  }
+}
+
+async function buildMoshSshAuthArgs(options, sessionId) {
+  const sshArgs = [];
+  const tempFiles = [];
+
+  try {
+    if (typeof options.privateKey === "string" && options.privateKey.trim().length > 0) {
+      const keyPath = await writeMoshAuthTempFile(
+        safeMoshAuthFileName(sessionId, options.keyId, ".pem"),
+        options.privateKey,
+      );
+      tempFiles.push(keyPath);
+      sshArgs.push("-i", keyPath, "-o", "IdentitiesOnly=yes");
+
+      if (typeof options.certificate === "string" && options.certificate.trim().length > 0) {
+        const certPath = await writeMoshAuthTempFile(
+          safeMoshAuthFileName(sessionId, options.keyId, "-cert.pub"),
+          options.certificate,
+        );
+        tempFiles.push(certPath);
+        sshArgs.push("-o", `CertificateFile=${certPath}`);
+      }
+    } else if (Array.isArray(options.identityFilePaths) && options.identityFilePaths.length > 0) {
+      for (const keyPath of options.identityFilePaths) {
+        const normalized = normalizeMoshIdentityPath(keyPath);
+        if (normalized) sshArgs.push("-i", normalized);
+      }
+      if (sshArgs.length > 0) {
+        sshArgs.push("-o", "IdentitiesOnly=yes");
+      }
+    }
+  } catch (err) {
+    cleanupMoshAuthTempFiles(tempFiles);
+    throw err;
+  }
+
+  return { sshArgs, tempFiles };
 }
 
 /**
@@ -974,6 +1118,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
   const rows = options.rows || 24;
   const optionsEnv = options.env || {};
   const lang = optionsEnv.LANG || resolveLangFromCharsetForMosh(options.charset);
+  const moshAuth = await buildMoshSshAuthArgs(options, sessionId);
 
   const { args: sshArgs } = moshHandshake.buildSshHandshakeCommand({
     host: options.hostname,
@@ -981,6 +1126,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
     username: options.username,
     lang,
     moshServer: moshHandshake.buildMoshServerCommand(options.moshServerPath),
+    sshArgs: moshAuth.sshArgs,
   });
 
   const sshEnv = { ...process.env, ...optionsEnv, TERM: "xterm-256color" };
@@ -988,13 +1134,19 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
     sshEnv.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
   }
 
-  const sshPty = pty.spawn(sshExe, sshArgs, {
-    cols,
-    rows,
-    env: sshEnv,
-    cwd: os.homedir(),
-    encoding: null,
-  });
+  let sshPty;
+  try {
+    sshPty = pty.spawn(sshExe, sshArgs, {
+      cols,
+      rows,
+      env: sshEnv,
+      cwd: os.homedir(),
+      encoding: null,
+    });
+  } catch (err) {
+    cleanupMoshAuthTempFiles(moshAuth.tempFiles);
+    throw err;
+  }
 
   const session = {
     proc: sshPty,
@@ -1015,6 +1167,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
     rows,
     moshHandshakePhase: "ssh",
     moshHandshakeResult: null,
+    moshAuthTempFiles: moshAuth.tempFiles,
   };
   sessions.set(sessionId, session);
 
@@ -1035,7 +1188,7 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
   session.flushPendingData = flush;
 
   const sniffer = moshHandshake.createMoshConnectSniffer();
-  const respondToPasswordPrompt = createMoshSshPasswordResponder(sshPty, options.password);
+  const respondToPasswordPrompt = createMoshSshPasswordResponder(sshPty, options.password, options.passphrase);
 
   // Forward bytes from the ssh PTY to the renderer, redacting the
   // MOSH CONNECT magic line. ZMODEM is intentionally not enabled
@@ -1059,8 +1212,10 @@ async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe
 
   sshPty.onExit(({ exitCode, signal }) => {
     if (sessions.get(sessionId) !== session || session.closed) {
+      cleanupMoshAuthTempFiles(moshAuth.tempFiles);
       return;
     }
+    cleanupMoshAuthTempFiles(moshAuth.tempFiles);
 
     if (session.moshHandshakePhase === "parsed" && session.moshHandshakeResult) {
       try {
@@ -1470,6 +1625,8 @@ function closeSession(event, payload) {
     }
   } catch (err) {
     console.warn("Close failed", err);
+  } finally {
+    cleanupMoshAuthTempFiles(session.moshAuthTempFiles);
   }
   ptyProcessTree.unregisterPid(payload.sessionId);
   sessions.delete(payload.sessionId);

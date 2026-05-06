@@ -624,8 +624,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     pendingAuthRef,
     termRef,
     onUpdateHost,
-    onStartSsh: (term) => {
-      sessionStartersRef.current?.startSSH(term);
+    onStartSession: (term) => {
+      const starters = sessionStartersRef.current;
+      if (!starters) return;
+      if (host.moshEnabled) {
+        starters.startMosh(term);
+        return;
+      }
+      starters.startSSH(term);
     },
     setStatus: (next) => setStatus(next),
     setProgressLogs,

@@ -178,6 +178,11 @@ declare global {
       hostname: string;
       username?: string;
       password?: string;
+      privateKey?: string;
+      certificate?: string;
+      keyId?: string;
+      passphrase?: string;
+      identityFilePaths?: string[];
       port?: number;
       moshServerPath?: string;
       moshClientPath?: string;

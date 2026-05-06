@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Phase-1 source: pin to the FluentTerminal-shipped mosh-cygwin standalone
+# Source: pin to the FluentTerminal-shipped mosh-cygwin standalone
 # build (PE32+ x86-64, statically linked Cygwin runtime, no cygwin1.dll
-# dependency). FluentTerminal is GPL-3.0 — same license as netcatty —
-# and the binary itself is GPL-3.0 from upstream mobile-shell/mosh.
-#
-# Phase-2 replaced this fetch with an in-CI Cygwin build from upstream
-# source so we own the provenance end-to-end.
-#
+# dependency). FluentTerminal is GPL-3.0, same license as Netcatty, and
+# the binary itself is GPL-3.0 from upstream mobile-shell/mosh.
 # The pinned commit is FluentTerminal master @ bad0f85 (2019-09-12), which
 # is the commit where the prebuilt mosh-client.exe was added to the repo.
 # Verifying SHA256 against a frozen value protects against silent updates.

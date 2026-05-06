@@ -219,6 +219,98 @@ test("startMoshSession writes the saved password when ssh prompts for one", asyn
   assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
 });
 
+test("startMoshSession passes vault private keys to ssh via a temp identity file", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    {
+      ...h.options,
+      keyId: "key-1",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+      password: "wrong-password",
+    },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  const keyFlagIndex = h.spawns[0].args.indexOf("-i");
+  assert.notEqual(keyFlagIndex, -1);
+  const keyPath = h.spawns[0].args[keyFlagIndex + 1];
+  assert.equal(fs.existsSync(keyPath), true);
+  assert.equal(h.spawns[0].args.includes("IdentitiesOnly=yes"), true);
+  assert.equal(h.spawns[0].args.includes("alice@example.com"), true);
+
+  h.spawns[0].emitExit({ exitCode: 255, signal: 0 });
+  assert.equal(fs.existsSync(keyPath), false);
+});
+
+test("startMoshSession uses unique temp identity files for concurrent sessions with the same key", async (t) => {
+  const h = makeHarness(t);
+  const authOptions = {
+    keyId: "key-1",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+  };
+
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, ...authOptions },
+    { moshClientLookup: h.lookupOpts },
+  );
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, ...authOptions, sessionId: "mosh-test-session-2" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  const firstKeyPath = h.spawns[0].args[h.spawns[0].args.indexOf("-i") + 1];
+  const secondKeyPath = h.spawns[1].args[h.spawns[1].args.indexOf("-i") + 1];
+  assert.notEqual(firstKeyPath, secondKeyPath);
+  assert.equal(fs.existsSync(firstKeyPath), true);
+  assert.equal(fs.existsSync(secondKeyPath), true);
+
+  h.spawns[0].emitExit({ exitCode: 255, signal: 0 });
+  assert.equal(fs.existsSync(firstKeyPath), false);
+  assert.equal(fs.existsSync(secondKeyPath), true);
+
+  h.spawns[1].emitExit({ exitCode: 255, signal: 0 });
+  assert.equal(fs.existsSync(secondKeyPath), false);
+});
+
+test("closeSession removes Mosh temp identity files even before ssh exits", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    {
+      ...h.options,
+      keyId: "key-1",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+    },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  const keyPath = h.spawns[0].args[h.spawns[0].args.indexOf("-i") + 1];
+  assert.equal(fs.existsSync(keyPath), true);
+
+  h.bridge.closeSession(h.event, { sessionId: "mosh-test-session" });
+  assert.equal(fs.existsSync(keyPath), false);
+});
+
+test("startMoshSession writes the saved passphrase when ssh prompts for the temp key", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    {
+      ...h.options,
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----",
+      passphrase: "key-passphrase",
+    },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("Enter passphrase for key 'mosh-auth-key-1.pem':");
+
+  assert.deepEqual(h.spawns[0].writes, ["key-passphrase\r"]);
+});
+
 test("startMoshSession handshake path sends the existing exit event after mosh-client exits", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });

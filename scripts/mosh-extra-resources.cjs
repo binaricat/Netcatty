@@ -57,21 +57,22 @@ function moshExtraResources(platform) {
   }
 
   if (platform === "win32") {
-    // Windows ships mosh-client.exe + Cygwin DLL bundle (cygwin1.dll,
-    // cygcrypto-*.dll, etc.) plus the ncurses terminfo entry used by
-    // TERM=xterm-256color.
+    // Windows normally ships the pinned standalone mosh-client.exe. Keep
+    // optional DLL/terminfo packaging so older Cygwin bundles remain usable.
     const arch = requestedArch();
     const exe = path.join(moshRoot, `win32-${arch}`, "mosh-client.exe");
     const dllDir = path.join(moshRoot, `win32-${arch}`, `mosh-client-win32-${arch}-dlls`);
-    if (!hasFile(exe) || !hasDir(dllDir)) return [];
+    if (!hasFile(exe)) return [];
     const resources = [
       { from: `resources/mosh/win32-${arch}/`, to: "mosh/", filter: ["mosh-client.exe"] },
-      {
+    ];
+    if (hasDir(dllDir)) {
+      resources.push({
         from: `resources/mosh/win32-${arch}/mosh-client-win32-${arch}-dlls/`,
         to: `mosh/mosh-client-win32-${arch}-dlls/`,
         filter: ["**/*"],
-      },
-    ];
+      });
+    }
     const terminfoDir = path.join(moshRoot, `win32-${arch}`, "terminfo");
     if (hasDir(terminfoDir)) {
       resources.push({ from: `resources/mosh/win32-${arch}/terminfo/`, to: "mosh/terminfo/", filter: ["**/*"] });

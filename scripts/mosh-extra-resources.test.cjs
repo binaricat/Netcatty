@@ -8,7 +8,10 @@ const { moshExtraResources } = require("./mosh-extra-resources.cjs");
 
 function makeTmp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-resources-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.after(() => {
+    if (process.cwd().startsWith(dir)) process.chdir(os.tmpdir());
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   return dir;
 }
 
@@ -102,5 +105,16 @@ test("moshExtraResources keeps legacy Windows bundles packageable", (t) => {
       to: "mosh/mosh-client-win32-x64-dlls/",
       filter: ["**/*"],
     },
+  ]);
+});
+
+test("moshExtraResources packages standalone Windows mosh-client.exe", (t) => {
+  const root = makeTmp(t);
+  withCwdAndArch(t, root, "x64");
+  writeFile(path.join(root, "resources", "mosh", "win32-x64", "mosh-client.exe"));
+
+  const got = moshExtraResources("win32");
+  assert.deepEqual(got, [
+    { from: "resources/mosh/win32-x64/", to: "mosh/", filter: ["mosh-client.exe"] },
   ]);
 });

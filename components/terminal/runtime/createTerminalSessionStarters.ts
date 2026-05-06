@@ -824,6 +824,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         return;
       }
 
+      const hasConfiguredJumpHostChain =
+        (ctx.host.hostChain?.hostIds?.length || 0) > 0 ||
+        ctx.resolvedChainHosts.length > 0;
+      if (hasConfiguredJumpHostChain) {
+        stopMosh("Mosh does not support jump host chains. Use SSH for this host or remove the jump hosts from this connection.");
+        return;
+      }
+
       const unresolvedJumpProxyHost = ctx.resolvedChainHosts.find((jumpHost) => jumpHost.proxyProfileId && !jumpHost.proxyConfig);
       if (unresolvedJumpProxyHost) {
         stopMosh(`Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`);
@@ -854,12 +862,44 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           : null,
       });
       const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
+      const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
+      const authMethod = resolvedAuth.authMethod;
+      const key = authMethod === "password" ? undefined : resolvedAuth.key;
+      const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
+      const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(resolvedAuth.key?.privateKey);
+      const hasKeyMaterial = !!sanitizeCredentialValue(key?.privateKey) && authMethod !== "password";
+      const hasPassword = !!effectivePassword;
+      const needsCredentialReentry =
+        (authMethod === "password" && hasEncryptedPrimaryPassword && !hasPassword) ||
+        (authMethod !== "password" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
+
+      if (needsCredentialReentry) {
+        ctx.setError(null);
+        ctx.setNeedsAuth(true);
+        ctx.setAuthRetryMessage(
+          tr(
+            "terminal.auth.credentialsUnavailable",
+            "Saved credentials cannot be decrypted on this device. Please re-enter and save them again.",
+          ),
+        );
+        ctx.setAuthPassword("");
+        ctx.setStatus("connecting");
+        return;
+      }
+
       const moshEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
       const id = await ctx.terminalBackend.startMoshSession({
         sessionId: ctx.sessionId,
         hostname: ctx.host.hostname,
         username: resolvedAuth.username || "root",
         password: effectivePassword,
+        privateKey: sanitizeCredentialValue(key?.privateKey),
+        certificate: key?.certificate,
+        keyId: key?.id,
+        passphrase: key
+          ? (effectivePassphrase || sanitizeCredentialValue(key.passphrase))
+          : undefined,
+        identityFilePaths: authMethod !== "password" && !key ? ctx.host.identityFilePaths : undefined,
         port: ctx.host.port || 22,
         moshServerPath: ctx.host.moshServerPath,
         agentForwarding: ctx.host.agentForwarding,

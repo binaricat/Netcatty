@@ -11,7 +11,7 @@ export const useTerminalAuthState = ({
   pendingAuthRef,
   termRef,
   onUpdateHost,
-  onStartSsh,
+  onStartSession,
   setStatus,
   setProgressLogs,
 }: {
@@ -19,7 +19,7 @@ export const useTerminalAuthState = ({
   pendingAuthRef: RefObject<PendingAuth>;
   termRef: RefObject<XTerm | null>;
   onUpdateHost?: (host: Host) => void;
-  onStartSsh: (term: XTerm) => void;
+  onStartSession: (term: XTerm) => void;
   setStatus: (status: TerminalSession["status"]) => void;
   setProgressLogs: (next: string[] | ((prev: string[]) => string[])) => void;
 }) => {
@@ -106,7 +106,7 @@ export const useTerminalAuthState = ({
         logger.warn("Failed to clear terminal", err);
       }
 
-      onStartSsh(term);
+      onStartSession(term);
     },
     [
       authKeyId,
@@ -116,7 +116,7 @@ export const useTerminalAuthState = ({
       authUsername,
       host,
       isValid,
-      onStartSsh,
+      onStartSession,
       onUpdateHost,
       pendingAuthRef,
       saveCredentials,

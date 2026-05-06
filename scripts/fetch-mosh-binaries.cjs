@@ -23,6 +23,13 @@
 //   MOSH_BIN_RES_DIR  — override output dir for tests.
 //   MOSH_BIN_ALLOW_UNVERIFIED=true — explicit local escape hatch for mirrors
 //                       without SHA256SUMS. Never use for release builds.
+//   MOSH_BIN_FORCE_WINDOWS_CYGWIN=true — debug escape hatch for the upstream
+//                       Cygwin Windows bundle. The default Windows x64 asset
+//                       is the FluentTerminal-pinned standalone client because
+//                       the current Cygwin build clears the terminal and never
+//                       renders remote output on Windows.
+//   MOSH_BIN_WINDOWS_LEGACY_URL / MOSH_BIN_WINDOWS_LEGACY_SHA256 — test/mirror
+//                       overrides for that pinned Windows fallback.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -35,15 +42,24 @@ const { main: resolveMoshBinRelease } = require("./resolve-mosh-bin-release.cjs"
 
 const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_RES_DIR = path.join(ROOT, "resources", "mosh");
+const WINDOWS_LEGACY_FLUENT_MOSH_CLIENT = {
+  id: "windows-fluentterminal-standalone",
+  file: "mosh-client-win32-x64.exe",
+  local: "win32-x64/mosh-client.exe",
+  url: "https://raw.githubusercontent.com/felixse/FluentTerminal/bad0f85/Dependencies/MoshExecutables/x64/mosh-client.exe",
+  sha256: "5a8d84ff205c6a0711e53b961f909484a892f42648807e52d46d4fa93c05e286",
+};
 
 // (file basename in the release -> relative subpath under resources/mosh/)
 // Using flat names in the release for SHA256SUMS readability, then
 // fanning out into platform-arch subdirs locally.
 //
-// All targets are tar.gz bundles containing the binary plus the runtime
-// helpers each platform needs: ncurses terminfo on every platform, plus
-// the Cygwin DLL set on Windows. Bundling terminfo lets the bundled
-// statically-linked mosh-client work on minimal hosts that don't have a
+// Linux/macOS targets are tar.gz bundles containing the binary plus the
+// runtime helpers each platform needs. Windows x64 defaults to the
+// SHA256-pinned FluentTerminal standalone exe because the tested Cygwin
+// bundle clears the terminal and never renders remote output on Windows.
+// Bundling terminfo lets bundled Posix mosh-client builds work on
+// minimal hosts that don't have a
 // system ncurses-base — see issue #890.
 //
 // `legacy` describes the pre-bundle artifact name some published mosh
@@ -67,18 +83,38 @@ const TARGETS = [
     file: "mosh-client-darwin-universal.tar.gz", localDir: "darwin-universal", extract: "tar.gz",
     legacy: { file: "mosh-client-darwin-universal", local: "darwin-universal/mosh-client" },
   },
-  { platform: "win32", arch: "x64", file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz" },
+  {
+    platform: "win32", arch: "x64",
+    file: "mosh-client-win32-x64.tar.gz", localDir: "win32-x64", extract: "tar.gz",
+    legacy: WINDOWS_LEGACY_FLUENT_MOSH_CLIENT,
+    preferLegacy: true,
+  },
 ];
 
-function selectReleaseAsset(target, sums) {
+function applyReleaseAssetOverrides(asset, opts = {}) {
+  if (asset.id !== WINDOWS_LEGACY_FLUENT_MOSH_CLIENT.id) return asset;
+  return {
+    ...asset,
+    url: opts.windowsLegacyUrl || asset.url,
+    sha256: opts.windowsLegacySha256 || asset.sha256,
+  };
+}
+
+function selectReleaseAsset(target, sums, opts = {}) {
   const primary = { file: target.file, extract: target.extract, local: target.local, localDir: target.localDir };
   if (!target.legacy) return primary;
+  if (target.preferLegacy && !opts.forceWindowsCygwin) {
+    if (sums.has(target.legacy.file)) {
+      return { file: target.legacy.file, local: target.legacy.local };
+    }
+    return applyReleaseAssetOverrides(target.legacy, opts);
+  }
   // SHA256SUMS unavailable (allowUnverified mirror) — keep the primary
   // and let download / extraction errors surface naturally.
   if (sums.size === 0) return primary;
   if (sums.has(target.file)) return primary;
   if (sums.has(target.legacy.file)) {
-    return { file: target.legacy.file, local: target.legacy.local };
+    return applyReleaseAssetOverrides({ file: target.legacy.file, local: target.legacy.local }, opts);
   }
   return primary;
 }
@@ -299,13 +335,28 @@ function unpackTarGz(buf, target, { resDir }) {
   return destDir;
 }
 
+function writeFlatAsset(buf, target, asset, { resDir }) {
+  const dest = path.join(resDir, asset.local);
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-flat-"));
+  const tmpDest = path.join(tmpRoot, path.basename(dest));
+  try {
+    fs.writeFileSync(tmpDest, buf);
+    if (target.platform !== "win32") fs.chmodSync(tmpDest, 0o755);
+    replaceDir(tmpRoot, path.dirname(dest));
+  } catch (err) {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    throw err;
+  }
+  return dest;
+}
+
 async function fetchOne(target, sums, opts) {
   const { baseUrl, resDir, allowUnverified = false } = opts;
-  const asset = selectReleaseAsset(target, sums);
+  const asset = selectReleaseAsset(target, sums, opts);
   if (asset.file !== target.file) {
-    log(`using legacy asset ${asset.file} (release predates the bundled tar.gz layout for ${target.platform}-${target.arch})`);
+    log(`using legacy asset ${asset.file} for ${target.platform}-${target.arch}`);
   }
-  const url = `${baseUrl}/${asset.file}`;
+  const url = asset.url || `${baseUrl}/${asset.file}`;
   let buf;
   try {
     buf = await follow(url);
@@ -313,7 +364,7 @@ async function fetchOne(target, sums, opts) {
     throw new Error(`download failed for ${asset.file}: ${err.message}`);
   }
 
-  const expected = sums.get(asset.file);
+  const expected = asset.sha256 || sums.get(asset.file);
   const actual = crypto.createHash("sha256").update(buf).digest("hex");
   if (expected && expected !== actual) {
     throw new Error(`SHA256 mismatch for ${asset.file}: expected ${expected}, got ${actual}`);
@@ -331,10 +382,7 @@ async function fetchOne(target, sums, opts) {
     return true;
   }
 
-  const dest = path.join(resDir, asset.local);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, buf);
-  if (target.platform !== "win32") fs.chmodSync(dest, 0o755);
+  const dest = writeFlatAsset(buf, target, asset, { resDir });
   log(`wrote ${path.relative(ROOT, dest)} (${buf.length} bytes, sha256=${actual})`);
   return true;
 }
@@ -366,6 +414,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     `https://github.com/${owner}/${repo}/releases/download/${encodeURIComponent(release)}`;
   const resDir = path.resolve(env.MOSH_BIN_RES_DIR || DEFAULT_RES_DIR);
   const allowUnverified = env.MOSH_BIN_ALLOW_UNVERIFIED === "true";
+  const forceWindowsCygwin = env.MOSH_BIN_FORCE_WINDOWS_CYGWIN === "true";
   const platformFilter = hostTarget?.platform || platformArg;
   const archFilter = hostTarget?.arch || archArg;
 
@@ -377,7 +426,14 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     if (platformFilter && target.platform !== platformFilter) continue;
     if (archFilter && target.arch !== archFilter) continue;
     total += 1;
-    if (await fetchOne(target, sums, { baseUrl, resDir, allowUnverified })) ok += 1;
+    if (await fetchOne(target, sums, {
+      baseUrl,
+      resDir,
+      allowUnverified,
+      forceWindowsCygwin,
+      windowsLegacyUrl: env.MOSH_BIN_WINDOWS_LEGACY_URL,
+      windowsLegacySha256: env.MOSH_BIN_WINDOWS_LEGACY_SHA256,
+    })) ok += 1;
   }
   log(`done - ${ok}/${total} binaries written`);
   if (ok < total) throw new Error(`only wrote ${ok}/${total} requested binaries`);
@@ -402,5 +458,6 @@ module.exports = {
   validateTarEntries,
   assertExtractedTreeSafe,
   unpackTarGz,
+  writeFlatAsset,
   main,
 };

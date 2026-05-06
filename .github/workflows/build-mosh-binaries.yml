@@ -9,7 +9,7 @@ name: build-mosh-binaries
 #    (`binaricat/Netcatty-mosh-bin` by default).
 #
 # `paths` keeps unrelated commits (UI, bridges, etc) from rebuilding
-# mosh on every push — this workflow is expensive (~30min Cygwin leg).
+# or refreshing mosh binaries on every push.
 on:
   workflow_dispatch:
     inputs:
@@ -129,48 +129,22 @@ jobs:
           path: out/
 
   # ------------------------------------------------------------------
-  # Windows x64 — in-CI Cygwin build from upstream mobile-shell/mosh
-  # source. Cygwin's POSIX runtime can't be fully statically linked, so
-  # we accept the dynamic Cygwin DLL deps and bundle them alongside the
-  # exe (cygcheck-discovered, ~10 MB total). The pinned-FluentTerminal
-  # path is preserved as `fetch-windows.sh` for emergency fallback.
+  # Windows x64 pinned standalone client.
+  # Do not compile this in CI: the upstream Cygwin build can clear the
+  # terminal and never render output on Windows. Ship the SHA256-pinned
+  # FluentTerminal standalone binary verified by fetch-windows.sh.
   # ------------------------------------------------------------------
-  build-windows-x64:
-    name: build-windows-x64
-    runs-on: windows-latest
+  fetch-windows-x64:
+    name: fetch-windows-x64
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Cygwin
-        uses: cygwin/cygwin-install-action@v5
-        with:
-          add-to-path: false
-          # Keep package signature checks, but avoid the setup.exe hash
-          # fetch path that currently fails on windows-latest runners.
-          check-hash: false
-          packages: >
-            gcc-g++ make autoconf automake libtool perl perl_pods pkg-config git
-            openssl-devel libssl-devel libprotobuf-devel libncurses-devel
-            libncursesw-devel zlib-devel protobuf-compiler
-      - name: Build mosh-client.exe (win32-x64)
-        shell: pwsh
+      - name: Fetch pinned mosh-client.exe (win32-x64)
         run: |
-          $ErrorActionPreference = "Stop"
-          $cygwinBin = "C:\cygwin\bin"
-          $workspace = (& "$cygwinBin\cygpath.exe" -u "$env:GITHUB_WORKSPACE").Trim()
-          $scriptPath = Join-Path $env:RUNNER_TEMP "build-mosh-windows.sh"
-          $script = @'
           set -euo pipefail
-          cd "__WORKSPACE__"
-          export MOSH_REF="${MOSH_REF:?missing MOSH_REF}"
-          export ARCH=x64
-          export OUT_DIR="__WORKSPACE__/out"
+          export OUT_DIR="${GITHUB_WORKSPACE}/out"
           mkdir -p "$OUT_DIR"
-          bash scripts/build-mosh/build-windows.sh
-          '@
-          $script = $script.Replace("__WORKSPACE__", $workspace).Replace("`r`n", "`n")
-          Set-Content -Path $scriptPath -Value $script -NoNewline -Encoding utf8
-          $scriptPathCygwin = (& "$cygwinBin\cygpath.exe" -u "$scriptPath").Trim()
-          & "$cygwinBin\bash.exe" --login "$scriptPathCygwin"
+          bash scripts/build-mosh/fetch-windows.sh
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -179,12 +153,8 @@ jobs:
 
   # ------------------------------------------------------------------
   # Windows arm64 — intentionally not built.
-  # Cygwin's arm64 port is still experimental (no stable cygwin1.dll
-  # release for aarch64 as of this commit), so we don't attempt an
-  # arm64 mosh build. arm64 Windows installs fall through to the
-  # legacy `mosh` wrapper path in terminalBridge.startMoshSession.
-  # When upstream Cygwin ships a stable arm64 build, drop the same
-  # cygwin-install-action job below with `platform: arm64`.
+  # The pinned upstream source only provides x64. arm64 Windows builds
+  # should be added only after we have a tested standalone arm64 client.
   # ------------------------------------------------------------------
 
   # ------------------------------------------------------------------
@@ -196,7 +166,7 @@ jobs:
       - build-linux-x64
       - build-linux-arm64
       - build-macos-universal
-      - build-windows-x64
+      - fetch-windows-x64
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
     permissions:
@@ -241,7 +211,8 @@ jobs:
           fi
           {
             printf '%s\n' 'Pre-built `mosh-client` binaries consumed by `scripts/fetch-mosh-binaries.cjs` during `npm run pack`.'
-            printf 'Built from `mobile-shell/mosh` upstream ref `%s`.\n\n' "${MOSH_REF}"
+            printf 'Linux/macOS artifacts are built from `mobile-shell/mosh` upstream ref `%s`.\n' "${MOSH_REF}"
+            printf '%s\n\n' 'Windows x64 is the SHA256-pinned FluentTerminal standalone `mosh-client.exe` fallback.'
             printf 'Source workflow: %s/%s/actions/runs/%s\n' "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
             printf 'Source commit: `%s`\n\n' "${GITHUB_SHA}"
             printf '%s\n' 'All artifacts are GPL-3.0; see `resources/mosh/README.md` for source provenance.'
