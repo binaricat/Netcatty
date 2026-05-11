@@ -47,6 +47,10 @@ declare global {
     label?: string; // Display label for UI
     proxy?: NetcattyProxyConfig;
     identityFilePaths?: string[];
+    // Resolved keepalive for THIS hop (caller has already applied host
+    // override / global fallback). interval in seconds, 0 = disabled.
+    keepaliveInterval?: number;
+    keepaliveCountMax?: number;
   }
 
   // Host key information for verification

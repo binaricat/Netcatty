@@ -471,6 +471,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.updateStatus("disconnected");
       return;
     }
+    const globalKeepalive = ctx.terminalSettings ?? { keepaliveInterval: 30, keepaliveCountMax: 10 };
     const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
@@ -513,6 +514,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         jumpHostsWithUnavailableCredentials.push(jumpHost.label || jumpHost.hostname);
       }
 
+      // Resolve keepalive for THIS hop. Each jump host carries its own
+      // override toggle, so a bastion that is a router (interval=0) can
+      // coexist with a cloud target host (interval=30) in the same chain.
+      const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
+
       return {
         hostname: jumpHost.hostname,
         port: jumpHost.port || 22,
@@ -535,6 +541,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           }
           : undefined,
         identityFilePaths: jumpIdentityFilePaths,
+        keepaliveInterval: hopKeepalive.interval,
+        keepaliveCountMax: hopKeepalive.countMax,
       };
     });
 

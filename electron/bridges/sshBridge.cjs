@@ -455,19 +455,23 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         options._tunnelRef.chainConnections = connections;
       }
 
+      // Per-hop keepalive. Each jump entry already carries its own resolved
+      // interval/countMax (see resolveHostKeepalive in domain/host.ts), so
+      // a chain with a router as the bastion and a cloud host at the end
+      // can have keepalive=0 on the bastion and the cloud-friendly values
+      // on the final target — without one stepping on the other. We fall
+      // back to the target-call options for backward compat with older
+      // serializers that don't populate the per-hop fields yet.
+      const hopInterval = jump.keepaliveInterval ?? options.keepaliveInterval ?? 0;
+      const hopCountMax = jump.keepaliveCountMax ?? options.keepaliveCountMax ?? 10;
       // Build connection options
       const connOpts = {
         host: jump.hostname,
         port: jump.port || 22,
         username: jump.username || 'root',
         readyTimeout: 120000, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
-        // Resolved keepalive (caller decides whether host override or global
-        // applies — see resolveHostKeepalive in domain/host.ts). interval is
-        // in seconds; 0 means truly disabled, so countMax also goes to 0 to
-        // skip ssh2's dead-connection check entirely for hosts that don't
-        // reply to keepalive@openssh.com (older routers / switches).
-        keepaliveInterval: options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 0,
-        keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 10) : 0,
+        keepaliveInterval: hopInterval > 0 ? hopInterval * 1000 : 0,
+        keepaliveCountMax: hopInterval > 0 ? hopCountMax : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
         algorithms: buildAlgorithms(options.legacyAlgorithms),
