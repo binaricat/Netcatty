@@ -923,25 +923,33 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
       // Set to 0 (unlimited) since complex operations add many temp listeners
       conn.setMaxListeners(0);
 
-      // Per-hop keepalive. Each jump entry now carries its own resolved
-      // values when the renderer supplies them; fall back to the target
-      // call's options for backward compat with older serializers and
-      // ultimately to a 10s default so an idle SFTP browse over a NAT
-      // doesn't drop (the original #669 protection).
+      // Per-hop keepalive. The renderer's resolver returns either a positive
+      // number (use it) or 0 (the host explicitly opted out, e.g. a router
+      // whose SSH stack doesn't reply to keepalive@openssh.com). Only when
+      // BOTH the per-hop and the target-call fields are undefined do we
+      // fall back to 10s/3 — that path exists for older serializers that
+      // pre-date per-host plumbing, preserving the #669 idle-NAT protection
+      // for callers that haven't yet been updated.
       const hopInterval = jump.keepaliveInterval != null
         ? jump.keepaliveInterval
         : options.keepaliveInterval;
       const hopCountMax = jump.keepaliveCountMax != null
         ? jump.keepaliveCountMax
-        : (options.keepaliveCountMax ?? 3);
+        : options.keepaliveCountMax;
+      const hopIntervalMs = hopInterval == null
+        ? 10000
+        : (hopInterval > 0 ? hopInterval * 1000 : 0);
+      const hopCountMaxEffective = hopInterval == null
+        ? 3
+        : (hopInterval > 0 ? (hopCountMax ?? 3) : 0);
       // Build connection options
       const connOpts = {
         host: jump.hostname,
         port: jump.port || 22,
         username: jump.username || 'root',
         readyTimeout: 120000, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
-        keepaliveInterval: hopInterval > 0 ? hopInterval * 1000 : 10000,
-        keepaliveCountMax: hopInterval > 0 ? hopCountMax : 3,
+        keepaliveInterval: hopIntervalMs,
+        keepaliveCountMax: hopCountMaxEffective,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
         algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
@@ -1442,16 +1450,20 @@ async function openSftp(event, options) {
     // Enable keyboard-interactive authentication (required for 2FA/MFA)
     tryKeyboard: true,
     readyTimeout: 120000, // 2 minutes for 2FA input
-    // Keep SFTP sessions alive while the panel is idle. Without SSH-level
-    // keepalive packets the connection sits with zero data flow while the
-    // user is just browsing files, and NAT/firewall state tables drop the
-    // idle TCP connection after ~30-60s (the exact symptom of #669).
-    // Honor an explicitly configured positive keepaliveInterval (seconds)
-    // — including per-host overrides resolved by the renderer; otherwise
-    // default to 10s. countMax is forwarded from the renderer too with a
-    // backward-compat fallback of 3.
-    keepaliveInterval: options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 10000,
-    keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 3) : 3,
+    // Keepalive policy:
+    //   - positive value: honor it (in seconds, convert to ms)
+    //   - explicit 0: truly disabled (host opted out via per-host override —
+    //     critical for routers/switches that don't reply to keepalive
+    //     @openssh.com and would otherwise be killed by ssh2 after countMax
+    //     unanswered probes)
+    //   - undefined: legacy caller path, fall back to 10s/3 so an idle SFTP
+    //     browse over a NAT doesn't drop (the original #669 protection)
+    keepaliveInterval: options.keepaliveInterval == null
+      ? 10000
+      : (options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 0),
+    keepaliveCountMax: options.keepaliveInterval == null
+      ? 3
+      : (options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 3) : 0),
     algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
   };
 
