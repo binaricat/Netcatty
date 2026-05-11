@@ -524,7 +524,12 @@ const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
   prev.hotkeyScheme === next.hotkeyScheme &&
   prev.keyBindings === next.keyBindings &&
   prev.editorWordWrap === next.editorWordWrap &&
-  prev.setEditorWordWrap === next.setEditorWordWrap;
+  prev.setEditorWordWrap === next.setEditorWordWrap &&
+  // Only the keepalive fields of terminalSettings affect SFTP connection
+  // resolution today; compare them directly rather than the whole object
+  // so unrelated terminal-setting changes don't tear the panel down.
+  prev.terminalSettings?.keepaliveInterval === next.terminalSettings?.keepaliveInterval &&
+  prev.terminalSettings?.keepaliveCountMax === next.terminalSettings?.keepaliveCountMax;
 
 export const SftpView = memo(SftpViewInner, sftpViewAreEqual);
 SftpView.displayName = "SftpView";

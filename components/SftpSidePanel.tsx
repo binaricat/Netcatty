@@ -770,7 +770,11 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.onGetTerminalCwd === next.onGetTerminalCwd &&
   prev.onRequestTerminalFocus === next.onRequestTerminalFocus &&
   prev.initialLocation?.hostId === next.initialLocation?.hostId &&
-  prev.initialLocation?.path === next.initialLocation?.path;
+  prev.initialLocation?.path === next.initialLocation?.path &&
+  // Only the keepalive fields of terminalSettings affect SFTP connection
+  // resolution today; compare them directly rather than the whole object.
+  prev.terminalSettings?.keepaliveInterval === next.terminalSettings?.keepaliveInterval &&
+  prev.terminalSettings?.keepaliveCountMax === next.terminalSettings?.keepaliveCountMax;
 
 export const SftpSidePanel = memo(SftpSidePanelInner, sidePanelAreEqual);
 SftpSidePanel.displayName = "SftpSidePanel";

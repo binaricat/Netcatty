@@ -3280,7 +3280,13 @@ export const vaultViewAreEqual = (
     prev.groupConfigs === next.groupConfigs &&
     prev.terminalThemeId === next.terminalThemeId &&
     prev.terminalFontSize === next.terminalFontSize &&
-    prev.navigateToSection === next.navigateToSection;
+    prev.navigateToSection === next.navigateToSection &&
+    // Only the keepalive fields of terminalSettings are forwarded to
+    // PortForwarding inside the vault, so compare them directly. Other
+    // terminal settings (fonts, themes, etc.) don't affect this subtree
+    // and we don't want to re-render for them.
+    prev.terminalSettings?.keepaliveInterval === next.terminalSettings?.keepaliveInterval &&
+    prev.terminalSettings?.keepaliveCountMax === next.terminalSettings?.keepaliveCountMax;
 
   return isEqual;
 };
