@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import { Cpu, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Cpu, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { useI18n } from "../application/i18n/I18nProvider";
@@ -1878,6 +1878,23 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   statusDotTone,
                 )}
               />
+              {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
+                <button
+                  type="button"
+                  className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(host.hostname).then(() => {
+                      toast.success(t("terminal.statusbar.copyHostname.toast", { hostname: host.hostname }));
+                    }).catch(() => {
+                      toast.error(t("terminal.statusbar.copyHostname.error"));
+                    });
+                  }}
+                  title={t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}
+                  aria-label={t("terminal.statusbar.copyHostname.label")}
+                >
+                  <Copy size={10} />
+                </button>
+              )}
             </div>
             {/* Server Stats Display */}
             {terminalSettings?.showServerStats && status === 'connected' && serverStats.lastUpdated && (
