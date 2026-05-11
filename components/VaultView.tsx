@@ -172,6 +172,7 @@ interface VaultViewProps {
   // Optional: navigate to a specific section on mount or when changed
   navigateToSection?: VaultSection | null;
   onNavigateToSectionHandled?: () => void;
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const VaultViewInner: React.FC<VaultViewProps> = ({
@@ -222,6 +223,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   showOnlyUngroupedHostsInRoot,
   navigateToSection,
   onNavigateToSectionHandled,
+  terminalSettings,
 }) => {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -2946,6 +2948,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 Array.from(new Set([...customGroups, groupPath])),
               )
             }
+            terminalSettings={terminalSettings}
           />
         )}
         {/* Always render KnownHostsManager but hide with CSS to prevent unmounting */}

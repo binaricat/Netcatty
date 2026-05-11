@@ -66,6 +66,7 @@ interface SftpViewProps {
   keyBindings: KeyBinding[];
   editorWordWrap: boolean;
   setEditorWordWrap: (enabled: boolean) => void;
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const SftpViewInner: React.FC<SftpViewProps> = ({
@@ -84,6 +85,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   keyBindings,
   editorWordWrap,
   setEditorWordWrap,
+  terminalSettings,
 }) => {
   const { t } = useI18n();
   const isActive = useIsSftpActive();
@@ -109,7 +111,8 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     ...fileWatchHandlers,
     useCompressedUpload: sftpUseCompressedUpload,
     defaultShowHiddenFiles: sftpShowHiddenFiles,
-  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles]);
+    terminalSettings,
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings]);
 
   // Pre-resolve group defaults so SFTP connections inherit group config
   const effectiveHosts = useMemo(() => {

@@ -75,6 +75,7 @@ interface PortForwardingProps {
   onNewHost?: () => void;
   onSaveHost?: (host: Host) => void;
   onCreateGroup?: (groupPath: string) => void;
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const PortForwarding: React.FC<PortForwardingProps> = ({
@@ -88,6 +89,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   onNewHost: _onNewHost,
   onSaveHost,
   onCreateGroup: _onCreateGroup,
+  terminalSettings,
 }) => {
   const { t } = useI18n();
   const {
@@ -169,6 +171,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             }
           },
           rule.autoStart, // Enable reconnect for auto-start rules
+          terminalSettings,
         );
         // Show error from result only if not already shown
         if (!result.success && result.error && !errorShown) {
@@ -186,7 +189,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         });
       }
     },
-    [hosts, identities, keys, resolveEffectiveHost, setRuleStatus, startTunnel, t],
+    [hosts, identities, keys, resolveEffectiveHost, setRuleStatus, startTunnel, t, terminalSettings],
   );
 
   // Stop a port forwarding tunnel

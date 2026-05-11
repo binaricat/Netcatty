@@ -2036,6 +2036,7 @@ function App({ settings }: { settings: SettingsState }) {
             showOnlyUngroupedHostsInRoot={settings.showOnlyUngroupedHostsInRoot}
             navigateToSection={navigateToSection}
             onNavigateToSectionHandled={() => setNavigateToSection(null)}
+            terminalSettings={terminalSettings}
           />
         </VaultViewContainer>
 
@@ -2055,6 +2056,7 @@ function App({ settings }: { settings: SettingsState }) {
           keyBindings={keyBindings}
           editorWordWrap={editorWordWrap}
           setEditorWordWrap={setEditorWordWrap}
+          terminalSettings={terminalSettings}
         />
 
         <TerminalLayerMount

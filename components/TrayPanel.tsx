@@ -107,7 +107,11 @@ const WorkspaceGroup: React.FC<{
   );
 };
 
-const TrayPanelContent: React.FC = () => {
+interface TrayPanelContentProps {
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
+}
+
+const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings }) => {
   const { t } = useI18n();
   const {
     hideTrayPanel,
@@ -350,7 +354,7 @@ const TrayPanelContent: React.FC = () => {
                         const host = resolveEffectiveHost(rawHost);
                         void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
                           if (status === "error" && error) toast.error(error);
-                        }, rule.autoStart);
+                        }, rule.autoStart, terminalSettings);
                       }
                     }}
                     className={cn(
@@ -411,7 +415,7 @@ const TrayPanel: React.FC = () => {
   const settings = useSettingsState();
   return (
     <I18nProvider locale={settings.uiLanguage}>
-      <TrayPanelContent />
+      <TrayPanelContent terminalSettings={settings.terminalSettings} />
     </I18nProvider>
   );
 };
