@@ -12,6 +12,7 @@ import {
 import { resolveHostAuth } from "../../../domain/sshAuth";
 import {
   detectVendorFromSshVersion,
+  resolveHostKeepalive,
   resolveTelnetPassword,
   resolveTelnetPort,
   resolveTelnetUsername,
@@ -662,6 +663,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         password?: string;
         key?: SSHKey;
       }): Promise<string> => {
+        // Resolve keepalive per-host: a host can opt into its own values
+        // (e.g. set interval=0 on an embedded device whose SSH stack
+        // doesn't reply to keepalive@openssh.com) while everything else
+        // inherits the cloud-friendly global setting.
+        const keepalive = resolveHostKeepalive(
+          ctx.host,
+          ctx.terminalSettings ?? { keepaliveInterval: 30, keepaliveCountMax: 10 },
+        );
         return ctx.terminalBackend.startSSHSession({
           sessionId: ctx.sessionId,
           hostLabel: ctx.host.label,
@@ -687,7 +696,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           env: termEnv,
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
-          keepaliveInterval: ctx.terminalSettings?.keepaliveInterval,
+          keepaliveInterval: keepalive.interval,
+          keepaliveCountMax: keepalive.countMax,
           sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
           identityFilePaths: attempt.password ? undefined : targetIdentityFilePaths,
           knownHosts: ctx.knownHosts,

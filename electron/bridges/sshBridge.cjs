@@ -461,10 +461,13 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         port: jump.port || 22,
         username: jump.username || 'root',
         readyTimeout: 120000, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
-        // Use user-configured keepalive interval from options (in seconds -> convert to ms)
-        // 0 = disabled (no keepalive packets sent)
+        // Resolved keepalive (caller decides whether host override or global
+        // applies — see resolveHostKeepalive in domain/host.ts). interval is
+        // in seconds; 0 means truly disabled, so countMax also goes to 0 to
+        // skip ssh2's dead-connection check entirely for hosts that don't
+        // reply to keepalive@openssh.com (older routers / switches).
         keepaliveInterval: options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 0,
-        keepaliveCountMax: options.keepaliveInterval > 0 ? 3 : 0,
+        keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 10) : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
         algorithms: buildAlgorithms(options.legacyAlgorithms),
@@ -737,10 +740,11 @@ async function startSSHSession(event, options) {
       username: options.username || "root",
       // `readyTimeout` covers the entire connection + authentication flow in ssh2.
       readyTimeout: 20000, // Fast failure for non-interactive auth
-      // Use user-configured keepalive interval (in seconds -> convert to ms)
-      // 0 = disabled (no keepalive packets sent)
+      // Resolved keepalive (caller decides whether host override or global
+      // applies). interval is in seconds; 0 means truly disabled, so
+      // countMax also goes to 0 to skip ssh2's dead-connection check.
       keepaliveInterval: options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 0,
-      keepaliveCountMax: options.keepaliveInterval > 0 ? 3 : 0,
+      keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 10) : 0,
       // Enable keyboard-interactive authentication (required for 2FA/MFA)
       tryKeyboard: true,
       algorithms: buildAlgorithms(options.legacyAlgorithms),

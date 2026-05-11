@@ -129,6 +129,15 @@ export interface Host {
   keywordHighlightEnabled?: boolean;
   // Legacy SSH algorithm support for older network equipment (switches, routers)
   legacyAlgorithms?: boolean;
+  // Per-host SSH keepalive override. When `keepaliveOverride === true`, the
+  // host uses its own `keepaliveInterval` / `keepaliveCountMax` instead of
+  // inheriting the global TerminalSettings values. Lets a user keep an
+  // aggressive cloud-friendly keepalive globally while disabling it for a
+  // specific router / embedded device whose SSH stack doesn't reply to
+  // OpenSSH keepalive global requests (issue #581 / #939).
+  keepaliveInterval?: number; // Seconds; 0 = disabled
+  keepaliveCountMax?: number; // Unanswered keepalives before declaring dead
+  keepaliveOverride?: boolean;
   // What the Backspace key sends: undefined = xterm default (no interception), 'ctrl-h' = ^H (0x08)
   backspaceBehavior?: 'ctrl-h';
   // Local SSH key file paths (from SSH config IdentityFile or user-added)
@@ -503,6 +512,7 @@ export interface TerminalSettings {
 
   // SSH Connection
   keepaliveInterval: number; // Seconds between SSH-level keepalive packets (0 = disabled)
+  keepaliveCountMax: number; // Unanswered keepalives before declaring the connection dead
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
 
   // Mosh Connection
@@ -653,7 +663,13 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
   localShell: '', // Empty = use system default
   localStartDir: '', // Empty = use home directory
-  keepaliveInterval: 0, // 0 = disabled (use SSH library defaults)
+  // Cloud-friendly defaults: 30s interval keeps NAT/LB state tables alive,
+  // and 10 unanswered keepalives provides headroom for brief network glitches
+  // before declaring the session dead (~5 min). Hosts whose SSH stack doesn't
+  // reply to keepalive@openssh.com (older routers/switches) should set their
+  // own per-host keepaliveOverride and dial these values down.
+  keepaliveInterval: 30,
+  keepaliveCountMax: 10,
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showServerStats: true, // Show server stats by default

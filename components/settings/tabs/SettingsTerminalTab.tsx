@@ -1047,6 +1047,24 @@ export default function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          label={t("settings.terminal.connection.keepaliveCountMax")}
+          description={t("settings.terminal.connection.keepaliveCountMax.desc")}
+        >
+          <Input
+            type="number"
+            min={1}
+            max={100}
+            value={terminalSettings.keepaliveCountMax}
+            onChange={(e) => {
+              const val = parseInt(e.target.value) || 1;
+              if (val >= 1 && val <= 100) {
+                updateTerminalSetting("keepaliveCountMax", val);
+              }
+            }}
+            className="w-24"
+          />
+        </SettingRow>
+        <SettingRow
           label={t("settings.terminal.connection.x11Display")}
           description={t("settings.terminal.connection.x11Display.desc")}
         >

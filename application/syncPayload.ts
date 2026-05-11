@@ -159,7 +159,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'smoothScrolling',
   'rightClickBehavior', 'copyOnSelect', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
-  'keepaliveInterval', 'disableBracketedPaste', 'clearWipesScrollback',
+  'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
   'preserveSelectionOnInput', 'osc52Clipboard', 'showServerStats',
   'serverStatsRefreshInterval', 'rendererType',
   'autocompleteEnabled', 'autocompleteGhostText', 'autocompletePopupMenu',

@@ -8,6 +8,7 @@ import {
   FolderPlus,
   Forward,
   Globe,
+  HeartPulse,
   Key,
   KeyRound,
   Link2,
@@ -1804,6 +1805,72 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               <option value="ctrl-h">^H (0x08)</option>
             </select>
           </div>
+        </Card>
+
+        {/* Per-host keepalive override */}
+        <Card className="p-3 space-y-2 bg-card border-border/80">
+          <div className="flex items-center gap-2">
+            <HeartPulse size={14} className="text-muted-foreground" />
+            <p className="text-xs font-semibold">{t("hostDetails.section.keepalive")}</p>
+          </div>
+          <ToggleRow
+            label={t("hostDetails.keepalive.override")}
+            enabled={!!form.keepaliveOverride}
+            onToggle={() => {
+              const next = !form.keepaliveOverride;
+              update("keepaliveOverride", next);
+              // Seed sensible per-host defaults the first time the user
+              // turns the override on so the inputs aren't empty.
+              if (next) {
+                if (form.keepaliveInterval == null) update("keepaliveInterval", 0);
+                if (form.keepaliveCountMax == null) update("keepaliveCountMax", 3);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground break-words">
+            {t("hostDetails.keepalive.desc")}
+          </p>
+          {form.keepaliveOverride && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">{t("hostDetails.keepalive.interval")}</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={3600}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+                  value={form.keepaliveInterval ?? 0}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isFinite(v)) return;
+                    if (v < 0 || v > 3600) return;
+                    update("keepaliveInterval", v);
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">{t("hostDetails.keepalive.countMax")}</p>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+                  value={form.keepaliveCountMax ?? 3}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isFinite(v)) return;
+                    if (v < 1 || v > 100) return;
+                    update("keepaliveCountMax", v);
+                  }}
+                />
+              </div>
+              {(form.keepaliveInterval ?? 0) === 0 && (
+                <p className="text-xs text-muted-foreground break-words pl-1">
+                  {t("hostDetails.keepalive.disabledHint")}
+                </p>
+              )}
+            </div>
+          )}
         </Card>
 
         {/* Proxy via Hosts (Jump Hosts / ProxyJump) */}
