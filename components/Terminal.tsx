@@ -1394,10 +1394,27 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!el) return;
 
     const handleContextMenuCapture = (e: MouseEvent) => {
-      if (mouseTrackingRef.current) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
+      if (!mouseTrackingRef.current) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      // stopImmediatePropagation blocks the event from reaching React's
+      // bubble-phase root listener, so the onContextMenu handler in
+      // TerminalContextMenu (which dispatches paste / select-word) never
+      // fires inside a mouse-tracking TUI. Without dispatching the user's
+      // chosen action here, right-click paste silently stops working in
+      // opencode, tmux with `mouse on`, vim with `set mouse=a`, etc. (#941).
+      // Middle-click still works because its auxclick listener lives in
+      // createXTermRuntime and isn't gated by mouseTracking.
+      const behavior = terminalSettingsRef.current?.rightClickBehavior;
+      if (behavior === 'paste') {
+        void terminalContextActionsRef.current?.onPaste?.();
+      } else if (behavior === 'select-word') {
+        terminalContextActionsRef.current?.onSelectWord?.();
       }
+      // 'context-menu' is intentionally not handled — Radix opens the
+      // menu via its own pointerdown listener, which our capture handler
+      // does not intercept.
     };
 
     const handleMouseUpCapture = (e: MouseEvent) => {
@@ -1494,6 +1511,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     disableBracketedPasteRef,
     scrollOnPasteRef,
   });
+  // Kept fresh on every render so the mouseTracking capture handler at
+  // handleContextMenuCapture (which is bound once per sessionId) can
+  // still invoke the latest paste / select-word callbacks without
+  // re-binding on every action identity change. See #941.
+  const terminalContextActionsRef = useRef(terminalContextActions);
+  terminalContextActionsRef.current = terminalContextActions;
 
   const handleSetTerminalEncoding = (encoding: 'utf-8' | 'gb18030') => {
     setTerminalEncoding(encoding);
