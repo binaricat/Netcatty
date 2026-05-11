@@ -145,6 +145,10 @@ declare global {
     jumpHosts?: NetcattyJumpHost[];
     identityFilePaths?: string[];
     legacyAlgorithms?: boolean;
+    // Resolved keepalive for the target connection (caller has already
+    // applied host override / global fallback). interval in seconds.
+    keepaliveInterval?: number;
+    keepaliveCountMax?: number;
   }
 
   interface PortForwardResult {

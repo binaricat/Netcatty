@@ -71,6 +71,7 @@ interface SftpSidePanelProps {
   setEditorWordWrap: (value: boolean) => void;
   onGetTerminalCwd?: () => Promise<string | null>;
   onRequestTerminalFocus?: () => void;
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
@@ -98,6 +99,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   setEditorWordWrap,
   onGetTerminalCwd,
   onRequestTerminalFocus,
+  terminalSettings,
 }) => {
   const { t } = useI18n();
   const hostWriteSource = writableHosts ?? hosts;
@@ -119,7 +121,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     useCompressedUpload: sftpUseCompressedUpload,
     defaultShowHiddenFiles: sftpShowHiddenFiles,
     autoConnectLocalOnMount: false,
-  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles]);
+    terminalSettings,
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings]);
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
   const {

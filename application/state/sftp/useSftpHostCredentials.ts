@@ -1,12 +1,19 @@
 import { useCallback } from "react";
-import type { Host, Identity, SSHKey } from "../../../domain/models";
+import type { Host, Identity, SSHKey, TerminalSettings } from "../../../domain/models";
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from "../../../domain/credentials";
 import { resolveBridgeKeyAuth, resolveHostAuth } from "../../../domain/sshAuth";
+import { resolveHostKeepalive } from "../../../domain/host";
+
+// Fallback used when no global TerminalSettings are wired through (older
+// call sites or tests). Matches DEFAULT_TERMINAL_SETTINGS so behavior is
+// identical whether or not the caller passes settings.
+const FALLBACK_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
 
 interface UseSftpHostCredentialsParams {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
 }
 
 export const buildSftpHostCredentials = ({
@@ -14,7 +21,9 @@ export const buildSftpHostCredentials = ({
   hosts,
   keys,
   identities,
+  terminalSettings,
 }: UseSftpHostCredentialsParams & { host: Host }): NetcattySSHOptions => {
+  const globalKeepalive = terminalSettings ?? FALLBACK_KEEPALIVE;
   if (host.proxyProfileId && !host.proxyConfig) {
     throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
   }
@@ -79,6 +88,7 @@ export const buildSftpHostCredentials = ({
       ) {
         throw new Error(`Saved credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter them.`);
       }
+      const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
       return {
         hostname: jumpHost.hostname,
         port: jumpHost.port || 22,
@@ -101,6 +111,8 @@ export const buildSftpHostCredentials = ({
           }
           : undefined,
         identityFilePaths: jumpKeyAuth.identityFilePaths,
+        keepaliveInterval: hopKeepalive.interval,
+        keepaliveCountMax: hopKeepalive.countMax,
       };
     });
   }
@@ -129,6 +141,7 @@ export const buildSftpHostCredentials = ({
     throw new Error("Saved credentials cannot be decrypted on this device. Open host settings and re-enter them.");
   }
 
+  const targetKeepalive = resolveHostKeepalive(host, globalKeepalive);
   return {
     hostname: host.hostname,
     username: resolved.username,
@@ -144,6 +157,8 @@ export const buildSftpHostCredentials = ({
     jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
     sudo: host.sftpSudo,
     identityFilePaths: keyAuth.identityFilePaths,
+    keepaliveInterval: targetKeepalive.interval,
+    keepaliveCountMax: targetKeepalive.countMax,
   };
 };
 
@@ -151,8 +166,9 @@ export const useSftpHostCredentials = ({
   hosts,
   keys,
   identities,
+  terminalSettings,
 }: UseSftpHostCredentialsParams) =>
   useCallback(
-    (host: Host): NetcattySSHOptions => buildSftpHostCredentials({ host, hosts, keys, identities }),
-    [hosts, identities, keys],
+    (host: Host): NetcattySSHOptions => buildSftpHostCredentials({ host, hosts, keys, identities, terminalSettings }),
+    [hosts, identities, keys, terminalSettings],
   );

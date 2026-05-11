@@ -4,9 +4,14 @@
  * for establishing and managing SSH port forwarding tunnels.
  */
 
-import { Host, Identity, PortForwardingRule, SSHKey } from '../../domain/models';
+import { Host, Identity, PortForwardingRule, SSHKey, TerminalSettings } from '../../domain/models';
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveBridgeKeyAuth, resolveHostAuth } from '../../domain/sshAuth';
+import { resolveHostKeepalive } from '../../domain/host';
+
+// Fallback matching DEFAULT_TERMINAL_SETTINGS so older call sites that don't
+// thread terminalSettings still get the cloud-friendly defaults.
+const FALLBACK_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
 import { logger } from '../../lib/logger';
 import { localStorageAdapter } from '../persistence/localStorageAdapter';
 import { STORAGE_KEY_PF_RECONNECT_CANCEL } from '../config/storageKeys';
@@ -361,8 +366,10 @@ export const startPortForward = async (
   keys: SSHKey[],
   identities: Identity[],
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
-  enableReconnect = false
+  enableReconnect = false,
+  terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>,
 ): Promise<{ success: boolean; error?: string }> => {
+  const globalKeepalive = terminalSettings ?? FALLBACK_KEEPALIVE;
   const bridge = netcattyBridge.get();
   
   // Clear any existing reconnect timer
@@ -440,6 +447,7 @@ export const startPortForward = async (
           ) {
             throw new Error(`Saved credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter them.`);
           }
+          const hopKeepalive = resolveHostKeepalive(jumpHost, globalKeepalive);
           return {
             hostname: jumpHost.hostname,
             port: jumpHost.port || 22,
@@ -462,6 +470,8 @@ export const startPortForward = async (
               }
               : undefined,
             identityFilePaths: jumpKeyAuth.identityFilePaths,
+            keepaliveInterval: hopKeepalive.interval,
+            keepaliveCountMax: hopKeepalive.countMax,
           };
         });
     }
@@ -542,6 +552,8 @@ export const startPortForward = async (
       jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
       identityFilePaths: keyAuth.identityFilePaths,
       legacyAlgorithms: host.legacyAlgorithms,
+      keepaliveInterval: resolveHostKeepalive(host, globalKeepalive).interval,
+      keepaliveCountMax: resolveHostKeepalive(host, globalKeepalive).countMax,
     });
     
     if (!result.success) {

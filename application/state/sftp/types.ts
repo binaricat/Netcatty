@@ -64,4 +64,10 @@ export interface SftpStateOptions {
   useCompressedUpload?: boolean;
   defaultShowHiddenFiles?: boolean;
   autoConnectLocalOnMount?: boolean;
+  /**
+   * Global SSH keepalive settings, forwarded through to per-SFTP-connection
+   * keepalive resolution so a host that has opted into its own override
+   * is honored for SFTP browsing too (not just the terminal session).
+   */
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }

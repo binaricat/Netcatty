@@ -2394,6 +2394,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                           setEditorWordWrap={setEditorWordWrap}
                           onGetTerminalCwd={getTerminalCwd}
                           onRequestTerminalFocus={refocusActiveTerminalSession}
+                          terminalSettings={terminalSettings}
                         />
                     );
                   })}

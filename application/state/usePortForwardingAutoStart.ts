@@ -24,6 +24,7 @@ export interface UsePortForwardingAutoStartOptions {
   identities: Identity[];
   proxyProfiles: ProxyProfile[];
   groupConfigs: GroupConfig[];
+  terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
 }
 
 const AUTO_START_PROXY_NOT_READY_ERROR = "Proxy or jump host configuration is not ready";
@@ -103,6 +104,7 @@ export const usePortForwardingAutoStart = ({
   identities,
   proxyProfiles,
   groupConfigs,
+  terminalSettings,
 }: UsePortForwardingAutoStartOptions): void => {
   const autoStartExecutedRef = useRef(false);
   const hostsRef = useRef<Host[]>(hosts);
@@ -110,6 +112,8 @@ export const usePortForwardingAutoStart = ({
   const identitiesRef = useRef<Identity[]>(identities);
   const proxyProfilesRef = useRef<ProxyProfile[]>(proxyProfiles);
   const groupConfigsRef = useRef<GroupConfig[]>(groupConfigs);
+  const terminalSettingsRef = useRef(terminalSettings);
+  terminalSettingsRef.current = terminalSettings;
 
   const isHostAuthReady = useCallback((host: Host, seen = new Set<string>()): boolean => {
     if (!host || seen.has(host.id)) return true;
@@ -238,7 +242,7 @@ export const usePortForwardingAutoStart = ({
       }
 
       const host = resolveEffectiveHost(rawHost);
-      return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true);
+      return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current);
     };
 
     setReconnectCallback(handleReconnect);
@@ -304,6 +308,10 @@ export const usePortForwardingAutoStart = ({
             updateStoredRuleStatus(rule.id, status, error);
           },
           true, // Enable reconnect for auto-start rules
+          // Read via ref so adjusting global keepalive after launch doesn't
+          // re-trigger the auto-start effect (its dep array is intentionally
+          // stable to fire once on vault init).
+          terminalSettingsRef.current,
         );
       }
     };

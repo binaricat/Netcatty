@@ -174,6 +174,7 @@ export const useSftpState = (
     hosts,
     keys,
     identities,
+    terminalSettings: options?.terminalSettings,
     leftTabsRef,
     rightTabsRef,
     leftTabs,

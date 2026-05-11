@@ -923,14 +923,25 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
       // Set to 0 (unlimited) since complex operations add many temp listeners
       conn.setMaxListeners(0);
 
+      // Per-hop keepalive. Each jump entry now carries its own resolved
+      // values when the renderer supplies them; fall back to the target
+      // call's options for backward compat with older serializers and
+      // ultimately to a 10s default so an idle SFTP browse over a NAT
+      // doesn't drop (the original #669 protection).
+      const hopInterval = jump.keepaliveInterval != null
+        ? jump.keepaliveInterval
+        : options.keepaliveInterval;
+      const hopCountMax = jump.keepaliveCountMax != null
+        ? jump.keepaliveCountMax
+        : (options.keepaliveCountMax ?? 3);
       // Build connection options
       const connOpts = {
         host: jump.hostname,
         port: jump.port || 22,
         username: jump.username || 'root',
         readyTimeout: 120000, // 2 minutes to allow for keyboard-interactive (2FA/MFA)
-        keepaliveInterval: 10000,
-        keepaliveCountMax: 3,
+        keepaliveInterval: hopInterval > 0 ? hopInterval * 1000 : 10000,
+        keepaliveCountMax: hopInterval > 0 ? hopCountMax : 3,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
         algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
@@ -1435,10 +1446,12 @@ async function openSftp(event, options) {
     // keepalive packets the connection sits with zero data flow while the
     // user is just browsing files, and NAT/firewall state tables drop the
     // idle TCP connection after ~30-60s (the exact symptom of #669).
-    // Honor an explicitly configured positive keepaliveInterval (seconds);
-    // otherwise default to 10s, matching the SFTP jump host path below.
+    // Honor an explicitly configured positive keepaliveInterval (seconds)
+    // — including per-host overrides resolved by the renderer; otherwise
+    // default to 10s. countMax is forwarded from the renderer too with a
+    // backward-compat fallback of 3.
     keepaliveInterval: options.keepaliveInterval > 0 ? options.keepaliveInterval * 1000 : 10000,
-    keepaliveCountMax: 3,
+    keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 3) : 3,
     algorithms: buildSftpAlgorithms(options.legacyAlgorithms),
   };
 

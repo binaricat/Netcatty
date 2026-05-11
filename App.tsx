@@ -629,7 +629,7 @@ function App({ settings }: { settings: SettingsState }) {
       const effectiveHost = resolveEffectiveHost(host);
       void startTunnel(rule, effectiveHost, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
         if (status === "error" && error) toast.error(error);
-      }, rule.autoStart);
+      }, rule.autoStart, terminalSettings);
       return;
     }
 
@@ -836,6 +836,7 @@ function App({ settings }: { settings: SettingsState }) {
     identities,
     proxyProfiles,
     groupConfigs,
+    terminalSettings,
   });
 
   // Sync tray menu data + handle tray actions

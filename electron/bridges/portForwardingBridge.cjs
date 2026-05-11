@@ -82,6 +82,8 @@ async function startPortForward(event, payload) {
     jumpHosts = [],
     identityFilePaths,
     legacyAlgorithms,
+    keepaliveInterval: resolvedKeepaliveInterval,
+    keepaliveCountMax: resolvedKeepaliveCountMax,
   } = payload;
 
   const conn = new SSHClient();
@@ -110,12 +112,17 @@ async function startPortForward(event, payload) {
     }
   };
 
+  // Keepalive resolved by the renderer (per-host override applied), with a
+  // 10s/3 fallback — a forwarded TCP tunnel doesn't generate idle data
+  // flow, so NAT/firewall state tables drop it within ~30-60s without
+  // keepalive packets.
   const connectOpts = {
     host: hostname,
     port: port,
     username: username || 'root',
     readyTimeout: 120000, // 2 minutes for 2FA input
-    keepaliveInterval: 10000,
+    keepaliveInterval: resolvedKeepaliveInterval > 0 ? resolvedKeepaliveInterval * 1000 : 10000,
+    keepaliveCountMax: resolvedKeepaliveInterval > 0 ? (resolvedKeepaliveCountMax ?? 3) : 3,
     // Enable keyboard-interactive authentication (required for 2FA/MFA)
     tryKeyboard: true,
     algorithms: buildAlgorithms(legacyAlgorithms),
