@@ -150,6 +150,10 @@ export const useSftpBackend = () => {
     return bridge.getHomeDir();
   }, []);
 
+  const listDrives = useCallback(async () => {
+    return await netcattyBridge.get()?.listDrives?.() ?? [];
+  }, []);
+
   const startStreamTransfer = useCallback(
     async (
       options: Parameters<NonNullable<NetcattyBridge["startStreamTransfer"]>>[0],
@@ -268,6 +272,7 @@ export const useSftpBackend = () => {
     mkdirLocal,
     statLocal,
     getHomeDir,
+    listDrives,
 
     startStreamTransfer,
     cancelTransfer,

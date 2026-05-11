@@ -2,9 +2,10 @@
  * SFTP Breadcrumb navigation component
  */
 
-import { ChevronRight, Home, MoreHorizontal } from 'lucide-react';
-import React, { memo, useMemo } from 'react';
+import { ChevronDown, ChevronRight, Home, MoreHorizontal } from 'lucide-react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { Dropdown, DropdownContent, DropdownTrigger } from '../ui/dropdown';
 import { cn } from '../../lib/utils';
 
 interface SftpBreadcrumbProps {
@@ -13,15 +14,30 @@ interface SftpBreadcrumbProps {
     onHome: () => void;
     /** Maximum number of visible path segments before truncation (default: 4) */
     maxVisibleParts?: number;
+    isLocal?: boolean;
+    onListDrives?: () => Promise<string[]>;
 }
 
-const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({ 
-    path, 
-    onNavigate, 
+const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
+    path,
+    onNavigate,
     onHome,
-    maxVisibleParts = 4 
+    maxVisibleParts = 4,
+    isLocal,
+    onListDrives,
 }) => {
     const { t } = useI18n();
+
+    const [drives, setDrives] = useState<string[]>([]);
+    const [driveDropdownOpen, setDriveDropdownOpen] = useState(false);
+
+    const handleDriveDropdownOpen = useCallback(async (open: boolean) => {
+        setDriveDropdownOpen(open);
+        if (open && onListDrives) {
+            const result = await onListDrives();
+            setDrives(result);
+        }
+    }, [onListDrives]);
 
     // Handle both Windows (C:\path) and Unix (/path) style paths
     const isWindowsPath = /^[A-Za-z]:/.test(path);
@@ -70,6 +86,8 @@ const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
         };
     }, [parts, maxVisibleParts]);
 
+    const showDriveDropdown = isWindowsPath && isLocal && !!onListDrives;
+
     return (
         <div 
             className="flex items-center gap-1 text-xs text-muted-foreground overflow-hidden"
@@ -101,16 +119,41 @@ const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
                                 <ChevronRight size={12} className="opacity-40 shrink-0" />
                             </>
                         )}
-                        <button
-                            onClick={() => onNavigate(partPath)}
-                            className={cn(
-                                "hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 truncate max-w-[120px] shrink-0",
-                                isLast && "text-foreground font-medium"
-                            )}
-                            title={part}
-                        >
-                            {part}
-                        </button>
+                        {originalIndex === 0 && showDriveDropdown ? (
+                            <Dropdown open={driveDropdownOpen} onOpenChange={handleDriveDropdownOpen}>
+                                <DropdownTrigger asChild>
+                                    <button className="hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 shrink-0 flex items-center gap-0.5">
+                                        {part}
+                                        <ChevronDown size={10} className="opacity-60" />
+                                    </button>
+                                </DropdownTrigger>
+                                <DropdownContent align="start" className="w-16 p-1">
+                                    {drives.map(drive => (
+                                        <button
+                                            key={drive}
+                                            onClick={() => { onNavigate(drive + '\\'); setDriveDropdownOpen(false); }}
+                                            className={cn(
+                                                "w-full text-left px-2 py-1 text-xs rounded hover:bg-secondary/60",
+                                                drive === part && "bg-secondary font-medium"
+                                            )}
+                                        >
+                                            {drive}
+                                        </button>
+                                    ))}
+                                </DropdownContent>
+                            </Dropdown>
+                        ) : (
+                            <button
+                                onClick={() => onNavigate(partPath)}
+                                className={cn(
+                                    "hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 truncate max-w-[120px] shrink-0",
+                                    isLast && "text-foreground font-medium"
+                                )}
+                                title={part}
+                            >
+                                {part}
+                            </button>
+                        )}
                         {!isLast && <ChevronRight size={12} className="opacity-40 shrink-0" />}
                     </React.Fragment>
                 );

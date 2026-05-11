@@ -55,6 +55,7 @@ interface SftpPaneToolbarProps {
   onGoToTerminalCwd?: () => void;
   viewMode: 'list' | 'tree';
   onSetViewMode: (mode: 'list' | 'tree') => void;
+  onListDrives?: () => Promise<string[]>;
 }
 
 // Prioritize breadcrumb path display. 6 action buttons need ~156px,
@@ -105,6 +106,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   onGoToTerminalCwd,
   viewMode,
   onSetViewMode,
+  onListDrives,
 }) => {
   const outerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -487,6 +489,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
                 pane.connection?.homeDir &&
                 onNavigateTo(pane.connection.homeDir)
               }
+              isLocal={!isRemote}
+              onListDrives={onListDrives}
             />
           </div>
         )}

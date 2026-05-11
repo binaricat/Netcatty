@@ -48,6 +48,7 @@ interface UseSftpViewPaneCallbacksParams {
   listLocalFiles: (path: string) => Promise<RemoteFile[]>;
   mkdirLocal?: (path: string) => Promise<void>;
   deleteLocalFile?: (path: string) => Promise<void>;
+  listDrives: () => Promise<string[]>;
 }
 
 export const useSftpViewPaneCallbacks = ({
@@ -63,6 +64,7 @@ export const useSftpViewPaneCallbacks = ({
   startStreamTransfer,
   getSftpIdForConnection,
   listLocalFiles,
+  listDrives,
 }: UseSftpViewPaneCallbacksParams) => {
   const paneActions = useSftpViewPaneActions({ sftpRef });
   const fileOps = useSftpViewFileOps({
@@ -174,6 +176,7 @@ export const useSftpViewPaneCallbacks = ({
       onUploadExternalFileList: fileOps.onUploadExternalFileListLeft,
       onUploadExternalFolder: fileOps.onUploadExternalFolderLeft,
       onListDirectory: makeListDirectory("left", () => sftpRef.current.leftPane),
+      onListDrives: listDrives,
     }),
     [],
   );
@@ -214,6 +217,7 @@ export const useSftpViewPaneCallbacks = ({
       onUploadExternalFileList: fileOps.onUploadExternalFileListRight,
       onUploadExternalFolder: fileOps.onUploadExternalFolderRight,
       onListDirectory: makeListDirectory("right", () => sftpRef.current.rightPane),
+      onListDrives: listDrives,
     }),
     [],
   );

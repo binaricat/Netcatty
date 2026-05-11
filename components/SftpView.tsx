@@ -136,6 +136,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     mkdirLocal,
     deleteLocalFile,
     listLocalDir,
+    listDrives,
   } = useSftpBackend();
 
   // Store sftp in a ref so callbacks can access the latest instance
@@ -262,6 +263,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     startStreamTransfer,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
     listLocalFiles: listLocalDir,
+    listDrives,
   });
 
   const visibleTransfers = useMemo(

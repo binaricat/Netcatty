@@ -348,6 +348,19 @@ async function readKnownHosts() {
   return combinedContent || null;
 }
 
+function listDrives() {
+  if (process.platform !== "win32") return [];
+  const drives = [];
+  for (let i = 65; i <= 90; i++) {
+    const letter = String.fromCharCode(i);
+    try {
+      fs.accessSync(letter + ":\\");
+      drives.push(letter + ":");
+    } catch {}
+  }
+  return drives;
+}
+
 /**
  * Register IPC handlers for local filesystem operations
  */
@@ -361,6 +374,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:stat", statLocal);
   ipcMain.handle("netcatty:local:tree", listLocalTree);
   ipcMain.handle("netcatty:local:homedir", getHomeDir);
+  ipcMain.handle("netcatty:local:drives", listDrives);
   ipcMain.handle("netcatty:system:info", getSystemInfo);
   ipcMain.handle("netcatty:known-hosts:read", readKnownHosts);
 }
@@ -377,6 +391,7 @@ module.exports = {
   collectLocalTreeEntries,
   listLocalTree,
   getHomeDir,
+  listDrives,
   getSystemInfo,
   readKnownHosts,
   parseAttribOutput,

@@ -856,6 +856,9 @@ const api = {
   getHomeDir: async () => {
     return ipcRenderer.invoke("netcatty:local:homedir");
   },
+  listDrives: async () => {
+    return ipcRenderer.invoke("netcatty:local:drives");
+  },
   getSystemInfo: async () => {
     return ipcRenderer.invoke("netcatty:system:info");
   },

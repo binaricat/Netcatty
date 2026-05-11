@@ -512,6 +512,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onGoToTerminalCwd={onGoToTerminalCwd}
         viewMode={viewMode}
         onSetViewMode={handleSetViewMode}
+        onListDrives={callbacks.onListDrives}
       />
 
       {treeEverMounted && (

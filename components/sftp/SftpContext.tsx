@@ -60,6 +60,7 @@ export interface SftpPaneCallbacks {
     // External folder upload from native directory picker.
     onUploadExternalFolder?: (targetPath?: string) => Promise<void>;
     onListDirectory: (path: string) => Promise<SftpFileEntry[]>;
+    onListDrives: () => Promise<string[]>;
 }
 
 export interface SftpDragCallbacks {

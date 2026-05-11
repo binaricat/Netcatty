@@ -520,6 +520,7 @@ declare global {
       lastModified: number;
     }>>;
     getHomeDir?(): Promise<string>;
+    listDrives?(): Promise<string[]>;
     getSystemInfo?(): Promise<{ username: string; hostname: string }>;
 
     setTheme?(theme: 'light' | 'dark' | 'system'): Promise<boolean>;

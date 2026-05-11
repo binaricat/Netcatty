@@ -133,6 +133,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     mkdirLocal,
     deleteLocalFile,
     listLocalDir,
+    listDrives,
   } = useSftpBackend();
 
   const sftpRef = useRef(sftp);
@@ -296,6 +297,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     startStreamTransfer,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
     listLocalFiles: listLocalDir,
+    listDrives,
   });
 
   const {
