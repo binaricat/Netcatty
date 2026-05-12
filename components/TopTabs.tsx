@@ -1098,16 +1098,18 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </Tooltip>
         </div>
         {/* Settings gear button - sits to the left of WindowControls on win/linux, at the right edge on mac */}
-        <div className="self-stretch flex items-stretch">
+        <div className="self-stretch flex items-center px-2 app-drag" style={dragRegionStyle}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                onClick={onOpenSettings}
-                className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag hover:bg-accent"
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 app-no-drag"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                onClick={onOpenSettings}
               >
                 <Settings size={16} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.openSettings')}</TooltipContent>
           </Tooltip>
