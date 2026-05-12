@@ -1103,7 +1103,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             <TooltipTrigger asChild>
               <button
                 onClick={onOpenSettings}
-                className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
+                className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag hover:bg-accent"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
               >
                 <Settings size={16} />
