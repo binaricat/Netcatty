@@ -2233,6 +2233,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                 <ContextMenuItem onClick={() => handleEditHost(host)}>
                                   <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
                                 </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
+                                  <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
+                                  <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
+                                </ContextMenuItem>
                                 <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
                                   <Pin className="mr-2 h-4 w-4" /> {t('vault.hosts.unpin')}
                                 </ContextMenuItem>
@@ -2331,6 +2337,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                                 </ContextMenuItem>
                                 <ContextMenuItem onClick={() => handleEditHost(host)}>
                                   <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
+                                  <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
+                                  <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
                                 </ContextMenuItem>
                                 <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
                                   <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
