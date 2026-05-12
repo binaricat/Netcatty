@@ -12,12 +12,14 @@ type PasteDisplayState = {
   expiresAt: number;
   clearPending: number;
   pasteEchoFragments: string[];
+  inPasteEchoActiveRegion: boolean;
 };
 
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;
-const READLINE_ACTIVE_REGION_MARKERS = ["\x1b[7m", "\x1b[27m"] as const;
+const READLINE_ACTIVE_REGION_START = "\x1b[7m";
+const READLINE_ACTIVE_REGION_END = "\x1b[27m";
 const MIN_PASTE_ECHO_FRAGMENT_LENGTH = 6;
 const ESC = "\x1b";
 const BEL = "\x07";
@@ -27,14 +29,12 @@ const getNow = () => Date.now();
 const isStateActive = (state: PasteDisplayState | undefined): state is PasteDisplayState =>
   !!state && state.expiresAt > getNow();
 
-const hasReadlineActiveRegion = (data: string): boolean =>
-  READLINE_ACTIVE_REGION_MARKERS.some((marker) => data.includes(marker));
-
 const stripReadlineActiveRegion = (data: string): string =>
-  READLINE_ACTIVE_REGION_MARKERS.reduce(
-    (nextData, marker) => nextData.split(marker).join(""),
-    data,
-  );
+  data
+    .split(READLINE_ACTIVE_REGION_START)
+    .join("")
+    .split(READLINE_ACTIVE_REGION_END)
+    .join("");
 
 const isCsiFinalByte = (char: string): boolean => {
   const code = char.charCodeAt(0);
@@ -120,6 +120,66 @@ const isExpectedPasteEcho = (data: string, state: PasteDisplayState): boolean =>
   );
 };
 
+const stripMatchedReadlineActiveRegion = (
+  data: string,
+  state: PasteDisplayState,
+): { data: string; matched: boolean } => {
+  let index = 0;
+  let matched = false;
+  let nextData = "";
+
+  while (index < data.length) {
+    if (state.inPasteEchoActiveRegion) {
+      const endIndex = data.indexOf(READLINE_ACTIVE_REGION_END, index);
+      if (endIndex === -1) {
+        nextData += data.slice(index);
+        matched = true;
+        break;
+      }
+
+      nextData += data.slice(index, endIndex);
+      index = endIndex + READLINE_ACTIVE_REGION_END.length;
+      state.inPasteEchoActiveRegion = false;
+      matched = true;
+      continue;
+    }
+
+    const startIndex = data.indexOf(READLINE_ACTIVE_REGION_START, index);
+    if (startIndex === -1) {
+      nextData += data.slice(index);
+      break;
+    }
+
+    nextData += data.slice(index, startIndex);
+    const contentStart = startIndex + READLINE_ACTIVE_REGION_START.length;
+    const endIndex = data.indexOf(READLINE_ACTIVE_REGION_END, contentStart);
+
+    if (endIndex === -1) {
+      const highlightedContent = data.slice(contentStart);
+      if (isExpectedPasteEcho(highlightedContent, state)) {
+        nextData += highlightedContent;
+        state.inPasteEchoActiveRegion = true;
+        matched = true;
+      } else {
+        nextData += data.slice(startIndex);
+      }
+      break;
+    }
+
+    const highlightedContent = data.slice(contentStart, endIndex);
+    if (isExpectedPasteEcho(highlightedContent, state)) {
+      nextData += highlightedContent;
+      matched = true;
+    } else {
+      nextData += data.slice(startIndex, endIndex + READLINE_ACTIVE_REGION_END.length);
+    }
+
+    index = endIndex + READLINE_ACTIVE_REGION_END.length;
+  }
+
+  return { data: nextData, matched };
+};
+
 const estimateRows = (text: string, cols: number): number => {
   const width = Math.max(1, cols);
   return text
@@ -151,6 +211,7 @@ export function pasteTextIntoTerminal(
       expiresAt: getNow() + PASTE_DISPLAY_FIX_WINDOW_MS,
       clearPending: 0,
       pasteEchoFragments: getPasteEchoFragments(text),
+      inPasteEchoActiveRegion: false,
     });
   }
 
@@ -176,12 +237,13 @@ export function prepareTerminalDataForUserPasteDisplay(term: object, data: strin
   const state = pasteDisplayStates.get(term);
   if (!isStateActive(state)) return data;
 
-  const isPasteEcho = isExpectedPasteEcho(data, state);
-  if (hasReadlineActiveRegion(data) && isPasteEcho) {
+  const strippedActiveRegion = stripMatchedReadlineActiveRegion(data, state);
+  if (strippedActiveRegion.matched) {
     state.clearPending = Math.max(state.clearPending, 3);
-    return stripReadlineActiveRegion(data);
+    return strippedActiveRegion.data;
   }
 
+  const isPasteEcho = isExpectedPasteEcho(data, state);
   if (isPasteEcho && (data.length > LONG_PASTE_MIN_LENGTH || data.includes("\r"))) {
     state.clearPending = Math.max(state.clearPending, 1);
   }

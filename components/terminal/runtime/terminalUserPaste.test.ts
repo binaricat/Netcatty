@@ -81,6 +81,53 @@ test("long multi-line paste preserves unrelated reverse-video output", () => {
   );
 });
 
+test("long multi-line paste strips only matched paste echo segments in mixed output", () => {
+  const term = {
+    cols: 20,
+    rows: 4,
+    paste: () => {},
+    scrollToBottom: () => {},
+    write: () => {},
+  };
+
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index} with enough content`).join("\n");
+  pasteTextIntoTerminal(term, longPaste, {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(
+    prepareTerminalDataForUserPasteDisplay(
+      term,
+      "mode \x1b[7mINSERT\x1b[27m \x1b[7mline 3 with enough content\x1b[27m done",
+    ),
+    "mode \x1b[7mINSERT\x1b[27m line 3 with enough content done",
+  );
+});
+
+test("long multi-line paste strips matched paste echo when active-region spans chunks", () => {
+  const term = {
+    cols: 20,
+    rows: 4,
+    paste: () => {},
+    scrollToBottom: () => {},
+    write: () => {},
+  };
+
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index} with enough content`).join("\n");
+  pasteTextIntoTerminal(term, longPaste, {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(
+    prepareTerminalDataForUserPasteDisplay(term, "\x1b[7mline 3 with enough"),
+    "line 3 with enough",
+  );
+  assert.equal(
+    prepareTerminalDataForUserPasteDisplay(term, " content\x1b[27m"),
+    " content",
+  );
+});
+
 test("long multi-line paste does not clear cursor-right residue before terminal echo", () => {
   const writes: string[] = [];
   const term = {
