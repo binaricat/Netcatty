@@ -552,118 +552,31 @@ async function startTelnetSession(event, options) {
     // byte from the peer — if the remote never speaks the protocol (some
     // legacy raw-TCP services on port 23), we fall back to passthrough so we
     // do not corrupt their stream by misreading stray 0xFF bytes as IAC.
-    const TELNET_TERM_TYPE = "XTERM-256COLOR";
     let telnetProtocolActive = false;
     let telnetCleanData = Buffer.alloc(0);
-    // Options for which we have already sent a request; the peer's reply for
-    // these is acknowledgement, not a fresh negotiation, so we must not
-    // bounce another command back at it (the source of negotiation loops).
-    const requestedOptions = new Set();
 
-    const writeTelnetCommand = (cmd, opt) => {
+    const writeRawTelnetCommand = (cmd, opt) => {
       if (socket.destroyed) return;
       socket.write(Buffer.from([telnetProtocol.IAC, cmd, opt]));
     };
 
-    const requestOption = (cmd, opt) => {
-      requestedOptions.add(opt);
-      writeTelnetCommand(cmd, opt);
-    };
-
-    const sendWindowSizeSubneg = (currentCols, currentRows) => {
+    const writeRawSubnegotiation = (opt, payload) => {
       if (socket.destroyed) return;
-      const safeCols = Number.isFinite(currentCols) && currentCols > 0 ? currentCols : 80;
-      const safeRows = Number.isFinite(currentRows) && currentRows > 0 ? currentRows : 24;
-      const payload = Buffer.from([
-        (safeCols >> 8) & 0xff, safeCols & 0xff,
-        (safeRows >> 8) & 0xff, safeRows & 0xff,
-      ]);
       socket.write(Buffer.concat([
-        Buffer.from([telnetProtocol.IAC, telnetProtocol.SB, telnetProtocol.OPT.NAWS]),
-        telnetProtocol.escapeIacForWire(payload),
+        Buffer.from([telnetProtocol.IAC, telnetProtocol.SB, opt]),
+        payload,
         Buffer.from([telnetProtocol.IAC, telnetProtocol.SE]),
       ]));
     };
 
-    const sendTerminalTypeSubneg = () => {
-      if (socket.destroyed) return;
-      socket.write(Buffer.concat([
-        Buffer.from([
-          telnetProtocol.IAC,
-          telnetProtocol.SB,
-          telnetProtocol.OPT.TERMINAL_TYPE,
-          telnetProtocol.SUBOPTION_IS,
-        ]),
-        Buffer.from(TELNET_TERM_TYPE, "ascii"),
-        Buffer.from([telnetProtocol.IAC, telnetProtocol.SE]),
-      ]));
-    };
-
-    const startActiveNegotiation = () => {
-      // Drive the negotiation rather than waiting for the server. Quite a
-      // few older switches/routers will not advance past their welcome
-      // banner until the client commits to a basic option set, which is the
-      // root cause of "stuck on press-any-key" reports.
-      requestOption(telnetProtocol.DO, telnetProtocol.OPT.SUPPRESS_GO_AHEAD);
-      requestOption(telnetProtocol.WILL, telnetProtocol.OPT.TERMINAL_TYPE);
-      requestOption(telnetProtocol.WILL, telnetProtocol.OPT.NAWS);
-    };
-
-    const handleTelnetCommand = (cmd, opt) => {
-      // If we initiated this option, the peer's reply is just acknowledgement.
-      // Drop it from the pending set and do not bounce another command back —
-      // that is how spec-strict peers ended up in WILL/WONT ping-pong loops.
-      if (requestedOptions.has(opt)) {
-        if (cmd === telnetProtocol.WILL || cmd === telnetProtocol.WONT
-          || cmd === telnetProtocol.DO || cmd === telnetProtocol.DONT) {
-          requestedOptions.delete(opt);
-          return;
-        }
-      }
-
-      if (cmd === telnetProtocol.WILL) {
-        if (opt === telnetProtocol.OPT.SUPPRESS_GO_AHEAD || opt === telnetProtocol.OPT.ECHO) {
-          writeTelnetCommand(telnetProtocol.DO, opt);
-        } else {
-          writeTelnetCommand(telnetProtocol.DONT, opt);
-        }
-        return;
-      }
-
-      if (cmd === telnetProtocol.DO) {
-        if (opt === telnetProtocol.OPT.NAWS) {
-          writeTelnetCommand(telnetProtocol.WILL, opt);
-          const session = sessions.get(sessionId);
-          sendWindowSizeSubneg(session?.cols ?? cols, session?.rows ?? rows);
-        } else if (opt === telnetProtocol.OPT.TERMINAL_TYPE
-          || opt === telnetProtocol.OPT.SUPPRESS_GO_AHEAD) {
-          writeTelnetCommand(telnetProtocol.WILL, opt);
-        } else {
-          writeTelnetCommand(telnetProtocol.WONT, opt);
-        }
-        return;
-      }
-
-      if (cmd === telnetProtocol.DONT) {
-        // Confirm we will not enable. Sending WONT only if the peer's DONT
-        // is unexpected (not a reply to our own WILL) avoids the loop.
-        writeTelnetCommand(telnetProtocol.WONT, opt);
-        return;
-      }
-
-      if (cmd === telnetProtocol.WONT) {
-        writeTelnetCommand(telnetProtocol.DONT, opt);
-        return;
-      }
-    };
-
-    const handleTelnetSubnegotiation = (opt, payload) => {
-      if (opt === telnetProtocol.OPT.TERMINAL_TYPE
-        && payload.length > 0
-        && payload[0] === telnetProtocol.SUBOPTION_SEND) {
-        sendTerminalTypeSubneg();
-      }
-    };
+    const negotiator = telnetProtocol.createTelnetNegotiator({
+      writeCommand: writeRawTelnetCommand,
+      writeSubnegotiation: writeRawSubnegotiation,
+      getWindowSize: () => {
+        const session = sessions.get(sessionId);
+        return { cols: session?.cols ?? cols, rows: session?.rows ?? rows };
+      },
+    });
 
     const telnetParser = telnetProtocol.createTelnetParser({
       onData: (clean) => {
@@ -672,8 +585,8 @@ async function startTelnetSession(event, options) {
           ? clean
           : Buffer.concat([telnetCleanData, clean]);
       },
-      onCommand: handleTelnetCommand,
-      onSubnegotiation: handleTelnetSubnegotiation,
+      onCommand: (cmd, opt) => negotiator.handleCommand(cmd, opt),
+      onSubnegotiation: (opt, payload) => negotiator.handleSubnegotiation(opt, payload),
     });
 
     const processIncomingTelnet = (data) => {
@@ -683,7 +596,7 @@ async function startTelnetSession(event, options) {
       if (!telnetProtocolActive) {
         if (data.indexOf(0xff) < 0) return data;
         telnetProtocolActive = true;
-        startActiveNegotiation();
+        negotiator.start();
       }
       telnetCleanData = Buffer.alloc(0);
       telnetParser.feed(data);

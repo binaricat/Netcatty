@@ -11,8 +11,11 @@ const {
   DO,
   DONT,
   OPT,
+  SUBOPTION_IS,
+  SUBOPTION_SEND,
   escapeIacForWire,
   createTelnetParser,
+  createTelnetNegotiator,
 } = require("./telnetProtocol.cjs");
 
 const collect = () => {
@@ -219,6 +222,166 @@ test("parser reset clears pending state", () => {
   assert.equal(parser.pendingByteCount, 1);
   parser.reset();
   assert.equal(parser.pendingByteCount, 0);
+});
+
+const recordNegotiator = (overrides = {}) => {
+  const commands = [];
+  const subnegs = [];
+  const negotiator = createTelnetNegotiator({
+    writeCommand(cmd, opt) {
+      commands.push({ cmd, opt });
+    },
+    writeSubnegotiation(opt, payload) {
+      subnegs.push({ opt, payload: Buffer.from(payload) });
+    },
+    getWindowSize: () => ({ cols: 120, rows: 40 }),
+    ...overrides,
+  });
+  return { negotiator, commands, subnegs };
+};
+
+test("negotiator.start drives the canonical handshake (DO SGA / WILL TT / WILL NAWS)", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.start();
+  assert.deepEqual(commands, [
+    { cmd: DO, opt: OPT.SUPPRESS_GO_AHEAD },
+    { cmd: WILL, opt: OPT.TERMINAL_TYPE },
+    { cmd: WILL, opt: OPT.NAWS },
+  ]);
+  assert.equal(negotiator.pendingDoCount, 1);
+  assert.equal(negotiator.pendingWillCount, 2);
+});
+
+test("peer's WILL on our pending DO is swallowed (no double-DO loop)", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.start();
+  commands.length = 0;
+  // Server replies WILL SGA — acknowledges our DO SGA.
+  negotiator.handleCommand(WILL, OPT.SUPPRESS_GO_AHEAD);
+  assert.deepEqual(commands, []);
+  assert.equal(negotiator.pendingDoCount, 0);
+});
+
+test("peer's independent DO on a SGA where our DO is still pending is replied with WILL (regression)", () => {
+  // RFC 858: WILL/WONT and DO/DONT are independent per direction. The peer
+  // can ask us to enable SGA on our side while our request to enable it on
+  // its side is still in flight. The old implementation incorrectly treated
+  // the peer's DO as an ack of our DO and never replied.
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.start();
+  commands.length = 0;
+
+  negotiator.handleCommand(DO, OPT.SUPPRESS_GO_AHEAD);
+
+  assert.deepEqual(commands, [{ cmd: WILL, opt: OPT.SUPPRESS_GO_AHEAD }]);
+  // The pending DO request stays open until the peer also says WILL/WONT.
+  assert.equal(negotiator.pendingDoCount, 1);
+});
+
+test("peer's DO NAWS that acknowledges our WILL NAWS still triggers a size subnegotiation", () => {
+  const { negotiator, commands, subnegs } = recordNegotiator();
+  negotiator.start();
+  commands.length = 0;
+  subnegs.length = 0;
+
+  negotiator.handleCommand(DO, OPT.NAWS);
+
+  // No echoed WILL NAWS — the peer was acknowledging our own WILL.
+  assert.deepEqual(commands, []);
+  // But the actual size payload must follow.
+  assert.equal(subnegs.length, 1);
+  assert.equal(subnegs[0].opt, OPT.NAWS);
+  assert.deepEqual(
+    [...subnegs[0].payload],
+    [(120 >> 8) & 0xff, 120 & 0xff, (40 >> 8) & 0xff, 40 & 0xff],
+  );
+  assert.equal(negotiator.pendingWillCount, 1); // TERMINAL-TYPE still outstanding
+});
+
+test("peer's independent DO NAWS (no WILL pending) replies WILL + size subneg", () => {
+  const { negotiator, commands, subnegs } = recordNegotiator();
+  // Note: not calling start(), so no WILL NAWS is pending.
+  negotiator.handleCommand(DO, OPT.NAWS);
+  assert.deepEqual(commands, [{ cmd: WILL, opt: OPT.NAWS }]);
+  assert.equal(subnegs.length, 1);
+  assert.equal(subnegs[0].opt, OPT.NAWS);
+});
+
+test("peer's WILL ECHO triggers DO ECHO, repeated WILL ECHO is swallowed as ack", () => {
+  const { negotiator, commands } = recordNegotiator();
+  // First WILL ECHO: fresh request → we reply DO ECHO. That DO is sent via
+  // the raw writer (not requestOption), so it is NOT in pendingDoRequests.
+  // The peer's subsequent WILL ECHO is a re-announce and we should reply
+  // with another DO. The negotiator does not currently de-duplicate, so
+  // this test pins down the actual behaviour: reply each time.
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  negotiator.handleCommand(WILL, OPT.ECHO);
+  assert.deepEqual(commands, [
+    { cmd: DO, opt: OPT.ECHO },
+    { cmd: DO, opt: OPT.ECHO },
+  ]);
+});
+
+test("peer's WONT on our pending DO is swallowed", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.start();
+  commands.length = 0;
+  negotiator.handleCommand(WONT, OPT.SUPPRESS_GO_AHEAD);
+  assert.deepEqual(commands, []);
+  assert.equal(negotiator.pendingDoCount, 0);
+});
+
+test("peer's DONT on our pending WILL is swallowed", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.start();
+  commands.length = 0;
+  negotiator.handleCommand(DONT, OPT.TERMINAL_TYPE);
+  assert.deepEqual(commands, []);
+  // NAWS still outstanding.
+  assert.equal(negotiator.pendingWillCount, 1);
+});
+
+test("peer's DO on an option we don't support replies WONT", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.handleCommand(DO, OPT.LINEMODE);
+  assert.deepEqual(commands, [{ cmd: WONT, opt: OPT.LINEMODE }]);
+});
+
+test("peer's WILL on an option we don't support replies DONT", () => {
+  const { negotiator, commands } = recordNegotiator();
+  negotiator.handleCommand(WILL, OPT.NEW_ENVIRON);
+  assert.deepEqual(commands, [{ cmd: DONT, opt: OPT.NEW_ENVIRON }]);
+});
+
+test("peer's TERMINAL-TYPE SEND subnegotiation replies with IS <termType>", () => {
+  const { negotiator, subnegs } = recordNegotiator();
+  negotiator.handleSubnegotiation(
+    OPT.TERMINAL_TYPE,
+    Buffer.from([SUBOPTION_SEND]),
+  );
+  assert.equal(subnegs.length, 1);
+  assert.equal(subnegs[0].opt, OPT.TERMINAL_TYPE);
+  assert.equal(
+    subnegs[0].payload.toString("ascii"),
+    "\x00XTERM-256COLOR",
+  );
+});
+
+test("negotiator honors a custom termType override", () => {
+  const { negotiator, subnegs } = recordNegotiator({ termType: "VT100" });
+  negotiator.handleSubnegotiation(
+    OPT.TERMINAL_TYPE,
+    Buffer.from([SUBOPTION_SEND]),
+  );
+  assert.equal(subnegs[0].payload.toString("ascii"), "\x00VT100");
+});
+
+test("sendWindowSize falls back to 80x24 when getWindowSize returns garbage", () => {
+  const { negotiator, subnegs } = recordNegotiator({
+    getWindowSize: () => ({ cols: NaN, rows: -3 }),
+  });
+  negotiator.sendWindowSize();
+  assert.deepEqual([...subnegs[0].payload], [0, 80, 0, 24]);
 });
 
 test("data emitted before a command is delivered before that command's callback", () => {

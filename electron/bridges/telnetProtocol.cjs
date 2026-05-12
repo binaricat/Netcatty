@@ -236,6 +236,142 @@ function unescapeIacFromPayload(buf) {
   return Buffer.from(out);
 }
 
+/**
+ * Build a Telnet negotiation policy machine.
+ *
+ * The machine owns the rules for which options we accept, the
+ * direction-aware acknowledgement tracking, and the wire bytes sent in
+ * response to peer commands. It is intentionally separated from socket I/O
+ * so it can be exercised directly in unit tests.
+ *
+ * `writeCommand(cmd, opt)` is invoked to send `IAC <cmd> <opt>` on the
+ * wire; `writeSubnegotiation(opt, payload)` is invoked to send
+ * `IAC SB <opt> <payload...> IAC SE` (with `payload` already escaped if
+ * needed by the caller); `getWindowSize()` returns `{ cols, rows }` for
+ * the current terminal dimensions; `termType` is the string advertised
+ * for TERMINAL-TYPE subnegotiation (default "XTERM-256COLOR").
+ */
+function createTelnetNegotiator({
+  writeCommand,
+  writeSubnegotiation,
+  getWindowSize,
+  termType = "XTERM-256COLOR",
+} = {}) {
+  const pendingDoRequests = new Set();
+  const pendingWillRequests = new Set();
+
+  const noopWrite = () => {};
+  const cmdSink = typeof writeCommand === "function" ? writeCommand : noopWrite;
+  const sbSink = typeof writeSubnegotiation === "function" ? writeSubnegotiation : noopWrite;
+  const sizeFn = typeof getWindowSize === "function"
+    ? getWindowSize
+    : () => ({ cols: 80, rows: 24 });
+
+  const naws = () => {
+    const { cols, rows } = sizeFn() || {};
+    const safeCols = Number.isFinite(cols) && cols > 0 ? cols : 80;
+    const safeRows = Number.isFinite(rows) && rows > 0 ? rows : 24;
+    const payload = Buffer.from([
+      (safeCols >> 8) & 0xff, safeCols & 0xff,
+      (safeRows >> 8) & 0xff, safeRows & 0xff,
+    ]);
+    sbSink(OPT.NAWS, escapeIacForWire(payload));
+  };
+
+  const sendTerminalType = () => {
+    sbSink(
+      OPT.TERMINAL_TYPE,
+      Buffer.concat([
+        Buffer.from([SUBOPTION_IS]),
+        Buffer.from(String(termType), "ascii"),
+      ]),
+    );
+  };
+
+  const requestOption = (cmd, opt) => {
+    if (cmd === DO) pendingDoRequests.add(opt);
+    else if (cmd === WILL) pendingWillRequests.add(opt);
+    cmdSink(cmd, opt);
+  };
+
+  const start = () => {
+    // Drive the negotiation rather than waiting for the peer. Many legacy
+    // servers will not advance past their banner until the client commits
+    // to a basic option set.
+    requestOption(DO, OPT.SUPPRESS_GO_AHEAD);
+    requestOption(WILL, OPT.TERMINAL_TYPE);
+    requestOption(WILL, OPT.NAWS);
+  };
+
+  const handleCommand = (cmd, opt) => {
+    let acknowledgesOurRequest = false;
+    if ((cmd === WILL || cmd === WONT) && pendingDoRequests.has(opt)) {
+      pendingDoRequests.delete(opt);
+      acknowledgesOurRequest = true;
+    } else if ((cmd === DO || cmd === DONT) && pendingWillRequests.has(opt)) {
+      pendingWillRequests.delete(opt);
+      acknowledgesOurRequest = true;
+    }
+
+    if (cmd === WILL) {
+      if (!acknowledgesOurRequest) {
+        if (opt === OPT.SUPPRESS_GO_AHEAD || opt === OPT.ECHO) {
+          cmdSink(DO, opt);
+        } else {
+          cmdSink(DONT, opt);
+        }
+      }
+      return;
+    }
+
+    if (cmd === DO) {
+      if (opt === OPT.NAWS) {
+        if (!acknowledgesOurRequest) cmdSink(WILL, opt);
+        // Always follow through with the actual size, whether this DO is the
+        // peer's reply to our WILL or an independent fresh request.
+        naws();
+      } else if (opt === OPT.TERMINAL_TYPE || opt === OPT.SUPPRESS_GO_AHEAD) {
+        if (!acknowledgesOurRequest) cmdSink(WILL, opt);
+      } else {
+        if (!acknowledgesOurRequest) cmdSink(WONT, opt);
+      }
+      return;
+    }
+
+    if (cmd === DONT) {
+      if (!acknowledgesOurRequest) cmdSink(WONT, opt);
+      return;
+    }
+
+    if (cmd === WONT) {
+      if (!acknowledgesOurRequest) cmdSink(DONT, opt);
+      return;
+    }
+  };
+
+  const handleSubnegotiation = (opt, payload) => {
+    if (opt === OPT.TERMINAL_TYPE
+      && payload && payload.length > 0
+      && payload[0] === SUBOPTION_SEND) {
+      sendTerminalType();
+    }
+  };
+
+  return {
+    start,
+    handleCommand,
+    handleSubnegotiation,
+    sendWindowSize: naws,
+    /** Test/debug introspection — number of options awaiting a reply per direction. */
+    get pendingDoCount() {
+      return pendingDoRequests.size;
+    },
+    get pendingWillCount() {
+      return pendingWillRequests.size;
+    },
+  };
+}
+
 module.exports = {
   // Command constants
   IAC,
@@ -262,4 +398,5 @@ module.exports = {
   commandName,
   escapeIacForWire,
   createTelnetParser,
+  createTelnetNegotiator,
 };
