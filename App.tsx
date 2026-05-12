@@ -300,6 +300,16 @@ function App({ settings }: { settings: SettingsState }) {
   keysRef.current = keys;
   const knownHostsRef = useRef(knownHosts);
   knownHostsRef.current = knownHosts;
+  // Bridge the gap while useVaultState hydrates: its async init awaits
+  // hosts/keys/identities/proxyProfiles decryption before reading knownHosts,
+  // so the state is briefly [] at boot even when localStorage has entries.
+  // Any SSH connect during that window (manual click or restored session)
+  // would otherwise see no trusted hosts and prompt for fingerprint
+  // re-confirmation. Mirrors the same fallback already used by sync payloads.
+  const effectiveKnownHosts = useMemo(
+    () => getEffectiveKnownHosts(knownHosts) ?? [],
+    [knownHosts],
+  );
 
   const {
     sessions,
@@ -1996,7 +2006,7 @@ function App({ settings }: { settings: SettingsState }) {
             snippets={snippets}
             snippetPackages={snippetPackages}
             customGroups={customGroups}
-            knownHosts={knownHosts}
+            knownHosts={effectiveKnownHosts}
             shellHistory={shellHistory}
             connectionLogs={connectionLogs}
             managedSources={managedSources}
@@ -2069,7 +2079,7 @@ function App({ settings }: { settings: SettingsState }) {
           snippetPackages={snippetPackages}
           sessions={sessions}
           workspaces={workspaces}
-          knownHosts={knownHosts}
+          knownHosts={effectiveKnownHosts}
           draggingSessionId={draggingSessionId}
           terminalTheme={currentTerminalTheme}
           followAppTerminalTheme={followAppTerminalTheme}
