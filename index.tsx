@@ -9,6 +9,7 @@ import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 import App from './App';
 import { ToastProvider } from './components/ui/toast';
+import { TooltipProvider } from './components/ui/tooltip';
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
@@ -103,17 +104,21 @@ const renderApp = () => {
   if (route === 'settings') {
     root.render(
       <ToastProvider>
-        <Suspense fallback={<SettingsWindowFallback />}>
-          <LazySettingsPage />
-        </Suspense>
+        <TooltipProvider delayDuration={300}>
+          <Suspense fallback={<SettingsWindowFallback />}>
+            <LazySettingsPage />
+          </Suspense>
+        </TooltipProvider>
       </ToastProvider>
     );
   } else if (route === 'tray') {
     root.render(
       <ToastProvider>
-        <Suspense fallback={<div style={{ padding: 12, color: '#fff' }}>Loading tray panel…</div>}>
-          <LazyTrayPanel />
-        </Suspense>
+        <TooltipProvider delayDuration={300}>
+          <Suspense fallback={<div style={{ padding: 12, color: '#fff' }}>Loading tray panel…</div>}>
+            <LazyTrayPanel />
+          </Suspense>
+        </TooltipProvider>
       </ToastProvider>
     );
   } else {
