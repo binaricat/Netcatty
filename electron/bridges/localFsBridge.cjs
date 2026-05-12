@@ -348,17 +348,16 @@ async function readKnownHosts() {
   return combinedContent || null;
 }
 
-function listDrives() {
+async function listDrives() {
   if (process.platform !== "win32") return [];
-  const drives = [];
+  const letters = [];
   for (let i = 65; i <= 90; i++) {
-    const letter = String.fromCharCode(i);
-    try {
-      fs.accessSync(letter + ":\\");
-      drives.push(letter + ":");
-    } catch {}
+    letters.push(String.fromCharCode(i));
   }
-  return drives;
+  const results = await Promise.allSettled(
+    letters.map((letter) => fs.promises.access(letter + ":\\"))
+  );
+  return letters.filter((_, idx) => results[idx].status === "fulfilled").map((letter) => letter + ":");
 }
 
 /**
