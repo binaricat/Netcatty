@@ -56,9 +56,49 @@ test("long multi-line paste strips readline active-region highlighting from echo
   });
 
   assert.equal(
-    prepareTerminalDataForUserPasteDisplay(term, "\x1b[7mthird line\x1b[27m"),
-    "third line",
+    prepareTerminalDataForUserPasteDisplay(term, "\x1b[7mline 3 with enough content\x1b[27m"),
+    "line 3 with enough content",
   );
+});
+
+test("long multi-line paste preserves unrelated reverse-video output", () => {
+  const term = {
+    cols: 20,
+    rows: 4,
+    paste: () => {},
+    scrollToBottom: () => {},
+    write: () => {},
+  };
+
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index} with enough content`).join("\n");
+  pasteTextIntoTerminal(term, longPaste, {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(
+    prepareTerminalDataForUserPasteDisplay(term, "\x1b[7munrelated ncurses status\x1b[27m"),
+    "\x1b[7munrelated ncurses status\x1b[27m",
+  );
+});
+
+test("long multi-line paste does not clear cursor-right residue before terminal echo", () => {
+  const writes: string[] = [];
+  const term = {
+    cols: 20,
+    rows: 4,
+    paste: () => {},
+    scrollToBottom: () => {},
+    write: (data: string) => writes.push(data),
+  };
+
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index} with enough content`).join("\n");
+  pasteTextIntoTerminal(term, longPaste, {
+    scrollOnPaste: false,
+  });
+
+  clearPasteResidualAfterTerminalWrite(term);
+
+  assert.deepEqual(writes, []);
 });
 
 test("long multi-line paste clears cursor-right residue after terminal echo", () => {
@@ -75,6 +115,7 @@ test("long multi-line paste clears cursor-right residue after terminal echo", ()
   pasteTextIntoTerminal(term, longPaste, {
     scrollOnPaste: false,
   });
+  prepareTerminalDataForUserPasteDisplay(term, "\x1b[7mline 3 with enough content\x1b[27m");
 
   clearPasteResidualAfterTerminalWrite(term);
 

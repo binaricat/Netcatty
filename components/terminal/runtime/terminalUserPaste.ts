@@ -11,12 +11,16 @@ type PasteOptions = {
 type PasteDisplayState = {
   expiresAt: number;
   clearPending: number;
+  pasteEchoFragments: string[];
 };
 
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;
 const READLINE_ACTIVE_REGION_MARKERS = ["\x1b[7m", "\x1b[27m"] as const;
+const MIN_PASTE_ECHO_FRAGMENT_LENGTH = 6;
+const ESC = "\x1b";
+const BEL = "\x07";
 
 const getNow = () => Date.now();
 
@@ -31,6 +35,90 @@ const stripReadlineActiveRegion = (data: string): string =>
     (nextData, marker) => nextData.split(marker).join(""),
     data,
   );
+
+const isCsiFinalByte = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return code >= 0x40 && code <= 0x7e;
+};
+
+const stripAnsiEscapeSequences = (data: string): string => {
+  let plainText = "";
+
+  for (let index = 0; index < data.length; index += 1) {
+    const char = data[index];
+    if (char !== ESC) {
+      plainText += char;
+      continue;
+    }
+
+    const nextChar = data[index + 1];
+    if (nextChar === "[") {
+      index += 2;
+      while (index < data.length && !isCsiFinalByte(data[index])) {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (nextChar === "]") {
+      index += 2;
+      while (index < data.length) {
+        if (data[index] === BEL) break;
+        if (data[index] === ESC && data[index + 1] === "\\") {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (nextChar) {
+      index += 1;
+    }
+  }
+
+  return plainText;
+};
+
+const stripNonLineBreakControls = (data: string): string => {
+  let plainText = "";
+  for (const char of data) {
+    const code = char.charCodeAt(0);
+    if (char === "\n" || (code >= 0x20 && code !== 0x7f)) {
+      plainText += char;
+    }
+  }
+  return plainText;
+};
+
+const getPlainTerminalText = (data: string): string =>
+  stripNonLineBreakControls(
+    stripAnsiEscapeSequences(data).replace(/\r\n/g, "\n").replace(/\r/g, "\n"),
+  );
+
+const getPasteEchoFragments = (text: string): string[] =>
+  Array.from(
+    new Set(
+      getPlainTerminalText(text)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length >= MIN_PASTE_ECHO_FRAGMENT_LENGTH),
+    ),
+  );
+
+const isExpectedPasteEcho = (data: string, state: PasteDisplayState): boolean => {
+  if (state.pasteEchoFragments.length === 0) return false;
+
+  const candidateLines = getPlainTerminalText(stripReadlineActiveRegion(data))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length >= MIN_PASTE_ECHO_FRAGMENT_LENGTH);
+
+  return candidateLines.some((line) =>
+    state.pasteEchoFragments.some((fragment) => fragment.includes(line) || line.includes(fragment)),
+  );
+};
 
 const estimateRows = (text: string, cols: number): number => {
   const width = Math.max(1, cols);
@@ -61,7 +149,8 @@ export function pasteTextIntoTerminal(
   if (shouldApplyPasteDisplayFix(term, text)) {
     pasteDisplayStates.set(term, {
       expiresAt: getNow() + PASTE_DISPLAY_FIX_WINDOW_MS,
-      clearPending: 1,
+      clearPending: 0,
+      pasteEchoFragments: getPasteEchoFragments(text),
     });
   }
 
@@ -87,12 +176,13 @@ export function prepareTerminalDataForUserPasteDisplay(term: object, data: strin
   const state = pasteDisplayStates.get(term);
   if (!isStateActive(state)) return data;
 
-  if (hasReadlineActiveRegion(data)) {
+  const isPasteEcho = isExpectedPasteEcho(data, state);
+  if (hasReadlineActiveRegion(data) && isPasteEcho) {
     state.clearPending = Math.max(state.clearPending, 3);
     return stripReadlineActiveRegion(data);
   }
 
-  if (data.length > LONG_PASTE_MIN_LENGTH || data.includes("\r")) {
+  if (isPasteEcho && (data.length > LONG_PASTE_MIN_LENGTH || data.includes("\r"))) {
     state.clearPending = Math.max(state.clearPending, 1);
   }
   return data;
