@@ -1895,7 +1895,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                       <Copy size={10} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
+                  <TooltipContent side="bottom">{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
                 </Tooltip>
               )}
             </div>
@@ -2234,7 +2234,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                       <Radio size={12} />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
+                  <TooltipContent side="bottom">
                     {isBroadcastEnabled
                       ? t("terminal.toolbar.broadcastDisable")
                       : t("terminal.toolbar.broadcastEnable")}
@@ -2254,7 +2254,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                       <Maximize2 size={12} />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{t("terminal.toolbar.focusMode")}</TooltipContent>
+                  <TooltipContent side="bottom">{t("terminal.toolbar.focusMode")}</TooltipContent>
                 </Tooltip>
               )}
               {renderControls({ showClose: inWorkspace })}
