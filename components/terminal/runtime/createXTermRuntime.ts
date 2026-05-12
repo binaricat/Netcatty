@@ -43,6 +43,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
+import { pasteTextIntoTerminal } from "./terminalUserPaste";
 import type {
   Host,
   KeyBinding,
@@ -405,19 +406,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
-  const scrollViewportToBottom = () => {
-    term.scrollToBottom();
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => {
-        term.scrollToBottom();
-      });
-    }
-  };
-  const scrollToBottomAfterPaste = () => {
-    if (shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current)) {
-      scrollViewportToBottom();
-    }
-  };
   const scrollToBottomAfterInput = (data: string) => {
     if (shouldScrollOnTerminalInput(ctx.terminalSettingsRef.current, data)) {
       term.scrollToBottom();
@@ -542,15 +530,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               navigator.clipboard.readText().then((text) => {
                 const id = ctx.sessionRef.current;
                 if (id) {
-                  const rawData = normalizeLineEndings(text);
-                  const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
-                    ? wrapBracketedPaste(rawData)
-                    : rawData;
-                  // Notify autocomplete with the final bytes so bracketed
-                  // pastes preserve their inner newlines as literal input.
-                  ctx.onAutocompleteInput?.(data);
-                  ctx.terminalBackend.writeToSession(id, data);
-                  scrollToBottomAfterPaste();
+                  pasteTextIntoTerminal(term, text, {
+                    scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                  });
                 }
               });
               break;
@@ -559,13 +541,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               const selection = term.getSelection();
               const id = ctx.sessionRef.current;
               if (selection && id) {
-                const rawData = normalizeLineEndings(selection);
-                const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
-                  ? wrapBracketedPaste(rawData)
-                  : rawData;
-                ctx.onAutocompleteInput?.(data);
-                ctx.terminalBackend.writeToSession(id, data);
-                scrollToBottomAfterPaste();
+                pasteTextIntoTerminal(term, selection, {
+                  scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                });
               }
               break;
             }
@@ -615,13 +593,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       try {
         const text = await navigator.clipboard.readText();
         if (text && ctx.sessionRef.current) {
-          const rawData = normalizeLineEndings(text);
-          const data = term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste
-            ? wrapBracketedPaste(rawData)
-            : rawData;
-          ctx.onAutocompleteInput?.(data);
-          ctx.terminalBackend.writeToSession(ctx.sessionRef.current, data);
-          scrollToBottomAfterPaste();
+          pasteTextIntoTerminal(term, text, {
+            scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+          });
         }
       } catch (err) {
         logger.warn("[Terminal] Failed to paste from clipboard:", err);

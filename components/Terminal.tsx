@@ -1506,9 +1506,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const terminalContextActions = useTerminalContextActions({
     termRef,
     sessionRef,
-    terminalBackend,
     onHasSelectionChange: setHasSelection,
-    disableBracketedPasteRef,
     scrollOnPasteRef,
   });
   // Kept fresh on every render so the mouseTracking capture handler at

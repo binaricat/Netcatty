@@ -17,6 +17,10 @@ import {
   resolveTelnetPort,
   resolveTelnetUsername,
 } from "../../../domain/host";
+import {
+  clearPasteResidualAfterTerminalWrite,
+  prepareTerminalDataForUserPasteDisplay,
+} from "./terminalUserPaste";
 
 /**
  * Per-connection token for stale-timer detection. The renderer reuses the
@@ -206,13 +210,17 @@ const writeSessionData = (
   term: XTerm,
   data: string,
 ) => {
+  const displayData = prepareTerminalDataForUserPasteDisplay(term, data);
   const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
   if (!shouldScrollOnTerminalOutput(settings)) {
-    term.write(data);
+    term.write(displayData, () => {
+      clearPasteResidualAfterTerminalWrite(term);
+    });
     return;
   }
 
-  term.write(data, () => {
+  term.write(displayData, () => {
+    clearPasteResidualAfterTerminalWrite(term);
     handleTerminalOutputAutoScroll(ctx, term);
   });
 };
