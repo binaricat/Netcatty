@@ -43,6 +43,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
+import { handleSerialLineModeInput } from "./serialLineInput";
 import { pasteTextIntoTerminal } from "./terminalUserPaste";
 import type {
   Host,
@@ -615,45 +616,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (id) {
       // Serial line mode: buffer input and send on Enter
       if (ctx.host.protocol === "serial" && ctx.serialLineMode && ctx.serialLineBufferRef) {
-        if (data === "\r") {
-          // Enter key: send buffered line + CR
-          const line = ctx.serialLineBufferRef.current + "\r";
-          ctx.terminalBackend.writeToSession(id, line);
-          ctx.serialLineBufferRef.current = "";
-          // Local echo newline if enabled
-          if (ctx.serialLocalEcho) {
-            term.write("\r\n");
-          }
-        } else if (data === "\x7f" || data === "\b") {
-          // Backspace: remove last character from buffer
-          if (ctx.serialLineBufferRef.current.length > 0) {
-            ctx.serialLineBufferRef.current = ctx.serialLineBufferRef.current.slice(0, -1);
-            if (ctx.serialLocalEcho) {
-              term.write("\b \b");
-            }
-          }
-        } else if (data === "\x03") {
-          // Ctrl+C: clear buffer and send Ctrl+C
-          ctx.serialLineBufferRef.current = "";
-          ctx.terminalBackend.writeToSession(id, data);
-          if (ctx.serialLocalEcho) {
-            term.write("^C\r\n");
-          }
-        } else if (data === "\x15") {
-          // Ctrl+U: clear line buffer
-          if (ctx.serialLocalEcho && ctx.serialLineBufferRef.current.length > 0) {
-            // Erase the displayed line
-            const len = ctx.serialLineBufferRef.current.length;
-            term.write("\b \b".repeat(len));
-          }
-          ctx.serialLineBufferRef.current = "";
-        } else if (data.charCodeAt(0) >= 32 || data.length > 1) {
-          // Regular characters: add to buffer
-          ctx.serialLineBufferRef.current += data;
-          if (ctx.serialLocalEcho) {
-            term.write(data);
-          }
-        }
+        handleSerialLineModeInput(data, {
+          bufferRef: ctx.serialLineBufferRef,
+          localEcho: ctx.serialLocalEcho,
+          writeToSession: (nextData) => ctx.terminalBackend.writeToSession(id, nextData),
+          writeToTerminal: (nextData) => term.write(nextData),
+        });
       } else {
         // Character mode (default): send immediately
         // When backspaceBehavior is configured, remap the Backspace key output
