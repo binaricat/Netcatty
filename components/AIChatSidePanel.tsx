@@ -38,6 +38,7 @@ import { matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import AgentSelector from './ai/AgentSelector';
 import ChatInput from './ai/ChatInput';
 import ChatMessageList from './ai/ChatMessageList';
@@ -1035,24 +1036,32 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             session={activeSession}
             onExport={handleExport}
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-md text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
-            onClick={() => setShowHistory(!showHistory)}
-            title="Session history"
-          >
-            <History size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-md text-primary/82 hover:bg-primary/[0.10] hover:text-primary"
-            onClick={handleNewChat}
-            title="New chat"
-          >
-            <Plus size={15} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
+                onClick={() => setShowHistory(!showHistory)}
+              >
+                <History size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.chat.sessionHistory')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md text-primary/82 hover:bg-primary/[0.10] hover:text-primary"
+                onClick={handleNewChat}
+              >
+                <Plus size={15} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.chat.newChat')}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -1199,13 +1208,17 @@ const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                     <span className={SESSION_HISTORY_ROW_CLASSNAMES.time}>
                       {timeStr}
                     </span>
-                    <button
-                      onClick={(e) => onDelete(e, session.id)}
-                      className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
-                      title="Delete"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={(e) => onDelete(e, session.id)}
+                          className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('common.delete')}</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               );

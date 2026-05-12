@@ -20,6 +20,7 @@ import SettingsTerminalTab from "./settings/tabs/SettingsTerminalTab";
 import SettingsSystemTab from "./settings/tabs/SettingsSystemTab";
 const SettingsAITab = React.lazy(() => import("./settings/tabs/SettingsAITab"));
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -187,13 +188,17 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                 <div className="flex items-center justify-between px-4 py-2">
                     <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
                     {!isMac && (
-                        <button
-                            onClick={handleClose}
-                            className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
-                            title={t("common.close")}
-                        >
-                            <X size={16} />
-                        </button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    onClick={handleClose}
+                                    className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t("common.close")}</TooltipContent>
+                        </Tooltip>
                     )}
                 </div>
             </div>

@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { Check, ChevronDown, ChevronRight, CheckCircle2, Loader2, ShieldAlert, X, XCircle, Slash } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useI18n } from '../../application/i18n/I18nProvider';
 
 /**
@@ -142,9 +143,14 @@ export const ToolCall = ({
           : <ChevronRight size={12} className="text-muted-foreground/40 shrink-0" />
         }
         {name === 'terminal_execute' && args?.command ? (
-          <span className="font-mono text-muted-foreground/70 truncate" title={String(args.command)}>
-            <span className="text-muted-foreground/40">$ </span>{String(args.command)}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="font-mono text-muted-foreground/70 truncate cursor-default">
+                <span className="text-muted-foreground/40">$ </span>{String(args.command)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{String(args.command)}</TooltipContent>
+          </Tooltip>
         ) : (
           <span className="font-mono text-muted-foreground/70 truncate">{name}</span>
         )}

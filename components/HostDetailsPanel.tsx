@@ -938,15 +938,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                     {selectedIdentity.label}
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={clearIdentity}
-                  title={t("common.clear")}
-                >
-                  <X size={14} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={clearIdentity}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("common.clear")}</TooltipContent>
+                </Tooltip>
               </div>
             ) : form.identityId ? (
               <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border/70 bg-secondary/60">
@@ -956,15 +960,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                     {t("hostDetails.identity.missing")}
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
-                  onClick={clearIdentity}
-                  title={t("common.clear")}
-                >
-                  <X size={14} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={clearIdentity}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("common.clear")}</TooltipContent>
+                </Tooltip>
               </div>
             ) : (
               (() => {
@@ -1019,29 +1027,33 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                           }}
                           className="h-10 pr-9"
                         />
-                        <button
-                          type="button"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          onClick={() => {
-                            setIdentitySuggestionsOpen((prev) => {
-                              if (prev) return false;
-                              const q = (form.username || "")
-                                .toLowerCase()
-                                .trim();
-                              const matches = q
-                                ? identities.filter(
-                                  (i) =>
-                                    i.label.toLowerCase().includes(q) ||
-                                    i.username.toLowerCase().includes(q),
-                                )
-                                : identities;
-                              return matches.length > 0;
-                            });
-                          }}
-                          title={t("hostDetails.identity.suggestions")}
-                        >
-                          <ChevronDown size={16} />
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                              onClick={() => {
+                                setIdentitySuggestionsOpen((prev) => {
+                                  if (prev) return false;
+                                  const q = (form.username || "")
+                                    .toLowerCase()
+                                    .trim();
+                                  const matches = q
+                                    ? identities.filter(
+                                      (i) =>
+                                        i.label.toLowerCase().includes(q) ||
+                                        i.username.toLowerCase().includes(q),
+                                    )
+                                    : identities;
+                                  return matches.length > 0;
+                                });
+                              }}
+                            >
+                              <ChevronDown size={16} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("hostDetails.identity.suggestions")}</TooltipContent>
+                        </Tooltip>
                       </div>
                     </PopoverTrigger>
                     <PopoverContent
@@ -1123,14 +1135,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                   onChange={(e) => update("password", e.target.value)}
                   className="h-10 pr-10"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  title={showPassword ? t("hostDetails.password.hide") : t("hostDetails.password.show")}
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{showPassword ? t("hostDetails.password.hide") : t("hostDetails.password.show")}</TooltipContent>
+                </Tooltip>
               </div>
             )}
 
@@ -1153,9 +1169,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 {form.identityFilePaths.map((keyPath, idx) => (
                   <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60 overflow-hidden">
                     <FileKey size={14} className="text-primary shrink-0" />
-                    <span className="text-xs w-0 flex-1 truncate font-mono" title={keyPath}>
-                      {keyPath}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-xs w-0 flex-1 truncate font-mono cursor-default">
+                          {keyPath}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{keyPath}</TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1366,26 +1387,30 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                         }
                       }}
                     />
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      title={t("hostDetails.credential.browseKeyFile")}
-                      onClick={async () => {
-                        const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
-                        if (!bridge?.selectFile) return;
-                        const filePath = await bridge.selectFile(
-                          "Select SSH Private Key",
-                          undefined,
-                          [{ name: "All Files", extensions: ["*"] }]
-                        );
-                        if (filePath) {
-                          addLocalKeyFilePath(filePath);
-                        }
-                      }}
-                    >
-                      <FolderOpen size={14} />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={async () => {
+                            const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+                            if (!bridge?.selectFile) return;
+                            const filePath = await bridge.selectFile(
+                              "Select SSH Private Key",
+                              undefined,
+                              [{ name: "All Files", extensions: ["*"] }]
+                            );
+                            if (filePath) {
+                              addLocalKeyFilePath(filePath);
+                            }
+                          }}
+                        >
+                          <FolderOpen size={14} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("hostDetails.credential.browseKeyFile")}</TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1794,16 +1819,20 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               </p>
             </div>
           )}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
-            <select
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-              value={form.backspaceBehavior ?? ""}
-              onChange={(e) => update("backspaceBehavior", e.target.value || undefined)}
+            <Select
+              value={form.backspaceBehavior ?? "default"}
+              onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
             >
-              <option value="">{t("hostDetails.backspaceBehavior.default")}</option>
-              <option value="ctrl-h">^H (0x08)</option>
-            </select>
+              <SelectTrigger className="h-8 w-auto text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">{t("hostDetails.backspaceBehavior.default")}</SelectItem>
+                <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </Card>
 

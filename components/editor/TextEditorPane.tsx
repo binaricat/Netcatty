@@ -28,6 +28,7 @@ import { HotkeyScheme, KeyBinding, matchesKeyBinding } from '../../domain/models
 import { getLanguageName, getSupportedLanguages } from '../../lib/sftpFileUtils';
 import { Button } from '../ui/button';
 import { Combobox } from '../ui/combobox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 // Map our language IDs to Monaco language IDs
 const languageIdToMonaco = (langId: string): string => {
@@ -186,16 +187,20 @@ export const TextEditorPromoteButton: React.FC<{
   onPromoteToTab: () => void;
   title: string;
 }> = ({ saving, onPromoteToTab, title }) => (
-  <Button
-    variant="ghost"
-    size="icon"
-    className="h-7 w-7"
-    onClick={onPromoteToTab}
-    disabled={!canPromoteTextEditor({ saving })}
-    title={title}
-  >
-    <Maximize2 size={14} />
-  </Button>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        onClick={onPromoteToTab}
+        disabled={!canPromoteTextEditor({ saving })}
+      >
+        <Maximize2 size={14} />
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent>{title}</TooltipContent>
+  </Tooltip>
 );
 
 export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
@@ -479,34 +484,47 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
               {fileName}
             </span>
             {subtitle && (
-              <span className="text-xs text-muted-foreground truncate" title={subtitle}>
-                {subtitle}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-muted-foreground truncate cursor-default">
+                    {subtitle}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{subtitle}</TooltipContent>
+              </Tooltip>
             )}
             {saveError && <span className="text-xs text-destructive truncate">{saveError}</span>}
           </div>
           <div className="flex items-center gap-2 min-w-0">
             {/* Search button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleSearch}
-              title={t('common.search')}
-            >
-              <Search size={14} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleSearch}
+                >
+                  <Search size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('common.search')}</TooltipContent>
+            </Tooltip>
 
             {/* Word wrap toggle */}
-            <Button
-              variant={wordWrap ? 'secondary' : 'ghost'}
-              size="icon"
-              className="h-7 w-7"
-              onClick={onToggleWordWrap}
-              title={t('sftp.editor.wordWrap')}
-            >
-              <WrapText size={14} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={wordWrap ? 'secondary' : 'ghost'}
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={onToggleWordWrap}
+                >
+                  <WrapText size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('sftp.editor.wordWrap')}</TooltipContent>
+            </Tooltip>
 
             {/* Language selector */}
             <Combobox

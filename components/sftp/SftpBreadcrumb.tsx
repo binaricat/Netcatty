@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Home, MoreHorizontal } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Dropdown, DropdownContent, DropdownTrigger } from '../ui/dropdown';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
 
 interface SftpBreadcrumbProps {
@@ -89,76 +90,90 @@ const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
     const showDriveDropdown = isWindowsPath && isLocal && !!onListDrives;
 
     return (
-        <div 
-            className="flex items-center gap-1 text-xs text-muted-foreground overflow-hidden"
-            title={path}
-        >
-            <button
-                onClick={onHome}
-                className="hover:text-foreground p-1 rounded hover:bg-secondary/60 shrink-0"
-                title={t("sftp.goHome")}
-            >
-                <Home size={12} />
-            </button>
-            <ChevronRight size={12} className="opacity-40 shrink-0" />
-            {visibleParts.map(({ part, originalIndex }, displayIdx) => {
-                const partPath = buildPath(originalIndex);
-                const isLast = originalIndex === parts.length - 1;
-                const showEllipsisBefore = needsTruncation && displayIdx === 1;
-                
-                return (
-                    <React.Fragment key={partPath}>
-                        {showEllipsisBefore && (
-                            <>
-                                <span
-                                    className="px-1 py-0.5 shrink-0 flex items-center text-muted-foreground cursor-default"
-                                    title={`${t("sftp.showHiddenPaths")}: ${hiddenParts.map(h => h.part).join(' > ')}`}
-                                >
-                                    <MoreHorizontal size={14} />
-                                </span>
-                                <ChevronRight size={12} className="opacity-40 shrink-0" />
-                            </>
-                        )}
-                        {originalIndex === 0 && showDriveDropdown ? (
-                            <Dropdown open={driveDropdownOpen} onOpenChange={handleDriveDropdownOpen}>
-                                <DropdownTrigger asChild>
-                                    <button className="hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 shrink-0 flex items-center gap-0.5">
-                                        {part}
-                                        <ChevronDown size={10} className="opacity-60" />
-                                    </button>
-                                </DropdownTrigger>
-                                <DropdownContent align="start" className="w-16 p-1">
-                                    {drives.map(drive => (
-                                        <button
-                                            key={drive}
-                                            onClick={() => { onNavigate(drive + '\\'); setDriveDropdownOpen(false); }}
-                                            className={cn(
-                                                "w-full text-left px-2 py-1 text-xs rounded hover:bg-secondary/60",
-                                                drive === part && "bg-secondary font-medium"
-                                            )}
-                                        >
-                                            {drive}
-                                        </button>
-                                    ))}
-                                </DropdownContent>
-                            </Dropdown>
-                        ) : (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground overflow-hidden cursor-default">
+                    <Tooltip>
+                        <TooltipTrigger asChild>
                             <button
-                                onClick={() => onNavigate(partPath)}
-                                className={cn(
-                                    "hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 truncate max-w-[120px] shrink-0",
-                                    isLast && "text-foreground font-medium"
-                                )}
-                                title={part}
+                                onClick={onHome}
+                                className="hover:text-foreground p-1 rounded hover:bg-secondary/60 shrink-0"
                             >
-                                {part}
+                                <Home size={12} />
                             </button>
-                        )}
-                        {!isLast && <ChevronRight size={12} className="opacity-40 shrink-0" />}
-                    </React.Fragment>
-                );
-            })}
-        </div>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("sftp.goHome")}</TooltipContent>
+                    </Tooltip>
+                    <ChevronRight size={12} className="opacity-40 shrink-0" />
+                    {visibleParts.map(({ part, originalIndex }, displayIdx) => {
+                        const partPath = buildPath(originalIndex);
+                        const isLast = originalIndex === parts.length - 1;
+                        const showEllipsisBefore = needsTruncation && displayIdx === 1;
+
+                        return (
+                            <React.Fragment key={partPath}>
+                                {showEllipsisBefore && (
+                                    <>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className="px-1 py-0.5 shrink-0 flex items-center text-muted-foreground cursor-default">
+                                                    <MoreHorizontal size={14} />
+                                                </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                {`${t("sftp.showHiddenPaths")}: ${hiddenParts.map(h => h.part).join(' > ')}`}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        <ChevronRight size={12} className="opacity-40 shrink-0" />
+                                    </>
+                                )}
+                                {originalIndex === 0 && showDriveDropdown ? (
+                                    <Dropdown open={driveDropdownOpen} onOpenChange={handleDriveDropdownOpen}>
+                                        <DropdownTrigger asChild>
+                                            <button className="hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 shrink-0 flex items-center gap-0.5">
+                                                {part}
+                                                <ChevronDown size={10} className="opacity-60" />
+                                            </button>
+                                        </DropdownTrigger>
+                                        <DropdownContent align="start" className="w-16 p-1">
+                                            {drives.map(drive => (
+                                                <button
+                                                    key={drive}
+                                                    onClick={() => { onNavigate(drive + '\\'); setDriveDropdownOpen(false); }}
+                                                    className={cn(
+                                                        "w-full text-left px-2 py-1 text-xs rounded hover:bg-secondary/60",
+                                                        drive === part && "bg-secondary font-medium"
+                                                    )}
+                                                >
+                                                    {drive}
+                                                </button>
+                                            ))}
+                                        </DropdownContent>
+                                    </Dropdown>
+                                ) : (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={() => onNavigate(partPath)}
+                                                className={cn(
+                                                    "hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/60 truncate max-w-[120px] shrink-0",
+                                                    isLast && "text-foreground font-medium"
+                                                )}
+                                            >
+                                                {part}
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>{part}</TooltipContent>
+                                    </Tooltip>
+                                )}
+                                {!isLast && <ChevronRight size={12} className="opacity-40 shrink-0" />}
+                            </React.Fragment>
+                        );
+                    })}
+                </div>
+            </TooltipTrigger>
+            <TooltipContent>{path}</TooltipContent>
+        </Tooltip>
     );
 };
 

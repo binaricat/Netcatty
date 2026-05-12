@@ -41,6 +41,8 @@ import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { resolveGroupDefaults, applyGroupDefaults } from '../domain/groupConfig';
 import { materializeHostProxyProfile } from '../domain/proxyProfiles';
 import { DistroAvatar } from './DistroAvatar';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { useI18n } from '../application/i18n/I18nProvider';
 import Terminal from './Terminal';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
@@ -507,6 +509,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   toggleScriptsSidePanelRef,
   activeSidePanelTabRef,
 }) => {
+  const { t } = useI18n();
   // Subscribe to activeTabId from external store
   const activeTabId = useActiveTabId();
   const isVaultActive = activeTabId === 'vault';
@@ -2099,27 +2102,35 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             />
           </div>
           {onRequestAddToWorkspace && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 flex-shrink-0 hover:text-inherit"
-              style={{ color: mutedFg }}
-              onClick={() => onRequestAddToWorkspace(activeWorkspace.id)}
-              title="Add Terminal"
-            >
-              <Plus size={14} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 flex-shrink-0 hover:text-inherit"
+                  style={{ color: mutedFg }}
+                  onClick={() => onRequestAddToWorkspace(activeWorkspace.id)}
+                >
+                  <Plus size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('terminal.layer.addTerminal')}</TooltipContent>
+            </Tooltip>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 flex-shrink-0 hover:text-inherit"
-            style={{ color: mutedFg }}
-            onClick={() => onToggleWorkspaceViewMode?.(activeWorkspace.id)}
-            title="Switch to Split View"
-          >
-            <Columns2 size={14} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 flex-shrink-0 hover:text-inherit"
+                style={{ color: mutedFg }}
+                onClick={() => onToggleWorkspaceViewMode?.(activeWorkspace.id)}
+              >
+                <Columns2 size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('terminal.layer.switchToSplitView')}</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Session list */}
@@ -2252,111 +2263,137 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                       borderBottom: '1px solid var(--terminal-sidepanel-border)',
                     }}
                   >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      data-tab-id="sftp"
-                      data-tab-type="sidepanel"
-                      data-state={activeSidePanelTab === 'sftp' ? 'active' : 'inactive'}
-                      className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        backgroundColor: activeSidePanelTab === 'sftp'
-                          ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                          : 'transparent',
-                        color: activeSidePanelTab === 'sftp'
-                          ? 'var(--terminal-sidepanel-fg)'
-                          : 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={handleToggleSftpFromBar}
-                      title="SFTP"
-                    >
-                      <FolderTree size={15} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      data-tab-id="scripts"
-                      data-tab-type="sidepanel"
-                      data-state={activeSidePanelTab === 'scripts' ? 'active' : 'inactive'}
-                      className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        backgroundColor: activeSidePanelTab === 'scripts'
-                          ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                          : 'transparent',
-                        color: activeSidePanelTab === 'scripts'
-                          ? 'var(--terminal-sidepanel-fg)'
-                          : 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={handleOpenScripts}
-                      title="Scripts"
-                    >
-                      <Zap size={15} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      data-tab-id="theme"
-                      data-tab-type="sidepanel"
-                      data-state={activeSidePanelTab === 'theme' ? 'active' : 'inactive'}
-                      className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        backgroundColor: activeSidePanelTab === 'theme'
-                          ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                          : 'transparent',
-                        color: activeSidePanelTab === 'theme'
-                          ? 'var(--terminal-sidepanel-fg)'
-                          : 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={handleOpenTheme}
-                      title="Theme"
-                    >
-                      <Palette size={15} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      data-tab-id="ai"
-                      data-tab-type="sidepanel"
-                      data-state={activeSidePanelTab === 'ai' ? 'active' : 'inactive'}
-                      className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        backgroundColor: activeSidePanelTab === 'ai'
-                          ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
-                          : 'transparent',
-                        color: activeSidePanelTab === 'ai'
-                          ? 'var(--terminal-sidepanel-fg)'
-                          : 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={handleOpenAI}
-                      title="AI Chat"
-                    >
-                      <MessageSquare size={15} />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          data-tab-id="sftp"
+                          data-tab-type="sidepanel"
+                          data-state={activeSidePanelTab === 'sftp' ? 'active' : 'inactive'}
+                          className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            backgroundColor: activeSidePanelTab === 'sftp'
+                              ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                              : 'transparent',
+                            color: activeSidePanelTab === 'sftp'
+                              ? 'var(--terminal-sidepanel-fg)'
+                              : 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={handleToggleSftpFromBar}
+                        >
+                          <FolderTree size={15} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('terminal.layer.sftp')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          data-tab-id="scripts"
+                          data-tab-type="sidepanel"
+                          data-state={activeSidePanelTab === 'scripts' ? 'active' : 'inactive'}
+                          className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            backgroundColor: activeSidePanelTab === 'scripts'
+                              ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                              : 'transparent',
+                            color: activeSidePanelTab === 'scripts'
+                              ? 'var(--terminal-sidepanel-fg)'
+                              : 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={handleOpenScripts}
+                        >
+                          <Zap size={15} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('terminal.layer.scripts')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          data-tab-id="theme"
+                          data-tab-type="sidepanel"
+                          data-state={activeSidePanelTab === 'theme' ? 'active' : 'inactive'}
+                          className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            backgroundColor: activeSidePanelTab === 'theme'
+                              ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                              : 'transparent',
+                            color: activeSidePanelTab === 'theme'
+                              ? 'var(--terminal-sidepanel-fg)'
+                              : 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={handleOpenTheme}
+                        >
+                          <Palette size={15} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('terminal.layer.theme')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          data-tab-id="ai"
+                          data-tab-type="sidepanel"
+                          data-state={activeSidePanelTab === 'ai' ? 'active' : 'inactive'}
+                          className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            backgroundColor: activeSidePanelTab === 'ai'
+                              ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                              : 'transparent',
+                            color: activeSidePanelTab === 'ai'
+                              ? 'var(--terminal-sidepanel-fg)'
+                              : 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={handleOpenAI}
+                        >
+                          <MessageSquare size={15} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('terminal.layer.aiChat')}</TooltipContent>
+                    </Tooltip>
                     <div className="flex-1" />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        color: 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={() => setSidePanelPosition(p => p === 'left' ? 'right' : 'left')}
-                      title={sidePanelPosition === 'left' ? 'Move panel to right' : 'Move panel to left'}
-                    >
-                      {sidePanelPosition === 'left' ? <PanelRight size={15} /> : <PanelLeft size={15} />}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                      style={{
-                        color: 'var(--terminal-sidepanel-muted)',
-                      }}
-                      onClick={handleCloseSidePanel}
-                      title="Close panel"
-                    >
-                      <X size={15} />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            color: 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={() => setSidePanelPosition(p => p === 'left' ? 'right' : 'left')}
+                        >
+                          {sidePanelPosition === 'left' ? <PanelRight size={15} /> : <PanelLeft size={15} />}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {sidePanelPosition === 'left' ? t('terminal.layer.movePanelRight') : t('terminal.layer.movePanelLeft')}
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                          style={{
+                            color: 'var(--terminal-sidepanel-muted)',
+                          }}
+                          onClick={handleCloseSidePanel}
+                        >
+                          <X size={15} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t('terminal.layer.closePanel')}</TooltipContent>
+                    </Tooltip>
                   </div>
                 )}
                 <div className="flex-1 min-h-0 relative">

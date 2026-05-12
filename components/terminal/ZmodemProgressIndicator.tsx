@@ -1,5 +1,7 @@
 import { ArrowDownToLine, ArrowUpFromLine, X } from 'lucide-react';
 import React from 'react';
+import { useI18n } from '../../application/i18n/I18nProvider';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 interface ZmodemProgressIndicatorProps {
   transferType: 'upload' | 'download' | null;
@@ -30,9 +32,14 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
   finalizing,
   onCancel,
 }) => {
+  const { t } = useI18n();
   const percent = total > 0 ? Math.min(100, Math.round((transferred / total) * 100)) : 0;
   const Icon = transferType === 'upload' ? ArrowUpFromLine : ArrowDownToLine;
-  const label = finalizing ? 'Waiting for remote...' : transferType === 'upload' ? 'Uploading' : 'Downloading';
+  const label = finalizing
+    ? t('zmodem.waitingForRemote')
+    : transferType === 'upload'
+      ? t('zmodem.uploading')
+      : t('zmodem.downloading');
   const fileInfo = fileCount > 0 ? ` (${fileIndex + 1}/${fileCount})` : '';
 
   return (
@@ -67,13 +74,17 @@ export const ZmodemProgressIndicator: React.FC<ZmodemProgressIndicatorProps> = (
           {formatBytes(transferred)} / {formatBytes(total)}
         </div>
       </div>
-      <button
-        onClick={onCancel}
-        className="flex-shrink-0 p-1 rounded transition-colors hover:bg-white/10"
-        title="Cancel transfer (Ctrl+C)"
-      >
-        <X className="h-3.5 w-3.5 opacity-60" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onCancel}
+            className="flex-shrink-0 p-1 rounded transition-colors hover:bg-white/10"
+          >
+            <X className="h-3.5 w-3.5 opacity-60" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t('zmodem.cancelTransfer')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 };

@@ -35,6 +35,7 @@ import {
     PopoverTrigger,
 } from './ui/popover';
 import { toast } from './ui/toast';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 // ============================================================================
 // Provider Icons
@@ -169,26 +170,30 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
 
     return (
         <Popover open={isOpen} onOpenChange={setIsOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                        "h-8 w-8 relative text-muted-foreground hover:text-foreground app-no-drag",
-                        className
-                    )}
-                    title={t('sync.cloudSync')}
-                >
-                    {getButtonIcon()}
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                "h-8 w-8 relative text-muted-foreground hover:text-foreground app-no-drag",
+                                className
+                            )}
+                        >
+                            {getButtonIcon()}
 
-                    {/* Status indicator dot */}
-                    <StatusIndicator
-                        status={overallStatus}
-                        size="sm"
-                        className="absolute top-0.5 right-0.5 ring-2 ring-background"
-                    />
-                </Button>
-            </PopoverTrigger>
+                            {/* Status indicator dot */}
+                            <StatusIndicator
+                                status={overallStatus}
+                                size="sm"
+                                className="absolute top-0.5 right-0.5 ring-2 ring-background"
+                            />
+                        </Button>
+                    </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t('sync.cloudSync')}</TooltipContent>
+            </Tooltip>
 
             <PopoverContent
                 key={syncStateKey}
@@ -222,16 +227,20 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                         </div>
 
                         {onOpenSettings && (
-                            <button
-                                onClick={() => {
-                                    setIsOpen(false);
-                                    onOpenSettings();
-                                }}
-                                className="p-1 rounded hover:bg-muted transition-colors"
-                                title={t('sync.settings')}
-                            >
-                                <Settings size={14} className="text-muted-foreground" />
-                            </button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        onClick={() => {
+                                            setIsOpen(false);
+                                            onOpenSettings();
+                                        }}
+                                        className="p-1 rounded hover:bg-muted transition-colors"
+                                    >
+                                        <Settings size={14} className="text-muted-foreground" />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('sync.settings')}</TooltipContent>
+                            </Tooltip>
                         )}
                     </div>
                 </div>

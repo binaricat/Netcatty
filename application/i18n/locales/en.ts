@@ -2054,6 +2054,32 @@ const en: Messages = {
   'ai.safety.blocklist.reset': 'Reset to defaults',
   'ai.safety.blocklist.add': 'Add pattern',
   'ai.safety.note': 'Command Blocklist, Command Timeout, and Observer mode are enforced at the MCP Server level, applying to all agent types. Confirm mode and Max Iterations are fully enforced for the built-in agent; ACP agents may have their own internal controls for these settings.',
+
+  // Unified tooltips for terminal workspace and top tabs (issue #954)
+  'terminal.layer.addTerminal': 'Add Terminal',
+  'terminal.layer.switchToSplitView': 'Switch to Split View',
+  'terminal.layer.sftp': 'SFTP',
+  'terminal.layer.scripts': 'Scripts',
+  'terminal.layer.theme': 'Theme',
+  'terminal.layer.aiChat': 'AI Chat',
+  'terminal.layer.movePanelLeft': 'Move panel to left',
+  'terminal.layer.movePanelRight': 'Move panel to right',
+  'terminal.layer.closePanel': 'Close panel',
+  'topTabs.openQuickSwitcher': 'Open quick switcher',
+  'topTabs.moreTabs': 'More tabs',
+  'topTabs.aiAssistant': 'AI Assistant',
+  'topTabs.toggleTheme': 'Toggle theme',
+  'topTabs.openSettings': 'Open Settings',
+  'ai.chat.sessionHistory': 'Session history',
+  'ai.chat.attach': 'Attach',
+  'ai.chat.collapse': 'Collapse',
+  'ai.chat.expand': 'Expand',
+  'ai.chat.enableAgent': 'Enable {name}',
+  'zmodem.waitingForRemote': 'Waiting for remote...',
+  'zmodem.uploading': 'Uploading',
+  'zmodem.downloading': 'Downloading',
+  'zmodem.cancelTransfer': 'Cancel transfer (Ctrl+C)',
+  'settings.shortcuts.resetToDefault': 'Reset to default',
 };
 
 export default en;

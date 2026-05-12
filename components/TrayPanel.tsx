@@ -4,6 +4,7 @@ import { useSessionState } from "../application/state/useSessionState";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
 import { useVaultState } from "../application/state/useVaultState";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { cn } from "../lib/utils";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { I18nProvider } from "../application/i18n/I18nProvider";
@@ -78,28 +79,31 @@ const WorkspaceGroup: React.FC<{
       {expanded && (
         <div className="ml-4 mt-0.5 space-y-0.5">
           {sessions.map((s) => (
-            <button
-              key={s.id}
-              title={s.hostLabel || s.label}
-              onClick={() => {
-                // Jump to session (using session id)
-                void jumpToSession(s.id);
-              }}
-              className={cn(
-                "w-full text-left px-2 py-1 rounded hover:bg-muted flex items-center justify-between text-sm",
-                s.status === "connected" ? "" : "text-muted-foreground",
-                activeTabId === s.id ? "bg-muted/60" : "",
-              )}
-            >
-              <span className="flex items-center gap-2 min-w-0">
-                <StatusDot
-                  status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
-                  spinning={s.status === "connecting"}
-                />
-                <span className="truncate">{s.hostLabel || s.label}</span>
-              </span>
-              <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
-            </button>
+            <Tooltip key={s.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => {
+                    // Jump to session (using session id)
+                    void jumpToSession(s.id);
+                  }}
+                  className={cn(
+                    "w-full text-left px-2 py-1 rounded hover:bg-muted flex items-center justify-between text-sm",
+                    s.status === "connected" ? "" : "text-muted-foreground",
+                    activeTabId === s.id ? "bg-muted/60" : "",
+                  )}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <StatusDot
+                      status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
+                      spinning={s.status === "connecting"}
+                    />
+                    <span className="truncate">{s.hostLabel || s.label}</span>
+                  </span>
+                  <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{s.hostLabel || s.label}</TooltipContent>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -219,17 +223,20 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
           <span className="text-sm font-medium">Netcatty</span>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            onClick={handleOpenMain}
-            title={t("tray.openMainWindow")}
-          >
-            <Maximize2 size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                onClick={handleOpenMain}
+              >
+                <Maximize2 size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("tray.openMainWindow")}</TooltipContent>
+          </Tooltip>
           <button
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
             onClick={handleClose}
-            title="Close"
           >
             <X size={14} />
           </button>
@@ -277,27 +284,30 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                 ))}
                 {/* Solo sessions */}
                 {soloSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    title={s.hostLabel || s.label}
-                    onClick={() => {
-                      void jumpToSession(s.id);
-                    }}
-                    className={cn(
-                      "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
-                      s.status === "connected" ? "" : "text-muted-foreground",
-                      activeTabId === s.id ? "bg-muted" : "",
-                    )}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <StatusDot
-                        status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
-                        spinning={s.status === "connecting"}
-                      />
-                      <span className="truncate">{s.hostLabel || s.label}</span>
-                    </span>
-                    <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
-                  </button>
+                  <Tooltip key={s.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => {
+                          void jumpToSession(s.id);
+                        }}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
+                          s.status === "connected" ? "" : "text-muted-foreground",
+                          activeTabId === s.id ? "bg-muted" : "",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <StatusDot
+                            status={s.status === "connected" ? "success" : s.status === "connecting" ? "warning" : "error"}
+                            spinning={s.status === "connecting"}
+                          />
+                          <span className="truncate">{s.hostLabel || s.label}</span>
+                        </span>
+                        <span className="ml-2 text-xs text-muted-foreground">{t(`tray.status.${s.status}`)}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{s.hostLabel || s.label}</TooltipContent>
+                  </Tooltip>
                 ))}
               </div>
             </div>
@@ -307,16 +317,20 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
         {activeSession && (
           <div>
             <div className="px-2 py-1 text-xs text-muted-foreground">Current</div>
-            <Button
-              variant="ghost"
-              className="w-full justify-start px-2 h-8"
-              title={activeSession.hostLabel || activeSession.label}
-              onClick={() => {
-                void jumpToSession(activeSession.id);
-              }}
-            >
-              <span className="truncate">{activeSession.hostLabel || activeSession.label}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start px-2 h-8"
+                  onClick={() => {
+                    void jumpToSession(activeSession.id);
+                  }}
+                >
+                  <span className="truncate">{activeSession.hostLabel || activeSession.label}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{activeSession.hostLabel || activeSession.label}</TooltipContent>
+            </Tooltip>
           </div>
         )}
 
@@ -332,55 +346,58 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                   : `${rule.localPort} → ${rule.remoteHost}:${rule.remotePort}`);
 
                 return (
-                  <button
-                    key={rule.id}
-                    disabled={isConnecting}
-                    title={label}
-                    onClick={() => {
-                      const rawHost = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
-                      if (!rawHost) {
-                        toast.error(t("pf.error.hostNotFound"));
-                        return;
-                      }
-                      if (isActive) {
-                        void stopTunnel(rule.id);
-                      } else {
-                        const resolveEffectiveHost = (host: Host) => {
-                          const withGroupDefaults = host.group
-                            ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-                            : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
-                          return materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
-                        };
-                        const host = resolveEffectiveHost(rawHost);
-                        void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
-                          if (status === "error" && error) toast.error(error);
-                        }, rule.autoStart, terminalSettings);
-                      }
-                    }}
-                    className={cn(
-                      "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
-                      isConnecting ? "opacity-60" : "",
-                    )}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <StatusDot
-                        status={
-                          rule.status === "active"
-                            ? "success"
-                            : rule.status === "connecting"
-                              ? "warning"
-                              : rule.status === "error"
-                                ? "error"
-                                : "neutral"
-                        }
-                        spinning={rule.status === "connecting"}
-                      />
-                      <span className="truncate">{label}</span>
-                    </span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {t(`tray.status.${rule.status}`)}
-                    </span>
-                  </button>
+                  <Tooltip key={rule.id}>
+                    <TooltipTrigger asChild>
+                      <button
+                        disabled={isConnecting}
+                        onClick={() => {
+                          const rawHost = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
+                          if (!rawHost) {
+                            toast.error(t("pf.error.hostNotFound"));
+                            return;
+                          }
+                          if (isActive) {
+                            void stopTunnel(rule.id);
+                          } else {
+                            const resolveEffectiveHost = (host: Host) => {
+                              const withGroupDefaults = host.group
+                                ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
+                                : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
+                              return materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
+                            };
+                            const host = resolveEffectiveHost(rawHost);
+                            void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
+                              if (status === "error" && error) toast.error(error);
+                            }, rule.autoStart, terminalSettings);
+                          }
+                        }}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
+                          isConnecting ? "opacity-60" : "",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <StatusDot
+                            status={
+                              rule.status === "active"
+                                ? "success"
+                                : rule.status === "connecting"
+                                  ? "warning"
+                                  : rule.status === "error"
+                                    ? "error"
+                                    : "neutral"
+                            }
+                            spinning={rule.status === "connecting"}
+                          />
+                          <span className="truncate">{label}</span>
+                        </span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {t(`tray.status.${rule.status}`)}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{label}</TooltipContent>
+                  </Tooltip>
                 );
               })}
             </div>

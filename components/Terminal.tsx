@@ -35,6 +35,7 @@ import { useTerminalBackend } from "../application/state/useTerminalBackend";
 // SFTPModal removed - SFTP is now handled by SftpSidePanel in TerminalLayer
 import { Button } from "./ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "./ui/toast";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { composeFontFamilyStack, type SupportedPlatform } from "../infrastructure/config/cjkFonts";
@@ -1877,21 +1878,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                 )}
               />
               {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
-                <button
-                  type="button"
-                  className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(host.hostname).then(() => {
-                      toast.success(t("terminal.statusbar.copyHostname.toast", { hostname: host.hostname }));
-                    }).catch(() => {
-                      toast.error(t("terminal.statusbar.copyHostname.error"));
-                    });
-                  }}
-                  title={t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}
-                  aria-label={t("terminal.statusbar.copyHostname.label")}
-                >
-                  <Copy size={10} />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(host.hostname).then(() => {
+                          toast.success(t("terminal.statusbar.copyHostname.toast", { hostname: host.hostname }));
+                        }).catch(() => {
+                          toast.error(t("terminal.statusbar.copyHostname.error"));
+                        });
+                      }}
+                      aria-label={t("terminal.statusbar.copyHostname.label")}
+                    >
+                      <Copy size={10} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
+                </Tooltip>
               )}
             </div>
             {/* Server Stats Display */}
@@ -1902,7 +1907,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   <HoverCardTrigger asChild>
                     <button
                       className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
-                      title={t("terminal.serverStats.cpu")}
+                      aria-label={t("terminal.serverStats.cpu")}
                     >
                       <Cpu size={10} className="flex-shrink-0" />
                       <span>
@@ -1971,7 +1976,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   <HoverCardTrigger asChild>
                     <button
                       className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
-                      title={t("terminal.serverStats.memory")}
+                      aria-label={t("terminal.serverStats.memory")}
                     >
                       <MemoryStick size={10} className="flex-shrink-0" />
                       <span>
@@ -1993,12 +1998,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                       {serverStats.memTotal !== null && (
                         <div className="space-y-1.5">
                           <div className="w-full h-3 bg-muted rounded overflow-hidden flex">
-                            {/* Used (green) */}
+                            {/* Used (green) — exact value shown in legend below */}
                             {serverStats.memUsed !== null && serverStats.memUsed > 0 && (
                               <div
                                 className="h-full bg-emerald-500"
                                 style={{ width: `${(serverStats.memUsed / serverStats.memTotal) * 100}%` }}
-                                title={`${t("terminal.serverStats.memUsed")}: ${(serverStats.memUsed / 1024).toFixed(1)}G`}
                               />
                             )}
                             {/* Buffers (blue) */}
@@ -2006,7 +2010,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                               <div
                                 className="h-full bg-blue-500"
                                 style={{ width: `${(serverStats.memBuffers / serverStats.memTotal) * 100}%` }}
-                                title={`${t("terminal.serverStats.memBuffers")}: ${(serverStats.memBuffers / 1024).toFixed(1)}G`}
                               />
                             )}
                             {/* Cached (amber/orange) */}
@@ -2014,7 +2017,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                               <div
                                 className="h-full bg-amber-500"
                                 style={{ width: `${(serverStats.memCached / serverStats.memTotal) * 100}%` }}
-                                title={`${t("terminal.serverStats.memCached")}: ${(serverStats.memCached / 1024).toFixed(1)}G`}
                               />
                             )}
                           </div>
@@ -2048,7 +2050,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                               <div
                                 className="h-full bg-rose-500"
                                 style={{ width: `${(serverStats.swapUsed / serverStats.swapTotal) * 100}%` }}
-                                title={`${t("terminal.serverStats.swapUsed")}: ${(serverStats.swapUsed / 1024).toFixed(1)}G`}
                               />
                             )}
                           </div>
@@ -2081,9 +2082,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                                     style={{ width: `${Math.min(100, proc.memPercent * 2)}%` }}
                                   />
                                 </div>
-                                <span className="flex-shrink-0 font-mono truncate max-w-[140px]" title={proc.command}>
-                                  {proc.command.split('/').pop()?.split(' ')[0] || proc.command}
-                                </span>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex-shrink-0 font-mono truncate max-w-[140px] cursor-default">
+                                      {proc.command.split('/').pop()?.split(' ')[0] || proc.command}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{proc.command}</TooltipContent>
+                                </Tooltip>
                               </div>
                             ))}
                           </div>
@@ -2097,7 +2103,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                   <HoverCardTrigger asChild>
                     <button
                       className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
-                      title={t("terminal.serverStats.disk")}
+                      aria-label={t("terminal.serverStats.disk")}
                     >
                       <HardDrive size={10} className="flex-shrink-0" />
                       <span className={cn(
@@ -2125,9 +2131,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                           {serverStats.disks.map((disk, index) => (
                             <div key={index} className="flex flex-col gap-1 min-w-[180px]">
                               <div className="flex items-center justify-between gap-4">
-                                <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]" title={disk.mountPoint}>
-                                  {disk.mountPoint}
-                                </span>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px] cursor-default">
+                                      {disk.mountPoint}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{disk.mountPoint}</TooltipContent>
+                                </Tooltip>
                                 <span className={cn(
                                   "text-[11px] font-medium whitespace-nowrap",
                                   disk.percent >= 90 ? "text-red-400" : disk.percent >= 80 ? "text-amber-400" : "text-emerald-400"
@@ -2159,7 +2170,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
                     <HoverCardTrigger asChild>
                       <button
                         className="flex items-center gap-1 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
-                        title={t("terminal.serverStats.network")}
+                        aria-label={t("terminal.serverStats.network")}
                       >
                         <ArrowDownToLine size={9} className="flex-shrink-0 text-emerald-400" />
                         <span>{formatNetSpeed(serverStats.netRxSpeed)}</span>
@@ -2203,40 +2214,48 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             <div className="flex-1" />
             <div className="flex items-center gap-0.5 flex-shrink-0">
               {inWorkspace && onToggleBroadcast && (
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className={cn(
-                    "h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)]",
-                    "bg-transparent hover:bg-transparent",
-                    isBroadcastEnabled && "text-green-500",
-                  )}
-                  onClick={onToggleBroadcast}
-                  title={
-                    isBroadcastEnabled
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className={cn(
+                        "h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)]",
+                        "bg-transparent hover:bg-transparent",
+                        isBroadcastEnabled && "text-green-500",
+                      )}
+                      onClick={onToggleBroadcast}
+                      aria-label={
+                        isBroadcastEnabled
+                          ? t("terminal.toolbar.broadcastDisable")
+                          : t("terminal.toolbar.broadcastEnable")
+                      }
+                    >
+                      <Radio size={12} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isBroadcastEnabled
                       ? t("terminal.toolbar.broadcastDisable")
-                      : t("terminal.toolbar.broadcastEnable")
-                  }
-                  aria-label={
-                    isBroadcastEnabled
-                      ? t("terminal.toolbar.broadcastDisable")
-                      : t("terminal.toolbar.broadcastEnable")
-                  }
-                >
-                  <Radio size={12} />
-                </Button>
+                      : t("terminal.toolbar.broadcastEnable")}
+                  </TooltipContent>
+                </Tooltip>
               )}
               {inWorkspace && !isFocusMode && onExpandToFocus && (
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent"
-                  onClick={onExpandToFocus}
-                  title={t("terminal.toolbar.focusMode")}
-                  aria-label={t("terminal.toolbar.focusMode")}
-                >
-                  <Maximize2 size={12} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent"
+                      onClick={onExpandToFocus}
+                      aria-label={t("terminal.toolbar.focusMode")}
+                    >
+                      <Maximize2 size={12} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("terminal.toolbar.focusMode")}</TooltipContent>
+                </Tooltip>
               )}
               {renderControls({ showClose: inWorkspace })}
             </div>

@@ -15,6 +15,7 @@ import {
   DropdownContent,
   DropdownTrigger,
 } from '../ui/dropdown';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 interface ConversationExportProps {
   session: AISession | null;
@@ -45,17 +46,21 @@ const ConversationExport: React.FC<ConversationExportProps> = ({
 
   return (
     <Dropdown>
-      <DropdownTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={className ?? 'h-7 w-7 rounded-md text-muted-foreground/70 hover:bg-accent/60 hover:text-foreground'}
-          disabled={!hasMessages}
-          title={t('ai.chat.exportConversation')}
-        >
-          <Download size={14} />
-        </Button>
-      </DropdownTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={className ?? 'h-7 w-7 rounded-md text-muted-foreground/70 hover:bg-accent/60 hover:text-foreground'}
+              disabled={!hasMessages}
+            >
+              <Download size={14} />
+            </Button>
+          </DropdownTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t('ai.chat.exportConversation')}</TooltipContent>
+      </Tooltip>
       <DropdownContent
         align="end"
         sideOffset={6}

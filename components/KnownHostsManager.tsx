@@ -37,6 +37,7 @@ import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "./ui/toast";
 
 interface KnownHostsManagerProps {
@@ -122,27 +123,35 @@ const HostItem = React.memo<HostItemProps>(
               {/* Quick action buttons on hover */}
               <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 {!converted && (
-                  <button
-                    className="p-1 rounded hover:bg-primary/20 text-primary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConvertToHost(knownHost);
-                    }}
-                    title={t("action.convertToHost")}
-                  >
-                    <ArrowRight size={12} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="p-1 rounded hover:bg-primary/20 text-primary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onConvertToHost(knownHost);
+                        }}
+                      >
+                        <ArrowRight size={12} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("action.convertToHost")}</TooltipContent>
+                  </Tooltip>
                 )}
-                <button
-                  className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(knownHost.id);
-                  }}
-                  title={t("action.remove")}
-                >
-                  <Trash2 size={12} />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="p-1 rounded hover:bg-destructive/20 text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(knownHost.id);
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("action.remove")}</TooltipContent>
+                </Tooltip>
               </div>
               <div className="flex items-center gap-3 h-full">
                 <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
@@ -193,18 +202,22 @@ const HostItem = React.memo<HostItemProps>(
             </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {!converted && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onConvertToHost(knownHost);
-                  }}
-                  title={t("action.convertToHost")}
-                >
-                  <ArrowRight size={14} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onConvertToHost(knownHost);
+                      }}
+                    >
+                      <ArrowRight size={14} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("action.convertToHost")}</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>

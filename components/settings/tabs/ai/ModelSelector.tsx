@@ -3,6 +3,7 @@ import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import type { AIProviderId } from "../../../../infrastructure/ai/types";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { cn } from "../../../../lib/utils";
 import type { FetchedModel } from "./types";
 import { getFetchBridge } from "./types";
@@ -120,16 +121,20 @@ export const ModelSelector: React.FC<{
           )}
         </div>
         {canFetch && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => { setHasFetched(false); void fetchModels(); }}
-            disabled={isLoading}
-            className="shrink-0 px-2"
-            title={t('ai.providers.refreshModels')}
-          >
-            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setHasFetched(false); void fetchModels(); }}
+                disabled={isLoading}
+                className="shrink-0 px-2"
+              >
+                <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.providers.refreshModels')}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 

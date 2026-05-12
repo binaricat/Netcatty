@@ -9,6 +9,7 @@ import {
 } from "../../infrastructure/config/storageKeys";
 import type { TransferTask } from "../../types";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { SftpTransferItem } from "./SftpTransferItem";
 
 type SftpState = ReturnType<typeof useSftpState>;
@@ -344,13 +345,17 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
       className="border-t border-border/70 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm shrink-0"
       style={{ height: clampPanelHeight(panelHeight) }}
     >
-      <div
-        className="group flex h-3 cursor-row-resize items-center justify-center border-b border-border/30 text-muted-foreground/70"
-        onMouseDown={handleResizeStart}
-        title={t("sftp.transfers.dragToResize")}
-      >
-        <GripHorizontal size={14} className="transition-colors group-hover:text-foreground/80" />
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            className="group flex h-3 cursor-row-resize items-center justify-center border-b border-border/30 text-muted-foreground/70"
+            onMouseDown={handleResizeStart}
+          >
+            <GripHorizontal size={14} className="transition-colors group-hover:text-foreground/80" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{t("sftp.transfers.dragToResize")}</TooltipContent>
+      </Tooltip>
 
       <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground">
         <span className="font-medium">

@@ -11,6 +11,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
 import { Label } from "../../ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import { SectionHeader, SettingsTabContent } from "../settings-ui";
 
 const getOpenerLabel = (
@@ -527,31 +528,44 @@ export default function SettingsFileAssociationsTab() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {openerType === 'system-app' && systemApp ? (
-                        <span title={systemApp.path}>{systemApp.name}</span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-default">{systemApp.name}</span>
+                          </TooltipTrigger>
+                          <TooltipContent>{systemApp.path}</TooltipContent>
+                        </Tooltip>
                       ) : (
                         getOpenerLabel(openerType, systemApp, t)
                       )}
                     </td>
                     <td className="px-4 py-3 text-right space-x-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => handleEdit(extension)}
-                        disabled={editingExtension === extension}
-                        title={t('common.edit')}
-                      >
-                        <Pencil size={14} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleRemove(extension)}
-                        title={t('settings.sftpFileAssociations.remove')}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleEdit(extension)}
+                            disabled={editingExtension === extension}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('common.edit')}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleRemove(extension)}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('settings.sftpFileAssociations.remove')}</TooltipContent>
+                      </Tooltip>
                     </td>
                   </tr>
                 ))}

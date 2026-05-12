@@ -8,6 +8,10 @@ import {
   isTextEditorReadOnly,
   TextEditorPromoteButton,
 } from "./TextEditorPane.tsx";
+import { TooltipProvider } from "../ui/tooltip.tsx";
+
+const wrap = (child: React.ReactElement) =>
+  React.createElement(TooltipProvider, null, child);
 
 test("disables promoting a modal editor to a tab while a save is running", () => {
   assert.equal(canPromoteTextEditor({ saving: true }), false);
@@ -18,18 +22,22 @@ test("disables promoting a modal editor to a tab while a save is running", () =>
 
 test("renders the promote button disabled while a save is running", () => {
   const savingMarkup = renderToStaticMarkup(
-    React.createElement(TextEditorPromoteButton, {
-      saving: true,
-      onPromoteToTab: () => {},
-      title: "Maximize",
-    }),
+    wrap(
+      React.createElement(TextEditorPromoteButton, {
+        saving: true,
+        onPromoteToTab: () => {},
+        title: "Maximize",
+      }),
+    ),
   );
   const idleMarkup = renderToStaticMarkup(
-    React.createElement(TextEditorPromoteButton, {
-      saving: false,
-      onPromoteToTab: () => {},
-      title: "Maximize",
-    }),
+    wrap(
+      React.createElement(TextEditorPromoteButton, {
+        saving: false,
+        onPromoteToTab: () => {},
+        title: "Maximize",
+      }),
+    ),
   );
 
   assert.match(savingMarkup, /disabled=""/);

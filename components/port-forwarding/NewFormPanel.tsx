@@ -12,6 +12,7 @@ import { TrafficDiagram } from '../TrafficDiagram';
 import { AsidePanel,AsidePanelContent,AsidePanelFooter } from '../ui/aside-panel';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
 import { getTypeLabel } from './utils';
@@ -183,14 +184,18 @@ export const NewFormPanel: React.FC<NewFormPanelProps> = ({
                     >
                         {t('common.cancel')}
                     </Button>
-                    <button
-                        className="text-xs text-muted-foreground hover:text-foreground/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-foreground/5 transition-colors"
-                        onClick={onOpenWizard}
-                        title={t('pf.form.openWizardTitle')}
-                    >
-                        <Zap size={12} />
-                        {t('pf.form.openWizard')}
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                className="text-xs text-muted-foreground hover:text-foreground/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-foreground/5 transition-colors"
+                                onClick={onOpenWizard}
+                            >
+                                <Zap size={12} />
+                                {t('pf.form.openWizard')}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('pf.form.openWizardTitle')}</TooltipContent>
+                    </Tooltip>
                 </div>
             </AsidePanelFooter>
         </AsidePanel>

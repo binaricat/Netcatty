@@ -26,6 +26,7 @@ import type { DropEntry } from "../lib/sftpFileUtils";
 import { Host, Identity, SSHKey } from "../types";
 import type { TransferTask } from "../types";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { DistroAvatar } from "./DistroAvatar";
 
 import { SftpPaneView } from "./sftp/SftpPaneView";
@@ -653,18 +654,22 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
                 size="sm"
                 className="h-5 w-5 rounded-sm shrink-0"
               />
-              <div
-                className="min-w-0 flex-1 max-w-[calc(100%-1.75rem)] text-[11px] leading-5 truncate"
-                title={`${displayHost.label} · ${(displayHost.username || "root")}@${formatHostPort(displayHost.hostname, displayHost.port || 22)}`}
-              >
-                <span className="font-medium">
-                  {displayHost.label}
-                </span>
-                <span className="mx-1 text-muted-foreground">·</span>
-                <span className="font-mono text-muted-foreground">
-                  {(displayHost.username || "root")}@{displayHost.hostname}:{displayHost.port || 22}
-                </span>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="min-w-0 flex-1 max-w-[calc(100%-1.75rem)] text-[11px] leading-5 truncate cursor-default">
+                    <span className="font-medium">
+                      {displayHost.label}
+                    </span>
+                    <span className="mx-1 text-muted-foreground">·</span>
+                    <span className="font-mono text-muted-foreground">
+                      {(displayHost.username || "root")}@{displayHost.hostname}:{displayHost.port || 22}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {`${displayHost.label} · ${(displayHost.username || "root")}@${formatHostPort(displayHost.hostname, displayHost.port || 22)}`}
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
         )}

@@ -15,6 +15,7 @@ import { MIN_FONT_SIZE, MAX_FONT_SIZE, TerminalFont } from '../../infrastructure
 import { useCustomThemes, useCustomThemeActions } from '../../application/state/customThemeStore';
 import { parseItermcolors } from '../../infrastructure/parsers/itermcolorsParser';
 import { CustomThemeModal } from './CustomThemeModal';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { cn } from '../../lib/utils';
 import { TerminalTheme } from '../../domain/models';
 import { ScrollArea } from '../ui/scroll-area';
@@ -581,26 +582,32 @@ const ThemeSidePanelInner: React.FC<ThemeSidePanelProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2 rounded-lg p-1.5" style={{ backgroundColor: 'var(--terminal-panel-hover)' }}>
-              <select
-                value={currentFontWeight}
-                onChange={(e) => onFontWeightChange(Number(e.target.value))}
-                className="flex-1 h-7 rounded-md border text-xs px-2 cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--terminal-panel-bg)',
-                  color: 'var(--terminal-panel-fg)',
-                  borderColor: 'var(--terminal-panel-border)',
-                }}
+              <Select
+                value={String(currentFontWeight)}
+                onValueChange={(v) => onFontWeightChange(Number(v))}
               >
-                <option value={100}>100 Thin</option>
-                <option value={200}>200 ExtraLight</option>
-                <option value={300}>300 Light</option>
-                <option value={400}>400 Normal</option>
-                <option value={500}>500 Medium</option>
-                <option value={600}>600 SemiBold</option>
-                <option value={700}>700 Bold</option>
-                <option value={800}>800 ExtraBold</option>
-                <option value={900}>900 Black</option>
-              </select>
+                <SelectTrigger
+                  className="flex-1 h-7 text-xs"
+                  style={{
+                    backgroundColor: 'var(--terminal-panel-bg)',
+                    color: 'var(--terminal-panel-fg)',
+                    borderColor: 'var(--terminal-panel-border)',
+                  }}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="100">100 Thin</SelectItem>
+                  <SelectItem value="200">200 ExtraLight</SelectItem>
+                  <SelectItem value="300">300 Light</SelectItem>
+                  <SelectItem value="400">400 Normal</SelectItem>
+                  <SelectItem value="500">500 Medium</SelectItem>
+                  <SelectItem value="600">600 SemiBold</SelectItem>
+                  <SelectItem value="700">700 Bold</SelectItem>
+                  <SelectItem value="800">800 ExtraBold</SelectItem>
+                  <SelectItem value="900">900 Black</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         )}

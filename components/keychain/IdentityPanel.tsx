@@ -11,6 +11,7 @@ import { Combobox } from '../ui/combobox';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Popover,PopoverContent,PopoverTrigger } from '../ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 interface IdentityPanelProps {
     draftIdentity: Partial<Identity>;
@@ -129,15 +130,19 @@ export const IdentityPanel: React.FC<IdentityPanelProps> = ({
                     <span className="text-sm flex-1 truncate">
                         {selectedKey?.label || t('hostDetails.credential.missing')}
                     </span>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={clearSelectedKey}
-                        title={t('common.clear')}
-                    >
-                        <X size={12} />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={clearSelectedKey}
+                            >
+                                <X size={12} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('common.clear')}</TooltipContent>
+                    </Tooltip>
                 </div>
             )}
 
@@ -202,15 +207,19 @@ export const IdentityPanel: React.FC<IdentityPanelProps> = ({
                         icon={<Key size={14} className="text-muted-foreground" />}
                         className="flex-1"
                     />
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => setSelectedCredentialType(null)}
-                        title={t('common.cancel')}
-                    >
-                        <X size={14} />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0"
+                                onClick={() => setSelectedCredentialType(null)}
+                            >
+                                <X size={14} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('common.cancel')}</TooltipContent>
+                    </Tooltip>
                 </div>
             )}
 
@@ -230,15 +239,19 @@ export const IdentityPanel: React.FC<IdentityPanelProps> = ({
                         icon={<Shield size={14} className="text-muted-foreground" />}
                         className="flex-1"
                     />
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => setSelectedCredentialType(null)}
-                        title={t('common.cancel')}
-                    >
-                        <X size={14} />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0"
+                                onClick={() => setSelectedCredentialType(null)}
+                            >
+                                <X size={14} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('common.cancel')}</TooltipContent>
+                    </Tooltip>
                 </div>
             )}
 

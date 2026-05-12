@@ -1907,21 +1907,25 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                 onChange={setSortMode}
                 className="h-10 w-10"
               />
-              <Button
-                variant={isMultiSelectMode ? "secondary" : "ghost"}
-                size="icon"
-                className="h-10 w-10"
-                onClick={() => {
-                  if (isMultiSelectMode) {
-                    clearHostSelection();
-                  } else {
-                    setIsMultiSelectMode(true);
-                  }
-                }}
-                title={t("vault.hosts.multiSelect")}
-              >
-                <CheckSquare size={16} />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={isMultiSelectMode ? "secondary" : "ghost"}
+                    size="icon"
+                    className="h-10 w-10"
+                    onClick={() => {
+                      if (isMultiSelectMode) {
+                        clearHostSelection();
+                      } else {
+                        setIsMultiSelectMode(true);
+                      }
+                    }}
+                  >
+                    <CheckSquare size={16} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("vault.hosts.multiSelect")}</TooltipContent>
+              </Tooltip>
             </div>
             {/* New Host split button — collapses with an animation when the
                 host details / new-host aside panel is open, since the button

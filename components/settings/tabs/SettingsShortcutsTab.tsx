@@ -230,7 +230,7 @@ export default function SettingsShortcutsTab(props: {
                             <button
                               onClick={() => updateKeyBinding?.(binding.id, scheme, "Disabled")}
                               className="p-1 hover:bg-muted rounded"
-                              title={t("settings.shortcuts.setDisabled")}
+                              aria-label={t("settings.shortcuts.setDisabled")}
                             >
                               <Ban size={12} />
                             </button>
@@ -238,7 +238,7 @@ export default function SettingsShortcutsTab(props: {
                           <button
                             onClick={() => resetKeyBinding?.(binding.id, scheme)}
                             className="p-1 hover:bg-muted rounded"
-                            title="Reset to default"
+                            aria-label={t("settings.shortcuts.resetToDefault")}
                           >
                             <RotateCcw size={12} />
                           </button>

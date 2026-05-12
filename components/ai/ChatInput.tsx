@@ -22,6 +22,7 @@ import type { PromptInputStatus } from '../ai-elements/prompt-input';
 import { formatThinkingLabel } from '../../infrastructure/ai/types';
 import type { AgentModelPreset, AIPermissionMode, UploadedFile } from '../../infrastructure/ai/types';
 import { ScrollArea } from '../ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 // Keep in sync with the popover's Tailwind max-width below.
 const MODEL_PICKER_MAX_WIDTH = 360;
@@ -415,24 +416,27 @@ const ChatInput: React.FC<ChatInputProps> = ({
             <div className="px-3 pt-3 pb-1.5">
               <div className="flex flex-wrap gap-2">
                 {selectedUserSkills.map((skill) => (
-                  <div
-                    key={skill.id}
-                    className={selectedSkillChipClassName}
-                    title={skill.description || skill.name || skill.slug}
-                  >
-                    <Package size={11} className="text-primary/72 shrink-0" />
-                    <span className="truncate max-w-[180px]">
-                      {skill.name && skill.name !== skill.slug ? skill.name : `/${skill.slug}`}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveUserSkill?.(skill.slug)}
-                      className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-full text-foreground/42 hover:bg-primary/10 hover:text-foreground/72 transition-colors cursor-pointer"
-                      aria-label={`Remove skill ${skill.name || skill.slug}`}
-                    >
-                      <X size={9} />
-                    </button>
-                  </div>
+                  <Tooltip key={skill.id}>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={selectedSkillChipClassName}
+                      >
+                        <Package size={11} className="text-primary/72 shrink-0" />
+                        <span className="truncate max-w-[180px]">
+                          {skill.name && skill.name !== skill.slug ? skill.name : `/${skill.slug}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveUserSkill?.(skill.slug)}
+                          className="inline-flex h-4.5 w-4.5 items-center justify-center rounded-full text-foreground/42 hover:bg-primary/10 hover:text-foreground/72 transition-colors cursor-pointer"
+                          aria-label={`Remove skill ${skill.name || skill.slug}`}
+                        >
+                          <X size={9} />
+                        </button>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{skill.description || skill.name || skill.slug}</TooltipContent>
+                  </Tooltip>
                 ))}
               </div>
             </div>
@@ -450,14 +454,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
             ].filter(Boolean).join(' ')}
             maxLength={100000}
           />
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className="absolute top-3.5 right-3 rounded-md p-1 text-muted-foreground/38 hover:text-muted-foreground/72 hover:bg-muted/25 transition-colors cursor-pointer"
-            title={expanded ? 'Collapse' : 'Expand'}
-          >
-            <Expand size={12} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setExpanded((e) => !e)}
+                className="absolute top-3.5 right-3 rounded-md p-1 text-muted-foreground/38 hover:text-muted-foreground/72 hover:bg-muted/25 transition-colors cursor-pointer"
+              >
+                <Expand size={12} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{expanded ? t('ai.chat.collapse') : t('ai.chat.expand')}</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* @ mention popover */}
@@ -557,25 +565,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
         {/* Footer toolbar */}
         <PromptInputFooter className="gap-1.5 border-t-0 bg-transparent px-3 pb-2 pt-0">
           <PromptInputTools className="gap-1 flex-wrap">
-            <button
-              ref={attachBtnRef}
-              type="button"
-              onClick={() => {
-                if (!showAttachMenu) {
-                  const rect = attachBtnRef.current?.getBoundingClientRect();
-                  if (rect) setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
-                  setActiveMenu('attach');
-                } else {
-                  closeAllMenus();
-                }
-              }}
-              className={iconButtonClassName}
-              title="Attach"
-              aria-label="Attach file"
-              aria-expanded={showAttachMenu}
-            >
-              <Plus size={13} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  ref={attachBtnRef}
+                  type="button"
+                  onClick={() => {
+                    if (!showAttachMenu) {
+                      const rect = attachBtnRef.current?.getBoundingClientRect();
+                      if (rect) setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
+                      setActiveMenu('attach');
+                    } else {
+                      closeAllMenus();
+                    }
+                  }}
+                  className={iconButtonClassName}
+                  aria-label={t('ai.chat.attach')}
+                  aria-expanded={showAttachMenu}
+                >
+                  <Plus size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.chat.attach')}</TooltipContent>
+            </Tooltip>
             {showAttachMenu && menuPos && createPortal(
               <>
                 <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
@@ -743,33 +755,37 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {/* Permission mode chip — only for Catty Agent */}
             {permissionMode && onPermissionModeChange && (
               <>
-                <button
-                  ref={permBtnRef}
-                  type="button"
-                  onClick={() => {
-                    if (!showPermPicker) {
-                      const rect = permBtnRef.current?.getBoundingClientRect();
-                      if (rect) setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
-                      setActiveMenu('perm');
-                    } else {
-                      closeAllMenus();
-                    }
-                  }}
-                  className={`${chipClassName} cursor-pointer hover:bg-muted/24 transition-colors`}
-                  title={t('ai.safety.permissionMode')}
-                  aria-label="Permission mode"
-                  aria-expanded={showPermPicker}
-                >
-                  {permissionMode === 'observer' && <Eye size={11} className="text-blue-400/70" />}
-                  {permissionMode === 'confirm' && <ShieldCheck size={11} className="text-yellow-400/70" />}
-                  {permissionMode === 'autonomous' && <Zap size={11} className="text-green-400/70" />}
-                  <span className="truncate max-w-[72px]">
-                    {permissionMode === 'observer' && t('ai.chat.permObserver')}
-                    {permissionMode === 'confirm' && t('ai.chat.permConfirm')}
-                    {permissionMode === 'autonomous' && t('ai.chat.permAuto')}
-                  </span>
-                  <ChevronDown size={9} className="text-muted-foreground/50" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      ref={permBtnRef}
+                      type="button"
+                      onClick={() => {
+                        if (!showPermPicker) {
+                          const rect = permBtnRef.current?.getBoundingClientRect();
+                          if (rect) setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
+                          setActiveMenu('perm');
+                        } else {
+                          closeAllMenus();
+                        }
+                      }}
+                      className={`${chipClassName} cursor-pointer hover:bg-muted/24 transition-colors`}
+                      aria-label={t('ai.safety.permissionMode')}
+                      aria-expanded={showPermPicker}
+                    >
+                      {permissionMode === 'observer' && <Eye size={11} className="text-blue-400/70" />}
+                      {permissionMode === 'confirm' && <ShieldCheck size={11} className="text-yellow-400/70" />}
+                      {permissionMode === 'autonomous' && <Zap size={11} className="text-green-400/70" />}
+                      <span className="truncate max-w-[72px]">
+                        {permissionMode === 'observer' && t('ai.chat.permObserver')}
+                        {permissionMode === 'confirm' && t('ai.chat.permConfirm')}
+                        {permissionMode === 'autonomous' && t('ai.chat.permAuto')}
+                      </span>
+                      <ChevronDown size={9} className="text-muted-foreground/50" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('ai.safety.permissionMode')}</TooltipContent>
+                </Tooltip>
                 {showPermPicker && menuPos && createPortal(
                   <>
                     <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />

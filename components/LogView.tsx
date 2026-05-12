@@ -277,7 +277,6 @@ const LogViewComponent: React.FC<LogViewProps> = ({
                             className="gap-1.5 h-8 px-2"
                             onClick={handleExport}
                             disabled={isExporting}
-                            title={t("logView.export")}
                         >
                             <Download size={14} />
                             <span className="text-xs">{t("logView.export")}</span>
@@ -290,7 +289,6 @@ const LogViewComponent: React.FC<LogViewProps> = ({
                         size="sm"
                         className="gap-1.5 h-8 px-2"
                         onClick={() => setThemeModalOpen(true)}
-                        title={t("logView.customizeAppearance")}
                     >
                         <Palette size={14} />
                         <span className="text-xs">{t("logView.appearance")}</span>

@@ -21,6 +21,7 @@ import React, {
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { logger } from "../../lib/logger";
 import { useRenderTracker } from "../../lib/useRenderTracker";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { useActiveTabId } from "./SftpContext";
 
@@ -395,13 +396,17 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
       </div>
 
       {/* Add tab button */}
-      <button
-        className="px-2 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[linear-gradient(135deg,_hsl(var(--accent)_/_0.18),_hsl(var(--primary)_/_0.18))] transition-all duration-150 border-l border-border/40 cursor-pointer"
-        onClick={handleAddTabClick}
-        title={t("sftp.tabs.addTab")}
-      >
-        <Plus size={14} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className="px-2 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[linear-gradient(135deg,_hsl(var(--accent)_/_0.18),_hsl(var(--primary)_/_0.18))] transition-all duration-150 border-l border-border/40 cursor-pointer"
+            onClick={handleAddTabClick}
+          >
+            <Plus size={14} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{t("sftp.tabs.addTab")}</TooltipContent>
+      </Tooltip>
     </div>
   );
 };

@@ -2063,6 +2063,32 @@ const zhCN: Messages = {
   'ai.safety.blocklist.reset': '恢复默认',
   'ai.safety.blocklist.add': '添加规则',
   'ai.safety.note': '命令黑名单、命令超时和观察者模式通过 MCP Server 层强制执行，对所有 Agent 类型生效。确认模式和最大迭代次数对内置 Agent 完全强制执行；ACP Agent 可能有自己的内部控制。',
+
+  // 统一终端工作区和顶部标签的 tooltip 文案 (issue #954)
+  'terminal.layer.addTerminal': '添加终端',
+  'terminal.layer.switchToSplitView': '切换到分屏视图',
+  'terminal.layer.sftp': '文件传输',
+  'terminal.layer.scripts': '脚本',
+  'terminal.layer.theme': '主题',
+  'terminal.layer.aiChat': 'AI 助手',
+  'terminal.layer.movePanelLeft': '面板移至左侧',
+  'terminal.layer.movePanelRight': '面板移至右侧',
+  'terminal.layer.closePanel': '关闭面板',
+  'topTabs.openQuickSwitcher': '打开快速切换',
+  'topTabs.moreTabs': '更多标签页',
+  'topTabs.aiAssistant': 'AI 助手',
+  'topTabs.toggleTheme': '切换主题',
+  'topTabs.openSettings': '打开设置',
+  'ai.chat.sessionHistory': '会话历史',
+  'ai.chat.attach': '附件',
+  'ai.chat.collapse': '收起',
+  'ai.chat.expand': '展开',
+  'ai.chat.enableAgent': '启用 {name}',
+  'zmodem.waitingForRemote': '等待远端...',
+  'zmodem.uploading': '上传中',
+  'zmodem.downloading': '下载中',
+  'zmodem.cancelTransfer': '取消传输 (Ctrl+C)',
+  'settings.shortcuts.resetToDefault': '重置为默认',
 };
 
 export default zhCN;

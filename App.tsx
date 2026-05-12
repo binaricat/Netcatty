@@ -55,6 +55,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { ToastProvider, toast } from './components/ui/toast';
+import { TooltipProvider } from './components/ui/tooltip';
 import { VaultView, VaultSection } from './components/VaultView';
 import { QuickAddSnippetDialog } from './components/QuickAddSnippetDialog';
 import { AddToWorkspaceDialog } from './components/workspace/AddToWorkspaceDialog';
@@ -2436,7 +2437,9 @@ function AppWithProviders() {
   return (
     <I18nProvider locale={settings.uiLanguage}>
       <ToastProvider>
-        <App settings={settings} />
+        <TooltipProvider delayDuration={300}>
+          <App settings={settings} />
+        </TooltipProvider>
       </ToastProvider>
     </I18nProvider>
   );

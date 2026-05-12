@@ -477,22 +477,26 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             )}
           </div>
         ) : (
-          <div
-            className="flex-1 min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
-            onDoubleClick={handlePathDoubleClick}
-            title={t("sftp.path.doubleClickToEdit")}
-          >
-            <SftpBreadcrumb
-              path={displayPath}
-              onNavigate={onNavigateTo}
-              onHome={() =>
-                pane.connection?.homeDir &&
-                onNavigateTo(pane.connection.homeDir)
-              }
-              isLocal={!isRemote}
-              onListDrives={onListDrives}
-            />
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className="flex-1 min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
+                onDoubleClick={handlePathDoubleClick}
+              >
+                <SftpBreadcrumb
+                  path={displayPath}
+                  onNavigate={onNavigateTo}
+                  onHome={() =>
+                    pane.connection?.homeDir &&
+                    onNavigateTo(pane.connection.homeDir)
+                  }
+                  isLocal={!isRemote}
+                  onListDrives={onListDrives}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{t("sftp.path.doubleClickToEdit")}</TooltipContent>
+          </Tooltip>
         )}
 
         {/* Bookmark button with dropdown */}
@@ -555,15 +559,19 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
                       {bm.global && (
                         <Globe size={10} className="shrink-0 text-primary" />
                       )}
-                      <button
-                        type="button"
-                        className="flex-1 text-left text-xs truncate font-mono"
-                        onClick={() => onNavigateToBookmark(bm.path)}
-                        title={bm.path}
-                      >
-                        {bm.label}
-                        <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex-1 text-left text-xs truncate font-mono"
+                            onClick={() => onNavigateToBookmark(bm.path)}
+                          >
+                            {bm.label}
+                            <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{bm.path}</TooltipContent>
+                      </Tooltip>
                       <Button
                         variant="ghost"
                         size="icon"

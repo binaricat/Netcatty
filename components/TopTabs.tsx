@@ -14,6 +14,7 @@ import { DISTRO_LOGOS, DISTRO_COLORS } from './DistroAvatar';
 import { getShellIconPath, isMonochromeShellIcon } from '../lib/useDiscoveredShells';
 import { Button } from './ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SyncStatusButton } from './SyncStatusButton';
 
 // Helper styles for Electron drag regions (use type assertion to include non-standard WebkitAppRegion)
@@ -205,7 +206,6 @@ const WindowControls: React.FC = memo(() => {
         onClick={handleMinimize}
         className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
         style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-        title="Minimize"
       >
         <Minus size={16} />
       </button>
@@ -213,20 +213,16 @@ const WindowControls: React.FC = memo(() => {
         onClick={handleMaximize}
         className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
         style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-        title={isMaximized ? "Restore" : "Maximize"}
       >
         {isMaximized ? (
-          // Restore icon (two overlapping squares)
           <Copy size={14} />
         ) : (
-          // Maximize icon (single square)
           <Square size={14} />
         )}
       </button>
       <button
         onClick={handleClose}
         className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-all duration-150 app-no-drag"
-        title="Close"
       >
         <X size={16} />
       </button>
@@ -577,60 +573,63 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
 
         return (
-          <div
-            key={tabId}
-            data-tab-id={tabId}
-            data-tab-type="editor"
-            data-state={isActive ? 'active' : 'inactive'}
-            onClick={() => onSelectTab(tabId)}
-            title={tooltip}
-            className={cn(
-              "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-            )}
-            style={{
-              backgroundColor: isActive
-                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                : 'transparent',
-              color: isActive
-                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-              }
-            }}
-          >
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <FileIcon
-                size={14}
-                className="shrink-0"
-                style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-              />
-              <span className="truncate flex items-center gap-0.5">
-                {dirty && <span className="text-primary mr-0.5">●</span>}
-                {editorTab.fileName}
-                {suffix && <span className="text-muted-foreground ml-1">{suffix}</span>}
-              </span>
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestCloseEditorTab(editorTab.id);
-              }}
-              className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-              aria-label="Close editor tab"
-            >
-              <X size={12} />
-            </button>
-          </div>
+          <Tooltip key={tabId}>
+            <TooltipTrigger asChild>
+              <div
+                data-tab-id={tabId}
+                data-tab-type="editor"
+                data-state={isActive ? 'active' : 'inactive'}
+                onClick={() => onSelectTab(tabId)}
+                className={cn(
+                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+                )}
+                style={{
+                  backgroundColor: isActive
+                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+                    : 'transparent',
+                  color: isActive
+                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+                  }
+                }}
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <FileIcon
+                    size={14}
+                    className="shrink-0"
+                    style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                  />
+                  <span className="truncate flex items-center gap-0.5">
+                    {dirty && <span className="text-primary mr-0.5">●</span>}
+                    {editorTab.fileName}
+                    {suffix && <span className="text-muted-foreground ml-1">{suffix}</span>}
+                  </span>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRequestCloseEditorTab(editorTab.id);
+                  }}
+                  className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+                  aria-label="Close editor tab"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{tooltip}</TooltipContent>
+          </Tooltip>
         );
       }
 
@@ -1016,16 +1015,20 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             {renderOrderedTabs()}
             {/* Add new tab button - follows last tab when not overflowing */}
             {!hasOverflow && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 flex-shrink-0 app-no-drag mb-0 rounded-none"
-                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                onClick={onOpenQuickSwitcher}
-                title="Open quick switcher"
-              >
-                <Plus size={14} />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 flex-shrink-0 app-no-drag mb-0 rounded-none"
+                    style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                    onClick={onOpenQuickSwitcher}
+                  >
+                    <Plus size={14} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('topTabs.openQuickSwitcher')}</TooltipContent>
+              </Tooltip>
             )}
             {/* Draggable spacer - fixed width handle at the end */}
             <div className="min-w-[20px] h-7 app-drag flex-shrink-0" style={dragRegionStyle} />
@@ -1042,56 +1045,72 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
         {/* More tabs button - only when overflowing */}
         {hasOverflow && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 flex-shrink-0 app-no-drag self-end rounded-none"
-            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-            onClick={onOpenQuickSwitcher}
-            title="More tabs"
-          >
-            <MoreHorizontal size={14} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 flex-shrink-0 app-no-drag self-end rounded-none"
+                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                onClick={onOpenQuickSwitcher}
+              >
+                <MoreHorizontal size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('topTabs.moreTabs')}</TooltipContent>
+          </Tooltip>
         )}
 
         {/* Fixed right controls */}
         <div className="flex-shrink-0 flex items-center gap-2 app-drag self-center" style={dragRegionStyle}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 app-no-drag"
-            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-            title="AI Assistant"
-            onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel'))}
-          >
-            <Sparkles size={16} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 app-no-drag"
+                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel'))}
+              >
+                <Sparkles size={16} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('topTabs.aiAssistant')}</TooltipContent>
+          </Tooltip>
           <Button variant="ghost" size="icon" className="h-6 w-6 app-no-drag" style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}>
             <Bell size={16} />
           </Button>
           <SyncStatusButton onOpenSettings={onOpenSettings} onSyncNow={onSyncNow} />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 app-no-drag"
-            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-            onClick={onToggleTheme}
-            disabled={isImmersiveActive && !followAppTerminalTheme}
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 app-no-drag"
+                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                onClick={onToggleTheme}
+                disabled={isImmersiveActive && !followAppTerminalTheme}
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('topTabs.toggleTheme')}</TooltipContent>
+          </Tooltip>
         </div>
         {/* Settings gear button - sits to the left of WindowControls on win/linux, at the right edge on mac */}
         <div className="self-stretch flex items-stretch">
-          <button
-            onClick={onOpenSettings}
-            className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
-            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-            title="Open Settings"
-          >
-            <Settings size={16} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onOpenSettings}
+                className="h-full w-10 flex items-center justify-center transition-all duration-150 app-no-drag"
+                style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+              >
+                <Settings size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('topTabs.openSettings')}</TooltipContent>
+          </Tooltip>
         </div>
         {/* Custom window controls for Windows/Linux */}
         {!isMacClient && <div className="self-stretch flex items-stretch"><WindowControls /></div>}

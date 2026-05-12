@@ -54,6 +54,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // Import utilities and components from keychain module
 import {
@@ -1168,9 +1169,14 @@ echo $3 >> "$FILE"`);
                     </Label>
                     <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                       <FileKey size={14} className="text-primary shrink-0" />
-                      <span className="text-xs font-mono truncate" title={draftKey.filePath}>
-                        {draftKey.filePath}
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-xs font-mono truncate cursor-default">
+                            {draftKey.filePath}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{draftKey.filePath}</TooltipContent>
+                      </Tooltip>
                     </div>
                   </div>
                 )}

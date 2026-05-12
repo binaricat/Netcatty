@@ -54,6 +54,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from './ui/toast';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 // ============================================================================
 // Provider Icons
@@ -377,12 +378,14 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                         </span>
                     </div>
                 ) : error ? (
-                    <p
-                        className="text-xs text-red-500 truncate mt-1 max-w-[360px] cursor-help"
-                        title={error}
-                    >
-                        {error}
-                    </p>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <p className="text-xs text-red-500 truncate mt-1 max-w-[360px] cursor-help">
+                                {error}
+                            </p>
+                        </TooltipTrigger>
+                        <TooltipContent>{error}</TooltipContent>
+                    </Tooltip>
                 ) : (
                     <p className="text-xs text-muted-foreground mt-1">
                         {isConnecting ? t('cloudSync.provider.connecting') : t('cloudSync.provider.notConnected')}
@@ -1904,9 +1907,14 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                                                     </div>
                                                 </div>
                                                 {entry.error && (
-                                                    <span className="text-xs text-red-500 truncate max-w-24" title={entry.error}>
-                                                        {t('cloudSync.history.error')}
-                                                    </span>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <span className="text-xs text-red-500 truncate max-w-24 cursor-default">
+                                                                {t('cloudSync.history.error')}
+                                                            </span>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>{entry.error}</TooltipContent>
+                                                    </Tooltip>
                                                 )}
                                             </div>
                                         ))}

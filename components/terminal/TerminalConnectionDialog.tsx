@@ -10,6 +10,7 @@ import { Host, SSHKey } from '../../types';
 import { formatHostPort, resolveTelnetPort } from '../../domain/host';
 import { DistroAvatar } from '../DistroAvatar';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { TerminalAuthDialog, TerminalAuthDialogProps } from './TerminalAuthDialog';
 import { TerminalConnectionProgress, TerminalConnectionProgressProps } from './TerminalConnectionProgress';
 import { HostKeyInfo, TerminalHostKeyVerification } from './TerminalHostKeyVerification';
@@ -203,16 +204,20 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                             </Button>
                         )}
                         {canDismissDisconnected && (
-                            <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7"
-                                aria-label={t('terminal.connection.dismissDisconnectedDialog')}
-                                title={t('terminal.connection.dismissDisconnectedDialog')}
-                                onClick={onDismissDisconnected}
-                            >
-                                <X size={14} />
-                            </Button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7"
+                                        aria-label={t('terminal.connection.dismissDisconnectedDialog')}
+                                        onClick={onDismissDisconnected}
+                                    >
+                                        <X size={14} />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t('terminal.connection.dismissDisconnectedDialog')}</TooltipContent>
+                            </Tooltip>
                         )}
                     </div>
                 </div>

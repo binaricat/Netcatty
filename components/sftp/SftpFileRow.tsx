@@ -4,6 +4,7 @@
 
 import { Folder, Link } from 'lucide-react';
 import React, { memo, useCallback } from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
 import { SftpFileEntry } from '../../types';
 import { buildSftpColumnTemplate, ColumnWidths, formatBytes, formatDate, getFileIcon, isNavigableDirectory } from './utils';
@@ -106,17 +107,21 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                         />
                     )}
                 </div>
-                <span
-                    className={cn(
-                        "truncate",
-                        entry.type === 'symlink' && "italic pr-1",
-                        isSelectionVisible && "font-medium",
-                    )}
-                    title={entry.name}
-                >
-                    {entry.name}
-                    {entry.type === 'symlink' && <span className="sr-only"> (symbolic link)</span>}
-                </span>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <span
+                            className={cn(
+                                "truncate cursor-default",
+                                entry.type === 'symlink' && "italic pr-1",
+                                isSelectionVisible && "font-medium",
+                            )}
+                        >
+                            {entry.name}
+                            {entry.type === 'symlink' && <span className="sr-only"> (symbolic link)</span>}
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{entry.name}</TooltipContent>
+                </Tooltip>
             </div>
             <span className={cn("text-xs truncate", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>{modifiedLabel}</span>
             <span className={cn("text-xs truncate text-right", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>

@@ -10,6 +10,7 @@ import type { UpdateState } from '../../../application/state/useUpdateCheck';
 import { SessionLogFormat, keyEventToString } from "../../../domain/models";
 import { TabsContent } from "../../ui/tabs";
 import { Button } from "../../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import { Toggle, Select, SettingRow } from "../settings-ui";
 import { cn } from "../../../lib/utils";
 
@@ -637,9 +638,14 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                                 if (entry.uptimeSeconds != null) parts.push(`Uptime: ${entry.uptimeSeconds}s`);
                                 const text = parts.join('  ');
                                 return text ? (
-                                  <div className="text-muted-foreground truncate" title={text}>
-                                    {text}
-                                  </div>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="text-muted-foreground truncate cursor-default">
+                                        {text}
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{text}</TooltipContent>
+                                  </Tooltip>
                                 ) : null;
                               })()}
                               {entry.stack && (
@@ -678,14 +684,18 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   <Trash2 size={14} />
                   {t("settings.system.crashLogs.clear")}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleOpenCrashLogsDir}
-                  title={t("settings.system.openFolder")}
-                >
-                  <FolderOpen size={16} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleOpenCrashLogsDir}
+                    >
+                      <FolderOpen size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("settings.system.openFolder")}</TooltipContent>
+                </Tooltip>
               </div>
 
               {crashLogClearResult && (
@@ -716,16 +726,20 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                     {isLoading ? "..." : (tempDirInfo?.path ?? "-")}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={handleOpenTempDir}
-                  disabled={!tempDirInfo?.path}
-                  title={t("settings.system.openFolder")}
-                >
-                  <FolderOpen size={16} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={handleOpenTempDir}
+                      disabled={!tempDirInfo?.path}
+                    >
+                      <FolderOpen size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("settings.system.openFolder")}</TooltipContent>
+                </Tooltip>
               </div>
 
               {/* Stats */}
@@ -823,15 +837,19 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                     {t("settings.sessionLogs.browse")}
                   </Button>
                   {sessionLogsDir && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleOpenSessionLogsDir}
-                      className="shrink-0"
-                      title={t("settings.sessionLogs.openFolder")}
-                    >
-                      <FolderOpen size={16} />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleOpenSessionLogsDir}
+                          className="shrink-0"
+                        >
+                          <FolderOpen size={16} />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("settings.sessionLogs.openFolder")}</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -902,13 +920,17 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                         : toggleWindowHotkey || t("settings.globalHotkey.notSet")}
                     </button>
                     {toggleWindowHotkey && (
-                      <button
-                        onClick={handleResetHotkey}
-                        className="p-1 hover:bg-muted rounded"
-                        title={t("settings.globalHotkey.reset")}
-                      >
-                        <RotateCcw size={14} />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={handleResetHotkey}
+                            className="p-1 hover:bg-muted rounded"
+                          >
+                            <RotateCcw size={14} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("settings.globalHotkey.reset")}</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                 </SettingRow>

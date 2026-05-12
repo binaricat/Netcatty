@@ -6,6 +6,7 @@ import { ChevronUp, ChevronDown, Search } from 'lucide-react';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Button } from '../ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export interface TerminalSearchBarProps {
     isOpen: boolean;
@@ -115,48 +116,56 @@ export const TerminalSearchBar: React.FC<TerminalSearchBarProps> = ({
 
             {/* Navigation buttons */}
             <div className="flex items-center gap-0.5 flex-shrink-0">
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 disabled:opacity-30"
-                    style={{
-                        color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onFindPrevious();
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    disabled={!searchTerm}
-                    title={t("terminal.search.prevMatch")}
-                    tabIndex={-1}
-                >
-                    <ChevronUp size={14} />
-                </Button>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 disabled:opacity-30"
-                    style={{
-                        color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onFindNext();
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    disabled={!searchTerm}
-                    title={t("terminal.search.nextMatch")}
-                    tabIndex={-1}
-                >
-                    <ChevronDown size={14} />
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 disabled:opacity-30"
+                            style={{
+                                color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
+                            }}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onFindPrevious();
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            disabled={!searchTerm}
+                            tabIndex={-1}
+                        >
+                            <ChevronUp size={14} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.search.prevMatch")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 disabled:opacity-30"
+                            style={{
+                                color: 'color-mix(in srgb, var(--terminal-ui-fg, #ffffff) 60%, transparent)',
+                            }}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onFindNext();
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            disabled={!searchTerm}
+                            tabIndex={-1}
+                        >
+                            <ChevronDown size={14} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.search.nextMatch")}</TooltipContent>
+                </Tooltip>
             </div>
         </div>
     );

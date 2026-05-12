@@ -298,7 +298,6 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                     onClose();
                   }}
                   className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground border border-border rounded px-1.5 py-0.5 transition-colors hover:bg-muted/50"
-                  title="New Workspace"
                 >
                   <Plus size={11} />
                   <span>New Workspace</span>

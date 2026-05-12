@@ -249,15 +249,19 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             className="h-7 pl-7 text-xs bg-muted/30 border-none"
           />
         </div>
-        <button
-          type="button"
-          onClick={handleAddSnippet}
-          title={t('snippets.action.newSnippet')}
-          aria-label={t('snippets.action.newSnippet')}
-          className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-        >
-          <Plus size={14} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handleAddSnippet}
+              aria-label={t('snippets.action.newSnippet')}
+              className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <Plus size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('snippets.action.newSnippet')}</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Content */}

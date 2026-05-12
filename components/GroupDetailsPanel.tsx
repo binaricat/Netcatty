@@ -51,9 +51,11 @@ import { Combobox } from "./ui/combobox";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { TerminalFontSelect } from "./settings/TerminalFontSelect";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 type SubPanel = "none" | "proxy" | "chain" | "env-vars" | "theme-select";
 
@@ -814,29 +816,33 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                       }
                     }}
                   />
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    title={t("hostDetails.credential.browseKeyFile")}
-                    onClick={async () => {
-                      const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
-                      if (!bridge?.selectFile) return;
-                      const filePath = await bridge.selectFile(
-                        "Select SSH Private Key",
-                        undefined,
-                        [{ name: "All Files", extensions: ["*"] }]
-                      );
-                      if (filePath) {
-                        const paths = [...(form.identityFilePaths || []), filePath];
-                        update("identityFilePaths", paths);
-                        update("identityFileId", undefined);
-                        update("authMethod", "key");
-                      }
-                    }}
-                  >
-                    <FolderOpen size={14} />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="secondary"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={async () => {
+                          const bridge = (window as unknown as { netcatty?: NetcattyBridge }).netcatty;
+                          if (!bridge?.selectFile) return;
+                          const filePath = await bridge.selectFile(
+                            "Select SSH Private Key",
+                            undefined,
+                            [{ name: "All Files", extensions: ["*"] }]
+                          );
+                          if (filePath) {
+                            const paths = [...(form.identityFilePaths || []), filePath];
+                            update("identityFilePaths", paths);
+                            update("identityFileId", undefined);
+                            update("authMethod", "key");
+                          }
+                        }}
+                      >
+                        <FolderOpen size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("hostDetails.credential.browseKeyFile")}</TooltipContent>
+                  </Tooltip>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -871,16 +877,20 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             />
 
             {/* Backspace behavior */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
-              <select
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                value={form.backspaceBehavior ?? ""}
-                onChange={(e) => update("backspaceBehavior", e.target.value || undefined)}
+              <Select
+                value={form.backspaceBehavior ?? "default"}
+                onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
               >
-                <option value="">{t("hostDetails.backspaceBehavior.default")}</option>
-                <option value="ctrl-h">^H (0x08)</option>
-              </select>
+                <SelectTrigger className="h-8 w-auto text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{t("hostDetails.backspaceBehavior.default")}</SelectItem>
+                  <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Proxy */}
@@ -895,14 +905,19 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               </div>
               <div className="flex min-w-0 items-center gap-2">
                 {(form.proxyConfig?.host || form.proxyProfileId) && (
-                  <div title={proxySummaryLabel} className="min-w-0">
-                    <Badge
-                      variant="secondary"
-                      className="max-w-[160px] truncate text-xs"
-                    >
-                      {proxySummaryLabel}
-                    </Badge>
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="min-w-0 cursor-default">
+                        <Badge
+                          variant="secondary"
+                          className="max-w-[160px] truncate text-xs"
+                        >
+                          {proxySummaryLabel}
+                        </Badge>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{proxySummaryLabel}</TooltipContent>
+                  </Tooltip>
                 )}
                 <ChevronRight size={14} className="text-muted-foreground" />
               </div>

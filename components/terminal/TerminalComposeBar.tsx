@@ -8,6 +8,7 @@
 import { Radio, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { cn } from '../../lib/utils';
 
 export interface TerminalComposeBarProps {
@@ -83,12 +84,14 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
             <div className="flex items-center gap-2">
                 {/* Broadcast indicator */}
                 {isBroadcastEnabled && (
-                    <div
-                        className="flex items-center"
-                        title={t("terminal.composeBar.broadcasting")}
-                    >
-                        <Radio size={14} className="text-amber-400 animate-pulse" />
-                    </div>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div className="flex items-center cursor-default">
+                                <Radio size={14} className="text-amber-400 animate-pulse" />
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("terminal.composeBar.broadcasting")}</TooltipContent>
+                    </Tooltip>
                 )}
 
                 {/* Borderless input — lives flush on the terminal bg so the
@@ -114,25 +117,29 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
                 />
 
                 {/* Minimal close button — no filled bg, hover only. */}
-                <button
-                    className="h-6 w-6 flex items-center justify-center rounded-md transition-colors duration-150 flex-shrink-0"
-                    style={{
-                        color: `color-mix(in srgb, ${resolvedFg} 50%, ${resolvedBg} 50%)`,
-                        background: 'transparent',
-                    }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.background = `color-mix(in srgb, ${resolvedFg} 10%, ${resolvedBg} 90%)`;
-                        e.currentTarget.style.color = resolvedFg;
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.color = `color-mix(in srgb, ${resolvedFg} 50%, ${resolvedBg} 50%)`;
-                    }}
-                    onClick={onClose}
-                    title={t("terminal.composeBar.close")}
-                >
-                    <X size={12} />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            className="h-6 w-6 flex items-center justify-center rounded-md transition-colors duration-150 flex-shrink-0"
+                            style={{
+                                color: `color-mix(in srgb, ${resolvedFg} 50%, ${resolvedBg} 50%)`,
+                                background: 'transparent',
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.background = `color-mix(in srgb, ${resolvedFg} 10%, ${resolvedBg} 90%)`;
+                                e.currentTarget.style.color = resolvedFg;
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.color = `color-mix(in srgb, ${resolvedFg} 50%, ${resolvedBg} 50%)`;
+                            }}
+                            onClick={onClose}
+                        >
+                            <X size={12} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.composeBar.close")}</TooltipContent>
+                </Tooltip>
             </div>
         </div>
     );

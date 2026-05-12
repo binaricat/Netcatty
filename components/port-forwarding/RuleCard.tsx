@@ -68,13 +68,26 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-semibold truncate">{rule.label}</span>
-                                <span
-                                    className={cn(
-                                        "h-2 w-2 rounded-full flex-shrink-0",
-                                        getStatusColor(rule.status)
-                                    )}
-                                    title={rule.status === 'error' && rule.error ? rule.error : undefined}
-                                />
+                                {rule.status === 'error' && rule.error ? (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span
+                                                className={cn(
+                                                    "h-2 w-2 rounded-full flex-shrink-0 cursor-default",
+                                                    getStatusColor(rule.status)
+                                                )}
+                                            />
+                                        </TooltipTrigger>
+                                        <TooltipContent>{rule.error}</TooltipContent>
+                                    </Tooltip>
+                                ) : (
+                                    <span
+                                        className={cn(
+                                            "h-2 w-2 rounded-full flex-shrink-0",
+                                            getStatusColor(rule.status)
+                                        )}
+                                    />
+                                )}
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                                 <TooltipProvider delayDuration={300}>

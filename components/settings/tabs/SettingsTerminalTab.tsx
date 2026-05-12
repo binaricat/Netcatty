@@ -19,6 +19,7 @@ import { Button } from "../../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
+import { Select as ShadcnSelect, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
 import { SectionHeader, Select, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { ThemeSelectModal } from "../ThemeSelectModal";
 import { TerminalFontSelect } from "../TerminalFontSelect";
@@ -960,35 +961,41 @@ export default function SettingsTerminalTab(props: {
           description={t("settings.terminal.localShell.shell.desc")}
         >
           <div className="flex flex-col gap-1 items-end">
-            <select
-              className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
+            <ShadcnSelect
               value={
                 showCustomShellInput
                   ? "__custom__"
-                  : terminalSettings.localShell || ""
+                  : (terminalSettings.localShell || "__default__")
               }
-              onChange={(e) => {
-                const value = e.target.value;
+              onValueChange={(value) => {
                 if (value === "__custom__") {
                   setCustomShellDraft(terminalSettings.localShell || "");
                   setCustomShellModalOpen(true);
+                } else if (value === "__default__") {
+                  setShowCustomShellInput(false);
+                  updateTerminalSetting("localShell", "");
                 } else {
                   setShowCustomShellInput(false);
                   updateTerminalSetting("localShell", value);
                 }
               }}
             >
-              <option value="">
-                {t("settings.terminal.localShell.shell.default")}
-                {defaultShell ? ` (${defaultShell.split(/[/\\]/).pop()})` : ""}
-              </option>
-              {discoveredShells.map((shell) => (
-                <option key={shell.id} value={shell.id}>
-                  {shell.name}
-                </option>
-              ))}
-              <option value="__custom__">{t("settings.terminal.localShell.shell.custom")}</option>
-            </select>
+              <SelectTrigger className="h-9 w-48 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">
+                  {t("settings.terminal.localShell.shell.default")}
+                  {defaultShell ? ` (${defaultShell.split(/[/\\]/).pop()})` : ""}
+                </SelectItem>
+                {discoveredShells.map((shell) => (
+                  <SelectItem key={shell.id} value={shell.id}>
+                    {shell.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__custom__">{t("settings.terminal.localShell.shell.custom")}</SelectItem>
+              </SelectContent>
+            </ShadcnSelect>
             {showCustomShellInput && (
               <span className="text-xs text-muted-foreground truncate max-w-48">
                 {terminalSettings.localShell}

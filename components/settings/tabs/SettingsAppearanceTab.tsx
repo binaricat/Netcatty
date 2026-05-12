@@ -7,6 +7,7 @@ import { SUPPORTED_UI_LOCALES } from "../../../infrastructure/config/i18n";
 import { cn } from "../../../lib/utils";
 import { SectionHeader, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
 import { FontSelect } from "../FontSelect";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 
 export default function SettingsAppearanceTab(props: {
   theme: "dark" | "light" | "system";
@@ -122,20 +123,23 @@ export default function SettingsAppearanceTab(props: {
   ) => (
     <div className="flex flex-wrap gap-2 justify-end">
       {options.map((preset) => (
-        <button
-          key={preset.id}
-          onClick={() => onChange(preset.id)}
-          className={cn(
-            "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm border border-border/70",
-            value === preset.id
-              ? "ring-2 ring-offset-2 ring-foreground scale-110"
-              : "hover:scale-105",
-          )}
-          style={getHslStyle(preset.tokens.background)}
-          title={preset.name}
-        >
-          {value === preset.id && <Check className="text-white drop-shadow-md" size={10} />}
-        </button>
+        <Tooltip key={preset.id}>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => onChange(preset.id)}
+              className={cn(
+                "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm border border-border/70",
+                value === preset.id
+                  ? "ring-2 ring-offset-2 ring-foreground scale-110"
+                  : "hover:scale-105",
+              )}
+              style={getHslStyle(preset.tokens.background)}
+            >
+              {value === preset.id && <Check className="text-white drop-shadow-md" size={10} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{preset.name}</TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );
@@ -212,42 +216,49 @@ export default function SettingsAppearanceTab(props: {
             <div className="text-sm font-medium">{t("settings.appearance.accentColor.custom")}</div>
             <div className="flex flex-wrap gap-2">
               {ACCENT_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  onClick={() => setCustomAccent(c.value)}
-                  className={cn(
-                    "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm",
-                    customAccent === c.value
-                      ? "ring-2 ring-offset-2 ring-foreground scale-110"
-                      : "hover:scale-105",
-                  )}
-                  style={getHslStyle(c.value)}
-                  title={c.name}
-                >
-                  {customAccent === c.value && <Check className="text-white drop-shadow-md" size={10} />}
-                </button>
+                <Tooltip key={c.name}>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setCustomAccent(c.value)}
+                      className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm",
+                        customAccent === c.value
+                          ? "ring-2 ring-offset-2 ring-foreground scale-110"
+                          : "hover:scale-105",
+                      )}
+                      style={getHslStyle(c.value)}
+                    >
+                      {customAccent === c.value && <Check className="text-white drop-shadow-md" size={10} />}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{c.name}</TooltipContent>
+                </Tooltip>
               ))}
-              <label
-                className={cn(
-                  "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm cursor-pointer",
-                  "bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500",
-                  !ACCENT_COLORS.some((c) => c.value === customAccent)
-                    ? "ring-2 ring-offset-2 ring-foreground scale-110"
-                    : "hover:scale-105",
-                )}
-                title={t("settings.appearance.customColor")}
-              >
-                <input
-                  type="color"
-                  className="sr-only"
-                  onChange={(e) => setCustomAccent(hexToHsl(e.target.value))}
-                />
-                {!ACCENT_COLORS.some((c) => c.value === customAccent) ? (
-                  <Check className="text-white drop-shadow-md" size={10} />
-                ) : (
-                  <Palette size={12} className="text-white drop-shadow-md" />
-                )}
-              </label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <label
+                    className={cn(
+                      "w-6 h-6 rounded-full flex items-center justify-center transition-all shadow-sm cursor-pointer",
+                      "bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500",
+                      !ACCENT_COLORS.some((c) => c.value === customAccent)
+                        ? "ring-2 ring-offset-2 ring-foreground scale-110"
+                        : "hover:scale-105",
+                    )}
+                  >
+                    <input
+                      type="color"
+                      className="sr-only"
+                      onChange={(e) => setCustomAccent(hexToHsl(e.target.value))}
+                    />
+                    {!ACCENT_COLORS.some((c) => c.value === customAccent) ? (
+                      <Check className="text-white drop-shadow-md" size={10} />
+                    ) : (
+                      <Palette size={12} className="text-white drop-shadow-md" />
+                    )}
+                  </label>
+                </TooltipTrigger>
+                <TooltipContent>{t("settings.appearance.customColor")}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         )}

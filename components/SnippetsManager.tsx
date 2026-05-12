@@ -745,21 +745,25 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           actions={
             <>
               {editingSnippet.id && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive hover:text-destructive"
-                  onClick={() => {
-                    const id = editingSnippet.id;
-                    if (!id) return;
-                    onDelete(id);
-                    handleClosePanel();
-                  }}
-                  aria-label={t('common.delete')}
-                  title={t('common.delete')}
-                >
-                  <Trash2 size={16} />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => {
+                        const id = editingSnippet.id;
+                        if (!id) return;
+                        onDelete(id);
+                        handleClosePanel();
+                      }}
+                      aria-label={t('common.delete')}
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('common.delete')}</TooltipContent>
+                </Tooltip>
               )}
               <Button
                 variant="ghost"
@@ -839,18 +843,22 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.shortkey')}</p>
                 {editingSnippet.shortkey && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() => {
-                      setEditingSnippet(prev => ({ ...prev, shortkey: undefined }));
-                      setShortkeyError(null);
-                    }}
-                    title={t('snippets.shortkey.clear')}
-                  >
-                    <RotateCcw size={12} />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => {
+                          setEditingSnippet(prev => ({ ...prev, shortkey: undefined }));
+                          setShortkeyError(null);
+                        }}
+                      >
+                        <RotateCcw size={12} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('snippets.shortkey.clear')}</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
               <button
@@ -1269,7 +1277,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                 value={newPackageName}
                 onChange={(e) => setNewPackageName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createPackage()}
-                title="Package names can contain letters, numbers, hyphens, underscores, and forward slashes. Can optionally start with /"
               />
               <p className="text-[11px] text-muted-foreground">{t('snippets.packageDialog.hint')}</p>
             </div>

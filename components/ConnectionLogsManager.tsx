@@ -12,6 +12,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { cn } from "../lib/utils";
 import { ConnectionLog, Host } from "../types";
 import { ScrollArea } from "./ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface ConnectionLogsManagerProps {
     logs: ConnectionLog[];
@@ -108,31 +109,39 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
 
             {/* Saved column */}
             <div className="flex items-center gap-2 shrink-0">
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleSaved(log.id);
-                    }}
-                    className={cn(
-                        "p-1.5 rounded-md transition-colors",
-                        log.saved
-                            ? "text-primary bg-primary/10"
-                            : "text-muted-foreground hover:text-primary hover:bg-primary/10"
-                    )}
-                    title={log.saved ? t("logs.action.unsave") : t("logs.action.save")}
-                >
-                    <Bookmark size={16} fill={log.saved ? "currentColor" : "none"} />
-                </button>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(log.id);
-                    }}
-                    className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
-                    title={t("logs.action.delete")}
-                >
-                    <Trash2 size={16} />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleSaved(log.id);
+                            }}
+                            className={cn(
+                                "p-1.5 rounded-md transition-colors",
+                                log.saved
+                                    ? "text-primary bg-primary/10"
+                                    : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            )}
+                        >
+                            <Bookmark size={16} fill={log.saved ? "currentColor" : "none"} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{log.saved ? t("logs.action.unsave") : t("logs.action.save")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(log.id);
+                            }}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                            <Trash2 size={16} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("logs.action.delete")}</TooltipContent>
+                </Tooltip>
             </div>
         </div>
     );
