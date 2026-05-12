@@ -15,18 +15,27 @@ type PasteDisplayState = {
   inPasteEchoActiveRegion: boolean;
 };
 
+type PasteInputScrollState = {
+  expiresAt: number;
+  remainingDataVariants: string[];
+};
+
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
+const pasteInputScrollStates = new WeakMap<object, PasteInputScrollState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;
+const PASTE_INPUT_SCROLL_WINDOW_MS = 4000;
 const READLINE_ACTIVE_REGION_START = "\x1b[7m";
 const READLINE_ACTIVE_REGION_END = "\x1b[27m";
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 const MIN_PASTE_ECHO_FRAGMENT_LENGTH = 6;
 const ESC = "\x1b";
 const BEL = "\x07";
 
 const getNow = () => Date.now();
 
-const isStateActive = (state: PasteDisplayState | undefined): state is PasteDisplayState =>
+const isStateActive = <T extends { expiresAt: number }>(state: T | undefined): state is T =>
   !!state && state.expiresAt > getNow();
 
 const stripReadlineActiveRegion = (data: string): string =>
@@ -106,6 +115,18 @@ const getPasteEchoFragments = (text: string): string[] =>
         .filter((line) => line.length >= MIN_PASTE_ECHO_FRAGMENT_LENGTH),
     ),
   );
+
+const preparePasteTextForXterm = (text: string): string => text.replace(/\r?\n/g, "\r");
+
+const getPasteInputDataVariants = (text: string): string[] => {
+  const preparedText = preparePasteTextForXterm(text);
+  return Array.from(
+    new Set([
+      preparedText,
+      `${BRACKETED_PASTE_START}${preparedText}${BRACKETED_PASTE_END}`,
+    ]),
+  ).filter((candidate) => candidate.length > 0);
+};
 
 const isExpectedPasteEcho = (data: string, state: PasteDisplayState): boolean => {
   if (state.pasteEchoFragments.length === 0) return false;
@@ -215,6 +236,15 @@ export function pasteTextIntoTerminal(
     });
   }
 
+  if (options.scrollOnPaste === false) {
+    pasteInputScrollStates.set(term, {
+      expiresAt: getNow() + PASTE_INPUT_SCROLL_WINDOW_MS,
+      remainingDataVariants: getPasteInputDataVariants(text),
+    });
+  } else {
+    pasteInputScrollStates.delete(term);
+  }
+
   term.paste(text);
 
   if (!options.scrollOnPaste) return;
@@ -231,6 +261,28 @@ export function pasteTextIntoTerminal(
       term.scrollToBottom();
     });
   }
+}
+
+export function shouldSuppressTerminalInputScrollForUserPaste(term: object, data: string): boolean {
+  const state = pasteInputScrollStates.get(term);
+  if (!isStateActive(state)) {
+    pasteInputScrollStates.delete(term);
+    return false;
+  }
+
+  const matchingIndex = state.remainingDataVariants.findIndex((candidate) => {
+    if (candidate === data) return true;
+    return candidate.startsWith(data);
+  });
+  if (matchingIndex === -1) return false;
+
+  const candidate = state.remainingDataVariants[matchingIndex];
+  if (candidate.length > data.length) {
+    state.remainingDataVariants[matchingIndex] = candidate.slice(data.length);
+  } else {
+    pasteInputScrollStates.delete(term);
+  }
+  return true;
 }
 
 export function prepareTerminalDataForUserPasteDisplay(term: object, data: string): string {

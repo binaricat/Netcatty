@@ -5,6 +5,7 @@ import {
   clearPasteResidualAfterTerminalWrite,
   pasteTextIntoTerminal,
   prepareTerminalDataForUserPasteDisplay,
+  shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
 
 test("user paste delegates raw clipboard text to xterm paste handling", () => {
@@ -39,6 +40,65 @@ test("user paste preserves the existing scroll-on-paste behavior", () => {
   });
 
   assert.deepEqual(calls, ["paste", "scroll", "raf", "scroll"]);
+});
+
+test("user paste with scroll disabled suppresses input auto-scroll for raw paste data", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "line one\rline two"), true);
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "x"), false);
+});
+
+test("user paste with scroll disabled suppresses input auto-scroll for bracketed paste data", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(
+    shouldSuppressTerminalInputScrollForUserPaste(term, "\x1b[200~line one\rline two\x1b[201~"),
+    true,
+  );
+});
+
+test("user paste with scroll enabled keeps input auto-scroll available", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: true,
+    requestAnimationFrame: () => {},
+  });
+
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "line one\rline two"), false);
+});
+
+test("user paste with scroll disabled suppresses split input chunks", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+  });
+
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "line one\r"), true);
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "line two"), true);
+  assert.equal(shouldSuppressTerminalInputScrollForUserPaste(term, "line two"), false);
 });
 
 test("long multi-line paste strips readline active-region highlighting from echo", () => {

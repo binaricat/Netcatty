@@ -44,7 +44,10 @@ import {
 import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { handleSerialLineModeInput } from "./serialLineInput";
-import { pasteTextIntoTerminal } from "./terminalUserPaste";
+import {
+  pasteTextIntoTerminal,
+  shouldSuppressTerminalInputScrollForUserPaste,
+} from "./terminalUserPaste";
 import type {
   Host,
   KeyBinding,
@@ -651,7 +654,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.onBroadcastInputRef.current(broadcastData, ctx.sessionId);
       }
 
-      scrollToBottomAfterInput(data);
+      if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {
+        scrollToBottomAfterInput(data);
+      }
 
       // Notify autocomplete of input
       ctx.onAutocompleteInput?.(data);
