@@ -633,23 +633,22 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           reject(new Error(errMsg));
         });
         // Handle keyboard-interactive authentication for jump hosts (2FA/MFA)
-        const chainKiHandler = createKeyboardInteractiveHandler({
+        conn.on('keyboard-interactive', createKeyboardInteractiveHandler({
           sender,
           sessionId,
           hostname: hopLabel,
           password: jump.password,
           logPrefix: `[Chain] Hop ${i + 1}/${totalHops}`,
-        });
-        conn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
-          if (prompts && prompts.length > 0) {
-            sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'waiting for user input...');
-          }
-          const wrappedFinish = (...args) => {
-            sendProgress(i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'user responded');
-            finish(...args);
-          };
-          chainKiHandler(name, instructions, lang, prompts, wrappedFinish);
-        });
+          onAutoFill: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'using saved password',
+          ),
+          onPromptShown: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'waiting for user input...',
+          ),
+          onUserResponded: () => sendProgress(
+            i + 1, totalHops + 1, hopLabel, 'auth-attempt', 'user responded',
+          ),
+        }));
         console.log(`[Chain] Hop ${i + 1}/${totalHops}: Connecting to ${hopLabel}...`);
         conn.connect(connOpts);
       });
@@ -1565,51 +1564,26 @@ async function startSSHSession(event, options) {
         }
       });
 
-      // Handle keyboard-interactive authentication (2FA/MFA)
-      conn.on("keyboard-interactive", (name, instructions, instructionsLang, prompts, finish) => {
-        console.log(`${logPrefix} ${options.hostname} keyboard-interactive auth requested`, {
-          name,
-          instructions,
-          promptCount: prompts?.length || 0,
-          prompts: prompts?.map(p => ({ prompt: p.prompt, echo: p.echo })),
-        });
-
-        // If there are no prompts, just call finish with empty array
-        if (!prompts || prompts.length === 0) {
-          console.log(`${logPrefix} No prompts, finishing keyboard-interactive`);
-          finish([]);
-          return;
-        }
-
-        sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'waiting for user input...');
-
-        // Forward ALL prompts to user - no auto-fill to avoid semantic detection issues
-        // (Prompt text is admin-customizable and may not contain expected keywords)
-        const requestId = keyboardInteractiveHandler.generateRequestId('ssh');
-
-        keyboardInteractiveHandler.storeRequest(requestId, (userResponses) => {
-          console.log(`${logPrefix} Received user responses, finishing keyboard-interactive`);
-          sendProgress(totalHops, totalHops, options.hostname, 'auth-attempt', 'user responded');
-          finish(userResponses);
-        }, sender.id, sessionId);
-
-        const promptsData = prompts.map((p) => ({
-          prompt: p.prompt,
-          echo: p.echo,
-        }));
-
-        console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
-
-        safeSend(sender, "netcatty:keyboard-interactive", {
-          requestId,
-          sessionId,
-          name: name || "",
-          instructions: instructions || "",
-          prompts: promptsData,
-          hostname: options.hostname,
-          savedPassword: options.password || null, // Pass saved password for optional fill button
-        });
-      });
+      // Handle keyboard-interactive authentication (2FA/MFA). Uses the shared
+      // factory so PAM-wrapped single-password prompts get auto-filled from
+      // the saved host password (#969) — same path the chain/SFTP/port-
+      // forwarding bridges go through.
+      conn.on("keyboard-interactive", createKeyboardInteractiveHandler({
+        sender,
+        sessionId,
+        hostname: options.hostname,
+        password: options.password,
+        logPrefix,
+        onAutoFill: () => sendProgress(
+          totalHops, totalHops, options.hostname, 'auth-attempt', 'using saved password',
+        ),
+        onPromptShown: () => sendProgress(
+          totalHops, totalHops, options.hostname, 'auth-attempt', 'waiting for user input...',
+        ),
+        onUserResponded: () => sendProgress(
+          totalHops, totalHops, options.hostname, 'auth-attempt', 'user responded',
+        ),
+      }));
 
 
       // Enable keyboard-interactive authentication in authHandler
