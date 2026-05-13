@@ -717,12 +717,44 @@ function buildAuthHandler(options) {
   };
 }
 
-// Latin-script + CJK keywords for "this prompt is asking for a password
-// rather than an OTP". Deliberately narrow: shapes like "Passcode:" (Duo),
-// "Verification code:", "Token:", "Code:" must NOT match here, because
-// auto-filling the saved password into one of those burns an auth attempt
-// on the server side and risks tripping `pam_faillock` / `pam_tally2`
-// lockout policies. See the #969 PR review.
+// OTP / MFA / token vocabulary. Matched FIRST — any hit here disqualifies the
+// challenge from auto-fill even if it also contains a "password" keyword.
+// Catches phrases like "One-time password", "动态密码", "动态口令",
+// "一次性密码", "Verification code", "Duo passcode", "two-factor", etc.
+// — all single-prompt shapes that look like password fields on the surface
+// but actually want an OTP. Submitting the saved password into any of these
+// burns an auth attempt and risks `pam_faillock` / `pam_tally2` lockout.
+// (#969 PR review, second round.)
+const OTP_PROMPT_PATTERN = new RegExp(
+  [
+    "one[\\s-]?time",
+    "\\botp\\b",
+    "verification",
+    "passcode",
+    "\\btoken\\b",
+    "2fa",
+    "two[\\s-]?factor",
+    "multi[\\s-]?factor",
+    "\\bmfa\\b",
+    "second\\s+factor",
+    "duo",
+    // CJK — no word boundaries; substring match is intentional
+    "动态",
+    "一次性",
+    "验证码",
+    "验证信息",
+    "令牌",
+    "双因素",
+    "多因素",
+    "短信验证",
+    "手机验证",
+  ].join("|"),
+  "i",
+);
+
+// Latin-script + CJK keywords for "this prompt is asking for a reusable
+// password". Only consulted AFTER OTP_PROMPT_PATTERN clears, so phrases like
+// "One-time password" or "动态密码" never reach this step.
 //
 // Custom-localized prompts that don't match these keywords fall through to
 // the modal, which is the same behavior as before the auto-fill optimization
@@ -739,11 +771,10 @@ const PASSWORD_PROMPT_PATTERN = /passw(or)?d|密\s*码|口\s*令/i;
  *
  * Conservative criteria, matching OpenSSH and Tabby behavior:
  *   - exactly one prompt (multi-prompt is almost certainly real 2FA / MFA)
- *   - the prompt has `echo === false` (so it isn't asking for a username,
- *     OTP code, or other low-secret value with visible echo)
- *   - the prompt text contains a known password keyword — Latin "password"
- *     or CJK "密码" / "口令" — so we don't blindly answer OTP / Duo /
- *     hardware-token challenges with the wrong value
+ *   - the prompt has `echo === false`
+ *   - the prompt text does NOT contain any OTP / MFA vocabulary
+ *   - the prompt text DOES contain a recognized password keyword (Latin
+ *     "password" / "passwd", CJK "密码" / "口令")
  *   - we have a non-empty saved password
  *
  * Anything else falls through to the modal so the user can answer in person.
@@ -754,6 +785,7 @@ function isAutoFillablePasswordChallenge(prompts, password) {
   const prompt = prompts[0];
   if (!prompt || prompt.echo !== false) return false;
   const promptText = typeof prompt.prompt === "string" ? prompt.prompt : "";
+  if (OTP_PROMPT_PATTERN.test(promptText)) return false;
   return PASSWORD_PROMPT_PATTERN.test(promptText);
 }
 

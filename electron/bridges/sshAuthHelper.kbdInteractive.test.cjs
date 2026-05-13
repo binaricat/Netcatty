@@ -32,11 +32,18 @@ const drainPendingRequests = (sent) => {
 };
 
 const passwordPrompt = { prompt: "Password:", echo: false };
+const linuxPasswordPrompt = { prompt: "[sudo] password for alice:", echo: false };
 const verificationCodePrompt = { prompt: "Verification code:", echo: true };
 const otpPrompt = { prompt: "Verification code:", echo: false }; // Google Auth / TOTP
 const duoPrompt = { prompt: "Duo two-factor login\nPasscode or option (1-1):", echo: false };
 const cjkPasswordPrompt = { prompt: "密码：", echo: false };
 const customizedAuthPrompt = { prompt: "Please authenticate:", echo: false };
+// OTP prompts that DO mention the word "password" or "口令" — the literal
+// keyword should not be enough to trigger auto-fill (#969 PR review round 2).
+const oneTimePasswordPrompt = { prompt: "Enter your one-time password:", echo: false };
+const cjkDynamicPasswordPrompt = { prompt: "动态密码：", echo: false };
+const cjkDynamicTokenPrompt = { prompt: "动态口令：", echo: false };
+const cjkOneTimePasswordPrompt = { prompt: "一次性密码：", echo: false };
 
 // --- isAutoFillablePasswordChallenge ---------------------------------------
 
@@ -90,6 +97,27 @@ test("isAutoFillablePasswordChallenge falls through to the modal for unrecognize
   // — the user sees the modal as before. No regression from the old
   // always-prompt baseline.
   assert.equal(isAutoFillablePasswordChallenge([customizedAuthPrompt], "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge rejects 'One-time password' even though it contains the word 'password'", () => {
+  // PR review round 2: the OTP vocabulary check must run before the password
+  // keyword check, otherwise "password" in "One-time password" triggers a
+  // false-positive auto-fill that burns a 2FA attempt.
+  assert.equal(isAutoFillablePasswordChallenge([oneTimePasswordPrompt], "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge rejects Chinese OTP prompts ('动态密码', '动态口令', '一次性密码')", () => {
+  // The Chinese "动态密码" / "动态口令" / "一次性密码" idioms specifically
+  // mean OTP. Mustn't auto-fill the reusable password into them.
+  assert.equal(isAutoFillablePasswordChallenge([cjkDynamicPasswordPrompt], "hunter2"), false);
+  assert.equal(isAutoFillablePasswordChallenge([cjkDynamicTokenPrompt], "hunter2"), false);
+  assert.equal(isAutoFillablePasswordChallenge([cjkOneTimePasswordPrompt], "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge accepts a sudo-style password prompt", () => {
+  // Regression guard: the OTP deny-list should not over-block normal Linux
+  // PAM prompts that legitimately mention a username after "password".
+  assert.equal(isAutoFillablePasswordChallenge([linuxPasswordPrompt], "hunter2"), true);
 });
 
 // --- createKeyboardInteractiveHandler --------------------------------------
