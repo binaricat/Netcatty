@@ -717,6 +717,18 @@ function buildAuthHandler(options) {
   };
 }
 
+// Latin-script + CJK keywords for "this prompt is asking for a password
+// rather than an OTP". Deliberately narrow: shapes like "Passcode:" (Duo),
+// "Verification code:", "Token:", "Code:" must NOT match here, because
+// auto-filling the saved password into one of those burns an auth attempt
+// on the server side and risks tripping `pam_faillock` / `pam_tally2`
+// lockout policies. See the #969 PR review.
+//
+// Custom-localized prompts that don't match these keywords fall through to
+// the modal, which is the same behavior as before the auto-fill optimization
+// — strictly no worse than the old "always prompt" baseline.
+const PASSWORD_PROMPT_PATTERN = /passw(or)?d|密\s*码|口\s*令/i;
+
 /**
  * Decide whether a keyboard-interactive challenge is "just a PAM-wrapped
  * password prompt" that we can answer with the saved host password without
@@ -729,6 +741,9 @@ function buildAuthHandler(options) {
  *   - exactly one prompt (multi-prompt is almost certainly real 2FA / MFA)
  *   - the prompt has `echo === false` (so it isn't asking for a username,
  *     OTP code, or other low-secret value with visible echo)
+ *   - the prompt text contains a known password keyword — Latin "password"
+ *     or CJK "密码" / "口令" — so we don't blindly answer OTP / Duo /
+ *     hardware-token challenges with the wrong value
  *   - we have a non-empty saved password
  *
  * Anything else falls through to the modal so the user can answer in person.
@@ -737,7 +752,9 @@ function isAutoFillablePasswordChallenge(prompts, password) {
   if (typeof password !== "string" || password.length === 0) return false;
   if (!Array.isArray(prompts) || prompts.length !== 1) return false;
   const prompt = prompts[0];
-  return Boolean(prompt) && prompt.echo === false;
+  if (!prompt || prompt.echo !== false) return false;
+  const promptText = typeof prompt.prompt === "string" ? prompt.prompt : "";
+  return PASSWORD_PROMPT_PATTERN.test(promptText);
 }
 
 /**

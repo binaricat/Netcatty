@@ -33,6 +33,10 @@ const drainPendingRequests = (sent) => {
 
 const passwordPrompt = { prompt: "Password:", echo: false };
 const verificationCodePrompt = { prompt: "Verification code:", echo: true };
+const otpPrompt = { prompt: "Verification code:", echo: false }; // Google Auth / TOTP
+const duoPrompt = { prompt: "Duo two-factor login\nPasscode or option (1-1):", echo: false };
+const cjkPasswordPrompt = { prompt: "密码：", echo: false };
+const customizedAuthPrompt = { prompt: "Please authenticate:", echo: false };
 
 // --- isAutoFillablePasswordChallenge ---------------------------------------
 
@@ -60,6 +64,32 @@ test("isAutoFillablePasswordChallenge rejects when no saved password is availabl
 test("isAutoFillablePasswordChallenge rejects empty / non-array prompts", () => {
   assert.equal(isAutoFillablePasswordChallenge([], "hunter2"), false);
   assert.equal(isAutoFillablePasswordChallenge(undefined, "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge rejects OTP-style hidden prompts (Google Authenticator, TOTP)", () => {
+  // Single prompt, echo=false, but the text says "Verification code" — that's
+  // a 2FA challenge, not a password. Submitting the saved password here would
+  // burn an auth attempt on the server. (#969 PR review)
+  assert.equal(isAutoFillablePasswordChallenge([otpPrompt], "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge rejects Duo-style passcode prompts", () => {
+  // "Passcode" is the term Duo uses for the OTP, not a reusable password.
+  // Treat it as a 2FA challenge.
+  assert.equal(isAutoFillablePasswordChallenge([duoPrompt], "hunter2"), false);
+});
+
+test("isAutoFillablePasswordChallenge accepts CJK password prompts", () => {
+  // PAM on Chinese-locale Linux often renders "密码：" — the user still
+  // expects the saved password to work.
+  assert.equal(isAutoFillablePasswordChallenge([cjkPasswordPrompt], "hunter2"), true);
+});
+
+test("isAutoFillablePasswordChallenge falls through to the modal for unrecognized prompt text", () => {
+  // Custom prompts that don't mention a known keyword stay on the safe side
+  // — the user sees the modal as before. No regression from the old
+  // always-prompt baseline.
+  assert.equal(isAutoFillablePasswordChallenge([customizedAuthPrompt], "hunter2"), false);
 });
 
 // --- createKeyboardInteractiveHandler --------------------------------------
@@ -161,6 +191,29 @@ test("createKeyboardInteractiveHandler does not auto-fill when no saved password
   assert.deepEqual(promptEvents, ["prompt-shown"]);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.savedPassword, null);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler shows the modal for OTP-style hidden prompts even with a saved password", () => {
+  // Regression guard for the #969 PR review: a single hidden-echo prompt
+  // that doesn't mention "password" must not auto-submit the saved value.
+  const { sender, sent } = createSender();
+  const autoFillEvents = [];
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "vps-1.example.com",
+    password: "hunter2",
+    onAutoFill: () => autoFillEvents.push("auto-fill"),
+  });
+
+  handler("", "", "", [otpPrompt], () => {});
+
+  assert.deepEqual(autoFillEvents, []);
+  assert.equal(sent.length, 1, "modal IPC should fire instead of auto-fill");
+  assert.equal(sent[0].channel, "netcatty:keyboard-interactive");
 
   drainPendingRequests(sent);
 });
