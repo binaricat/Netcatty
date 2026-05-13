@@ -117,7 +117,11 @@ test("classifyHostKey treats the same hostname on a different port as unknown", 
   assert.equal(result.status, "unknown");
 });
 
-test("classifyHostKey treats unknown incoming key types as comparable for changed hosts", () => {
+test("classifyHostKey reports unknown when only the incoming key type is unknown", () => {
+  // Without a confident key type from ssh2 we cannot tell whether this is a
+  // rotation of the stored key or a brand-new algorithm; force the user back
+  // through the first-time-trust path rather than scaring them with a
+  // "fingerprint changed" warning (#972).
   const result = classifyHostKey({
     knownHosts: [{
       id: "kh-1",
@@ -133,10 +137,13 @@ test("classifyHostKey treats unknown incoming key types as comparable for change
     fingerprint: "new-key",
   });
 
-  assert.equal(result.status, "changed");
+  assert.equal(result.status, "unknown");
 });
 
-test("classifyHostKey treats stored unknown key types as comparable for changed hosts", () => {
+test("classifyHostKey reports unknown when the stored record has no key type", () => {
+  // Legacy / imported records sometimes have an empty or "unknown" keyType.
+  // Promoting those to "changed" on every connect was the root cause of #972;
+  // treat them as not-comparable so the user re-confirms cleanly.
   const result = classifyHostKey({
     knownHosts: [{
       id: "kh-1",
@@ -152,7 +159,30 @@ test("classifyHostKey treats stored unknown key types as comparable for changed 
     fingerprint: "new-key",
   });
 
-  assert.equal(result.status, "changed");
+  assert.equal(result.status, "unknown");
+});
+
+test("classifyHostKey reports unknown when the server presents a different key type than any stored record", () => {
+  // Server with ssh-rsa stored; presents ssh-ed25519 this time. OpenSSH treats
+  // this as a new key offering, not a rotation; we match that behavior so a
+  // host with multiple algorithms doesn't spam mismatch warnings on every
+  // algorithm renegotiation.
+  const result = classifyHostKey({
+    knownHosts: [{
+      id: "kh-rsa",
+      hostname: "switch.local",
+      port: 22,
+      keyType: "ssh-rsa",
+      publicKey: "SHA256:rsa-key",
+      discoveredAt: 1,
+    }],
+    hostname: "switch.local",
+    port: 22,
+    keyType: "ssh-ed25519",
+    fingerprint: "new-key",
+  });
+
+  assert.equal(result.status, "unknown");
 });
 
 test("classifyHostKey prefers exact key type mismatches when a host has multiple keys", () => {
@@ -304,7 +334,10 @@ test("createHostVerifier prompts for unknown host keys and waits for user respon
 });
 
 test("createHostVerifier includes existing known host details when a key changes", async () => {
-  const rawKey = Buffer.from("changed server key");
+  // A well-formed wire blob so `describeHostKey` can recover keyType =
+  // "ssh-ed25519"; that triggers the strict (host, port, type) mismatch
+  // branch with a stored record of the same type but different fingerprint.
+  const rawKey = makeRawPublicKey("ssh-ed25519", "changed server key");
   const sent = [];
   const sender = {
     id: 1,
@@ -322,6 +355,7 @@ test("createHostVerifier includes existing known host details when a key changes
       port: 22,
       keyType: "ssh-ed25519",
       publicKey: "SHA256:old-key",
+      fingerprint: "old-key",
       discoveredAt: 1,
     }],
   });

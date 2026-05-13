@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeDistroId, sanitizeHost } from "../../domain/host";
 import { sanitizeGroupConfig } from "../../domain/groupConfig";
+import { normalizeKnownHosts } from "../../domain/knownHosts";
 import {
   ConnectionLog,
   GroupConfig,
@@ -505,11 +506,22 @@ export const useVaultState = () => {
         if (savedGroups) setCustomGroups(savedGroups);
         if (savedSnippetPackages) setSnippetPackages(savedSnippetPackages);
 
-        // Load known hosts
+        // Load known hosts. Records imported from `~/.ssh/known_hosts` and
+        // records saved by older builds may be missing the `fingerprint` /
+        // `keyType` fields the verifier compares against; backfill them now
+        // so the next SSH connect can match without falling into the brittle
+        // re-derivation path that caused the repeated "fingerprint changed"
+        // warnings in #972.
         const savedKnownHosts = localStorageAdapter.read<KnownHost[]>(
           STORAGE_KEY_KNOWN_HOSTS,
         );
-        if (savedKnownHosts) setKnownHosts(savedKnownHosts);
+        if (savedKnownHosts) {
+          const normalized = normalizeKnownHosts(savedKnownHosts);
+          setKnownHosts(normalized);
+          if (normalized !== savedKnownHosts) {
+            localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, normalized);
+          }
+        }
 
         // Load shell history
         const savedShellHistory = localStorageAdapter.read<ShellHistoryEntry[]>(
@@ -638,7 +650,7 @@ export const useVaultState = () => {
 
       if (key === STORAGE_KEY_KNOWN_HOSTS) {
         const next = safeParse<KnownHost[]>(event.newValue) ?? [];
-        setKnownHosts(next);
+        setKnownHosts(normalizeKnownHosts(next));
         return;
       }
 

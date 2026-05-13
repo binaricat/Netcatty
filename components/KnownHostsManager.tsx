@@ -22,6 +22,7 @@ import React, {
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useKnownHostsBackend } from "../application/state/useKnownHostsBackend";
 import { useStoredViewMode, ViewMode } from "../application/state/useStoredViewMode";
+import { fingerprintFromPublicKey } from "../domain/knownHosts";
 import { STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE } from "../infrastructure/config/storageKeys";
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
@@ -80,12 +81,20 @@ const parseKnownHostsFile = (content: string): KnownHost[] => {
         hostname = "(hashed)";
       }
 
+      const fullPublicKey = `${keyType} ${publicKey}`;
+      // Compute the fingerprint up front so the SSH host verifier can match
+      // against this record directly instead of re-deriving on every connect —
+      // the re-derivation path is where the false "fingerprint changed"
+      // warnings in #972 originated.
+      const fingerprint = fingerprintFromPublicKey(fullPublicKey);
+
       parsed.push({
         id: `kh-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         hostname,
         port,
         keyType,
-        publicKey: `${keyType} ${publicKey}`,
+        publicKey: fullPublicKey,
+        fingerprint: fingerprint || undefined,
         discoveredAt: Date.now(),
       });
     } catch {

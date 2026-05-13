@@ -81,6 +81,17 @@ const getKnownHostFingerprint = (knownHost) => {
     || fingerprintFromPublicKey(knownHost?.publicKey);
 };
 
+// Classification rules, in order:
+//   1. Any record for (host, port) whose fingerprint matches the live key →
+//      trusted. Fingerprint is the ground truth; key type is metadata.
+//   2. A record matching (host, port, keyType) *exactly* with a non-matching
+//      fingerprint → changed. Only this case is a real "key rotated" alarm —
+//      the user already trusted this exact algorithm on this host and the
+//      server now presents a different key of the same type.
+//   3. Otherwise → unknown. This includes the case where the server presents
+//      a key of an algorithm we have no record for, even if the host has
+//      records for other algorithms. Tabby and OpenSSH both treat that as a
+//      first-time prompt rather than a mismatch warning (#972).
 const classifyHostKey = ({ knownHosts = [], hostname, port = 22, keyType, fingerprint }) => {
   const normalizedFingerprint = normalizeFingerprint(fingerprint);
   const candidates = Array.isArray(knownHosts)
@@ -104,26 +115,17 @@ const classifyHostKey = ({ knownHosts = [], hostname, port = 22, keyType, finger
   }
 
   const normalizedKeyType = typeof keyType === "string" ? keyType.trim() : "";
-  const hasSpecificIncomingType = normalizedKeyType && normalizedKeyType !== "unknown";
-  let sameTypeMismatch;
-  if (hasSpecificIncomingType) {
-    sameTypeMismatch = comparableCandidates.find((entry) => entry.knownHost.keyType === normalizedKeyType);
-    if (!sameTypeMismatch && comparableCandidates.length === 1) {
-      const onlyCandidate = comparableCandidates[0];
-      if (!onlyCandidate.knownHost.keyType || onlyCandidate.knownHost.keyType === "unknown") {
-        sameTypeMismatch = onlyCandidate;
-      }
+  if (normalizedKeyType && normalizedKeyType !== "unknown") {
+    const sameTypeMismatch = comparableCandidates.find(
+      (entry) => entry.knownHost.keyType === normalizedKeyType,
+    );
+    if (sameTypeMismatch) {
+      return {
+        status: "changed",
+        knownHost: sameTypeMismatch.knownHost,
+        expectedFingerprint: sameTypeMismatch.fingerprint,
+      };
     }
-  } else if (comparableCandidates.length === 1) {
-    sameTypeMismatch = comparableCandidates[0];
-  }
-
-  if (sameTypeMismatch) {
-    return {
-      status: "changed",
-      knownHost: sameTypeMismatch.knownHost,
-      expectedFingerprint: sameTypeMismatch.fingerprint,
-    };
   }
 
   return { status: "unknown" };
