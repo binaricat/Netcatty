@@ -1459,6 +1459,9 @@ const zhCN: Messages = {
   'settings.terminal.behavior.preserveSelectionOnInput': '输入时保留选区',
   'settings.terminal.behavior.preserveSelectionOnInput.desc':
     '键盘输入时不清除鼠标选中的文本，方便选中路径后输入 `sz ` 之类命令再粘贴。',
+  'settings.terminal.behavior.forcePromptNewLine': '提示符另起一行',
+  'settings.terminal.behavior.forcePromptNewLine.desc':
+    '当命令输出的最后一行未以换行符结束时，将识别到的 shell 提示符移动到下一行显示。',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 剪贴板',
   'settings.terminal.behavior.osc52Clipboard.desc':
     '允许远程程序（tmux、vim 等）通过 OSC-52 转义序列访问本地剪贴板。',

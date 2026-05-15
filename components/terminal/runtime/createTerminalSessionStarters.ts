@@ -21,6 +21,12 @@ import {
   clearPasteResidualAfterTerminalWrite,
   prepareTerminalDataForUserPasteDisplay,
 } from "./terminalUserPaste";
+import {
+  markPromptLineBreakCommandPending,
+  prepareTerminalDataForPromptLineBreak,
+  syncPromptLineBreakState,
+  type PromptLineBreakState,
+} from "./promptLineBreak";
 
 /**
  * Per-connection token for stale-timer detection. The renderer reuses the
@@ -138,6 +144,7 @@ export type TerminalSessionStartersContext = {
   fitAddonRef: RefObject<FitAddon | null>;
   serializeAddonRef: RefObject<SerializeAddon | null>;
   pendingAuthRef: RefObject<PendingAuth>;
+  promptLineBreakStateRef?: RefObject<PromptLineBreakState>;
 
   updateStatus: (next: TerminalSession["status"]) => void;
   setStatus: Dispatch<SetStateAction<TerminalSession["status"]>>;
@@ -210,17 +217,34 @@ const writeSessionData = (
   term: XTerm,
   data: string,
 ) => {
-  const displayData = prepareTerminalDataForUserPasteDisplay(term, data);
   const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+  const forcePromptNewLine = settings?.forcePromptNewLine ?? true;
+  if (!forcePromptNewLine && ctx.promptLineBreakStateRef?.current) {
+    ctx.promptLineBreakStateRef.current.pendingCommand = false;
+    ctx.promptLineBreakStateRef.current.suppressNextPromptCache = false;
+  }
+  const displayData = prepareTerminalDataForPromptLineBreak(
+    term,
+    prepareTerminalDataForUserPasteDisplay(term, data),
+    ctx.promptLineBreakStateRef?.current,
+    forcePromptNewLine,
+  );
+  const syncPrompt = () => {
+    if (forcePromptNewLine) {
+      syncPromptLineBreakState(term, ctx.promptLineBreakStateRef?.current);
+    }
+  };
   if (!shouldScrollOnTerminalOutput(settings)) {
     term.write(displayData, () => {
       clearPasteResidualAfterTerminalWrite(term);
+      syncPrompt();
     });
     return;
   }
 
   term.write(displayData, () => {
     clearPasteResidualAfterTerminalWrite(term);
+    syncPrompt();
     handleTerminalOutputAutoScroll(ctx, term);
   });
 };
@@ -311,6 +335,9 @@ const scheduleStartupCommand = (
     ctx.terminalBackend.writeToSession(ctx.sessionRef.current, `${commandToRun}${suffix}`, {
       automated: true,
     });
+    if (!ctx.noAutoRun) {
+      markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef);
+    }
     onSettled?.();
     if (!ctx.noAutoRun && ctx.onCommandExecuted) {
       ctx.onCommandExecuted(commandToRun, ctx.host.id, ctx.host.label, ctx.sessionId);

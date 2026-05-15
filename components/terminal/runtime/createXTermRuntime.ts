@@ -48,6 +48,10 @@ import {
   pasteTextIntoTerminal,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
+import {
+  markPromptLineBreakCommandPending,
+  type PromptLineBreakState,
+} from "./promptLineBreak";
 import type {
   Host,
   KeyBinding,
@@ -108,6 +112,7 @@ export type CreateXTermRuntimeContext = {
     sessionId: string,
   ) => void;
   commandBufferRef: RefObject<string>;
+  promptLineBreakStateRef?: RefObject<PromptLineBreakState>;
   setIsSearchOpen: Dispatch<SetStateAction<boolean>>;
 
   // Serial-specific options
@@ -503,6 +508,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               const cmd = snippet.command.trim();
               if (cmd) ctx.onCommandExecuted(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
               ctx.commandBufferRef.current = "";
+              markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef);
             }
             return false;
           }
@@ -666,6 +672,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           const cmd = ctx.commandBufferRef.current.trim();
           if (cmd) ctx.onCommandExecuted(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
           ctx.commandBufferRef.current = "";
+          markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef);
         } else if (data === "\x7f" || data === "\b") {
           ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
         } else if (data === "\x03") {

@@ -54,6 +54,11 @@ import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
 import { createTerminalSessionStarters, type PendingAuth } from "./terminal/runtime/createTerminalSessionStarters";
 import { createXTermRuntime, primaryFontFamily, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
 import { applyUserCursorPreference } from "./terminal/runtime/cursorPreference";
+import {
+  createPromptLineBreakState,
+  markPromptLineBreakCommandPending,
+  type PromptLineBreakState,
+} from "./terminal/runtime/promptLineBreak";
 import { shouldPreserveTerminalFocusOnMouseDown } from "./terminal/toolbarFocus";
 import { preserveTerminalViewportInScrollback } from "./terminal/clearTerminalViewport";
 import { XTERM_PERFORMANCE_CONFIG } from "../infrastructure/config/xtermPerformance";
@@ -287,6 +292,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const terminalDataCapturedRef = useRef(false);
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const commandBufferRef = useRef<string>("");
+  const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);
   const serialLineBufferRef = useRef<string>("");
@@ -480,6 +486,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const cmd = commandBufferRef.current.trim();
           if (cmd && onCommandExecuted) onCommandExecuted(cmd, host.id, host.label, sessionId);
           commandBufferRef.current = "";
+          markPromptLineBreakCommandPending(promptLineBreakStateRef);
         } else if (ch === "\x15") {
           // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
           commandBufferRef.current = "";
@@ -811,6 +818,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     fitAddonRef,
     serializeAddonRef,
     pendingAuthRef,
+    promptLineBreakStateRef,
     updateStatus,
     setStatus,
     setError,
@@ -863,6 +871,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     setShowLogs(false);
     setIsCancelling(false);
     setIsDisconnectedDialogDismissed(false);
+    promptLineBreakStateRef.current = createPromptLineBreakState();
 
     const boot = async () => {
       try {
@@ -887,6 +896,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           statusRef,
           onCommandExecuted,
           commandBufferRef,
+          promptLineBreakStateRef,
           setIsSearchOpen,
           // Serial-specific options
           serialLocalEcho: serialConfig?.localEcho,

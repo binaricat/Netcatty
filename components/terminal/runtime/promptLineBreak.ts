@@ -1,0 +1,155 @@
+import type { Terminal as XTerm } from "@xterm/xterm";
+import type { RefObject } from "react";
+import { detectPrompt } from "../autocomplete/promptDetector";
+
+export type PromptLineBreakState = {
+  lastPromptText: string;
+  pendingCommand: boolean;
+  suppressNextPromptCache: boolean;
+};
+
+type VisibleTextMap = {
+  text: string;
+  rawStartByTextIndex: number[];
+};
+
+const ESC = "\x1b";
+const BEL = "\x07";
+
+const isCsiFinalByte = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return code >= 0x40 && code <= 0x7e;
+};
+
+const mapVisibleText = (data: string): VisibleTextMap => {
+  let text = "";
+  const rawStartByTextIndex: number[] = [];
+  let nextVisibleSegmentStart = 0;
+
+  const appendVisible = (index: number, char: string) => {
+    rawStartByTextIndex.push(nextVisibleSegmentStart);
+    text += char;
+    nextVisibleSegmentStart = index + char.length;
+  };
+
+  for (let index = 0; index < data.length; index += 1) {
+    const char = data[index];
+    if (char !== ESC) {
+      appendVisible(index, char);
+      continue;
+    }
+
+    const nextChar = data[index + 1];
+    if (nextChar === "[") {
+      index += 2;
+      while (index < data.length && !isCsiFinalByte(data[index])) {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (nextChar === "]") {
+      index += 2;
+      while (index < data.length) {
+        if (data[index] === BEL) break;
+        if (data[index] === ESC && data[index + 1] === "\\") {
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (nextChar) {
+      index += 1;
+    }
+  }
+
+  return { text, rawStartByTextIndex };
+};
+
+const endsWithLineBreak = (text: string): boolean => {
+  const last = text[text.length - 1];
+  return last === "\n" || last === "\r";
+};
+
+const getCursorX = (term: XTerm): number => {
+  try {
+    return term.buffer.active.cursorX;
+  } catch {
+    return 0;
+  }
+};
+
+export function createPromptLineBreakState(): PromptLineBreakState {
+  return {
+    lastPromptText: "",
+    pendingCommand: false,
+    suppressNextPromptCache: false,
+  };
+}
+
+export function markPromptLineBreakCommandPending(
+  stateRef?: RefObject<PromptLineBreakState>,
+): void {
+  if (!stateRef?.current) return;
+  stateRef.current.pendingCommand = true;
+  stateRef.current.suppressNextPromptCache = false;
+}
+
+export function insertPromptLineBreakBeforePrompt(
+  data: string,
+  promptText: string,
+  cursorXBeforeWrite: number,
+): string {
+  if (!data || !promptText) return data;
+
+  const mapped = mapVisibleText(data);
+  if (!mapped.text.endsWith(promptText)) return data;
+
+  const promptTextStart = mapped.text.length - promptText.length;
+  const prefixText = mapped.text.slice(0, promptTextStart);
+  if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return data;
+  if (prefixText.length > 0 && endsWithLineBreak(prefixText)) return data;
+
+  const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
+  return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;
+}
+
+export function prepareTerminalDataForPromptLineBreak(
+  term: XTerm,
+  data: string,
+  state: PromptLineBreakState | undefined,
+  enabled: boolean,
+): string {
+  if (!enabled || !state?.pendingCommand || !state.lastPromptText) return data;
+
+  const cursorXBeforeWrite = getCursorX(term);
+  const nextData = insertPromptLineBreakBeforePrompt(
+    data,
+    state.lastPromptText,
+    cursorXBeforeWrite,
+  );
+  state.suppressNextPromptCache = nextData === data && cursorXBeforeWrite > 0;
+  return nextData;
+}
+
+export function syncPromptLineBreakState(term: XTerm, state?: PromptLineBreakState): void {
+  if (!state) return;
+
+  const prompt = detectPrompt(term);
+  if (!prompt.isAtPrompt || prompt.userInput.length > 0) return;
+
+  if (state.pendingCommand && state.suppressNextPromptCache) {
+    state.suppressNextPromptCache = false;
+    state.pendingCommand = false;
+    return;
+  }
+
+  if (!state.pendingCommand || state.lastPromptText) {
+    state.lastPromptText = prompt.promptText;
+  }
+  state.suppressNextPromptCache = false;
+  state.pendingCommand = false;
+}

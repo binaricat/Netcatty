@@ -323,6 +323,9 @@ const en: Messages = {
   'settings.terminal.behavior.preserveSelectionOnInput': 'Keep selection while typing',
   'settings.terminal.behavior.preserveSelectionOnInput.desc':
     'Don\'t clear mouse-selected text when typing — useful for selecting a path then pasting it after a command prefix like `sz `.',
+  'settings.terminal.behavior.forcePromptNewLine': 'Prompt on a new line',
+  'settings.terminal.behavior.forcePromptNewLine.desc':
+    'When the final line of command output is not terminated by a newline, move the recognized shell prompt to the next visual line.',
   'settings.terminal.behavior.osc52Clipboard': 'OSC-52 clipboard',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Allow remote programs (tmux, vim, etc.) to access the local clipboard via OSC-52 escape sequences.',

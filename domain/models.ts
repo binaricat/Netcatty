@@ -544,6 +544,11 @@ export interface TerminalSettings {
   // on input; this opt-in toggle restores the selection right after.
   preserveSelectionOnInput: boolean;
 
+  // When the final visible output line from a command is not terminated by a
+  // newline, move a recognized shell prompt to the next visual line. This is
+  // display-only; raw session logs keep the original byte stream.
+  forcePromptNewLine: boolean;
+
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
 
@@ -715,6 +720,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   disableBracketedPaste: false, // Bracketed paste enabled by default
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
+  forcePromptNewLine: true, // Keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   autocompleteEnabled: true, // Autocomplete enabled by default
