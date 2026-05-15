@@ -1,7 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { insertPromptLineBreakBeforePrompt } from "./promptLineBreak";
+import {
+  createPromptLineBreakState,
+  insertPromptLineBreakBeforePrompt,
+  prepareTerminalDataForPromptLineBreak,
+  syncPromptLineBreakState,
+} from "./promptLineBreak";
+
+function createFakeTerm(lineText = "", cursorX = lineText.length) {
+  return {
+    buffer: {
+      active: {
+        cursorX,
+        cursorY: 0,
+        baseY: 0,
+        getLine(line: number) {
+          if (line !== 0) return undefined;
+          return {
+            isWrapped: false,
+            translateToString() {
+              return lineText;
+            },
+          };
+        },
+      },
+    },
+  };
+}
 
 test("inserts a visual line break before a prompt after an unterminated final output line", () => {
   assert.equal(
@@ -36,4 +62,51 @@ test("does not insert for non-prompt output", () => {
     insertPromptLineBreakBeforePrompt("hello> ", "$ ", 0),
     "hello> ",
   );
+});
+
+test("refreshes cached prompt when a changed prompt arrives after a line break in the same chunk", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "old$ ";
+  state.pendingCommand = true;
+  const termBeforeWrite = createFakeTerm("old$ cd /tmp", 12);
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      termBeforeWrite as never,
+      "\r\nnew$ ",
+      state,
+      true,
+    ),
+    "\r\nnew$ ",
+  );
+  assert.equal(state.suppressNextPromptCache, false);
+
+  syncPromptLineBreakState(createFakeTerm("new$ ") as never, state);
+
+  assert.equal(state.lastPromptText, "new$ ");
+  assert.equal(state.pendingCommand, false);
+});
+
+test("does not refresh cached prompt from an unchanged mid-line write without a line reset", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "old$ ";
+  state.pendingCommand = true;
+  const termBeforeWrite = createFakeTerm("old$ run", 8);
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      termBeforeWrite as never,
+      "outputnew$ ",
+      state,
+      true,
+    ),
+    "outputnew$ ",
+  );
+  assert.equal(state.suppressNextPromptCache, true);
+
+  syncPromptLineBreakState(createFakeTerm("outputnew$ ") as never, state);
+
+  assert.equal(state.lastPromptText, "old$ ");
+  assert.equal(state.pendingCommand, false);
+  assert.equal(state.suppressNextPromptCache, false);
 });

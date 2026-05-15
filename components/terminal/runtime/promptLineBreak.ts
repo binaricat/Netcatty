@@ -74,6 +74,9 @@ const endsWithLineBreak = (text: string): boolean => {
   return last === "\n" || last === "\r";
 };
 
+const containsLineReset = (text: string): boolean =>
+  text.includes("\n") || text.includes("\r");
+
 const getCursorX = (term: XTerm): number => {
   try {
     return term.buffer.active.cursorX;
@@ -131,7 +134,10 @@ export function prepareTerminalDataForPromptLineBreak(
     state.lastPromptText,
     cursorXBeforeWrite,
   );
-  state.suppressNextPromptCache = nextData === data && cursorXBeforeWrite > 0;
+  state.suppressNextPromptCache =
+    nextData === data &&
+    cursorXBeforeWrite > 0 &&
+    !containsLineReset(mapVisibleText(data).text);
   return nextData;
 }
 
