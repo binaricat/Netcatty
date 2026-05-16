@@ -50,6 +50,7 @@ import { TerminalComposeBar } from "./terminal/TerminalComposeBar";
 import { TerminalContextMenu } from "./terminal/TerminalContextMenu";
 import { TerminalSearchBar } from "./terminal/TerminalSearchBar";
 import { ZmodemProgressIndicator } from "./terminal/ZmodemProgressIndicator";
+import { createReplaySafeTerminalLogSanitizer } from "./terminal/replaySafeTerminalLog";
 import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
 import { createTerminalSessionStarters, type PendingAuth } from "./terminal/runtime/createTerminalSessionStarters";
 import { createXTermRuntime, primaryFontFamily, type XTermRuntime } from "./terminal/runtime/createXTermRuntime";
@@ -63,6 +64,8 @@ import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useServerStats } from "./terminal/hooks/useServerStats";
 import { extractDropEntries, getPathForFile, DropEntry } from "../lib/sftpFileUtils";
 import { useTerminalAutocomplete, AutocompletePopup } from "./terminal/autocomplete";
+
+const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
 
 /**
  * Extract unique root paths from drop entries for local terminal path insertion.
@@ -285,6 +288,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // cancelled retry can't fire a startNewSession after the fact.
   const retryTokenRef = useRef<symbol | null>(null);
   const terminalDataCapturedRef = useRef(false);
+  const terminalLogDataRef = useRef("");
+  const terminalLogSanitizerRef = useRef(createReplaySafeTerminalLogSanitizer());
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const commandBufferRef = useRef<string>("");
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
@@ -299,6 +304,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const pendingOutputScrollRef = useRef(false);
   const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
+
+  const captureTerminalLogData = useCallback((data: string) => {
+    const replaySafeData = terminalLogSanitizerRef.current.append(data);
+    if (!replaySafeData) return;
+    terminalLogDataRef.current += replaySafeData;
+    if (terminalLogDataRef.current.length > MAX_CONNECTION_LOG_DATA_CHARS) {
+      terminalLogDataRef.current = terminalLogDataRef.current.slice(-MAX_CONNECTION_LOG_DATA_CHARS);
+    }
+  }, []);
+
+  const finalizeTerminalLogData = useCallback(() => {
+    const replaySafeData = terminalLogSanitizerRef.current.finish();
+    if (replaySafeData) {
+      terminalLogDataRef.current += replaySafeData;
+      if (terminalLogDataRef.current.length > MAX_CONNECTION_LOG_DATA_CHARS) {
+        terminalLogDataRef.current = terminalLogDataRef.current.slice(-MAX_CONNECTION_LOG_DATA_CHARS);
+      }
+    }
+    return terminalLogDataRef.current;
+  }, []);
+
+  const writeLocalTerminalData = useCallback((data: string) => {
+    if (!data) return;
+    captureTerminalLogData(data);
+    termRef.current?.write(data);
+  }, [captureTerminalLogData]);
 
   useEffect(() => {
     if (xtermRuntimeRef.current) {
@@ -437,20 +468,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             const line = serialLineBufferRef.current + "\r";
             terminalBackend.writeToSession(id, line);
             serialLineBufferRef.current = "";
-            if (serialConfig?.localEcho) termRef.current?.write("\r\n");
+            if (serialConfig?.localEcho) writeLocalTerminalData("\r\n");
           } else if (ch === "\x15") {
             if (serialConfig?.localEcho && serialLineBufferRef.current.length > 0) {
-              termRef.current?.write("\b \b".repeat(serialLineBufferRef.current.length));
+              writeLocalTerminalData("\b \b".repeat(serialLineBufferRef.current.length));
             }
             serialLineBufferRef.current = "";
           } else if (ch === "\b" || ch === "\x7f") {
             if (serialLineBufferRef.current.length > 0) {
               serialLineBufferRef.current = serialLineBufferRef.current.slice(0, -1);
-              if (serialConfig?.localEcho) termRef.current?.write("\b \b");
+              if (serialConfig?.localEcho) writeLocalTerminalData("\b \b");
             }
           } else if (ch.charCodeAt(0) >= 32) {
             serialLineBufferRef.current += ch;
-            if (serialConfig?.localEcho) termRef.current?.write(ch);
+            if (serialConfig?.localEcho) writeLocalTerminalData(ch);
           }
         }
         // Still update commandBuffer and broadcast for serial line mode
@@ -460,9 +491,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         terminalBackend.writeToSession(id, text);
         for (const ch of text) {
           if (ch === "\r") {
-            termRef.current?.write("\r\n");
+            writeLocalTerminalData("\r\n");
           } else if (ch.charCodeAt(0) >= 32) {
-            termRef.current?.write(ch);
+            writeLocalTerminalData(ch);
           }
         }
       } else {
@@ -754,12 +785,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     hasConnectedRef.current = next === "connected";
     onStatusChange?.(sessionId, next);
   };
+
   const handleTerminalDataCaptureOnce = useCallback((capturedSessionId: string, data: string) => {
     const captureHandler = onTerminalDataCaptureRef.current;
     if (!captureHandler || terminalDataCapturedRef.current) return;
     terminalDataCapturedRef.current = true;
-    captureHandler(capturedSessionId, data);
-  }, []);
+    const replaySafeLogData = finalizeTerminalLogData();
+    const capturedData = replaySafeLogData || data;
+    captureHandler(capturedSessionId, capturedData);
+  }, [finalizeTerminalLogData]);
 
   const cleanupSession = () => {
     disposeDataRef.current?.();
@@ -847,6 +881,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     },
     onSessionExit,
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
+    onTerminalLogData: captureTerminalLogData,
     onOsDetected,
     onCommandExecuted,
     sessionLog,
@@ -856,6 +891,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   useEffect(() => {
     let disposed = false;
     terminalDataCapturedRef.current = false;
+    terminalLogDataRef.current = "";
+    terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer();
     setError(null);
     hasConnectedRef.current = false;
     pendingOutputScrollRef.current = false;
@@ -892,6 +929,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           serialLocalEcho: serialConfig?.localEcho,
           serialLineMode: serialConfig?.lineMode,
           serialLineBufferRef,
+          onTerminalLogData: captureTerminalLogData,
           onCwdChange: (cwd: string) => {
             knownCwdRef.current = cwd;
           },

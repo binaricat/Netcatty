@@ -302,14 +302,16 @@ export function prepareTerminalDataForUserPasteDisplay(term: object, data: strin
   return data;
 }
 
-export function clearPasteResidualAfterTerminalWrite(term: object): void {
+export function clearPasteResidualAfterTerminalWrite(term: object): string | null {
   const state = pasteDisplayStates.get(term);
-  if (!isStateActive(state)) return;
-  if (state.clearPending <= 0) return;
-  if (typeof (term as Partial<Pick<XTerm, "write">>).write !== "function") return;
+  if (!isStateActive(state)) return null;
+  if (state.clearPending <= 0) return null;
+  if (typeof (term as Partial<Pick<XTerm, "write">>).write !== "function") return null;
 
   // Readline can leave stale cells to the right of the cursor after very long
   // bracketed paste redraws; clear them locally without sending bytes upstream.
   state.clearPending -= 1;
-  (term as Pick<XTerm, "write">).write("\x1b[K");
+  const cleanupData = "\x1b[K";
+  (term as Pick<XTerm, "write">).write(cleanupData);
+  return cleanupData;
 }

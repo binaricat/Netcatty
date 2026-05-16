@@ -114,6 +114,7 @@ export type CreateXTermRuntimeContext = {
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
   serialLineBufferRef?: RefObject<string>;
+  onTerminalLogData?: (data: string) => void;
 
   // Callback when shell reports CWD change via OSC 7
   onCwdChange?: (cwd: string) => void;
@@ -614,6 +615,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   fitAddon.fit();
   term.focus();
 
+  const writeLocalTerminalData = (nextData: string) => {
+    ctx.onTerminalLogData?.(nextData);
+    term.write(nextData);
+  };
+
   term.onData((data) => {
     const id = ctx.sessionRef.current;
     if (id) {
@@ -623,7 +629,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           bufferRef: ctx.serialLineBufferRef,
           localEcho: ctx.serialLocalEcho,
           writeToSession: (nextData) => ctx.terminalBackend.writeToSession(id, nextData),
-          writeToTerminal: (nextData) => term.write(nextData),
+          writeToTerminal: writeLocalTerminalData,
         });
       } else {
         // Character mode (default): send immediately
@@ -637,13 +643,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // Local echo for serial connections only when explicitly enabled
         if (ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
           if (data === "\r") {
-            term.write("\r\n");
+            writeLocalTerminalData("\r\n");
           } else if (data === "\x7f" || data === "\b") {
-            term.write("\b \b");
+            writeLocalTerminalData("\b \b");
           } else if (data === "\x03") {
-            term.write("^C");
+            writeLocalTerminalData("^C");
           } else if (data.charCodeAt(0) >= 32 || data.length > 1) {
-            term.write(data);
+            writeLocalTerminalData(data);
           }
         }
       }

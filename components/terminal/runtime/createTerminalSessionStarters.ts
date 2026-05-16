@@ -153,6 +153,7 @@ export type TerminalSessionStartersContext = {
   onSessionAttached?: (sessionId: string) => void;
   onSessionExit?: (sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
+  onTerminalLogData?: (data: string) => void;
   onOsDetected?: (hostId: string, distro: string) => void;
   onCommandExecuted?: (
     command: string,
@@ -205,22 +206,38 @@ const handleTerminalOutputAutoScroll = (
   term.scrollToBottom();
 };
 
+const writeTerminalLine = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+  data: string,
+) => {
+  ctx.onTerminalLogData?.(`${data}\r\n`);
+  term.writeln(data);
+};
+
 const writeSessionData = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
   data: string,
 ) => {
   const displayData = prepareTerminalDataForUserPasteDisplay(term, data);
+  ctx.onTerminalLogData?.(displayData);
+  const clearPasteResidualAndCapture = () => {
+    const cleanupData = clearPasteResidualAfterTerminalWrite(term);
+    if (cleanupData) {
+      ctx.onTerminalLogData?.(cleanupData);
+    }
+  };
   const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
   if (!shouldScrollOnTerminalOutput(settings)) {
     term.write(displayData, () => {
-      clearPasteResidualAfterTerminalWrite(term);
+      clearPasteResidualAndCapture();
     });
     return;
   }
 
   term.write(displayData, () => {
-    clearPasteResidualAfterTerminalWrite(term);
+    clearPasteResidualAndCapture();
     handleTerminalOutputAutoScroll(ctx, term);
   });
 };
@@ -271,7 +288,8 @@ const attachSessionToTerminal = (
     if (evt.error) {
       ctx.setError(evt.error);
     }
-    term.writeln(opts?.onExitMessage?.(evt) ?? "\r\n[session closed]");
+    const exitMessage = opts?.onExitMessage?.(evt) ?? "\r\n[session closed]";
+    writeTerminalLine(ctx, term, exitMessage);
 
     if (ctx.onTerminalDataCapture && ctx.serializeAddonRef.current) {
       try {
@@ -392,7 +410,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   const startSSH = async (term: XTerm) => {
     if (!ctx.terminalBackend.backendAvailable()) {
       ctx.setError("Native SSH bridge unavailable. Launch via Electron app.");
-      term.writeln(
+      writeTerminalLine(
+        ctx,
+        term,
         "\r\n[netcatty SSH bridge unavailable. Please run the desktop build to connect.]",
       );
       ctx.updateStatus("disconnected");
@@ -412,7 +432,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setNeedsAuth(false);
       ctx.setAuthRetryMessage(null);
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -455,7 +475,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
       const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -475,7 +495,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (unresolvedJumpProxyHost) {
       const message = `Saved proxy for jump host "${unresolvedJumpProxyHost.label || unresolvedJumpProxyHost.hostname}" is missing. Open host settings and select a valid proxy.`;
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -563,7 +583,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setNeedsAuth(false);
       ctx.setAuthRetryMessage(null);
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -582,7 +602,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       ctx.setNeedsAuth(false);
       ctx.setAuthRetryMessage(null);
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -823,7 +843,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.setStatus("connecting");
       } else {
         ctx.setError(message);
-        term.writeln(`\r\n[Failed to start SSH: ${message}]`);
+        writeTerminalLine(ctx, term, `\r\n[Failed to start SSH: ${message}]`);
         ctx.updateStatus("disconnected");
       }
 
@@ -835,7 +855,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   const startTelnet = async (term: XTerm) => {
     if (!ctx.terminalBackend.telnetAvailable()) {
       ctx.setError("Telnet bridge unavailable. Please run the desktop build.");
-      term.writeln("\r\n[Telnet bridge unavailable. Please run the desktop build.]");
+      writeTerminalLine(ctx, term, "\r\n[Telnet bridge unavailable. Please run the desktop build.]");
       ctx.updateStatus("disconnected");
       return;
     }
@@ -843,7 +863,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
       const message = `Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`;
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -851,7 +871,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     if (ctx.host.proxyConfig?.host && ctx.host.proxyConfig?.port) {
       const message = "Telnet does not support proxy connections. Use SSH for this host or remove the proxy from this connection.";
       ctx.setError(message);
-      term.writeln(`\r\n[${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[${message}]`);
       ctx.updateStatus("disconnected");
       return;
     }
@@ -887,7 +907,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         ctx.setNeedsAuth(false);
         ctx.setAuthRetryMessage(null);
         ctx.setError(message);
-        term.writeln(`\r\n[${message}]`);
+        writeTerminalLine(ctx, term, `\r\n[${message}]`);
         ctx.updateStatus("disconnected");
         return;
       }
@@ -928,24 +948,24 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       });
       telnetSessionId = id;
 
-	      attachSessionToTerminal(ctx, term, id, {
-	        onExitMessage: (evt) =>
-	          `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
-	        onExit: cleanupTelnetStartupWait,
-	      });
-	      const disposeTelnetExit = ctx.disposeExitRef.current;
-	      ctx.disposeExitRef.current = () => {
-	        cleanupTelnetStartupWait();
-	        disposeTelnetExit?.();
-	      };
-	      if (waitsForAutoLogin) {
-	        return;
-	      }
-	    } catch (err) {
-	      cleanupTelnetStartupWait();
+      attachSessionToTerminal(ctx, term, id, {
+        onExitMessage: (evt) =>
+          `\r\n[Telnet session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
+        onExit: cleanupTelnetStartupWait,
+      });
+      const disposeTelnetExit = ctx.disposeExitRef.current;
+      ctx.disposeExitRef.current = () => {
+        cleanupTelnetStartupWait();
+        disposeTelnetExit?.();
+      };
+      if (waitsForAutoLogin) {
+        return;
+      }
+    } catch (err) {
+      cleanupTelnetStartupWait();
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
-      term.writeln(`\r\n[Failed to start Telnet: ${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[Failed to start Telnet: ${message}]`);
       ctx.updateStatus("disconnected");
     }
   };
@@ -953,7 +973,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   const startMosh = async (term: XTerm) => {
     if (!ctx.terminalBackend.moshAvailable()) {
       ctx.setError("Mosh bridge unavailable. Please run the desktop build.");
-      term.writeln("\r\n[Mosh bridge unavailable. Please run the desktop build.]");
+      writeTerminalLine(ctx, term, "\r\n[Mosh bridge unavailable. Please run the desktop build.]");
       ctx.updateStatus("disconnected");
       return;
     }
@@ -961,7 +981,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     try {
       const stopMosh = (message: string) => {
         ctx.setError(message);
-        term.writeln(`\r\n[${message}]`);
+        writeTerminalLine(ctx, term, `\r\n[${message}]`);
         ctx.updateStatus("disconnected");
       };
 
@@ -1074,7 +1094,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
-      term.writeln(`\r\n[Failed to start Mosh: ${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[Failed to start Mosh: ${message}]`);
       ctx.updateStatus("disconnected");
     }
   };
@@ -1082,7 +1102,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   const startLocal = async (term: XTerm) => {
     if (!ctx.terminalBackend.localAvailable()) {
       ctx.setError("Local shell bridge unavailable. Please run the desktop build.");
-      term.writeln(
+      writeTerminalLine(
+        ctx,
+        term,
         "\r\n[Local shell bridge unavailable. Please run the desktop build to spawn a local terminal.]",
       );
       ctx.updateStatus("disconnected");
@@ -1133,9 +1155,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       ctx.disposeExitRef.current = ctx.terminalBackend.onSessionExit(id, (evt) => {
         ctx.updateStatus("disconnected");
-        term.writeln(
-          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
-        );
+        const exitMessage = `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`;
+        writeTerminalLine(ctx, term, exitMessage);
 
         logger.info("[Terminal] Session exit, capturing data", {
           sessionId: ctx.sessionId,
@@ -1161,7 +1182,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
-      term.writeln(`\r\n[Failed to start local shell: ${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[Failed to start local shell: ${message}]`);
       ctx.updateStatus("disconnected");
     }
   };
@@ -1170,7 +1191,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   const startSerial = async (term: XTerm) => {
     if (!ctx.serialConfig) {
       ctx.setError("No serial configuration provided");
-      term.writeln("\r\n[Error: No serial configuration provided]");
+      writeTerminalLine(ctx, term, "\r\n[Error: No serial configuration provided]");
       ctx.updateStatus("disconnected");
       return;
     }
@@ -1197,7 +1218,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // Update status right away since serial ports don't require handshake
       ctx.updateStatus("connected");
       ctx.setProgressValue(100);
-      term.writeln(`[Connected to ${ctx.serialConfig.path} at ${ctx.serialConfig.baudRate} baud]`);
+      writeTerminalLine(ctx, term, `[Connected to ${ctx.serialConfig.path} at ${ctx.serialConfig.baudRate} baud]`);
 
       attachSessionToTerminal(ctx, term, id, {
         onExitMessage: (evt) =>
@@ -1208,7 +1229,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);
-      term.writeln(`\r\n[Failed to connect to serial port: ${message}]`);
+      writeTerminalLine(ctx, term, `\r\n[Failed to connect to serial port: ${message}]`);
       ctx.updateStatus("disconnected");
     }
   };
