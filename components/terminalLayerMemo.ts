@@ -32,6 +32,7 @@ export const terminalLayerAreEqual = (
   prev.onAddKnownHost === next.onAddKnownHost &&
   prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
+  prev.onReorderWorkspaceSessions === next.onReorderWorkspaceSessions &&
   prev.onSplitSession === next.onSplitSession &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.identities === next.identities

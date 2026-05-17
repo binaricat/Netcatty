@@ -8,8 +8,7 @@ import {
 } from '../application/state/sessionActivity';
 import { sessionActivityStore } from '../application/state/sessionActivityStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
-import { collectSessionIds } from '../domain/workspace';
-import { SplitDirection } from '../domain/workspace';
+import { collectSessionIds, resolveWorkspaceFocusSessionOrder, SplitDirection } from '../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../domain/models';
 import {
   clearHostFontFamilyOverride,
@@ -55,7 +54,6 @@ import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
 import { useCustomThemes } from '../application/state/customThemeStore';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { RippleButton } from './ui/ripple';
 import { ScrollArea } from './ui/scroll-area';
 import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
 import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
@@ -427,6 +425,7 @@ interface TerminalLayerProps {
   onSetDraggingSessionId: (id: string | null) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  onReorderWorkspaceSessions?: (workspaceId: string, draggedSessionId: string, targetSessionId: string, position: 'before' | 'after') => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   // Broadcast mode
   isBroadcastEnabled?: (workspaceId: string) => boolean;
@@ -490,6 +489,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onSetDraggingSessionId,
   onToggleWorkspaceViewMode,
   onSetWorkspaceFocusedSession,
+  onReorderWorkspaceSessions,
   onSplitSession,
   isBroadcastEnabled,
   onToggleBroadcast,
@@ -625,6 +625,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const [dropHint, setDropHint] = useState<SplitHint>(null);
   // Focus-mode sidebar: client-side filter for the terminal list.
   const [focusSidebarSearch, setFocusSidebarSearch] = useState('');
+  const [focusSidebarDragSessionId, setFocusSidebarDragSessionId] = useState<string | null>(null);
+  const [focusSidebarDropIndicator, setFocusSidebarDropIndicator] = useState<{
+    sessionId: string;
+    position: 'before' | 'after';
+  } | null>(null);
   const [themePreview, setThemePreview] = useState<{ targetSessionId: string | null; themeId: string | null }>({
     targetSessionId: null,
     themeId: null,
@@ -2031,16 +2036,117 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     };
   }, [focusedSessionId, isFocusMode, activeWorkspace, isTerminalLayerVisible]);
 
-  // Get sessions for the active workspace in focus mode
-  const workspaceSessionIds = useMemo(() => {
-    if (!activeWorkspace) return [];
-    return collectSessionIds(activeWorkspace.root);
-  }, [activeWorkspace]);
-
   const workspaceSessions = useMemo(() => {
-    const idSet = new Set(workspaceSessionIds);
-    return sessions.filter(s => idSet.has(s.id));
-  }, [sessions, workspaceSessionIds]);
+    if (!activeWorkspace) return [];
+    const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+    return resolveWorkspaceFocusSessionOrder(activeWorkspace.root, activeWorkspace.focusSessionOrder)
+      .map((sessionId) => sessionMap.get(sessionId))
+      .filter((session): session is TerminalSession => Boolean(session));
+  }, [activeWorkspace, sessions]);
+
+  const handleFocusSidebarDragStart = useCallback((e: React.DragEvent, sessionId: string) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('workspace-focus-session-id', sessionId);
+    setFocusSidebarDragSessionId(sessionId);
+  }, []);
+
+  const handleFocusSidebarDragOver = useCallback((e: React.DragEvent, targetSessionId: string) => {
+    const draggedSessionId = e.dataTransfer.getData('workspace-focus-session-id') || focusSidebarDragSessionId;
+    if (!activeWorkspace || !draggedSessionId || draggedSessionId === targetSessionId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    setFocusSidebarDropIndicator({ sessionId: targetSessionId, position });
+  }, [activeWorkspace, focusSidebarDragSessionId]);
+
+  const getFocusSidebarContainerDropTarget = useCallback((
+    container: HTMLElement,
+    clientY: number,
+    draggedSessionId: string,
+  ): { sessionId: string; position: 'before' | 'after' } | null => {
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-workspace-focus-session-id]'),
+    );
+    if (rows.length === 0) return null;
+
+    for (const row of rows) {
+      const sessionId = row.dataset.workspaceFocusSessionId;
+      if (!sessionId || sessionId === draggedSessionId) continue;
+
+      const rect = row.getBoundingClientRect();
+      if (clientY < rect.top) return { sessionId, position: 'before' };
+      if (clientY <= rect.bottom) {
+        return {
+          sessionId,
+          position: clientY < rect.top + rect.height / 2 ? 'before' : 'after',
+        };
+      }
+    }
+
+    const lastRow = [...rows].reverse().find((row) => (
+      row.dataset.workspaceFocusSessionId
+      && row.dataset.workspaceFocusSessionId !== draggedSessionId
+    ));
+    const lastSessionId = lastRow?.dataset.workspaceFocusSessionId;
+    return lastSessionId ? { sessionId: lastSessionId, position: 'after' } : null;
+  }, []);
+
+  const handleFocusSidebarContainerDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const draggedSessionId = e.dataTransfer.getData('workspace-focus-session-id') || focusSidebarDragSessionId;
+    if (!activeWorkspace || !draggedSessionId) return;
+
+    const target = getFocusSidebarContainerDropTarget(e.currentTarget, e.clientY, draggedSessionId);
+    if (!target) return;
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setFocusSidebarDropIndicator(target);
+  }, [activeWorkspace, focusSidebarDragSessionId, getFocusSidebarContainerDropTarget]);
+
+  const handleFocusSidebarContainerDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const draggedSessionId = e.dataTransfer.getData('workspace-focus-session-id') || focusSidebarDragSessionId;
+    if (!activeWorkspace || !draggedSessionId) return;
+
+    const target = focusSidebarDropIndicator
+      ?? getFocusSidebarContainerDropTarget(e.currentTarget, e.clientY, draggedSessionId);
+    if (!target || target.sessionId === draggedSessionId) return;
+
+    e.preventDefault();
+    onReorderWorkspaceSessions?.(activeWorkspace.id, draggedSessionId, target.sessionId, target.position);
+    setFocusSidebarDragSessionId(null);
+    setFocusSidebarDropIndicator(null);
+  }, [
+    activeWorkspace,
+    focusSidebarDragSessionId,
+    focusSidebarDropIndicator,
+    getFocusSidebarContainerDropTarget,
+    onReorderWorkspaceSessions,
+  ]);
+
+  const handleFocusSidebarDrop = useCallback((e: React.DragEvent, targetSessionId: string) => {
+    const draggedSessionId = e.dataTransfer.getData('workspace-focus-session-id') || focusSidebarDragSessionId;
+    if (!activeWorkspace || !draggedSessionId || draggedSessionId === targetSessionId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position = focusSidebarDropIndicator?.sessionId === targetSessionId
+      ? focusSidebarDropIndicator.position
+      : e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    onReorderWorkspaceSessions?.(activeWorkspace.id, draggedSessionId, targetSessionId, position);
+    setFocusSidebarDragSessionId(null);
+    setFocusSidebarDropIndicator(null);
+  }, [activeWorkspace, focusSidebarDragSessionId, focusSidebarDropIndicator, onReorderWorkspaceSessions]);
+
+  const handleFocusSidebarDragEnd = useCallback(() => {
+    setFocusSidebarDragSessionId(null);
+    setFocusSidebarDropIndicator(null);
+  }, []);
 
   // Render focus mode sidebar
   const renderFocusModeSidebar = () => {
@@ -2135,7 +2241,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
         {/* Session list */}
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+          <div
+            className="p-2 space-y-1"
+            onDragOver={handleFocusSidebarContainerDragOver}
+            onDrop={handleFocusSidebarContainerDrop}
+          >
             {workspaceSessions.filter((session) => {
               const term = focusSidebarSearch.trim().toLowerCase();
               if (!term) return true;
@@ -2156,18 +2266,41 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
               const restBg = isSelected ? selectedBg : 'transparent';
               const hoverBg = isSelected ? selectedHoverBg : unselectedHoverBg;
               const rowFg = isSelected ? termFg : unselectedFg;
+              const dropPosition = focusSidebarDropIndicator?.sessionId === session.id
+                ? focusSidebarDropIndicator.position
+                : null;
+              const isDragging = focusSidebarDragSessionId === session.id;
 
               return (
-                <RippleButton
+                <div
                   key={session.id}
-                  variant="ghost"
+                  data-workspace-focus-session-id={session.id}
+                  draggable
+                  role="button"
+                  tabIndex={0}
                   // Row colors are terminal-theme derived (see renderFocusModeSidebar
                   // top). `hover:text-inherit` pins text against ghost variant's
                   // hover:text-accent-foreground default; hover bg is swapped
                   // via inline style so we stay on terminal-theme alpha rather
                   // than Tailwind's app-theme foreground color.
-                  className="w-full h-auto justify-start gap-2 px-2 py-1.5 font-normal hover:text-inherit"
-                  style={{ backgroundColor: restBg, color: rowFg }}
+                  className={cn(
+                    "relative flex w-full select-none items-center justify-start gap-2 rounded-md px-2 py-1.5 text-sm font-normal outline-none transition-colors hover:text-inherit focus-visible:ring-1 cursor-grab active:cursor-grabbing",
+                    isDragging && "opacity-50",
+                  )}
+                  style={{
+                    backgroundColor: restBg,
+                    color: rowFg,
+                    boxShadow: dropPosition
+                      ? `inset 0 ${dropPosition === 'before' ? '2px' : '-2px'} 0 ${termFg}`
+                      : undefined,
+                  }}
+                  onDragStart={(e) => handleFocusSidebarDragStart(e, session.id)}
+                  onDragOver={(e) => handleFocusSidebarDragOver(e, session.id)}
+                  onDragLeave={(e) => {
+                    e.stopPropagation();
+                  }}
+                  onDrop={(e) => handleFocusSidebarDrop(e, session.id)}
+                  onDragEnd={handleFocusSidebarDragEnd}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = hoverBg;
                   }}
@@ -2175,6 +2308,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                     e.currentTarget.style.backgroundColor = restBg;
                   }}
                   onClick={() => onSetWorkspaceFocusedSession?.(activeWorkspace.id, session.id)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    onSetWorkspaceFocusedSession?.(activeWorkspace.id, session.id);
+                  }}
                 >
                   <div className="relative flex-shrink-0">
                     {host ? (
@@ -2195,7 +2333,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
                       {session.username}@{session.hostname}
                     </div>
                   </div>
-                </RippleButton>
+                </div>
               );
             })}
           </div>

@@ -810,6 +810,7 @@ export interface Workspace {
   root: WorkspaceNode;
   viewMode?: WorkspaceViewMode; // 'split' = tiled view (default), 'focus' = left list + single terminal
   focusedSessionId?: string; // Which session is focused when in focus mode
+  focusSessionOrder?: string[]; // User-defined session order for the focus-mode sidebar
   snippetId?: string; // If this workspace was created from running a snippet
 }
 
