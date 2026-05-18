@@ -52,8 +52,14 @@ const storySpec: FigSpec = {
     },
   ],
 };
-const bridgeState: { localEntries: MockDirEntry[] } = {
+const bridgeState: {
+  localEntries: MockDirEntry[];
+  remoteEntriesByPath: Map<string, MockDirEntry[]>;
+  remoteCalls: string[];
+} = {
   localEntries: [],
+  remoteEntriesByPath: new Map(),
+  remoteCalls: [],
 };
 
 Object.defineProperty(globalThis, "window", {
@@ -74,6 +80,22 @@ Object.defineProperty(globalThis, "window", {
           .slice(0, limit ?? bridgeState.localEntries.length);
         return { success: true, entries };
       },
+      listAutocompleteRemoteDir: async (
+        _sessionId: string,
+        path: string,
+        foldersOnly: boolean,
+        filterPrefix?: string,
+        limit?: number,
+      ) => {
+        bridgeState.remoteCalls.push(path);
+        const prefix = (filterPrefix ?? "").toLowerCase();
+        const remoteEntries = bridgeState.remoteEntriesByPath.get(path) ?? [];
+        const entries = remoteEntries
+          .filter((entry) => !foldersOnly || entry.type === "directory")
+          .filter((entry) => !prefix || entry.name.toLowerCase().startsWith(prefix))
+          .slice(0, limit ?? remoteEntries.length);
+        return { success: true, entries };
+      },
     },
   },
   configurable: true,
@@ -86,6 +108,8 @@ test.beforeEach(() => {
   localStorage.clear();
   clearHistory();
   bridgeState.localEntries = [{ name: "package.json", type: "file" }];
+  bridgeState.remoteEntriesByPath = new Map();
+  bridgeState.remoteCalls = [];
 });
 
 test("getCompletions prioritizes spec-driven path suggestions over history", async () => {
@@ -120,4 +144,45 @@ test("getCompletions does not treat generator-only spec args as path contexts", 
   assert.equal(completions[0]?.source, "history");
   assert.equal(completions[0]?.text, "story pick package-choice");
   assert.equal(completions.some((entry) => entry.source === "path"), false);
+});
+
+test("getCompletions uses the remote shell cwd for relative path arguments instead of stale home", async () => {
+  bridgeState.remoteEntriesByPath.set("~", [{ name: "home-only.txt", type: "file" }]);
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const completions = await getCompletions("cat wo", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+    cwd: "~",
+  });
+
+  assert.deepEqual(bridgeState.remoteCalls, ["."]);
+  assert.equal(completions[0]?.source, "path");
+  assert.equal(completions[0]?.text, "cat worktree.txt");
+  assert.equal(completions.some((entry) => entry.text.includes("~")), false);
+});
+
+test("getCompletions does not reuse cached remote relative listings after cwd changes", async () => {
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "home-only.txt", type: "file" }]);
+
+  await getCompletions("cat ", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+  });
+
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const completions = await getCompletions("cat wo", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-1",
+  });
+
+  assert.equal(bridgeState.remoteCalls.length, 2);
+  assert.equal(completions[0]?.text, "cat worktree.txt");
 });

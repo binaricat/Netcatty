@@ -238,6 +238,7 @@ export async function getCompletions(
     ? await getPathSuggestions(ctx, {
       sessionId: options.sessionId,
       protocol: options.protocol,
+      os: options.os,
       cwd: options.cwd,
       foldersOnly: pathCheck.foldersOnly,
     })
