@@ -1,6 +1,6 @@
 import { Circle, Columns2, FolderTree, MessageSquare, PanelLeft, PanelRight, Palette, Plus, Search, Server, X, Zap } from 'lucide-react';
-import React, { Suspense, createContext, lazy, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useActiveTabId } from '../application/state/activeTabStore';
+import React, { Suspense, createContext, lazy, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
 import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
 import {
   getSessionActivityIdsToClear,
@@ -58,6 +58,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate';
 import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
 import { terminalLayerAreEqual } from './terminalLayerMemo';
+import { getTerminalPaneSnapshot, parseTerminalPaneSnapshot } from './terminalPaneVisibility';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
 
@@ -457,6 +458,365 @@ interface TerminalLayerProps {
   activeSidePanelTabRef?: React.MutableRefObject<string | null>;
 }
 
+interface TerminalPaneProps {
+  session: TerminalSession;
+  host: Host;
+  chainHosts?: Host[];
+  workspaceById: Map<string, Workspace>;
+  workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
+  isTerminalLayerVisible: boolean;
+  workspaceFocusHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  workspaceBroadcastHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  splitVerticalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  themePreview: { targetSessionId: string | null; themeId: string | null };
+  keys: SSHKey[];
+  identities: Identity[];
+  snippets: Snippet[];
+  knownHosts: KnownHost[];
+  terminalFontFamilyId: string;
+  fontSize: number;
+  terminalTheme: TerminalTheme;
+  followAppTerminalTheme?: boolean;
+  accentMode?: 'theme' | 'custom';
+  customAccent?: string;
+  terminalSettings?: TerminalSettings;
+  hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  keyBindings?: KeyBinding[];
+  isResizing: boolean;
+  isComposeBarOpen: boolean;
+  sessionLog?: { enabled: true; directory: string; format: string };
+  onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
+  onOpenSftp: (
+    host: Host,
+    initialPath?: string,
+    pendingUploadEntries?: DropEntry[],
+    sourceSessionId?: string,
+  ) => void;
+  onOpenScripts: () => void;
+  onOpenTheme: () => void;
+  onCloseSession: (sessionId: string) => void;
+  onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
+  onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
+  onTerminalDataCapture?: (sessionId: string, data: string) => void;
+  onOsDetected: (hostId: string, distro: string) => void;
+  onUpdateHost: (host: Host) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void;
+  onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  isBroadcastEnabled?: (workspaceId: string) => boolean;
+  onBroadcastInput: (data: string, sourceSessionId: string) => void;
+  onToggleWorkspaceComposeBar: () => void;
+  onSnippetExecutorChange: (
+    sessionId: string,
+    executor: SnippetExecutor | null,
+  ) => void;
+}
+
+const getPaneThemePreviewId = (props: TerminalPaneProps): string | null => (
+  props.session.id === props.themePreview.targetSessionId
+    ? props.themePreview.themeId
+    : null
+);
+
+const terminalPanePropsAreEqual = (
+  prev: TerminalPaneProps,
+  next: TerminalPaneProps,
+): boolean => (
+  prev.session === next.session &&
+  prev.host === next.host &&
+  prev.chainHosts === next.chainHosts &&
+  prev.workspaceById === next.workspaceById &&
+  prev.workspaceRectsById === next.workspaceRectsById &&
+  prev.isTerminalLayerVisible === next.isTerminalLayerVisible &&
+  prev.workspaceFocusHandlersRef === next.workspaceFocusHandlersRef &&
+  prev.workspaceBroadcastHandlersRef === next.workspaceBroadcastHandlersRef &&
+  prev.splitHorizontalHandlersRef === next.splitHorizontalHandlersRef &&
+  prev.splitVerticalHandlersRef === next.splitVerticalHandlersRef &&
+  getPaneThemePreviewId(prev) === getPaneThemePreviewId(next) &&
+  prev.keys === next.keys &&
+  prev.identities === next.identities &&
+  prev.snippets === next.snippets &&
+  prev.knownHosts === next.knownHosts &&
+  prev.terminalFontFamilyId === next.terminalFontFamilyId &&
+  prev.fontSize === next.fontSize &&
+  prev.terminalTheme === next.terminalTheme &&
+  prev.followAppTerminalTheme === next.followAppTerminalTheme &&
+  prev.accentMode === next.accentMode &&
+  prev.customAccent === next.customAccent &&
+  prev.terminalSettings === next.terminalSettings &&
+  prev.hotkeyScheme === next.hotkeyScheme &&
+  prev.keyBindings === next.keyBindings &&
+  prev.isResizing === next.isResizing &&
+  prev.isComposeBarOpen === next.isComposeBarOpen &&
+  prev.sessionLog === next.sessionLog &&
+  prev.onHotkeyAction === next.onHotkeyAction &&
+  prev.onOpenSftp === next.onOpenSftp &&
+  prev.onOpenScripts === next.onOpenScripts &&
+  prev.onOpenTheme === next.onOpenTheme &&
+  prev.onCloseSession === next.onCloseSession &&
+  prev.onStatusChange === next.onStatusChange &&
+  prev.onSessionExit === next.onSessionExit &&
+  prev.onTerminalDataCapture === next.onTerminalDataCapture &&
+  prev.onOsDetected === next.onOsDetected &&
+  prev.onUpdateHost === next.onUpdateHost &&
+  prev.onAddKnownHost === next.onAddKnownHost &&
+  prev.onCommandExecuted === next.onCommandExecuted &&
+  prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
+  prev.onSplitSession === next.onSplitSession &&
+  prev.isBroadcastEnabled === next.isBroadcastEnabled &&
+  prev.onBroadcastInput === next.onBroadcastInput &&
+  prev.onToggleWorkspaceComposeBar === next.onToggleWorkspaceComposeBar &&
+  prev.onSnippetExecutorChange === next.onSnippetExecutorChange
+);
+
+const TerminalPane: React.FC<TerminalPaneProps> = memo(({
+  session,
+  host,
+  chainHosts,
+  workspaceById,
+  workspaceRectsById,
+  isTerminalLayerVisible,
+  workspaceFocusHandlersRef,
+  workspaceBroadcastHandlersRef,
+  splitHorizontalHandlersRef,
+  splitVerticalHandlersRef,
+  themePreview,
+  keys,
+  identities,
+  snippets,
+  knownHosts,
+  terminalFontFamilyId,
+  fontSize,
+  terminalTheme,
+  followAppTerminalTheme,
+  accentMode,
+  customAccent,
+  terminalSettings,
+  hotkeyScheme,
+  keyBindings,
+  isResizing,
+  isComposeBarOpen,
+  sessionLog,
+  onHotkeyAction,
+  onOpenSftp,
+  onOpenScripts,
+  onOpenTheme,
+  onCloseSession,
+  onStatusChange,
+  onSessionExit,
+  onTerminalDataCapture,
+  onOsDetected,
+  onUpdateHost,
+  onAddKnownHost,
+  onCommandExecuted,
+  onSetWorkspaceFocusedSession,
+  onSplitSession,
+  isBroadcastEnabled,
+  onBroadcastInput,
+  onToggleWorkspaceComposeBar,
+  onSnippetExecutorChange,
+}) => {
+  const getPaneSnapshot = useCallback(
+    () => getTerminalPaneSnapshot({
+      activeTabId: activeTabStore.getActiveTabId(),
+      sessionId: session.id,
+      sessionWorkspaceId: session.workspaceId,
+      workspaceById,
+      isTerminalLayerVisible,
+    }),
+    [isTerminalLayerVisible, session.id, session.workspaceId, workspaceById],
+  );
+  const paneSnapshot = useSyncExternalStore(activeTabStore.subscribe, getPaneSnapshot);
+  const paneState = parseTerminalPaneSnapshot(paneSnapshot);
+  const activeWorkspaceId = paneState.workspaceId;
+  const isVisible = paneState.isVisible;
+  const inActiveWorkspace = !!activeWorkspaceId;
+  const isFocusMode = paneState.mode === 'focus';
+  const isSplitViewVisible = paneState.mode === 'split';
+  const isFocusedPane = inActiveWorkspace && !isFocusMode && session.id === paneState.focusedSessionId;
+  const rect = activeWorkspaceId && isSplitViewVisible
+    ? workspaceRectsById.get(activeWorkspaceId)?.[session.id] ?? null
+    : null;
+  const layoutStyle = rect
+    ? {
+      left: `${rect.x}px`,
+      top: `${rect.y}px`,
+      width: `${rect.w}px`,
+      height: `${rect.h}px`,
+    }
+    : { left: 0, top: 0, width: '100%', height: '100%' };
+  const style: React.CSSProperties = { ...layoutStyle };
+
+  if (!isVisible) {
+    style.visibility = 'hidden';
+    style.pointerEvents = 'none';
+    // Preserve xterm state while keeping hidden terminals out of layout.
+    style.left = '-9999px';
+    style.top = '-9999px';
+  }
+
+  const workspaceFocusHandler = activeWorkspaceId
+    ? workspaceFocusHandlersRef.current.get(activeWorkspaceId)
+    : undefined;
+  const workspaceBroadcastHandler = activeWorkspaceId
+    ? workspaceBroadcastHandlersRef.current.get(activeWorkspaceId)
+    : undefined;
+  const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
+  const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
+  const broadcastEnabled = activeWorkspaceId ? !!isBroadcastEnabled?.(activeWorkspaceId) : false;
+  const themePreviewId = session.id === themePreview.targetSessionId
+    ? themePreview.themeId ?? undefined
+    : undefined;
+
+  const handlePaneClick = useCallback(() => {
+    if (activeWorkspaceId && !isFocusMode) {
+      onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
+    }
+  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, session.id]);
+
+  return (
+    <div
+      data-session-id={session.id}
+      className={cn(
+        "absolute bg-background",
+        inActiveWorkspace && "workspace-pane",
+        isVisible && "z-10",
+      )}
+      style={style}
+      tabIndex={-1}
+      onClick={handlePaneClick}
+    >
+      <Terminal
+        host={host}
+        keys={keys}
+        identities={identities}
+        snippets={snippets}
+        chainHosts={chainHosts}
+        themePreviewId={themePreviewId}
+        knownHosts={knownHosts}
+        isVisible={isVisible}
+        inWorkspace={inActiveWorkspace}
+        isResizing={isResizing}
+        isFocusMode={isFocusMode}
+        isFocused={isFocusedPane}
+        fontFamilyId={terminalFontFamilyId}
+        fontSize={fontSize}
+        terminalTheme={terminalTheme}
+        followAppTerminalTheme={followAppTerminalTheme}
+        accentMode={accentMode}
+        customAccent={customAccent}
+        terminalSettings={terminalSettings}
+        sessionId={session.id}
+        startupCommand={session.startupCommand}
+        noAutoRun={session.noAutoRun}
+        serialConfig={session.serialConfig}
+        hotkeyScheme={hotkeyScheme}
+        keyBindings={keyBindings}
+        onHotkeyAction={onHotkeyAction}
+        onOpenSftp={onOpenSftp}
+        onOpenScripts={onOpenScripts}
+        onOpenTheme={onOpenTheme}
+        onCloseSession={onCloseSession}
+        onStatusChange={onStatusChange}
+        onSessionExit={onSessionExit}
+        onTerminalDataCapture={onTerminalDataCapture}
+        onOsDetected={onOsDetected}
+        onUpdateHost={onUpdateHost}
+        onAddKnownHost={onAddKnownHost}
+        onCommandExecuted={onCommandExecuted}
+        onExpandToFocus={inActiveWorkspace && !isFocusMode ? workspaceFocusHandler : undefined}
+        onSplitHorizontal={onSplitSession ? splitHorizontalHandler : undefined}
+        onSplitVertical={onSplitSession ? splitVerticalHandler : undefined}
+        isBroadcastEnabled={broadcastEnabled}
+        onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
+        onToggleComposeBar={inActiveWorkspace ? onToggleWorkspaceComposeBar : undefined}
+        isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
+        onBroadcastInput={broadcastEnabled ? onBroadcastInput : undefined}
+        onSnippetExecutorChange={onSnippetExecutorChange}
+        sessionLog={sessionLog}
+      />
+    </div>
+  );
+}, terminalPanePropsAreEqual);
+TerminalPane.displayName = 'TerminalPane';
+
+interface TerminalPanesHostProps {
+  sessions: TerminalSession[];
+  sessionHostsMap: Map<string, Host>;
+  sessionChainHostsMap: Map<string, Host[]>;
+  workspaceById: Map<string, Workspace>;
+  workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
+  isTerminalLayerVisible: boolean;
+  workspaceFocusHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  workspaceBroadcastHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  splitVerticalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
+  themePreview: { targetSessionId: string | null; themeId: string | null };
+  keys: SSHKey[];
+  identities: Identity[];
+  snippets: Snippet[];
+  knownHosts: KnownHost[];
+  terminalFontFamilyId: string;
+  fontSize: number;
+  terminalTheme: TerminalTheme;
+  followAppTerminalTheme?: boolean;
+  accentMode?: 'theme' | 'custom';
+  customAccent?: string;
+  terminalSettings?: TerminalSettings;
+  hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  keyBindings?: KeyBinding[];
+  isResizing: boolean;
+  isComposeBarOpen: boolean;
+  sessionLog?: { enabled: true; directory: string; format: string };
+  onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
+  onOpenSftp: TerminalPaneProps['onOpenSftp'];
+  onOpenScripts: () => void;
+  onOpenTheme: () => void;
+  onCloseSession: (sessionId: string) => void;
+  onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
+  onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
+  onTerminalDataCapture?: (sessionId: string, data: string) => void;
+  onOsDetected: (hostId: string, distro: string) => void;
+  onUpdateHost: (host: Host) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void;
+  onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  isBroadcastEnabled?: (workspaceId: string) => boolean;
+  onBroadcastInput: (data: string, sourceSessionId: string) => void;
+  onToggleWorkspaceComposeBar: () => void;
+  onSnippetExecutorChange: (
+    sessionId: string,
+    executor: SnippetExecutor | null,
+  ) => void;
+}
+
+const TerminalPanesHost: React.FC<TerminalPanesHostProps> = memo(({
+  sessions,
+  sessionHostsMap,
+  sessionChainHostsMap,
+  ...sharedProps
+}) => (
+  <>
+    {sessions.map((session) => {
+      const host = sessionHostsMap.get(session.id);
+      if (!host) return null;
+      return (
+        <TerminalPane
+          key={session.id}
+          session={session}
+          host={host}
+          chainHosts={sessionChainHostsMap.get(session.id)}
+          {...sharedProps}
+        />
+      );
+    })}
+  </>
+));
+TerminalPanesHost.displayName = 'TerminalPanesHost';
+
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   hosts,
   groupConfigs,
@@ -649,23 +1009,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     startClient: { x: number; y: number };
   } | null>(null);
 
-  const activeWorkspace = useMemo(() => workspaces.find(w => w.id === activeTabId), [workspaces, activeTabId]);
+  const workspaceById = useMemo(
+    () => new Map(workspaces.map((workspace) => [workspace.id, workspace])),
+    [workspaces],
+  );
+  const activeWorkspace = useMemo(() => activeTabId ? workspaceById.get(activeTabId) : undefined, [workspaceById, activeTabId]);
   const activeSession = useMemo(() => sessions.find(s => s.id === activeTabId), [sessions, activeTabId]);
-
-  // Handle broadcast input - write to all other sessions in the same workspace
-  const handleBroadcastInput = useCallback((data: string, sourceSessionId: string) => {
-    if (!activeWorkspace) return;
-
-    // Get all session IDs in this workspace
-    const workspaceSessionIds = sessions
-      .filter(s => s.workspaceId === activeWorkspace.id && s.id !== sourceSessionId)
-      .map(s => s.id);
-
-    // Write to all other sessions
-    for (const targetSessionId of workspaceSessionIds) {
-      terminalBackend.writeToSession(targetSessionId, data);
-    }
-  }, [activeWorkspace, sessions, terminalBackend]);
 
   // Workspace-level compose bar state
   const [isComposeBarOpen, setIsComposeBarOpen] = useState(false);
@@ -673,6 +1022,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   activeTabIdRef.current = activeTabId;
   const activeWorkspaceRef = useRef(activeWorkspace);
   activeWorkspaceRef.current = activeWorkspace;
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const workspacesRef = useRef(workspaces);
@@ -681,6 +1032,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   hostsRef.current = hosts;
   const onSetWorkspaceFocusedSessionRef = useRef(onSetWorkspaceFocusedSession);
   onSetWorkspaceFocusedSessionRef.current = onSetWorkspaceFocusedSession;
+
+  // Handle broadcast input - write to all other sessions in the source workspace.
+  const handleBroadcastInput = useCallback((data: string, sourceSessionId: string) => {
+    const sourceSession = sessionsRef.current.find((session) => session.id === sourceSessionId);
+    const workspaceId = sourceSession?.workspaceId;
+    if (!workspaceId) return;
+
+    for (const session of sessionsRef.current) {
+      if (session.workspaceId === workspaceId && session.id !== sourceSessionId) {
+        terminalBackend.writeToSession(session.id, data);
+      }
+    }
+  }, [terminalBackend]);
 
   // Side panel state - per-tab tracking of which sub-panel is active
   // Maps tab IDs to the active sub-panel type (sftp/scripts/theme), absent = closed
@@ -992,6 +1356,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     return map;
   }, [sessions, sessionHostsMap, hostMap, groupConfigs, proxyProfileIdSet, proxyProfiles]);
+  const sessionHostsMapRef = useRef(sessionHostsMap);
+  sessionHostsMapRef.current = sessionHostsMap;
 
   const validAIScopeTargetIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1115,15 +1481,33 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return rects;
   }, []);
 
+  const workspaceRectsById = useMemo(
+    () => {
+      const map = new Map<string, Record<string, WorkspaceRect>>();
+      for (const workspace of workspaces) {
+        map.set(workspace.id, computeWorkspaceRects(workspace, workspaceArea));
+      }
+      return map;
+    },
+    [computeWorkspaceRects, workspaceArea, workspaces],
+  );
   const activeWorkspaceRects = useMemo<Record<string, WorkspaceRect>>(
-    () => computeWorkspaceRects(activeWorkspace, workspaceArea),
-    [activeWorkspace, workspaceArea, computeWorkspaceRects]
+    () => activeWorkspace ? workspaceRectsById.get(activeWorkspace.id) ?? {} : {},
+    [activeWorkspace, workspaceRectsById]
   );
 
   useEffect(() => {
     if (!workspaceInnerRef.current) return;
     const el = workspaceInnerRef.current;
-    const updateSize = () => setWorkspaceArea({ width: el.clientWidth, height: el.clientHeight });
+    const updateSize = () => {
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      setWorkspaceArea((prev) => (
+        prev.width === width && prev.height === height
+          ? prev
+          : { width, height }
+      ));
+    };
     updateSize();
     const observer = new ResizeObserver(() => updateSize());
     observer.observe(el);
@@ -1310,6 +1694,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Check if active workspace is in focus mode
   const isFocusMode = activeWorkspace?.viewMode === 'focus';
   const focusedSessionId = activeWorkspace?.focusedSessionId;
+  const focusedSessionIdRef = useRef(focusedSessionId);
+  focusedSessionIdRef.current = focusedSessionId;
 
   // Resolve the SFTP host for the current tab.
   // Uses the stored host from when the user opened SFTP, but updates when
@@ -1434,24 +1820,29 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Switch side panel to a specific tab (or toggle if already on that tab)
   const handleSwitchSidePanelTab = useCallback((tab: SidePanelTab) => {
-    if (!activeTabId) return;
-    const currentPanel = sidePanelOpenTabsRef.current.get(activeTabId);
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const currentPanel = sidePanelOpenTabsRef.current.get(tabId);
 
     // If already on this tab, do nothing — user must click X to close
     if (currentPanel === tab) return;
 
     // If switching to SFTP and no host is stored yet, resolve it
-    if (tab === 'sftp' && !sftpHostForTabRef.current.has(activeTabId)) {
+    if (tab === 'sftp' && !sftpHostForTabRef.current.has(tabId)) {
       let host: Host | null = null;
-      if (activeWorkspace && focusedSessionId) {
-        host = sessionHostsMap.get(focusedSessionId) ?? null;
-      } else if (activeSession) {
-        host = sessionHostsMap.get(activeSession.id) ?? null;
+      const currentWorkspace = activeWorkspaceRef.current;
+      const currentFocusedSessionId = focusedSessionIdRef.current;
+      const currentActiveSession = activeSessionRef.current;
+      const currentSessionHosts = sessionHostsMapRef.current;
+      if (currentWorkspace && currentFocusedSessionId) {
+        host = currentSessionHosts.get(currentFocusedSessionId) ?? null;
+      } else if (currentActiveSession) {
+        host = currentSessionHosts.get(currentActiveSession.id) ?? null;
       }
       if (!host) return;
       setSftpHostForTab(prev => {
         const next = new Map(prev);
-        next.set(activeTabId, host);
+        next.set(tabId, host);
         return next;
       });
     }
@@ -1462,10 +1853,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     setSidePanelOpenTabs(prev => {
       const next = new Map(prev);
-      next.set(activeTabId, tab);
+      next.set(tabId, tab);
       return next;
     });
-  }, [activeTabId, activeWorkspace, focusedSessionId, activeSession, sessionHostsMap]);
+  }, []);
 
   // Toggle SFTP from activity bar header
   const handleToggleSftpFromBar = useCallback(() => {
@@ -1856,7 +2247,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const sessionById = new Map<string, TerminalSession>(sessions.map((session) => [session.id, session]));
     const workspaceById = new Map<string, Workspace>(workspaces.map((workspace) => [workspace.id, workspace]));
     const tabIds = new Set<string>(mountedAiTabIds);
-    if (activeTabId) tabIds.add(activeTabId);
 
     const contexts = new Map<string, AIPanelContext>();
 
@@ -1901,7 +2291,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
 
     return contexts;
-  }, [sessions, workspaces, mountedAiTabIds, activeTabId, sessionHostsMap]);
+  }, [sessions, workspaces, mountedAiTabIds, sessionHostsMap]);
 
   const resolveAIExecutorContext = useCallback((scope: {
     type: 'terminal' | 'workspace';
@@ -2673,123 +3063,53 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
               )}
             </div>
           )}
-          {sessions.map(session => {
-            // Use pre-computed host to avoid creating new objects on every render
-            const host = sessionHostsMap.get(session.id)!;
-            const inActiveWorkspace = !!activeWorkspace && session.workspaceId === activeWorkspace.id;
-            const isActiveSolo = activeTabId === session.id && !activeWorkspace && isTerminalLayerVisible;
-
-            // In focus mode, only the focused session is visible
-            const isFocusedInWorkspace = isFocusMode && inActiveWorkspace && session.id === focusedSessionId;
-            const isSplitViewVisible = !isFocusMode && inActiveWorkspace;
-
-            const isVisible = ((isFocusedInWorkspace || isSplitViewVisible || isActiveSolo) && isTerminalLayerVisible);
-
-            // In focus mode, use full area; in split mode, use computed rects
-            const rect = (isSplitViewVisible && !isFocusMode) ? activeWorkspaceRects[session.id] : null;
-
-            const layoutStyle = rect
-              ? {
-                left: `${rect.x}px`,
-                top: `${rect.y}px`,
-                width: `${rect.w}px`,
-                height: `${rect.h}px`,
-              }
-              : { left: 0, top: 0, width: '100%', height: '100%' };
-
-            const style: React.CSSProperties = { ...layoutStyle };
-
-            if (!isVisible) {
-              style.visibility = 'hidden';
-              style.pointerEvents = 'none';
-              // Use absolute offscreen position instead of display:none to preserve
-              // xterm canvas state in memory and avoid full re-render on tab switch.
-              style.left = '-9999px';
-              style.top = '-9999px';
-            }
-
-            // Check if this pane is the focused one in the workspace
-            const isFocusedPane = inActiveWorkspace && !isFocusMode && session.id === focusedSessionId;
-            const workspaceFocusHandler = activeWorkspace
-              ? workspaceFocusHandlersRef.current.get(activeWorkspace.id)
-              : undefined;
-            const workspaceBroadcastHandler = activeWorkspace
-              ? workspaceBroadcastHandlersRef.current.get(activeWorkspace.id)
-              : undefined;
-            const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
-            const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
-
-            return (
-              <div
-                key={session.id}
-                data-session-id={session.id}
-                className={cn(
-                  "absolute bg-background",
-                  inActiveWorkspace && "workspace-pane",
-                  isVisible && "z-10",
-                  // Focus indicator is handled by CSS .workspace-pane:not(:focus-within)
-                )}
-                style={style}
-                tabIndex={-1}
-                onClick={() => {
-                  // Set focused session when clicking on a pane in split view
-                  if (inActiveWorkspace && !isFocusMode && activeWorkspace) {
-                    onSetWorkspaceFocusedSession?.(activeWorkspace.id, session.id);
-                  }
-                }}
-              >
-                <Terminal
-                  host={host}
-                  keys={keys}
-                  identities={identities}
-                  snippets={snippets}
-                  chainHosts={sessionChainHostsMap.get(session.id)}
-                  themePreviewId={session.id === previewTargetSessionId ? activeThemePreviewId ?? undefined : undefined}
-                  knownHosts={knownHosts}
-                  isVisible={isVisible}
-                  inWorkspace={inActiveWorkspace}
-                  isResizing={!!resizing}
-                  isFocusMode={isFocusMode}
-                  isFocused={isFocusedPane}
-                  fontFamilyId={terminalFontFamilyId}
-                  fontSize={fontSize}
-                  terminalTheme={terminalTheme}
-                  followAppTerminalTheme={followAppTerminalTheme}
-                  accentMode={accentMode}
-                  customAccent={customAccent}
-                  terminalSettings={terminalSettings}
-                  sessionId={session.id}
-                  startupCommand={session.startupCommand}
-                  noAutoRun={session.noAutoRun}
-                  serialConfig={session.serialConfig}
-                  hotkeyScheme={hotkeyScheme}
-                  keyBindings={keyBindings}
-                  onHotkeyAction={onHotkeyAction}
-                  onOpenSftp={handleOpenSftp}
-                  onOpenScripts={handleOpenScripts}
-                  onOpenTheme={handleOpenTheme}
-                  onCloseSession={handleCloseSession}
-                  onStatusChange={handleStatusChange}
-                  onSessionExit={handleSessionExit}
-                  onTerminalDataCapture={handleTerminalDataCapture}
-                  onOsDetected={handleOsDetected}
-                  onUpdateHost={handleUpdateHost}
-                  onAddKnownHost={handleAddKnownHost}
-                  onCommandExecuted={handleCommandExecuted}
-                  onExpandToFocus={inActiveWorkspace && !isFocusMode ? workspaceFocusHandler : undefined}
-                  onSplitHorizontal={onSplitSession ? splitHorizontalHandler : undefined}
-                  onSplitVertical={onSplitSession ? splitVerticalHandler : undefined}
-                  isBroadcastEnabled={inActiveWorkspace && activeWorkspace ? isBroadcastEnabled?.(activeWorkspace.id) : false}
-                  onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
-                  onToggleComposeBar={inActiveWorkspace ? handleToggleWorkspaceComposeBar : undefined}
-                  isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
-                  onBroadcastInput={inActiveWorkspace && activeWorkspace && isBroadcastEnabled?.(activeWorkspace.id) ? handleBroadcastInput : undefined}
-                  onSnippetExecutorChange={handleSnippetExecutorChange}
-                  sessionLog={sessionLogConfig}
-                />
-              </div>
-            );
-          })}
+          <TerminalPanesHost
+            sessions={sessions}
+            sessionHostsMap={sessionHostsMap}
+            sessionChainHostsMap={sessionChainHostsMap}
+            workspaceById={workspaceById}
+            workspaceRectsById={workspaceRectsById}
+            isTerminalLayerVisible={isTerminalLayerVisible}
+            workspaceFocusHandlersRef={workspaceFocusHandlersRef}
+            workspaceBroadcastHandlersRef={workspaceBroadcastHandlersRef}
+            splitHorizontalHandlersRef={splitHorizontalHandlersRef}
+            splitVerticalHandlersRef={splitVerticalHandlersRef}
+            themePreview={themePreview}
+            keys={keys}
+            identities={identities}
+            snippets={snippets}
+            knownHosts={knownHosts}
+            terminalFontFamilyId={terminalFontFamilyId}
+            fontSize={fontSize}
+            terminalTheme={terminalTheme}
+            followAppTerminalTheme={followAppTerminalTheme}
+            accentMode={accentMode}
+            customAccent={customAccent}
+            terminalSettings={terminalSettings}
+            hotkeyScheme={hotkeyScheme}
+            keyBindings={keyBindings}
+            isResizing={!!resizing}
+            isComposeBarOpen={isComposeBarOpen}
+            sessionLog={sessionLogConfig}
+            onHotkeyAction={onHotkeyAction}
+            onOpenSftp={handleOpenSftp}
+            onOpenScripts={handleOpenScripts}
+            onOpenTheme={handleOpenTheme}
+            onCloseSession={handleCloseSession}
+            onStatusChange={handleStatusChange}
+            onSessionExit={handleSessionExit}
+            onTerminalDataCapture={handleTerminalDataCapture}
+            onOsDetected={handleOsDetected}
+            onUpdateHost={handleUpdateHost}
+            onAddKnownHost={handleAddKnownHost}
+            onCommandExecuted={handleCommandExecuted}
+            onSetWorkspaceFocusedSession={onSetWorkspaceFocusedSession}
+            onSplitSession={onSplitSession}
+            isBroadcastEnabled={isBroadcastEnabled}
+            onBroadcastInput={handleBroadcastInput}
+            onToggleWorkspaceComposeBar={handleToggleWorkspaceComposeBar}
+            onSnippetExecutorChange={handleSnippetExecutorChange}
+          />
           {/* Only show resizers in split view mode, not in focus mode */}
           {!isFocusMode && activeResizers.map(handle => {
             const isVertical = handle.direction === 'vertical';

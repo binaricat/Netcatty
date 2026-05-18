@@ -1,6 +1,6 @@
 import { Bell, Copy, FileCode, FileText, Folder, FolderLock, LayoutGrid, Minus, Moon, MoreHorizontal, Plus, Server, Settings, Sparkles, Square, Sun, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { activeTabStore, fromEditorTabId, isEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
+import { activeTabStore, fromEditorTabId, isEditorTabId, useActiveTabId, useIsTabActive } from '../application/state/activeTabStore';
 import type { EditorTab } from '../application/state/editorTabStore';
 import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
@@ -20,6 +20,7 @@ import { SyncStatusButton } from './SyncStatusButton';
 // Helper styles for Electron drag regions (use type assertion to include non-standard WebkitAppRegion)
 const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
 const dragRegionNoSelect = { WebkitAppRegion: 'drag', userSelect: 'none' } as React.CSSProperties;
+const emptyTabStyle: React.CSSProperties = {};
 
 // File extensions that render the code-file icon instead of the plain text icon.
 const CODE_EXTENSIONS_RE = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
@@ -231,6 +232,512 @@ const WindowControls: React.FC = memo(() => {
 });
 WindowControls.displayName = 'WindowControls';
 
+type TranslateFn = ReturnType<typeof useI18n>['t'];
+type RenderBulkCloseItems = (anchorId: string) => React.ReactNode;
+
+interface ActiveTabAutoScrollerProps {
+  tabsContainerRef: React.RefObject<HTMLDivElement | null>;
+  updateScrollState: () => void;
+}
+
+const ActiveTabAutoScroller: React.FC<ActiveTabAutoScrollerProps> = memo(({
+  tabsContainerRef,
+  updateScrollState,
+}) => {
+  const activeTabId = useActiveTabId();
+
+  useLayoutEffect(() => {
+    if (!activeTabId || activeTabId === 'vault' || activeTabId === 'sftp') return;
+    const container = tabsContainerRef.current;
+    if (!container) return;
+
+    const activeTabElement = container.querySelector(`[data-tab-id="${activeTabId}"]`) as HTMLElement | null;
+    if (activeTabElement) {
+      const containerRect = container.getBoundingClientRect();
+      const tabRect = activeTabElement.getBoundingClientRect();
+
+      if (tabRect.left < containerRect.left) {
+        container.scrollLeft -= (containerRect.left - tabRect.left + 8);
+      } else if (tabRect.right > containerRect.right) {
+        container.scrollLeft += (tabRect.right - containerRect.right + 8);
+      }
+    }
+
+    setTimeout(updateScrollState, 100);
+  }, [activeTabId, tabsContainerRef, updateScrollState]);
+
+  return null;
+});
+ActiveTabAutoScroller.displayName = 'ActiveTabAutoScroller';
+
+interface RootTopTabProps {
+  tabId: 'vault' | 'sftp';
+  label: string;
+  icon: React.ReactNode;
+  className?: string;
+}
+
+const RootTopTab: React.FC<RootTopTabProps> = memo(({ tabId, label, icon, className }) => {
+  const isActive = useIsTabActive(tabId);
+  const handleClick = useCallback(() => {
+    activeTabStore.setActiveTabId(tabId);
+  }, [tabId]);
+
+  return (
+    <div
+      data-tab-id={tabId}
+      data-tab-type="root"
+      data-state={isActive ? 'active' : 'inactive'}
+      onClick={handleClick}
+      className={cn(
+        "netcatty-tab relative h-7 px-3 overflow-hidden text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
+        className,
+      )}
+      style={{
+        backgroundColor: isActive
+          ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+          : 'transparent',
+        color: isActive
+          ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+          : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+          e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+        }
+      }}
+    >
+      {icon} {label}
+    </div>
+  );
+});
+RootTopTab.displayName = 'RootTopTab';
+
+interface EditorTopTabProps {
+  tabId: string;
+  editorTab: EditorTab;
+  host: Host | undefined;
+  suffix: string;
+  onRequestCloseEditorTab: (editorTabId: string) => void;
+}
+
+const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
+  tabId,
+  editorTab,
+  host,
+  suffix,
+  onRequestCloseEditorTab,
+}) => {
+  const isActive = useIsTabActive(tabId);
+  const dirty = editorTab.content !== editorTab.baselineContent;
+  const tooltip = `${host?.label ?? editorTab.hostId}@${host?.hostname ?? ''}:${editorTab.remotePath}`;
+  const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
+  const handleClick = useCallback(() => {
+    activeTabStore.setActiveTabId(tabId);
+  }, [tabId]);
+  const handleClose = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onRequestCloseEditorTab(editorTab.id);
+  }, [editorTab.id, onRequestCloseEditorTab]);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          data-tab-id={tabId}
+          data-tab-type="editor"
+          data-state={isActive ? 'active' : 'inactive'}
+          onClick={handleClick}
+          className="netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0"
+          style={{
+            backgroundColor: isActive
+              ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+              : 'transparent',
+            color: isActive
+              ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+              : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+              e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+            }
+          }}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <FileIcon
+              size={14}
+              className="shrink-0"
+              style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+            />
+            <span className="truncate flex items-center gap-0.5">
+              {dirty && <span className="text-primary mr-0.5">●</span>}
+              {editorTab.fileName}
+              {suffix && <span className="text-muted-foreground ml-1">{suffix}</span>}
+            </span>
+          </div>
+          <button
+            onClick={handleClose}
+            className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+            aria-label="Close editor tab"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+});
+EditorTopTab.displayName = 'EditorTopTab';
+
+interface SessionTopTabProps {
+  session: TerminalSession;
+  host: Host | undefined;
+  hasActivity: boolean;
+  isBeingDragged: boolean;
+  isDraggingForReorder: boolean;
+  shiftStyle: React.CSSProperties;
+  showDropIndicatorBefore: boolean;
+  showDropIndicatorAfter: boolean;
+  onTabDragStart: (e: React.DragEvent, tabId: string) => void;
+  onTabDragEnd: () => void;
+  onTabDragOver: (e: React.DragEvent, tabId: string) => void;
+  onTabDragLeave: (e: React.DragEvent) => void;
+  onTabDrop: (e: React.DragEvent, targetTabId: string) => void;
+  onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
+  onRenameSession: (sessionId: string) => void;
+  onCopySession: (sessionId: string) => void;
+  renderBulkCloseItems: RenderBulkCloseItems;
+  t: TranslateFn;
+}
+
+const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
+  session,
+  host,
+  hasActivity,
+  isBeingDragged,
+  isDraggingForReorder,
+  shiftStyle,
+  showDropIndicatorBefore,
+  showDropIndicatorAfter,
+  onTabDragStart,
+  onTabDragEnd,
+  onTabDragOver,
+  onTabDragLeave,
+  onTabDrop,
+  onCloseSession,
+  onRenameSession,
+  onCopySession,
+  renderBulkCloseItems,
+  t,
+}) => {
+  const isActive = useIsTabActive(session.id);
+  const handleClick = useCallback(() => {
+    activeTabStore.setActiveTabId(session.id);
+  }, [session.id]);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          data-tab-id={session.id}
+          data-tab-type="session"
+          data-state={isActive ? 'active' : 'inactive'}
+          onClick={handleClick}
+          draggable
+          onDragStart={(e) => onTabDragStart(e, session.id)}
+          onDragEnd={onTabDragEnd}
+          onDragOver={(e) => onTabDragOver(e, session.id)}
+          onDragLeave={onTabDragLeave}
+          onDrop={(e) => onTabDrop(e, session.id)}
+          className={cn(
+            "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+            "transition-transform duration-150",
+            isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
+          )}
+          style={{
+            ...shiftStyle,
+            backgroundColor: isActive
+              ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+              : 'transparent',
+            color: isActive
+              ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+              : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+              e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+            }
+          }}
+        >
+          {showDropIndicatorBefore && isDraggingForReorder && (
+            <div
+              className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+            />
+          )}
+          {showDropIndicatorAfter && isDraggingForReorder && (
+            <div
+              className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+            />
+          )}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <SessionTabIcon host={host} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
+            <span className="truncate">{session.hostLabel}</span>
+            <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
+          </div>
+          <button
+            onClick={(e) => onCloseSession(session.id, e)}
+            className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+            aria-label={t('tabs.closeSessionAria')}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => onRenameSession(session.id)}>
+          {t('common.rename')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onCopySession(session.id)}>
+          {t('tabs.copyTab')}
+        </ContextMenuItem>
+        <ContextMenuItem className="text-destructive" onClick={() => onCloseSession(session.id)}>
+          {t('common.close')}
+        </ContextMenuItem>
+        {renderBulkCloseItems(session.id)}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
+SessionTopTab.displayName = 'SessionTopTab';
+
+interface WorkspaceTopTabProps {
+  workspace: Workspace;
+  paneCount: number;
+  hasActivity: boolean;
+  isBeingDragged: boolean;
+  isDraggingForReorder: boolean;
+  shiftStyle: React.CSSProperties;
+  showDropIndicatorBefore: boolean;
+  showDropIndicatorAfter: boolean;
+  onTabDragStart: (e: React.DragEvent, tabId: string) => void;
+  onTabDragEnd: () => void;
+  onTabDragOver: (e: React.DragEvent, tabId: string) => void;
+  onTabDragLeave: (e: React.DragEvent) => void;
+  onTabDrop: (e: React.DragEvent, targetTabId: string) => void;
+  onRenameWorkspace: (workspaceId: string) => void;
+  onCloseWorkspace: (workspaceId: string) => void;
+  renderBulkCloseItems: RenderBulkCloseItems;
+  t: TranslateFn;
+}
+
+const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
+  workspace,
+  paneCount,
+  hasActivity,
+  isBeingDragged,
+  isDraggingForReorder,
+  shiftStyle,
+  showDropIndicatorBefore,
+  showDropIndicatorAfter,
+  onTabDragStart,
+  onTabDragEnd,
+  onTabDragOver,
+  onTabDragLeave,
+  onTabDrop,
+  onRenameWorkspace,
+  onCloseWorkspace,
+  renderBulkCloseItems,
+  t,
+}) => {
+  const isActive = useIsTabActive(workspace.id);
+  const handleClick = useCallback(() => {
+    activeTabStore.setActiveTabId(workspace.id);
+  }, [workspace.id]);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          data-tab-id={workspace.id}
+          data-tab-type="workspace"
+          data-state={isActive ? 'active' : 'inactive'}
+          onClick={handleClick}
+          draggable
+          onDragStart={(e) => onTabDragStart(e, workspace.id)}
+          onDragEnd={onTabDragEnd}
+          onDragOver={(e) => onTabDragOver(e, workspace.id)}
+          onDragLeave={onTabDragLeave}
+          onDrop={(e) => onTabDrop(e, workspace.id)}
+          className={cn(
+            "netcatty-tab relative h-7 pl-3 pr-2 min-w-[150px] max-w-[260px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
+            "transition-transform duration-150",
+            isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
+          )}
+          style={{
+            ...shiftStyle,
+            backgroundColor: isActive
+              ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+              : 'transparent',
+            color: isActive
+              ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+              : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+          }}
+          onMouseEnter={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+              e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isActive) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+            }
+          }}
+        >
+          {showDropIndicatorBefore && isDraggingForReorder && (
+            <div
+              className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+            />
+          )}
+          {showDropIndicatorAfter && isDraggingForReorder && (
+            <div
+              className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
+              style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
+            />
+          )}
+          <div className="flex items-center gap-2 truncate">
+            <LayoutGrid
+              size={14}
+              className="shrink-0"
+              style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+            />
+            <span className="truncate">{workspace.title}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasActivity && sessionStatusDot('connected', true)}
+            <div
+              className="text-[10px] px-1.5 py-0.5 rounded-full min-w-[22px] text-center"
+              style={{
+                border: '1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 18%, transparent)',
+                backgroundColor: 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 60%, transparent)',
+              }}
+            >
+              {paneCount}
+            </div>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => onRenameWorkspace(workspace.id)}>
+          {t('common.rename')}
+        </ContextMenuItem>
+        <ContextMenuItem className="text-destructive" onClick={() => onCloseWorkspace(workspace.id)}>
+          {t('common.close')}
+        </ContextMenuItem>
+        {renderBulkCloseItems(workspace.id)}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+});
+WorkspaceTopTab.displayName = 'WorkspaceTopTab';
+
+interface LogViewTopTabProps {
+  logView: LogView;
+  onCloseLogView: (logViewId: string) => void;
+  t: TranslateFn;
+}
+
+const LogViewTopTab: React.FC<LogViewTopTabProps> = memo(({
+  logView,
+  onCloseLogView,
+  t,
+}) => {
+  const isActive = useIsTabActive(logView.id);
+  const isLocal = logView.log.protocol === 'local' || logView.log.hostname === 'localhost';
+  const handleClick = useCallback(() => {
+    activeTabStore.setActiveTabId(logView.id);
+  }, [logView.id]);
+  const handleClose = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onCloseLogView(logView.id);
+  }, [logView.id, onCloseLogView]);
+
+  return (
+    <div
+      data-tab-id={logView.id}
+      data-tab-type="logView"
+      data-state={isActive ? 'active' : 'inactive'}
+      onClick={handleClick}
+      className="netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0"
+      style={{
+        backgroundColor: isActive
+          ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
+          : 'transparent',
+        color: isActive
+          ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
+          : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
+          e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
+        }
+      }}
+    >
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <FileText
+          size={14}
+          className="shrink-0"
+          style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+        />
+        <span className="truncate">
+          {t('tabs.logPrefix')} {isLocal ? t('tabs.logLocal') : logView.log.hostname}
+        </span>
+      </div>
+      <button
+        onClick={handleClose}
+        className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+        aria-label={t('tabs.closeLogViewAria')}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+});
+LogViewTopTab.displayName = 'LogViewTopTab';
+
 const TopTabsInner: React.FC<TopTabsProps> = ({
   theme,
   followAppTerminalTheme = false,
@@ -263,13 +770,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   hostById,
 }) => {
   const { t } = useI18n();
-  // Subscribe to activeTabId from external store
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
-  const activeTabId = useActiveTabId();
   const sessionActivityMap = useSessionActivityMap();
-  const isVaultActive = activeTabId === 'vault';
-  const isSftpActive = activeTabId === 'sftp';
-  const onSelectTab = activeTabStore.setActiveTabId;
 
   // Tab reorder drag state
   const [dropIndicator, setDropIndicator] = useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
@@ -333,29 +835,6 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       };
     }
   }, [updateScrollState, orderedTabs]);
-
-  // Scroll to active tab when it changes
-  useLayoutEffect(() => {
-    if (!activeTabId || activeTabId === 'vault' || activeTabId === 'sftp') return;
-    const container = tabsContainerRef.current;
-    if (!container) return;
-
-    // Find the active tab element
-    const activeTabElement = container.querySelector(`[data-tab-id="${activeTabId}"]`) as HTMLElement | null;
-    if (activeTabElement) {
-      const containerRect = container.getBoundingClientRect();
-      const tabRect = activeTabElement.getBoundingClientRect();
-
-      // Check if tab is outside visible area
-      if (tabRect.left < containerRect.left) {
-        container.scrollLeft -= (containerRect.left - tabRect.left + 8);
-      } else if (tabRect.right > containerRect.right) {
-        container.scrollLeft += (tabRect.right - containerRect.right + 8);
-      }
-    }
-    // Update scroll indicators after scroll
-    setTimeout(updateScrollState, 100);
-  }, [activeTabId, updateScrollState]);
 
   // Pre-compute lookup maps for O(1) access instead of O(n) find operations
   const orphanSessionMap = useMemo(() => {
@@ -525,7 +1004,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
   // Bulk-close menu items shared by session and workspace context menus.
   // Anchor is the tab the user right-clicked on (matches VSCode/JetBrains UX).
-  const renderBulkCloseItems = (anchorId: string) => {
+  const renderBulkCloseItems = useCallback((anchorId: string) => {
     const anchorIdx = orderedTabs.indexOf(anchorId);
     const othersIds = orderedTabs.filter((id) => id !== anchorId);
     const rightIds = anchorIdx >= 0 ? orderedTabs.slice(anchorIdx + 1) : [];
@@ -552,7 +1031,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         </ContextMenuItem>
       </>
     );
-  };
+  }, [onCloseTabsBatch, orderedTabs, t]);
 
   // Render the tabs
   const renderOrderedTabs = () => {
@@ -562,74 +1041,21 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       if (item.type === 'editor') {
         const { editorTab } = item;
         const tabId = item.id;
-        const isActive = activeTabId === tabId;
         const host = hostById.get(editorTab.hostId);
-        const dirty = editorTab.content !== editorTab.baselineContent;
-        const tooltip = `${host?.label ?? editorTab.hostId}@${host?.hostname ?? ''}:${editorTab.remotePath}`;
         // Disambiguate duplicate filenames using the memoed counts map.
         const suffix = (editorTabFileNameCounts.get(editorTab.fileName) ?? 0) > 1
           ? ` · ${editorTab.remotePath.split('/').slice(-2, -1)[0] || '/'}`
           : '';
-        const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
 
         return (
-          <Tooltip key={tabId}>
-            <TooltipTrigger asChild>
-              <div
-                data-tab-id={tabId}
-                data-tab-type="editor"
-                data-state={isActive ? 'active' : 'inactive'}
-                onClick={() => onSelectTab(tabId)}
-                className={cn(
-                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-                )}
-                style={{
-                  backgroundColor: isActive
-                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                    : 'transparent',
-                  color: isActive
-                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-                  }
-                }}
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <FileIcon
-                    size={14}
-                    className="shrink-0"
-                    style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                  />
-                  <span className="truncate flex items-center gap-0.5">
-                    {dirty && <span className="text-primary mr-0.5">●</span>}
-                    {editorTab.fileName}
-                    {suffix && <span className="text-muted-foreground ml-1">{suffix}</span>}
-                  </span>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRequestCloseEditorTab(editorTab.id);
-                  }}
-                  className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-                  aria-label="Close editor tab"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>{tooltip}</TooltipContent>
-          </Tooltip>
+          <EditorTopTab
+            key={tabId}
+            tabId={tabId}
+            editorTab={editorTab}
+            host={host}
+            suffix={suffix}
+            onRequestCloseEditorTab={onRequestCloseEditorTab}
+          />
         );
       }
 
@@ -637,92 +1063,32 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const session = item.session;
         const hasActivity = !!sessionActivityMap[session.id];
         const isBeingDragged = draggingSessionId === session.id;
-        const shiftStyle = tabShiftStyles[session.id] || {};
+        const shiftStyle = tabShiftStyles[session.id] || emptyTabStyle;
         const showDropIndicatorBefore = dropIndicator?.tabId === session.id && dropIndicator.position === 'before';
         const showDropIndicatorAfter = dropIndicator?.tabId === session.id && dropIndicator.position === 'after';
 
         return (
-          <ContextMenu key={session.id}>
-            <ContextMenuTrigger asChild>
-              <div
-                data-tab-id={session.id}
-                data-tab-type="session"
-                data-state={activeTabId === session.id ? 'active' : 'inactive'}
-                onClick={() => onSelectTab(session.id)}
-                draggable
-                onDragStart={(e) => handleTabDragStart(e, session.id)}
-                onDragEnd={handleTabDragEnd}
-                onDragOver={(e) => handleTabDragOver(e, session.id)}
-                onDragLeave={handleTabDragLeave}
-                onDrop={(e) => handleTabDrop(e, session.id)}
-                className={cn(
-                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-                  "transition-transform duration-150",
-                  isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
-                )}
-                style={{
-                  ...shiftStyle,
-                  backgroundColor: activeTabId === session.id
-                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                    : 'transparent',
-                  color: activeTabId === session.id
-                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-                }}
-                onMouseEnter={(e) => {
-                  if (activeTabId !== session.id) {
-                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activeTabId !== session.id) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-                  }
-                }}
-              >
-                {/* Drop indicator line - before */}
-                {showDropIndicatorBefore && isDraggingForReorder && (
-                  <div
-                    className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-                  />
-                )}
-                {/* Drop indicator line - after */}
-                {showDropIndicatorAfter && isDraggingForReorder && (
-                  <div
-                    className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-                  />
-                )}
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <SessionTabIcon host={hostMap.get(session.hostId)} isActive={activeTabId === session.id} protocol={session.protocol} shellIcon={session.localShellIcon} />
-                  <span className="truncate">{session.hostLabel}</span>
-                  <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
-                </div>
-                <button
-                  onClick={(e) => onCloseSession(session.id, e)}
-                  className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-                  aria-label={t('tabs.closeSessionAria')}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onClick={() => onRenameSession(session.id)}>
-                {t('common.rename')}
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onCopySession(session.id)}>
-                {t('tabs.copyTab')}
-              </ContextMenuItem>
-              <ContextMenuItem className="text-destructive" onClick={() => onCloseSession(session.id)}>
-                {t('common.close')}
-              </ContextMenuItem>
-              {renderBulkCloseItems(session.id)}
-            </ContextMenuContent>
-          </ContextMenu>
+          <SessionTopTab
+            key={session.id}
+            session={session}
+            host={hostMap.get(session.hostId)}
+            hasActivity={hasActivity}
+            isBeingDragged={isBeingDragged}
+            isDraggingForReorder={isDraggingForReorder}
+            shiftStyle={shiftStyle}
+            showDropIndicatorBefore={showDropIndicatorBefore}
+            showDropIndicatorAfter={showDropIndicatorAfter}
+            onTabDragStart={handleTabDragStart}
+            onTabDragEnd={handleTabDragEnd}
+            onTabDragOver={handleTabDragOver}
+            onTabDragLeave={handleTabDragLeave}
+            onTabDrop={handleTabDrop}
+            onCloseSession={onCloseSession}
+            onRenameSession={onRenameSession}
+            onCopySession={onCopySession}
+            renderBulkCloseItems={renderBulkCloseItems}
+            t={t}
+          />
         );
       }
 
@@ -730,159 +1096,45 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const workspace = item.workspace;
         const paneCount = item.paneCount;
         const hasActivity = !!workspaceActivityMap.get(workspace.id);
-        const isActive = activeTabId === workspace.id;
         const isBeingDragged = draggingSessionId === workspace.id;
-        const shiftStyle = tabShiftStyles[workspace.id] || {};
+        const shiftStyle = tabShiftStyles[workspace.id] || emptyTabStyle;
         const showDropIndicatorBefore = dropIndicator?.tabId === workspace.id && dropIndicator.position === 'before';
         const showDropIndicatorAfter = dropIndicator?.tabId === workspace.id && dropIndicator.position === 'after';
 
         return (
-          <ContextMenu key={workspace.id}>
-            <ContextMenuTrigger asChild>
-              <div
-                data-tab-id={workspace.id}
-                data-tab-type="workspace"
-                data-state={isActive ? 'active' : 'inactive'}
-                onClick={() => onSelectTab(workspace.id)}
-                draggable
-                onDragStart={(e) => handleTabDragStart(e, workspace.id)}
-                onDragEnd={handleTabDragEnd}
-                onDragOver={(e) => handleTabDragOver(e, workspace.id)}
-                onDragLeave={handleTabDragLeave}
-                onDrop={(e) => handleTabDrop(e, workspace.id)}
-                className={cn(
-                  "netcatty-tab relative h-7 pl-3 pr-2 min-w-[150px] max-w-[260px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-                  "transition-transform duration-150",
-                  isBeingDragged && isDraggingForReorder ? "opacity-40 scale-95" : ""
-                )}
-                style={{
-                  ...shiftStyle,
-                  backgroundColor: isActive
-                    ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                    : 'transparent',
-                  color: isActive
-                    ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                    : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                    e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-                  }
-                }}
-              >
-                {/* Drop indicator line - before */}
-                {showDropIndicatorBefore && isDraggingForReorder && (
-                  <div
-                    className="absolute -left-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-                  />
-                )}
-                {/* Drop indicator line - after */}
-                {showDropIndicatorAfter && isDraggingForReorder && (
-                  <div
-                    className="absolute -right-0.5 top-1 bottom-1 w-0.5 rounded-full animate-pulse"
-                    style={{ backgroundColor: 'var(--top-tabs-accent, hsl(var(--accent)))', boxShadow: '0 0 8px 2px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 50%, transparent)' }}
-                  />
-                )}
-                <div className="flex items-center gap-2 truncate">
-                  <LayoutGrid
-                    size={14}
-                    className="shrink-0"
-                    style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-                  />
-                  <span className="truncate">{workspace.title}</span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {hasActivity && sessionStatusDot('connected', true)}
-                  <div
-                    className="text-[10px] px-1.5 py-0.5 rounded-full min-w-[22px] text-center"
-                    style={{
-                      border: '1px solid color-mix(in srgb, var(--top-tabs-fg, hsl(var(--foreground))) 18%, transparent)',
-                      backgroundColor: 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 60%, transparent)',
-                    }}
-                  >
-                    {paneCount}
-                  </div>
-                </div>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onClick={() => onRenameWorkspace(workspace.id)}>
-                {t('common.rename')}
-              </ContextMenuItem>
-              <ContextMenuItem className="text-destructive" onClick={() => onCloseWorkspace(workspace.id)}>
-                {t('common.close')}
-              </ContextMenuItem>
-              {renderBulkCloseItems(workspace.id)}
-            </ContextMenuContent>
-          </ContextMenu>
+          <WorkspaceTopTab
+            key={workspace.id}
+            workspace={workspace}
+            paneCount={paneCount}
+            hasActivity={hasActivity}
+            isBeingDragged={isBeingDragged}
+            isDraggingForReorder={isDraggingForReorder}
+            shiftStyle={shiftStyle}
+            showDropIndicatorBefore={showDropIndicatorBefore}
+            showDropIndicatorAfter={showDropIndicatorAfter}
+            onTabDragStart={handleTabDragStart}
+            onTabDragEnd={handleTabDragEnd}
+            onTabDragOver={handleTabDragOver}
+            onTabDragLeave={handleTabDragLeave}
+            onTabDrop={handleTabDrop}
+            onRenameWorkspace={onRenameWorkspace}
+            onCloseWorkspace={onCloseWorkspace}
+            renderBulkCloseItems={renderBulkCloseItems}
+            t={t}
+          />
         );
       }
 
       if (item.type === 'logView') {
         const logView = item.logView;
-        const isActive = activeTabId === logView.id;
-        const isLocal = logView.log.protocol === 'local' || logView.log.hostname === 'localhost';
 
         return (
-          <div
+          <LogViewTopTab
             key={logView.id}
-            data-tab-id={logView.id}
-            data-tab-type="logView"
-            data-state={isActive ? 'active' : 'inactive'}
-            onClick={() => onSelectTab(logView.id)}
-            className={cn(
-              "netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0",
-            )}
-            style={{
-              backgroundColor: isActive
-                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                : 'transparent',
-              color: isActive
-                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-              }
-            }}
-          >
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <FileText
-                size={14}
-                className="shrink-0"
-                style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-              />
-              <span className="truncate">
-                {t('tabs.logPrefix')} {isLocal ? t('tabs.logLocal') : logView.log.hostname}
-              </span>
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseLogView(logView.id);
-              }}
-              className="p-1 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-              aria-label={t('tabs.closeLogViewAria')}
-            >
-              <X size={12} />
-            </button>
-          </div>
+            logView={logView}
+            onCloseLogView={onCloseLogView}
+            t={t}
+          />
         );
       }
 
@@ -911,6 +1163,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       }}
       onDoubleClick={handleTitleBarDoubleClick}
     >
+      <ActiveTabAutoScroller
+        tabsContainerRef={tabsContainerRef}
+        updateScrollState={updateScrollState}
+      />
       {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
       <div className="absolute inset-x-0 top-0 h-1 app-drag pointer-events-auto z-10" style={dragRegionStyle} aria-hidden />
       <div
@@ -919,69 +1175,19 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       >
         {/* Fixed left tabs: Vaults and SFTP */}
         <div className="flex items-end gap-0 flex-shrink-0 app-drag">
-          <div
-            data-tab-id="vault"
-            data-tab-type="root"
-            data-state={isVaultActive ? 'active' : 'inactive'}
-            onClick={() => onSelectTab('vault')}
-            className={cn(
-              "netcatty-tab relative h-7 px-3 rounded text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
-            )}
-            style={{
-              backgroundColor: isVaultActive
-                ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                : 'transparent',
-              color: isVaultActive
-                ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-            }}
-            onMouseEnter={(e) => {
-              if (!isVaultActive) {
-                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isVaultActive) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-              }
-            }}
-          >
-            <FolderLock size={14} /> Vaults
-          </div>
+          <RootTopTab
+            tabId="vault"
+            label="Vaults"
+            icon={<FolderLock size={14} />}
+            className="rounded"
+          />
           {showSftpTab && (
-            <div
-              data-tab-id="sftp"
-              data-tab-type="root"
-              data-state={isSftpActive ? 'active' : 'inactive'}
-              onClick={() => onSelectTab('sftp')}
-              className={cn(
-                "netcatty-tab relative h-7 px-3 rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center gap-2 app-no-drag",
-              )}
-              style={{
-                backgroundColor: isSftpActive
-                  ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
-                  : 'transparent',
-                color: isSftpActive
-                  ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
-                  : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
-              }}
-              onMouseEnter={(e) => {
-                if (!isSftpActive) {
-                  e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 40%, transparent)';
-                  e.currentTarget.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSftpActive) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--top-tabs-muted, hsl(var(--muted-foreground)))';
-                }
-              }}
-            >
-              <Folder size={14} /> SFTP
-            </div>
+            <RootTopTab
+              tabId="sftp"
+              label="SFTP"
+              icon={<Folder size={14} />}
+              className="rounded-t-md"
+            />
           )}
         </div>
 

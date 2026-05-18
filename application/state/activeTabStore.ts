@@ -1,4 +1,4 @@
-import { useCallback,useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 // Simple store for active tab that allows fine-grained subscriptions
 type Listener = () => void;
@@ -92,7 +92,11 @@ export const useIsEditorTabActive = (tabId: string): boolean => {
 // Check if terminal layer should be visible
 // Editor tabs are NOT terminal tabs, so exclude them from the visibility condition.
 export const useIsTerminalLayerVisible = (draggingSessionId: string | null) => {
-  const activeTabId = useActiveTabId();
-  const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !isEditorTabId(activeTabId);
-  return isTerminalTab || !!draggingSessionId;
+  const getSnapshot = useCallback(() => {
+    const activeTabId = activeTabStore.getActiveTabId();
+    const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !isEditorTabId(activeTabId);
+    return isTerminalTab || !!draggingSessionId;
+  }, [draggingSessionId]);
+
+  return useSyncExternalStore(activeTabStore.subscribe, getSnapshot);
 };
