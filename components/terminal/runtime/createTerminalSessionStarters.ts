@@ -213,15 +213,6 @@ const handleTerminalOutputAutoScroll = (
   term.scrollToBottom();
 };
 
-const writeTerminalLine = (
-  ctx: TerminalSessionStartersContext,
-  term: XTerm,
-  data: string,
-) => {
-  ctx.onTerminalLogData?.(`${data}\r\n`);
-  term.writeln(data);
-};
-
 type TerminalWriteQueue = {
   writing: boolean;
   pending: Array<() => void>;
@@ -258,6 +249,18 @@ const enqueueTerminalWrite = (
   if (!queue.writing) {
     scheduleNextTerminalWrite(term, queue);
   }
+};
+
+const writeTerminalLine = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+  data: string,
+) => {
+  enqueueTerminalWrite(term, (done) => {
+    const lineData = `${data}\r\n`;
+    ctx.onTerminalLogData?.(lineData);
+    term.write(lineData, done);
+  });
 };
 
 const writeSessionData = (

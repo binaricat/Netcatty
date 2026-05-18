@@ -26,7 +26,7 @@ test("getMissingChainHostIds reports unresolved jump hosts", () => {
 
 test("startSerial captures direct connected banner in terminal log data", async () => {
   const capturedLogData: string[] = [];
-  const writtenLines: string[] = [];
+  const writtenData: string[] = [];
 
   const terminalBackend = {
     backendAvailable: () => true,
@@ -92,15 +92,18 @@ test("startSerial captures direct connected banner in terminal log data", async 
   const term = {
     cols: 120,
     rows: 32,
-    write: noop,
-    writeln: (data: string) => writtenLines.push(data),
+    write: (data: string, callback?: () => void) => {
+      writtenData.push(data);
+      callback?.();
+    },
+    writeln: noop,
     scrollToBottom: noop,
   };
 
   await createTerminalSessionStarters(ctx as never).startSerial(term as never);
 
   const banner = "[Connected to COM3 at 9600 baud]";
-  assert.deepEqual(writtenLines, [banner]);
+  assert.deepEqual(writtenData, [`${banner}\r\n`]);
   assert.deepEqual(capturedLogData, [`${banner}\r\n`]);
 });
 
@@ -297,6 +300,97 @@ test("session data waits for prior terminal writes before evaluating prompt line
   writeCallbacks.shift()?.();
 
   assert.deepEqual(writes, ["hello", "\r\n$ "]);
+});
+
+test("local session exit text waits for pending terminal output writes", async () => {
+  const writes: string[] = [];
+  const writeCallbacks: Array<() => void> = [];
+  let onData: ((data: string) => void) | null = null;
+  let onExit: ((evt: { reason?: "closed" }) => void) | null = null;
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: (_id: string, cb: (data: string) => void) => {
+      onData = cb;
+      return noop;
+    },
+    onSessionExit: (_id: string, cb: (evt: { reason?: "closed" }) => void) => {
+      onExit = cb;
+      return noop;
+    },
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+  };
+
+  const term = {
+    cols: 20,
+    rows: 4,
+    write: (data: string, callback?: () => void) => {
+      writes.push(data);
+      if (callback) writeCallbacks.push(callback);
+    },
+    writeln: (data: string) => {
+      writes.push(`${data}\r\n`);
+    },
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startLocal(term as never);
+
+  assert.notEqual(onData, null);
+  assert.notEqual(onExit, null);
+  onData?.("partial output");
+  onExit?.({ reason: "closed" });
+
+  assert.deepEqual(writes, ["partial output"]);
+
+  writeCallbacks.shift()?.();
+
+  assert.deepEqual(writes, ["partial output", "\r\n[session closed]\r\n"]);
 });
 
 test("startSSH allows jump hosts that use reference key files with unavailable saved passphrases", async () => {
