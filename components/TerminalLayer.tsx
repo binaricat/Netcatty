@@ -1,5 +1,5 @@
 import { Circle, Columns2, FolderTree, MessageSquare, PanelLeft, PanelRight, Palette, Plus, Search, Server, X, Zap } from 'lucide-react';
-import React, { Suspense, createContext, lazy, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { Suspense, createContext, lazy, memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { activeTabStore, useActiveTabId } from '../application/state/activeTabStore';
 import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
 import {
@@ -59,6 +59,7 @@ import { setupMcpApprovalBridge } from '../infrastructure/ai/shared/approvalGate
 import { resolveScriptsSidePanelShortcutIntent } from '../application/state/resolveSnippetsShortcutIntent';
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { getTerminalPaneSnapshot, parseTerminalPaneSnapshot } from './terminalPaneVisibility';
+import { getScopedTopTabsThemeId } from './terminalTopTabsTheme';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
 
@@ -149,22 +150,32 @@ const clearTerminalPreviewVars = (sessionId: string | null) => {
   pane.style.removeProperty('--terminal-preview-toolbar-btn-active');
 };
 
+const setStylePropertyIfChanged = (element: HTMLElement, property: string, value: string) => {
+  if (element.style.getPropertyValue(property) === value) return;
+  element.style.setProperty(property, value);
+};
+
+const removeStylePropertyIfSet = (element: HTMLElement, property: string) => {
+  if (!element.style.getPropertyValue(property)) return;
+  element.style.removeProperty(property);
+};
+
 const clearTopTabsPreviewVars = () => {
   if (typeof document === 'undefined') return;
   const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
   if (!tabsRoot) return;
-  tabsRoot.style.removeProperty('--top-tabs-bg');
-  tabsRoot.style.removeProperty('--top-tabs-fg');
-  tabsRoot.style.removeProperty('--top-tabs-muted');
-  tabsRoot.style.removeProperty('--top-tabs-active-bg');
-  tabsRoot.style.removeProperty('--top-tabs-accent');
-  tabsRoot.style.removeProperty('--background');
-  tabsRoot.style.removeProperty('--foreground');
-  tabsRoot.style.removeProperty('--accent');
-  tabsRoot.style.removeProperty('--primary');
-  tabsRoot.style.removeProperty('--secondary');
-  tabsRoot.style.removeProperty('--border');
-  tabsRoot.style.removeProperty('--muted-foreground');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-bg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-fg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-muted');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-active-bg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-accent');
+  removeStylePropertyIfSet(tabsRoot, '--background');
+  removeStylePropertyIfSet(tabsRoot, '--foreground');
+  removeStylePropertyIfSet(tabsRoot, '--accent');
+  removeStylePropertyIfSet(tabsRoot, '--primary');
+  removeStylePropertyIfSet(tabsRoot, '--secondary');
+  removeStylePropertyIfSet(tabsRoot, '--border');
+  removeStylePropertyIfSet(tabsRoot, '--muted-foreground');
 };
 
 const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<string, T> => {
@@ -2005,9 +2016,33 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const focusedFontWeightOverridden = hasHostFontWeightOverride(focusedHost);
   const visibleFocusedThemeId = followAppTerminalTheme ? terminalTheme.id : focusedThemeId;
   const previewedOrVisibleThemeId = activeThemePreviewId ?? visibleFocusedThemeId;
-  const activeTopTabsThemeId = activeSidePanelTab === 'theme' && previewTargetSessionId
-    ? previewedOrVisibleThemeId
-    : (isVisible ? visibleFocusedThemeId : null);
+  const activeTopTabsThemeId = useMemo(
+    () =>
+      getScopedTopTabsThemeId({
+        activeSidePanelTab,
+        activeThemePreviewId,
+        activeWorkspace,
+        followAppTerminalTheme,
+        isVisible,
+        previewTargetSessionId,
+        previewedOrVisibleThemeId,
+        resolveSessionThemeId: (sessionId) => {
+          const host = sessionHostsMap.get(sessionId) ?? null;
+          return followAppTerminalTheme ? terminalTheme.id : resolveHostTerminalThemeId(host, terminalTheme.id);
+        },
+      }),
+    [
+      activeSidePanelTab,
+      activeThemePreviewId,
+      activeWorkspace,
+      followAppTerminalTheme,
+      isVisible,
+      previewTargetSessionId,
+      previewedOrVisibleThemeId,
+      sessionHostsMap,
+      terminalTheme.id,
+    ],
+  );
   const appliedPreviewSessionRef = useRef<string | null>(null);
   const customThemes = useCustomThemes();
   const applyTerminalPreviewVars = useCallback((sessionId: string | null, themeId: string | null) => {
@@ -2052,18 +2087,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const border = adjustLightnessToken(bg, isDark ? 12 : -10);
     const mutedFg = adjustSaturationToken(adjustLightnessToken(fg, isDark ? -20 : 20), 0.5);
 
-    tabsRoot.style.setProperty('--background', bg);
-    tabsRoot.style.setProperty('--foreground', fg);
-    tabsRoot.style.setProperty('--accent', accent);
-    tabsRoot.style.setProperty('--primary', accent);
-    tabsRoot.style.setProperty('--secondary', secondary);
-    tabsRoot.style.setProperty('--border', border);
-    tabsRoot.style.setProperty('--muted-foreground', mutedFg);
-    tabsRoot.style.setProperty('--top-tabs-bg', 'hsl(var(--secondary))');
-    tabsRoot.style.setProperty('--top-tabs-fg', 'hsl(var(--foreground))');
-    tabsRoot.style.setProperty('--top-tabs-muted', 'hsl(var(--muted-foreground))');
-    tabsRoot.style.setProperty('--top-tabs-active-bg', 'hsl(var(--background))');
-    tabsRoot.style.setProperty('--top-tabs-accent', 'hsl(var(--accent))');
+    setStylePropertyIfChanged(tabsRoot, '--background', bg);
+    setStylePropertyIfChanged(tabsRoot, '--foreground', fg);
+    setStylePropertyIfChanged(tabsRoot, '--accent', accent);
+    setStylePropertyIfChanged(tabsRoot, '--primary', accent);
+    setStylePropertyIfChanged(tabsRoot, '--secondary', secondary);
+    setStylePropertyIfChanged(tabsRoot, '--border', border);
+    setStylePropertyIfChanged(tabsRoot, '--muted-foreground', mutedFg);
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-bg', 'hsl(var(--secondary))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-fg', 'hsl(var(--foreground))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-muted', 'hsl(var(--muted-foreground))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-active-bg', 'hsl(var(--background))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-accent', 'hsl(var(--accent))');
   }, [accentMode, customAccent, customThemes]);
 
   useEffect(() => {
@@ -2092,7 +2127,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
   }, [applyTerminalPreviewVars, themePreview]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeTopTabsThemeId) {
       applyTopTabsPreviewVars(activeTopTabsThemeId);
       return;
