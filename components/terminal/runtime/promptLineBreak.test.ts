@@ -29,10 +29,10 @@ function createFakeTerm(lineText = "", cursorX = lineText.length) {
   };
 }
 
-test("inserts a visual line break before a prompt after an unterminated final output line", () => {
+test("does not insert before prompt-like suffixes in a larger output chunk", () => {
   assert.equal(
     insertPromptLineBreakBeforePrompt("hello$ ", "$ ", 0),
-    "hello\r\n$ ",
+    "hello$ ",
   );
 });
 
@@ -52,8 +52,8 @@ test("does not insert when the output already ends with a line break", () => {
 
 test("keeps prompt ANSI styling on the prompt side of the inserted line break", () => {
   assert.equal(
-    insertPromptLineBreakBeforePrompt("hello\x1b[32m$ \x1b[0m", "$ ", 0),
-    "hello\r\n\x1b[32m$ \x1b[0m",
+    insertPromptLineBreakBeforePrompt("\x1b[32m$ \x1b[0m", "$ ", 5),
+    "\r\n\x1b[32m$ \x1b[0m",
   );
 });
 
@@ -62,6 +62,36 @@ test("does not insert for non-prompt output", () => {
     insertPromptLineBreakBeforePrompt("hello> ", "$ ", 0),
     "hello> ",
   );
+});
+
+test("does not insert for output chunks that only end with the cached prompt text", () => {
+  assert.equal(
+    insertPromptLineBreakBeforePrompt("total $ ", "$ ", 0),
+    "total $ ",
+  );
+});
+
+test("does not refresh cached prompt from output that only ends with the prompt text", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "total $ ",
+      state,
+      true,
+    ),
+    "total $ ",
+  );
+  assert.equal(state.suppressNextPromptCache, true);
+
+  syncPromptLineBreakState(createFakeTerm("total $ ") as never, state);
+
+  assert.equal(state.lastPromptText, "$ ");
+  assert.equal(state.pendingCommand, false);
+  assert.equal(state.suppressNextPromptCache, false);
 });
 
 test("refreshes cached prompt when a changed prompt arrives after a line break in the same chunk", () => {

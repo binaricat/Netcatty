@@ -77,6 +77,15 @@ const endsWithLineBreak = (text: string): boolean => {
 const containsLineReset = (text: string): boolean =>
   text.includes("\n") || text.includes("\r");
 
+const hasAmbiguousPromptSuffix = (data: string, promptText: string): boolean => {
+  const mapped = mapVisibleText(data);
+  if (!mapped.text.endsWith(promptText)) return false;
+
+  const promptTextStart = mapped.text.length - promptText.length;
+  const prefixText = mapped.text.slice(0, promptTextStart);
+  return prefixText.length > 0 && !endsWithLineBreak(prefixText);
+};
+
 const getCursorX = (term: XTerm): number => {
   try {
     return term.buffer.active.cursorX;
@@ -114,7 +123,7 @@ export function insertPromptLineBreakBeforePrompt(
   const promptTextStart = mapped.text.length - promptText.length;
   const prefixText = mapped.text.slice(0, promptTextStart);
   if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return data;
-  if (prefixText.length > 0 && endsWithLineBreak(prefixText)) return data;
+  if (prefixText.length > 0) return data;
 
   const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
   return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;
@@ -134,10 +143,12 @@ export function prepareTerminalDataForPromptLineBreak(
     state.lastPromptText,
     cursorXBeforeWrite,
   );
+  const visibleText = mapVisibleText(data).text;
   state.suppressNextPromptCache =
     nextData === data &&
-    cursorXBeforeWrite > 0 &&
-    !containsLineReset(mapVisibleText(data).text);
+    (cursorXBeforeWrite > 0 ||
+      hasAmbiguousPromptSuffix(data, state.lastPromptText)) &&
+    !containsLineReset(visibleText);
   return nextData;
 }
 
