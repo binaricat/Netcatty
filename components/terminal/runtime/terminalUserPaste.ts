@@ -1,11 +1,15 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 type PasteTarget = Pick<XTerm, "paste" | "scrollToBottom"> &
-  Partial<Pick<XTerm, "cols" | "rows" | "write">>;
+  Partial<Pick<XTerm, "cols" | "rows" | "write">> & {
+    modes?: { bracketedPasteMode?: boolean };
+    options?: { ignoreBracketedPasteMode?: boolean };
+  };
 
 type PasteOptions = {
   scrollOnPaste?: boolean;
   requestAnimationFrame?: (callback: () => void) => unknown;
+  onPasteData?: (data: string) => boolean | void;
 };
 
 type PasteDisplayState = {
@@ -22,6 +26,7 @@ type PasteInputScrollState = {
 
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const pasteInputScrollStates = new WeakMap<object, PasteInputScrollState>();
+const pasteBroadcastStates = new WeakMap<object, PasteInputScrollState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;
 const PASTE_INPUT_SCROLL_WINDOW_MS = 4000;
@@ -126,6 +131,14 @@ const getPasteInputDataVariants = (text: string): string[] => {
       `${BRACKETED_PASTE_START}${preparedText}${BRACKETED_PASTE_END}`,
     ]),
   ).filter((candidate) => candidate.length > 0);
+};
+
+const getPasteInputData = (term: PasteTarget, text: string): string => {
+  const preparedText = preparePasteTextForXterm(text);
+  if (term.modes?.bracketedPasteMode && !term.options?.ignoreBracketedPasteMode) {
+    return `${BRACKETED_PASTE_START}${preparedText}${BRACKETED_PASTE_END}`;
+  }
+  return preparedText;
 };
 
 const isExpectedPasteEcho = (data: string, state: PasteDisplayState): boolean => {
@@ -245,6 +258,21 @@ export function pasteTextIntoTerminal(
     pasteInputScrollStates.delete(term);
   }
 
+  if (options.onPasteData) {
+    const pasteData = getPasteInputData(term, text);
+    const didBroadcast = options.onPasteData(pasteData) === true;
+    if (didBroadcast) {
+      pasteBroadcastStates.set(term, {
+        expiresAt: getNow() + PASTE_INPUT_SCROLL_WINDOW_MS,
+        remainingDataVariants: [pasteData],
+      });
+    } else {
+      pasteBroadcastStates.delete(term);
+    }
+  } else {
+    pasteBroadcastStates.delete(term);
+  }
+
   term.paste(text);
 
   if (!options.scrollOnPaste) return;
@@ -264,9 +292,21 @@ export function pasteTextIntoTerminal(
 }
 
 export function shouldSuppressTerminalInputScrollForUserPaste(term: object, data: string): boolean {
-  const state = pasteInputScrollStates.get(term);
+  return consumePasteInputState(pasteInputScrollStates, term, data);
+}
+
+export function shouldSuppressTerminalBroadcastForUserPaste(term: object, data: string): boolean {
+  return consumePasteInputState(pasteBroadcastStates, term, data);
+}
+
+function consumePasteInputState(
+  states: WeakMap<object, PasteInputScrollState>,
+  term: object,
+  data: string,
+): boolean {
+  const state = states.get(term);
   if (!isStateActive(state)) {
-    pasteInputScrollStates.delete(term);
+    states.delete(term);
     return false;
   }
 
@@ -280,7 +320,7 @@ export function shouldSuppressTerminalInputScrollForUserPaste(term: object, data
   if (candidate.length > data.length) {
     state.remainingDataVariants[matchingIndex] = candidate.slice(data.length);
   } else {
-    pasteInputScrollStates.delete(term);
+    states.delete(term);
   }
   return true;
 }

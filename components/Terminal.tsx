@@ -1509,6 +1509,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionRef,
     onHasSelectionChange: setHasSelection,
     scrollOnPasteRef,
+    isBroadcastEnabledRef,
+    onBroadcastInputRef,
   });
   // Kept fresh on every render so the mouseTracking capture handler at
   // handleContextMenuCapture (which is bound once per sessionId) can
