@@ -323,6 +323,9 @@ const ru: Messages = {
   'settings.terminal.behavior.preserveSelectionOnInput': 'Сохранять выделение при вводе',
   'settings.terminal.behavior.preserveSelectionOnInput.desc':
     'Не сбрасывать выделенный мышью текст при вводе. Это удобно, например, чтобы выделить путь и вставить его после префикса команды вроде `sz `.',
+  'settings.terminal.behavior.forcePromptNewLine': 'Переносить приглашение на новую строку',
+  'settings.terminal.behavior.forcePromptNewLine.desc':
+    'Если последняя строка вывода команды не завершена переводом строки, переносить распознанное приглашение оболочки на следующую визуальную строку.',
   'settings.terminal.behavior.osc52Clipboard': 'Буфер обмена OSC-52',
   'settings.terminal.behavior.osc52Clipboard.desc':
     'Разрешить удалённым программам (tmux, vim и т. д.) доступ к локальному буферу обмена через escape-последовательности OSC-52.',
