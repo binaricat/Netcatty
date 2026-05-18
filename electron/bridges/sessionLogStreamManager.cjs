@@ -7,6 +7,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const {
+  safePathSegment,
   toLocalISOString,
   wrapTerminalHtmlContent,
 } = require("./sessionLogsBridge.cjs");
@@ -51,7 +52,7 @@ function startStream(sessionId, opts) {
 
   try {
     // Build file path: directory / hostSubdir / timestamp.ext
-    const safeHostLabel = (hostLabel || hostname || "unknown").replace(/[^a-zA-Z0-9-_]/g, "_");
+    const safeHostLabel = safePathSegment(hostLabel || hostname, "unknown");
     const hostDir = path.join(directory, safeHostLabel);
     fs.mkdirSync(hostDir, { recursive: true });
 

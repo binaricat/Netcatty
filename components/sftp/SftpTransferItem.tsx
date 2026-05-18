@@ -8,7 +8,9 @@ import {
     CheckCircle2,
     ChevronDown,
     ChevronUp,
+    ClipboardCopy,
     File,
+    FolderOpen,
     FolderUp,
     GripVertical,
     Loader2,
@@ -35,6 +37,8 @@ interface SftpTransferItemProps {
     onDismiss: () => void;
     canRevealTarget?: boolean;
     onRevealTarget?: () => void;
+    canCopyTargetPath?: boolean;
+    onCopyTargetPath?: () => void;
     canToggleChildren?: boolean;
     isExpanded?: boolean;
     visibleChildCount?: number;
@@ -84,6 +88,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     onDismiss,
     canRevealTarget = false,
     onRevealTarget,
+    canCopyTargetPath = false,
+    onCopyTargetPath,
     canToggleChildren = false,
     isExpanded = false,
     visibleChildCount: _visibleChildCount = 0,
@@ -209,6 +215,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const dismissActionLabel = t('sftp.transfers.dismissAction');
     const resizeNameColumnLabel = t('sftp.transfers.resizeNameColumn');
     const toggleChildrenLabel = isExpanded ? t('sftp.transfers.collapseChildList') : t('sftp.transfers.expandChildList');
+    const revealTargetLabel = t('sftp.transfers.openTargetFolder');
+    const copyTargetPathLabel = t('sftp.transfers.copyTargetPath');
     const actionButtonClass = "h-6 w-6 focus-visible:ring-1 focus-visible:ring-primary/50";
     const actionAriaLabel = (label: string) => `${label}: ${task.fileName}`;
 
@@ -238,6 +246,20 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
 
     const actionButtons = (
         <div className="flex items-center gap-1 shrink-0">
+            {canRevealTarget && onRevealTarget && (
+                <IconButtonWithTooltip label={revealTargetLabel}>
+                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onRevealTarget} aria-label={actionAriaLabel(revealTargetLabel)}>
+                        <FolderOpen size={12} />
+                    </Button>
+                </IconButtonWithTooltip>
+            )}
+            {canCopyTargetPath && onCopyTargetPath && (
+                <IconButtonWithTooltip label={copyTargetPathLabel}>
+                    <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onCopyTargetPath} aria-label={actionAriaLabel(copyTargetPathLabel)}>
+                        <ClipboardCopy size={12} />
+                    </Button>
+                </IconButtonWithTooltip>
+            )}
             {task.status === 'failed' && task.retryable !== false && (
                 <IconButtonWithTooltip label={retryActionLabel}>
                     <Button variant="ghost" size="icon" className={actionButtonClass} onClick={onRetry} aria-label={actionAriaLabel(retryActionLabel)}>
@@ -355,6 +377,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         type="button"
                         className="flex min-w-0 flex-1 rounded-sm text-left transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                         onClick={onRevealTarget}
+                        aria-label={actionAriaLabel(revealTargetLabel)}
                     >
                         {titleBlock}
                     </button>
@@ -440,6 +463,7 @@ const arePropsEqual = (
     if (prev.targetPath !== next.targetPath) return false;
     if (prev.totalBytes !== next.totalBytes) return false;
     if ((prevProps.canRevealTarget ?? false) !== (nextProps.canRevealTarget ?? false)) return false;
+    if ((prevProps.canCopyTargetPath ?? false) !== (nextProps.canCopyTargetPath ?? false)) return false;
     if ((prevProps.isChild ?? false) !== (nextProps.isChild ?? false)) return false;
     if ((prevProps.childNameColumnWidth ?? 260) !== (nextProps.childNameColumnWidth ?? 260)) return false;
     if ((prevProps.canToggleChildren ?? false) !== (nextProps.canToggleChildren ?? false)) return false;

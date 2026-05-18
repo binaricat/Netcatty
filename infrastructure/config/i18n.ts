@@ -8,6 +8,7 @@ export const DEFAULT_UI_LOCALE = 'en';
 // Add new languages by appending to this list and providing message dictionaries.
 export const SUPPORTED_UI_LOCALES: LocaleOption[] = [
   { id: 'en', label: 'English' },
+  { id: 'ru', label: 'Русский' },
   { id: 'zh-CN', label: '简体中文' },
 ];
 

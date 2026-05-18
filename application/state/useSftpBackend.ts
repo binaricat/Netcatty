@@ -154,6 +154,12 @@ export const useSftpBackend = () => {
     return await netcattyBridge.get()?.listDrives?.() ?? [];
   }, []);
 
+  const openPath = useCallback(async (path: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.openPath) throw new Error("openPath unavailable");
+    return bridge.openPath(path);
+  }, []);
+
   const startStreamTransfer = useCallback(
     async (
       options: Parameters<NonNullable<NetcattyBridge["startStreamTransfer"]>>[0],
@@ -273,6 +279,7 @@ export const useSftpBackend = () => {
     statLocal,
     getHomeDir,
     listDrives,
+    openPath,
 
     startStreamTransfer,
     cancelTransfer,

@@ -628,6 +628,23 @@ const registerBridges = (win) => {
     await getWindowManager().tryOpenExternalWithFallback(shell, url);
   });
 
+  ipcMain.handle("netcatty:openPath", async (_event, targetPath) => {
+    if (typeof targetPath !== "string" || targetPath.trim() === "") {
+      return { success: false, error: "Invalid path" };
+    }
+
+    try {
+      const { shell } = electronModule;
+      const error = await shell.openPath(targetPath);
+      return error ? { success: false, error } : { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
   // App information for About/Application screens
   ipcMain.handle("netcatty:app:getInfo", async () => {
     return {

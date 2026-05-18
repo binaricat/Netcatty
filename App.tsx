@@ -346,6 +346,7 @@ function App({ settings }: { settings: SettingsState }) {
     splitSession,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
+    reorderWorkspaceSessions,
     moveFocusInWorkspace,
     runSnippet,
     orphanSessions,
@@ -2114,6 +2115,7 @@ function App({ settings }: { settings: SettingsState }) {
           onSetDraggingSessionId={setDraggingSessionId}
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
+          onReorderWorkspaceSessions={reorderWorkspaceSessions}
           onSplitSession={splitSessionWithCurrentShell}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}

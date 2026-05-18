@@ -139,6 +139,31 @@ test("stopStream without a token still tears down the current stream (back-compa
   }
 });
 
+test("startStream host directory preserves valid Unicode labels and replaces path-unsafe characters", async () => {
+  const directory = path.join(TEMP_ROOT, `stream-unicode-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    const token = startStream(sessionId, {
+      hostLabel: "生产/服务器:东京*?<>|\0",
+      hostname: "fallback.example",
+      directory,
+      format: "raw",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+    });
+
+    assert.ok(token, "startStream should return a token");
+    appendData(sessionId, "data\n");
+    const finalPath = await stopStream(sessionId, token);
+
+    assert.equal(path.basename(path.dirname(finalPath)), "生产_服务器_东京______");
+    assert.equal(fs.readFileSync(finalPath, "utf8"), "data\n");
+  } finally {
+    await stopStream(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 async function waitForFileContent(directory, expectedContent) {
   const deadline = Date.now() + 3000;
   let lastContent = "";

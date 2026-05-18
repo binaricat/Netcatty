@@ -3,6 +3,7 @@ import type { Host, SftpFileEntry } from "../../types";
 import type { FileOpenerType, SystemAppInfo } from "../../lib/sftpFileUtils";
 import type { useSftpState } from "../../application/state/useSftpState";
 import type { HotkeyScheme, KeyBinding } from "../../domain/models";
+import type { TransferTask } from "../../types";
 import FileOpenerDialog from "../FileOpenerDialog";
 import TextEditorModal from "../TextEditorModal";
 import type { TextEditorModalSnapshot } from "../TextEditorModal";
@@ -16,6 +17,10 @@ interface SftpOverlaysProps {
   sftp: SftpState;
   visibleTransfers: SftpState["transfers"];
   showTransferQueue?: boolean;
+  canRevealTransferTarget?: (task: TransferTask) => boolean;
+  onRevealTransferTarget?: (task: TransferTask) => void | Promise<void>;
+  canCopyTransferTargetPath?: (task: TransferTask) => boolean;
+  onCopyTransferTargetPath?: (task: TransferTask) => void | Promise<void>;
   showHostPickerLeft: boolean;
   showHostPickerRight: boolean;
   hostSearchLeft: string;
@@ -54,6 +59,10 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
   sftp,
   visibleTransfers,
   showTransferQueue = true,
+  canRevealTransferTarget,
+  onRevealTransferTarget,
+  canCopyTransferTargetPath,
+  onCopyTransferTargetPath,
   showHostPickerLeft,
   showHostPickerRight,
   hostSearchLeft,
@@ -111,7 +120,15 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
       />
 
       {showTransferQueue && (
-        <SftpTransferQueue sftp={sftp} visibleTransfers={visibleTransfers} allTransfers={sftp.transfers} />
+        <SftpTransferQueue
+          sftp={sftp}
+          visibleTransfers={visibleTransfers}
+          allTransfers={sftp.transfers}
+          canRevealTransferTarget={canRevealTransferTarget}
+          onRevealTransferTarget={onRevealTransferTarget}
+          canCopyTransferTargetPath={canCopyTransferTargetPath}
+          onCopyTransferTargetPath={onCopyTransferTargetPath}
+        />
       )}
 
       <SftpConflictDialog

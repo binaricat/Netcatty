@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createTerminalSessionStarters, getMissingChainHostIds } from "./createTerminalSessionStarters";
+import { pasteTextIntoTerminal } from "./terminalUserPaste";
 
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwAAAA";
@@ -20,6 +21,170 @@ test("getMissingChainHostIds reports unresolved jump hosts", () => {
     ),
     ["jump-2"],
   );
+});
+
+test("startSerial captures direct connected banner in terminal log data", async () => {
+  const capturedLogData: string[] = [];
+  const writtenLines: string[] = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "serial-host",
+      label: "Serial",
+      hostname: "COM3",
+      username: "",
+      protocol: "serial",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    serialConfig: {
+      path: "COM3",
+      baudRate: 9600,
+      dataBits: 8,
+      stopBits: 1,
+      parity: "none",
+      flowControl: "none",
+    },
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+    onTerminalLogData: (data: string) => capturedLogData.push(data),
+  };
+
+  const term = {
+    cols: 120,
+    rows: 32,
+    write: noop,
+    writeln: (data: string) => writtenLines.push(data),
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startSerial(term as never);
+
+  const banner = "[Connected to COM3 at 9600 baud]";
+  assert.deepEqual(writtenLines, [banner]);
+  assert.deepEqual(capturedLogData, [`${banner}\r\n`]);
+});
+
+test("local session captures paste cleanup writes in terminal log data", async () => {
+  const capturedLogData: string[] = [];
+  const writes: string[] = [];
+  let onData: ((data: string) => void) | null = null;
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: (_id: string, cb: (data: string) => void) => {
+      onData = cb;
+      return noop;
+    },
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const ctx = {
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: {},
+    terminalBackend,
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+    onTerminalLogData: (data: string) => capturedLogData.push(data),
+  };
+
+  const term = {
+    cols: 20,
+    rows: 4,
+    paste: noop,
+    write: (data: string, callback?: () => void) => {
+      writes.push(data);
+      callback?.();
+    },
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index} with enough content`).join("\n");
+  pasteTextIntoTerminal(term, longPaste, { scrollOnPaste: false });
+  await createTerminalSessionStarters(ctx as never).startLocal(term as never);
+
+  assert.notEqual(onData, null);
+  onData?.("\x1b[7mline 3 with enough content\x1b[27m");
+
+  assert.deepEqual(writes, ["line 3 with enough content", "\x1b[K"]);
+  assert.deepEqual(capturedLogData, ["line 3 with enough content", "\x1b[K"]);
 });
 
 test("startSSH allows jump hosts that use reference key files with unavailable saved passphrases", async () => {

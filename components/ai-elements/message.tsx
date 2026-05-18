@@ -4,6 +4,7 @@ import { code } from '@streamdown/code';
 import type { ComponentProps, HTMLAttributes } from 'react';
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
+import { createSafeCodeHighlighter } from './streamdownCodeHighlighter';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: 'user' | 'assistant' | 'system' | 'tool';
@@ -60,7 +61,8 @@ export const MessageActions = ({ className, children, ...props }: MessageActions
   </div>
 );
 
-const streamdownPlugins = { cjk, code };
+const safeCode = createSafeCodeHighlighter(code);
+const streamdownPlugins = { cjk, code: safeCode };
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 

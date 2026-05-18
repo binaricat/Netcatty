@@ -144,6 +144,7 @@ export const createWorkspaceFromSessions = (
     id: `ws-${crypto.randomUUID()}`,
     title: 'Workspace',
     focusedSessionId: baseSessionId, // Initialize with the base session focused
+    focusSessionOrder: [baseSessionId, joiningSessionId],
     root: {
       id: crypto.randomUUID(),
       type: 'split',
@@ -171,6 +172,47 @@ export const updateWorkspaceSplitSizes = (
   return patch(root);
 };
 
+export const resolveWorkspaceFocusSessionOrder = (
+  root: WorkspaceNode,
+  savedOrder?: string[],
+): string[] => {
+  const sessionIds = collectSessionIds(root);
+  if (!savedOrder?.length) return sessionIds;
+
+  const sessionIdSet = new Set(sessionIds);
+  const ordered = savedOrder.filter((id, index) => (
+    sessionIdSet.has(id) && savedOrder.indexOf(id) === index
+  ));
+  const orderedSet = new Set(ordered);
+  return [...ordered, ...sessionIds.filter((id) => !orderedSet.has(id))];
+};
+
+export const reorderWorkspaceFocusSessionOrder = (
+  root: WorkspaceNode,
+  savedOrder: string[] | undefined,
+  draggedSessionId: string,
+  targetSessionId: string,
+  position: 'before' | 'after' = 'before',
+): string[] => {
+  if (draggedSessionId === targetSessionId) {
+    return resolveWorkspaceFocusSessionOrder(root, savedOrder);
+  }
+
+  const currentOrder = resolveWorkspaceFocusSessionOrder(root, savedOrder);
+  const draggedIndex = currentOrder.indexOf(draggedSessionId);
+  const targetIndex = currentOrder.indexOf(targetSessionId);
+
+  if (draggedIndex === -1 || targetIndex === -1) return currentOrder;
+
+  currentOrder.splice(draggedIndex, 1);
+  let insertIndex = targetIndex;
+  if (draggedIndex < targetIndex) insertIndex -= 1;
+  if (position === 'after') insertIndex += 1;
+  currentOrder.splice(insertIndex, 0, draggedSessionId);
+
+  return currentOrder;
+};
+
 /**
  * Create a workspace from multiple session IDs.
  * Used for snippet runner - creates a workspace with all sessions in a horizontal split.
@@ -195,6 +237,7 @@ export const createWorkspaceFromSessionIds = (
       viewMode: options.viewMode,
       snippetId: options.snippetId,
       focusedSessionId: sessionIds[0],
+      focusSessionOrder: [sessionIds[0]],
       root: {
         id: crypto.randomUUID(),
         type: 'pane',
@@ -216,6 +259,7 @@ export const createWorkspaceFromSessionIds = (
     viewMode: options.viewMode,
     snippetId: options.snippetId,
     focusedSessionId: sessionIds[0],
+    focusSessionOrder: sessionIds,
     root: {
       id: crypto.randomUUID(),
       type: 'split',

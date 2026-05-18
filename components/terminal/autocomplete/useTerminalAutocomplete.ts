@@ -275,6 +275,7 @@ export function useTerminalAutocomplete(
     return listDirectoryEntries(dirPath, {
       sessionId: sessionIdRef.current,
       protocol: protocolRef.current,
+      os: hostOsRef.current,
       foldersOnly: false,
       limit: 50,
     });
@@ -308,7 +309,11 @@ export function useTerminalAutocomplete(
       getCwdRef.current?.(),
       hostOsRef.current,
     );
-    const dirPath = normalizePathTokenForLookup(parseCommandLine(item.text).currentWord, cwd);
+    const dirPath = normalizePathTokenForLookup(parseCommandLine(item.text).currentWord, cwd, {
+      preferRelativeCwd: Boolean(
+        sessionIdRef.current && protocolRef.current !== "local" && hostOsRef.current === "linux",
+      ),
+    });
     if (!dirPath) return;
 
     const requestVersion = ++subDirFetchVersionRef.current;

@@ -1,4 +1,4 @@
-import { SftpFileEntry } from "../../../domain/models";
+import { SftpFileEntry, TransferTask } from "../../../domain/models";
 
 export const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return "--";
@@ -74,6 +74,11 @@ export const getParentPath = (path: string): string => {
   parts.pop();
   const result = parts.length ? `/${parts.join("/")}` : "/";
   return result;
+};
+
+export const isConcreteTransferTargetPath = (task: Pick<TransferTask, "targetPath">): boolean => {
+  const targetPath = task.targetPath.trim();
+  return targetPath.length > 0 && targetPath !== "(temp)";
 };
 
 export const getFileName = (path: string): string => {

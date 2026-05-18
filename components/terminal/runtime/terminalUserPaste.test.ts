@@ -5,6 +5,8 @@ import {
   clearPasteResidualAfterTerminalWrite,
   pasteTextIntoTerminal,
   prepareTerminalDataForUserPasteDisplay,
+  shouldBroadcastTerminalUserInput,
+  shouldSuppressTerminalBroadcastForUserPaste,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
 
@@ -22,6 +24,131 @@ test("user paste delegates raw clipboard text to xterm paste handling", () => {
   pasteTextIntoTerminal(term, text, { scrollOnPaste: false });
 
   assert.deepEqual(pasted, [text]);
+});
+
+test("user paste reports prepared terminal input for broadcast targets", () => {
+  const pasted: string[] = [];
+  const broadcastData: string[] = [];
+  const term = {
+    paste: (text: string) => pasted.push(text),
+    scrollToBottom: () => {},
+  };
+
+  const text = "line one\r\nline two\nline three";
+
+  const options = {
+    scrollOnPaste: false,
+    onPasteData: (data: string) => broadcastData.push(data),
+  };
+
+  pasteTextIntoTerminal(term, text, options);
+
+  assert.deepEqual(pasted, [text]);
+  assert.deepEqual(broadcastData, ["line one\rline two\rline three"]);
+});
+
+test("user paste reports bracketed terminal input for broadcast targets when bracketed paste is active", () => {
+  const broadcastData: string[] = [];
+  const term = {
+    modes: { bracketedPasteMode: true },
+    options: { ignoreBracketedPasteMode: false },
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+    onPasteData: (data: string) => broadcastData.push(data),
+  });
+
+  assert.deepEqual(broadcastData, ["\x1b[200~line one\rline two\x1b[201~"]);
+});
+
+test("user paste reports plain terminal input for broadcast targets when bracketed paste is ignored", () => {
+  const broadcastData: string[] = [];
+  const term = {
+    modes: { bracketedPasteMode: true },
+    options: { ignoreBracketedPasteMode: true },
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+    onPasteData: (data: string) => broadcastData.push(data),
+  });
+
+  assert.deepEqual(broadcastData, ["line one\rline two"]);
+});
+
+test("user paste broadcast data is consumed so xterm onData does not rebroadcast it", () => {
+  const term = {
+    modes: { bracketedPasteMode: true },
+    options: { ignoreBracketedPasteMode: false },
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one\nline two", {
+    scrollOnPaste: false,
+    onPasteData: () => true,
+  });
+
+  assert.equal(
+    shouldSuppressTerminalBroadcastForUserPaste(
+      term,
+      "\x1b[200~line one\rline two\x1b[201~",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldSuppressTerminalBroadcastForUserPaste(
+      term,
+      "\x1b[200~line one\rline two\x1b[201~",
+    ),
+    false,
+  );
+});
+
+test("user paste does not suppress later broadcast when paste callback did not broadcast", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one", {
+    scrollOnPaste: false,
+    onPasteData: () => false,
+  });
+
+  assert.equal(shouldSuppressTerminalBroadcastForUserPaste(term, "line one"), false);
+});
+
+test("broadcast gate consumes paste state even when broadcast is disabled before onData", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one", {
+    scrollOnPaste: false,
+    onPasteData: () => true,
+  });
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "line one", {
+      isBroadcastEnabled: false,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "line one", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
 });
 
 test("user paste preserves the existing scroll-on-paste behavior", () => {

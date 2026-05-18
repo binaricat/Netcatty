@@ -18,7 +18,7 @@ const ptyProcessTree = require("./ptyProcessTree.cjs");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const { detectShellKind } = require("./ai/ptyExec.cjs");
-const { trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
+const { stripAnsi, trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
@@ -904,6 +904,19 @@ function addBundledMoshRuntimeEnv(env, bareClient, opts = {}) {
   return env;
 }
 
+function stripMoshPromptControls(text) {
+  // eslint-disable-next-line no-control-regex
+  return stripAnsi(text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+
+function isMoshPassphrasePrompt(tail) {
+  return /(^|[\r\n]).*passphrase.*:\s*$/i.test(stripMoshPromptControls(tail));
+}
+
+function isMoshPasswordPrompt(tail) {
+  return /(^|[\r\n]).*password:\s*$/i.test(stripMoshPromptControls(tail));
+}
+
 function createMoshSshPasswordResponder(sshPty, password, passphrase) {
   if (
     (typeof password !== "string" || password.length === 0) &&
@@ -922,14 +935,14 @@ function createMoshSshPasswordResponder(sshPty, password, passphrase) {
     if (!text) return;
 
     tail = (tail + text).slice(-512);
-    if (typeof passphrase === "string" && passphrase.length > 0 && !answeredPassphrase && /(^|[\r\n]).*passphrase.*:\s*$/i.test(tail)) {
+    if (typeof passphrase === "string" && passphrase.length > 0 && !answeredPassphrase && isMoshPassphrasePrompt(tail)) {
       answeredPassphrase = true;
       sshPty.write(`${passphrase}\r`);
       return;
     }
 
     if (typeof password !== "string" || password.length === 0 || answeredPassword) return;
-    if (!/(^|[\r\n]).*password:\s*$/i.test(tail)) return;
+    if (!isMoshPasswordPrompt(tail)) return;
 
     answeredPassword = true;
     sshPty.write(`${password}\r`);

@@ -46,6 +46,7 @@ import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
   pasteTextIntoTerminal,
+  shouldBroadcastTerminalUserInput,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
 import {
@@ -119,6 +120,7 @@ export type CreateXTermRuntimeContext = {
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
   serialLineBufferRef?: RefObject<string>;
+  onTerminalLogData?: (data: string) => void;
 
   // Callback when shell reports CWD change via OSC 7
   onCwdChange?: (cwd: string) => void;
@@ -415,6 +417,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
+  const broadcastUserPasteData = (data: string) => {
+    if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
+      ctx.onBroadcastInputRef.current(data, ctx.sessionId);
+      return true;
+    }
+    return false;
+  };
   const scrollToBottomAfterInput = (data: string) => {
     if (shouldScrollOnTerminalInput(ctx.terminalSettingsRef.current, data)) {
       term.scrollToBottom();
@@ -542,6 +551,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
                 if (id) {
                   pasteTextIntoTerminal(term, text, {
                     scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                    onPasteData: broadcastUserPasteData,
                   });
                 }
               });
@@ -553,6 +563,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               if (selection && id) {
                 pasteTextIntoTerminal(term, selection, {
                   scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                  onPasteData: broadcastUserPasteData,
                 });
               }
               break;
@@ -605,6 +616,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         if (text && ctx.sessionRef.current) {
           pasteTextIntoTerminal(term, text, {
             scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+            onPasteData: broadcastUserPasteData,
           });
         }
       } catch (err) {
@@ -620,6 +632,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   fitAddon.fit();
   term.focus();
 
+  const writeLocalTerminalData = (nextData: string) => {
+    ctx.onTerminalLogData?.(nextData);
+    term.write(nextData);
+  };
+
   term.onData((data) => {
     const id = ctx.sessionRef.current;
     if (id) {
@@ -629,7 +646,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           bufferRef: ctx.serialLineBufferRef,
           localEcho: ctx.serialLocalEcho,
           writeToSession: (nextData) => ctx.terminalBackend.writeToSession(id, nextData),
-          writeToTerminal: (nextData) => term.write(nextData),
+          writeToTerminal: writeLocalTerminalData,
         });
       } else {
         // Character mode (default): send immediately
@@ -643,21 +660,25 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // Local echo for serial connections only when explicitly enabled
         if (ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
           if (data === "\r") {
-            term.write("\r\n");
+            writeLocalTerminalData("\r\n");
           } else if (data === "\x7f" || data === "\b") {
-            term.write("\b \b");
+            writeLocalTerminalData("\b \b");
           } else if (data === "\x03") {
-            term.write("^C");
+            writeLocalTerminalData("^C");
           } else if (data.charCodeAt(0) >= 32 || data.length > 1) {
-            term.write(data);
+            writeLocalTerminalData(data);
           }
         }
       }
 
-      if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
-        // Use remapped data so broadcast peers also receive the correct byte
-        const broadcastData = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
-        ctx.onBroadcastInputRef.current(broadcastData, ctx.sessionId);
+      const onBroadcastInput = ctx.onBroadcastInputRef.current;
+      // Use remapped data so broadcast peers also receive the correct byte
+      const broadcastData = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
+      if (shouldBroadcastTerminalUserInput(term, broadcastData, {
+        isBroadcastEnabled: ctx.isBroadcastEnabledRef.current,
+        hasBroadcastInputHandler: !!onBroadcastInput,
+      })) {
+        onBroadcastInput?.(broadcastData, ctx.sessionId);
       }
 
       if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {

@@ -5,6 +5,7 @@
 import {
   ClipboardPaste,
   Copy,
+  RefreshCcw,
   SplitSquareHorizontal,
   SplitSquareVertical,
   Terminal as TerminalIcon,
@@ -36,9 +37,27 @@ export interface TerminalContextMenuProps {
   onClear?: () => void;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
+  isReconnectable?: boolean;
+  onReconnect?: () => void;
   onClose?: () => void;
   onSelectWord?: () => void;
 }
+
+export const shouldShowReconnectAction = ({
+  isReconnectable,
+  onReconnect,
+}: {
+  isReconnectable?: boolean;
+  onReconnect?: () => void;
+}): boolean => Boolean(isReconnectable && onReconnect);
+
+export const shouldSuppressMouseTrackingContextMenu = ({
+  isAlternateScreen,
+  showReconnectAction,
+}: {
+  isAlternateScreen?: boolean;
+  showReconnectAction?: boolean;
+}): boolean => Boolean(isAlternateScreen && !showReconnectAction);
 
 export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   children,
@@ -54,6 +73,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onClear,
   onSplitHorizontal,
   onSplitVertical,
+  isReconnectable,
+  onReconnect,
   onClose,
   onSelectWord,
 }) => {
@@ -88,6 +109,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const splitHShortcut = getShortcut('split-horizontal');
   const splitVShortcut = getShortcut('split-vertical');
   const clearShortcut = getShortcut('clear-buffer');
+  const showReconnectAction = shouldShowReconnectAction({ isReconnectable, onReconnect });
 
   // Handle right-click: intercept for paste/select-word unless Shift is held
   // or rightClickBehavior is 'context-menu'. The ContextMenuTrigger stays always
@@ -95,8 +117,9 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const handleRightClick = useCallback(
     (e: React.MouseEvent) => {
       // In alternate screen (tmux, vim, etc.), let the terminal application
-      // handle right-click natively to avoid conflicting menus
-      if (isAlternateScreen) {
+      // handle right-click natively to avoid conflicting menus. Reconnect is
+      // still available after disconnect, even if mouse tracking was left on.
+      if (shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction })) {
         e.preventDefault();
         return;
       }
@@ -120,7 +143,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         onSelectWord?.();
       }
     },
-    [rightClickBehavior, onPaste, onSelectWord, isAlternateScreen],
+    [rightClickBehavior, onPaste, onSelectWord, isAlternateScreen, showReconnectAction],
   );
 
   // Always use ContextMenu wrapper to maintain consistent React tree structure
@@ -133,7 +156,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       >
         {children}
       </ContextMenuTrigger>
-      {!isAlternateScreen && (
+      {!shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction }) && (
         <ContextMenuContent className="w-56">
           <ContextMenuItem onClick={onCopy} disabled={!hasSelection}>
             <Copy size={14} className="mr-2" />
@@ -157,6 +180,16 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             {t('terminal.menu.selectAll')}
             <ContextMenuShortcut>{selectAllShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
+
+          {showReconnectAction && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={onReconnect}>
+                <RefreshCcw size={14} className="mr-2" />
+                {t('terminal.menu.reconnect')}
+              </ContextMenuItem>
+            </>
+          )}
 
           <ContextMenuSeparator />
 

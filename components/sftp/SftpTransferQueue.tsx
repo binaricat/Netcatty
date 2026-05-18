@@ -20,6 +20,8 @@ interface SftpTransferQueueProps {
   allTransfers: SftpState["transfers"];
   canRevealTransferTarget?: (task: TransferTask) => boolean;
   onRevealTransferTarget?: (task: TransferTask) => void | Promise<void>;
+  canCopyTransferTargetPath?: (task: TransferTask) => boolean;
+  onCopyTransferTargetPath?: (task: TransferTask) => void | Promise<void>;
 }
 
 const MIN_PANEL_HEIGHT = 112;
@@ -151,6 +153,8 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   allTransfers,
   canRevealTransferTarget,
   onRevealTransferTarget,
+  canCopyTransferTargetPath,
+  onCopyTransferTargetPath,
 }) => {
   const { t } = useI18n();
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({});
@@ -414,6 +418,14 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
                   onRevealTransferTarget
                     ? () => {
                         void onRevealTransferTarget(task);
+                      }
+                    : undefined
+                }
+                canCopyTargetPath={canCopyTransferTargetPath?.(task) ?? false}
+                onCopyTargetPath={
+                  onCopyTransferTargetPath
+                    ? () => {
+                        void onCopyTransferTargetPath(task);
                       }
                     : undefined
                 }

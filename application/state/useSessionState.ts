@@ -9,6 +9,7 @@ FocusDirection,
 getNextFocusSessionId,
 insertPaneIntoWorkspace,
 pruneWorkspaceNode,
+reorderWorkspaceFocusSessionOrder,
 SplitDirection,
 SplitHint,
 updateWorkspaceSplitSizes,
@@ -759,6 +760,27 @@ export const useSessionState = () => {
     }));
   }, []);
 
+  const reorderWorkspaceSessions = useCallback((
+    workspaceId: string,
+    draggedSessionId: string,
+    targetSessionId: string,
+    position: 'before' | 'after' = 'before',
+  ) => {
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws.id !== workspaceId) return ws;
+      return {
+        ...ws,
+        focusSessionOrder: reorderWorkspaceFocusSessionOrder(
+          ws.root,
+          ws.focusSessionOrder,
+          draggedSessionId,
+          targetSessionId,
+          position,
+        ),
+      };
+    }));
+  }, []);
+
   // Move focus between panes in a workspace
   const moveFocusInWorkspace = useCallback((workspaceId: string, direction: FocusDirection): boolean => {
     const workspace = workspaces.find(w => w.id === workspaceId);
@@ -1049,6 +1071,7 @@ export const useSessionState = () => {
     splitSession,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
+    reorderWorkspaceSessions,
     moveFocusInWorkspace,
     runSnippet,
     orphanSessions,
