@@ -219,6 +219,19 @@ test("startMoshSession writes the saved password when ssh prompts for one", asyn
   assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
 });
 
+test("startMoshSession writes the saved password when ConPTY appends cursor controls to the prompt", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, password: "saved-secret" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("alice@example.com's password: \x1b[?25h");
+
+  assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
+});
+
 test("startMoshSession passes vault private keys to ssh via a temp identity file", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(
