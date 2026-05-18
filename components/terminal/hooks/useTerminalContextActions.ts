@@ -6,6 +6,7 @@ import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
 import { clearTerminalViewport } from "../clearTerminalViewport";
 
 type BroadcastPasteRefs = {
+  sourceSessionId: string;
   sessionRef: RefObject<string | null>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
   onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
@@ -13,11 +14,10 @@ type BroadcastPasteRefs = {
 
 export const broadcastTerminalPasteData = (
   data: string,
-  { sessionRef, isBroadcastEnabledRef, onBroadcastInputRef }: BroadcastPasteRefs,
+  { sourceSessionId, sessionRef, isBroadcastEnabledRef, onBroadcastInputRef }: BroadcastPasteRefs,
 ): boolean => {
-  const sessionId = sessionRef.current;
-  if (sessionId && isBroadcastEnabledRef?.current && onBroadcastInputRef?.current) {
-    onBroadcastInputRef.current(data, sessionId);
+  if (sessionRef.current && isBroadcastEnabledRef?.current && onBroadcastInputRef?.current) {
+    onBroadcastInputRef.current(data, sourceSessionId);
     return true;
   }
   return false;
@@ -25,6 +25,7 @@ export const broadcastTerminalPasteData = (
 
 export const useTerminalContextActions = ({
   termRef,
+  sourceSessionId,
   sessionRef,
   onHasSelectionChange,
   scrollOnPasteRef,
@@ -32,6 +33,7 @@ export const useTerminalContextActions = ({
   onBroadcastInputRef,
 }: {
   termRef: RefObject<XTerm | null>;
+  sourceSessionId: string;
   sessionRef: RefObject<string | null>;
   onHasSelectionChange?: (hasSelection: boolean) => void;
   scrollOnPasteRef?: RefObject<boolean>;
@@ -40,11 +42,12 @@ export const useTerminalContextActions = ({
 }) => {
   const broadcastUserPasteData = useCallback((data: string) => {
     return broadcastTerminalPasteData(data, {
+      sourceSessionId,
       sessionRef,
       isBroadcastEnabledRef,
       onBroadcastInputRef,
     });
-  }, [isBroadcastEnabledRef, onBroadcastInputRef, sessionRef]);
+  }, [isBroadcastEnabledRef, onBroadcastInputRef, sessionRef, sourceSessionId]);
 
   const onCopy = useCallback(() => {
     const term = termRef.current;

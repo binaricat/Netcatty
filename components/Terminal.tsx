@@ -1506,6 +1506,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalContextActions = useTerminalContextActions({
     termRef,
+    sourceSessionId: sessionId,
     sessionRef,
     onHasSelectionChange: setHasSelection,
     scrollOnPasteRef,
