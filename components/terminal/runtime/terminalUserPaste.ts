@@ -12,6 +12,11 @@ type PasteOptions = {
   onPasteData?: (data: string) => boolean | void;
 };
 
+type BroadcastUserInputOptions = {
+  isBroadcastEnabled?: boolean;
+  hasBroadcastInputHandler?: boolean;
+};
+
 type PasteDisplayState = {
   expiresAt: number;
   clearPending: number;
@@ -297,6 +302,15 @@ export function shouldSuppressTerminalInputScrollForUserPaste(term: object, data
 
 export function shouldSuppressTerminalBroadcastForUserPaste(term: object, data: string): boolean {
   return consumePasteInputState(pasteBroadcastStates, term, data);
+}
+
+export function shouldBroadcastTerminalUserInput(
+  term: object,
+  data: string,
+  options: BroadcastUserInputOptions,
+): boolean {
+  const isSuppressedUserPaste = shouldSuppressTerminalBroadcastForUserPaste(term, data);
+  return !isSuppressedUserPaste && !!options.isBroadcastEnabled && !!options.hasBroadcastInputHandler;
 }
 
 function consumePasteInputState(

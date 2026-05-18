@@ -46,7 +46,7 @@ import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
   pasteTextIntoTerminal,
-  shouldSuppressTerminalBroadcastForUserPaste,
+  shouldBroadcastTerminalUserInput,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
 import type {
@@ -659,12 +659,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
       }
 
-      if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
-        // Use remapped data so broadcast peers also receive the correct byte
-        const broadcastData = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
-        if (!shouldSuppressTerminalBroadcastForUserPaste(term, broadcastData)) {
-          ctx.onBroadcastInputRef.current(broadcastData, ctx.sessionId);
-        }
+      const onBroadcastInput = ctx.onBroadcastInputRef.current;
+      // Use remapped data so broadcast peers also receive the correct byte
+      const broadcastData = (data === "\x7f" && ctx.host.backspaceBehavior === "ctrl-h") ? "\x08" : data;
+      if (shouldBroadcastTerminalUserInput(term, broadcastData, {
+        isBroadcastEnabled: ctx.isBroadcastEnabledRef.current,
+        hasBroadcastInputHandler: !!onBroadcastInput,
+      })) {
+        onBroadcastInput?.(broadcastData, ctx.sessionId);
       }
 
       if (!shouldSuppressTerminalInputScrollForUserPaste(term, data)) {

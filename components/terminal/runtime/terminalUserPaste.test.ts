@@ -5,6 +5,7 @@ import {
   clearPasteResidualAfterTerminalWrite,
   pasteTextIntoTerminal,
   prepareTerminalDataForUserPasteDisplay,
+  shouldBroadcastTerminalUserInput,
   shouldSuppressTerminalBroadcastForUserPaste,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
@@ -121,6 +122,33 @@ test("user paste does not suppress later broadcast when paste callback did not b
   });
 
   assert.equal(shouldSuppressTerminalBroadcastForUserPaste(term, "line one"), false);
+});
+
+test("broadcast gate consumes paste state even when broadcast is disabled before onData", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "line one", {
+    scrollOnPaste: false,
+    onPasteData: () => true,
+  });
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "line one", {
+      isBroadcastEnabled: false,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "line one", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
 });
 
 test("user paste preserves the existing scroll-on-paste behavior", () => {
