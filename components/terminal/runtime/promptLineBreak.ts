@@ -153,9 +153,7 @@ export function syncPromptLineBreakState(term: XTerm, state?: PromptLineBreakSta
     return;
   }
 
-  if (!state.pendingCommand || state.lastPromptText) {
-    state.lastPromptText = prompt.promptText;
-  }
+  state.lastPromptText = prompt.promptText;
   state.suppressNextPromptCache = false;
   state.pendingCommand = false;
 }

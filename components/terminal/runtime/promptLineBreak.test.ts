@@ -87,6 +87,17 @@ test("refreshes cached prompt when a changed prompt arrives after a line break i
   assert.equal(state.pendingCommand, false);
 });
 
+test("caches the first valid prompt even when a command is already pending", () => {
+  const state = createPromptLineBreakState();
+  state.pendingCommand = true;
+
+  syncPromptLineBreakState(createFakeTerm("$ ") as never, state);
+
+  assert.equal(state.lastPromptText, "$ ");
+  assert.equal(state.pendingCommand, false);
+  assert.equal(state.suppressNextPromptCache, false);
+});
+
 test("does not refresh cached prompt from an unchanged mid-line write without a line reset", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "old$ ";
