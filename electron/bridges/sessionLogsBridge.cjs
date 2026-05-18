@@ -11,6 +11,13 @@ const {
   terminalDataToPlainText,
 } = require("./terminalLogSanitizer.cjs");
 
+const FILE_NAME_UNSAFE_CHARS = new Set(["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]);
+
+function isControlCharacter(char) {
+  const code = char.codePointAt(0);
+  return code !== undefined && ((code >= 0 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f));
+}
+
 /**
  * Get current Date to a local ISO-like string (YYYY-MM-DDTHH-MM-SS)
  */
@@ -25,6 +32,23 @@ function toLocalISOString(date = new Date()) {
   const seconds = pad(date.getSeconds());
 
   return `${year}-${month}-${day}T${hours}-${minutes}-${seconds}`;
+}
+
+function safePathSegment(value, fallback = "unknown") {
+  const raw = String(value || "");
+  let safe = Array.from(raw, (char) => {
+    return FILE_NAME_UNSAFE_CHARS.has(char) || isControlCharacter(char) ? "_" : char;
+  }).join("").trim();
+
+  if (!safe || safe === "." || safe === "..") {
+    return fallback;
+  }
+
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(safe)) {
+    safe = `${safe}_`;
+  }
+
+  return safe;
 }
 
 /**
@@ -105,7 +129,7 @@ async function exportSessionLog(event, payload) {
   // Generate default filename
   const date = new Date(startTime);
   const dateStr = toLocalISOString(date);
-  const safeHostLabel = (hostLabel || hostname || "session").replace(/[^a-zA-Z0-9-_]/g, "_");
+  const safeHostLabel = safePathSegment(hostLabel || hostname, "session");
   const ext = format === "html" ? "html" : format === "raw" ? "log" : "txt";
   const defaultPath = `${safeHostLabel}_${dateStr}.${ext}`;
 
@@ -172,7 +196,7 @@ async function autoSaveSessionLog(event, payload) {
 
   try {
     // Create host subdirectory
-    const safeHostLabel = (hostLabel || hostname || hostId || "unknown").replace(/[^a-zA-Z0-9-_]/g, "_");
+    const safeHostLabel = safePathSegment(hostLabel || hostname || hostId, "unknown");
     const hostDir = path.join(directory, safeHostLabel);
 
     await fs.promises.mkdir(hostDir, { recursive: true });
@@ -244,4 +268,5 @@ module.exports = {
   terminalDataToHtml,
   terminalPlainTextToHtml,
   wrapTerminalHtmlContent,
+  safePathSegment,
 };
