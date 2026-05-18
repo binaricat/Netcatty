@@ -222,47 +222,84 @@ const writeTerminalLine = (
   term.writeln(data);
 };
 
+type TerminalWriteQueue = {
+  writing: boolean;
+  pending: Array<() => void>;
+};
+
+const terminalWriteQueues = new WeakMap<XTerm, TerminalWriteQueue>();
+
+const scheduleNextTerminalWrite = (term: XTerm, queue: TerminalWriteQueue) => {
+  const next = queue.pending.shift();
+  if (!next) {
+    queue.writing = false;
+    terminalWriteQueues.delete(term);
+    return;
+  }
+
+  queue.writing = true;
+  next();
+};
+
+const enqueueTerminalWrite = (
+  term: XTerm,
+  write: (done: () => void) => void,
+) => {
+  let queue = terminalWriteQueues.get(term);
+  if (!queue) {
+    queue = { writing: false, pending: [] };
+    terminalWriteQueues.set(term, queue);
+  }
+
+  queue.pending.push(() => {
+    write(() => scheduleNextTerminalWrite(term, queue));
+  });
+
+  if (!queue.writing) {
+    scheduleNextTerminalWrite(term, queue);
+  }
+};
+
 const writeSessionData = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
   data: string,
 ) => {
-  const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
-  const forcePromptNewLine = settings?.forcePromptNewLine ?? true;
-  if (!forcePromptNewLine && ctx.promptLineBreakStateRef?.current) {
-    ctx.promptLineBreakStateRef.current.pendingCommand = false;
-    ctx.promptLineBreakStateRef.current.suppressNextPromptCache = false;
-  }
-  const displayData = prepareTerminalDataForPromptLineBreak(
-    term,
-    prepareTerminalDataForUserPasteDisplay(term, data),
-    ctx.promptLineBreakStateRef?.current,
-    forcePromptNewLine,
-  );
-  ctx.onTerminalLogData?.(displayData);
-  const clearPasteResidualAndCapture = () => {
-    const cleanupData = clearPasteResidualAfterTerminalWrite(term);
-    if (cleanupData) {
-      ctx.onTerminalLogData?.(cleanupData);
+  enqueueTerminalWrite(term, (done) => {
+    const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
+    const forcePromptNewLine = settings?.forcePromptNewLine ?? true;
+    if (!forcePromptNewLine && ctx.promptLineBreakStateRef?.current) {
+      ctx.promptLineBreakStateRef.current.pendingCommand = false;
+      ctx.promptLineBreakStateRef.current.suppressNextPromptCache = false;
     }
-  };
-  const syncPrompt = () => {
-    if (forcePromptNewLine) {
-      syncPromptLineBreakState(term, ctx.promptLineBreakStateRef?.current);
-    }
-  };
-  if (!shouldScrollOnTerminalOutput(settings)) {
-    term.write(displayData, () => {
+    const displayData = prepareTerminalDataForPromptLineBreak(
+      term,
+      prepareTerminalDataForUserPasteDisplay(term, data),
+      ctx.promptLineBreakStateRef?.current,
+      forcePromptNewLine,
+    );
+    ctx.onTerminalLogData?.(displayData);
+    const clearPasteResidualAndCapture = () => {
+      const cleanupData = clearPasteResidualAfterTerminalWrite(term);
+      if (cleanupData) {
+        ctx.onTerminalLogData?.(cleanupData);
+      }
+    };
+    const syncPrompt = () => {
+      if (forcePromptNewLine) {
+        syncPromptLineBreakState(term, ctx.promptLineBreakStateRef?.current);
+      }
+    };
+    const afterWrite = () => {
       clearPasteResidualAndCapture();
       syncPrompt();
-    });
-    return;
-  }
+      if (shouldScrollOnTerminalOutput(settings)) {
+        handleTerminalOutputAutoScroll(ctx, term);
+      }
+      done();
+    };
 
-  term.write(displayData, () => {
-    clearPasteResidualAndCapture();
-    syncPrompt();
-    handleTerminalOutputAutoScroll(ctx, term);
+    term.write(displayData, afterWrite);
   });
 };
 
