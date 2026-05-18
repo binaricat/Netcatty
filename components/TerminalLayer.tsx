@@ -1,6 +1,7 @@
 import { Circle, Columns2, FolderTree, MessageSquare, PanelLeft, PanelRight, Palette, Plus, Search, Server, X, Zap } from 'lucide-react';
 import React, { createContext, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
+import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
 import {
   getSessionActivityIdsToClear,
   getValidSessionActivityIds,
@@ -573,16 +574,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
   }, [onUpdateSessionStatus]);
 
-  const handleSessionExit = useCallback((sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => {
-    // Auto-close the tab/session when the user actively exited (e.g. typed `exit`)
-    // reason === "exited" means the remote process/shell exited normally (stream-level close),
-    // as opposed to network errors, timeouts, or connection-level drops
-    if (evt.reason === "exited") {
-      onCloseSession(sessionId);
-    } else {
+  const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
+    const intent = resolveTerminalSessionExitIntent(evt);
+    if (intent.kind === "markDisconnected") {
       onUpdateSessionStatus(sessionId, 'disconnected');
     }
-  }, [onUpdateSessionStatus, onCloseSession]);
+  }, [onUpdateSessionStatus]);
 
   const handleOsDetected = useCallback((hostId: string, distro: string) => {
     onUpdateHostDistro(hostId, distro);
