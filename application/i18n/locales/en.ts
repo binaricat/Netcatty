@@ -1323,6 +1323,7 @@ const en: Messages = {
   'terminal.menu.paste': 'Paste',
   'terminal.menu.pasteSelection': 'Paste Selection',
   'terminal.menu.selectAll': 'Select All',
+  'terminal.menu.reconnect': 'Reconnect',
   'terminal.menu.splitHorizontal': 'Split Horizontal',
   'terminal.menu.splitVertical': 'Split Vertical',
   'terminal.menu.clearBuffer': 'Clear Buffer',
