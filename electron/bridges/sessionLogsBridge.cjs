@@ -12,6 +12,7 @@ const {
 } = require("./terminalLogSanitizer.cjs");
 
 const FILE_NAME_UNSAFE_CHARS = new Set(["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]);
+const WINDOWS_RESERVED_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
 
 function isControlCharacter(char) {
   const code = char.codePointAt(0);
@@ -44,7 +45,9 @@ function safePathSegment(value, fallback = "unknown") {
     return fallback;
   }
 
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(safe)) {
+  safe = safe.replace(/\.+$/g, (match) => "_".repeat(match.length));
+
+  if (WINDOWS_RESERVED_DEVICE_NAME.test(safe)) {
     safe = `${safe}_`;
   }
 

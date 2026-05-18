@@ -56,6 +56,10 @@ test("safe path segments replace invisible control characters and protected name
   assert.equal(safePathSegment("生产\u0085服务器\u009b", "fallback"), "生产_服务器_");
   assert.equal(safePathSegment("../name", "fallback"), ".._name");
   assert.equal(safePathSegment("CON", "fallback"), "CON_");
+  assert.equal(safePathSegment("COM¹", "fallback"), "COM¹_");
+  assert.equal(safePathSegment("LPT².txt", "fallback"), "LPT².txt_");
+  assert.equal(safePathSegment("prod.", "fallback"), "prod_");
+  assert.equal(safePathSegment("prod..", "fallback"), "prod__");
 });
 
 test("auto-save host directory preserves valid Unicode labels and replaces path-unsafe characters", async () => {
