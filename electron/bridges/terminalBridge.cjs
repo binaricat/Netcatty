@@ -938,7 +938,10 @@ function createMoshSshPasswordResponder(sshPty, password, passphrase) {
 
 function getLatestMoshPromptLine(text) {
   const lines = String(text || "").split(/[\r\n]+/);
-  return lines[lines.length - 1] || "";
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim().length > 0) return lines[index];
+  }
+  return "";
 }
 
 function isMoshAutoFillablePasswordPrompt(text, password) {

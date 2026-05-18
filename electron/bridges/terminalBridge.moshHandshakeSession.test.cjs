@@ -232,6 +232,19 @@ test("startMoshSession writes the saved password for localized password prompts"
   assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
 });
 
+test("startMoshSession writes the saved password when the prompt chunk ends with newline", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, password: "saved-secret" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("Password:\r\n");
+
+  assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
+});
+
 test("startMoshSession does not write saved password into OTP prompts", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(
