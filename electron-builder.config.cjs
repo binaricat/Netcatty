@@ -33,6 +33,7 @@ module.exports = {
         'dist/**/*',
         'electron/**/*',
         'lib/**/*.cjs',
+        'lib/**/*.json',
         '!electron/.dev-config.json',
         'skills/**/*',
         'public/**/*',

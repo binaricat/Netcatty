@@ -1,0 +1,7 @@
+{
+  "powershellShells": ["powershell", "powershell.exe", "pwsh", "pwsh.exe"],
+  "cmdShells": ["cmd", "cmd.exe"],
+  "fishShells": ["fish"],
+  "posixShells": ["sh", "bash", "zsh", "ksh", "dash", "ash", "bash.exe"],
+  "wslShells": ["wsl", "wsl.exe"]
+}
