@@ -275,13 +275,14 @@ const writeSessionData = (
       ctx.promptLineBreakStateRef.current.pendingCommand = false;
       ctx.promptLineBreakStateRef.current.suppressNextPromptCache = false;
     }
+    const pasteDisplayData = prepareTerminalDataForUserPasteDisplay(term, data);
     const displayData = prepareTerminalDataForPromptLineBreak(
       term,
-      prepareTerminalDataForUserPasteDisplay(term, data),
+      pasteDisplayData,
       ctx.promptLineBreakStateRef?.current,
       forcePromptNewLine,
     );
-    ctx.onTerminalLogData?.(displayData);
+    ctx.onTerminalLogData?.(pasteDisplayData);
     const clearPasteResidualAndCapture = () => {
       const cleanupData = clearPasteResidualAfterTerminalWrite(term);
       if (cleanupData) {

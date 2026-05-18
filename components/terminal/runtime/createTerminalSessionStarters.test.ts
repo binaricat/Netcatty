@@ -302,6 +302,118 @@ test("session data waits for prior terminal writes before evaluating prompt line
   assert.deepEqual(writes, ["hello", "\r\n$ "]);
 });
 
+test("prompt line break display insertion does not mutate captured session log data", async () => {
+  const writes: string[] = [];
+  const capturedLogData: string[] = [];
+  const writeCallbacks: Array<() => void> = [];
+  let onData: ((data: string) => void) | null = null;
+  let cursorX = 0;
+  let lineText = "";
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: (_id: string, cb: (data: string) => void) => {
+      onData = cb;
+      return noop;
+    },
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  const promptState = createPromptLineBreakState();
+  promptState.lastPromptText = "$ ";
+  promptState.pendingCommand = true;
+
+  const ctx = {
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+    },
+    keys: [],
+    resolvedChainHosts: [],
+    sessionId: "session-1",
+    terminalSettings: { forcePromptNewLine: true },
+    terminalBackend,
+    promptLineBreakStateRef: { current: promptState },
+    sessionRef: { current: null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    updateStatus: noop,
+    setStatus: noop,
+    setError: noop,
+    setNeedsAuth: noop,
+    setAuthRetryMessage: noop,
+    setAuthPassword: noop,
+    setProgressLogs: noop,
+    setProgressValue: noop,
+    setChainProgress: noop,
+    onTerminalLogData: (data: string) => capturedLogData.push(data),
+  };
+
+  const term = {
+    get buffer() {
+      return {
+        active: {
+          get cursorX() {
+            return cursorX;
+          },
+          cursorY: 0,
+          baseY: 0,
+          getLine(line: number) {
+            if (line !== 0) return undefined;
+            return {
+              isWrapped: false,
+              translateToString() {
+                return lineText;
+              },
+            };
+          },
+        },
+      };
+    },
+    write: (data: string, callback?: () => void) => {
+      writes.push(data);
+      if (callback) writeCallbacks.push(callback);
+    },
+    writeln: noop,
+    scrollToBottom: noop,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startLocal(term as never);
+
+  assert.notEqual(onData, null);
+  onData?.("hello");
+  onData?.("$ ");
+
+  cursorX = 5;
+  lineText = "hello";
+  writeCallbacks.shift()?.();
+
+  assert.deepEqual(writes, ["hello", "\r\n$ "]);
+  assert.deepEqual(capturedLogData, ["hello", "$ "]);
+});
+
 test("local session exit text waits for pending terminal output writes", async () => {
   const writes: string[] = [];
   const writeCallbacks: Array<() => void> = [];
