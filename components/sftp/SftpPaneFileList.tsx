@@ -14,10 +14,9 @@ import type { SftpFileEntry } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpTransferSource } from "./SftpContext";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
-import { buildSftpColumnTemplate, type ColumnWidths, type SortField, type SortOrder } from "./utils";
-import { isNavigableDirectory } from "./index";
+import { buildSftpColumnTemplate, isNavigableDirectory, type ColumnWidths, type SortField, type SortOrder } from "./utils";
 import { isKnownBinaryFile } from "../../lib/sftpFileUtils";
-import { SftpFileRow } from "./index";
+import { SftpFileRow } from "./SftpFileRow";
 import {
   getSftpListUploadFilesTargetPath,
   getSftpUploadFilesLabelKey,

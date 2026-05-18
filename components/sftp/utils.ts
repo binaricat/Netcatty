@@ -329,7 +329,7 @@ export const isNavigableDirectory = (entry: SftpFileEntry): boolean => {
  *
  * The ".." parent directory entry is never considered hidden.
  */
-export const isHiddenFile = <T extends { name: string; hidden?: boolean }>(
+const isHiddenFile = <T extends { name: string; hidden?: boolean }>(
     file: T,
 ): boolean => {
     if (file.name === "..") return false;
@@ -339,10 +339,6 @@ export const isHiddenFile = <T extends { name: string; hidden?: boolean }>(
     if (file.name.startsWith(".")) return true;
     return false;
 };
-
-/** @deprecated Use isHiddenFile instead */
-export const isWindowsHiddenFile = <T extends { name: string; hidden?: boolean }>(file: T): boolean =>
-    isHiddenFile(file);
 
 /**
  * Filter files based on hidden file visibility setting.

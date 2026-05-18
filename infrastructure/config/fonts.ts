@@ -100,7 +100,3 @@ export function migrateDeprecatedFontOverride<
   }
   return next;
 }
-
-export function getRawFontFamily(fontId: string): string {
-  return (TERMINAL_FONTS.find((f) => f.id === fontId) || TERMINAL_FONTS[0]).family;
-}

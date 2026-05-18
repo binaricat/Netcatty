@@ -241,6 +241,44 @@ export interface SyncPayload {
   syncedAt: number;         // When this payload was created
 }
 
+export const SYNC_PAYLOAD_ENTITY_KEYS = [
+  'hosts',
+  'keys',
+  'identities',
+  'proxyProfiles',
+  'snippets',
+  'customGroups',
+  'snippetPackages',
+  'portForwardingRules',
+  'knownHosts',
+  'groupConfigs',
+] as const;
+
+export const CLOUD_SYNC_PAYLOAD_ENTITY_KEYS = [
+  'hosts',
+  'keys',
+  'identities',
+  'proxyProfiles',
+  'snippets',
+  'customGroups',
+  'snippetPackages',
+  'portForwardingRules',
+  'groupConfigs',
+] as const;
+
+export type SyncPayloadEntityKey = typeof SYNC_PAYLOAD_ENTITY_KEYS[number];
+export type CloudSyncPayloadEntityKey = typeof CLOUD_SYNC_PAYLOAD_ENTITY_KEYS[number];
+
+export function hasSyncPayloadEntityData(
+  payload: SyncPayload,
+  keys: readonly SyncPayloadEntityKey[] = SYNC_PAYLOAD_ENTITY_KEYS,
+): boolean {
+  return keys.some((key) => {
+    const value = payload[key];
+    return Array.isArray(value) && value.length > 0;
+  });
+}
+
 // ============================================================================
 // Encryption Types
 // ============================================================================

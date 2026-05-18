@@ -147,7 +147,3 @@ export const UI_FONTS: UIFont[] = BASE_UI_FONTS.map((font) => ({
 }));
 
 export const DEFAULT_UI_FONT_ID = 'space-grotesk';
-
-export const getUiFontById = (id: string): UIFont => {
-  return UI_FONTS.find((f) => f.id === id) || UI_FONTS[0];
-};

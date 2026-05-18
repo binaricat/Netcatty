@@ -12,6 +12,7 @@ import { useWindowControls } from "../application/state/useWindowControls";
 import { useUpdateCheck } from "../application/state/useUpdateCheck";
 import { useAIState } from "../application/state/useAIState";
 import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
+import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
 import SettingsApplicationTab from "./SettingsApplicationTab";
 import SettingsAppearanceTab from "./settings/tabs/SettingsAppearanceTab";
 import SettingsFileAssociationsTab from "./settings/tabs/SettingsFileAssociationsTab";
@@ -133,13 +134,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 
     // Strip transient runtime fields before passing to sync
     const portForwardingRulesForSync = useMemo(
-        () =>
-            portForwardingRules.map((rule) => ({
-                ...rule,
-                status: "inactive" as const,
-                error: undefined,
-                lastUsedAt: undefined,
-            })),
+        () => sanitizePortForwardingRulesForSync(portForwardingRules) ?? [],
         [portForwardingRules],
     );
 

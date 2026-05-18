@@ -104,12 +104,6 @@ export const useActiveTabId = (side: "left" | "right"): string | null => {
     );
 };
 
-// Hook to check if a specific pane is active (for CSS control)
-export const useIsPaneActive = (side: "left" | "right", paneId: string): boolean => {
-    const activeTabId = useActiveTabId(side);
-    return activeTabId === paneId || (activeTabId === null && paneId !== null);
-};
-
 export interface SftpContextValue {
     // Hosts list for connection picker
     hosts: Host[];

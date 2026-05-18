@@ -15,7 +15,7 @@ import {
   useSftpPaneCallbacks,
   useSftpUpdateHosts,
   useSftpWritableHosts,
-} from "./index";
+} from "./SftpContext";
 import type { SftpPane } from "../../application/state/sftp/types";
 import { joinPath } from "../../application/state/sftp/utils";
 import type { Host } from "../../domain/models";

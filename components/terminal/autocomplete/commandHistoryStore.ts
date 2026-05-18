@@ -389,17 +389,6 @@ function fuzzyScore(query: string, target: string): number {
 }
 
 /**
- * Delete a specific command from history for a host.
- */
-export function deleteHistoryEntry(command: string, hostId: string): void {
-  const store = loadStore();
-  store.entries = store.entries.filter(
-    (e) => !(e.command === command && e.hostId === hostId),
-  );
-  saveStore(store);
-}
-
-/**
  * Clear all history for a specific host, or all history if no hostId given.
  */
 export function clearHistory(hostId?: string): void {
@@ -410,15 +399,4 @@ export function clearHistory(hostId?: string): void {
     store.entries = [];
   }
   saveStore(store);
-}
-
-/**
- * Get total number of stored history entries.
- */
-export function getHistoryCount(hostId?: string): number {
-  const store = loadStore();
-  if (hostId) {
-    return store.entries.filter((e) => e.hostId === hostId).length;
-  }
-  return store.entries.length;
 }

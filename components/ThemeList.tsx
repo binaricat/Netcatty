@@ -10,7 +10,7 @@ import { cn } from '../lib/utils';
 import { TerminalTheme } from '../types';
 
 // Memoized theme item component
-export const ThemeItem = memo(({
+const ThemeItem = memo(({
     theme,
     isSelected,
     onSelect

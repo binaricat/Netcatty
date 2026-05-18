@@ -55,20 +55,7 @@ const CHAT_SESSION_ID = process.env.NETCATTY_MCP_CHAT_SESSION_ID || null;
 const PERMISSION_MODE = process.env.NETCATTY_MCP_PERMISSION_MODE || "confirm";
 
 // Default command blocklist (defense-in-depth, TCP bridge also checks)
-// NOTE: Keep in sync with DEFAULT_COMMAND_BLOCKLIST in infrastructure/ai/types.ts
-const DEFAULT_COMMAND_BLOCKLIST = [
-  '\\brm\\s+(-[a-zA-Z]*r[a-zA-Z]*\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?|-[a-zA-Z]*f[a-zA-Z]*\\s+(-[a-zA-Z]*r[a-zA-Z]*\\s+)?|--recursive\\s+|--force\\s+){1,}',
-  '\\bmkfs\\.',
-  '\\bdd\\s+if=.*\\s+of=/dev/',
-  '\\b(shutdown|reboot|poweroff|halt)\\b',
-  ':\\(\\)\\{\\s*:\\|:\\&\\s*\\};:',
-  '>\\s*/dev/sd',
-  '\\bchmod\\s+(-[a-zA-Z]*R[a-zA-Z]*|--recursive)\\s+777\\s+/',
-  '\\bmv\\s+/\\s',
-  ':\\s*>\\s*/etc/',
-  '\\bcurl\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b',
-  '\\bwget\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b',
-];
+const DEFAULT_COMMAND_BLOCKLIST = require("../../lib/commandBlocklist.cjs");
 
 // Pre-compile blocklist regexes once at module load time
 const compiledBlocklist = DEFAULT_COMMAND_BLOCKLIST.map(pattern => {

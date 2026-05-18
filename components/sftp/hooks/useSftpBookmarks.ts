@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import type { Host, SftpBookmark } from "../../../domain/models";
+import { createSftpBookmark } from "../../../application/state/sftp/bookmarkHelpers";
 
 interface UseSftpBookmarksParams {
     host: Host | undefined;
@@ -40,16 +41,7 @@ export const useSftpBookmarks = ({
         if (isCurrentPathBookmarked) {
             updateHostBookmarks(bookmarks.filter((b) => b.path !== currentPath));
         } else {
-            const label =
-                currentPath === "/"
-                    ? "/"
-                    : currentPath.split("/").filter(Boolean).pop() || currentPath;
-            const newBookmark: SftpBookmark = {
-                id: `bm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                path: currentPath,
-                label,
-            };
-            updateHostBookmarks([...bookmarks, newBookmark]);
+            updateHostBookmarks([...bookmarks, createSftpBookmark(currentPath)]);
         }
     }, [currentPath, host, isCurrentPathBookmarked, bookmarks, updateHostBookmarks]);
 

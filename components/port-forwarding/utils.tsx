@@ -1,23 +1,21 @@
 /**
  * Port Forwarding utilities and constants
  */
-import { Globe,Server,Shuffle } from 'lucide-react';
-import React from 'react';
 import { PortForwardingType } from '../../domain/models';
 
-export const TYPE_LABEL_KEYS: Record<PortForwardingType, string> = {
+const TYPE_LABEL_KEYS: Record<PortForwardingType, string> = {
   local: 'pf.type.local',
   remote: 'pf.type.remote',
   dynamic: 'pf.type.dynamic',
 };
 
-export const TYPE_MENU_LABEL_KEYS: Record<PortForwardingType, string> = {
+const TYPE_MENU_LABEL_KEYS: Record<PortForwardingType, string> = {
   local: 'pf.type.menu.local',
   remote: 'pf.type.menu.remote',
   dynamic: 'pf.type.menu.dynamic',
 };
 
-export const TYPE_DESCRIPTION_KEYS: Record<PortForwardingType, string> = {
+const TYPE_DESCRIPTION_KEYS: Record<PortForwardingType, string> = {
   local: 'pf.type.local.desc',
   remote: 'pf.type.remote.desc',
   dynamic: 'pf.type.dynamic.desc',
@@ -43,12 +41,6 @@ export function getTypeDescription(
 ): string {
   return t(TYPE_DESCRIPTION_KEYS[type]);
 }
-
-export const TYPE_ICONS: Record<PortForwardingType, React.ReactNode> = {
-  local: <Globe size={16} />,
-  remote: <Server size={16} />,
-  dynamic: <Shuffle size={16} />,
-};
 
 /**
  * Get status color class for a rule

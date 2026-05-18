@@ -177,12 +177,22 @@ const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
 
   useEffect(() => {
     if (shouldMount) return;
-    // Warm up the terminal layer shortly after first paint to reduce latency when opening a session.
-    const id = window.setTimeout(() => setShouldMount(true), 1200);
+    type IdleWindow = Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const idleWindow = window as IdleWindow;
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const id = idleWindow.requestIdleCallback(() => setShouldMount(true), { timeout: 5000 });
+      return () => idleWindow.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(() => setShouldMount(true), 5000);
     return () => window.clearTimeout(id);
   }, [shouldMount]);
 
-  if (!shouldMount) return null;
+  const shouldRender = shouldMount || isVisible;
+
+  if (!shouldRender) return null;
 
   return (
     <Suspense fallback={null}>
@@ -1716,6 +1726,10 @@ function App({ settings }: { settings: SettingsState }) {
     }
   }, [updateSessionStatus, updateHostLastConnected]);
 
+  const handleUpdateHostFromTerminal = useCallback((host: Host) => {
+    updateHosts(hosts.map((h) => (h.id === host.id ? host : h)));
+  }, [hosts, updateHosts]);
+
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const { username, hostname } = systemInfoRef.current;
@@ -2012,7 +2026,7 @@ function App({ settings }: { settings: SettingsState }) {
             shellHistory={shellHistory}
             connectionLogs={connectionLogs}
             managedSources={managedSources}
-            sessions={sessions}
+            sessionCount={sessions.length}
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
             terminalThemeId={terminalThemeId}
@@ -2100,7 +2114,7 @@ function App({ settings }: { settings: SettingsState }) {
           onCloseSession={closeSession}
           onUpdateSessionStatus={handleSessionStatusChange}
           onUpdateHostDistro={updateHostDistro}
-          onUpdateHost={(host) => updateHosts(hosts.map(h => h.id === host.id ? host : h))}
+          onUpdateHost={handleUpdateHostFromTerminal}
           onAddKnownHost={handleAddKnownHost}
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
             addShellHistoryEntry({ command, hostId, hostLabel, sessionId });

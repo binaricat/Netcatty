@@ -1,5 +1,5 @@
 import { Circle, Columns2, FolderTree, MessageSquare, PanelLeft, PanelRight, Palette, Plus, Search, Server, X, Zap } from 'lucide-react';
-import React, { createContext, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, createContext, lazy, memo, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId } from '../application/state/activeTabStore';
 import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
 import {
@@ -48,7 +48,6 @@ import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
-import { AIChatSidePanel } from './AIChatSidePanel';
 import { useAIState } from '../application/state/useAIState';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { TERMINAL_THEMES } from '../infrastructure/config/terminalThemes';
@@ -61,6 +60,10 @@ import { resolveScriptsSidePanelShortcutIntent } from '../application/state/reso
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
+
+const LazyAIChatSidePanel = lazy(() =>
+  import('./AIChatSidePanel').then((m) => ({ default: m.AIChatSidePanel })),
+);
 
 type WorkspaceRect = { x: number; y: number; w: number; h: number };
 
@@ -334,48 +337,52 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
             key={tabId}
             className={cn("absolute inset-0 z-10", !isVisible && "hidden")}
           >
-            <AIChatSidePanel
-              sessions={aiState.sessions}
-              activeSessionIdMap={aiState.activeSessionIdMap}
-              draftsByScope={aiState.draftsByScope}
-              panelViewByScope={aiState.panelViewByScope}
-              setActiveSessionId={aiState.setActiveSessionId}
-              ensureDraftForScope={aiState.ensureDraftForScope}
-              updateDraft={aiState.updateDraft}
-              showDraftView={aiState.showDraftView}
-              showSessionView={aiState.showSessionView}
-              clearDraftForScope={aiState.clearDraftForScope}
-              addDraftFiles={aiState.addDraftFiles}
-              removeDraftFile={aiState.removeDraftFile}
-              createSession={aiState.createSession}
-              deleteSession={aiState.deleteSession}
-              updateSessionTitle={aiState.updateSessionTitle}
-              updateSessionExternalSessionId={aiState.updateSessionExternalSessionId}
-              addMessageToSession={aiState.addMessageToSession}
-              updateLastMessage={aiState.updateLastMessage}
-              updateMessageById={aiState.updateMessageById}
-              providers={aiState.providers}
-              activeProviderId={aiState.activeProviderId}
-              activeModelId={aiState.activeModelId}
-              defaultAgentId={aiState.defaultAgentId}
-              toolIntegrationMode={aiState.toolIntegrationMode}
-              externalAgents={aiState.externalAgents}
-              setExternalAgents={aiState.setExternalAgents}
-              agentModelMap={aiState.agentModelMap}
-              setAgentModel={aiState.setAgentModel}
-              globalPermissionMode={aiState.globalPermissionMode}
-              setGlobalPermissionMode={aiState.setGlobalPermissionMode}
-              commandBlocklist={aiState.commandBlocklist}
-              maxIterations={aiState.maxIterations}
-              webSearchConfig={aiState.webSearchConfig}
-              scopeType={context.scopeType}
-              scopeTargetId={context.scopeTargetId}
-              scopeHostIds={context.scopeHostIds}
-              scopeLabel={context.scopeLabel}
-              terminalSessions={context.terminalSessions}
-              resolveExecutorContext={resolveExecutorContext}
-              isVisible={isVisible}
-            />
+            {isVisible && (
+              <Suspense fallback={null}>
+                <LazyAIChatSidePanel
+                  sessions={aiState.sessions}
+                  activeSessionIdMap={aiState.activeSessionIdMap}
+                  draftsByScope={aiState.draftsByScope}
+                  panelViewByScope={aiState.panelViewByScope}
+                  setActiveSessionId={aiState.setActiveSessionId}
+                  ensureDraftForScope={aiState.ensureDraftForScope}
+                  updateDraft={aiState.updateDraft}
+                  showDraftView={aiState.showDraftView}
+                  showSessionView={aiState.showSessionView}
+                  clearDraftForScope={aiState.clearDraftForScope}
+                  addDraftFiles={aiState.addDraftFiles}
+                  removeDraftFile={aiState.removeDraftFile}
+                  createSession={aiState.createSession}
+                  deleteSession={aiState.deleteSession}
+                  updateSessionTitle={aiState.updateSessionTitle}
+                  updateSessionExternalSessionId={aiState.updateSessionExternalSessionId}
+                  addMessageToSession={aiState.addMessageToSession}
+                  updateLastMessage={aiState.updateLastMessage}
+                  updateMessageById={aiState.updateMessageById}
+                  providers={aiState.providers}
+                  activeProviderId={aiState.activeProviderId}
+                  activeModelId={aiState.activeModelId}
+                  defaultAgentId={aiState.defaultAgentId}
+                  toolIntegrationMode={aiState.toolIntegrationMode}
+                  externalAgents={aiState.externalAgents}
+                  setExternalAgents={aiState.setExternalAgents}
+                  agentModelMap={aiState.agentModelMap}
+                  setAgentModel={aiState.setAgentModel}
+                  globalPermissionMode={aiState.globalPermissionMode}
+                  setGlobalPermissionMode={aiState.setGlobalPermissionMode}
+                  commandBlocklist={aiState.commandBlocklist}
+                  maxIterations={aiState.maxIterations}
+                  webSearchConfig={aiState.webSearchConfig}
+                  scopeType={context.scopeType}
+                  scopeTargetId={context.scopeTargetId}
+                  scopeHostIds={context.scopeHostIds}
+                  scopeLabel={context.scopeLabel}
+                  terminalSessions={context.terminalSessions}
+                  resolveExecutorContext={resolveExecutorContext}
+                  isVisible={isVisible}
+                />
+              </Suspense>
+            )}
           </div>
         );
       })}

@@ -7,7 +7,9 @@ import type { TransferTask } from "../../types";
 import FileOpenerDialog from "../FileOpenerDialog";
 import TextEditorModal from "../TextEditorModal";
 import type { TextEditorModalSnapshot } from "../TextEditorModal";
-import { SftpConflictDialog, SftpHostPicker, SftpPermissionsDialog } from "./index";
+import { SftpConflictDialog } from "./SftpConflictDialog";
+import { SftpHostPicker } from "./SftpHostPicker";
+import { SftpPermissionsDialog } from "./SftpPermissionsDialog";
 import { SftpTransferQueue } from "./SftpTransferQueue";
 
 type SftpState = ReturnType<typeof useSftpState>;

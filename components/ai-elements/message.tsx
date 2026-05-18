@@ -47,20 +47,6 @@ export const MessageContent = ({ children, className, from, ...props }: MessageC
   </div>
 );
 
-export type MessageActionsProps = ComponentProps<'div'>;
-
-export const MessageActions = ({ className, children, ...props }: MessageActionsProps) => (
-  <div
-    className={cn(
-      'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity',
-      className,
-    )}
-    {...props}
-  >
-    {children}
-  </div>
-);
-
 const safeCode = createSafeCodeHighlighter(code);
 const streamdownPlugins = { cjk, code: safeCode };
 

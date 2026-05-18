@@ -16,7 +16,7 @@ import { sftpTreeSelectionStore } from "./useSftpTreeSelectionStore";
 import { sftpListOrderStore } from "./useSftpListOrderStore";
 import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
-import { filterHiddenFiles, isNavigableDirectory } from "../index";
+import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 import type { SftpFileEntry } from "../../../types";
 import { toast } from "../../ui/toast";
 

@@ -8,33 +8,6 @@ import { logger } from '../../lib/logger';
 import { KeyType, SSHKey } from '../../types';
 
 /**
- * Generate mock key pair (for fallback when Electron backend is unavailable)
- */
-export const generateMockKeyPair = (type: KeyType, label: string, keySize?: number): { privateKey: string; publicKey: string } => {
-    const typeMap: Record<KeyType, string> = {
-        'ED25519': 'ed25519',
-        'ECDSA': `ecdsa-sha2-nistp${keySize || 256}`,
-        'RSA': 'rsa',
-    };
-
-    const randomId = crypto.randomUUID().replace(/-/g, '').substring(0, 32);
-
-    // Generate size-appropriate random data for more realistic keys
-    const keyLength = type === 'RSA' ? (keySize || 4096) / 8 : 32;
-    const randomData = Array.from(crypto.getRandomValues(new Uint8Array(keyLength)))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-
-    const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACB${randomId}AAAEC${randomData.substring(0, 64)}
------END OPENSSH PRIVATE KEY-----`;
-
-    const publicKey = `ssh-${typeMap[type]} AAAAC3NzaC1lZDI1NTE5AAAAI${randomId.substring(0, 20)} ${label}@netcatty`;
-
-    return { privateKey, publicKey };
-};
-
-/**
  * Get icon element for key source
  */
 export const getKeyIcon = (key: SSHKey): React.ReactElement => {

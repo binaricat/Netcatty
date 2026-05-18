@@ -1,4 +1,8 @@
-import type { SyncPayload } from './sync';
+import {
+  CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
+  type CloudSyncPayloadEntityKey,
+  type SyncPayload,
+} from './sync';
 
 export type ShrinkFinding =
   | { suspicious: false }
@@ -22,22 +26,9 @@ export type ShrinkFinding =
       viaRemote?: boolean;
     };
 
-// Keep in sync with all array-typed fields of SyncPayload. When a new
-// array entity type is added there, add it here too — there is no
-// compile-time check enforcing this.
-const CHECKED_ENTITIES = [
-  'hosts',
-  'keys',
-  'identities',
-  'proxyProfiles',
-  'snippets',
-  'customGroups',
-  'snippetPackages',
-  'portForwardingRules',
-  'groupConfigs',
-] as const;
+const CHECKED_ENTITIES = CLOUD_SYNC_PAYLOAD_ENTITY_KEYS;
 
-type CheckedEntityType = typeof CHECKED_ENTITIES[number];
+type CheckedEntityType = CloudSyncPayloadEntityKey;
 
 const BULK_SHRINK_RATIO = 0.5;
 const BULK_SHRINK_MIN_ABSOLUTE = 3;

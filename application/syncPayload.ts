@@ -18,7 +18,12 @@ import type {
   Snippet,
   SSHKey,
 } from '../domain/models';
-import type { SyncPayload } from '../domain/sync';
+import {
+  CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
+  SYNC_PAYLOAD_ENTITY_KEYS,
+  hasSyncPayloadEntityData,
+  type SyncPayload,
+} from '../domain/sync';
 import {
   nextCustomKeyBindingsSyncVersion,
   parseCustomKeyBindingsStorageRecord,
@@ -26,7 +31,7 @@ import {
 } from '../domain/customKeyBindings';
 import { isEncryptedCredentialPlaceholder } from '../domain/credentials';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
-import { rehydrateGlobalBookmarks } from '../components/sftp/hooks/useGlobalSftpBookmarks';
+import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
 import {
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
@@ -67,6 +72,7 @@ import {
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
+  STORAGE_KEY_PORT_FORWARDING,
 } from '../infrastructure/config/storageKeys';
 
 // ---------------------------------------------------------------------------
@@ -94,19 +100,7 @@ export interface SyncableVaultData {
  * protecting or syncing.
  */
 export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
-  const hasEntities =
-    (payload.hosts?.length ?? 0) > 0 ||
-    (payload.keys?.length ?? 0) > 0 ||
-    (payload.snippets?.length ?? 0) > 0 ||
-    (payload.identities?.length ?? 0) > 0 ||
-    (payload.proxyProfiles?.length ?? 0) > 0 ||
-    (payload.customGroups?.length ?? 0) > 0 ||
-    (payload.snippetPackages?.length ?? 0) > 0 ||
-    (payload.portForwardingRules?.length ?? 0) > 0 ||
-    (payload.knownHosts?.length ?? 0) > 0 ||
-    (payload.groupConfigs?.length ?? 0) > 0;
-
-  if (hasEntities) return true;
+  if (hasSyncPayloadEntityData(payload, SYNC_PAYLOAD_ENTITY_KEYS)) return true;
 
   return Boolean(
     payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
@@ -118,22 +112,37 @@ export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
  * Local-only trust records are intentionally ignored.
  */
 export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
-  const hasEntities =
-    (payload.hosts?.length ?? 0) > 0 ||
-    (payload.keys?.length ?? 0) > 0 ||
-    (payload.snippets?.length ?? 0) > 0 ||
-    (payload.identities?.length ?? 0) > 0 ||
-    (payload.proxyProfiles?.length ?? 0) > 0 ||
-    (payload.customGroups?.length ?? 0) > 0 ||
-    (payload.snippetPackages?.length ?? 0) > 0 ||
-    (payload.portForwardingRules?.length ?? 0) > 0 ||
-    (payload.groupConfigs?.length ?? 0) > 0;
-
-  if (hasEntities) return true;
+  if (hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS)) return true;
 
   return Boolean(
     payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
   );
+}
+
+export function sanitizePortForwardingRulesForSync(
+  rules: PortForwardingRule[] | undefined,
+): PortForwardingRule[] | undefined {
+  if (!rules) return rules;
+  return rules.map((rule) => ({
+    ...rule,
+    status: 'inactive' as const,
+    error: undefined,
+    lastUsedAt: undefined,
+  }));
+}
+
+export function getEffectivePortForwardingRulesForSync(
+  rules: PortForwardingRule[] | undefined,
+): PortForwardingRule[] | undefined {
+  let effectiveRules = rules;
+  if (!effectiveRules || effectiveRules.length === 0) {
+    const stored = localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING);
+    if (Array.isArray(stored) && stored.length > 0) {
+      effectiveRules = stored;
+    }
+  }
+
+  return sanitizePortForwardingRulesForSync(effectiveRules);
 }
 
 /** Callbacks used by `applySyncPayload` to import data into local state. */
@@ -550,7 +559,7 @@ export function buildSyncPayload(
     customGroups: vault.customGroups,
     snippetPackages: vault.snippetPackages,
     groupConfigs: vault.groupConfigs,
-    portForwardingRules,
+    portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -611,7 +620,7 @@ function applyPayload(
     if (payload.settings) {
       applySyncableSettings(payload.settings);
       // Rehydrate in-memory bookmark snapshot after localStorage was updated
-      if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalBookmarks();
+      if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
       importers.onSettingsApplied?.();
     }
   });

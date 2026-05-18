@@ -70,7 +70,6 @@ import {
   SSHKey,
   ShellHistoryEntry,
   Snippet,
-  TerminalSession,
 } from "../types";
 import { AppLogo } from "./AppLogo";
 import { DistroAvatar } from "./DistroAvatar";
@@ -135,7 +134,7 @@ interface VaultViewProps {
   shellHistory: ShellHistoryEntry[];
   connectionLogs: ConnectionLog[];
   managedSources: ManagedSource[];
-  sessions: TerminalSession[];
+  sessionCount: number;
   hotkeyScheme: HotkeyScheme;
   keyBindings: KeyBinding[];
   terminalThemeId: string;
@@ -187,7 +186,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   shellHistory,
   connectionLogs,
   managedSources,
-  sessions,
+  sessionCount,
   hotkeyScheme,
   keyBindings,
   terminalThemeId,
@@ -2511,7 +2510,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
                         {t("vault.hosts.header.entries", { count: viewMode === "tree" ? treeViewHosts.length : visibleDisplayedHosts.length })}
                       </span>
                       <div className="bg-secondary/80 border border-border/70 rounded-md px-2 py-1 text-[11px]">
-                        {t("vault.hosts.header.live", { count: sessions.length })}
+                        {t("vault.hosts.header.live", { count: sessionCount })}
                       </div>
                     </div>
                   </div>
@@ -3291,7 +3290,7 @@ export const vaultViewAreEqual = (
     prev.knownHosts === next.knownHosts &&
     prev.shellHistory === next.shellHistory &&
     prev.connectionLogs === next.connectionLogs &&
-    prev.sessions === next.sessions &&
+    prev.sessionCount === next.sessionCount &&
     prev.managedSources === next.managedSources &&
     prev.groupConfigs === next.groupConfigs &&
     prev.terminalThemeId === next.terminalThemeId &&

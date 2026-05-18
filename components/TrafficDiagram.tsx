@@ -190,5 +190,3 @@ export const TrafficDiagram: React.FC<TrafficDiagramProps> = ({ type, isAnimatin
         </div>
     );
 };
-
-export default TrafficDiagram;

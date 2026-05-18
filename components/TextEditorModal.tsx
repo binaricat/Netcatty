@@ -73,7 +73,7 @@ interface TextEditorModalProps {
   onPromoteToTab?: (snapshot: TextEditorModalSnapshot) => void;
 }
 
-export const TextEditorModal: React.FC<TextEditorModalProps> = ({
+const TextEditorModal: React.FC<TextEditorModalProps> = ({
   open,
   onClose,
   fileName,

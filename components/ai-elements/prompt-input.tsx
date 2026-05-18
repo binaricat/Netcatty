@@ -11,7 +11,6 @@ import type {
   FormEvent,
   HTMLAttributes,
   KeyboardEvent,
-  ReactNode,
 } from 'react';
 import { forwardRef, useCallback, useRef } from 'react';
 import { cn } from '../../lib/utils';
@@ -145,37 +144,6 @@ export const PromptInputTools = forwardRef<HTMLDivElement, PromptInputToolsProps
 );
 PromptInputTools.displayName = 'PromptInputTools';
 
-// ---------------------------------------------------------------------------
-// PromptInputButton (toolbar button with optional tooltip)
-// ---------------------------------------------------------------------------
-
-export interface PromptInputButtonProps extends ComponentProps<typeof InputGroupButton> {
-  tooltip?: ReactNode;
-  tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
-}
-
-export const PromptInputButton = forwardRef<HTMLButtonElement, PromptInputButtonProps>(
-  ({ tooltip, tooltipSide = 'top', ...props }, ref) => {
-    const button = <InputGroupButton ref={ref} {...props} />;
-
-    if (!tooltip) return button;
-
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent side={tooltipSide}>{tooltip}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  },
-);
-PromptInputButton.displayName = 'PromptInputButton';
-
-// ---------------------------------------------------------------------------
-// PromptInputSubmit
-// ---------------------------------------------------------------------------
-
 export type PromptInputStatus = 'idle' | 'submitted' | 'streaming' | 'error';
 
 export interface PromptInputSubmitProps extends ComponentProps<typeof InputGroupButton> {
@@ -244,4 +212,3 @@ export const PromptInputSubmit = forwardRef<HTMLButtonElement, PromptInputSubmit
   },
 );
 PromptInputSubmit.displayName = 'PromptInputSubmit';
-

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPaneCallbacks, SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
-import { isNavigableDirectory } from "../index";
+import { isNavigableDirectory } from "../utils";
 import { joinPath } from "../../../application/state/sftp/utils";
 
 interface UseSftpPaneDragAndSelectParams {

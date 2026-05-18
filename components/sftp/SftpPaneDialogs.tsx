@@ -12,7 +12,7 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { getFileName, getParentPath } from "../../application/state/sftp/utils";
-import { SftpHostPicker } from "./index";
+import { SftpHostPicker } from "./SftpHostPicker";
 import type { Host } from "../../types";
 
 interface SftpPaneDialogsProps {

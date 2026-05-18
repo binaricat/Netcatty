@@ -133,14 +133,6 @@ export type ResolvedXTermPerformance = {
 const isLowMemoryDevice = (deviceMemoryGb?: number) =>
   typeof deviceMemoryGb === "number" && deviceMemoryGb > 0 && deviceMemoryGb <= 4;
 
-/**
- * Get platform-specific xterm configuration
- * @returns Configuration object optimized for the current platform
- */
-export function getXTermConfig(platform: XTermPlatform = "darwin") {
-  return resolveXTermPerformanceConfig({ platform }).options;
-}
-
 export type RendererPreference = "auto" | "webgl" | "dom";
 
 /**

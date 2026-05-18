@@ -362,22 +362,3 @@ export function getAlignedPrompt(
   }
   return { prompt: raw, alignedTyped: null };
 }
-
-/**
- * Simplified prompt detection: just check if we're likely at a prompt.
- */
-export function isLikelyAtPrompt(term: XTerm): boolean {
-  const buffer = term.buffer.active;
-  const cursorY = buffer.cursorY + buffer.baseY;
-  const line = buffer.getLine(cursorY);
-  if (!line) return false;
-
-  const lineText = line.translateToString(false);
-  if (lineText.trim().length === 0) return false;
-
-  for (const pattern of NON_PROMPT_PATTERNS) {
-    if (pattern.test(lineText)) return false;
-  }
-
-  return findPromptBoundary(lineText) >= 0;
-}

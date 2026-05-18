@@ -17,7 +17,7 @@ interface FileOpenerDialogProps {
   onSelectSystemApp: () => Promise<SystemAppInfo | null>;
 }
 
-export const FileOpenerDialog: React.FC<FileOpenerDialogProps> = ({
+const FileOpenerDialog: React.FC<FileOpenerDialogProps> = ({
   open,
   onClose,
   fileName,

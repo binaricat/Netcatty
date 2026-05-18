@@ -6,7 +6,7 @@ import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "../ui/pop
 import { Dropdown, DropdownContent, DropdownTrigger } from "../ui/dropdown";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { SftpBreadcrumb } from "./index";
+import { SftpBreadcrumb } from "./SftpBreadcrumb";
 import type { SftpFilenameEncoding } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpBookmark } from "../../domain/models";

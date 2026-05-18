@@ -19,11 +19,11 @@ import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '..
 import {
   SYNCABLE_SETTING_STORAGE_KEYS,
   collectSyncableSettings,
+  getEffectivePortForwardingRulesForSync,
   hasMeaningfulCloudSyncData,
 } from '../syncPayload';
 import { readInterruptedVaultApply } from '../localVaultBackups';
 import {
-  STORAGE_KEY_PORT_FORWARDING,
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
 } from '../../infrastructure/config/storageKeys';
 import {
@@ -156,21 +156,6 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   }, []);
 
   const getSyncSnapshot = useCallback(() => {
-    let effectivePFRules = config.portForwardingRules;
-    if (!effectivePFRules || effectivePFRules.length === 0) {
-      const stored = localStorageAdapter.read<SyncPayload['portForwardingRules']>(
-        STORAGE_KEY_PORT_FORWARDING,
-      );
-      if (stored && Array.isArray(stored) && stored.length > 0) {
-        effectivePFRules = stored.map((rule) => ({
-          ...rule,
-          status: 'inactive' as const,
-          error: undefined,
-          lastUsedAt: undefined,
-        }));
-      }
-    }
-
     return {
       hosts: config.hosts,
       keys: config.keys,
@@ -179,7 +164,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       snippets: config.snippets,
       customGroups: config.customGroups,
       snippetPackages: config.snippetPackages,
-      portForwardingRules: effectivePFRules,
+      portForwardingRules: getEffectivePortForwardingRulesForSync(config.portForwardingRules),
       groupConfigs: config.groupConfigs,
     };
   }, [

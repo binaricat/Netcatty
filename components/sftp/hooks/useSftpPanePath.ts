@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPane } from "../../../application/state/sftp/types";
-import { filterHiddenFiles, isNavigableDirectory } from "../index";
+import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 
 interface UseSftpPanePathParams {
   connection: SftpPane["connection"] | null;

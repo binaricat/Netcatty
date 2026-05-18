@@ -244,16 +244,3 @@ export const useEditorTab = (id: EditorTabId): EditorTab | undefined => {
   const getSnapshot = useCallback(() => editorTabStore.getTab(id), [id]);
   return useSyncExternalStore(editorTabStore.subscribe, getSnapshot);
 };
-
-export const useEditorDirty = (id: EditorTabId): boolean => {
-  const getSnapshot = useCallback(() => editorTabStore.isDirty(id), [id]);
-  return useSyncExternalStore(editorTabStore.subscribe, getSnapshot);
-};
-
-export const useAnyEditorDirty = (): boolean => {
-  const getSnapshot = useCallback(
-    () => editorTabStore.getTabs().some((t) => t.content !== t.baselineContent),
-    [],
-  );
-  return useSyncExternalStore(editorTabStore.subscribe, getSnapshot);
-};
