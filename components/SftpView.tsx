@@ -19,12 +19,13 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
+import { getParentPath, isConcreteTransferTargetPath } from "../application/state/sftp/utils";
 import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
 import { useInstantThemeSwitch } from "../lib/useInstantThemeSwitch";
-import { Host, Identity, ProxyProfile, SSHKey } from "../types";
+import { Host, Identity, ProxyProfile, SSHKey, TransferTask } from "../types";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { materializeHostProxyProfile } from "../domain/proxyProfiles";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
@@ -137,6 +138,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     deleteLocalFile,
     listLocalDir,
     listDrives,
+    openPath,
   } = useSftpBackend();
 
   // Store sftp in a ref so callbacks can access the latest instance
@@ -269,6 +271,75 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   const visibleTransfers = useMemo(
     () => [...sftp.transfers].filter((t) => !t.parentTaskId).reverse().slice(0, 5),
     [sftp.transfers],
+  );
+
+  const getTransferTargetDirectory = useCallback(
+    (task: TransferTask) => (task.isDirectory ? task.targetPath : getParentPath(task.targetPath)),
+    [],
+  );
+
+  const findRemoteTransferTargetTab = useCallback((task: TransferTask) => {
+    const state = sftpRef.current;
+    for (const side of ["left", "right"] as const) {
+      const tabs = side === "left" ? state.leftTabs.tabs : state.rightTabs.tabs;
+      const pane = tabs.find((tab) => tab.connection?.id === task.targetConnectionId);
+      if (pane?.connection && !pane.connection.isLocal) {
+        return { side, tabId: pane.id };
+      }
+    }
+    return null;
+  }, []);
+
+  const canRevealTransferTarget = useCallback(
+    (task: TransferTask) => {
+      if (task.status !== "completed") return false;
+      if (!isConcreteTransferTargetPath(task)) return false;
+      if (task.targetConnectionId === "local") {
+        return true;
+      }
+      return !!findRemoteTransferTargetTab(task);
+    },
+    [findRemoteTransferTargetTab],
+  );
+
+  const handleRevealTransferTarget = useCallback(
+    async (task: TransferTask) => {
+      if (!isConcreteTransferTargetPath(task)) return;
+      const targetDirectory = getTransferTargetDirectory(task);
+      if (task.targetConnectionId === "local") {
+        try {
+          const result = await openPath(targetDirectory);
+          if (result.success) return;
+        } catch {
+          // Show the localized error below.
+        }
+        toast.error(t("sftp.transfers.openTargetFolderError"), "SFTP");
+        return;
+      }
+
+      const targetTab = findRemoteTransferTargetTab(task);
+      if (!targetTab) return;
+      await sftpRef.current.navigateTo(targetTab.side, targetDirectory, { force: true, tabId: targetTab.tabId });
+    },
+    [findRemoteTransferTargetTab, getTransferTargetDirectory, openPath, t],
+  );
+
+  const canCopyTransferTargetPath = useCallback(
+    (task: TransferTask) => task.status === "completed" && isConcreteTransferTargetPath(task),
+    [],
+  );
+
+  const handleCopyTransferTargetPath = useCallback(
+    async (task: TransferTask) => {
+      if (!isConcreteTransferTargetPath(task)) return;
+      try {
+        await navigator.clipboard.writeText(task.targetPath);
+        toast.success(t("sftp.transfers.copyTargetPathSuccess"), "SFTP");
+      } catch {
+        toast.error(t("sftp.transfers.copyTargetPathError"), "SFTP");
+      }
+    },
+    [t],
   );
 
   const containerStyle: React.CSSProperties = isActive
@@ -475,6 +546,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
           hosts={effectiveHosts}
           sftp={sftp}
           visibleTransfers={visibleTransfers}
+          canRevealTransferTarget={canRevealTransferTarget}
+          onRevealTransferTarget={handleRevealTransferTarget}
+          canCopyTransferTargetPath={canCopyTransferTargetPath}
+          onCopyTransferTargetPath={handleCopyTransferTargetPath}
           showHostPickerLeft={showHostPickerLeft}
           showHostPickerRight={showHostPickerRight}
           hostSearchLeft={hostSearchLeft}

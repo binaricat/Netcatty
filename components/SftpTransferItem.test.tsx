@@ -136,3 +136,31 @@ test("keeps reveal target and child toggle as separate buttons", () => {
   assert.match(markup, /aria-expanded="false"/);
   assert.match(markup, /aria-controls="children-transfer-1"/);
 });
+
+test("renders explicit target actions for completed local downloads", () => {
+  const markup = renderTransferItem(
+    {
+      ...baseTask,
+      id: "download-1",
+      fileName: "report.pdf",
+      sourcePath: "/remote/report.pdf",
+      targetPath: "/Users/alice/Downloads/report.pdf",
+      targetConnectionId: "local",
+      direction: "download",
+      status: "completed",
+      error: undefined,
+      transferredBytes: 1024,
+    },
+    {
+      canRevealTarget: true,
+      onRevealTarget: () => {},
+      canCopyTargetPath: true,
+      onCopyTargetPath: () => {},
+    },
+  );
+
+  assert.match(markup, /aria-label="Open target folder: report\.pdf"/);
+  assert.match(markup, /aria-label="Copy target path: report\.pdf"/);
+  assert.match(markup, /lucide-folder-open/);
+  assert.match(markup, /lucide-clipboard-copy/);
+});

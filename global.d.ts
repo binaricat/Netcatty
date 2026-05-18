@@ -581,6 +581,7 @@ declare global {
     // either the system browser or the in-app fallback BrowserWindow.
     // Rejects only in the rare case where both paths fail.
     openExternal?(url: string): Promise<void>;
+    openPath?(path: string): Promise<{ success: boolean; error?: string }>;
 
     // App info (name/version/platform) for About screens
     getAppInfo?(): Promise<{ name: string; version: string; platform: string }>;

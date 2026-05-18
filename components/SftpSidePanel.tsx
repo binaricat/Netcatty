@@ -19,7 +19,7 @@ import { editorTabStore } from "../application/state/editorTabStore";
 import { releaseEditorTabSaveCoordinator } from "../application/state/editorTabSave";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
-import { getParentPath } from "../application/state/sftp/utils";
+import { getParentPath, isConcreteTransferTargetPath } from "../application/state/sftp/utils";
 import { buildCacheKey } from "../application/state/sftp/sharedRemoteHostCache";
 import { logger } from "../lib/logger";
 import type { DropEntry } from "../lib/sftpFileUtils";
@@ -135,6 +135,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     deleteLocalFile,
     listLocalDir,
     listDrives,
+    openPath,
   } = useSftpBackend();
 
   const sftpRef = useRef(sftp);
@@ -576,18 +577,35 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const handleRevealTransferTarget = useCallback(
     async (task: TransferTask) => {
+      if (!isConcreteTransferTargetPath(task)) return;
       const connection = sftpRef.current.leftPane.connection;
+      const revealPath = task.isDirectory ? task.targetPath : getParentPath(task.targetPath);
+
+      if (task.targetConnectionId === "local") {
+        try {
+          const result = await openPath(revealPath);
+          if (result.success) return;
+        } catch {
+          // Show the localized error below.
+        }
+        toast.error(t("sftp.transfers.openTargetFolderError"), "SFTP");
+        return;
+      }
+
       if (!connection || connection.isLocal) return;
 
-      const revealPath = task.isDirectory ? task.targetPath : getParentPath(task.targetPath);
       await sftpRef.current.navigateTo("left", revealPath, { force: true });
     },
-    [],
+    [openPath, t],
   );
 
   const canRevealTransferTarget = useCallback(
     (task: TransferTask) => {
       if (task.status !== "completed") return false;
+      if (!isConcreteTransferTargetPath(task)) return false;
+      if (task.targetConnectionId === "local") {
+        return true;
+      }
       if (task.direction !== "upload" && task.direction !== "remote-to-remote") return false;
 
       const connection = sftp.leftPane.connection;
@@ -606,6 +624,24 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       return connection.id === task.targetConnectionId;
     },
     [sftp.leftPane.connection],
+  );
+
+  const canCopyTransferTargetPath = useCallback(
+    (task: TransferTask) => task.status === "completed" && isConcreteTransferTargetPath(task),
+    [],
+  );
+
+  const handleCopyTransferTargetPath = useCallback(
+    async (task: TransferTask) => {
+      if (!isConcreteTransferTargetPath(task)) return;
+      try {
+        await navigator.clipboard.writeText(task.targetPath);
+        toast.success(t("sftp.transfers.copyTargetPathSuccess"), "SFTP");
+      } catch {
+        toast.error(t("sftp.transfers.copyTargetPathError"), "SFTP");
+      }
+    },
+    [t],
   );
 
   // When the auto-connect effect defers a switch (active transfers or open
@@ -706,6 +742,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
           allTransfers={sftp.transfers}
           canRevealTransferTarget={canRevealTransferTarget}
           onRevealTransferTarget={handleRevealTransferTarget}
+          canCopyTransferTargetPath={canCopyTransferTargetPath}
+          onCopyTransferTargetPath={handleCopyTransferTargetPath}
         />
       </div>
 
@@ -715,6 +753,10 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
           sftp={sftp}
           visibleTransfers={visibleTransfers}
           showTransferQueue={false}
+          canRevealTransferTarget={canRevealTransferTarget}
+          onRevealTransferTarget={handleRevealTransferTarget}
+          canCopyTransferTargetPath={canCopyTransferTargetPath}
+          onCopyTransferTargetPath={handleCopyTransferTargetPath}
           showHostPickerLeft={showHostPickerLeft}
           showHostPickerRight={showHostPickerRight}
           hostSearchLeft={hostSearchLeft}

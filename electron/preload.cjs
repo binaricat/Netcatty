@@ -969,6 +969,7 @@ const api = {
   
   // Open URL in default browser
   openExternal: (url) => ipcRenderer.invoke("netcatty:openExternal", url),
+  openPath: (path) => ipcRenderer.invoke("netcatty:openPath", path),
 
   // App info
   getAppInfo: () => ipcRenderer.invoke("netcatty:app:getInfo"),
