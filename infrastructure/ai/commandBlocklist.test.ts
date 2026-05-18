@@ -6,10 +6,12 @@ import { checkCommandSafety } from "./cattyAgent/safety";
 import { DEFAULT_COMMAND_BLOCKLIST } from "./types";
 
 const require = createRequire(import.meta.url);
-const defaultCommandBlocklist = require("../../lib/commandBlocklist.cjs") as string[];
+const defaultCommandBlocklist = require("../../lib/commandBlocklist.json") as string[];
+const cjsCommandBlocklist = require("../../lib/commandBlocklist.cjs") as string[];
 
-test("AI command blocklist uses the shared CommonJS source", () => {
-  assert.deepEqual(DEFAULT_COMMAND_BLOCKLIST, Array.from(defaultCommandBlocklist));
+test("AI command blocklist uses the shared JSON source", () => {
+  assert.deepEqual(DEFAULT_COMMAND_BLOCKLIST, defaultCommandBlocklist);
+  assert.deepEqual(Array.from(cjsCommandBlocklist), defaultCommandBlocklist);
 });
 
 test("shared default command blocklist covers bypass-style shell execution", () => {

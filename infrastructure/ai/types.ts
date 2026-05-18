@@ -1,11 +1,6 @@
 // AI Provider types
-import * as commandBlocklistModule from '../../lib/commandBlocklist.cjs';
+import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
 import type { ProviderContinuation } from './providerContinuation';
-
-const commandBlocklistSource = commandBlocklistModule as unknown as {
-  DEFAULT_COMMAND_BLOCKLIST?: string[];
-  default?: string[];
-};
 
 export type AIProviderId = 'openai' | 'anthropic' | 'google' | 'ollama' | 'openrouter' | 'custom';
 
@@ -255,7 +250,7 @@ export interface AISettings {
 }
 
 export const DEFAULT_COMMAND_BLOCKLIST = [
-  ...(commandBlocklistSource.DEFAULT_COMMAND_BLOCKLIST ?? commandBlocklistSource.default ?? []),
+  ...defaultCommandBlocklist,
 ];
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
