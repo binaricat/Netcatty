@@ -219,6 +219,32 @@ test("startMoshSession writes the saved password when ssh prompts for one", asyn
   assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
 });
 
+test("startMoshSession writes the saved password for localized password prompts", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, password: "saved-secret" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("密码：");
+
+  assert.deepEqual(h.spawns[0].writes, ["saved-secret\r"]);
+});
+
+test("startMoshSession does not write saved password into OTP prompts", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    { ...h.options, password: "saved-secret" },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  h.spawns[0].emitData("One-time password:");
+
+  assert.deepEqual(h.spawns[0].writes, []);
+});
+
 test("startMoshSession passes vault private keys to ssh via a temp identity file", async (t) => {
   const h = makeHarness(t);
   await h.bridge.startMoshSession(

@@ -25,6 +25,7 @@ const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { createTelnetAutoLogin } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
+const { isAutoFillablePasswordChallenge } = require("./sshAuthHelper.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -928,12 +929,22 @@ function createMoshSshPasswordResponder(sshPty, password, passphrase) {
       return;
     }
 
-    if (typeof password !== "string" || password.length === 0 || answeredPassword) return;
-    if (!/(^|[\r\n]).*password:\s*$/i.test(tail)) return;
+    if (answeredPassword || !isMoshAutoFillablePasswordPrompt(tail, password)) return;
 
     answeredPassword = true;
     sshPty.write(`${password}\r`);
   };
+}
+
+function getLatestMoshPromptLine(text) {
+  const lines = String(text || "").split(/[\r\n]+/);
+  return lines[lines.length - 1] || "";
+}
+
+function isMoshAutoFillablePasswordPrompt(text, password) {
+  const prompt = getLatestMoshPromptLine(text);
+  if (!/[:：]\s*$/.test(prompt)) return false;
+  return isAutoFillablePasswordChallenge([{ prompt, echo: false }], password);
 }
 
 function normalizeMoshIdentityPath(keyPath) {
