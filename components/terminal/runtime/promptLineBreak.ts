@@ -86,6 +86,12 @@ const hasAmbiguousPromptSuffix = (data: string, promptText: string): boolean => 
   return prefixText.length > 0 && !endsWithLineBreak(prefixText);
 };
 
+const isDistinctPromptText = (promptText: string): boolean => {
+  const trimmed = promptText.trim();
+  if (trimmed.length >= 8) return true;
+  return trimmed.length >= 6 && /[@:\\/]/.test(trimmed);
+};
+
 const getCursorX = (term: XTerm): number => {
   try {
     return term.buffer.active.cursorX;
@@ -162,7 +168,10 @@ export function insertPromptLineBreakBeforePrompt(
   const promptTextStart = mapped.text.length - promptText.length;
   const prefixText = mapped.text.slice(0, promptTextStart);
   if (prefixText.length === 0 && cursorXBeforeWrite <= 0) return data;
-  if (prefixText.length > 0) return data;
+  if (prefixText.length > 0) {
+    if (endsWithLineBreak(prefixText)) return data;
+    if (!isDistinctPromptText(promptText)) return data;
+  }
 
   const promptRawStart = mapped.rawStartByTextIndex[promptTextStart] ?? 0;
   return `${data.slice(0, promptRawStart)}\r\n${data.slice(promptRawStart)}`;

@@ -85,6 +85,33 @@ test("does not insert before prompt-like output after a line break", () => {
   );
 });
 
+test("inserts before a distinct root prompt in the same output chunk", () => {
+  const prompt = "[root@iZwz9ftrhzy4b3hduolf6yZ ~]# ";
+
+  assert.equal(
+    insertPromptLineBreakBeforePrompt(`file tail${prompt}`, prompt, 0),
+    `file tail\r\n${prompt}`,
+  );
+});
+
+test("inserts before a distinct conda prompt in the same output chunk", () => {
+  const prompt = "(base) rynn@aiserver:~$ ";
+
+  assert.equal(
+    insertPromptLineBreakBeforePrompt(`file tail${prompt}`, prompt, 0),
+    `file tail\r\n${prompt}`,
+  );
+});
+
+test("does not insert before an already separated distinct prompt", () => {
+  const prompt = "(base) rynn@aiserver:~$ ";
+
+  assert.equal(
+    insertPromptLineBreakBeforePrompt(`file tail\r\n${prompt}`, prompt, 0),
+    `file tail\r\n${prompt}`,
+  );
+});
+
 test("does not refresh cached prompt from output that only ends with the prompt text", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";
@@ -165,6 +192,23 @@ test("keeps waiting after prompt-like output on a fresh line", () => {
     ),
     "\r\n$ ",
   );
+});
+
+test("prepares a same-chunk cat output break for a distinct prompt", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "(base) rynn@aiserver:~$ ";
+  state.pendingCommand = true;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "without trailing newline(base) rynn@aiserver:~$ ",
+      state,
+      true,
+    ),
+    "without trailing newline\r\n(base) rynn@aiserver:~$ ",
+  );
+  assert.equal(state.suppressNextPromptCache, false);
 });
 
 test("refreshes cached prompt when a changed prompt arrives after a line break in the same chunk", () => {
