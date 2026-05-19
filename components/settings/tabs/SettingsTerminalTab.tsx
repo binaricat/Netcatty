@@ -894,7 +894,7 @@ export default function SettingsTerminalTab(props: {
           label={t("settings.terminal.behavior.forcePromptNewLine")}
           description={t("settings.terminal.behavior.forcePromptNewLine.desc")}
         >
-          <Toggle checked={terminalSettings.forcePromptNewLine ?? true} onChange={(v) => updateTerminalSetting("forcePromptNewLine", v)} />
+          <Toggle checked={terminalSettings.forcePromptNewLine ?? false} onChange={(v) => updateTerminalSetting("forcePromptNewLine", v)} />
         </SettingRow>
 
         <SettingRow

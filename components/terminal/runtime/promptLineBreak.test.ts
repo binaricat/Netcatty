@@ -71,6 +71,20 @@ test("does not insert for output chunks that only end with the cached prompt tex
   );
 });
 
+test("does not insert before an ambiguous prompt suffix inside output", () => {
+  assert.equal(
+    insertPromptLineBreakBeforePrompt("world$ ", "$ ", 5),
+    "world$ ",
+  );
+});
+
+test("does not insert before prompt-like output after a line break", () => {
+  assert.equal(
+    insertPromptLineBreakBeforePrompt("\r\nhello$ ", "$ ", 0),
+    "\r\nhello$ ",
+  );
+});
+
 test("does not refresh cached prompt from output that only ends with the prompt text", () => {
   const state = createPromptLineBreakState();
   state.lastPromptText = "$ ";
@@ -90,8 +104,67 @@ test("does not refresh cached prompt from output that only ends with the prompt 
   syncPromptLineBreakState(createFakeTerm("total $ ") as never, state);
 
   assert.equal(state.lastPromptText, "$ ");
-  assert.equal(state.pendingCommand, false);
+  assert.equal(state.pendingCommand, true);
   assert.equal(state.suppressNextPromptCache, false);
+});
+
+test("keeps waiting for the real prompt after an output suffix matches the prompt text", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "total $ ",
+      state,
+      true,
+    ),
+    "total $ ",
+  );
+
+  syncPromptLineBreakState(createFakeTerm("total $ ") as never, state);
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("total $ ", 8) as never,
+      "$ ",
+      state,
+      true,
+    ),
+    "\r\n$ ",
+  );
+});
+
+test("keeps waiting after prompt-like output on a fresh line", () => {
+  const state = createPromptLineBreakState();
+  state.lastPromptText = "$ ";
+  state.pendingCommand = true;
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("", 0) as never,
+      "\r\nhello$ ",
+      state,
+      true,
+    ),
+    "\r\nhello$ ",
+  );
+
+  syncPromptLineBreakState(createFakeTerm("hello$ ") as never, state);
+
+  assert.equal(state.lastPromptText, "$ ");
+  assert.equal(state.pendingCommand, true);
+
+  assert.equal(
+    prepareTerminalDataForPromptLineBreak(
+      createFakeTerm("hello$ ", 7) as never,
+      "$ ",
+      state,
+      true,
+    ),
+    "\r\n$ ",
+  );
 });
 
 test("refreshes cached prompt when a changed prompt arrives after a line break in the same chunk", () => {
@@ -148,6 +221,6 @@ test("does not refresh cached prompt from an unchanged mid-line write without a 
   syncPromptLineBreakState(createFakeTerm("outputnew$ ") as never, state);
 
   assert.equal(state.lastPromptText, "old$ ");
-  assert.equal(state.pendingCommand, false);
+  assert.equal(state.pendingCommand, true);
   assert.equal(state.suppressNextPromptCache, false);
 });

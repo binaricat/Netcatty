@@ -270,7 +270,7 @@ const writeSessionData = (
 ) => {
   enqueueTerminalWrite(term, (done) => {
     const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
-    const forcePromptNewLine = settings?.forcePromptNewLine ?? true;
+    const forcePromptNewLine = settings?.forcePromptNewLine ?? false;
     if (!forcePromptNewLine && ctx.promptLineBreakStateRef?.current) {
       ctx.promptLineBreakStateRef.current.pendingCommand = false;
       ctx.promptLineBreakStateRef.current.suppressNextPromptCache = false;
@@ -377,6 +377,7 @@ const attachSessionToTerminal = (
 
 const scheduleStartupCommand = (
   ctx: TerminalSessionStartersContext,
+  term: XTerm,
   id: string,
   onSettled?: () => void,
 ): (() => void) | undefined => {
@@ -395,7 +396,7 @@ const scheduleStartupCommand = (
       automated: true,
     });
     if (!ctx.noAutoRun) {
-      markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef);
+      markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, commandToRun);
     }
     onSettled?.();
     if (!ctx.noAutoRun && ctx.onCommandExecuted) {
@@ -877,7 +878,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
       });
 
-      scheduleStartupCommand(ctx, id);
+      scheduleStartupCommand(ctx, term, id);
 
       // Run OS detection only after successful connection. Mint a fresh
       // token for this specific connection attempt and register it as
@@ -991,7 +992,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           ctx.sessionId,
           () => {
             disposeAutoLoginListener();
-            cancelPendingStartupCommand = scheduleStartupCommand(ctx, telnetSessionId, () => {
+            cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, telnetSessionId, () => {
               cancelPendingStartupCommand = undefined;
               disposeAutoLoginCancelListener();
             });
@@ -1158,7 +1159,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           `\r\n[Mosh session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
       });
 
-      scheduleStartupCommand(ctx, id);
+      scheduleStartupCommand(ctx, term, id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);

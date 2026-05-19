@@ -514,7 +514,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             ctx.onAutocompleteInput?.(snippetData);
             ctx.terminalBackend.writeToSession(id, snippetData);
             if (!snippet.noAutoRun) {
-              recordTerminalCommandExecution(snippet.command, ctx);
+              recordTerminalCommandExecution(snippet.command, ctx, term);
             }
             return false;
           }
@@ -687,7 +687,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
       if (ctx.statusRef.current === "connected") {
         if (data === "\r" || data === "\n") {
-          recordTerminalCommandExecution(ctx.commandBufferRef.current, ctx);
+          recordTerminalCommandExecution(ctx.commandBufferRef.current, ctx, term);
         } else if (data === "\x7f" || data === "\b") {
           ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
         } else if (data === "\x03") {

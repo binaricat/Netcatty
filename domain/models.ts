@@ -720,7 +720,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   disableBracketedPaste: false, // Bracketed paste enabled by default
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
-  forcePromptNewLine: true, // Keep the next shell prompt visually separated from unterminated final output lines
+  forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   autocompleteEnabled: true, // Autocomplete enabled by default

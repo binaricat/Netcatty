@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import type { Terminal as XTerm } from "@xterm/xterm";
 import type { Host } from "../../../types";
 import {
   markPromptLineBreakCommandPending,
@@ -21,11 +22,12 @@ type TerminalCommandExecutionContext = {
 export const recordTerminalCommandExecution = (
   command: string,
   ctx: TerminalCommandExecutionContext,
+  term?: XTerm | null,
 ) => {
   const cmd = command.trim();
   if (cmd) {
     ctx.onCommandExecuted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
   }
   ctx.commandBufferRef.current = "";
-  markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef);
+  markPromptLineBreakCommandPending(ctx.promptLineBreakStateRef, term, command);
 };

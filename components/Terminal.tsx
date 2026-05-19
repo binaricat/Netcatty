@@ -514,10 +514,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       // Update command buffer for onCommandExecuted tracking
       for (const ch of text) {
         if (ch === "\r" || ch === "\n") {
-          const cmd = commandBufferRef.current.trim();
+          const rawCommand = commandBufferRef.current;
+          const cmd = rawCommand.trim();
           if (cmd && onCommandExecuted) onCommandExecuted(cmd, host.id, host.label, sessionId);
           commandBufferRef.current = "";
-          markPromptLineBreakCommandPending(promptLineBreakStateRef);
+          markPromptLineBreakCommandPending(promptLineBreakStateRef, termRef.current, rawCommand);
         } else if (ch === "\x15") {
           // Ctrl+U: clear line — reset command buffer (fuzzy match sends this)
           commandBufferRef.current = "";
