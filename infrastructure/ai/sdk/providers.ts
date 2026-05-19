@@ -115,6 +115,87 @@ function createOpenAIChatStreamFieldCapture(
   };
 }
 
+function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) => string {
+  const toolCallIdsByChoiceAndIndex = new Map<string, string>();
+  const requestIdToken = requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  return (data: string): string => {
+    if (!data || data.trim() === '[DONE]') return data;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return data;
+    }
+
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as Record<string, unknown>).choices)) {
+      return data;
+    }
+
+    let changed = false;
+    const normalizedChoices = ((parsed as Record<string, unknown>).choices as unknown[]).map((choice, choicePosition) => {
+      if (!choice || typeof choice !== 'object') return choice;
+      const choiceRecord = choice as Record<string, unknown>;
+      const delta = choiceRecord.delta;
+      if (!delta || typeof delta !== 'object') return choice;
+
+      const deltaRecord = delta as Record<string, unknown>;
+      if (!Array.isArray(deltaRecord.tool_calls)) return choice;
+
+      const choiceIndex = typeof choiceRecord.index === 'number' ? choiceRecord.index : choicePosition;
+      let deltaChanged = false;
+      const normalizedToolCalls = deltaRecord.tool_calls.map((toolCall, toolCallPosition) => {
+        if (!toolCall || typeof toolCall !== 'object') return toolCall;
+        const toolCallRecord = toolCall as Record<string, unknown>;
+        const toolCallIndex = typeof toolCallRecord.index === 'number' ? toolCallRecord.index : toolCallPosition;
+        const key = `${choiceIndex}:${toolCallIndex}`;
+        const existingId = toolCallIdsByChoiceAndIndex.get(key);
+
+        if (typeof toolCallRecord.id === 'string' && toolCallRecord.id) {
+          toolCallIdsByChoiceAndIndex.set(key, toolCallRecord.id);
+          return toolCall;
+        }
+
+        if (existingId || !hasFunctionName(toolCallRecord)) {
+          return toolCall;
+        }
+
+        const syntheticId = `call_netcatty_${requestIdToken}_${choiceIndex}_${toolCallIndex}`;
+        toolCallIdsByChoiceAndIndex.set(key, syntheticId);
+        changed = true;
+        deltaChanged = true;
+        return { ...toolCallRecord, id: syntheticId };
+      });
+
+      if (!deltaChanged) return choice;
+      return {
+        ...choiceRecord,
+        delta: {
+          ...deltaRecord,
+          tool_calls: normalizedToolCalls,
+        },
+      };
+    });
+
+    if (!changed) return data;
+    return JSON.stringify({
+      ...(parsed as Record<string, unknown>),
+      choices: normalizedChoices,
+    });
+  };
+}
+
+function hasFunctionName(toolCall: Record<string, unknown>): boolean {
+  const fn = toolCall.function;
+  return Boolean(
+    fn &&
+    typeof fn === 'object' &&
+    typeof (fn as Record<string, unknown>).name === 'string' &&
+    (fn as Record<string, unknown>).name,
+  );
+}
+
 /**
  * Extract headers as a plain Record<string, string> from various header formats.
  */
@@ -208,6 +289,7 @@ export function createBridgeFetchForSDK(
     if (isStreamingRequest(resolvedInit)) {
       const requestId = `sdk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const captureOpenAIChatFields = createOpenAIChatStreamFieldCapture(requestContext);
+      const normalizeOpenAIChatToolCalls = createOpenAIChatToolCallNormalizer(requestId);
 
       // Set up IPC event listeners BEFORE starting the stream to avoid
       // missing early events.
@@ -216,9 +298,10 @@ export function createBridgeFetchForSDK(
       let cleanedUp = false;
 
       const unsubData = bridge.onAiStreamData(requestId, (data: string) => {
-        captureOpenAIChatFields(data);
+        const normalizedData = normalizeOpenAIChatToolCalls(data);
+        captureOpenAIChatFields(normalizedData);
         // Re-wrap as SSE so the SDK can parse it
-        streamController?.enqueue(encoder.encode(`data: ${data}\n\n`));
+        streamController?.enqueue(encoder.encode(`data: ${normalizedData}\n\n`));
       });
       const unsubEnd = bridge.onAiStreamEnd(requestId, () => {
         try { streamController?.close(); } catch { /* already closed */ }
