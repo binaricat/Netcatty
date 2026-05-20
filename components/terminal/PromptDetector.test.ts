@@ -93,6 +93,30 @@ test("keeps typed command intact when command text contains Powerline glyphs", (
   assert.equal(result.alignedTyped, typedInput);
 });
 
+test("does not treat a mid-line dollar as a prompt boundary", () => {
+  const lineText = "$ echo $HOME";
+  const term = createFakeTerm(lineText, "$ echo $".length);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, "echo $");
+  assert.equal(result.prompt.cursorOffset, "echo $".length);
+});
+
+test("does not treat a mid-line redirection as a prompt boundary", () => {
+  const lineText = "$ cat >file";
+  const term = createFakeTerm(lineText, "$ cat >".length);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, "$ ");
+  assert.equal(result.prompt.userInput, "cat >");
+  assert.equal(result.prompt.cursorOffset, "cat >".length);
+});
+
 test("prefers standard prompt terminator over later Powerline glyphs", () => {
   const lineText = "$ echo  foo";
   const term = createFakeTerm(lineText, lineText.length);
@@ -102,6 +126,97 @@ test("prefers standard prompt terminator over later Powerline glyphs", () => {
   assert.equal(result.prompt.isAtPrompt, true);
   assert.equal(result.prompt.promptText, "$ ");
   assert.equal(result.prompt.userInput, "echo  foo");
+});
+
+test("ignores xterm row padding after a no-space root prompt", () => {
+  const prompt = " root@stwo:~#";
+  const term = createFakeTerm(`${prompt}          `, prompt.length);
+
+  const result = getAlignedPrompt(term as never, "", true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, prompt);
+  assert.equal(result.prompt.userInput, "");
+});
+
+test("aligns typed input after a no-space root prompt", () => {
+  const prompt = " root@stwo:~#";
+  const typedInput = "printf ok";
+  const lineText = `${prompt}${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, true);
+  assert.equal(result.prompt.promptText, prompt);
+  assert.equal(result.prompt.userInput, typedInput);
+  assert.equal(result.alignedTyped, typedInput);
+});
+
+test("does not resurrect python REPL prompts during fallback alignment", () => {
+  const typedInput = "print('ok')";
+  const lineText = `>>> ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
+test("does not resurrect mysql REPL prompts during fallback alignment", () => {
+  const typedInput = "select 1";
+  const lineText = `mysql> ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
+test("does not resurrect shell continuation prompts during fallback alignment", () => {
+  const typedInput = "echo ok";
+  const lineText = `> ${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
+test("does not resurrect no-space python REPL prompts during fallback alignment", () => {
+  const typedInput = "print(1)";
+  const lineText = `>>>${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
+test("does not resurrect no-space mysql REPL prompts during fallback alignment", () => {
+  const typedInput = "select 1";
+  const lineText = `mysql>${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
+test("does not resurrect no-space shell continuation prompts during fallback alignment", () => {
+  const typedInput = "echo ok";
+  const lineText = `>${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
 });
 
 test("keeps typed command intact for PUA-only prompts when command text contains Powerline glyphs", () => {

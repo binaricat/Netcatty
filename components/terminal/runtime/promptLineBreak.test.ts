@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createPromptLineBreakState,
   insertPromptLineBreakBeforePrompt,
+  markPromptLineBreakCommandPending,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
 } from "./promptLineBreak";
@@ -96,6 +97,15 @@ test("inserts before a distinct root prompt in the same output chunk", () => {
 
 test("inserts before a distinct conda prompt in the same output chunk", () => {
   const prompt = "(base) rynn@aiserver:~$ ";
+
+  assert.equal(
+    insertPromptLineBreakBeforePrompt(`file tail${prompt}`, prompt, 0),
+    `file tail\r\n${prompt}`,
+  );
+});
+
+test("inserts before a distinct no-space root prompt in the same output chunk", () => {
+  const prompt = " root@stwo:~#";
 
   assert.equal(
     insertPromptLineBreakBeforePrompt(`file tail${prompt}`, prompt, 0),
@@ -209,6 +219,31 @@ test("prepares a same-chunk cat output break for a distinct prompt", () => {
     "without trailing newline\r\n(base) rynn@aiserver:~$ ",
   );
   assert.equal(state.suppressNextPromptCache, false);
+});
+
+test("caches a no-space root prompt from typed command alignment", () => {
+  const prompt = " root@stwo:~#";
+  const command = "printf ok";
+  const state = createPromptLineBreakState();
+
+  markPromptLineBreakCommandPending(
+    { current: state },
+    createFakeTerm(`${prompt}${command}`) as never,
+    command,
+  );
+
+  assert.equal(state.lastPromptText, prompt);
+  assert.equal(state.pendingCommand, true);
+});
+
+test("syncs a no-space root prompt without xterm row padding", () => {
+  const prompt = " root@stwo:~#";
+  const state = createPromptLineBreakState();
+
+  syncPromptLineBreakState(createFakeTerm(`${prompt}          `, prompt.length) as never, state);
+
+  assert.equal(state.lastPromptText, prompt);
+  assert.equal(state.pendingCommand, false);
 });
 
 test("refreshes cached prompt when a changed prompt arrives after a line break in the same chunk", () => {

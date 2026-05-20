@@ -38,6 +38,15 @@ const NO_PROMPT: PromptDetectionResult = {
   isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0,
 };
 
+function isNonPromptLine(lineText: string): boolean {
+  return NON_PROMPT_PATTERNS.some((pattern) => pattern.test(lineText));
+}
+
+function isSpecificShellPromptCandidate(promptText: string): boolean {
+  const trimmed = promptText.trim();
+  return trimmed.length >= 6 && /[@:\\/~\])]/.test(trimmed);
+}
+
 export interface AlignedPromptResult {
   /** The prompt view every consumer should use for parsing / suggestion lookup / line rewrites. */
   prompt: PromptDetectionResult;
@@ -88,15 +97,22 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   const lineText = line.translateToString(false);
 
   // Check for non-prompt patterns (pagers, editors, etc.)
-  for (const pattern of NON_PROMPT_PATTERNS) {
-    if (pattern.test(lineText)) return NO_PROMPT;
-  }
+  if (isNonPromptLine(lineText)) return NO_PROMPT;
 
   // Empty line
   if (lineText.trim().length === 0) return NO_PROMPT;
 
-  // Try to find the prompt boundary on the current line
-  const promptEnd = findPromptBoundary(lineText);
+  const cursorLinePrefix = lineText.substring(0, Math.max(0, cursorX));
+  // Try to find the prompt boundary on the current line. xterm buffer rows are
+  // padded with blank cells; when the cursor is at the visible row end, scan
+  // only up to the cursor so prompts like "root@host:~#" do not inherit a fake
+  // trailing space. If there is command text to the right of the cursor, keep
+  // the full line so "$" / ">" inside mid-line edits are validated against
+  // their real following character.
+  const promptScanText = lineText.slice(Math.max(0, cursorX)).trim().length > 0
+    ? lineText
+    : cursorLinePrefix;
+  const promptEnd = findPromptBoundary(promptScanText);
   if (promptEnd >= 0) {
     const promptText = lineText.substring(0, promptEnd);
     // Use cursor position to determine actual input length — don't trim trailing
@@ -327,28 +343,42 @@ export function getAlignedPrompt(
 ): AlignedPromptResult {
   if (!term) return { prompt: NO_PROMPT, alignedTyped: null };
   const raw = detectPrompt(term);
-  if (!typedReliable || typedBuffer.length === 0 || !raw.isAtPrompt) {
+  if (!typedReliable || typedBuffer.length === 0) {
     return { prompt: raw, alignedTyped: null };
   }
-  if (raw.userInput === typedBuffer) {
-    return { prompt: raw, alignedTyped: typedBuffer };
+
+  if (raw.isAtPrompt) {
+    if (raw.userInput === typedBuffer) {
+      return { prompt: raw, alignedTyped: typedBuffer };
+    }
+    if (raw.userInput.length > typedBuffer.length && raw.userInput.endsWith(typedBuffer)) {
+      return {
+        prompt: reconcilePromptWithTypedInput(raw, typedBuffer),
+        alignedTyped: typedBuffer,
+      };
+    }
+    if (typedBuffer.length > raw.userInput.length && typedBuffer.startsWith(raw.userInput)) {
+      return {
+        prompt: replacePromptUserInput(raw, typedBuffer),
+        alignedTyped: typedBuffer,
+      };
+    }
   }
-  if (raw.userInput.length > typedBuffer.length && raw.userInput.endsWith(typedBuffer)) {
-    return {
-      prompt: reconcilePromptWithTypedInput(raw, typedBuffer),
-      alignedTyped: typedBuffer,
-    };
-  }
-  if (typedBuffer.length > raw.userInput.length && typedBuffer.startsWith(raw.userInput)) {
-    return {
-      prompt: replacePromptUserInput(raw, typedBuffer),
-      alignedTyped: typedBuffer,
-    };
-  }
+
   const cursorLinePrefix = getCursorLinePrefix(term);
   if (cursorLinePrefix?.endsWith(typedBuffer)) {
+    if (!raw.isAtPrompt && isNonPromptLine(cursorLinePrefix)) {
+      return { prompt: raw, alignedTyped: null };
+    }
+
     const promptText = cursorLinePrefix.slice(0, cursorLinePrefix.length - typedBuffer.length);
-    if (promptText.length > 0) {
+    const promptBoundary = findPromptBoundary(promptText);
+    const promptEndsAtBoundary =
+      promptBoundary >= 0 && promptText.slice(promptBoundary).trim().length === 0;
+    const canUseFallback =
+      raw.isAtPrompt ||
+      (promptEndsAtBoundary && isSpecificShellPromptCandidate(promptText));
+    if (promptText.length > 0 && canUseFallback) {
       return {
         prompt: {
           isAtPrompt: true,
