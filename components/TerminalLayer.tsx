@@ -60,6 +60,7 @@ import { resolveScriptsSidePanelShortcutIntent } from '../application/state/reso
 import { terminalLayerAreEqual } from './terminalLayerMemo';
 import { getTerminalPaneSnapshot, parseTerminalPaneSnapshot } from './terminalPaneVisibility';
 import { getScopedTopTabsThemeId } from './terminalTopTabsTheme';
+import { resolvePreferredTerminalCwd } from './terminal/sftpCwd';
 
 type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
 
@@ -504,6 +505,7 @@ interface TerminalPaneProps {
     pendingUploadEntries?: DropEntry[],
     sourceSessionId?: string,
   ) => void;
+  onTerminalCwdChange: (sessionId: string, cwd: string | null) => void;
   onOpenScripts: () => void;
   onOpenTheme: () => void;
   onCloseSession: (sessionId: string) => void;
@@ -564,6 +566,7 @@ const terminalPanePropsAreEqual = (
   prev.sessionLog === next.sessionLog &&
   prev.onHotkeyAction === next.onHotkeyAction &&
   prev.onOpenSftp === next.onOpenSftp &&
+  prev.onTerminalCwdChange === next.onTerminalCwdChange &&
   prev.onOpenScripts === next.onOpenScripts &&
   prev.onOpenTheme === next.onOpenTheme &&
   prev.onCloseSession === next.onCloseSession &&
@@ -612,6 +615,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   sessionLog,
   onHotkeyAction,
   onOpenSftp,
+  onTerminalCwdChange,
   onOpenScripts,
   onOpenTheme,
   onCloseSession,
@@ -727,6 +731,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         keyBindings={keyBindings}
         onHotkeyAction={onHotkeyAction}
         onOpenSftp={onOpenSftp}
+        onTerminalCwdChange={onTerminalCwdChange}
         onOpenScripts={onOpenScripts}
         onOpenTheme={onOpenTheme}
         onCloseSession={onCloseSession}
@@ -783,6 +788,7 @@ interface TerminalPanesHostProps {
   sessionLog?: { enabled: true; directory: string; format: string };
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onOpenSftp: TerminalPaneProps['onOpenSftp'];
+  onTerminalCwdChange: TerminalPaneProps['onTerminalCwdChange'];
   onOpenScripts: () => void;
   onOpenTheme: () => void;
   onCloseSession: (sessionId: string) => void;
@@ -894,6 +900,24 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const isVaultActive = activeTabId === 'vault';
   const isSftpActive = activeTabId === 'sftp';
   const isVisible = (!isVaultActive && !isSftpActive) || !!draggingSessionId;
+  const terminalRendererCwdBySessionRef = useRef<Map<string, string>>(new Map());
+
+  const handleTerminalCwdChange = useCallback((sessionId: string, cwd: string | null) => {
+    if (cwd && cwd.trim().length > 0) {
+      terminalRendererCwdBySessionRef.current.set(sessionId, cwd);
+    } else {
+      terminalRendererCwdBySessionRef.current.delete(sessionId);
+    }
+  }, []);
+
+  useEffect(() => {
+    const liveSessionIds = new Set(sessions.map((session) => session.id));
+    for (const sessionId of terminalRendererCwdBySessionRef.current.keys()) {
+      if (!liveSessionIds.has(sessionId)) {
+        terminalRendererCwdBySessionRef.current.delete(sessionId);
+      }
+    }
+  }, [sessions]);
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
@@ -1772,13 +1796,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Get the focused terminal's current working directory
   const getTerminalCwd = useCallback(async (): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
-    if (!sessionId) return null;
-    try {
-      const result = await terminalBackend.getSessionPwd(sessionId);
-      return result.success && result.cwd ? result.cwd : null;
-    } catch {
-      return null;
-    }
+    return resolvePreferredTerminalCwd({
+      rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
+      sessionId,
+      getSessionPwd: (id) => terminalBackend.getSessionPwd(id),
+    });
   }, [getActiveTerminalSessionId, terminalBackend]);
 
   const refocusTerminalSession = useCallback((sessionId?: string | null) => {
@@ -3128,6 +3150,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
             sessionLog={sessionLogConfig}
             onHotkeyAction={onHotkeyAction}
             onOpenSftp={handleOpenSftp}
+            onTerminalCwdChange={handleTerminalCwdChange}
             onOpenScripts={handleOpenScripts}
             onOpenTheme={handleOpenTheme}
             onCloseSession={handleCloseSession}
