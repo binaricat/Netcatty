@@ -267,6 +267,30 @@ const log = (msg, data) => {
   console.log("[SSH]", msg, data ? JSON.stringify(data, null, 2) : "");
 };
 
+function shouldLogSshDebugMessage(msg) {
+  if (typeof msg !== "string") return false;
+  return /auth|publickey|keyboard|handshake|kex|newkeys|dh gex/i.test(msg);
+}
+
+function attachSshDebugLogger(connectOpts) {
+  if (!DEBUG_SSH) return;
+  connectOpts.debug = (msg) => {
+    if (shouldLogSshDebugMessage(msg)) {
+      log("ssh2 debug", { msg });
+    }
+  };
+}
+
+function logSshAlgorithms(label, algorithms, extra = {}) {
+  log(`${label} algorithm configuration`, {
+    ...extra,
+    kex: algorithms.kex,
+    cipher: algorithms.cipher,
+    hmac: algorithms.hmac,
+    serverHostKey: algorithms.serverHostKey,
+  });
+}
+
 // Session storage - shared reference passed from main
 let sessions = null;
 let electronModule = null;
@@ -402,6 +426,12 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         tryKeyboard: true,
         algorithms: buildAlgorithms(options.legacyAlgorithms),
       };
+      attachSshDebugLogger(connOpts);
+      logSshAlgorithms("Jump host", connOpts.algorithms, {
+        hostname: jump.hostname,
+        port: jump.port || 22,
+        legacyAlgorithms: !!options.legacyAlgorithms,
+      });
 
       // Auth - support agent (certificate), key, password, and default key fallback
       const hasCertificate =
@@ -678,6 +708,12 @@ async function startSSHSession(event, options) {
       tryKeyboard: true,
       algorithms: buildAlgorithms(options.legacyAlgorithms),
     };
+    attachSshDebugLogger(connectOpts);
+    logSshAlgorithms("Target host", connectOpts.algorithms, {
+      hostname: options.hostname,
+      port: options.port || 22,
+      legacyAlgorithms: !!options.legacyAlgorithms,
+    });
 
     connectOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
       sender,
@@ -1537,14 +1573,6 @@ async function startSSHSession(event, options) {
 
       // Increase timeout to allow for keyboard-interactive auth
       connectOpts.readyTimeout = 120000; // 2 minutes for 2FA input
-
-      // Enable debug logging for ssh2 to diagnose auth issues
-      connectOpts.debug = (msg) => {
-        // Only log auth-related messages to avoid noise
-        if (msg.includes('Auth') || msg.includes('auth') || msg.includes('publickey') || msg.includes('keyboard')) {
-          log("ssh2 debug", { msg });
-        }
-      };
 
       console.log(`${logPrefix} Connecting to ${options.hostname}...`);
       conn.connect(connectOpts);
@@ -2639,4 +2667,5 @@ module.exports = {
   connectThroughChain,
   buildAlgorithms,
   _resetAlgorithmSupportCacheForTests,
+  _shouldLogSshDebugMessage: shouldLogSshDebugMessage,
 };
