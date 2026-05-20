@@ -1,18 +1,5 @@
 import { Host, TerminalTheme } from './models';
 
-const TERMINAL_HOST_APPEARANCE_UPDATE_KEYS = [
-  'theme',
-  'themeOverride',
-  'fontFamily',
-  'fontFamilyOverride',
-  'fontSize',
-  'fontSizeOverride',
-  'fontWeight',
-  'fontWeightOverride',
-  'keywordHighlightRules',
-  'keywordHighlightEnabled',
-] as const satisfies readonly (keyof Host)[];
-
 const hasLegacyStringValue = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -51,19 +38,21 @@ export const clearHostFontSizeOverride = (host: Host): Host => ({
   fontSizeOverride: false,
 });
 
-export const mergeTerminalHostAppearanceUpdate = (
+export const mergeTerminalHostUpdate = (
   savedHost: Host,
   terminalHostUpdate: Host,
 ): Host => {
-  const nextHost: Host = { ...savedHost };
-  const mutableNextHost = nextHost as unknown as Record<string, unknown>;
-  const updateRecord = terminalHostUpdate as unknown as Record<string, unknown>;
+  const nextHost: Host = {
+    ...terminalHostUpdate,
+    id: savedHost.id,
+    protocol: savedHost.protocol,
+    port: savedHost.port,
+    moshEnabled: savedHost.moshEnabled,
+  };
 
-  for (const key of TERMINAL_HOST_APPEARANCE_UPDATE_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(updateRecord, key)) {
-      mutableNextHost[key] = updateRecord[key];
-    }
-  }
+  if (!Object.prototype.hasOwnProperty.call(savedHost, 'protocol')) delete nextHost.protocol;
+  if (!Object.prototype.hasOwnProperty.call(savedHost, 'port')) delete nextHost.port;
+  if (!Object.prototype.hasOwnProperty.call(savedHost, 'moshEnabled')) delete nextHost.moshEnabled;
 
   return nextHost;
 };

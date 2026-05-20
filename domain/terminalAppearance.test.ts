@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   applyCustomAccentToTerminalTheme,
-  mergeTerminalHostAppearanceUpdate,
+  mergeTerminalHostUpdate,
 } from "./terminalAppearance";
 import type { Host, TerminalTheme } from "./models";
 
@@ -65,7 +65,7 @@ const savedHost: Host = {
   telnetPort: 23,
 };
 
-test("terminal appearance updates preserve saved connection protocol and port", () => {
+test("terminal updates preserve saved connection protocol and port", () => {
   const telnetSessionHost: Host = {
     ...savedHost,
     protocol: "telnet",
@@ -75,7 +75,7 @@ test("terminal appearance updates preserve saved connection protocol and port", 
     fontFamilyOverride: true,
   };
 
-  const merged = mergeTerminalHostAppearanceUpdate(savedHost, telnetSessionHost);
+  const merged = mergeTerminalHostUpdate(savedHost, telnetSessionHost);
 
   assert.equal(merged.protocol, "ssh");
   assert.equal(merged.port, 22);
@@ -84,6 +84,46 @@ test("terminal appearance updates preserve saved connection protocol and port", 
   assert.equal(merged.telnetPort, 23);
   assert.equal(merged.fontFamily, "jetbrains-mono");
   assert.equal(merged.fontFamilyOverride, true);
+});
+
+test("terminal updates still persist credentials entered during connection", () => {
+  const credentialUpdate: Host = {
+    ...savedHost,
+    protocol: "telnet",
+    port: 23,
+    moshEnabled: false,
+    username: "deploy",
+    authMethod: "password",
+    password: "secret",
+  };
+
+  const merged = mergeTerminalHostUpdate(savedHost, credentialUpdate);
+
+  assert.equal(merged.protocol, "ssh");
+  assert.equal(merged.port, 22);
+  assert.equal(merged.moshEnabled, true);
+  assert.equal(merged.username, "deploy");
+  assert.equal(merged.authMethod, "password");
+  assert.equal(merged.password, "secret");
+});
+
+test("terminal updates still persist SFTP bookmarks", () => {
+  const bookmarkUpdate: Host = {
+    ...savedHost,
+    protocol: "telnet",
+    port: 23,
+    moshEnabled: false,
+    sftpBookmarks: [{ id: "bookmark-1", path: "/srv/www", label: "/srv/www" }],
+  };
+
+  const merged = mergeTerminalHostUpdate(savedHost, bookmarkUpdate);
+
+  assert.equal(merged.protocol, "ssh");
+  assert.equal(merged.port, 22);
+  assert.equal(merged.moshEnabled, true);
+  assert.deepEqual(merged.sftpBookmarks, [
+    { id: "bookmark-1", path: "/srv/www", label: "/srv/www" },
+  ]);
 });
 
 test("terminal appearance reset clears only appearance fields", () => {
@@ -101,7 +141,7 @@ test("terminal appearance reset clears only appearance fields", () => {
     fontSizeOverride: false,
   };
 
-  const merged = mergeTerminalHostAppearanceUpdate(hostWithAppearance, resetUpdate);
+  const merged = mergeTerminalHostUpdate(hostWithAppearance, resetUpdate);
 
   assert.equal(merged.protocol, "ssh");
   assert.equal(merged.port, 22);

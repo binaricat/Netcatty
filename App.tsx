@@ -30,7 +30,7 @@ import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
 import {
   applyCustomAccentToTerminalTheme,
-  mergeTerminalHostAppearanceUpdate,
+  mergeTerminalHostUpdate,
   resolveHostTerminalThemeId,
 } from './domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from './domain/connectionLog';
@@ -1733,7 +1733,7 @@ function App({ settings }: { settings: SettingsState }) {
 
   const handleUpdateHostFromTerminal = useCallback((host: Host) => {
     updateHosts(hosts.map((h) => (
-      h.id === host.id ? mergeTerminalHostAppearanceUpdate(h, host) : h
+      h.id === host.id ? mergeTerminalHostUpdate(h, host) : h
     )));
   }, [hosts, updateHosts]);
 
