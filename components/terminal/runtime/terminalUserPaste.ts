@@ -29,12 +29,19 @@ type PasteInputScrollState = {
   remainingDataVariants: string[];
 };
 
+type TerminalProtocolReplyState = {
+  expiresAt: number;
+  pendingCursorPositionReports: number;
+};
+
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const pasteInputScrollStates = new WeakMap<object, PasteInputScrollState>();
 const pasteBroadcastStates = new WeakMap<object, PasteInputScrollState>();
+const terminalProtocolReplyStates = new WeakMap<object, TerminalProtocolReplyState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;
 const PASTE_INPUT_SCROLL_WINDOW_MS = 4000;
+const TERMINAL_PROTOCOL_REPLY_WINDOW_MS = 4000;
 const READLINE_ACTIVE_REGION_START = "\x1b[7m";
 const READLINE_ACTIVE_REGION_END = "\x1b[27m";
 const BRACKETED_PASTE_START = "\x1b[200~";
@@ -42,6 +49,7 @@ const BRACKETED_PASTE_END = "\x1b[201~";
 const MIN_PASTE_ECHO_FRAGMENT_LENGTH = 6;
 const ESC = "\x1b";
 const BEL = "\x07";
+const CURSOR_POSITION_REPORT_REPLY_BODY_PATTERN = /^\??\d+;\d+R$/;
 
 const getNow = () => Date.now();
 
@@ -115,6 +123,10 @@ const getPlainTerminalText = (data: string): string =>
   stripNonLineBreakControls(
     stripAnsiEscapeSequences(data).replace(/\r\n/g, "\n").replace(/\r/g, "\n"),
   );
+
+const isCursorPositionReportReply = (data: string): boolean =>
+  data.startsWith(`${ESC}[`) &&
+  CURSOR_POSITION_REPORT_REPLY_BODY_PATTERN.test(data.slice(2));
 
 const getPasteEchoFragments = (text: string): string[] =>
   Array.from(
@@ -304,13 +316,55 @@ export function shouldSuppressTerminalBroadcastForUserPaste(term: object, data: 
   return consumePasteInputState(pasteBroadcastStates, term, data);
 }
 
+export function markExpectedTerminalCursorPositionReport(term: object): void {
+  const currentState = terminalProtocolReplyStates.get(term);
+  const activeState = isStateActive(currentState)
+    ? currentState
+    : {
+        expiresAt: 0,
+        pendingCursorPositionReports: 0,
+      };
+
+  terminalProtocolReplyStates.set(term, {
+    expiresAt: getNow() + TERMINAL_PROTOCOL_REPLY_WINDOW_MS,
+    pendingCursorPositionReports: activeState.pendingCursorPositionReports + 1,
+  });
+}
+
+function shouldSuppressTerminalProtocolReplyBroadcast(term: object, data: string): boolean {
+  const state = terminalProtocolReplyStates.get(term);
+  if (!isStateActive(state)) {
+    terminalProtocolReplyStates.delete(term);
+    return false;
+  }
+
+  if (
+    state.pendingCursorPositionReports <= 0 ||
+    !isCursorPositionReportReply(data)
+  ) {
+    return false;
+  }
+
+  state.pendingCursorPositionReports -= 1;
+  if (state.pendingCursorPositionReports <= 0) {
+    terminalProtocolReplyStates.delete(term);
+  }
+  return true;
+}
+
 export function shouldBroadcastTerminalUserInput(
   term: object,
   data: string,
   options: BroadcastUserInputOptions,
 ): boolean {
   const isSuppressedUserPaste = shouldSuppressTerminalBroadcastForUserPaste(term, data);
-  return !isSuppressedUserPaste && !!options.isBroadcastEnabled && !!options.hasBroadcastInputHandler;
+  const isSuppressedTerminalProtocolReply = shouldSuppressTerminalProtocolReplyBroadcast(term, data);
+  return (
+    !isSuppressedUserPaste &&
+    !isSuppressedTerminalProtocolReply &&
+    !!options.isBroadcastEnabled &&
+    !!options.hasBroadcastInputHandler
+  );
 }
 
 function consumePasteInputState(

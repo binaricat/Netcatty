@@ -45,6 +45,7 @@ import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
+  markExpectedTerminalCursorPositionReport,
   pasteTextIntoTerminal,
   shouldBroadcastTerminalUserInput,
   shouldSuppressTerminalInputScrollForUserPaste,
@@ -156,6 +157,15 @@ const detectPlatform = (): XTermPlatform => {
 
   return "darwin";
 };
+
+const csiParamsInclude = (
+  params: readonly (number | number[])[],
+  target: number,
+): boolean => params.some((param) => (
+  Array.isArray(param)
+    ? param.includes(target)
+    : param === target
+));
 
 /**
  * Extract the primary font family from a CSS font-family string that may
@@ -721,6 +731,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return !wipeAllowed;
   });
 
+  const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {
+    if (csiParamsInclude(params, 6)) {
+      markExpectedTerminalCursorPositionReport(term);
+    }
+    return false;
+  };
+
+  const cursorPositionReportRequestDisposables = [
+    term.parser.registerCsiHandler({ final: "n" }, markCursorPositionReportRequest),
+    term.parser.registerCsiHandler({ prefix: "?", final: "n" }, markCursorPositionReportRequest),
+  ];
+
   const writeKittyKeyboardReply = (payload: string) => {
     const id = ctx.sessionRef.current;
     if (!id) return;
@@ -858,6 +880,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       cleanupMiddleClick?.();
       keywordHighlighter.dispose();
       eraseScrollbackDisposable.dispose();
+      for (const disposable of cursorPositionReportRequestDisposables) {
+        disposable.dispose();
+      }
       kittyKeyboardDisposable.dispose();
       osc7Disposable.dispose();
       osc52Disposable.dispose();

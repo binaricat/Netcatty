@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   clearPasteResidualAfterTerminalWrite,
+  markExpectedTerminalCursorPositionReport,
   pasteTextIntoTerminal,
   prepareTerminalDataForUserPasteDisplay,
   shouldBroadcastTerminalUserInput,
@@ -144,6 +145,60 @@ test("broadcast gate consumes paste state even when broadcast is disabled before
   );
   assert.equal(
     shouldBroadcastTerminalUserInput(term, "line one", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
+});
+
+test("broadcast gate suppresses expected terminal cursor position report replies", () => {
+  const term = {};
+
+  markExpectedTerminalCursorPositionReport(term);
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[1;1R", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[1;1R", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
+});
+
+test("broadcast gate preserves normal input while a cursor position report is pending", () => {
+  const term = {};
+
+  markExpectedTerminalCursorPositionReport(term);
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "ls\r", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[24;80R", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+});
+
+test("broadcast gate preserves keyboard sequences that look like cursor reports without a terminal request", () => {
+  const term = {};
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[1;2R", {
       isBroadcastEnabled: true,
       hasBroadcastInputHandler: true,
     }),
