@@ -173,6 +173,41 @@ test("broadcast gate suppresses expected terminal cursor position report replies
   );
 });
 
+test("broadcast gate suppresses cursor position report replies split across chunks", () => {
+  const term = {};
+
+  markExpectedTerminalCursorPositionReport(term);
+
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "24;", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "80R", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastTerminalUserInput(term, "\x1b[24;80R", {
+      isBroadcastEnabled: true,
+      hasBroadcastInputHandler: true,
+    }),
+    true,
+  );
+});
+
 test("broadcast gate preserves normal input while a cursor position report is pending", () => {
   const term = {};
 

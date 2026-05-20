@@ -32,6 +32,7 @@ type PasteInputScrollState = {
 type TerminalProtocolReplyState = {
   expiresAt: number;
   pendingCursorPositionReports: number;
+  cursorPositionReportFragment: string;
 };
 
 const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
@@ -49,7 +50,6 @@ const BRACKETED_PASTE_END = "\x1b[201~";
 const MIN_PASTE_ECHO_FRAGMENT_LENGTH = 6;
 const ESC = "\x1b";
 const BEL = "\x07";
-const CURSOR_POSITION_REPORT_REPLY_BODY_PATTERN = /^\??\d+;\d+R$/;
 
 const getNow = () => Date.now();
 
@@ -124,9 +124,44 @@ const getPlainTerminalText = (data: string): string =>
     stripAnsiEscapeSequences(data).replace(/\r\n/g, "\n").replace(/\r/g, "\n"),
   );
 
-const isCursorPositionReportReply = (data: string): boolean =>
-  data.startsWith(`${ESC}[`) &&
-  CURSOR_POSITION_REPORT_REPLY_BODY_PATTERN.test(data.slice(2));
+type CursorPositionReportMatch =
+  | { type: "complete"; length: number }
+  | { type: "prefix" }
+  | { type: "none" };
+
+const isAsciiDigit = (char: string): boolean => char >= "0" && char <= "9";
+
+const matchCursorPositionReportFromStart = (data: string): CursorPositionReportMatch => {
+  if (!data.startsWith(ESC)) return { type: "none" };
+  if (data.length === 1) return { type: "prefix" };
+  if (data[1] !== "[") return { type: "none" };
+  if (data.length === 2) return { type: "prefix" };
+
+  let index = 2;
+  if (data[index] === "?") {
+    index += 1;
+    if (index === data.length) return { type: "prefix" };
+  }
+
+  let rowDigits = 0;
+  while (index < data.length && isAsciiDigit(data[index])) {
+    rowDigits += 1;
+    index += 1;
+  }
+  if (index === data.length) return { type: "prefix" };
+  if (rowDigits === 0 || data[index] !== ";") return { type: "none" };
+
+  index += 1;
+  let columnDigits = 0;
+  while (index < data.length && isAsciiDigit(data[index])) {
+    columnDigits += 1;
+    index += 1;
+  }
+  if (index === data.length) return { type: "prefix" };
+  if (columnDigits === 0 || data[index] !== "R") return { type: "none" };
+
+  return { type: "complete", length: index + 1 };
+};
 
 const getPasteEchoFragments = (text: string): string[] =>
   Array.from(
@@ -323,11 +358,13 @@ export function markExpectedTerminalCursorPositionReport(term: object): void {
     : {
         expiresAt: 0,
         pendingCursorPositionReports: 0,
+        cursorPositionReportFragment: "",
       };
 
   terminalProtocolReplyStates.set(term, {
     expiresAt: getNow() + TERMINAL_PROTOCOL_REPLY_WINDOW_MS,
     pendingCursorPositionReports: activeState.pendingCursorPositionReports + 1,
+    cursorPositionReportFragment: activeState.cursorPositionReportFragment,
   });
 }
 
@@ -338,14 +375,38 @@ function shouldSuppressTerminalProtocolReplyBroadcast(term: object, data: string
     return false;
   }
 
-  if (
-    state.pendingCursorPositionReports <= 0 ||
-    !isCursorPositionReportReply(data)
-  ) {
+  if (state.pendingCursorPositionReports <= 0 || data.length === 0) {
     return false;
   }
 
-  state.pendingCursorPositionReports -= 1;
+  let remainingData = `${state.cursorPositionReportFragment}${data}`;
+  let consumedCursorPositionReports = 0;
+
+  while (remainingData.length > 0) {
+    const match = matchCursorPositionReportFromStart(remainingData);
+    if (match.type === "none") {
+      state.cursorPositionReportFragment = "";
+      return false;
+    }
+
+    if (match.type === "prefix") {
+      if (consumedCursorPositionReports >= state.pendingCursorPositionReports) {
+        return false;
+      }
+      state.pendingCursorPositionReports -= consumedCursorPositionReports;
+      state.cursorPositionReportFragment = remainingData;
+      return true;
+    }
+
+    consumedCursorPositionReports += 1;
+    if (consumedCursorPositionReports > state.pendingCursorPositionReports) {
+      return false;
+    }
+    remainingData = remainingData.slice(match.length);
+  }
+
+  state.pendingCursorPositionReports -= consumedCursorPositionReports;
+  state.cursorPositionReportFragment = "";
   if (state.pendingCursorPositionReports <= 0) {
     terminalProtocolReplyStates.delete(term);
   }
