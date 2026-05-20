@@ -68,6 +68,21 @@ test('buildManagedAgentState keeps unrelated defaults when removing stale manage
   assert.equal(state.defaultAgentId, 'custom-agent');
 });
 
+test('buildManagedAgentState stores the system Claude executable for ACP runs', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'claude',
+    { path: '/opt/homebrew/bin/claude', version: '2.1.145 (Claude Code)', available: true },
+  );
+
+  assert.equal(state.agents.length, 1);
+  assert.equal(state.agents[0].command, '/opt/homebrew/bin/claude');
+  assert.deepEqual(state.agents[0].env, {
+    CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude',
+  });
+});
+
 test('buildManagedAgentState does not remove user-created matching agents', () => {
   const agents: ExternalAgentConfig[] = [
     {

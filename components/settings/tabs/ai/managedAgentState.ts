@@ -47,11 +47,15 @@ export function buildManagedAgentState(
 
   const existingManaged = managedAgents.find((agent) => agent.id === managedId);
   const defaults = AGENT_DEFAULTS[agentKey];
+  const managedEnv = agentKey === "claude"
+    ? { ...(existingManaged?.env ?? {}), CLAUDE_CODE_EXECUTABLE: pathInfo.path }
+    : existingManaged?.env;
   const nextManagedAgent: ExternalAgentConfig = {
     ...existingManaged,
     ...defaults,
     id: managedId,
     command: pathInfo.path,
+    ...(managedEnv ? { env: managedEnv } : {}),
     enabled: managedAgents.length === 0 ? true : managedAgents.some((agent) => agent.enabled),
   };
 

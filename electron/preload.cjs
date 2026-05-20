@@ -1418,11 +1418,11 @@ const api = {
     return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-cleared", handler);
   },
   // ACP streaming
-  aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext) => {
-    return ipcRenderer.invoke("netcatty:ai:acp:stream", { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext });
+  aiAcpStream: async (requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv) => {
+    return ipcRenderer.invoke("netcatty:ai:acp:stream", { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv });
   },
-  aiAcpListModels: async (acpCommand, acpArgs, cwd, providerId, chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:acp:list-models", { acpCommand, acpArgs, cwd, providerId, chatSessionId });
+  aiAcpListModels: async (acpCommand, acpArgs, cwd, providerId, chatSessionId, agentEnv) => {
+    return ipcRenderer.invoke("netcatty:ai:acp:list-models", { acpCommand, acpArgs, cwd, providerId, chatSessionId, agentEnv });
   },
   aiAcpCancel: async (requestId, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:acp:cancel", { requestId, chatSessionId });

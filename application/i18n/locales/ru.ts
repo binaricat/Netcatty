@@ -1967,7 +1967,7 @@ const ru: Messages = {
 
   // AI Claude Code
   'ai.claude.title': 'Claude Code',
-  'ai.claude.description': 'Агентный помощник для программирования от Anthropic. Использует claude-agent-acp для потоковой передачи по протоколу ACP.',
+  'ai.claude.description': 'Агентный помощник для программирования от Anthropic. Требует установленный в системе Claude Code CLI.',
   'ai.claude.detecting': 'Обнаружение...',
   'ai.claude.detected': 'Обнаружен',
   'ai.claude.notFound': 'Не найден',

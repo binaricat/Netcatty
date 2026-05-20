@@ -49,6 +49,7 @@ interface AcpBridge {
     toolIntegrationMode?: AIToolIntegrationMode,
     defaultTargetSession?: DefaultTargetSessionHint,
     userSkillsContext?: string,
+    agentEnv?: Record<string, string>,
   ): Promise<{ ok: boolean; error?: unknown }>;
   aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
   onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
@@ -221,6 +222,7 @@ export async function runAcpAgentTurn(
     toolIntegrationMode,
     defaultTargetSession,
     userSkillsContext,
+    config.env,
   ).then((result) => {
     if (result?.ok === false) {
       settle(() => {

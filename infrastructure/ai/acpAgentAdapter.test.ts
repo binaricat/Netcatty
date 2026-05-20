@@ -85,6 +85,41 @@ test('runAcpAgentTurn formats structured startup errors', async () => {
   assert.deepEqual(errors, ['Model is not available']);
 });
 
+test('runAcpAgentTurn forwards configured ACP environment', async () => {
+  let streamArgs: unknown[] = [];
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiAcpStream: async (...args: unknown[]) => {
+      streamArgs = args;
+      queueMicrotask(() => done?.());
+      return { ok: true };
+    },
+    aiAcpCancel: async () => ({ ok: true }),
+    onAiAcpEvent: () => () => {},
+    onAiAcpDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiAcpError: () => () => {},
+  };
+
+  await runAcpAgentTurn(
+    bridge,
+    'request-env',
+    'chat-env',
+    {
+      ...acpConfig,
+      env: { CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude' },
+    },
+    'hello',
+    createCallbacks([]),
+  );
+
+  assert.deepEqual(streamArgs.at(-1), {
+    CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude',
+  });
+});
+
 test('runAcpAgentTurn formats structured async error events', async () => {
   const errors: string[] = [];
   let onError: ((error: unknown) => void) | null = null;

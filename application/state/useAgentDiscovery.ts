@@ -52,14 +52,19 @@ export function useAgentDiscovery(
         );
         if (!match) return ea;
 
-        // Check if args or ACP config differ
+        // Check if args, ACP config, or Claude's resolved system path differ
         const currentArgs = JSON.stringify(ea.args || []);
         const newArgs = JSON.stringify(match.args);
         const acpChanged = ea.acpCommand !== match.acpCommand
           || JSON.stringify(ea.acpArgs || []) !== JSON.stringify(match.acpArgs || []);
-        if (currentArgs !== newArgs || acpChanged) {
+        const env = match.command === 'claude'
+          ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: match.path }
+          : ea.env;
+        const envChanged = match.command === 'claude'
+          && ea.env?.CLAUDE_CODE_EXECUTABLE !== match.path;
+        if (currentArgs !== newArgs || acpChanged || envChanged) {
           changed = true;
-          return { ...ea, args: match.args, acpCommand: match.acpCommand, acpArgs: match.acpArgs };
+          return { ...ea, args: match.args, acpCommand: match.acpCommand, acpArgs: match.acpArgs, ...(env ? { env } : {}) };
         }
         return ea;
       });
@@ -86,6 +91,7 @@ export function useAgentDiscovery(
         enabled: true,
         acpCommand: agent.acpCommand,
         acpArgs: agent.acpArgs,
+        ...(agent.command === 'claude' ? { env: { CLAUDE_CODE_EXECUTABLE: agent.path } } : {}),
       };
     },
     [],

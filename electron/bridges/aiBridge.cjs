@@ -552,6 +552,16 @@ function envPairsToObject(entries) {
   return result;
 }
 
+function normalizeAgentEnv(env) {
+  if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+  const result = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!key || value == null) continue;
+    result[key] = String(value);
+  }
+  return result;
+}
+
 function mapMcpServerToCopilotConfig(server) {
   if (!server || typeof server !== "object" || !server.name) return null;
 
@@ -1481,15 +1491,8 @@ function registerHandlers(ipcMain) {
     return hasCodexAcpUsage && rejectedVersionFlag;
   }
 
-  function isClaudeAcpFallbackProbeUsable(command, usesAcpFallback, probe) {
-    return command === "claude" && usesAcpFallback && probe?.launched && probe.exitCode === 0;
-  }
-
   function isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) {
-    return (
-      isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) ||
-      isClaudeAcpFallbackProbeUsable(command, usesAcpFallback, probe)
-    );
+    return isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
   }
 
   async function runCodexCli(args, options) {
@@ -1691,7 +1694,7 @@ function registerHandlers(ipcMain) {
     }
   }
 
-  // Discover external agents from PATH, plus bundled ACP binaries if present.
+  // Discover external agents from PATH. Codex can additionally use a bundled ACP fallback.
   ipcMain.handle("netcatty:ai:agents:discover", async (event) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const agents = [];
@@ -1704,7 +1707,6 @@ function registerHandlers(ipcMain) {
         acpCommand: "claude-agent-acp",
         acpArgs: [],
         args: ["-p", "--output-format", "text", "{prompt}"],
-        resolveAcp: resolveClaudeAcpBinaryPath,
       },
       {
         command: "codex",
@@ -1732,12 +1734,11 @@ function registerHandlers(ipcMain) {
 
     for (const agent of knownAgents) {
       let resolvedPath = resolveCliFromPath(agent.command, shellEnv);
+      const supportsBundledAcpFallback = agent.command === "codex";
 
-      // If the base command is not on PATH, check whether the bundled ACP
-      // binary is available — the agent can still work via ACP without the
-      // standalone CLI installed.
-      // resolveClaudeAcpBinaryPath returns { command, prependArgs },
-      // resolveCodexAcpBinaryPath returns a plain string.
+      // Codex can still work via bundled ACP if its standalone CLI is missing.
+      // Claude must resolve to the system `claude` executable and pass version probing.
+      // ACP resolvers return either a plain path or { command, prependArgs }.
       let versionCommand = null;
       let versionPrependArgs = [];
       let usesAcpFallback = false;
@@ -1773,7 +1774,7 @@ function registerHandlers(ipcMain) {
         }
         return false;
       };
-      if (!resolvedPath) {
+      if (!resolvedPath && supportsBundledAcpFallback) {
         tryResolveAcpFallback();
       }
 
@@ -1793,7 +1794,7 @@ function registerHandlers(ipcMain) {
         probe,
       );
 
-      if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && agent.command === "codex") {
+      if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && supportsBundledAcpFallback) {
         const previousPath = resolvedPath;
         if (tryResolveAcpFallback() && resolvedPath !== previousPath && !seenPaths.has(resolvedPath)) {
           probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
@@ -1843,18 +1844,6 @@ function registerHandlers(ipcMain) {
           };
         }
         return null;
-      }
-      if (command === "claude") {
-        const acpPath = resolveClaudeAcpBinaryPath(shellEnv, electronModule);
-        const scriptPath = acpPath?.prependArgs?.[0];
-        const displayPath = scriptPath || acpPath?.command;
-        if (displayPath && displayPath !== "claude-agent-acp" && existsSync(displayPath)) {
-          return {
-            displayPath,
-            command: scriptPath ? acpPath.command : null,
-            prependArgs: scriptPath ? acpPath.prependArgs : [],
-          };
-        }
       }
       return null;
     };
@@ -2121,7 +2110,7 @@ function registerHandlers(ipcMain) {
 
   // Known agent command names (must match knownAgents in discover handler)
   const ALLOWED_AGENT_COMMANDS = new Set([
-    "claude", "claude-agent-acp",
+    "claude",
     "codex", "codex-acp",
     "copilot",
   ]);
@@ -2343,7 +2332,7 @@ function registerHandlers(ipcMain) {
 
   // ── ACP (Agent Client Protocol) streaming ──
 
-  ipcMain.handle("netcatty:ai:acp:list-models", async (event, { acpCommand, acpArgs, cwd, providerId, chatSessionId }) => {
+  ipcMain.handle("netcatty:ai:acp:list-models", async (event, { acpCommand, acpArgs, cwd, providerId, chatSessionId, agentEnv: requestedAgentEnv }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
@@ -2375,7 +2364,7 @@ function registerHandlers(ipcMain) {
         }
       }
 
-      const agentEnv = withCliDiscoveryEnv({ ...shellEnv });
+      const agentEnv = withCliDiscoveryEnv({ ...shellEnv, ...normalizeAgentEnv(requestedAgentEnv) });
       if (isCodexAgent && apiKey) {
         agentEnv.CODEX_API_KEY = apiKey;
       }
@@ -2456,7 +2445,7 @@ function registerHandlers(ipcMain) {
     }
   });
 
-  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext }) => {
+  ipcMain.handle("netcatty:ai:acp:stream", async (event, { requestId, chatSessionId, acpCommand, acpArgs, prompt, cwd, providerId, model, existingSessionId, historyMessages, images, toolIntegrationMode, defaultTargetSession, userSkillsContext, agentEnv: requestedAgentEnv }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -2684,7 +2673,7 @@ function registerHandlers(ipcMain) {
           );
         cleanupAcpProvider(chatSessionId);
 
-        const agentEnv = withCliDiscoveryEnv({ ...shellEnv });
+        const agentEnv = withCliDiscoveryEnv({ ...shellEnv, ...normalizeAgentEnv(requestedAgentEnv) });
         if (isCodexAgent && apiKey) {
           agentEnv.CODEX_API_KEY = apiKey;
         }
@@ -2808,7 +2797,9 @@ function registerHandlers(ipcMain) {
             : acpArgs || [],
           env: (() => {
             const fallbackEnv = withCliDiscoveryEnv(
-              isCodexAgent && apiKey ? { ...shellEnv, CODEX_API_KEY: apiKey } : { ...shellEnv },
+              isCodexAgent && apiKey
+                ? { ...shellEnv, ...normalizeAgentEnv(requestedAgentEnv), CODEX_API_KEY: apiKey }
+                : { ...shellEnv, ...normalizeAgentEnv(requestedAgentEnv) },
             );
             if (isCodexAgent && resolvedProvider?.provider?.baseURL) {
               fallbackEnv.OPENAI_BASE_URL = resolvedProvider.provider.baseURL;

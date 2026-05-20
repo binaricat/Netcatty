@@ -637,6 +637,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       undefined,
       undefined,
       `models_${currentAgentId}`,
+      currentAgentConfig.env,
     ).then((result) => {
       if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
       // If the probe came back empty, drop any stale cached catalog for this

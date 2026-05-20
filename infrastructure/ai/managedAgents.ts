@@ -4,7 +4,7 @@ export type ManagedAgentKey = 'codex' | 'claude' | 'copilot';
 
 const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; acpCommand: string }> = {
   codex: { commandNames: ['codex', 'codex-acp'], acpCommand: 'codex-acp' },
-  claude: { commandNames: ['claude', 'claude-agent-acp'], acpCommand: 'claude-agent-acp' },
+  claude: { commandNames: ['claude'], acpCommand: 'claude-agent-acp' },
   copilot: { commandNames: ['copilot'], acpCommand: 'copilot' },
 };
 
@@ -37,6 +37,13 @@ export function matchesManagedAgentConfig(
 ): boolean {
   const meta = MANAGED_AGENT_META[agentKey];
   const basename = getCommandBasename(agent.command);
+  if (agentKey === 'claude') {
+    return (
+      agent.id === 'discovered_claude' ||
+      basename === 'claude' ||
+      basename.startsWith('claude.')
+    );
+  }
   return (
     agent.id === `discovered_${agentKey}` ||
     agent.acpCommand === meta.acpCommand ||
@@ -67,4 +74,3 @@ export function getManagedAgentStoredPath(
   );
   return fallbackAgent?.command ?? null;
 }
-

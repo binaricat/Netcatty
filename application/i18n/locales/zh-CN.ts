@@ -1944,7 +1944,7 @@ const zhCN: Messages = {
 
   // AI Claude Code
   'ai.claude.title': 'Claude Code',
-  'ai.claude.description': 'Anthropic 的智能编程助手。使用 claude-agent-acp 进行 ACP 协议流式传输。',
+  'ai.claude.description': 'Anthropic 的智能编程助手。需要系统中已安装 Claude Code CLI。',
   'ai.claude.detecting': '检测中...',
   'ai.claude.detected': '已检测到',
   'ai.claude.notFound': '未找到',

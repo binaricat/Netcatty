@@ -65,6 +65,32 @@ function writeFakeCodexAcpLoaderError(filePath) {
   fs.chmodSync(filePath, 0o755);
 }
 
+function writeFakeBrokenClaudeCli(filePath) {
+  if (process.platform === "win32") {
+    fs.writeFileSync(
+      filePath,
+      "@echo off\r\necho file:///opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js:95\r\nexit /b 1\r\n",
+      "utf8",
+    );
+    return;
+  }
+  fs.writeFileSync(
+    filePath,
+    "#!/bin/sh\necho 'file:///opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js:95'\nexit 1\n",
+    "utf8",
+  );
+  fs.chmodSync(filePath, 0o755);
+}
+
+function writeFakeClaudeVersion(filePath, version = "2.1.145 (Claude Code)") {
+  if (process.platform === "win32") {
+    fs.writeFileSync(filePath, `@echo off\r\necho ${version}\r\n`, "utf8");
+    return;
+  }
+  fs.writeFileSync(filePath, `#!/bin/sh\necho '${version}'\n`, "utf8");
+  fs.chmodSync(filePath, 0o755);
+}
+
 function loadBridgeWithMocks(options = {}) {
   const streamCalls = [];
   const safeSendCalls = [];
@@ -872,21 +898,12 @@ test("resolve-cli rejects bundled Codex ACP fallback when the fallback prints a 
   }
 });
 
-test("discovers bundled Claude ACP fallback when the version probe is silent", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-acp-discover-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const scriptPath = path.join(tempDir, "index.js");
-  fs.writeFileSync(scriptPath, "process.exit(0);\n", "utf8");
-
+test("does not discover Claude without a system Claude CLI", async () => {
   const { bridge, restore } = loadBridgeWithMocks({
     isPlausibleCliVersionOutput: (value) => String(value || "").trim().length > 0,
-    resolveClaudeAcpBinaryPath: () => ({
-      command: process.execPath,
-      prependArgs: [scriptPath],
-    }),
+    resolveClaudeAcpBinaryPath: () => {
+      throw new Error("Claude ACP resolver should not be used for discovery");
+    },
   });
   const ipcMain = createIpcMainStub();
 
@@ -903,17 +920,88 @@ test("discovers bundled Claude ACP fallback when the version probe is silent", a
 
     const agents = await discoverHandler({ sender: { id: 1 } });
 
-    assert.equal(agents.length, 1);
-    assert.equal(agents[0].command, "claude");
-    assert.equal(agents[0].path, scriptPath);
-    assert.equal(agents[0].version, "Bundled ACP");
-    assert.equal(agents[0].available, true);
+    assert.equal(agents.length, 0);
   } finally {
     restore();
   }
 });
 
-test("resolve-cli accepts stored bundled Claude ACP script path via its launcher", async (t) => {
+test("does not discover Claude when the PATH Claude shim is broken", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-broken-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const claudePath = path.join(tempDir, process.platform === "win32" ? "claude.cmd" : "claude");
+  writeFakeBrokenClaudeCli(claudePath);
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    isPlausibleCliVersionOutput: () => false,
+    resolveCliFromPath: (command) => (command === "claude" ? claudePath : null),
+    resolveClaudeAcpBinaryPath: () => {
+      throw new Error("Claude ACP resolver should not be used for discovery");
+    },
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
+    assert.equal(typeof discoverHandler, "function");
+
+    const agents = await discoverHandler({ sender: { id: 1 } });
+
+    assert.equal(agents.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli detects PATH Claude and reads its version", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-resolve-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const claudePath = path.join(tempDir, process.platform === "win32" ? "claude.cmd" : "claude");
+  writeFakeClaudeVersion(claudePath);
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    isPlausibleCliVersionOutput: (value) => String(value || "").includes("Claude Code"),
+    resolveCliFromPath: (command) => (command === "claude" ? claudePath : null),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    assert.equal(typeof resolveHandler, "function");
+
+    const result = await resolveHandler({ sender: { id: 1 } }, { command: "claude", customPath: "" });
+
+    assert.deepEqual(result, {
+      path: claudePath,
+      version: "2.1.145 (Claude Code)",
+      available: true,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli rejects stored Claude adapter script paths", async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-acp-stored-"));
   t.after(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -925,10 +1013,9 @@ test("resolve-cli accepts stored bundled Claude ACP script path via its launcher
   const { bridge, restore } = loadBridgeWithMocks({
     isPlausibleCliVersionOutput: (value) => String(value || "").trim().length > 0,
     normalizeCliPathForPlatform: () => scriptPath,
-    resolveClaudeAcpBinaryPath: () => ({
-      command: process.execPath,
-      prependArgs: [scriptPath],
-    }),
+    resolveClaudeAcpBinaryPath: () => {
+      throw new Error("Claude ACP resolver should not be used for path resolution");
+    },
   });
   const ipcMain = createIpcMainStub();
 
@@ -947,9 +1034,116 @@ test("resolve-cli accepts stored bundled Claude ACP script path via its launcher
 
     assert.deepEqual(result, {
       path: scriptPath,
-      version: "Bundled ACP",
-      available: true,
+      version: null,
+      available: false,
     });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli rejects broken PATH Claude shims", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-resolve-broken-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const claudePath = path.join(tempDir, process.platform === "win32" ? "claude.cmd" : "claude");
+  writeFakeBrokenClaudeCli(claudePath);
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    isPlausibleCliVersionOutput: () => false,
+    resolveCliFromPath: (command) => (command === "claude" ? claudePath : null),
+    resolveClaudeAcpBinaryPath: () => {
+      throw new Error("Claude ACP resolver should not be used for path resolution");
+    },
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    assert.equal(typeof resolveHandler, "function");
+
+    const result = await resolveHandler({ sender: { id: 1 } }, { command: "claude", customPath: "" });
+
+    assert.deepEqual(result, {
+      path: claudePath,
+      version: null,
+      available: false,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("ACP stream passes the configured system Claude executable to claude-agent-acp", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-executable-env-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const scriptPath = path.join(tempDir, "index.js");
+  fs.writeFileSync(scriptPath, "process.exit(0);\n", "utf8");
+
+  const { bridge, providerCreationArgs, restore } = loadBridgeWithMocks({
+    resolveClaudeAcpBinaryPath: () => ({
+      command: process.execPath,
+      prependArgs: [scriptPath],
+    }),
+    createACPProvider: () => ({
+      tools: {},
+      languageModel() {
+        return { id: "fake-model" };
+      },
+      async initSession() {},
+      getSessionId() {
+        return "claude-session";
+      },
+      cleanup() {},
+    }),
+    streamText: () => createEmptyStreamResult(),
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const streamHandler = ipcMain.handlers.get("netcatty:ai:acp:stream");
+    assert.equal(typeof streamHandler, "function");
+
+    await streamHandler({ sender: { id: 1 } }, {
+      requestId: "req-claude-env",
+      chatSessionId: "chat-claude-env",
+      acpCommand: "claude-agent-acp",
+      acpArgs: [],
+      prompt: "hello",
+      providerId: undefined,
+      model: undefined,
+      existingSessionId: undefined,
+      historyMessages: [],
+      images: undefined,
+      toolIntegrationMode: "mcp",
+      defaultTargetSession: undefined,
+      userSkillsContext: undefined,
+      agentEnv: { CLAUDE_CODE_EXECUTABLE: "/opt/homebrew/bin/claude" },
+    });
+
+    assert.equal(
+      providerCreationArgs[0].env.CLAUDE_CODE_EXECUTABLE,
+      "/opt/homebrew/bin/claude",
+    );
   } finally {
     restore();
   }
