@@ -35,6 +35,8 @@ const baseProps = {
   onAddKnownHost: () => {},
   onToggleWorkspaceViewMode: () => {},
   onSetWorkspaceFocusedSession: () => {},
+  isBroadcastEnabled: () => false,
+  onToggleBroadcast: () => {},
   onSplitSession: () => {},
   toggleScriptsSidePanelRef: { current: null },
 };
@@ -92,6 +94,26 @@ test("TerminalLayer re-renders when proxy profiles change", () => {
           createdAt: 1,
         }],
       } as never,
+    ),
+    false,
+  );
+});
+
+test("TerminalLayer re-renders when broadcast state changes", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, isBroadcastEnabled: () => true } as never,
+    ),
+    false,
+  );
+});
+
+test("TerminalLayer re-renders when broadcast toggle handler changes", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, onToggleBroadcast: () => {} } as never,
     ),
     false,
   );

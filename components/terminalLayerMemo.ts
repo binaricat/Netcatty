@@ -34,6 +34,8 @@ export const terminalLayerAreEqual = (
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onReorderWorkspaceSessions === next.onReorderWorkspaceSessions &&
   prev.onSplitSession === next.onSplitSession &&
+  prev.isBroadcastEnabled === next.isBroadcastEnabled &&
+  prev.onToggleBroadcast === next.onToggleBroadcast &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.identities === next.identities
 );
