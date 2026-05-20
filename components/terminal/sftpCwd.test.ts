@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolvePreferredTerminalCwd } from "./sftpCwd";
+import {
+  createTerminalCwdTracker,
+  resolvePreferredTerminalCwd,
+} from "./sftpCwd";
 
 test("resolvePreferredTerminalCwd returns the renderer cwd without probing the backend", async () => {
   let backendCalls = 0;
@@ -40,4 +43,19 @@ test("resolvePreferredTerminalCwd returns null when neither source has a cwd", a
   });
 
   assert.equal(cwd, null);
+});
+
+test("terminal cwd tracker clears stale renderer cwd before falling back to backend pwd", async () => {
+  const tracker = createTerminalCwdTracker();
+
+  tracker.setRendererCwd("/srv/old-session");
+  tracker.clearRendererCwd();
+
+  const cwd = await resolvePreferredTerminalCwd({
+    rendererCwd: tracker.getRendererCwd(),
+    sessionId: "session-1",
+    getSessionPwd: async () => ({ success: true, cwd: "/home/fresh-session" }),
+  });
+
+  assert.equal(cwd, "/home/fresh-session");
 });

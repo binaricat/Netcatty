@@ -14,6 +14,27 @@ const normalizeCwd = (cwd?: string | null): string | null => {
   return cwd;
 };
 
+export type TerminalCwdTracker = {
+  getRendererCwd: () => string | undefined;
+  setRendererCwd: (cwd?: string | null) => string | undefined;
+  clearRendererCwd: () => void;
+};
+
+export const createTerminalCwdTracker = (): TerminalCwdTracker => {
+  let rendererCwd: string | undefined;
+
+  return {
+    getRendererCwd: () => rendererCwd,
+    setRendererCwd: (cwd) => {
+      rendererCwd = normalizeCwd(cwd) ?? undefined;
+      return rendererCwd;
+    },
+    clearRendererCwd: () => {
+      rendererCwd = undefined;
+    },
+  };
+};
+
 export const resolvePreferredTerminalCwd = async ({
   rendererCwd,
   sessionId,
