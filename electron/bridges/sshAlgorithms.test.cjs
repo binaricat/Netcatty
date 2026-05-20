@@ -81,6 +81,7 @@ for (const [label, buildAlgorithms] of [
         new Set(["modp16", "modp18"]),
       );
       assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group-exchange-sha256"));
+      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group-exchange-sha1"));
       assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group14-sha1"));
       assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group1-sha1"));
     });

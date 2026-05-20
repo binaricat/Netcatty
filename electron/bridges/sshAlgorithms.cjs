@@ -61,6 +61,7 @@ function buildBaseAlgorithms() {
 
 function applyLegacyAlgorithms(algorithms) {
   algorithms.kex.push(...filterSupportedFixedDhKex([
+    "diffie-hellman-group-exchange-sha1",
     "diffie-hellman-group14-sha1",
     "diffie-hellman-group1-sha1",
   ]));
