@@ -36,6 +36,10 @@ const {
   preparePrivateKeyForAuth,
   loadFirstIdentityFileForAuth,
 } = require("./sshAuthHelper.cjs");
+const {
+  buildSftpAlgorithms,
+  _resetAlgorithmSupportCacheForTests,
+} = require("./sshAlgorithms.cjs");
 
 // SFTP clients storage - shared reference passed from main
 let sftpClients = null;
@@ -480,44 +484,6 @@ const ensureRemoteDirForSession = async (sftpId, dirPath, requestedEncoding) => 
   await ensureRemoteDirInternal(sftp, normalizedPath, encoding);
   return true;
 };
-
-/**
- * Build SSH algorithm configuration for SFTP connections.
- * When legacyEnabled is true, legacy algorithms are appended for older device compatibility.
- */
-function buildSftpAlgorithms(legacyEnabled) {
-  const algorithms = {
-    cipher: [
-      'aes128-gcm@openssh.com', 'aes256-gcm@openssh.com',
-      'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
-    ],
-    kex: [
-      'curve25519-sha256', 'curve25519-sha256@libssh.org',
-      'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
-      'diffie-hellman-group14-sha256',
-      'diffie-hellman-group16-sha512', 'diffie-hellman-group18-sha512',
-      'diffie-hellman-group-exchange-sha256',
-    ],
-    compress: ['none'],
-  };
-
-  if (legacyEnabled) {
-    algorithms.kex.push(
-      'diffie-hellman-group14-sha1',
-      'diffie-hellman-group1-sha1',
-    );
-    algorithms.cipher.push(
-      'aes128-cbc', 'aes256-cbc', '3des-cbc',
-    );
-    algorithms.serverHostKey = [
-      'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521',
-      'rsa-sha2-512', 'rsa-sha2-256',
-      'ssh-rsa', 'ssh-dss',
-    ];
-  }
-
-  return algorithms;
-}
 
 const { safeSend } = require("./ipcUtils.cjs");
 
@@ -2471,6 +2437,8 @@ module.exports = {
   init,
   registerHandlers,
   getSftpClients,
+  buildSftpAlgorithms,
+  _resetAlgorithmSupportCacheForTests,
   requireSftpChannel,
   encodePathForSession,
   ensureRemoteDirForSession,
