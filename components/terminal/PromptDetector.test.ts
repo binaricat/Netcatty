@@ -208,6 +208,17 @@ test("does not resurrect no-space mysql REPL prompts during fallback alignment",
   assert.equal(result.alignedTyped, null);
 });
 
+test("does not resurrect host-like no-space REPL prompts during fallback alignment", () => {
+  const typedInput = "select 1";
+  const lineText = `user@db>${typedInput}`;
+  const term = createFakeTerm(lineText, lineText.length);
+
+  const result = getAlignedPrompt(term as never, typedInput, true);
+
+  assert.equal(result.prompt.isAtPrompt, false);
+  assert.equal(result.alignedTyped, null);
+});
+
 test("does not resurrect no-space shell continuation prompts during fallback alignment", () => {
   const typedInput = "echo ok";
   const lineText = `>${typedInput}`;

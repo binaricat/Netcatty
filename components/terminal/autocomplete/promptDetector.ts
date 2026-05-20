@@ -44,6 +44,7 @@ function isNonPromptLine(lineText: string): boolean {
 
 function isSpecificShellPromptCandidate(promptText: string): boolean {
   const trimmed = promptText.trim();
+  if (trimmed.endsWith(">") || trimmed.endsWith("›")) return false;
   return trimmed.length >= 6 && /[@:\\/~\])]/.test(trimmed);
 }
 
