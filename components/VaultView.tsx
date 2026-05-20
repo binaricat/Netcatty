@@ -35,6 +35,7 @@ import React, { Suspense, lazy, memo, startTransition, useCallback, useEffect, u
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { useStoredBoolean } from "../application/state/useStoredBoolean";
+import { useStoredString } from "../application/state/useStoredString";
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
 import { sanitizeCredentialValue } from "../domain/credentials";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
@@ -50,6 +51,7 @@ import { upsertKnownHost } from "../domain/knownHosts";
 import { importVaultHostsFromText, exportHostsToCsvWithStats } from "../domain/vaultImport";
 import type { VaultImportFormat } from "../domain/vaultImport";
 import {
+  STORAGE_KEY_VAULT_HOSTS_SORT_MODE,
   STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED,
   STORAGE_KEY_VAULT_HOSTS_VIEW_MODE,
   STORAGE_KEY_VAULT_SIDEBAR_COLLAPSED,
@@ -120,6 +122,13 @@ export type VaultSection = "hosts" | "keys" | "proxies" | "snippets" | "port" | 
 type DropTarget =
   | { kind: "root" }
   | { kind: "group"; path: string };
+
+const isSortMode = (value: string): value is SortMode =>
+  value === "az" ||
+  value === "za" ||
+  value === "newest" ||
+  value === "oldest" ||
+  value === "group";
 
 // Props without isActive - it's now subscribed internally
 interface VaultViewProps {
@@ -280,7 +289,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     "grid",
   );
   const treeExpandedState = useTreeExpandedState(STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED);
-  const [sortMode, setSortMode] = useState<SortMode>("az");
+  const [sortMode, setSortMode] = useStoredString<SortMode>(
+    STORAGE_KEY_VAULT_HOSTS_SORT_MODE,
+    "az",
+    isSortMode,
+  );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
