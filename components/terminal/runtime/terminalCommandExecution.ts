@@ -5,6 +5,11 @@ import {
   markPromptLineBreakCommandPending,
   type PromptLineBreakState,
 } from "./promptLineBreak";
+import {
+  getAlignedPrompt,
+  isNonPromptLine,
+  reconcilePromptWithExternalCommand,
+} from "../autocomplete/promptDetector";
 
 type TerminalCommandExecutionContext = {
   host: Pick<Host, "id" | "label">;
@@ -19,13 +24,32 @@ type TerminalCommandExecutionContext = {
   promptLineBreakStateRef?: RefObject<PromptLineBreakState>;
 };
 
+const shouldRecordShellHistory = (
+  command: string,
+  term?: XTerm | null,
+): boolean => {
+  if (!term) return true;
+
+  const { prompt, alignedTyped } = getAlignedPrompt(term, command, true);
+  if (!prompt.isAtPrompt) return false;
+  if (alignedTyped?.trim() === command.trim()) return true;
+
+  if (reconcilePromptWithExternalCommand(prompt, command)) return true;
+
+  const liveCommand = prompt.userInput.trim();
+  if (liveCommand.length === 0) {
+    return !isNonPromptLine(`${prompt.promptText}${command.trim()}`);
+  }
+  return liveCommand === command.trim();
+};
+
 export const recordTerminalCommandExecution = (
   command: string,
   ctx: TerminalCommandExecutionContext,
   term?: XTerm | null,
 ) => {
   const cmd = command.trim();
-  if (cmd) {
+  if (cmd && shouldRecordShellHistory(cmd, term)) {
     ctx.onCommandExecuted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
   }
   ctx.commandBufferRef.current = "";

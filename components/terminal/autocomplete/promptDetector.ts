@@ -20,7 +20,29 @@ const NON_PROMPT_PATTERNS = [
   /^:\s*$/,                      // vim command mode
   /^\s*~\s*$/,                   // vim tilde lines
   /^>{1,3}\s/,                   // Bare > (bash PS2 continuation), >> or >>> (python REPL)
-  /^\w+>\s/,                     // mysql> / sqlite> / redis-cli> REPL prompts
+  /^\s{4}(?:->|['"`]>)\s/,       // mysql / mariadb continuation prompts
+  /^(?:mysql|sqlite(?:3)?|redis(?:-cli)?|psql|mariadb)>\s/i, // mysql> / sqlite> / redis-cli> prompts
+  /^SQL>\s/i,                      // sqlplus SQL> prompts
+  /^(?:sftp|ftp|lftp|ghci|node|mongo|mongosh|deno|irb|pry|julia|scala|gdb|lldb|cqlsh|hive|spark-sql|jshell|ksql|trino|presto|duckdb)>\s/i,
+  /^irb\([^)]*\):\d+[:*]?\d*>\s/i,
+  /^pry\([^)]*\)>\s/i,
+  /^\[\d+\]\s+pry\([^)]*\)>\s/i,
+  /^lftp\s+\S+>\s/i,
+  /^\s{3}\.{3}>\s/,
+  /^cqlsh(?::[\w.-]+)?>\s/i,
+  /^(?:hive|spark-sql)\s+\([^)]+\)>\s/i,
+  /^(?:\d+:\s*)?jdbc:hive2?:\/\/\S+>\s/i,
+  /^(?:test|admin|local|config)>\s+(?:db(?:\.|\s*$)|rs\.|print\s*\(|(?:const|let|var|await)\b|\d+\s*[-+*/]\s*\d*)/i,
+  /^[\w.-]+:[A-Z]+>\s+(?:db\.|rs\.|exit\b|(?:const|let|var|await)\b|show\s+(?:dbs?|collections|users|roles)|use\s+\w+|it\b)/i,
+  /^(?:[\w.-]+\s+){0,5}\[[^\]]+\]\s+[\w.-]+>\s+(?:db\.|rs\.|exit\b|hel(?:p)?\b|print\s*\(|(?:const|let|var|await)\b|\d+\s*[-+*/]\s*\d*|show\s+(?:dbs?|collections|users|roles)|use\s+\w+|it\b)/i,
+  /^(?:[\w.-]+\s+){1,5}[\w.-]+>\s+(?:db\.|rs\.|exit\b|hel(?:p)?\b|print\s*\(|(?:const|let|var|await)\b|\d+\s*[-+*/]\s*\d*|show\s+(?:dbs?|collections|users|roles)|use\s+\w+|it\b)/i,
+  /^(?:trino|presto)(?::[\w.-]+){1,2}>\s/i,
+  /^[\w.-]+@(?:[\w.-]+|\d{1,3}(?:\.\d{1,3}){3}):\d+>\s/i,
+  /^(?:[\w.-]+|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)(?:\[\d+\])?>\s/, // redis host:port> prompts
+  /^MariaDB\s+\[[^\]]+\]>\s/i,   // MariaDB [(none)]> prompts
+  /^[\w.-]+=[#>]\s/,             // postgres=# / postgres=> REPL prompts
+  /^[\w.-]+[-'"][#>]\s/,         // postgres-# / postgres'# continuation prompts
+  /^[\w.-]+(?:\([^)]*|\*|!|\^|\$[^$]*\$)[#>]\s/, // postgres multiline prompt states
 ];
 
 export interface PromptDetectionResult {
@@ -38,14 +60,34 @@ const NO_PROMPT: PromptDetectionResult = {
   isAtPrompt: false, promptText: "", userInput: "", cursorOffset: 0,
 };
 
-function isNonPromptLine(lineText: string): boolean {
+export function isNonPromptLine(lineText: string): boolean {
   return NON_PROMPT_PATTERNS.some((pattern) => pattern.test(lineText));
 }
 
-function isSpecificShellPromptCandidate(promptText: string): boolean {
+function isSpecificShellPromptCandidate(
+  promptText: string,
+  options: { allowGreaterThanTerminator?: boolean } = {},
+): boolean {
   const trimmed = promptText.trim();
-  if (trimmed.endsWith(">") || trimmed.endsWith("›")) return false;
+  if (
+    !options.allowGreaterThanTerminator &&
+    (trimmed.endsWith(">") || trimmed.endsWith("›"))
+  ) {
+    return false;
+  }
   return trimmed.length >= 6 && /[@:\\/~\])]/.test(trimmed);
+}
+
+function isLikelyNoSpaceShellPromptText(promptText: string): boolean {
+  const trimmed = promptText.trim();
+  if (/^root[#%$]$/.test(trimmed)) return true;
+  if (trimmed.length < 3) return false;
+
+  const marker = trimmed[trimmed.length - 1];
+  if (!PROMPT_CHARS.has(marker) && !isPuaChar(marker)) return false;
+
+  const prev = trimmed[trimmed.length - 2] ?? "";
+  return /[~:/\\\])]/.test(prev);
 }
 
 export interface AlignedPromptResult {
@@ -53,23 +95,11 @@ export interface AlignedPromptResult {
   prompt: PromptDetectionResult;
   /**
    * The keystroke buffer, but only when it's both marked reliable AND
-   * actually matches the tail of the raw detected userInput. Returns
-   * null otherwise — the single signal downstream uses to decide
-   * whether to record it as the executed command.
+   * can be validated against the live terminal line. Returns null
+   * otherwise - the single signal downstream uses to decide whether
+   * to record it as the executed command.
    */
   alignedTyped: string | null;
-}
-
-function replacePromptUserInput(
-  prompt: PromptDetectionResult,
-  userInput: string,
-): PromptDetectionResult {
-  return {
-    isAtPrompt: true,
-    promptText: prompt.promptText,
-    userInput,
-    cursorOffset: userInput.length,
-  };
 }
 
 function getCursorLinePrefix(term: XTerm): string | null {
@@ -80,6 +110,499 @@ function getCursorLinePrefix(term: XTerm): string | null {
   if (!line) return null;
 
   return line.translateToString(false).substring(0, Math.max(0, buffer.cursorX));
+}
+
+function getWrappedCursorPrefix(term: XTerm): string | null {
+  const buffer = term.buffer.active;
+  const cursorY = buffer.cursorY + buffer.baseY;
+  const cursorX = buffer.cursorX;
+  const line = buffer.getLine(cursorY);
+
+  if (!line?.isWrapped) return null;
+
+  let promptRow = cursorY - 1;
+  while (promptRow >= 0) {
+    const prevLine = buffer.getLine(promptRow);
+    if (!prevLine) return null;
+    if (!prevLine.isWrapped) break;
+    promptRow--;
+  }
+
+  const promptLine = buffer.getLine(promptRow);
+  if (!promptLine) return null;
+
+  let prefix = promptLine.translateToString(false);
+  for (let row = promptRow + 1; row < cursorY; row++) {
+    const rowLine = buffer.getLine(row);
+    if (!rowLine) return null;
+    prefix += rowLine.translateToString(false);
+  }
+
+  return prefix + line.translateToString(false).substring(0, Math.max(0, cursorX));
+}
+
+function inferPromptTextBeforeTypedInput(
+  cursorPrefix: string,
+  typedBuffer: string,
+  allowPartialEcho: boolean,
+): string | null {
+  if (cursorPrefix.endsWith(typedBuffer)) {
+    const promptText = cursorPrefix.slice(0, cursorPrefix.length - typedBuffer.length);
+    return promptText.length > 0 ? promptText : null;
+  }
+
+  if (!allowPartialEcho) return null;
+
+  const maxEchoLength = Math.min(cursorPrefix.length, typedBuffer.length);
+  const minPartialEchoLength = Math.max(6, typedBuffer.length - 2);
+  for (let echoLength = maxEchoLength - 1; echoLength >= minPartialEchoLength; echoLength--) {
+    const echoedInput = typedBuffer.slice(0, echoLength);
+    if (!cursorPrefix.endsWith(echoedInput)) continue;
+
+    const promptText = cursorPrefix.slice(0, cursorPrefix.length - echoLength);
+    if (promptText.length > 0) return promptText;
+  }
+
+  const noSpacePromptMinEchoLength = typedBuffer.trim().length <= 2 ? 1 : 3;
+  for (
+    let echoLength = Math.min(maxEchoLength - 1, minPartialEchoLength - 1);
+    echoLength >= noSpacePromptMinEchoLength;
+    echoLength--
+  ) {
+    const echoedInput = typedBuffer.slice(0, echoLength);
+    if (!cursorPrefix.endsWith(echoedInput)) continue;
+    const hasReliablePartialEcho =
+      typedBuffer.trim().length <= 2 ||
+      echoedInput.endsWith(" ") ||
+      (echoedInput.includes(" ") && echoedInput.length >= 4);
+    if (!hasReliablePartialEcho) continue;
+
+    const promptText = cursorPrefix.slice(0, cursorPrefix.length - echoLength);
+    if (isLikelyNoSpaceShellPromptText(promptText)) return promptText;
+  }
+
+  return null;
+}
+
+function hasSwallowedCommandAfterPrompt(promptText: string, promptBoundary: number): boolean {
+  const candidate = promptText.slice(0, promptBoundary).trimEnd();
+  const finalIndex = candidate.length - 1;
+  const finalChar = finalIndex >= 0 ? candidate[finalIndex] : "";
+
+  for (let i = 0; i < finalIndex; i++) {
+    const ch = candidate[i];
+    if (!PROMPT_CHARS.has(ch) && !isPuaChar(ch)) continue;
+
+    const nextChar = i + 1 < candidate.length ? candidate[i + 1] : null;
+    if (nextChar === null || nextChar === " ") continue;
+
+    const earlierPrompt = candidate.slice(0, i + 1);
+    if (isLikelyNoSpaceShellPromptText(earlierPrompt)) return true;
+    if (isEmbeddedPromptMarkerAt(candidate, i)) continue;
+    if (!isSpecificShellPromptCandidate(earlierPrompt)) continue;
+    if (PROMPT_CHARS.has(nextChar) || isPuaChar(nextChar)) return true;
+    if (startsWithCommonShellCommand(candidate.slice(i + 1))) return true;
+    if (finalChar !== "$") return true;
+  }
+
+  return false;
+}
+
+function canUseInferredPromptText(promptText: string, rawIsAtPrompt: boolean): boolean {
+  if (promptText.length === 0) return false;
+  if (rawIsAtPrompt) return true;
+
+  const promptBoundary = findPromptBoundary(promptText);
+  const promptEndsAtBoundary =
+    promptBoundary >= 0 && promptText.slice(promptBoundary).trim().length === 0;
+  return (
+    promptEndsAtBoundary &&
+    !hasSwallowedCommandAfterPrompt(promptText, promptBoundary) &&
+    isSpecificShellPromptCandidate(promptText)
+  );
+}
+
+function isThemedPromptText(promptText: string): boolean {
+  for (const ch of promptText) {
+    if (isPuaChar(ch)) return true;
+  }
+  return /[❯❮→➜➤⟩»›]/.test(promptText);
+}
+
+function isPromptPathDecoration(trimmed: string): boolean {
+  return (
+    trimmed === "~" ||
+    trimmed.startsWith("~/") ||
+    trimmed.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed) ||
+    trimmed.includes("\\")
+  );
+}
+
+function isPromptBareDirectoryText(trimmed: string): boolean {
+  if (trimmed.startsWith("./") || trimmed.startsWith("../")) return false;
+  return /^[\w.-]+$/.test(trimmed);
+}
+
+function isPromptStatusToken(token: string): boolean {
+  return (
+    /^git:\([^)]*\)$/.test(token) ||
+    /^[+$#%>!?*]$/.test(token) ||
+    token === "✗" ||
+    token === "✔"
+  );
+}
+
+function isPromptStatusText(trimmed: string): boolean {
+  const [first = "", ...rest] = trimmed.split(/\s+/);
+  if (rest.length === 0) return false;
+  if (!isPromptBareDirectoryText(first) && !isPromptPathDecoration(first)) return false;
+  return rest.every(isPromptStatusToken);
+}
+
+function isPromptStatusDecoration(extra: string): boolean {
+  if (!/^\s+/.test(extra) || !/\s+$/.test(extra)) return false;
+
+  return isPromptStatusText(extra.trim());
+}
+
+function isPromptDecorationExtra(extra: string, promptText: string): boolean {
+  const trimmed = extra.trim();
+  if (trimmed.length === 0) return false;
+  if (!isThemedPromptText(promptText)) return false;
+  if (startsWithCommonShellCommand(extra)) return false;
+  if (/^\s*\S+\s+$/.test(extra)) {
+    return isPromptPathDecoration(trimmed) || (
+      isPromptBareDirectoryText(trimmed) &&
+      !startsWithCommonShellCommand(trimmed)
+    );
+  }
+  if (isPromptStatusDecoration(extra)) return true;
+  for (const ch of extra) {
+    if (isPuaChar(ch)) return true;
+  }
+  return false;
+}
+
+function getFinalPromptBoundary(promptText: string): number {
+  const trimmedEnd = promptText.trimEnd().length;
+  if (trimmedEnd === 0) return -1;
+
+  const markerIndex = trimmedEnd - 1;
+  const marker = promptText[markerIndex];
+  if (!PROMPT_CHARS.has(marker) && !isPuaChar(marker)) return -1;
+
+  const nextChar = markerIndex + 1 < promptText.length ? promptText[markerIndex + 1] : null;
+  if (nextChar !== null && nextChar !== " ") return -1;
+  return nextChar === " " ? markerIndex + 2 : markerIndex + 1;
+}
+
+function endsAtFinalPromptBoundary(promptText: string): boolean {
+  const promptBoundary = getFinalPromptBoundary(promptText);
+  return promptBoundary >= 0 && promptText.slice(promptBoundary).trim().length === 0;
+}
+
+const COMMON_SHELL_COMMANDS = new Set([
+  "alias",
+  "awk",
+  "az",
+  "brew",
+  "bun",
+  "bundle",
+  "cargo",
+  "cat",
+  "cd",
+  "chmod",
+  "chown",
+  "code",
+  "composer",
+  "cp",
+  "curl",
+  "docker",
+  "echo",
+  "emacs",
+  "env",
+  "export",
+  "find",
+  "gcloud",
+  "gh",
+  "git",
+  "go",
+  "gradle",
+  "grep",
+  "helm",
+  "java",
+  "javac",
+  "kubectl",
+  "less",
+  "ls",
+  "make",
+  "mkdir",
+  "mvn",
+  "mv",
+  "nano",
+  "node",
+  "npm",
+  "npx",
+  "nvim",
+  "php",
+  "pip",
+  "pip3",
+  "pnpm",
+  "printf",
+  "python",
+  "python3",
+  "rails",
+  "rm",
+  "rsync",
+  "ruby",
+  "rustc",
+  "scp",
+  "screen",
+  "sed",
+  "ssh",
+  "sudo",
+  "tail",
+  "tar",
+  "terraform",
+  "tmux",
+  "touch",
+  "uv",
+  "vi",
+  "vim",
+  "yarn",
+]);
+
+function getLeadingShellCommandWord(text: string): string | null {
+  return text.trimStart().match(/^[\w.-]+(?=\s|$)/)?.[0] ?? null;
+}
+
+function startsWithCommonShellCommand(text: string): boolean {
+  const command = getLeadingShellCommandWord(text);
+  return command !== null && COMMON_SHELL_COMMANDS.has(command);
+}
+
+function isCompleteSpecificPrompt(promptText: string): boolean {
+  const promptBoundary = getFinalPromptBoundary(promptText);
+  return (
+    promptBoundary >= 0 &&
+    promptText.slice(promptBoundary).trim().length === 0 &&
+    isSpecificShellPromptCandidate(promptText) &&
+    !isEmbeddedPromptMarker(promptText, promptBoundary)
+  );
+}
+
+function looksLikeCommandAfterCompletePrompt(promptText: string, extra: string): boolean {
+  return isCompleteSpecificPrompt(promptText) && extra.trim().length > 0;
+}
+
+function hasShellCommandAfterOptionalDecoration(text: string): boolean {
+  const trimmedStart = text.trimStart();
+  if (startsWithCommonShellCommand(trimmedStart)) return true;
+
+  const [, afterDecoration = ""] = trimmedStart.match(/^\S+\s+(.+)$/) ?? [];
+  return startsWithCommonShellCommand(afterDecoration);
+}
+
+function isSingleBareDirectoryExtra(extra: string): boolean {
+  const trimmed = extra.trim();
+  return /^\s*\S+\s+$/.test(extra) && isPromptBareDirectoryText(trimmed);
+}
+
+function hasExplicitThemedDirectorySpacing(extra: string): boolean {
+  return /^\s+\S+\s+$/.test(extra);
+}
+
+type PromptDecorationReconcileOptions = {
+  allowSingleWordCommandDirectory?: boolean;
+};
+
+function canTreatCommonCommandNameAsThemedDirectory(
+  extra: string,
+  typedInput: string,
+  options: PromptDecorationReconcileOptions = {},
+): boolean {
+  const trimmedInput = typedInput.trim();
+  return (
+    isSingleBareDirectoryExtra(extra) &&
+    (
+      /\s/.test(trimmedInput) ||
+      /^(?:ls|cd|pwd)$/.test(trimmedInput) ||
+      (
+        options.allowSingleWordCommandDirectory === true &&
+        hasExplicitThemedDirectorySpacing(extra)
+      )
+    )
+  );
+}
+
+function canReconcilePromptDecoration(
+  prompt: PromptDetectionResult,
+  typedInput: string,
+  options: PromptDecorationReconcileOptions = {},
+): boolean {
+  if (
+    !prompt.isAtPrompt ||
+    !typedInput ||
+    prompt.userInput.length <= typedInput.length ||
+    !prompt.userInput.endsWith(typedInput)
+  ) {
+    return false;
+  }
+
+  const extra = prompt.userInput.slice(0, prompt.userInput.length - typedInput.length);
+  if (looksLikeCommandAfterCompletePrompt(prompt.promptText, extra)) return false;
+  if (
+    isThemedPromptText(prompt.promptText) &&
+    canTreatCommonCommandNameAsThemedDirectory(extra, typedInput, options)
+  ) {
+    return true;
+  }
+  if (isThemedPromptText(prompt.promptText) && hasShellCommandAfterOptionalDecoration(extra)) {
+    return false;
+  }
+
+  const candidatePromptText = prompt.promptText + extra;
+  const promptEndsAtBoundary =
+    endsAtFinalPromptBoundary(candidatePromptText) &&
+    isSpecificShellPromptCandidate(candidatePromptText);
+  return promptEndsAtBoundary || isPromptDecorationExtra(extra, prompt.promptText);
+}
+
+function alignTypedInputFromCursorPrefix(
+  raw: PromptDetectionResult,
+  cursorPrefix: string | null,
+  typedBuffer: string,
+): AlignedPromptResult | null {
+  if (!cursorPrefix) return null;
+  if (!raw.isAtPrompt && isNonPromptLine(cursorPrefix)) return null;
+
+  const promptText = inferPromptTextBeforeTypedInput(cursorPrefix, typedBuffer, !raw.isAtPrompt);
+  if (!promptText || !canUseInferredPromptText(promptText, raw.isAtPrompt)) {
+    return null;
+  }
+
+  return {
+    prompt: {
+      isAtPrompt: true,
+      promptText,
+      userInput: typedBuffer,
+      cursorOffset: typedBuffer.length,
+    },
+    alignedTyped: typedBuffer,
+  };
+}
+
+function canUseReliablePromptPrefix(
+  raw: PromptDetectionResult,
+  typedBuffer: string,
+): boolean {
+  if (!raw.isAtPrompt || typedBuffer.length === 0 || raw.userInput.length === 0) {
+    return false;
+  }
+  if (typedBuffer.length <= raw.userInput.length) return false;
+  return isReliableTypedPrefix(raw.userInput, typedBuffer, {
+    allowShortEcho: allowsShortPromptEcho(raw.promptText),
+  });
+}
+
+function isLikelyBareMongoPromptName(promptName: string): boolean {
+  return /^(?:test|admin|local|config)$/i.test(promptName);
+}
+
+function endsWithHostStyleGreaterThanPrompt(promptText: string): boolean {
+  const trimmed = promptText.trimEnd();
+  if (!trimmed.endsWith(">")) return false;
+  const promptName = trimmed.slice(0, -1).trim();
+  return /^[\w.-]+$/.test(promptName) && !isLikelyBareMongoPromptName(promptName);
+}
+
+function endsWithStandardShellPrompt(promptText: string): boolean {
+  const finalChar = promptText.trimEnd().at(-1);
+  return finalChar === "$" || finalChar === "#" || finalChar === "%";
+}
+
+function allowsShortPromptEcho(promptText: string): boolean {
+  return endsWithStandardShellPrompt(promptText) || endsWithHostStyleGreaterThanPrompt(promptText);
+}
+
+function isReliableTypedPrefix(
+  echoedInput: string,
+  typedBuffer: string,
+  options: { allowShortEcho?: boolean } = {},
+): boolean {
+  if (!typedBuffer.startsWith(echoedInput)) return false;
+  if (
+    options.allowShortEcho &&
+    typedBuffer.trim().length <= 2 &&
+    echoedInput.trim().length >= 1
+  ) {
+    return true;
+  }
+  return (
+    echoedInput.length >= Math.max(4, typedBuffer.length - 2) ||
+    (echoedInput.endsWith(" ") && echoedInput.trim().length >= 2) ||
+    (echoedInput.includes(" ") && echoedInput.length >= 4)
+  );
+}
+
+function withTypedUserInput(
+  prompt: PromptDetectionResult,
+  typedBuffer: string,
+): PromptDetectionResult {
+  return {
+    ...prompt,
+    userInput: typedBuffer,
+    cursorOffset: typedBuffer.length,
+  };
+}
+
+function alignThemedDecorationWithPartialEcho(
+  raw: PromptDetectionResult,
+  typedBuffer: string,
+): AlignedPromptResult | null {
+  if (!raw.isAtPrompt || !isThemedPromptText(raw.promptText)) return null;
+
+  const maxEchoLength = Math.min(raw.userInput.length, typedBuffer.length);
+  for (let echoLength = maxEchoLength; echoLength > 0; echoLength--) {
+    const echoedInput = typedBuffer.slice(0, echoLength);
+    if (!raw.userInput.endsWith(echoedInput)) continue;
+
+    const extra = raw.userInput.slice(0, raw.userInput.length - echoLength);
+    if (extra.length === 0) continue;
+    const hasReliableThemedDirectoryPrefix =
+      isSingleBareDirectoryExtra(extra) &&
+      hasExplicitThemedDirectorySpacing(extra) &&
+      typedBuffer.trim().length <= 3 &&
+      echoedInput.trim().length >= 1;
+
+    const syntheticPrompt = {
+      ...raw,
+      userInput: extra + typedBuffer,
+      cursorOffset: extra.length + typedBuffer.length,
+    };
+    if (
+      !hasReliableThemedDirectoryPrefix &&
+      !isReliableTypedPrefix(echoedInput, typedBuffer)
+    ) {
+      continue;
+    }
+    if (!canReconcilePromptDecoration(syntheticPrompt, typedBuffer, {
+      allowSingleWordCommandDirectory: true,
+    })) continue;
+
+    return {
+      prompt: {
+        isAtPrompt: true,
+        promptText: raw.promptText + extra,
+        userInput: typedBuffer,
+        cursorOffset: typedBuffer.length,
+      },
+      alignedTyped: typedBuffer,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -99,6 +622,10 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
 
   // Check for non-prompt patterns (pagers, editors, etc.)
   if (isNonPromptLine(lineText)) return NO_PROMPT;
+  if (line.isWrapped) {
+    const wrappedPrefix = getWrappedCursorPrefix(term);
+    if (wrappedPrefix && isNonPromptLine(wrappedPrefix)) return NO_PROMPT;
+  }
 
   // Empty line
   if (lineText.trim().length === 0) return NO_PROMPT;
@@ -142,6 +669,7 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
     const promptLine = buffer.getLine(promptRow);
     if (promptLine) {
       const promptLineText = promptLine.translateToString(false);
+      if (isNonPromptLine(promptLineText)) return NO_PROMPT;
       const pEnd = findPromptBoundary(promptLineText);
       if (pEnd >= 0) {
         const promptText = promptLineText.substring(0, pEnd);
@@ -156,6 +684,7 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
         const charsBeforeCursorRow = (cursorY - promptRow) * totalCols - pEnd;
         const userInput = fullInput.substring(0, charsBeforeCursorRow + cursorX);
         const cursorOffset = userInput.length;
+        if (isNonPromptLine(promptText + userInput)) return NO_PROMPT;
 
         return { isAtPrompt: true, promptText, userInput, cursorOffset };
       }
@@ -180,6 +709,56 @@ function isPuaChar(ch: string): boolean {
   if (!ch) return false;
   const code = ch.charCodeAt(0);
   return code >= 0xE000 && code <= 0xF8FF;
+}
+
+function getBoundaryMarkerIndex(lineText: string, boundary: number): number {
+  if (boundary <= 0) return -1;
+  return lineText[boundary - 1] === " " ? boundary - 2 : boundary - 1;
+}
+
+function isEmbeddedPromptMarkerAt(lineText: string, markerIndex: number): boolean {
+  if (markerIndex <= 0) return false;
+
+  const marker = lineText[markerIndex];
+  if (marker !== "#" && marker !== "%" && marker !== ">" && marker !== "$") return false;
+
+  const prev = lineText[markerIndex - 1];
+  return !/[\s~:\])}]/.test(prev);
+}
+
+function isEmbeddedPromptMarker(lineText: string, boundary: number): boolean {
+  return isEmbeddedPromptMarkerAt(lineText, getBoundaryMarkerIndex(lineText, boundary));
+}
+
+function canSupersedeThemedPromptBoundary(
+  lineText: string,
+  previousBoundary: number,
+  markerIndex: number,
+): boolean {
+  if (!isThemedPromptText(lineText.slice(0, previousBoundary))) return false;
+
+  const rawBetween = lineText.slice(previousBoundary, markerIndex);
+  const between = rawBetween.trim();
+  return (
+    between.length === 0 ||
+    isPromptPathDecoration(between) ||
+    isPromptStatusText(between) ||
+    (
+      /^\s/.test(rawBetween) &&
+      isPromptBareDirectoryText(between)
+    )
+  );
+}
+
+function canPromptMarkerSupersedePreviousBoundary(ch: string): boolean {
+  return ch === "$" || ch === "#" || ch === "%" || ch === ">" || ch === "›";
+}
+
+function isSpacedPromptSegment(lineText: string, boundary: number): boolean {
+  const markerIndex = getBoundaryMarkerIndex(lineText, boundary);
+  if (markerIndex <= 0) return false;
+  if (lineText[markerIndex - 1] !== " ") return false;
+  return lineText[markerIndex + 1] === " ";
 }
 
 /**
@@ -210,6 +789,15 @@ function findPromptBoundary(lineText: string): number {
 
     // For ambiguous prompt chars like >, only accept in the first 60% of the line
     if ((ch === ">" || ch === "›") && i >= ambiguousScanLimit) continue;
+    if (
+      (ch === ">" || ch === "›") &&
+      lastStandardBoundary >= 0 &&
+      /\s/.test(lineText.slice(0, i).trim()) &&
+      !isEmbeddedPromptMarker(lineText, lastStandardBoundary) &&
+      !canSupersedeThemedPromptBoundary(lineText, lastStandardBoundary, i)
+    ) {
+      continue;
+    }
 
     // Must be followed by a space or end-of-line.
     const nextChar = i + 1 < lineText.length ? lineText[i + 1] : null;
@@ -269,6 +857,31 @@ function findPromptBoundary(lineText: string): number {
     // Record this as a candidate boundary. A standard shell prompt terminator
     // is more reliable than a later Powerline/Nerd Font glyph in command text.
     const boundary = nextChar === " " ? i + 2 : i + 1;
+    const candidatePromptText = lineText.slice(0, boundary);
+    if (isStandard && hasSwallowedCommandAfterPrompt(candidatePromptText, boundary)) {
+      continue;
+    }
+    if (isStandard && lastStandardBoundary >= 0) {
+      const themedPromptCanSupersede = canSupersedeThemedPromptBoundary(
+        lineText,
+        lastStandardBoundary,
+        getBoundaryMarkerIndex(lineText, boundary),
+      );
+      const canSupersedePreviousBoundary =
+        canPromptMarkerSupersedePreviousBoundary(ch) &&
+        (
+          isEmbeddedPromptMarker(lineText, lastStandardBoundary) ||
+          isSpacedPromptSegment(lineText, lastStandardBoundary) ||
+          themedPromptCanSupersede
+        ) &&
+        (
+          themedPromptCanSupersede ||
+          isSpecificShellPromptCandidate(candidatePromptText, {
+            allowGreaterThanTerminator: ch === ">" || ch === "›",
+          })
+        );
+      if (!canSupersedePreviousBoundary) continue;
+    }
     if (isStandard) {
       lastStandardBoundary = boundary;
     } else {
@@ -308,6 +921,11 @@ export function reconcilePromptWithTypedInput(
     prompt.userInput.length > typedInput.length &&
     prompt.userInput.endsWith(typedInput)
   ) {
+    if (!canReconcilePromptDecoration(prompt, typedInput, {
+      allowSingleWordCommandDirectory: true,
+    })) {
+      return prompt;
+    }
     const extra = prompt.userInput.slice(0, prompt.userInput.length - typedInput.length);
     return {
       isAtPrompt: true,
@@ -317,6 +935,36 @@ export function reconcilePromptWithTypedInput(
     };
   }
   return prompt;
+}
+
+export function reconcilePromptWithExternalCommand(
+  prompt: PromptDetectionResult,
+  command: string,
+): PromptDetectionResult | null {
+  const typedInput = command.trim();
+  if (!prompt.isAtPrompt || typedInput.length === 0) return null;
+
+  const syntheticPrompt = {
+    ...prompt,
+    userInput: `${prompt.userInput}${typedInput}`,
+    cursorOffset: prompt.userInput.length + typedInput.length,
+  };
+  if (!canReconcilePromptDecoration(syntheticPrompt, typedInput, {
+    allowSingleWordCommandDirectory: true,
+  })) {
+    return null;
+  }
+
+  const extra = syntheticPrompt.userInput.slice(
+    0,
+    syntheticPrompt.userInput.length - typedInput.length,
+  );
+  return {
+    isAtPrompt: true,
+    promptText: prompt.promptText + extra,
+    userInput: typedInput,
+    cursorOffset: typedInput.length,
+  };
 }
 
 /**
@@ -329,13 +977,11 @@ export function reconcilePromptWithTypedInput(
  * pre-#806 behavior, not a worse pollution.
  *
  * Alignment rule: the keystroke buffer is usable only when it's marked
- * reliable AND the raw detected prompt still looks like the same shell
- * line. When the raw buffer has either over-captured prompt chrome
- * (`raw.userInput.endsWith(typedBuffer)`) or under-captured because the
- * shell echo/render is lagging behind local keystrokes
- * (`typedBuffer.startsWith(raw.userInput)`), prefer the typed buffer.
- * Otherwise the buffer is ignored and the raw detector result passes
- * through.
+ * reliable and it can be reconciled with the live line. Exact raw
+ * matches are safe, over-captured prompt chrome can be moved back into
+ * promptText, and no-space prompts can be inferred from the cursor line
+ * when the inferred prompt still looks like a shell prompt. Otherwise
+ * the buffer is ignored and the raw detector result passes through.
  */
 export function getAlignedPrompt(
   term: XTerm | null,
@@ -353,43 +999,31 @@ export function getAlignedPrompt(
       return { prompt: raw, alignedTyped: typedBuffer };
     }
     if (raw.userInput.length > typedBuffer.length && raw.userInput.endsWith(typedBuffer)) {
+      const prompt = reconcilePromptWithTypedInput(raw, typedBuffer);
+      if (prompt === raw) return { prompt: raw, alignedTyped: null };
       return {
-        prompt: reconcilePromptWithTypedInput(raw, typedBuffer),
+        prompt,
         alignedTyped: typedBuffer,
       };
     }
-    if (typedBuffer.length > raw.userInput.length && typedBuffer.startsWith(raw.userInput)) {
+    const themedDecorationAlignment = alignThemedDecorationWithPartialEcho(raw, typedBuffer);
+    if (themedDecorationAlignment) return themedDecorationAlignment;
+    if (canUseReliablePromptPrefix(raw, typedBuffer)) {
       return {
-        prompt: replacePromptUserInput(raw, typedBuffer),
+        prompt: withTypedUserInput(raw, typedBuffer),
         alignedTyped: typedBuffer,
       };
     }
   }
 
-  const cursorLinePrefix = getCursorLinePrefix(term);
-  if (cursorLinePrefix?.endsWith(typedBuffer)) {
-    if (!raw.isAtPrompt && isNonPromptLine(cursorLinePrefix)) {
-      return { prompt: raw, alignedTyped: null };
-    }
-
-    const promptText = cursorLinePrefix.slice(0, cursorLinePrefix.length - typedBuffer.length);
-    const promptBoundary = findPromptBoundary(promptText);
-    const promptEndsAtBoundary =
-      promptBoundary >= 0 && promptText.slice(promptBoundary).trim().length === 0;
-    const canUseFallback =
-      raw.isAtPrompt ||
-      (promptEndsAtBoundary && isSpecificShellPromptCandidate(promptText));
-    if (promptText.length > 0 && canUseFallback) {
-      return {
-        prompt: {
-          isAtPrompt: true,
-          promptText,
-          userInput: typedBuffer,
-          cursorOffset: typedBuffer.length,
-        },
-        alignedTyped: typedBuffer,
-      };
-    }
+  const cursorPrefixCandidates = [
+    getWrappedCursorPrefix(term),
+    getCursorLinePrefix(term),
+  ];
+  for (const cursorPrefix of cursorPrefixCandidates) {
+    const aligned = alignTypedInputFromCursorPrefix(raw, cursorPrefix, typedBuffer);
+    if (aligned) return aligned;
   }
+
   return { prompt: raw, alignedTyped: null };
 }

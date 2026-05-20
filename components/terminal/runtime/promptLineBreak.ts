@@ -1,6 +1,11 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 import type { RefObject } from "react";
-import { detectPrompt, getAlignedPrompt } from "../autocomplete/promptDetector";
+import {
+  detectPrompt,
+  getAlignedPrompt,
+  isNonPromptLine,
+  reconcilePromptWithExternalCommand,
+} from "../autocomplete/promptDetector";
 
 export type PromptLineBreakState = {
   lastPromptText: string;
@@ -131,12 +136,32 @@ function cachePromptLineBreakPromptFromCommand(
   state: PromptLineBreakState | undefined,
   command: string,
 ): boolean {
-  if (!state || command.length === 0) return false;
+  const trimmedCommand = command.trim();
+  if (!state || trimmedCommand.length === 0) return false;
 
-  const aligned = getAlignedPrompt(term, command, true);
-  if (!aligned.prompt.isAtPrompt || aligned.alignedTyped !== command) return false;
+  const aligned = getAlignedPrompt(term, trimmedCommand, true);
+  if (!aligned.prompt.isAtPrompt) {
+    state.lastPromptText = "";
+    state.suppressNextPromptCache = false;
+    return false;
+  }
+  if (isNonPromptLine(`${aligned.prompt.promptText}${trimmedCommand}`)) {
+    state.lastPromptText = "";
+    state.suppressNextPromptCache = false;
+    return true;
+  }
 
-  state.lastPromptText = aligned.prompt.promptText;
+  const prompt =
+    aligned.alignedTyped === trimmedCommand
+      ? aligned.prompt
+      : reconcilePromptWithExternalCommand(aligned.prompt, trimmedCommand);
+  if (!prompt) {
+    state.lastPromptText = "";
+    state.suppressNextPromptCache = false;
+    return false;
+  }
+
+  state.lastPromptText = prompt.promptText;
   state.suppressNextPromptCache = false;
   return true;
 }
