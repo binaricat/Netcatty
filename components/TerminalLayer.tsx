@@ -2242,14 +2242,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         onUpdateTerminalFontFamilyId?.(fontFamilyId);
         return;
       }
-      onUpdateHost({ ...focusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
+      if (rawFocusedHost) {
+        onUpdateHost({ ...rawFocusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
+      }
     });
-  }, [focusedHost, focusedFontFamilyId, isFocusedHostEphemeral, onUpdateTerminalFontFamilyId, onUpdateHost]);
+  }, [focusedHost, focusedFontFamilyId, isFocusedHostEphemeral, onUpdateTerminalFontFamilyId, onUpdateHost, rawFocusedHost]);
 
   const handleFontFamilyResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostEphemeral) return;
-    onUpdateHost(clearHostFontFamilyOverride(focusedHost));
-  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost]);
+    if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
+    onUpdateHost(clearHostFontFamilyOverride(rawFocusedHost));
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, rawFocusedHost]);
 
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
     if (!focusedHost || newFontSize === focusedFontSize) return;
@@ -2258,14 +2260,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         onUpdateTerminalFontSize?.(newFontSize);
         return;
       }
-      onUpdateHost({ ...focusedHost, fontSize: newFontSize, fontSizeOverride: true });
+      if (rawFocusedHost) {
+        onUpdateHost({ ...rawFocusedHost, fontSize: newFontSize, fontSizeOverride: true });
+      }
     });
-  }, [focusedHost, focusedFontSize, isFocusedHostEphemeral, onUpdateTerminalFontSize, onUpdateHost]);
+  }, [focusedHost, focusedFontSize, isFocusedHostEphemeral, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
 
   const handleFontSizeResetForFocusedSession = useCallback(() => {
-    if (!focusedHost || isFocusedHostEphemeral) return;
-    onUpdateHost(clearHostFontSizeOverride(focusedHost));
-  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost]);
+    if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
+    onUpdateHost(clearHostFontSizeOverride(rawFocusedHost));
+  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, rawFocusedHost]);
 
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
     if (!focusedHost || newFontWeight === focusedFontWeight) return;

@@ -1,5 +1,18 @@
 import { Host, TerminalTheme } from './models';
 
+const TERMINAL_HOST_APPEARANCE_UPDATE_KEYS = [
+  'theme',
+  'themeOverride',
+  'fontFamily',
+  'fontFamilyOverride',
+  'fontSize',
+  'fontSizeOverride',
+  'fontWeight',
+  'fontWeightOverride',
+  'keywordHighlightRules',
+  'keywordHighlightEnabled',
+] as const satisfies readonly (keyof Host)[];
+
 const hasLegacyStringValue = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -37,6 +50,23 @@ export const clearHostFontSizeOverride = (host: Host): Host => ({
   fontSize: undefined,
   fontSizeOverride: false,
 });
+
+export const mergeTerminalHostAppearanceUpdate = (
+  savedHost: Host,
+  terminalHostUpdate: Host,
+): Host => {
+  const nextHost: Host = { ...savedHost };
+  const mutableNextHost = nextHost as unknown as Record<string, unknown>;
+  const updateRecord = terminalHostUpdate as unknown as Record<string, unknown>;
+
+  for (const key of TERMINAL_HOST_APPEARANCE_UPDATE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(updateRecord, key)) {
+      mutableNextHost[key] = updateRecord[key];
+    }
+  }
+
+  return nextHost;
+};
 
 export const resolveHostTerminalThemeId = (host: Host | null | undefined, defaultThemeId: string): string =>
   hasHostThemeOverride(host) && host?.theme ? host.theme : defaultThemeId;

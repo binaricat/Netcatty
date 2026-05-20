@@ -28,7 +28,11 @@ import { upsertKnownHost } from './domain/knownHosts';
 import { materializeHostProxyProfile } from './domain/proxyProfiles';
 import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
-import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import {
+  applyCustomAccentToTerminalTheme,
+  mergeTerminalHostAppearanceUpdate,
+  resolveHostTerminalThemeId,
+} from './domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from './domain/connectionLog';
 import { collectSessionIds } from './domain/workspace';
 import { resolveCloseIntent } from './application/state/resolveCloseIntent';
@@ -1728,7 +1732,9 @@ function App({ settings }: { settings: SettingsState }) {
   }, [updateSessionStatus, updateHostLastConnected]);
 
   const handleUpdateHostFromTerminal = useCallback((host: Host) => {
-    updateHosts(hosts.map((h) => (h.id === host.id ? host : h)));
+    updateHosts(hosts.map((h) => (
+      h.id === host.id ? mergeTerminalHostAppearanceUpdate(h, host) : h
+    )));
   }, [hosts, updateHosts]);
 
   // Wrapper to create serial session with logging

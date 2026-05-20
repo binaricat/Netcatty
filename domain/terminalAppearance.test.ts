@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyCustomAccentToTerminalTheme } from "./terminalAppearance";
-import type { TerminalTheme } from "./models";
+import {
+  applyCustomAccentToTerminalTheme,
+  mergeTerminalHostAppearanceUpdate,
+} from "./terminalAppearance";
+import type { Host, TerminalTheme } from "./models";
 
 const baseTheme: TerminalTheme = {
   id: "ui-snow",
@@ -45,4 +48,64 @@ test("applies a custom accent to terminal cursor and selection colors", () => {
 test("keeps terminal theme unchanged without a valid custom accent", () => {
   assert.equal(applyCustomAccentToTerminalTheme(baseTheme, "theme", "160 70% 40%"), baseTheme);
   assert.equal(applyCustomAccentToTerminalTheme(baseTheme, "custom", "not-a-color"), baseTheme);
+});
+
+const savedHost: Host = {
+  id: "host-1",
+  label: "Core switch",
+  hostname: "10.0.0.2",
+  username: "admin",
+  port: 22,
+  os: "linux",
+  group: "",
+  tags: [],
+  protocol: "ssh",
+  moshEnabled: true,
+  telnetEnabled: true,
+  telnetPort: 23,
+};
+
+test("terminal appearance updates preserve saved connection protocol and port", () => {
+  const telnetSessionHost: Host = {
+    ...savedHost,
+    protocol: "telnet",
+    port: 23,
+    moshEnabled: false,
+    fontFamily: "jetbrains-mono",
+    fontFamilyOverride: true,
+  };
+
+  const merged = mergeTerminalHostAppearanceUpdate(savedHost, telnetSessionHost);
+
+  assert.equal(merged.protocol, "ssh");
+  assert.equal(merged.port, 22);
+  assert.equal(merged.moshEnabled, true);
+  assert.equal(merged.telnetEnabled, true);
+  assert.equal(merged.telnetPort, 23);
+  assert.equal(merged.fontFamily, "jetbrains-mono");
+  assert.equal(merged.fontFamilyOverride, true);
+});
+
+test("terminal appearance reset clears only appearance fields", () => {
+  const hostWithAppearance: Host = {
+    ...savedHost,
+    fontSize: 16,
+    fontSizeOverride: true,
+  };
+  const resetUpdate: Host = {
+    ...hostWithAppearance,
+    protocol: "telnet",
+    port: 23,
+    moshEnabled: false,
+    fontSize: undefined,
+    fontSizeOverride: false,
+  };
+
+  const merged = mergeTerminalHostAppearanceUpdate(hostWithAppearance, resetUpdate);
+
+  assert.equal(merged.protocol, "ssh");
+  assert.equal(merged.port, 22);
+  assert.equal(merged.moshEnabled, true);
+  assert.equal(merged.fontSize, undefined);
+  assert.equal(merged.fontSizeOverride, false);
 });
