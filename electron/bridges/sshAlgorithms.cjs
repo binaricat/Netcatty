@@ -61,9 +61,9 @@ function buildBaseAlgorithms() {
 
 function applyLegacyAlgorithms(algorithms) {
   algorithms.kex.push(...filterSupportedFixedDhKex([
-    "diffie-hellman-group-exchange-sha1",
     "diffie-hellman-group14-sha1",
     "diffie-hellman-group1-sha1",
+    "diffie-hellman-group-exchange-sha1",
   ]));
   algorithms.cipher.push(
     "aes128-cbc", "aes256-cbc", "3des-cbc",

@@ -86,6 +86,21 @@ for (const [label, buildAlgorithms] of [
       assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group1-sha1"));
     });
   });
+
+  test(`${label} legacy group-exchange SHA-1 is the last KEX fallback`, () => {
+    withAlgorithmRuntime({}, () => {
+      const legacyKex = buildAlgorithms(true).kex;
+      const group14Sha1Index = legacyKex.indexOf("diffie-hellman-group14-sha1");
+      const group1Sha1Index = legacyKex.indexOf("diffie-hellman-group1-sha1");
+      const groupExchangeSha1Index = legacyKex.indexOf("diffie-hellman-group-exchange-sha1");
+
+      assert.notEqual(group14Sha1Index, -1);
+      assert.notEqual(group1Sha1Index, -1);
+      assert.notEqual(groupExchangeSha1Index, -1);
+      assert.ok(group14Sha1Index < groupExchangeSha1Index);
+      assert.ok(group1Sha1Index < groupExchangeSha1Index);
+    });
+  });
 }
 
 test("SFTP legacy HMAC algorithms match SSH legacy compatibility", () => {
