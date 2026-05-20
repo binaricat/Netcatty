@@ -29,6 +29,7 @@ import { materializeHostProxyProfile } from './domain/proxyProfiles';
 import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
 import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from './domain/terminalAppearance';
+import { selectConnectionLogForTerminalDataCapture } from './domain/connectionLog';
 import { collectSessionIds } from './domain/workspace';
 import { resolveCloseIntent } from './application/state/resolveCloseIntent';
 import { resolveSnippetsShortcutIntent } from './application/state/resolveSnippetsShortcutIntent';
@@ -1756,15 +1757,10 @@ function App({ settings }: { settings: SettingsState }) {
     if (IS_DEV) console.log('[handleTerminalDataCapture] Session', session);
     if (IS_DEV) console.log('[handleTerminalDataCapture] All logs:', connectionLogs.map(l => ({ id: l.id, sessionId: l.sessionId, hostname: l.hostname, endTime: l.endTime, hasTerminalData: !!l.terminalData })));
 
-    // Prefer the persisted sessionId because the session may already have been
-    // removed from state by the time the terminal unmount cleanup runs.
-    const matchingLog = connectionLogs
-      .filter((log) => {
-        if (log.endTime || log.terminalData) return false;
-        if (log.sessionId) return log.sessionId === sessionId;
-        return !!session && log.hostname === session.hostname;
-      })
-      .sort((a, b) => b.startTime - a.startTime)[0];
+    const matchingLog = selectConnectionLogForTerminalDataCapture(
+      connectionLogs,
+      { sessionId, hostname: session?.hostname },
+    );
 
     if (IS_DEV) console.log('[handleTerminalDataCapture] Matching log', matchingLog);
 
