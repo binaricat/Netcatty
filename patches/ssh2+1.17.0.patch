@@ -738,3 +738,40 @@ index 9f33c02..9751164 100644
        }
        if (names !== undefined) {
          sftp._debug && sftp._debug(
+diff --git a/node_modules/ssh2/lib/protocol/constants.js b/node_modules/ssh2/lib/protocol/constants.js
+index ad77592..4b3f71a 100644
+--- a/node_modules/ssh2/lib/protocol/constants.js
++++ b/node_modules/ssh2/lib/protocol/constants.js
+@@ -160,4 +160,5 @@ const COMPAT = {
+   DYN_RPORT_BUG: 1 << 2,
+   BUG_DHGEX_LARGE: 1 << 3,
+   IMPLY_RSA_SHA2_SIGALGS: 1 << 4,
++  COMWARE_DHGEX_1024: 1 << 5,
+ };
+@@ -330,6 +331,7 @@ module.exports = {
+   COMPAT_CHECKS: [
+     [ 'Cisco-1.25', COMPAT.BAD_DHGEX ],
+     [ /^Cisco-1[.]/, COMPAT.BUG_DHGEX_LARGE ],
++    [ /^Comware-/, COMPAT.COMWARE_DHGEX_1024 ],
+     [ /^[0-9.]+$/, COMPAT.OLD_EXIT ], // old SSH.com implementations
+     [ /^OpenSSH_5[.][0-9]+/, COMPAT.DYN_RPORT_BUG ],
+     [ /^OpenSSH_7[.]4/, COMPAT.IMPLY_RSA_SHA2_SIGALGS ],
+diff --git a/node_modules/ssh2/lib/protocol/kex.js b/node_modules/ssh2/lib/protocol/kex.js
+index 811e631..4b5f792 100644
+--- a/node_modules/ssh2/lib/protocol/kex.js
++++ b/node_modules/ssh2/lib/protocol/kex.js
+@@ -1377,8 +1377,13 @@ const createKeyExchange = (() => {
+       this._generator = null;
+       this._minBits = GEX_MIN_BITS;
+       this._prefBits = dhEstimate(this.negotiated);
+-      if (this._protocol._compatFlags & COMPAT.BUG_DHGEX_LARGE)
++      if (hashName === 'sha1'
++          && (this._protocol._compatFlags & COMPAT.COMWARE_DHGEX_1024)) {
++        this._minBits = 1024;
++        this._prefBits = 1024;
++      } else if (this._protocol._compatFlags & COMPAT.BUG_DHGEX_LARGE) {
+         this._prefBits = Math.min(this._prefBits, 4096);
++      }
+       this._maxBits = GEX_MAX_BITS;
+     }
+     start() {

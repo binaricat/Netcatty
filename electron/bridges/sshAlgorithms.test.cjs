@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { KexInit, HANDLERS: KEX_HANDLERS } = require("../../node_modules/ssh2/lib/protocol/kex.js");
+const { COMPAT, COMPAT_CHECKS, MESSAGE } = require("../../node_modules/ssh2/lib/protocol/constants.js");
 
 const sshBridge = require("./sshBridge.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
@@ -43,6 +45,81 @@ function withAlgorithmRuntime({ unsupportedGroups = new Set(), hashes = ["sha1",
     crypto.getHashes = originalGetHashes;
     resetSupportCache();
   }
+}
+
+function kexPayloadFrom(init) {
+  const payload = Buffer.alloc(1 + 16 + init.totalSize + 1 + 4);
+  payload[0] = MESSAGE.KEXINIT;
+  init.copyAllTo(payload, 17);
+  return payload;
+}
+
+function buildKexInit(algorithms) {
+  return new KexInit({
+    kex: algorithms.kex,
+    serverHostKey: algorithms.serverHostKey,
+    cs: {
+      cipher: algorithms.cipher,
+      mac: algorithms.hmac,
+      compress: algorithms.compress,
+      lang: [],
+    },
+    sc: {
+      cipher: algorithms.cipher,
+      mac: algorithms.hmac,
+      compress: algorithms.compress,
+      lang: [],
+    },
+  });
+}
+
+function readLegacyGexRequestBits(compatFlags) {
+  const algorithms = sshBridge.buildAlgorithms(true);
+  const writtenPackets = [];
+  const protocol = {
+    _server: false,
+    _compatFlags: compatFlags,
+    _offer: buildKexInit(algorithms),
+    _debug: undefined,
+    _strictMode: undefined,
+    _kex: undefined,
+    _kexinit: Buffer.from("local-kexinit"),
+    _identRaw: Buffer.from("SSH-2.0-netcatty-test"),
+    _remoteIdentRaw: Buffer.from("SSH-2.0-Comware-5.20"),
+    _packetRW: {
+      write: {
+        allocStartKEX: 0,
+        alloc(size) {
+          return Buffer.alloc(size);
+        },
+        finalize(packet) {
+          return packet;
+        },
+      },
+    },
+    _cipher: {
+      encrypt(packet) {
+        writtenPackets.push(Buffer.from(packet));
+      },
+    },
+  };
+  const remote = buildKexInit({
+    kex: ["diffie-hellman-group-exchange-sha1"],
+    serverHostKey: ["ecdsa-sha2-nistp256", "ssh-rsa"],
+    cipher: ["aes128-ctr"],
+    hmac: ["hmac-sha2-256"],
+    compress: ["none"],
+  });
+
+  KEX_HANDLERS[MESSAGE.KEXINIT](protocol, kexPayloadFrom(remote));
+
+  const request = writtenPackets.find((packet) => packet[0] === MESSAGE.KEXDH_GEX_REQUEST);
+  assert.ok(request, "expected a DH group-exchange request packet");
+  return {
+    min: request.readUInt32BE(1),
+    preferred: request.readUInt32BE(5),
+    max: request.readUInt32BE(9),
+  };
 }
 
 for (const [label, buildAlgorithms] of [
@@ -122,4 +199,18 @@ test("legacy HMAC algorithms skip MD5 when the runtime disables it", () => {
       assert.equal(algorithms.hmac.includes("hmac-md5"), false);
     }
   });
+});
+
+test("Comware legacy group-exchange requests OpenSSH 6.4-sized DH groups", () => {
+  const comwareCompatRule = COMPAT_CHECKS.find(([pattern, flags]) => (
+    pattern instanceof RegExp
+    && pattern.test("Comware-5.20")
+    && (flags & COMPAT.COMWARE_DHGEX_1024)
+  ));
+
+  assert.ok(comwareCompatRule, "Comware servers should opt into the old DH group-exchange request size");
+  assert.deepEqual(
+    readLegacyGexRequestBits(COMPAT.COMWARE_DHGEX_1024),
+    { min: 1024, preferred: 1024, max: 8192 },
+  );
 });
