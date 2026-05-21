@@ -1,0 +1,117 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const {
+  deriveUuid,
+  patchMachOBuffer,
+} = require("./afterPackMacUuid.cjs");
+
+const LC_UUID = 0x1b;
+const LC_OTHER = 0x19;
+const MH_MAGIC_64 = 0xfeedfacf;
+
+// Build a minimal thin little-endian 64-bit Mach-O with two load commands:
+// one dummy command and one LC_UUID carrying `uuidBytes`.
+function buildThinMachO(uuidBytes) {
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(MH_MAGIC_64, 0); // magic
+  header.writeUInt32LE(0x0100000c, 4); // cputype arm64 (value irrelevant)
+  header.writeUInt32LE(0, 8); // cpusubtype
+  header.writeUInt32LE(2, 12); // filetype
+  header.writeUInt32LE(2, 16); // ncmds
+  header.writeUInt32LE(16 + 24, 20); // sizeofcmds
+  header.writeUInt32LE(0, 24); // flags
+  header.writeUInt32LE(0, 28); // reserved
+
+  const dummy = Buffer.alloc(16);
+  dummy.writeUInt32LE(LC_OTHER, 0); // cmd
+  dummy.writeUInt32LE(16, 4); // cmdsize
+  dummy.fill(0xab, 8); // payload sentinel
+
+  const uuidCmd = Buffer.alloc(24);
+  uuidCmd.writeUInt32LE(LC_UUID, 0); // cmd
+  uuidCmd.writeUInt32LE(24, 4); // cmdsize
+  uuidBytes.copy(uuidCmd, 8);
+
+  return Buffer.concat([header, dummy, uuidCmd]);
+}
+
+// Wrap one or more thin slices in a big-endian 32-bit fat binary.
+function buildFatMachO(slices) {
+  const headerSize = 8 + slices.length * 20;
+  const header = Buffer.alloc(headerSize);
+  header.writeUInt32BE(0xcafebabe, 0); // FAT_MAGIC
+  header.writeUInt32BE(slices.length, 4);
+
+  let offset = headerSize;
+  const offsets = [];
+  for (let i = 0; i < slices.length; i += 1) {
+    const archOff = 8 + i * 20;
+    header.writeUInt32BE(0x0100000c, archOff); // cputype
+    header.writeUInt32BE(0, archOff + 4); // cpusubtype
+    header.writeUInt32BE(offset, archOff + 8); // offset
+    header.writeUInt32BE(slices[i].length, archOff + 12); // size
+    header.writeUInt32BE(0, archOff + 16); // align
+    offsets.push(offset);
+    offset += slices[i].length;
+  }
+
+  return Buffer.concat([header, ...slices]);
+}
+
+test("deriveUuid is deterministic and 16 bytes", () => {
+  const a = deriveUuid("com.netcatty.app");
+  const b = deriveUuid("com.netcatty.app");
+  assert.equal(a.length, 16);
+  assert.ok(a.equals(b));
+});
+
+test("deriveUuid differs per appId and sets version/variant bits", () => {
+  const a = deriveUuid("com.netcatty.app");
+  const b = deriveUuid("com.example.other");
+  assert.ok(!a.equals(b));
+  assert.equal(a[6] & 0xf0, 0x50); // version 5
+  assert.equal(a[8] & 0xc0, 0x80); // RFC 4122 variant
+});
+
+test("patchMachOBuffer rewrites LC_UUID in a thin Mach-O and leaves the rest intact", () => {
+  const original = Buffer.alloc(16, 0x11);
+  const buf = buildThinMachO(original);
+  const uuid = deriveUuid("com.netcatty.app");
+
+  const { patched, oldUuids } = patchMachOBuffer(buf, uuid);
+
+  assert.equal(patched, 1);
+  assert.equal(oldUuids[0], original.toString("hex"));
+  // LC_UUID payload is now our derived uuid (uuid command starts at byte 48).
+  assert.ok(buf.subarray(48 + 8, 48 + 24).equals(uuid));
+  // Header magic + the dummy command's payload are untouched.
+  assert.equal(buf.readUInt32LE(0), MH_MAGIC_64);
+  assert.equal(buf.readUInt32LE(32), LC_OTHER);
+  assert.ok(buf.subarray(32 + 8, 32 + 16).equals(Buffer.alloc(8, 0xab)));
+});
+
+test("patchMachOBuffer patches every slice of a fat binary", () => {
+  const slice1 = buildThinMachO(Buffer.alloc(16, 0x22));
+  const slice2 = buildThinMachO(Buffer.alloc(16, 0x33));
+  const fat = buildFatMachO([slice1, slice2]);
+  const uuid = deriveUuid("com.netcatty.app");
+
+  const { patched } = patchMachOBuffer(fat, uuid);
+
+  assert.equal(patched, 2);
+});
+
+test("patchMachOBuffer reports zero when there is no LC_UUID", () => {
+  // A thin Mach-O whose single command is not LC_UUID.
+  const header = Buffer.alloc(32);
+  header.writeUInt32LE(MH_MAGIC_64, 0);
+  header.writeUInt32LE(1, 16); // ncmds
+  const cmd = Buffer.alloc(16);
+  cmd.writeUInt32LE(LC_OTHER, 0);
+  cmd.writeUInt32LE(16, 4);
+  const buf = Buffer.concat([header, cmd]);
+
+  const { patched } = patchMachOBuffer(buf, deriveUuid("com.netcatty.app"));
+  assert.equal(patched, 0);
+});
