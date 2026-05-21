@@ -9,6 +9,7 @@
 
 import type { Terminal as XTerm, IDisposable } from "@xterm/xterm";
 import { getXTermCellDimensions, invalidateCellDimensionCache } from "./xtermUtils";
+import { lineHasUntrackedTrailingInput } from "./ghostTextConsistency";
 
 /**
  * Minimal East-Asian-Width-style classifier: returns 2 for wide glyphs
@@ -112,9 +113,16 @@ export class GhostTextAddon implements IDisposable {
 
     this.disposables.push(
       term.onRender(() => {
-        if (this.isVisible()) {
-          this.updatePosition();
+        if (!this.isVisible()) return;
+        // Fail-safe: if the device echoed input we didn't track (some bastion
+        // hosts / network OS, #1013), hide rather than draw the ghost over
+        // already-typed text. Done here (post-echo render) rather than in
+        // show()/adjustToInput so it never fights the keystroke-time path.
+        if (this.realLineHasUntrackedInput()) {
+          this.hide();
+          return;
         }
+        this.updatePosition();
       }),
     );
 
@@ -289,6 +297,23 @@ export class GhostTextAddon implements IDisposable {
 
     // Include leading whitespace + the word up to (and including) the separator
     return ghost.substring(0, leadingSpace + 1 + wordEnd + 1);
+  }
+
+  /**
+   * True when the real terminal line has more input than we tracked, so
+   * rendering the ghost would paint over already-typed characters. See
+   * ./ghostTextConsistency and issue #1013. Returns false on hosts/inputs
+   * we can't judge (non-ASCII, echo still catching up), so the ghost only
+   * gets suppressed when corruption is actually imminent.
+   */
+  private realLineHasUntrackedInput(): boolean {
+    if (!this.term || !this.currentInput) return false;
+    const buf = this.term.buffer.active;
+    if (typeof buf?.getLine !== "function") return false;
+    const line = buf.getLine(buf.baseY + buf.cursorY);
+    if (!line || typeof line.translateToString !== "function") return false;
+    const beforeCursor = line.translateToString(false).slice(0, buf.cursorX);
+    return lineHasUntrackedTrailingInput(this.currentInput, beforeCursor);
   }
 
   private updatePosition(): void {

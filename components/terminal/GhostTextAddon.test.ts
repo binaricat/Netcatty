@@ -450,3 +450,32 @@ test("applyKeystroke: ignores non-typing data (escape sequences, control codes)"
     restoreDocument();
   }
 });
+
+test("hides the ghost on render when the device echoed untracked input (#1013)", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    // We believe only "network in" is typed; suggestion is the full command.
+    addon.show("network interface show", "network in");
+    assert.equal(addon.isActive(), true);
+
+    // The real line shows MORE than we tracked: a bastion host echoed the
+    // next char ("t") that our client-side buffer never recorded.
+    const line = "ecOS# network int";
+    const active = term.buffer.active as Record<string, unknown>;
+    active.baseY = 0;
+    active.cursorX = line.length;
+    active.getLine = () => ({ translateToString: () => line });
+
+    fireRender();
+
+    assert.equal(addon.isActive(), false);
+    assert.equal(ghostElement()?.style.display, "none");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
