@@ -78,7 +78,7 @@ export const normalizeDistroId = (value?: string) => {
  * plain `OpenSSH_*` with no distinct vendor marker.
  */
 export const detectVendorFromSshVersion = (softwareVersion?: string): '' | NetworkDeviceVendor => {
-  const s = (softwareVersion || '').trim();
+  const s = (softwareVersion || '').trim().replace(/^SSH-(?:2\.0|1\.99)-/i, '');
   if (!s) return '';
 
   // Cisco family — IOS, IOS XA, Wireless LAN Controller
@@ -97,6 +97,7 @@ export const detectVendorFromSshVersion = (softwareVersion?: string): '' | Netwo
   if (/^NetScreen\b/.test(s)) return 'juniper';
 
   // Huawei VRP and related products
+  if (s === '-') return 'huawei';
   if (/^HUAWEI[-_]/i.test(s)) return 'huawei';
   if (/^VRP-/i.test(s)) return 'huawei';
 

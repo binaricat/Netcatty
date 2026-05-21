@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { Host } from "./models.ts";
 import {
+  detectVendorFromSshVersion,
   normalizePrimaryTelnetState,
   resolveHostKeepalive,
   resolveTelnetPort,
@@ -156,6 +157,11 @@ test("sanitizeHost keeps a still-valid fontFamily untouched", () => {
   const after = sanitizeHost(before);
   assert.equal(after.fontFamily, "fira-code");
   assert.equal(after.fontFamilyOverride, true);
+});
+
+test("detectVendorFromSshVersion recognizes legacy Huawei VRP dash banner", () => {
+  assert.equal(detectVendorFromSshVersion("-"), "huawei");
+  assert.equal(detectVendorFromSshVersion("SSH-2.0--"), "huawei");
 });
 
 const GLOBAL_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
