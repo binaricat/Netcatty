@@ -11,6 +11,15 @@ const FIXED_DH_GROUP_BY_KEX = Object.freeze({
 let _md5Supported = null;
 const dhGroupSupport = new Map();
 
+// MODP groups that every SSH runtime we target supports, so we skip the
+// feature-detection probe for them. Under Electron's BoringSSL, instantiating a
+// fixed DH group object purely to test support is pathologically slow — the
+// 8192-bit modp18 alone takes ~20s on first call, freezing the first connection
+// of every app launch — yet the probe always succeeds. We only feature-detect
+// groups a runtime might genuinely drop (e.g. BoringSSL removed the weak
+// 1024-bit group1/modp2); those fail their probe instantly, so it stays cheap.
+const ASSUMED_SUPPORTED_DH_GROUPS = new Set(["modp14", "modp16", "modp18"]);
+
 // FIPS-enabled OpenSSL builds disable MD5. Feature-detect once so the legacy
 // algorithm list can skip hmac-md5 on those builds; ssh2 validates exact
 // algorithm lists strictly and would otherwise throw "Unsupported algorithm"
@@ -24,6 +33,7 @@ function md5Supported() {
 }
 
 function fixedDhGroupSupported(groupName) {
+  if (ASSUMED_SUPPORTED_DH_GROUPS.has(groupName)) return true;
   if (!dhGroupSupport.has(groupName)) {
     try {
       crypto.createDiffieHellmanGroup(groupName);

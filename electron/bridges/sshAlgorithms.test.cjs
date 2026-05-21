@@ -5,24 +5,16 @@ const crypto = require("node:crypto");
 const sshBridge = require("./sshBridge.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
 
-const FIXED_DH_GROUP_BY_KEX = new Map([
-  ["diffie-hellman-group1-sha1", "modp2"],
-  ["diffie-hellman-group14-sha1", "modp14"],
-  ["diffie-hellman-group14-sha256", "modp14"],
-  ["diffie-hellman-group16-sha512", "modp16"],
-  ["diffie-hellman-group18-sha512", "modp18"],
-]);
-
 const BASE_FIXED_DH_KEX = [
   "diffie-hellman-group14-sha256",
   "diffie-hellman-group16-sha512",
   "diffie-hellman-group18-sha512",
 ];
 
-const LEGACY_FIXED_DH_KEX = [
-  "diffie-hellman-group14-sha1",
-  "diffie-hellman-group1-sha1",
-];
+// Standard MODP groups we treat as supported without a runtime probe, because
+// probing them via createDiffieHellmanGroup is pathologically slow under
+// Electron's BoringSSL (~24s on first connection) yet always succeeds.
+const ASSUMED_SUPPORTED_GROUPS = ["modp14", "modp16", "modp18"];
 
 function resetSupportCache() {
   sshBridge._resetAlgorithmSupportCacheForTests?.();
@@ -32,8 +24,10 @@ function resetSupportCache() {
 function withAlgorithmRuntime({ unsupportedGroups = new Set(), hashes = ["sha1", "sha256", "sha512", "md5"] }, callback) {
   const originalCreateGroup = crypto.createDiffieHellmanGroup;
   const originalGetHashes = crypto.getHashes;
+  const probedGroups = [];
 
   crypto.createDiffieHellmanGroup = (name) => {
+    probedGroups.push(name);
     if (unsupportedGroups.has(name)) {
       throw new Error("Unknown DH group");
     }
@@ -43,7 +37,7 @@ function withAlgorithmRuntime({ unsupportedGroups = new Set(), hashes = ["sha1",
 
   resetSupportCache();
   try {
-    return callback();
+    return callback({ probedGroups });
   } finally {
     crypto.createDiffieHellmanGroup = originalCreateGroup;
     crypto.getHashes = originalGetHashes;
@@ -51,39 +45,44 @@ function withAlgorithmRuntime({ unsupportedGroups = new Set(), hashes = ["sha1",
   }
 }
 
-function assertFixedDhKexSupport(algorithms, expectedKexNames, unsupportedGroups) {
-  const expectedKex = new Set(expectedKexNames);
-
-  for (const [kexName, groupName] of FIXED_DH_GROUP_BY_KEX) {
-    assert.equal(
-      algorithms.kex.includes(kexName),
-      expectedKex.has(kexName) && !unsupportedGroups.has(groupName),
-      `${kexName} should match ${groupName} runtime support`,
-    );
-  }
-}
-
 for (const [label, buildAlgorithms] of [
   ["SSH", sshBridge.buildAlgorithms],
   ["SFTP", sftpBridge.buildSftpAlgorithms],
 ]) {
-  test(`${label} algorithms skip fixed DH groups unsupported by the runtime`, () => {
+  test(`${label} keeps standard DH groups without an expensive runtime probe`, () => {
     assert.equal(typeof buildAlgorithms, "function");
 
-    withAlgorithmRuntime({ unsupportedGroups: new Set(["modp16", "modp18"]) }, () => {
+    // Even when the runtime claims it can't create the standard MODP groups,
+    // they must stay in the offer list AND must never be passed to
+    // createDiffieHellmanGroup — probing them is what froze the first
+    // connection of every app launch for ~24s under BoringSSL.
+    withAlgorithmRuntime({ unsupportedGroups: new Set(ASSUMED_SUPPORTED_GROUPS) }, ({ probedGroups }) => {
       const modernAlgorithms = buildAlgorithms(false);
       const legacyAlgorithms = buildAlgorithms(true);
 
-      assertFixedDhKexSupport(modernAlgorithms, BASE_FIXED_DH_KEX, new Set(["modp16", "modp18"]));
-      assertFixedDhKexSupport(
-        legacyAlgorithms,
-        [...BASE_FIXED_DH_KEX, ...LEGACY_FIXED_DH_KEX],
-        new Set(["modp16", "modp18"]),
-      );
-      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group-exchange-sha256"));
-      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group-exchange-sha1"));
+      for (const kexName of BASE_FIXED_DH_KEX) {
+        assert.ok(modernAlgorithms.kex.includes(kexName), `${kexName} should be offered`);
+        assert.ok(legacyAlgorithms.kex.includes(kexName), `${kexName} should be offered (legacy)`);
+      }
       assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group14-sha1"));
-      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group1-sha1"));
+
+      for (const group of ASSUMED_SUPPORTED_GROUPS) {
+        assert.ok(!probedGroups.includes(group), `${group} must not be feature-probed`);
+      }
+    });
+  });
+
+  test(`${label} drops group1-sha1 when the runtime lacks modp2`, () => {
+    withAlgorithmRuntime({ unsupportedGroups: new Set(["modp2"]) }, () => {
+      const legacyAlgorithms = buildAlgorithms(true);
+
+      assert.equal(legacyAlgorithms.kex.includes("diffie-hellman-group1-sha1"), false);
+      // Standard groups and the other legacy fallbacks must remain.
+      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group14-sha1"));
+      for (const kexName of BASE_FIXED_DH_KEX) {
+        assert.ok(legacyAlgorithms.kex.includes(kexName), `${kexName} should remain`);
+      }
+      assert.ok(legacyAlgorithms.kex.includes("diffie-hellman-group-exchange-sha1"));
     });
   });
 
