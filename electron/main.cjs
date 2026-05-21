@@ -93,6 +93,12 @@ function createLazyModule(modulePath) {
   };
 }
 
+// Restore standard DH groups that Electron's BoringSSL dropped from the named
+// createDiffieHellmanGroup() API (e.g. modp2 / diffie-hellman-group1-sha1), so
+// legacy network devices stay reachable (#1035). MUST run before any module that
+// requires ssh2 — ssh2 destructures createDiffieHellmanGroup at load time.
+require("./bridges/boringSslDhCompat.cjs").installBoringSslDhCompat();
+
 // Import bridge modules
 const sshBridge = require("./bridges/sshBridge.cjs");
 const sftpBridge = require("./bridges/sftpBridge.cjs");
