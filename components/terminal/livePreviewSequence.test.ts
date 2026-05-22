@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeLivePreviewWrite } from "./livePreviewSequence.ts";
+import { computeLivePreviewWrite } from "./autocomplete/livePreviewSequence.ts";
 
 test("appends only the tail when the candidate continues the current line", () => {
   assert.equal(
