@@ -29,7 +29,7 @@ import {
   applyCustomAccentToTerminalTheme,
   resolveHostTerminalThemeId,
 } from "../domain/terminalAppearance";
-import { classifyDistroId } from "../domain/host";
+import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 // SFTPModal removed - SFTP is now handled by SftpSidePanel in TerminalLayer
@@ -585,6 +585,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return clearTerminalCwd;
   }, [clearTerminalCwd, host.id]);
 
+  // Classify the host's device family from the *detected* distro and the
+  // explicit deviceType only. This intentionally bypasses
+  // getEffectiveHostDistro(): the manual distro override (`distroMode:
+  // 'manual'` + `manualDistro`) is a purely cosmetic icon choice, and a
+  // user who pinned e.g. an "ubuntu" icon on what is actually a Cisco /
+  // Huawei host must not silently re-enable POSIX-shell probes against it.
+  // Several features gate on this — the working-directory probe below, the
+  // /etc/os-release probe, and the periodic server-stats poll (#674) —
+  // because each opens an extra exec channel that strict network-device
+  // CLIs reject or log as a new AAA session, and on Huawei VRP closes the
+  // whole session (#1043).
+  const detectedDeviceClass = classifyDistroId(host.distro);
+  const isNetworkDevice =
+    host.deviceType === 'network' || detectedDeviceClass === 'network-device';
+
   useEffect(() => {
     if (host.protocol === "local" || host.protocol === "serial" || host.protocol === "telnet") {
       return;
@@ -593,9 +608,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     let cancelled = false;
     const timer = setTimeout(async () => {
-      if (!sessionRef.current) return;
+      const id = sessionRef.current;
+      if (!id) return;
       try {
-        const result = await terminalBackend.getSessionPwd(sessionRef.current);
+        // The pwd probe opens an extra POSIX-shell exec channel, which strict
+        // network-device CLIs like Huawei VRP answer by closing the whole
+        // session (#1043). Skip it for known network devices; for a brand-new
+        // host (distro not classified yet on the first connect) consult the
+        // SSH banner, which is captured for free at handshake time.
+        const info = await terminalBackend.getSessionRemoteInfo?.(id);
+        if (cancelled || id !== sessionRef.current) return;
+        if (!shouldProbeSessionCwd({ isNetworkDevice, remoteSshVersion: info?.remoteSshVersion })) {
+          return;
+        }
+        const result = await terminalBackend.getSessionPwd(id);
         if (!cancelled && !terminalCwdTracker.getRendererCwd() && result.success && result.cwd) {
           knownCwdRef.current = result.cwd;
         }
@@ -608,7 +634,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [host.protocol, status, terminalBackend, terminalCwdTracker]);
+  }, [host.protocol, status, terminalBackend, terminalCwdTracker, isNetworkDevice]);
 
   useEffect(() => {
     if (!isVisible) {
@@ -620,25 +646,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isLocalConnection = host.protocol === "local";
   const isSerialConnection = host.protocol === "serial";
 
-  // Server stats (CPU, Memory, Disk) — only for Linux/macOS, and never
-  // for hosts classified as network devices (either via explicit
-  // deviceType='network' or via SSH banner detection that populated
-  // host.distro with a network-vendor ID). See #674: polling the stats
-  // command on Cisco / Huawei / Juniper etc. generates one AAA session
-  // log entry per poll because each exec channel is counted as a new
-  // session on those devices.
-  //
-  // IMPORTANT: this gating must NOT go through getEffectiveHostDistro()
-  // because that honors the manual distro override (`distroMode: 'manual'`
-  // + `manualDistro`) which is purely a cosmetic icon choice. A user who
-  // pinned an "ubuntu" icon on what is actually a Cisco host would
-  // otherwise silently re-enable the polling loop and re-introduce the
-  // AAA log flood this patch is meant to eliminate. The display icon can
-  // still be overridden (see DistroAvatar) — gating uses the raw detected
-  // `host.distro` and the explicit `host.deviceType` only.
-  const detectedDeviceClass = classifyDistroId(host.distro);
-  const isNetworkDevice =
-    host.deviceType === 'network' || detectedDeviceClass === 'network-device';
+  // Server stats (CPU, Memory, Disk) — only for Linux/macOS, never for
+  // network devices. See isNetworkDevice above for why the gating uses the
+  // raw detected distro / explicit deviceType (not getEffectiveHostDistro);
+  // #674 covers the AAA-log-flood motivation for stats specifically.
   const isSupportedOs =
     !isNetworkDevice &&
     (host.os === 'linux' || host.os === 'macos' || detectedDeviceClass === 'linux-like');

@@ -136,6 +136,24 @@ export const classifyDistroId = (distroId?: string): DeviceClass => {
   return 'other';
 };
 
+/**
+ * Decide whether it is safe to run the post-connect `pwd` probe that
+ * discovers the session's working directory. The probe opens an extra exec
+ * channel running a POSIX-shell script; strict network-device CLIs such as
+ * Huawei VRP respond by closing the whole SSH session (#1043), so it must be
+ * skipped for them.
+ *
+ * `isNetworkDevice` covers hosts we already classified (a reconnect, or an
+ * explicit `deviceType: 'network'`). On a brand-new host that field is not
+ * populated yet, so we also inspect the SSH server identification banner —
+ * captured for free at handshake — which identifies most vendors directly.
+ */
+export const shouldProbeSessionCwd = (opts: {
+  isNetworkDevice: boolean;
+  remoteSshVersion?: string;
+}): boolean =>
+  !opts.isNetworkDevice && !detectVendorFromSshVersion(opts.remoteSshVersion);
+
 export const getEffectiveHostDistro = (
   host?: Pick<Host, 'distro' | 'manualDistro' | 'distroMode'> | null,
 ) => {

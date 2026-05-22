@@ -10,6 +10,7 @@ import {
   resolveTelnetPassword,
   resolveTelnetUsername,
   sanitizeHost,
+  shouldProbeSessionCwd,
   upsertHostById,
 } from "./host.ts";
 
@@ -162,6 +163,34 @@ test("sanitizeHost keeps a still-valid fontFamily untouched", () => {
 test("detectVendorFromSshVersion recognizes legacy Huawei VRP dash banner", () => {
   assert.equal(detectVendorFromSshVersion("-"), "huawei");
   assert.equal(detectVendorFromSshVersion("SSH-2.0--"), "huawei");
+});
+
+test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "OpenSSH_9.6" }),
+    true,
+  );
+});
+
+test("shouldProbeSessionCwd skips the probe on an already-classified network device", () => {
+  // Reconnect / manual deviceType='network': host.distro already says network.
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: true, remoteSshVersion: "OpenSSH_9.6" }),
+    false,
+  );
+});
+
+test("shouldProbeSessionCwd skips the probe when the SSH banner reveals a network vendor", () => {
+  // First connect to a brand-new Huawei VRP: host.distro not persisted yet, so
+  // isNetworkDevice is still false — the banner is the only signal (#1043).
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "-" }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "SSH-1.99--" }),
+    false,
+  );
 });
 
 const GLOBAL_KEEPALIVE = { keepaliveInterval: 30, keepaliveCountMax: 10 };
