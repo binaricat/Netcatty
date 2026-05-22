@@ -98,6 +98,8 @@ const buildS3Client = (config) =>
     region: config.region,
     endpoint: normalizeEndpoint(config.endpoint),
     forcePathStyle: config.forcePathStyle ?? true,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
@@ -299,4 +301,5 @@ module.exports = {
   // Exposed for tests
   handleWebdavInitialize,
   buildBasicAuthHeader,
+  buildS3Client,
 };

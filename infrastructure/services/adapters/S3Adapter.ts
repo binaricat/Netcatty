@@ -194,6 +194,8 @@ export class S3Adapter {
       region: config.region,
       endpoint: config.endpoint,
       forcePathStyle: config.forcePathStyle ?? true,
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
