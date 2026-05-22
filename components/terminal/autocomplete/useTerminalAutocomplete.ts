@@ -919,6 +919,10 @@ export function useTerminalAutocomplete(
       // User is typing more — invalidate accepted command fallback since the
       // command is being edited further (e.g., accepted "git status" then added " --short")
       lastAcceptedCommandRef.current = null;
+      // The previewed candidate is now edited, so the line is the user's own
+      // text. Drop preview-active so Escape dismisses the popup without
+      // reverting these edits back to the stale baseline (#1005).
+      previewActiveRef.current = false;
 
       // Re-align any visible ghost text to the freshly-updated buffer
       // immediately. Without this the ghost keeps the tail it captured at
