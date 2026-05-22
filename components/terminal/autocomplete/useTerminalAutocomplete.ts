@@ -1063,10 +1063,11 @@ export function useTerminalAutocomplete(
       // which is otherwise shadowed by our single-Tab ghost accept.
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && s.subDirFocusLevel < 0) {
         if (s.popupVisible && s.suggestions.length > 0) {
-          e.preventDefault();
-          const selected = s.suggestions[Math.max(0, s.selectedIndex)];
-          if (selected) insertSuggestion(selected, false);
-          return false;
+          // #1005: don't intercept Tab. Keep whatever is currently rendered on
+          // the line and let Tab reach the shell for native completion.
+          clearState();
+          previewActiveRef.current = false;
+          return true;
         }
         // Hide stale ghost text before Tab reaches the shell — the shell's
         // completion will rewrite the line and the old ghost would mislead.
@@ -1173,17 +1174,21 @@ export function useTerminalAutocomplete(
           return false;
         }
 
-        // Enter on popup
+        // Enter on popup. The selected candidate is already rendered into the
+        // line by live-preview, so let Enter reach the shell; just record the
+        // command for history and suppress handleInput's duplicate record.
         if (e.key === "Enter") {
-          if (s.selectedIndex >= 0) {
+          if (s.selectedIndex >= 0 && previewActiveRef.current) {
             const selected = s.suggestions[s.selectedIndex];
             if (selected) {
-              e.preventDefault();
-              insertSuggestion(selected, true);
-              return false;
+              recordCommand(selected.text, hostIdRef.current, hostOsRef.current);
+              suppressNextEnterRecordRef.current = true;
+              setTimeout(() => { suppressNextEnterRecordRef.current = false; }, 100);
             }
           }
           clearState();
+          previewActiveRef.current = false;
+          return true;
         }
       }
 
@@ -1192,8 +1197,12 @@ export function useTerminalAutocomplete(
       // when only ghost text is showing (ghost text is passive/non-intrusive)
       if (e.key === "Escape" && s.popupVisible) {
         e.preventDefault();
+        if (previewActiveRef.current) {
+          renderPreviewSelection(-1); // restore the typed baseline
+        }
         ghost?.hide();
         clearState();
+        previewActiveRef.current = false;
         return false;
       }
 
