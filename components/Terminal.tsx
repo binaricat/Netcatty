@@ -1241,6 +1241,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
       }
 
+      // Changing the font can leave the WebGL renderer drawing stale glyphs from
+      // the old metrics (xterm.js #3280), surfacing as garbled text (issue #1049).
+      // Clear the texture atlas so glyphs re-rasterize with the new font.
+      xtermRuntimeRef.current?.clearTextureAtlas();
+
       if (isVisibleRef.current) {
         setTimeout(() => safeFit({ force: true, requireVisible: true }), 50);
       } else {

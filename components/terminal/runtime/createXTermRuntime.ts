@@ -43,6 +43,7 @@ import {
 } from "./kittyKeyboardProtocol";
 import { installKittyKeyboardProtocolHandlers } from "./kittyKeyboardRuntime";
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
+import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
   markExpectedTerminalCursorPositionReport,
@@ -79,6 +80,13 @@ export type XTermRuntime = {
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
+  /**
+   * Clear the WebGL renderer's glyph texture atlas so glyphs re-rasterize on the
+   * next frame. No-op when the DOM renderer is active. Used to recover from the
+   * persistent "garbled / 花屏" corruption (issue #1049) that the WebGL atlas can
+   * fall into after font changes or device pixel ratio changes.
+   */
+  clearTextureAtlas: () => void;
 };
 
 export type CreateXTermRuntimeContext = {
@@ -385,6 +393,45 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   scopedWindow.__xtermRendererPreference = performanceConfig.preferDOMRenderer
     ? "dom"
     : "webgl";
+
+  // The WebGL renderer caches rasterized glyphs in a texture atlas. Heavy TUIs
+  // (claude code / gemini cli / opencode and other full-screen agents), font
+  // changes, and device pixel ratio changes can leave that atlas in a corrupted
+  // state that persists for the life of the terminal — the "garbled / 花屏"
+  // report in issue #1049 where only opening a brand-new terminal helps. Clearing
+  // the atlas forces glyphs to re-rasterize at the correct scale on the next
+  // frame. No-op for the DOM renderer.
+  const clearWebglTextureAtlas = () => {
+    if (!webglAddon) return;
+    try {
+      webglAddon.clearTextureAtlas();
+    } catch (err) {
+      logger.warn("[XTerm] clearTextureAtlas failed", err);
+    }
+  };
+
+  // Recover the renderer when the device pixel ratio changes (moving the window
+  // between monitors with different DPI, or changing OS display scaling — a
+  // common Windows trigger). matchMedia change does not fire a normal resize, so
+  // this is needed in addition to the resize handling below.
+  let stopDprWatch: () => void = () => {};
+  if (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function"
+  ) {
+    stopDprWatch = watchDevicePixelRatio({
+      getDevicePixelRatio: () => window.devicePixelRatio || 1,
+      matchMedia: (query) => window.matchMedia(query),
+      onChange: () => {
+        clearWebglTextureAtlas();
+        try {
+          fitAddon.fit();
+        } catch (err) {
+          logger.warn("[XTerm] fit after devicePixelRatio change failed", err);
+        }
+      },
+    });
+  }
 
   const webLinksAddon = new WebLinksAddon((event, uri) => {
     const currentLinkModifier = ctx.terminalSettingsRef.current?.linkModifier ?? "none";
@@ -858,6 +905,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   let resizeTimeout: NodeJS.Timeout | null = null;
   const resizeDebounceMs = XTERM_PERFORMANCE_CONFIG.resize.debounceMs;
   term.onResize(({ cols, rows }) => {
+    // A reflow can leave stale glyphs in the WebGL atlas; clear it so the new
+    // dimensions re-rasterize cleanly (issue #1049).
+    clearWebglTextureAtlas();
     const id = ctx.sessionRef.current;
     if (!id) return;
     if (resizeTimeout) clearTimeout(resizeTimeout);
@@ -876,8 +926,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     serializeAddon,
     searchAddon,
     keywordHighlighter,
+    clearTextureAtlas: clearWebglTextureAtlas,
     dispose: () => {
       cleanupMiddleClick?.();
+      stopDprWatch();
       keywordHighlighter.dispose();
       eraseScrollbackDisposable.dispose();
       for (const disposable of cursorPositionReportRequestDisposables) {
