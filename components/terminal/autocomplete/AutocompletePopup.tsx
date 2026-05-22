@@ -95,16 +95,22 @@ const DirExpandIndicator: React.FC<{ visible: boolean; color: string }> = ({ vis
 const KeyCap: React.FC<{ label: string; color: string; bg: string }> = ({ label, color, bg }) => (
   <span
     style={{
-      fontSize: "10px",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      boxSizing: "border-box",
+      height: "16px",
+      minWidth: "16px",
+      padding: "0 4px",
+      fontSize: "11px",
       lineHeight: 1,
-      padding: "2px 4px",
-      borderRadius: "3px",
-      border: `1px solid ${color}`,
-      color,
-      backgroundColor: bg,
+      borderRadius: "4px",
+      border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+      color: `color-mix(in srgb, ${color} 80%, ${bg})`,
+      backgroundColor: `color-mix(in srgb, ${color} 12%, ${bg})`,
       flexShrink: 0,
-      minWidth: "14px",
-      textAlign: "center",
+      fontFamily:
+        'ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif',
     }}
   >
     {label}
@@ -388,7 +394,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                   {suggestion.source === "path" && suggestion.fileType === "directory" && (
                     <KeyCap label="→" color={dimTextColor} bg={popupBg} />
                   )}
-                  <KeyCap label="↵" color={dimTextColor} bg={popupBg} />
+                  <KeyCap label="⏎" color={dimTextColor} bg={popupBg} />
                 </span>
               )}
             </div>
