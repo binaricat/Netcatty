@@ -31,6 +31,10 @@ import {
   localStorageAdapter,
 } from '../../infrastructure/persistence/localStorageAdapter';
 import { notify } from '../notification';
+import {
+  getRuntimeRemoteCheckIntervalMs,
+  shouldRunRuntimeRemoteCheck,
+} from './autoSyncRemoteSchedule';
 
 interface AutoSyncConfig {
   // Data to sync
@@ -93,6 +97,11 @@ type SyncTrigger = 'auto' | 'manual';
 
 interface SyncNowOptions {
   trigger?: SyncTrigger;
+}
+
+interface RemoteVersionCheckOptions {
+  force?: boolean;
+  notifyOnFailure?: boolean;
 }
 
 export const useAutoSync = (config: AutoSyncConfig) => {
@@ -402,17 +411,20 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   // windows but does NOT serialize same-window re-entry, so this
   // in-flight guard closes that gap at the top of the call.
   const checkRemoteInFlightRef = useRef(false);
+  const lastRuntimeRemoteCheckAtRef = useRef<number | null>(null);
 
   // Check remote version and pull if newer (on startup)
-  const checkRemoteVersion = useCallback(async () => {
+  const checkRemoteVersion = useCallback(async (options?: RemoteVersionCheckOptions) => {
     if (checkRemoteInFlightRef.current) {
       return;
     }
+    const force = options?.force === true;
+    const notifyOnFailure = options?.notifyOnFailure !== false;
     const state = manager.getState();
     const hasProvider = Object.values(state.providers).some((provider) => isProviderReadyForSync(provider));
     const unlocked = state.securityState === 'UNLOCKED';
 
-    if (!hasProvider || !unlocked || hasCheckedRemoteRef.current || startupReadyRef.current === false) {
+    if (!hasProvider || !unlocked || (!force && hasCheckedRemoteRef.current) || startupReadyRef.current === false) {
       return;
     }
 
@@ -548,14 +560,16 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       }
     } catch (error) {
       console.error('[AutoSync] Failed to check remote version:', error);
-      // Surface a degraded-sync hint to the user rather than silently
-      // opening the auto-sync gate. Auto-sync will still retry on next
-      // data change (see finally block), but without this toast the user
-      // has no visible signal that startup reconciliation failed.
-      notify.error(
-        t('sync.autoSync.inspectFailedMessage'),
-        t('sync.autoSync.inspectFailedTitle'),
-      );
+      if (notifyOnFailure) {
+        // Surface a degraded-sync hint to the user rather than silently
+        // opening the auto-sync gate. Auto-sync will still retry on next
+        // data change (see finally block), but without this toast the user
+        // has no visible signal that startup reconciliation failed.
+        notify.error(
+          t('sync.autoSync.inspectFailedMessage'),
+          t('sync.autoSync.inspectFailedTitle'),
+        );
+      }
       // Leave hasCheckedRemoteRef=false so the next startup (or the next
       // provider/unlock transition) can retry.
     } finally {
@@ -726,12 +740,86 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       if (timerId) clearTimeout(timerId);
     };
   }, [sync.hasAnyConnectedProvider, sync.isUnlocked, config.startupReady, checkRemoteVersion]);
+
+  const runRuntimeRemoteCheck = useCallback(async (options?: { force?: boolean }) => {
+    const now = Date.now();
+    const minIntervalMs = getRuntimeRemoteCheckIntervalMs(sync.autoSyncInterval);
+    if (!shouldRunRuntimeRemoteCheck({
+      hasAnyConnectedProvider: sync.hasAnyConnectedProvider,
+      autoSyncEnabled: sync.autoSyncEnabled,
+      isUnlocked: sync.isUnlocked,
+      startupRemoteCheckDone: remoteCheckDoneRef.current,
+      isSyncing: sync.isSyncing,
+      isSyncRunning: isSyncRunningRef.current,
+      remoteCheckInFlight: checkRemoteInFlightRef.current,
+      force: options?.force === true,
+      now,
+      lastRemoteCheckAt: lastRuntimeRemoteCheckAtRef.current,
+      minIntervalMs,
+    })) {
+      return;
+    }
+
+    lastRuntimeRemoteCheckAtRef.current = now;
+    await checkRemoteVersion({ force: true, notifyOnFailure: false });
+  }, [
+    checkRemoteVersion,
+    sync.autoSyncEnabled,
+    sync.autoSyncInterval,
+    sync.hasAnyConnectedProvider,
+    sync.isSyncing,
+    sync.isUnlocked,
+  ]);
+
+  // Keep checking the cloud while the app is open. This closes the gap where
+  // another device uploads changes after our startup inspection but before
+  // this device edits anything locally.
+  useEffect(() => {
+    if (!sync.hasAnyConnectedProvider || !sync.autoSyncEnabled || !sync.isUnlocked) {
+      return;
+    }
+
+    const intervalMs = getRuntimeRemoteCheckIntervalMs(sync.autoSyncInterval);
+    const timerId = window.setInterval(() => {
+      void runRuntimeRemoteCheck();
+    }, intervalMs);
+
+    return () => window.clearInterval(timerId);
+  }, [
+    runRuntimeRemoteCheck,
+    sync.autoSyncEnabled,
+    sync.autoSyncInterval,
+    sync.hasAnyConnectedProvider,
+    sync.isUnlocked,
+  ]);
+
+  // Also re-check when the user returns to the app or the network comes back.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void runRuntimeRemoteCheck({ force: true });
+      }
+    };
+    const handleOnline = () => {
+      void runRuntimeRemoteCheck({ force: true });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [runRuntimeRemoteCheck]);
   
   // Reset check flags when provider disconnects
   useEffect(() => {
     if (!sync.hasAnyConnectedProvider) {
       hasCheckedRemoteRef.current = false;
       remoteCheckDoneRef.current = false;
+      lastRuntimeRemoteCheckAtRef.current = null;
     }
   }, [sync.hasAnyConnectedProvider]);
 
