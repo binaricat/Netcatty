@@ -1212,17 +1212,12 @@ export function useTerminalAutocomplete(
         }
 
         // Enter on popup. The selected candidate is already rendered into the
-        // line by live-preview, so let Enter reach the shell; just record the
-        // command for history and suppress handleInput's duplicate record.
+        // line by live-preview, so let Enter reach the shell. Don't record here:
+        // handleInput's Enter path records the *actual* line — it uses
+        // lastAcceptedCommandRef (set on select) but falls back to the live
+        // buffer when the user edited the previewed command (typing nulls that
+        // ref), so recording stays accurate in both cases.
         if (e.key === "Enter") {
-          if (s.selectedIndex >= 0 && previewActiveRef.current) {
-            const selected = s.suggestions[s.selectedIndex];
-            if (selected) {
-              recordCommand(selected.text, hostIdRef.current, hostOsRef.current);
-              suppressNextEnterRecordRef.current = true;
-              setTimeout(() => { suppressNextEnterRecordRef.current = false; }, 100);
-            }
-          }
           clearState();
           previewActiveRef.current = false;
           return true;
