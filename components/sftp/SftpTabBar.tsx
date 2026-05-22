@@ -20,6 +20,7 @@ import React, {
 } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { logger } from "../../lib/logger";
+import { handleTabMiddleClickClose, handleTabMiddleMouseDown } from "../../lib/tabInteractions";
 import { useRenderTracker } from "../../lib/useRenderTracker";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
@@ -322,6 +323,8 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
                 data-tab-type="sftp"
                 data-state={isActive ? 'active' : 'inactive'}
                 onClick={(e) => handleSelectTabClick(e, tab.id)}
+                onMouseDown={handleTabMiddleMouseDown}
+                onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseTab(tab.id))}
                 draggable
                 onDragStart={(e) => handleTabDragStart(e, tab.id)}
                 onDragEnd={handleTabDragEnd}

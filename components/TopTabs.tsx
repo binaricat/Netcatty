@@ -12,6 +12,7 @@ import { cn } from '../lib/utils';
 import { Host, TerminalSession, Workspace } from '../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from './DistroAvatar';
 import { getShellIconPath, isMonochromeShellIcon } from '../lib/useDiscoveredShells';
+import { handleTabMiddleClickClose, handleTabMiddleMouseDown } from '../lib/tabInteractions';
 import { Button } from './ui/button';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -355,6 +356,8 @@ const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
           data-tab-type="editor"
           data-state={isActive ? 'active' : 'inactive'}
           onClick={handleClick}
+          onMouseDown={handleTabMiddleMouseDown}
+          onAuxClick={(e) => handleTabMiddleClickClose(e, () => onRequestCloseEditorTab(editorTab.id))}
           className="netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0"
           style={{
             backgroundColor: isActive
@@ -458,6 +461,8 @@ const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
           data-tab-type="session"
           data-state={isActive ? 'active' : 'inactive'}
           onClick={handleClick}
+          onMouseDown={handleTabMiddleMouseDown}
+          onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseSession(session.id))}
           draggable
           onDragStart={(e) => onTabDragStart(e, session.id)}
           onDragEnd={onTabDragEnd}
@@ -586,6 +591,8 @@ const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
           data-tab-type="workspace"
           data-state={isActive ? 'active' : 'inactive'}
           onClick={handleClick}
+          onMouseDown={handleTabMiddleMouseDown}
+          onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseWorkspace(workspace.id))}
           draggable
           onDragStart={(e) => onTabDragStart(e, workspace.id)}
           onDragEnd={onTabDragEnd}
@@ -694,6 +701,8 @@ const LogViewTopTab: React.FC<LogViewTopTabProps> = memo(({
       data-tab-type="logView"
       data-state={isActive ? 'active' : 'inactive'}
       onClick={handleClick}
+      onMouseDown={handleTabMiddleMouseDown}
+      onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseLogView(logView.id))}
       className="netcatty-tab relative h-7 pl-3 pr-2 min-w-[140px] max-w-[240px] rounded-t-md overflow-hidden text-xs font-semibold cursor-pointer flex items-center justify-between gap-2 app-no-drag flex-shrink-0"
       style={{
         backgroundColor: isActive
