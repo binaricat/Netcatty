@@ -24,6 +24,7 @@ import { preloadCommonSpecs } from "./figSpecLoader";
 import { getXTermCellDimensions } from "./xtermUtils";
 import { listDirectoryEntries, normalizePathTokenForLookup } from "./remotePathCompleter";
 import { decideGhostSuggestion } from "./ghostSuggestionPolicy";
+import { computeLivePreviewWrite } from "./livePreviewSequence";
 
 export interface AutocompleteSettings {
   enabled: boolean;
@@ -253,6 +254,10 @@ export function useTerminalAutocomplete(
   const fetchVersionRef = useRef(0);
   /** Last accepted suggestion text — for accurate history recording on fast Enter after accept */
   const lastAcceptedCommandRef = useRef<string | null>(null);
+  /** The user's typed input that produced the current popup suggestions (live-preview baseline). */
+  const previewBaselineRef = useRef<string>("");
+  /** Whether a popup candidate is currently rendered into the command line (#1005). */
+  const previewActiveRef = useRef(false);
   /** Monotonic counter to invalidate stale async sub-dir fetches */
   const subDirFetchVersionRef = useRef(0);
   /**
@@ -666,6 +671,9 @@ export function useTerminalAutocomplete(
 
     // Popup
     if (settingsRef.current.showPopupMenu && completions.length > 0) {
+      // Live-preview baseline: the typed input these suggestions completed.
+      previewBaselineRef.current = input;
+      previewActiveRef.current = false;
       const { position, cursorLineTop, cursorLineBottom, expandUpward } = calculatePopupPosition(term, completions.length);
       startTransition(() => {
         setState((prev) => {
@@ -1144,25 +1152,24 @@ export function useTerminalAutocomplete(
           return true;
         }
 
-        // Main panel navigation
-        if (e.key === "ArrowUp") {
+        // Main panel navigation. The cycle includes a -1 "no selection" slot so
+        // ↑ off the top / ↓ off the bottom reverts to the typed baseline. Moving
+        // the selection live-renders the candidate into the command line (#1005).
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
+          const n = s.suggestions.length;
+          const cur = s.selectedIndex;
+          const next =
+            e.key === "ArrowDown"
+              ? (cur >= n - 1 ? -1 : cur + 1)
+              : (cur <= -1 ? n - 1 : cur - 1);
           setState((prev) => ({
             ...prev,
-            selectedIndex: prev.selectedIndex <= 0 ? prev.suggestions.length - 1 : prev.selectedIndex - 1,
+            selectedIndex: next,
             subDirPanels: [], subDirFocusLevel: -1,
           }));
-          fetchSubDirForIndex(s.selectedIndex <= 0 ? s.suggestions.length - 1 : s.selectedIndex - 1);
-          return false;
-        }
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setState((prev) => ({
-            ...prev,
-            selectedIndex: prev.selectedIndex >= prev.suggestions.length - 1 ? 0 : prev.selectedIndex + 1,
-            subDirPanels: [], subDirFocusLevel: -1,
-          }));
-          fetchSubDirForIndex(s.selectedIndex >= s.suggestions.length - 1 ? 0 : s.selectedIndex + 1);
+          renderPreviewSelection(next);
+          if (next >= 0) fetchSubDirForIndex(next);
           return false;
         }
 
@@ -1195,6 +1202,36 @@ export function useTerminalAutocomplete(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- insertSuggestion uses refs, stable identity
     [writeToTerminal],
   );
+
+  /**
+   * Render the suggestion at `index` straight into the command line (Termius
+   * live-preview, #1005). `index < 0` restores the user's typed baseline.
+   */
+  const renderPreviewSelection = useCallback((index: number) => {
+    const s = stateRef.current;
+    const term = termRef.current;
+    if (!term) return;
+    const baseline = previewBaselineRef.current;
+    const candidate =
+      index >= 0 && s.suggestions[index] ? s.suggestions[index].text : baseline;
+    const { prompt } = getAlignedPrompt(
+      term,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    if (!prompt.isAtPrompt) return;
+    const seq = computeLivePreviewWrite({
+      currentLine: prompt.userInput,
+      candidate,
+      os: hostOsRef.current,
+    });
+    if (seq) writeToTerminal(seq);
+    typedInputBufferRef.current = candidate;
+    typedBufferReliableRef.current = true;
+    const isPreview = index >= 0 && candidate !== baseline;
+    previewActiveRef.current = isPreview;
+    lastAcceptedCommandRef.current = isPreview ? candidate : null;
+  }, [termRef, writeToTerminal]);
 
   /**
    * Insert a suggestion into the terminal.
