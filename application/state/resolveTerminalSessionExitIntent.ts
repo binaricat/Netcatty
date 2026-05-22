@@ -6,12 +6,17 @@ export type TerminalSessionExitEvent = {
 };
 
 export type TerminalSessionExitIntent =
+  | { kind: "closeSession" }
   | { kind: "markDisconnected" };
 
 export function resolveTerminalSessionExitIntent(
-  _evt: TerminalSessionExitEvent,
+  evt: TerminalSessionExitEvent,
 ): TerminalSessionExitIntent {
-  // Backend exits can be remote idle timeouts, shell termination, or transport closes.
-  // Explicit user closes bypass this policy and call the close-session path directly.
+  if (evt.reason === "exited") {
+    return { kind: "closeSession" };
+  }
+
+  // Timeouts, transport errors, and channel closes should keep the tab visible
+  // so the user can inspect output and reconnect.
   return { kind: "markDisconnected" };
 }
