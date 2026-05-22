@@ -541,6 +541,41 @@ export function useTerminalAutocomplete(
     });
   }, [termRef]);
 
+  /**
+   * Render the full path for a sub-dir entry into the line WITHOUT finalizing
+   * (no clearState). Used for live-preview while navigating sub-dir panels (#1005).
+   */
+  const renderSubDirPath = useCallback((level: number, entry: SubDirEntry) => {
+    const s = stateRef.current;
+    const term = termRef.current;
+    if (!term) return;
+    const panel = s.subDirPanels[level];
+    if (!panel) return;
+    const { prompt } = getAlignedPrompt(
+      term, typedInputBufferRef.current, typedBufferReliableRef.current,
+    );
+    if (!prompt.isAtPrompt) return;
+    const parsed = parseCommandLine(prompt.userInput);
+    const cmdPrefix = parsed.tokens.slice(0, parsed.wordIndex).join(" ")
+      + (parsed.wordIndex > 0 ? " " : "");
+    const currentToken = parsed.currentWord;
+    const quotePrefix = currentToken.startsWith('"') || currentToken.startsWith("'")
+      ? currentToken[0] : "";
+    const quoteSuffix = quotePrefix && currentToken.endsWith(quotePrefix) ? quotePrefix : "";
+    const suffix = entry.type === "directory" ? "/" : "";
+    const entryName = quotePrefix || !/[\\$'"|!<>;#~` ]/.test(entry.name)
+      ? entry.name : shellEscape(entry.name);
+    const newCommand = cmdPrefix + `${quotePrefix}${panel.dirPath}${entryName}${suffix}${quoteSuffix}`;
+    const seq = computeLivePreviewWrite({
+      currentLine: prompt.userInput, candidate: newCommand, os: hostOsRef.current,
+    });
+    if (seq) writeToTerminal(seq);
+    typedInputBufferRef.current = newCommand;
+    typedBufferReliableRef.current = true;
+    previewActiveRef.current = true;
+    lastAcceptedCommandRef.current = newCommand;
+  }, [termRef, writeToTerminal]);
+
   /** Handle selecting a file/directory from any sub-dir panel.
    *  Builds the full path from the panel stack and replaces the current input. */
   const handleSubDirSelect = useCallback((level: number, entry: SubDirEntry) => {
@@ -1096,8 +1131,10 @@ export function useTerminalAutocomplete(
               panels[focusLevel] = { ...p, selectedIndex: newIdx };
               return { ...prev, subDirPanels: panels.slice(0, focusLevel + 1) };
             });
-            // Auto-expand next level if the newly selected item is a directory
+            // Live-render the highlighted entry's full path into the line (#1005).
             const newEntry = focusedPanel.entries[newIdx];
+            if (newEntry) renderSubDirPath(focusLevel, newEntry);
+            // Auto-expand next level if the newly selected item is a directory
             if (newEntry?.type === "directory") {
               expandSubDir(focusLevel, newEntry);
             }
