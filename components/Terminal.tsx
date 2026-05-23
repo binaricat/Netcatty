@@ -1269,6 +1269,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!isVisible) return;
     const timer = setTimeout(() => {
       safeFit({ requireVisible: true });
+      // Recover the WebGL renderer now that this tab is visible again. Hidden
+      // panes stay mounted off-screen (visibility:hidden) so each keeps a live
+      // WebGL context; creating another terminal's context — or the GPU dropping
+      // a non-composited off-screen canvas — can leave this terminal's drawing
+      // buffer corrupted ("花屏", issue #1063). Because a hidden pane keeps its
+      // dimensions, becoming visible triggers no resize and therefore no redraw,
+      // so the corruption persists until the user resizes the window. Force the
+      // same recovery a resize performs: clear the texture atlas (no-op on the
+      // DOM renderer) and synchronously repaint every row.
+      xtermRuntimeRef.current?.clearTextureAtlas();
+      const visibleTerm = termRef.current;
+      if (visibleTerm) forceSyncRenderAfterResize(visibleTerm);
       if (pendingOutputScrollRef.current) {
         termRef.current?.scrollToBottom();
         if (typeof requestAnimationFrame === "function") {
