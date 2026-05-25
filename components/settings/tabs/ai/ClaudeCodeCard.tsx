@@ -1,5 +1,5 @@
-import React from "react";
-import { RefreshCw } from "lucide-react";
+import React, { useState } from "react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -29,6 +29,11 @@ export const ClaudeCodeCard: React.FC<{
 }) => {
   const { t } = useI18n();
   const found = pathInfo?.available;
+  // Collapsed by default; auto-expand when the user already has config so it
+  // isn't hidden. Local UI state — not persisted.
+  const [configOpen, setConfigOpen] = useState(
+    () => Boolean(configDir.trim() || envText.trim()),
+  );
 
   const statusText = isResolvingPath
     ? t('ai.claude.detecting')
@@ -92,36 +97,51 @@ export const ClaudeCodeCard: React.FC<{
         </div>
       ) : null}
 
-      {/* Authentication & config (optional) */}
-      <div className="space-y-3 border-t border-border/60 pt-3">
-        <div className="text-xs font-medium text-muted-foreground">
-          {t('ai.claude.configSection')}
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="claude-config-dir" className="text-xs text-muted-foreground">{t('ai.claude.configDir')}</label>
-          <input
-            id="claude-config-dir"
-            type="text"
-            value={configDir}
-            onChange={(e) => onConfigDirChange(e.target.value)}
-            placeholder={t('ai.claude.configDir.placeholder')}
-            className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      {/* Authentication & config (optional, collapsible) */}
+      <div className="border-t border-border/60 pt-3">
+        <button
+          type="button"
+          onClick={() => setConfigOpen((v) => !v)}
+          aria-expanded={configOpen}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <span className="text-xs font-medium text-muted-foreground">
+            {t('ai.claude.configSection')}
+          </span>
+          <ChevronDown
+            size={14}
+            className={cn("text-muted-foreground transition-transform", configOpen && "rotate-180")}
           />
-          <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.configDir.hint')}</p>
-        </div>
-        <div className="space-y-1.5">
-          <label htmlFor="claude-env-vars" className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
-          <textarea
-            id="claude-env-vars"
-            value={envText}
-            onChange={(e) => onEnvTextChange(e.target.value)}
-            placeholder={t('ai.claude.envVars.placeholder')}
-            rows={3}
-            spellCheck={false}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
-          />
-          <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.envVars.hint')}</p>
-        </div>
+        </button>
+        {configOpen && (
+          <div className="space-y-3 mt-3">
+            <div className="space-y-1.5">
+              <label htmlFor="claude-config-dir" className="text-xs text-muted-foreground">{t('ai.claude.configDir')}</label>
+              <input
+                id="claude-config-dir"
+                type="text"
+                value={configDir}
+                onChange={(e) => onConfigDirChange(e.target.value)}
+                placeholder={t('ai.claude.configDir.placeholder')}
+                className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.configDir.hint')}</p>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="claude-env-vars" className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
+              <textarea
+                id="claude-env-vars"
+                value={envText}
+                onChange={(e) => onEnvTextChange(e.target.value)}
+                placeholder={t('ai.claude.envVars.placeholder')}
+                rows={3}
+                spellCheck={false}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+              />
+              <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.envVars.hint')}</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
