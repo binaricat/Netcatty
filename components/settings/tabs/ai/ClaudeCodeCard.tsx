@@ -12,12 +12,20 @@ export const ClaudeCodeCard: React.FC<{
   customPath: string;
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
+  configDir: string;
+  onConfigDirChange: (value: string) => void;
+  envText: string;
+  onEnvTextChange: (value: string) => void;
 }> = ({
   pathInfo,
   isResolvingPath,
   customPath,
   onCustomPathChange,
   onRecheckPath,
+  configDir,
+  onConfigDirChange,
+  envText,
+  onEnvTextChange,
 }) => {
   const { t } = useI18n();
   const found = pathInfo?.available;
@@ -83,6 +91,36 @@ export const ClaudeCodeCard: React.FC<{
           </div>
         </div>
       ) : null}
+
+      {/* Authentication & config (optional) */}
+      <div className="space-y-3 border-t border-border/60 pt-3">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t('ai.claude.configSection')}
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground">{t('ai.claude.configDir')}</label>
+          <input
+            type="text"
+            value={configDir}
+            onChange={(e) => onConfigDirChange(e.target.value)}
+            placeholder={t('ai.claude.configDir.placeholder')}
+            className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.configDir.hint')}</p>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
+          <textarea
+            value={envText}
+            onChange={(e) => onEnvTextChange(e.target.value)}
+            placeholder={t('ai.claude.envVars.placeholder')}
+            rows={3}
+            spellCheck={false}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+          />
+          <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.envVars.hint')}</p>
+        </div>
+      </div>
     </div>
   );
 };

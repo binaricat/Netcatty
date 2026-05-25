@@ -48,6 +48,7 @@ import {
   buildManagedAgentState,
   getInitialManagedAgentPaths,
 } from "./ai/managedAgentState";
+import { splitClaudeEnv, buildClaudeEnv } from "./ai/claudeConfigEnv";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -125,6 +126,29 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const [claudePathInfo, setClaudePathInfo] = useState<AgentPathInfo | null>(null);
   const [claudeCustomPath, setClaudeCustomPath] = useState("");
   const [isResolvingClaude, setIsResolvingClaude] = useState(false);
+
+  const claudeManagedEnv = useMemo(
+    () => externalAgents.find((a) => a.id === "discovered_claude")?.env,
+    [externalAgents],
+  );
+  const { configDir: claudeConfigDir, envText: claudeEnvText } = useMemo(
+    () => splitClaudeEnv(claudeManagedEnv),
+    [claudeManagedEnv],
+  );
+
+  const updateClaudeEnv = useCallback(
+    (nextConfigDir: string, nextEnvText: string) => {
+      setExternalAgents((prev) =>
+        prev.map((a) =>
+          a.id === "discovered_claude"
+            ? { ...a, env: buildClaudeEnv(a.env, nextConfigDir, nextEnvText) }
+            : a,
+        ),
+      );
+    },
+    [setExternalAgents],
+  );
+
   const initialManagedPathsRef = useRef<{
     codex: string;
     claude: string;
@@ -542,6 +566,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               customPath={claudeCustomPath}
               onCustomPathChange={setClaudeCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("claude")}
+              configDir={claudeConfigDir}
+              onConfigDirChange={(v) => updateClaudeEnv(v, claudeEnvText)}
+              envText={claudeEnvText}
+              onEnvTextChange={(v) => updateClaudeEnv(claudeConfigDir, v)}
             />
           </div>
 

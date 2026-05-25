@@ -1981,6 +1981,13 @@ const ru: Messages = {
   'ai.claude.path': 'Путь:',
   'ai.claude.notFoundHint': 'Не удалось найти claude в PATH. Установите его или укажите путь к исполняемому файлу ниже.',
   'ai.claude.customPathPlaceholder': 'например, /usr/local/bin/claude',
+  'ai.claude.configSection': 'Аутентификация и конфигурация (опционально)',
+  'ai.claude.configDir': 'Каталог конфигурации',
+  'ai.claude.configDir.placeholder': '~/.claude (пусто — по умолчанию)',
+  'ai.claude.configDir.hint': 'Задаёт CLAUDE_CONFIG_DIR — укажите папку, где выполнен вход `claude` (содержит settings.json и учётные данные).',
+  'ai.claude.envVars': 'Переменные окружения',
+  'ai.claude.envVars.placeholder': 'ANTHROPIC_API_KEY=sk-...\nANTHROPIC_BASE_URL=https://...',
+  'ai.claude.envVars.hint': 'По одному KEY=VALUE в строке. Передаётся процессу агента Claude.',
   'ai.claude.check': 'Проверить',
 
   // AI GitHub Copilot CLI

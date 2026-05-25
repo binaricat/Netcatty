@@ -1957,6 +1957,13 @@ const zhCN: Messages = {
   'ai.claude.path': '路径：',
   'ai.claude.notFoundHint': '在 PATH 中未找到 claude。请安装或在下方指定可执行文件路径。',
   'ai.claude.customPathPlaceholder': '例如 /usr/local/bin/claude',
+  'ai.claude.configSection': '认证与配置（可选）',
+  'ai.claude.configDir': '配置目录',
+  'ai.claude.configDir.placeholder': '~/.claude（留空用默认）',
+  'ai.claude.configDir.hint': '设置 CLAUDE_CONFIG_DIR —— 指向你已运行 `claude` 登录的目录（含 settings.json 和凭据）。',
+  'ai.claude.envVars': '环境变量',
+  'ai.claude.envVars.placeholder': 'ANTHROPIC_API_KEY=sk-...\nANTHROPIC_BASE_URL=https://...',
+  'ai.claude.envVars.hint': '每行一个 KEY=VALUE，会传给 Claude agent 进程。',
   'ai.claude.check': '检查',
 
   // AI GitHub Copilot CLI
