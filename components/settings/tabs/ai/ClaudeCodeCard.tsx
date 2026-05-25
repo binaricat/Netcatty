@@ -98,8 +98,9 @@ export const ClaudeCodeCard: React.FC<{
           {t('ai.claude.configSection')}
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('ai.claude.configDir')}</label>
+          <label htmlFor="claude-config-dir" className="text-xs text-muted-foreground">{t('ai.claude.configDir')}</label>
           <input
+            id="claude-config-dir"
             type="text"
             value={configDir}
             onChange={(e) => onConfigDirChange(e.target.value)}
@@ -109,8 +110,9 @@ export const ClaudeCodeCard: React.FC<{
           <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.configDir.hint')}</p>
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
+          <label htmlFor="claude-env-vars" className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
           <textarea
+            id="claude-env-vars"
             value={envText}
             onChange={(e) => onEnvTextChange(e.target.value)}
             placeholder={t('ai.claude.envVars.placeholder')}

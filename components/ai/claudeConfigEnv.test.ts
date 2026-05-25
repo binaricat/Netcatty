@@ -46,3 +46,16 @@ test("buildClaudeEnv merges config dir + parsed env, preserves CLAUDE_CODE_EXECU
 test("buildClaudeEnv omits config dir when blank and returns undefined when empty", () => {
   assert.equal(buildClaudeEnv(undefined, "  ", ""), undefined);
 });
+
+test("buildClaudeEnv ignores managed keys typed into the env editor", () => {
+  const next = buildClaudeEnv(
+    { CLAUDE_CODE_EXECUTABLE: "/usr/bin/claude" },
+    "/cfg",
+    "CLAUDE_CODE_EXECUTABLE=/evil/claude\nCLAUDE_CONFIG_DIR=/evil/dir\nANTHROPIC_API_KEY=sk-x",
+  );
+  assert.deepEqual(next, {
+    CLAUDE_CODE_EXECUTABLE: "/usr/bin/claude",
+    CLAUDE_CONFIG_DIR: "/cfg",
+    ANTHROPIC_API_KEY: "sk-x",
+  });
+});

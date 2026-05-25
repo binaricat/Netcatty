@@ -55,7 +55,11 @@ export function buildClaudeEnv(
   const trimmedDir = String(configDir || "").trim();
   if (trimmedDir) next[CONFIG_DIR_KEY] = trimmedDir;
 
-  Object.assign(next, parseEnvLines(envText));
+  // Drop managed keys if a user typed them into the free-text editor — the
+  // config-dir field and path discovery own CLAUDE_CONFIG_DIR / CLAUDE_CODE_EXECUTABLE.
+  const parsed = parseEnvLines(envText);
+  for (const key of MANAGED_KEYS) delete parsed[key];
+  Object.assign(next, parsed);
 
   return Object.keys(next).length > 0 ? next : undefined;
 }

@@ -3064,10 +3064,18 @@ function registerHandlers(ipcMain) {
       // #3 (light): include JSON-RPC code/data when present so Claude's bare
       // "Internal error" isn't shown context-free.
       const errCode = typeof err?.code === "number" ? err.code : err?.data?.code;
-      const errDetail = err?.data && typeof err.data === "object"
-        ? (() => { try { return JSON.stringify(err.data); } catch { return ""; } })()
-        : "";
-      const errMsg = [normalized.message, errCode != null ? `(code ${errCode})` : "", errDetail && errDetail !== "{}" ? errDetail : ""]
+      // Only surface data fields we don't already show (message/code) so the
+      // detail doesn't echo them back.
+      let errDetail = "";
+      if (err?.data && typeof err.data === "object") {
+        const extra = { ...err.data };
+        delete extra.code;
+        delete extra.message;
+        if (Object.keys(extra).length > 0) {
+          try { errDetail = JSON.stringify(extra); } catch { errDetail = ""; }
+        }
+      }
+      const errMsg = [normalized.message, errCode != null ? `(code ${errCode})` : "", errDetail]
         .filter(Boolean)
         .join(" ");
       const isAuthErr = isCodexAuthError(normalized);
