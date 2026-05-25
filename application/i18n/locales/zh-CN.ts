@@ -1962,8 +1962,8 @@ const zhCN: Messages = {
   'ai.claude.configDir.placeholder': '~/.claude（留空用默认）',
   'ai.claude.configDir.hint': '设置 CLAUDE_CONFIG_DIR —— 指向你已运行 `claude` 登录的目录（含 settings.json 和凭据）。',
   'ai.claude.envVars': '环境变量',
-  'ai.claude.envVars.placeholder': 'ANTHROPIC_API_KEY=sk-...\nANTHROPIC_BASE_URL=https://...',
-  'ai.claude.envVars.hint': '每行一个 KEY=VALUE，会传给 Claude agent 进程。',
+  'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
+  'ai.claude.envVars.hint': '每行一个 KEY=VALUE，传给 Claude agent。明文存在本地——API key／凭据建议用上面的「配置目录」（claude 登录），不要放这里。',
   'ai.claude.check': '检查',
 
   // AI GitHub Copilot CLI

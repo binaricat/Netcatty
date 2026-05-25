@@ -1986,8 +1986,8 @@ const ru: Messages = {
   'ai.claude.configDir.placeholder': '~/.claude (пусто — по умолчанию)',
   'ai.claude.configDir.hint': 'Задаёт CLAUDE_CONFIG_DIR — укажите папку, где выполнен вход `claude` (содержит settings.json и учётные данные).',
   'ai.claude.envVars': 'Переменные окружения',
-  'ai.claude.envVars.placeholder': 'ANTHROPIC_API_KEY=sk-...\nANTHROPIC_BASE_URL=https://...',
-  'ai.claude.envVars.hint': 'По одному KEY=VALUE в строке. Передаётся процессу агента Claude.',
+  'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
+  'ai.claude.envVars.hint': 'По одному KEY=VALUE в строке, передаётся агенту Claude. Хранится локально в открытом виде — для API-ключей и учётных данных используйте «Каталог конфигурации» выше (вход `claude`).',
   'ai.claude.check': 'Проверить',
 
   // AI GitHub Copilot CLI

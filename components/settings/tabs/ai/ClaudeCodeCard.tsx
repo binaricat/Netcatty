@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
 import type { AgentPathInfo } from "./types";
 import { ProviderIconBadge } from "./ProviderIconBadge";
+import { parseEnvLines, serializeEnvLines } from "./claudeConfigEnv";
 
 export const ClaudeCodeCard: React.FC<{
   pathInfo: AgentPathInfo | null;
@@ -34,6 +35,18 @@ export const ClaudeCodeCard: React.FC<{
   const [configOpen, setConfigOpen] = useState(
     () => Boolean(configDir.trim() || envText.trim()),
   );
+
+  // The env editor keeps the raw text the user types. Persisting parses it into
+  // a record (dropping incomplete lines), so binding the textarea directly to
+  // the persisted value would erase a key the moment it's typed before its "=".
+  // Only resync from the persisted value when it changes for some reason other
+  // than our own parse→serialize round-trip.
+  const [envDraft, setEnvDraft] = useState(envText);
+  useEffect(() => {
+    setEnvDraft((prev) =>
+      serializeEnvLines(parseEnvLines(prev)) === envText ? prev : envText,
+    );
+  }, [envText]);
 
   const statusText = isResolvingPath
     ? t('ai.claude.detecting')
@@ -131,8 +144,8 @@ export const ClaudeCodeCard: React.FC<{
               <label htmlFor="claude-env-vars" className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>
               <textarea
                 id="claude-env-vars"
-                value={envText}
-                onChange={(e) => onEnvTextChange(e.target.value)}
+                value={envDraft}
+                onChange={(e) => { setEnvDraft(e.target.value); onEnvTextChange(e.target.value); }}
                 placeholder={t('ai.claude.envVars.placeholder')}
                 rows={3}
                 spellCheck={false}

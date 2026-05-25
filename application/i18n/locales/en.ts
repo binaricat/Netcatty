@@ -1954,8 +1954,8 @@ const en: Messages = {
   'ai.claude.configDir.placeholder': '~/.claude (leave blank for default)',
   'ai.claude.configDir.hint': 'Sets CLAUDE_CONFIG_DIR — point at a folder where you have run `claude` login (contains settings.json + credentials).',
   'ai.claude.envVars': 'Environment variables',
-  'ai.claude.envVars.placeholder': 'ANTHROPIC_API_KEY=sk-...\nANTHROPIC_BASE_URL=https://...',
-  'ai.claude.envVars.hint': 'One KEY=VALUE per line. Passed to the Claude agent process.',
+  'ai.claude.envVars.placeholder': 'ANTHROPIC_BASE_URL=https://...\nANTHROPIC_MODEL=...',
+  'ai.claude.envVars.hint': 'One KEY=VALUE per line, passed to the Claude agent. Stored locally in plaintext — for API keys / credentials, prefer the config directory above (a `claude` login).',
   'ai.claude.check': 'Check',
 
   // AI GitHub Copilot CLI
