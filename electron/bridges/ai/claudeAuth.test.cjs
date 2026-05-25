@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const os = require("node:os");
 
-const { detectClaudeAuthPresence, getClaudeConfigDir } = require("./claudeAuth.cjs");
+const { detectClaudeAuthPresence, getClaudeConfigDir, expandHomePath } = require("./claudeAuth.cjs");
 
 test("getClaudeConfigDir: defaults to ~/.claude", () => {
   assert.equal(getClaudeConfigDir({}), path.join(os.homedir(), ".claude"));
@@ -12,6 +12,21 @@ test("getClaudeConfigDir: defaults to ~/.claude", () => {
 
 test("getClaudeConfigDir: honors CLAUDE_CONFIG_DIR", () => {
   assert.equal(getClaudeConfigDir({ CLAUDE_CONFIG_DIR: "/custom/dir" }), "/custom/dir");
+});
+
+test("getClaudeConfigDir: expands a leading ~ in CLAUDE_CONFIG_DIR", () => {
+  assert.equal(
+    getClaudeConfigDir({ CLAUDE_CONFIG_DIR: "~/.claude-work" }),
+    path.join(os.homedir(), ".claude-work"),
+  );
+});
+
+test("expandHomePath: expands '~' and '~/...', leaves others unchanged", () => {
+  assert.equal(expandHomePath("~"), os.homedir());
+  assert.equal(expandHomePath("~/x/y"), path.join(os.homedir(), "x/y"));
+  assert.equal(expandHomePath("/abs/path"), "/abs/path");
+  assert.equal(expandHomePath("~user/x"), "~user/x");
+  assert.equal(expandHomePath(""), "");
 });
 
 test("detectClaudeAuthPresence: ANTHROPIC_API_KEY in env => 'env'", () => {

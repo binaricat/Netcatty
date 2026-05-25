@@ -37,7 +37,7 @@ const {
   toUnpackedAsarPath,
 } = require("./ai/shellUtils.cjs");
 
-const { detectClaudeAuthPresence } = require("./ai/claudeAuth.cjs");
+const { detectClaudeAuthPresence, expandHomePath } = require("./ai/claudeAuth.cjs");
 
 const CLAUDE_AUTH_HELP_MESSAGE =
   "Claude Code has no usable authentication. Open Settings -> AI -> Claude Code and set a Config directory (point it at a folder where you've run `claude` login) or add an ANTHROPIC_API_KEY under Environment variables. Alternatively, run `claude` in a terminal to log in.";
@@ -563,6 +563,12 @@ function normalizeAgentEnv(env) {
   for (const [key, value] of Object.entries(env)) {
     if (!key || value == null) continue;
     result[key] = String(value);
+  }
+  // CLAUDE_CONFIG_DIR is consumed as a filesystem path by the spawned agent,
+  // which won't shell-expand "~". Expand it here so "~/.claude" works and the
+  // stored value stays portable (each device expands to its own home).
+  if (result.CLAUDE_CONFIG_DIR) {
+    result.CLAUDE_CONFIG_DIR = expandHomePath(result.CLAUDE_CONFIG_DIR);
   }
   return result;
 }

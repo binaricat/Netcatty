@@ -15,9 +15,25 @@ const { existsSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+/**
+ * Expand a leading "~" to the user's home directory. Env vars handed to a
+ * child process are NOT shell-expanded, so "~/.claude" would otherwise be
+ * treated as a literal directory named "~". Only a leading "~", "~/" or "~\"
+ * is expanded (not "~user"); other values pass through unchanged.
+ */
+function expandHomePath(p) {
+  if (typeof p !== "string") return p;
+  const trimmed = p.trim();
+  if (trimmed === "~") return os.homedir();
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+  return p;
+}
+
 function getClaudeConfigDir(env) {
   const custom = typeof env?.CLAUDE_CONFIG_DIR === "string" ? env.CLAUDE_CONFIG_DIR.trim() : "";
-  return custom || path.join(os.homedir(), ".claude");
+  return custom ? expandHomePath(custom) : path.join(os.homedir(), ".claude");
 }
 
 /**
@@ -31,4 +47,4 @@ function detectClaudeAuthPresence(env, fileExists = existsSync) {
   return "none";
 }
 
-module.exports = { detectClaudeAuthPresence, getClaudeConfigDir };
+module.exports = { detectClaudeAuthPresence, getClaudeConfigDir, expandHomePath };
