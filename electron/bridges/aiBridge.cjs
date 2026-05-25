@@ -2588,7 +2588,13 @@ function registerHandlers(ipcMain) {
 
       const authFingerprint = isCodexAgent
         ? getAcpProviderAuthFingerprint(apiKey, resolvedProvider?.provider, codexCustomConfig)
-        : null;
+        : isClaudeAgent
+          // Fingerprint the Claude agent env (config dir + user env vars) so a
+          // settings change invalidates the cached per-session provider and the
+          // next turn respawns with the new config instead of reusing a stale
+          // process spawned with the old env.
+          ? JSON.stringify(normalizeAgentEnv(requestedAgentEnv))
+          : null;
       const mcpSnapshot = isCodexAgent
         ? await resolveCodexMcpSnapshot(sessionCwd)
         : { mcpServers: [], fingerprint: getCodexMcpFingerprint([]) };
