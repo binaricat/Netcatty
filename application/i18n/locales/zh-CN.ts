@@ -2051,6 +2051,7 @@ const zhCN: Messages = {
   'ai.chat.placeholderDefault': '向 Catty Agent 发送消息...',
   'ai.chat.noModel': '未选择模型',
   'ai.chat.noProviderModel': '未配置默认模型——前往 设置 → AI → 提供商 设置。',
+  'ai.chat.selectProvider': '选择提供商',
   'ai.chat.recent': '最近',
   'ai.chat.viewAll': '查看全部',
   'ai.chat.untitled': '无标题',

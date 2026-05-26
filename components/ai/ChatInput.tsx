@@ -392,14 +392,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // the provider's icon + name + model name. Falls back to the existing
   // single-list model dropdown for ACP agents.
   const hasProviderSwitcher = !!providerSwitcher && providerSwitcher.providers.length > 0;
+  // Resolve to the actually-bound provider only — no `?? providers[0]`
+  // fallback, since a provider that isn't really bound will still hit the
+  // `!sendActiveProvider` guard at send time. Faking a selection in the
+  // chip would lie about a state the rest of the system treats as empty.
   const selectedSwitcherProvider = hasProviderSwitcher
     ? providerSwitcher!.providers.find((p) => p.id === providerSwitcher!.selectedProviderId)
-      ?? providerSwitcher!.providers[0]
     : undefined;
   const providerSwitcherChipLabel = hasProviderSwitcher
-    ? (providerSwitcher!.selectedModelId
-        ? `${selectedSwitcherProvider!.name} · ${providerSwitcher!.selectedModelId}`
-        : selectedSwitcherProvider!.name)
+    ? (selectedSwitcherProvider
+        ? (providerSwitcher!.selectedModelId
+            ? `${selectedSwitcherProvider.name} · ${providerSwitcher!.selectedModelId}`
+            : selectedSwitcherProvider.name)
+        : t('ai.chat.selectProvider'))
     : '';
   const modelLabel = hasProviderSwitcher
     ? providerSwitcherChipLabel

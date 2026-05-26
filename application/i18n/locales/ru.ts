@@ -2075,6 +2075,7 @@ const ru: Messages = {
   'ai.chat.placeholderDefault': 'Сообщение агенту Catty...',
   'ai.chat.noModel': 'Нет модели',
   'ai.chat.noProviderModel': 'Модель по умолчанию не задана — настройте её в Настройки → AI → Провайдеры.',
+  'ai.chat.selectProvider': 'Выберите провайдера',
   'ai.chat.recent': 'Недавние',
   'ai.chat.viewAll': 'Показать всё',
   'ai.chat.untitled': 'Без названия',

@@ -583,8 +583,17 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const cattyAgentModelId = useMemo(() => {
     const stored = agentModelMap['catty'];
     if (stored) return stored;
+    // If the user explicitly picked a per-agent provider, never fall back
+    // to the global `activeModelId` — that id belongs to whichever provider
+    // was globally active, not the one Catty is bound to now. Sending a
+    // gpt-4o id to a DeepSeek/Anthropic-shaped provider would just yield
+    // a wrong-model error.
+    const hasProviderOverride = !!agentProviderMap['catty'];
+    if (hasProviderOverride) {
+      return cattyAgentProvider?.defaultModel ?? '';
+    }
     return cattyAgentProvider?.defaultModel ?? activeModelId ?? '';
-  }, [agentModelMap, cattyAgentProvider, activeModelId]);
+  }, [agentModelMap, agentProviderMap, cattyAgentProvider, activeModelId]);
 
   const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
   const effectiveActiveModelId = currentAgentId === 'catty' ? cattyAgentModelId : activeModelId;

@@ -2042,6 +2042,7 @@ const en: Messages = {
   'ai.chat.placeholderDefault': 'Message Catty Agent...',
   'ai.chat.noModel': 'No model',
   'ai.chat.noProviderModel': 'No default model — set one in Settings → AI → Providers.',
+  'ai.chat.selectProvider': 'Select provider',
   'ai.chat.recent': 'Recent',
   'ai.chat.viewAll': 'View All',
   'ai.chat.untitled': 'Untitled',
