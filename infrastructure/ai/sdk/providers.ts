@@ -1,7 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { ProviderConfig } from '../types';
+import type { ProviderConfig, ProviderStyle } from '../types';
 import { resolveProviderStyle } from '../types';
 import {
   applyOpenAIChatContinuationToBody,
@@ -406,6 +406,35 @@ export function createBridgeFetchForSDK(
  * process replaces the placeholder with the real decrypted key before
  * making the HTTP request.
  */
+/**
+ * Apply per-vendor URL and apiKey quirks on top of the style-based
+ * wire-protocol routing. Exported so it can be unit-tested without spinning
+ * up the Vercel AI SDK clients.
+ *
+ * The URL fallback fires regardless of style — the user picked this
+ * providerId for a reason, even if they overrode the wire format. The
+ * ollama `'ollama'` throwaway apiKey is style-specific: it's only meaningful
+ * to the OpenAI-compat client, since Anthropic/Google clients need a real
+ * key on their own URL.
+ */
+export function resolveProviderEndpoint(
+  config: ProviderConfig,
+  style: ProviderStyle,
+  safeApiKey: string | undefined,
+): { baseURL: string | undefined; apiKey: string | undefined } {
+  let baseURL = config.baseURL;
+  let apiKey = safeApiKey;
+  if (config.providerId === 'ollama') {
+    baseURL = baseURL || 'http://localhost:11434/v1';
+    if (style === 'openai') {
+      apiKey = 'ollama';
+    }
+  } else if (config.providerId === 'openrouter') {
+    baseURL = baseURL || 'https://openrouter.ai/api/v1';
+  }
+  return { baseURL, apiKey };
+}
+
 export function createModelFromConfig(
   config: ProviderConfig,
   requestContext?: ProviderRequestContext,
@@ -415,19 +444,7 @@ export function createModelFromConfig(
   const customFetch = createBridgeFetchForSDK(config.id, requestContext);
   const modelId = config.defaultModel || '';
   const style = resolveProviderStyle(config);
-
-  // ProviderId still carries per-vendor quirks (baseURL fallback, ollama's
-  // throwaway apiKey) on top of the style-based wire-protocol routing.
-  let baseURL = config.baseURL;
-  let apiKey = safeApiKey;
-  if (style === 'openai') {
-    if (config.providerId === 'ollama') {
-      baseURL = baseURL || 'http://localhost:11434/v1';
-      apiKey = 'ollama';
-    } else if (config.providerId === 'openrouter') {
-      baseURL = baseURL || 'https://openrouter.ai/api/v1';
-    }
-  }
+  const { baseURL, apiKey } = resolveProviderEndpoint(config, style, safeApiKey);
 
   switch (style) {
     case 'openai':
