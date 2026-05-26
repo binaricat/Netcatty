@@ -14,6 +14,7 @@ import {
   type ToolExecResult,
 } from '../shared/toolExecutors';
 import { requestApproval } from '../shared/approvalGate';
+import { chainBySessionKey } from '../shared/sessionExecutionQueue';
 
 /** Unwrap a shared ToolExecResult into the shape expected by Vercel AI SDK tool results. */
 function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
@@ -50,14 +51,32 @@ export function createCattyTools(
       }),
       // No needsApproval — approval is handled inside execute via the approval gate.
       execute: async ({ sessionId, command }, { toolCallId }) => {
-        // In confirm mode, await user approval before executing
+        // In confirm mode, await user approval before executing. Approvals
+        // are intentionally kept *outside* the per-session queue below so
+        // that multiple parallel tool_use blocks from the same LLM turn
+        // each surface their own approval card immediately — the user can
+        // approve/deny them in any order, instead of seeing the prompts
+        // arrive one-by-one as earlier commands finish.
         if (permissionMode === 'confirm') {
           const approved = await requestApproval(toolCallId, 'terminal_execute', { sessionId, command }, chatSessionId);
           if (!approved) {
             return { error: 'User denied command execution.' };
           }
         }
-        return unwrap(await executeTerminalExecute(deps, { sessionId, command }));
+        // Serialize at the per-(chat, terminal) session granularity.
+        // Vercel AI SDK dispatches every tool_use block in a turn through
+        // `Promise.all(...)`, which would otherwise race three+ commands
+        // into the main-process session mutex — two of them get
+        // synthetic "Session already has another command" errors and the
+        // Anthropic API has rejected the resulting trace as
+        // `tool_use ids were found without tool_result blocks`. Queueing
+        // here gives the LLM real output for every call it asked for.
+        // Bridge-side mutex (mcpServerBridge.reserveSessionExecution)
+        // stays in place as defense-in-depth for non-LLM IPC paths.
+        const queueKey = `${chatSessionId ?? 'global'}:${sessionId}`;
+        return chainBySessionKey(queueKey, async () =>
+          unwrap(await executeTerminalExecute(deps, { sessionId, command })),
+        );
       },
     }),
 
