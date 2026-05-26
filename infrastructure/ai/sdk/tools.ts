@@ -86,7 +86,28 @@ export function createCattyTools(
           if (abortSignal?.aborted) {
             return { error: 'Command cancelled before it could start.' };
           }
-          return unwrap(await executeTerminalExecute(deps, { sessionId, command }));
+          // There's a tiny race between this check and the main-process
+          // `mcpServerBridge.reserveSessionExecution` registering the new
+          // exec into the cancellation tracker: `handleStop` issues a
+          // cancel IPC and the user's abort signal fires, but if our
+          // `aiExec` IPC was already in transit, the cancel may run
+          // before the exec has registered — and find nothing to
+          // cancel. Re-issue the cancel from the abort listener so a
+          // duplicate `aiCattyCancelExec` lands once the registration
+          // is complete. The cancel is idempotent (it only acts on
+          // entries it finds in `activePtyExecs`), so issuing twice is
+          // harmless.
+          const cancelOnAbort = () => {
+            if (chatSessionId) {
+              void bridge.aiCattyCancelExec?.(chatSessionId);
+            }
+          };
+          abortSignal?.addEventListener('abort', cancelOnAbort, { once: true });
+          try {
+            return unwrap(await executeTerminalExecute(deps, { sessionId, command }));
+          } finally {
+            abortSignal?.removeEventListener('abort', cancelOnAbort);
+          }
         } finally {
           slot.release();
         }

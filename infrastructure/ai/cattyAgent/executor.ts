@@ -25,6 +25,14 @@ export interface NetcattyBridge {
     exitCode?: number;
     error?: string;
   }>;
+  /**
+   * Cancel any in-flight Catty Agent command execution scoped to the
+   * given chat session. Idempotent — safe to call when nothing is
+   * running. Used by tools to re-issue cancel during the IPC transit
+   * window if the user clicks Stop after we've already dispatched
+   * `aiExec` but before the main process has registered it.
+   */
+  aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
 }
 
 // Workspace context provided to the executor
