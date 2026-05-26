@@ -226,6 +226,53 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
 });
 
+test("applySyncPayload dispatches a same-window AI-state-changed event so the open chat panel rehydrates", async () => {
+  // Without this nudge, the apply path writes to localStorage but
+  // `useAIState` (listening for `storage` events) never sees the changes
+  // in the calling window — mounted UI keeps showing pre-sync data.
+  const dispatched: Array<{ type: string; detail: unknown }> = [];
+  const fakeWindow = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent(event: Event) {
+      dispatched.push({
+        type: event.type,
+        detail: (event as CustomEvent).detail,
+      });
+      return true;
+    },
+  };
+  Object.defineProperty(globalThis, "window", { value: fakeWindow, configurable: true });
+  try {
+    localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "deepseek-local" }));
+    localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ catty: "deepseek-v4-flash" }));
+
+    const payload: SyncPayload = {
+      hosts: [],
+      keys: [],
+      identities: [],
+      snippets: [],
+      customGroups: [],
+      settings: {
+        ai: {
+          providers: [{ id: "openai-main", providerId: "openai", name: "OpenAI", enabled: true }],
+        },
+      },
+      syncedAt: 1,
+    } as SyncPayload;
+
+    await applySyncPayload(payload, { importVaultData: () => {} });
+
+    const events = dispatched.filter((e) => e.type === "netcatty:ai-state-changed");
+    const keys = events.map((e) => (e.detail as { key?: string })?.key);
+    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_PROVIDERS), "providers nudge");
+    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP), "agentProviderMap nudge");
+    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP), "agentModelMap nudge");
+  } finally {
+    delete (globalThis as { window?: unknown }).window;
+  }
+});
+
 test("applySyncPayload prunes per-agent bindings that reference providers absent from the synced set", async () => {
   // Local state has Catty bound to a provider the incoming sync no longer
   // ships — both the per-agent provider override and the saved model should

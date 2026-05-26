@@ -31,6 +31,7 @@ import {
 } from '../domain/customKeyBindings';
 import { isEncryptedCredentialPlaceholder } from '../domain/credentials';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
+import { emitAIStateChanged } from './state/aiStateEvents';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
 import {
   STORAGE_KEY_THEME,
@@ -555,6 +556,41 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
     // we'd leak overrides bound to ghost providers. Mirrors the same
     // cleanup `removeProvider` does for explicit user deletes.
     pruneOrphanPerAgentBindings();
+    // Nudge same-window AI state listeners. localStorage writes only fire
+    // `storage` events in *other* windows; without this nudge the open
+    // chat panel keeps showing pre-sync providers/bindings until reload.
+    notifyAIStateAfterSync(ai);
+  }
+}
+
+function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']): void {
+  if (!ai) return;
+  // Every AI storage key that `applySyncableSettings` may have touched
+  // gets a same-window nudge. `useAIState` listens for these and refreshes
+  // the corresponding React state by re-reading localStorage.
+  const touched: Array<string> = [];
+  if (ai.providers != null) touched.push(STORAGE_KEY_AI_PROVIDERS);
+  if (ai.activeProviderId != null) touched.push(STORAGE_KEY_AI_ACTIVE_PROVIDER);
+  if (ai.activeModelId != null) touched.push(STORAGE_KEY_AI_ACTIVE_MODEL);
+  if (ai.globalPermissionMode != null) touched.push(STORAGE_KEY_AI_PERMISSION_MODE);
+  if (ai.toolIntegrationMode != null) touched.push(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);
+  if (ai.hostPermissions != null) touched.push(STORAGE_KEY_AI_HOST_PERMISSIONS);
+  if (ai.defaultAgentId != null) touched.push(STORAGE_KEY_AI_DEFAULT_AGENT);
+  if (ai.commandBlocklist != null) touched.push(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
+  if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
+  if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
+  if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
+  // agentProviderMap is *always* potentially mutated because the reconcile
+  // step may have pruned it even if the payload didn't ship one.
+  touched.push(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
+  // The reconcile may also have pruned saved models alongside provider
+  // bindings, so always nudge the model map too.
+  if (!touched.includes(STORAGE_KEY_AI_AGENT_MODEL_MAP)) {
+    touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
+  }
+  if (ai.webSearchConfig !== undefined) touched.push(STORAGE_KEY_AI_WEB_SEARCH);
+  for (const key of touched) {
+    emitAIStateChanged(key);
   }
 }
 

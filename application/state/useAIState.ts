@@ -62,16 +62,13 @@ function getAIBridge() {
   return (window as unknown as { netcatty?: AIBridge }).netcatty;
 }
 
-const AI_STATE_CHANGED_EVENT = 'netcatty:ai-state-changed';
+import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
+
 const AI_STATE_CHANGED_DRAFTS_BY_SCOPE = 'netcatty:ai-drafts-by-scope';
 const AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE = 'netcatty:ai-panel-view-by-scope';
 
 type DraftsByScope = Partial<Record<string, AIDraft>>;
 type PanelViewByScope = Partial<Record<string, AIPanelView>>;
-
-function emitAIStateChanged(key: string) {
-  window.dispatchEvent(new CustomEvent<{ key: string }>(AI_STATE_CHANGED_EVENT, { detail: { key } }));
-}
 
 function cleanupAcpSessions(sessionIds: string[]) {
   const bridge = getAIBridge();
