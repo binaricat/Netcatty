@@ -31,6 +31,7 @@ import type { NetcattyBridge, ExecutorContext } from '../../../infrastructure/ai
 import { runExternalAgentTurn } from '../../../infrastructure/ai/externalAgentAdapter';
 import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError } from '../../../infrastructure/ai/errorClassifier';
+import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
 import {
   extractProviderContinuationFromRawChunk,
   getOpenAIChatAssistantFieldsForHistoryMessage,
@@ -647,9 +648,27 @@ export function useAIChatStreaming({
         // inside the tool's execute function via the approvalGate module.
         // The SDK may still emit this chunk type but we simply ignore it.
         case 'error': {
+          const typedChunk = chunk as ErrorChunk;
+          // Internal SDK reasoning/text state-machine errors (e.g. a
+          // third-party Anthropic-compat backend like DeepSeek's
+          // `-v4-flash` streaming thinking deltas without first emitting
+          // the `reasoning-start` content-block signal) leak through
+          // fullStream once per orphan delta. They're not user-facing
+          // errors — and worse, surfacing one assistant message per
+          // event breaks tool_use/tool_result contiguity on the next
+          // turn, which the Anthropic backend then rejects as
+          // `messages.N: tool_use ids were found without tool_result
+          // blocks immediately after`. Filter them out at the chunk
+          // boundary: drop the placeholder assistant message and keep
+          // accepting subsequent chunks, so the rest of the stream
+          // (real text, tool calls, the genuine `finish`) lands intact.
+          if (isSdkStreamStateError(typedChunk.error)) {
+            // eslint-disable-next-line no-console
+            console.warn('[Catty] suppressed SDK stream state error:', typedChunk.error);
+            break;
+          }
           cancelPendingFlush();
           flushText();
-          const typedChunk = chunk as ErrorChunk;
           updateMessageById(streamSessionId, activeMsgId, msg => ({
             ...msg,
             statusText: '',
