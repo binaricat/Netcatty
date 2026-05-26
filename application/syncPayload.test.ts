@@ -226,6 +226,53 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
 });
 
+test("applySyncPayload prunes per-agent bindings that reference providers absent from the synced set", async () => {
+  // Local state has Catty bound to a provider the incoming sync no longer
+  // ships — both the per-agent provider override and the saved model should
+  // be cleared so we don't dispatch a ghost provider id (or its now-orphan
+  // model name) to the wrong endpoint.
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({
+    catty: "deepseek-local",
+    codex: "openai-main",
+  }));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({
+    catty: "deepseek-v4-flash",
+    codex: "gpt-test",
+  }));
+
+  const syncedProviders = [
+    { id: "openai-main", providerId: "openai", name: "OpenAI", enabled: true },
+  ];
+
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: {
+      ai: {
+        providers: syncedProviders,
+        // Intentionally omit agentProviderMap — exercises the reconcile path.
+      },
+    },
+    syncedAt: 1,
+  } as SyncPayload;
+
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!),
+    { codex: "openai-main" },
+  );
+  // Catty's saved model belonged to the now-missing deepseek-local — drop it.
+  // Codex's binding stays, so its saved model stays.
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!),
+    { codex: "gpt-test" },
+  );
+});
+
 test("applySyncPayload preserves local externalAgents and ignores legacy payload field", async () => {
   const localAgents = [
     { id: "codex", name: "Codex", command: "/usr/local/bin/codex", enabled: true },

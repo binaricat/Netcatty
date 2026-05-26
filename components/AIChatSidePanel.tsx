@@ -583,6 +583,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   }, [agentProviderMap, providers, activeProvider]);
 
   const cattyAgentModelId = useMemo(() => {
+    // Whitespace-only model ids are treated as "no model" everywhere
+    // (picker, send guard, SDK) — normalize at the resolution boundary
+    // so a stored "   " never slips through downstream checks.
+    const trim = (s: string | undefined | null): string => (s ?? '').trim();
     const overrideId = agentProviderMap['catty'];
     const overrideProvider = overrideId
       ? providers.find((cfg) => cfg.id === overrideId)
@@ -592,12 +596,12 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       // override provider's defaultModel. Never reach for the global
       // `activeModelId` here: that id belongs to whichever provider
       // was globally active, not the one Catty is bound to now.
-      return agentModelMap['catty'] || overrideProvider.defaultModel || '';
+      return trim(agentModelMap['catty']) || trim(overrideProvider.defaultModel);
     }
     // No override, OR a stale override (the bound provider was deleted):
     // in either case the saved model id is no longer trustworthy as a
     // Catty pick, so consult the global active selection instead.
-    return cattyAgentProvider?.defaultModel ?? activeModelId ?? '';
+    return trim(cattyAgentProvider?.defaultModel) || trim(activeModelId);
   }, [agentModelMap, agentProviderMap, providers, cattyAgentProvider, activeModelId]);
 
   const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
@@ -939,8 +943,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       // an empty string and surface a vague backend error. The chat-input
       // chip already disables provider rows with no defaultModel, but a
       // stale binding (e.g. user emptied the provider's defaultModel after
-      // selecting it) can still land here.
-      if (!isExternalAgent && !sendActiveModelId) {
+      // selecting it) can still land here. Trim before checking so
+      // whitespace-only ids (which the picker also treats as empty) don't
+      // sneak past either.
+      if (!isExternalAgent && !sendActiveModelId.trim()) {
         addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {

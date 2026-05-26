@@ -548,6 +548,48 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
         );
       }
     }
+    // After all AI writes, reconcile per-agent bindings against the final
+    // provider list. Sync payloads can land with a new `providers` set but
+    // no `agentProviderMap`, or with a stale `agentProviderMap` that
+    // points at ids the synced provider set doesn't include — either way
+    // we'd leak overrides bound to ghost providers. Mirrors the same
+    // cleanup `removeProvider` does for explicit user deletes.
+    pruneOrphanPerAgentBindings();
+  }
+}
+
+function pruneOrphanPerAgentBindings(): void {
+  const providers = localStorageAdapter.read<Array<{ id?: string }>>(STORAGE_KEY_AI_PROVIDERS) ?? [];
+  const validIds = new Set(
+    providers
+      .map((p) => p?.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  );
+  const providerMap = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {};
+  const modelMap = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {};
+  let providerChanged = false;
+  let modelChanged = false;
+  const nextProviderMap: Record<string, string> = {};
+  const nextModelMap: Record<string, string> = { ...modelMap };
+  for (const agentId of Object.keys(providerMap)) {
+    const providerId = providerMap[agentId];
+    if (providerId && validIds.has(providerId)) {
+      nextProviderMap[agentId] = providerId;
+    } else {
+      providerChanged = true;
+      // Drop the saved model too — that id belonged to the now-missing
+      // provider and isn't trustworthy against any other binding.
+      if (agentId in nextModelMap) {
+        delete nextModelMap[agentId];
+        modelChanged = true;
+      }
+    }
+  }
+  if (providerChanged) {
+    localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, nextProviderMap);
+  }
+  if (modelChanged) {
+    localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, nextModelMap);
   }
 }
 
