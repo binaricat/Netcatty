@@ -15,6 +15,7 @@ import {
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
+  STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
 } from '../../infrastructure/config/storageKeys';
 import type {
@@ -326,6 +327,13 @@ export function useAIState() {
   const [agentModelMap, setAgentModelMapRaw] = useState<Record<string, string>>(() =>
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {}
   );
+  // Per-agent provider override: remembers which provider config each agent
+  // should bind to. Falls back to the global `activeProviderId` when an agent
+  // has no entry. Used so that e.g. Catty Agent can stay on DeepSeek while
+  // a Claude/Codex run continues on its existing provider.
+  const [agentProviderMap, setAgentProviderMapRaw] = useState<Record<string, string>>(() =>
+    localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {}
+  );
 
   // ── Web Search Config ──
   const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
@@ -409,6 +417,21 @@ export function useAIState() {
     setAgentModelMapRaw(prev => {
       const next = { ...prev, [agentId]: modelId };
       localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, next);
+      return next;
+    });
+  }, []);
+
+  const setAgentProvider = useCallback((agentId: string, providerId: string) => {
+    setAgentProviderMapRaw(prev => {
+      // Empty string clears the per-agent override and lets the agent fall
+      // back to the global `activeProviderId`.
+      const next = { ...prev };
+      if (providerId) {
+        next[agentId] = providerId;
+      } else {
+        delete next[agentId];
+      }
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
       return next;
     });
   }, []);
@@ -599,6 +622,9 @@ export function useAIState() {
           }
           case STORAGE_KEY_AI_AGENT_MODEL_MAP:
             setAgentModelMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {});
+            break;
+          case STORAGE_KEY_AI_AGENT_PROVIDER_MAP:
+            setAgentProviderMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {});
             break;
           case STORAGE_KEY_AI_ACTIVE_SESSION_MAP: {
             const nextActiveSessionIdMap =
@@ -1123,6 +1149,9 @@ export function useAIState() {
     // Per-agent model memory
     agentModelMap,
     setAgentModel,
+    // Per-agent provider override (falls back to activeProviderId when unset)
+    agentProviderMap,
+    setAgentProvider,
 
     // Web search
     webSearchConfig,
