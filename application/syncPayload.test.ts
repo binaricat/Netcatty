@@ -120,6 +120,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT, "120");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
 
   const payload = buildSyncPayload(vault([]));
@@ -135,6 +136,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
     commandTimeout: 120,
     maxIterations: 10,
     agentModelMap: { codex: "gpt-test" },
+    agentProviderMap: { catty: "openai-main" },
     webSearchConfig: webSearch,
   });
 });
@@ -201,6 +203,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
         commandTimeout: 30,
         maxIterations: 5,
         agentModelMap: { claude: "claude-test" },
+        agentProviderMap: { catty: "anthropic-main" },
         webSearchConfig: webSearch,
       },
     },
@@ -219,6 +222,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT), "30");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS), "5");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
+  assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
 });
 

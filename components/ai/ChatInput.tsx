@@ -744,21 +744,35 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
                       {providerSwitcher!.providers.map((p) => {
                         const isSelected = providerSwitcher!.selectedProviderId === p.id;
-                        const modelCaption = p.defaultModel?.trim()
-                          ? p.defaultModel
+                        const defaultModel = p.defaultModel?.trim() ?? '';
+                        const hasModel = defaultModel.length > 0;
+                        // Rows without a defaultModel are inert — picking
+                        // one would save a binding with an empty model id
+                        // and produce a confusing model error at send time.
+                        // User has to set a defaultModel in Settings first.
+                        const disabled = !hasModel;
+                        const modelCaption = hasModel
+                          ? defaultModel
                           : t('ai.chat.noProviderModel');
-                        const hasModel = !!p.defaultModel?.trim();
                         return (
                           <button
                             key={p.id}
                             type="button"
                             role="option"
                             aria-selected={isSelected}
+                            aria-disabled={disabled}
+                            disabled={disabled}
+                            title={disabled ? t('ai.chat.noProviderModel') : undefined}
                             onClick={() => {
-                              providerSwitcher!.onSelect(p.id, p.defaultModel ?? '');
+                              if (disabled) return;
+                              providerSwitcher!.onSelect(p.id, defaultModel);
                               closeAllMenus();
                             }}
-                            className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors ${
+                              disabled
+                                ? 'opacity-55 cursor-not-allowed'
+                                : 'hover:bg-muted/30 cursor-pointer'
+                            }`}
                           >
                             <ProviderIconBadge provider={p} size="md" />
                             <div className="flex-1 min-w-0">

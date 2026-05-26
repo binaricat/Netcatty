@@ -235,6 +235,7 @@ export interface SyncPayload {
       commandTimeout?: number;
       maxIterations?: number;
       agentModelMap?: Record<string, string>;
+      agentProviderMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
     };
   };

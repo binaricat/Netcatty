@@ -935,6 +935,21 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         return;
       }
 
+      // Catty needs a concrete model id — the SDK would otherwise dispatch
+      // an empty string and surface a vague backend error. The chat-input
+      // chip already disables provider rows with no defaultModel, but a
+      // stale binding (e.g. user emptied the provider's defaultModel after
+      // selecting it) can still land here.
+      if (!isExternalAgent && !sendActiveModelId) {
+        addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
+        addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
+        if (currentPanelView.mode === 'session') {
+          clearScopeDraft();
+          showScopeSessionView(sessionId);
+        }
+        return;
+      }
+
       // Add user message
       addMessageToSession(sessionId, {
         id: generateId(), role: 'user', content: trimmed,
