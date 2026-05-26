@@ -190,6 +190,8 @@ export interface BuiltinProviderIcon {
   id: string;
   /** Display label shown in the icon picker. */
   label: string;
+  /** Suggested display name when picking this preset (auto-fills ProviderConfig.name). */
+  name: string;
   /** Absolute URL of the SVG asset. */
   path: string;
   /** Background tint applied behind the monochrome glyph. */
@@ -197,23 +199,23 @@ export interface BuiltinProviderIcon {
 }
 
 export const BUILTIN_PROVIDER_ICONS: BuiltinProviderIcon[] = [
-  { id: "anthropic", label: "Anthropic", path: "/ai/providers/anthropic.svg", bgColor: "bg-orange-600" },
-  { id: "openai", label: "OpenAI", path: "/ai/providers/openai.svg", bgColor: "bg-emerald-600" },
-  { id: "google", label: "Google", path: "/ai/providers/google.svg", bgColor: "bg-blue-600" },
-  { id: "ollama", label: "Ollama", path: "/ai/providers/ollama.svg", bgColor: "bg-purple-600" },
-  { id: "openrouter", label: "OpenRouter", path: "/ai/providers/openrouter.svg", bgColor: "bg-pink-600" },
-  { id: "deepseek", label: "DeepSeek", path: "/ai/providers/deepseek.svg", bgColor: "bg-[#4D6BFE]" },
-  { id: "moonshot", label: "Moonshot", path: "/ai/providers/moonshot.svg", bgColor: "bg-zinc-800" },
-  { id: "kimi", label: "Kimi", path: "/ai/providers/kimi.svg", bgColor: "bg-zinc-800" },
-  { id: "qwen", label: "Qwen / 通义", path: "/ai/providers/qwen.svg", bgColor: "bg-[#615CED]" },
-  { id: "zhipu", label: "Zhipu / 智谱", path: "/ai/providers/zhipu.svg", bgColor: "bg-[#3859FF]" },
-  { id: "doubao", label: "Doubao / 豆包", path: "/ai/providers/doubao.svg", bgColor: "bg-[#0066FF]" },
-  { id: "mistral", label: "Mistral", path: "/ai/providers/mistral.svg", bgColor: "bg-[#FA520F]" },
-  { id: "cohere", label: "Cohere", path: "/ai/providers/cohere.svg", bgColor: "bg-[#39594D]" },
-  { id: "grok", label: "Grok / xAI", path: "/ai/providers/grok.svg", bgColor: "bg-zinc-900" },
-  { id: "perplexity", label: "Perplexity", path: "/ai/providers/perplexity.svg", bgColor: "bg-[#1F8A8C]" },
-  { id: "groq", label: "Groq", path: "/ai/providers/groq.svg", bgColor: "bg-[#F55036]" },
-  { id: "huggingface", label: "Hugging Face", path: "/ai/providers/huggingface.svg", bgColor: "bg-[#FF9D00]" },
+  { id: "anthropic", label: "Anthropic", name: "Anthropic", path: "/ai/providers/anthropic.svg", bgColor: "bg-orange-600" },
+  { id: "openai", label: "OpenAI", name: "OpenAI", path: "/ai/providers/openai.svg", bgColor: "bg-emerald-600" },
+  { id: "google", label: "Google", name: "Google", path: "/ai/providers/google.svg", bgColor: "bg-blue-600" },
+  { id: "ollama", label: "Ollama", name: "Ollama", path: "/ai/providers/ollama.svg", bgColor: "bg-purple-600" },
+  { id: "openrouter", label: "OpenRouter", name: "OpenRouter", path: "/ai/providers/openrouter.svg", bgColor: "bg-pink-600" },
+  { id: "deepseek", label: "DeepSeek", name: "DeepSeek", path: "/ai/providers/deepseek.svg", bgColor: "bg-[#4D6BFE]" },
+  { id: "moonshot", label: "Moonshot", name: "Moonshot", path: "/ai/providers/moonshot.svg", bgColor: "bg-zinc-800" },
+  { id: "kimi", label: "Kimi", name: "Kimi", path: "/ai/providers/kimi.svg", bgColor: "bg-zinc-800" },
+  { id: "qwen", label: "Qwen / 通义", name: "Qwen", path: "/ai/providers/qwen.svg", bgColor: "bg-[#615CED]" },
+  { id: "zhipu", label: "Zhipu / 智谱", name: "Zhipu", path: "/ai/providers/zhipu.svg", bgColor: "bg-[#3859FF]" },
+  { id: "doubao", label: "Doubao / 豆包", name: "Doubao", path: "/ai/providers/doubao.svg", bgColor: "bg-[#0066FF]" },
+  { id: "mistral", label: "Mistral", name: "Mistral", path: "/ai/providers/mistral.svg", bgColor: "bg-[#FA520F]" },
+  { id: "cohere", label: "Cohere", name: "Cohere", path: "/ai/providers/cohere.svg", bgColor: "bg-[#39594D]" },
+  { id: "grok", label: "Grok / xAI", name: "Grok", path: "/ai/providers/grok.svg", bgColor: "bg-zinc-900" },
+  { id: "perplexity", label: "Perplexity", name: "Perplexity", path: "/ai/providers/perplexity.svg", bgColor: "bg-[#1F8A8C]" },
+  { id: "groq", label: "Groq", name: "Groq", path: "/ai/providers/groq.svg", bgColor: "bg-[#F55036]" },
+  { id: "huggingface", label: "Hugging Face", name: "Hugging Face", path: "/ai/providers/huggingface.svg", bgColor: "bg-[#FF9D00]" },
 ];
 
 export const BUILTIN_PROVIDER_ICON_BY_ID: Record<string, BuiltinProviderIcon> =

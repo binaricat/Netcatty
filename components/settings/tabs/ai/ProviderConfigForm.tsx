@@ -6,6 +6,7 @@ import { encryptField, decryptField } from "../../../../infrastructure/persisten
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
+import type { BuiltinProviderIcon } from "./types";
 import { BUILTIN_PROVIDER_ICONS } from "./types";
 import type { ProviderFormState } from "./types";
 import { ModelSelector } from "./ModelSelector";
@@ -128,9 +129,9 @@ export const ProviderConfigForm: React.FC<{
     }
   }, [t]);
 
-  const handlePickBuiltin = useCallback((iconId: string) => {
+  const handlePickBuiltin = useCallback((icon: BuiltinProviderIcon) => {
     setIconError(null);
-    setForm((prev) => ({ ...prev, iconId, iconDataUrl: "" }));
+    setForm((prev) => ({ ...prev, iconId: icon.id, iconDataUrl: "", name: icon.name }));
   }, []);
 
   const handleResetIcon = useCallback(() => {
@@ -196,29 +197,34 @@ export const ProviderConfigForm: React.FC<{
         </div>
         {showIconPicker && (
           <div className="rounded-md border border-border/50 bg-muted/20 p-2 space-y-2">
-            <div className="grid grid-cols-8 gap-1.5">
-              {BUILTIN_PROVIDER_ICONS.map((icon) => (
-                <button
-                  key={icon.id}
-                  type="button"
-                  onClick={() => handlePickBuiltin(icon.id)}
-                  title={icon.label}
-                  aria-label={icon.label}
-                  className={cn(
-                    "rounded-md p-0.5 transition-colors",
-                    form.iconId === icon.id && !form.iconDataUrl
-                      ? "ring-2 ring-primary/70"
-                      : "hover:ring-1 hover:ring-border",
-                  )}
-                >
-                  <ProviderIconBadge
-                    provider={{ providerId: provider.providerId, name: icon.label, iconId: icon.id }}
-                    size="sm"
-                  />
-                </button>
-              ))}
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-1.5">
+              {BUILTIN_PROVIDER_ICONS.map((icon) => {
+                const isSelected = form.iconId === icon.id && !form.iconDataUrl;
+                return (
+                  <button
+                    key={icon.id}
+                    type="button"
+                    onClick={() => (isSelected ? handleResetIcon() : handlePickBuiltin(icon))}
+                    title={icon.label}
+                    aria-label={icon.label}
+                    aria-pressed={isSelected}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5 rounded-md border text-left transition-colors min-w-0",
+                      isSelected
+                        ? "border-primary/70 bg-primary/15"
+                        : "border-transparent hover:border-border hover:bg-muted/40",
+                    )}
+                  >
+                    <ProviderIconBadge
+                      provider={{ providerId: provider.providerId, name: icon.label, iconId: icon.id }}
+                      size="md"
+                    />
+                    <span className="text-xs text-foreground/85 truncate">{icon.label}</span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+            <div className="flex items-center gap-2 pt-2 border-t border-border/40">
               <input
                 ref={fileInputRef}
                 type="file"
