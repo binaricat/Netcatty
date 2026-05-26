@@ -3,8 +3,10 @@ import type { ProviderStyle } from "./types";
 /**
  * Pick auth headers for a provider's `/models` discovery endpoint.
  *
- * The Anthropic-protocol family uses `x-api-key` + `anthropic-version`;
- * every other family (OpenAI-compat, Google) uses Bearer.
+ * Each wire-protocol family uses its own auth dialect:
+ * - `anthropic`: `x-api-key` + `anthropic-version`
+ * - `google`:    `x-goog-api-key` (Google Generative AI rejects Bearer)
+ * - `openai`:    `Authorization: Bearer …` (also the OpenAI-compat default)
  *
  * Returning an empty object when the key is missing lets the caller still
  * issue an unauthenticated probe (e.g. against local Ollama).
@@ -14,11 +16,16 @@ export function buildModelDiscoveryHeaders(
   apiKey: string | undefined,
 ): Record<string, string> {
   if (!apiKey) return {};
-  if (style === "anthropic") {
-    return {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    };
+  switch (style) {
+    case "anthropic":
+      return {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      };
+    case "google":
+      return { "x-goog-api-key": apiKey };
+    case "openai":
+    default:
+      return { Authorization: `Bearer ${apiKey}` };
   }
-  return { Authorization: `Bearer ${apiKey}` };
 }
