@@ -930,7 +930,8 @@ function execViaChannel(sshClient, command, options) {
       });
     }
 
-    sshClient.exec(command, (err, execStream) => {
+    try {
+      sshClient.exec(command, (err, execStream) => {
       if (trackForCancellation) {
         trackForCancellation.delete(pendingMarker);
       }
@@ -991,6 +992,18 @@ function execViaChannel(sshClient, command, options) {
         }
       });
     });
+    } catch (err) {
+      // Rare path: `sshClient.exec` itself synchronously throws (e.g.
+      // because the underlying ssh2 client was destroyed between the
+      // session lookup and now). Drop the pending marker so it doesn't
+      // leak in `activePtyExecs`, and resolve as a normal failure
+      // result instead of letting the Promise reject — the tool layer
+      // expects `{ ok, error }` shape, not a thrown error.
+      if (trackForCancellation) {
+        trackForCancellation.delete(pendingMarker);
+      }
+      resolve({ ok: false, error: err?.message || String(err) });
+    }
   });
 }
 

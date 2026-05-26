@@ -137,6 +137,22 @@ test("execViaChannel registers a pending-cancel marker before the SSH channel op
   execCallback(new Error("test teardown"), null);
 });
 
+test("execViaChannel drops the pending marker and resolves cleanly when sshClient.exec throws synchronously", async () => {
+  const track = new Map();
+  const fakeClient = {
+    exec() {
+      throw new Error("client destroyed");
+    },
+  };
+  const result = await execViaChannel(fakeClient, "echo hi", {
+    trackForCancellation: track,
+    chatSessionId: "chat-throw",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "client destroyed");
+  assert.equal(track.size, 0, "pending marker must be removed even on sync throw");
+});
+
 test("execViaChannel short-circuits when cancel fires before the SSH channel opens", async () => {
   const track = new Map();
   let execCallback;
