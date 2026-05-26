@@ -26,6 +26,7 @@ const tempDirBridge = require("./tempDirBridge.cjs");
 const { createTelnetAutoLogin } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
+const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -482,6 +483,7 @@ async function startTelnetSession(event, options) {
 
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
+    enableTcpNoDelay(socket);
     let connected = false;
     // Token for the log stream we open on this connection. Captured here so
     // the close/error handlers below can pass it back to stopStream and
@@ -571,6 +573,7 @@ async function startTelnetSession(event, options) {
 
     socket.on('connect', () => {
       connected = true;
+      enableTcpNoDelay(socket);
       clearTimeout(connectTimeout);
       console.log(`[Telnet] Connected to ${hostname}:${port}`);
 

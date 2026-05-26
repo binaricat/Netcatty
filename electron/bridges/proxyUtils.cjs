@@ -4,6 +4,7 @@
  */
 
 const net = require("node:net");
+const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 
 /**
  * Create a socket through a proxy (HTTP CONNECT or SOCKS5)
@@ -25,6 +26,7 @@ function createProxySocket(proxy, targetHost, targetPort, options = {}) {
         if (proxy.type === 'http') {
             // HTTP CONNECT proxy
             const socket = net.connect(proxy.port, proxy.host, () => {
+                enableTcpNoDelay(socket);
                 let authHeader = '';
                 if (proxy.username && proxy.password) {
                     const auth = Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64');
@@ -48,11 +50,13 @@ function createProxySocket(proxy, targetHost, targetPort, options = {}) {
                 };
                 socket.on('data', onData);
             });
+            enableTcpNoDelay(socket);
             try { onSocket?.(socket); } catch { /* ignore */ }
             socket.on('error', reject);
         } else if (proxy.type === 'socks5') {
             // SOCKS5 proxy
             const socket = net.connect(proxy.port, proxy.host, () => {
+                enableTcpNoDelay(socket);
                 // SOCKS5 greeting
                 const authMethods = proxy.username && proxy.password ? [0x00, 0x02] : [0x00];
                 socket.write(Buffer.from([0x05, authMethods.length, ...authMethods]));
@@ -127,6 +131,7 @@ function createProxySocket(proxy, targetHost, targetPort, options = {}) {
 
                 socket.on('data', onData);
             });
+            enableTcpNoDelay(socket);
             try { onSocket?.(socket); } catch { /* ignore */ }
             socket.on('error', reject);
         } else {

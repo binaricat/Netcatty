@@ -40,6 +40,7 @@ const {
   buildAlgorithms,
   _resetAlgorithmSupportCacheForTests,
 } = require("./sshAlgorithms.cjs");
+const { enableSshNoDelay, enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 
 // Default SSH key names in priority order (preferred keys tried first)
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -609,6 +610,8 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           ),
         }));
         console.log(`[Chain] Hop ${i + 1}/${totalHops}: Connecting to ${hopLabel}...`);
+        conn.once('connect', () => enableSshNoDelay(conn));
+        if (connOpts.sock) enableTcpNoDelay(connOpts.sock);
         conn.connect(connOpts);
       });
 
@@ -1176,6 +1179,9 @@ async function startSSHSession(event, options) {
       const logPrefix = hasJumpHosts ? '[Chain]' : '[SSH]';
       let settled = false;
       let detachX11Forwarding = null;
+
+      conn.once("connect", () => enableSshNoDelay(conn));
+      if (connectOpts.sock) enableTcpNoDelay(connectOpts.sock);
 
       conn.once("handshake", () => {
         console.log(`${logPrefix} ${options.hostname} handshake complete`);
