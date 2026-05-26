@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import type { AIProviderId, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { resolveProviderStyle } from "../../../../infrastructure/ai/types";
-import { buildModelDiscoveryHeaders } from "../../../../infrastructure/ai/modelDiscoveryHeaders";
+import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from "../../../../infrastructure/ai/modelDiscoveryHeaders";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
@@ -29,16 +29,19 @@ export const ModelSelector: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
 
-  // Ollama runs locally without auth; all other providers need an API key to list models
-  const needsApiKey = providerId !== "ollama";
-  const canFetch = !!modelsEndpoint && (!needsApiKey || !!apiKey);
   // Resolve the wire-protocol family: prefer an explicit style override (set in
   // the form), then fall back to the providerId-derived default.
   const resolvedStyle: ProviderStyle = style
     ?? (providerId ? resolveProviderStyle({ providerId }) : "openai");
+  // Endpoint follows the resolved style so a providerId+style mismatch (e.g.
+  // Anthropic providerId switched to OpenAI style) still hits the right path.
+  const effectiveModelsEndpoint = resolveModelsDiscoveryEndpoint(resolvedStyle, modelsEndpoint);
+  // Ollama runs locally without auth; all other providers need an API key to list models
+  const needsApiKey = providerId !== "ollama";
+  const canFetch = !!effectiveModelsEndpoint && (!needsApiKey || !!apiKey);
 
   const fetchModels = useCallback(async () => {
-    if (!modelsEndpoint) return;
+    if (!effectiveModelsEndpoint) return;
     const bridge = getFetchBridge();
     if (!bridge?.aiFetch) return;
 
@@ -50,7 +53,7 @@ export const ModelSelector: React.FC<{
       if (bridge.aiAllowlistAddHost && baseURL) {
         await bridge.aiAllowlistAddHost(baseURL);
       }
-      const url = `${baseURL.replace(/\/+$/, "")}${modelsEndpoint}`;
+      const url = `${baseURL.replace(/\/+$/, "")}${effectiveModelsEndpoint}`;
       const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey);
       const result = await bridge.aiFetch(url, "GET", headers, undefined, undefined, undefined, undefined, skipTLSVerify);
       if (!result.ok) {
@@ -70,7 +73,7 @@ export const ModelSelector: React.FC<{
     } finally {
       setIsLoading(false);
     }
-  }, [baseURL, modelsEndpoint, apiKey, resolvedStyle, skipTLSVerify]);
+  }, [baseURL, effectiveModelsEndpoint, apiKey, resolvedStyle, skipTLSVerify]);
 
   // Auto-fetch when dropdown first opens
   useEffect(() => {

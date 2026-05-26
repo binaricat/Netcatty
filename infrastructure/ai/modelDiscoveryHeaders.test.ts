@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildModelDiscoveryHeaders } from "./modelDiscoveryHeaders";
+import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from "./modelDiscoveryHeaders";
 
 test("buildModelDiscoveryHeaders uses x-api-key+anthropic-version for the anthropic family", () => {
   assert.deepEqual(buildModelDiscoveryHeaders("anthropic", "sk-test"), {
@@ -36,4 +36,24 @@ test("buildModelDiscoveryHeaders honors the style override on an anthropic provi
   assert.deepEqual(buildModelDiscoveryHeaders("openai", "sk-test"), {
     Authorization: "Bearer sk-test",
   });
+});
+
+test("resolveModelsDiscoveryEndpoint follows the resolved style by default", () => {
+  assert.equal(resolveModelsDiscoveryEndpoint("openai"), "/models");
+  assert.equal(resolveModelsDiscoveryEndpoint("anthropic"), "/v1/models");
+  assert.equal(resolveModelsDiscoveryEndpoint("google"), undefined);
+});
+
+test("resolveModelsDiscoveryEndpoint overrides the preset path when style flips", () => {
+  // Anthropic providerId preset would otherwise pin /v1/models, but the user
+  // switched style to openai — pick /models instead so the path matches the
+  // protocol family the headers already speak.
+  assert.equal(resolveModelsDiscoveryEndpoint("openai", "/v1/models"), "/models");
+  assert.equal(resolveModelsDiscoveryEndpoint("anthropic", "/models"), "/v1/models");
+});
+
+test("resolveModelsDiscoveryEndpoint falls back to the preset path only when the style has no convention", () => {
+  // google has no STYLE_DEFAULT — preserve whatever the caller passed.
+  assert.equal(resolveModelsDiscoveryEndpoint("google", "/custom/list"), "/custom/list");
+  assert.equal(resolveModelsDiscoveryEndpoint("google", undefined), undefined);
 });
