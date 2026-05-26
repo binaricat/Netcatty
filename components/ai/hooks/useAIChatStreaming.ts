@@ -663,7 +663,6 @@ export function useAIChatStreaming({
           // accepting subsequent chunks, so the rest of the stream
           // (real text, tool calls, the genuine `finish`) lands intact.
           if (isSdkStreamStateError(typedChunk.error)) {
-            // eslint-disable-next-line no-console
             console.warn('[Catty] suppressed SDK stream state error:', typedChunk.error);
             break;
           }
