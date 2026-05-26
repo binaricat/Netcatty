@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   chainBySessionKey,
+  getSessionExecutionQueueSizeForTests,
+  reserveSessionSlot,
   resetSessionExecutionQueueForTests,
 } from "./shared/sessionExecutionQueue";
 
@@ -14,6 +16,13 @@ function defer<T = void>(): { promise: Promise<T>; resolve: (value: T) => void; 
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+// Drain pending microtasks and immediates so cleanup `.finally`s have run.
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await new Promise((r) => setImmediate(r));
+  }
 }
 
 test("chainBySessionKey serializes calls sharing the same key in dispatch order", async (t) => {
@@ -42,18 +51,15 @@ test("chainBySessionKey serializes calls sharing the same key in dispatch order"
     return "c";
   });
 
-  // Only `a` should have started — b and c are queued behind it.
-  await new Promise((r) => setImmediate(r));
+  await flushMicrotasks();
   assert.deepEqual(events, ["a:start"]);
 
   gateA.resolve();
-  await new Promise((r) => setImmediate(r));
-  await new Promise((r) => setImmediate(r));
+  await flushMicrotasks();
   assert.deepEqual(events, ["a:start", "a:end", "b:start"]);
 
   gateB.resolve();
-  await new Promise((r) => setImmediate(r));
-  await new Promise((r) => setImmediate(r));
+  await flushMicrotasks();
   assert.deepEqual(events, ["a:start", "a:end", "b:start", "b:end", "c:start"]);
 
   gateC.resolve();
@@ -94,20 +100,88 @@ test("chainBySessionKey isolates work across keys (different sessions run in par
   assert.equal(await a, "a");
 });
 
-test("chainBySessionKey eventually removes the map entry once the last task drains", async (t) => {
+test("queue Map drops the entry once the last task drains", async (t) => {
   t.afterEach(resetSessionExecutionQueueForTests);
-  // Use a private helper to inspect: reset on entry, run one task,
-  // and rely on the map being empty after it settles.
   resetSessionExecutionQueueForTests();
+  assert.equal(getSessionExecutionQueueSizeForTests(), 0);
   await chainBySessionKey("session-cleanup", async () => "done");
-  // Drain any microtasks the cleanup logic queued via `.finally`.
-  await new Promise((r) => setImmediate(r));
-  // Start a second task and confirm it doesn't see the previous tail —
-  // we can't introspect the map directly, but if the entry leaked,
-  // the new task would still chain off the old (resolved) promise and
-  // start immediately, which is functionally indistinguishable from a
-  // clean state. The real guarantee is the lack of unbounded growth
-  // exercised by stress-tests; here we just make sure correctness holds.
-  const value = await chainBySessionKey("session-cleanup", async () => "again");
-  assert.equal(value, "again");
+  await flushMicrotasks();
+  // Without the cleanup `finally`, the resolved tail would stay parked
+  // in the map; this is the regression guard that the previous version
+  // of this test was missing.
+  assert.equal(getSessionExecutionQueueSizeForTests(), 0);
+});
+
+test("reserveSessionSlot fixes order at reservation time regardless of pre-work duration", async (t) => {
+  t.afterEach(resetSessionExecutionQueueForTests);
+  const events: string[] = [];
+
+  // Simulate three tool_use calls firing in parallel where each has
+  // some pre-work (e.g. an approval prompt) of varying length. The
+  // serialized work order must still match the slot-reservation order.
+  async function run(name: string, prework: Promise<void>) {
+    const slot = reserveSessionSlot("session-order");
+    try {
+      events.push(`${name}:reserved`);
+      await prework;
+      events.push(`${name}:prework-done`);
+      await slot.ready;
+      events.push(`${name}:serial-start`);
+      // Trivial serial work, just so we can observe the start order.
+      await new Promise((r) => setImmediate(r));
+      events.push(`${name}:serial-end`);
+      return name;
+    } finally {
+      slot.release();
+    }
+  }
+
+  const gateA = defer();
+  const gateB = defer();
+  const gateC = defer();
+  const a = run("A", gateA.promise);
+  const b = run("B", gateB.promise);
+  const c = run("C", gateC.promise);
+
+  // Approvals land in reverse order — C first, then B, then A.
+  await flushMicrotasks();
+  gateC.resolve();
+  await flushMicrotasks();
+  gateB.resolve();
+  await flushMicrotasks();
+  gateA.resolve();
+  await flushMicrotasks();
+  assert.deepEqual(await Promise.all([a, b, c]), ["A", "B", "C"]);
+
+  const serialStarts = events.filter((e) => e.endsWith(":serial-start"));
+  assert.deepEqual(
+    serialStarts,
+    ["A:serial-start", "B:serial-start", "C:serial-start"],
+    `serial work ran in reservation order, not approval order; got: ${events.join(", ")}`,
+  );
+});
+
+test("reserveSessionSlot lets later slots proceed once an early slot releases without serialized work", async (t) => {
+  t.afterEach(resetSessionExecutionQueueForTests);
+  const events: string[] = [];
+
+  async function maybeRun(name: string, run: boolean) {
+    const slot = reserveSessionSlot("session-skip");
+    try {
+      events.push(`${name}:reserved`);
+      if (!run) return `${name}:skipped`;
+      await slot.ready;
+      events.push(`${name}:ran`);
+      return `${name}:ran`;
+    } finally {
+      slot.release();
+    }
+  }
+
+  // Slot A reserves but skips serial work (mimics user denying approval
+  // or aborting). Slot B should still proceed.
+  const a = maybeRun("A", false);
+  const b = maybeRun("B", true);
+  assert.equal(await a, "A:skipped");
+  assert.equal(await b, "B:ran");
 });
