@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Upload, RotateCcw, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X } from "lucide-react";
 import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
@@ -181,11 +181,17 @@ export const ProviderConfigForm: React.FC<{
           <button
             type="button"
             onClick={() => setShowIconPicker((v) => !v)}
-            className="shrink-0"
+            className="group relative shrink-0 rounded-md transition-all hover:brightness-110 hover:ring-2 hover:ring-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             aria-label={t('ai.providers.icon.change')}
             title={t('ai.providers.icon.change')}
           >
             <ProviderIconBadge provider={previewProvider} />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-background bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            >
+              <Pencil size={9} strokeWidth={2.5} />
+            </span>
           </button>
           <input
             type="text"
