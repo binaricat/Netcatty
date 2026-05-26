@@ -1909,6 +1909,7 @@ const en: Messages = {
   'ai.providers.icon.change': 'Change icon',
   'ai.providers.icon.upload': 'Upload image',
   'ai.providers.icon.reset': 'Reset',
+  'ai.providers.icon.close': 'Close',
   'ai.providers.icon.uploadedNote': 'Custom icon (64×64 WebP)',
   'ai.providers.icon.errorType': 'Please choose an image file.',
   'ai.providers.apiKey': 'API Key',

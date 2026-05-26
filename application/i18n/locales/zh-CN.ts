@@ -1918,6 +1918,7 @@ const zhCN: Messages = {
   'ai.providers.icon.change': '修改图标',
   'ai.providers.icon.upload': '上传图片',
   'ai.providers.icon.reset': '恢复默认',
+  'ai.providers.icon.close': '收起',
   'ai.providers.icon.uploadedNote': '自定义图标（64×64 WebP）',
   'ai.providers.icon.errorType': '请选择图片文件。',
   'ai.providers.apiKey': 'API Key',

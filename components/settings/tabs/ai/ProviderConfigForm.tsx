@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Upload, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Upload, RotateCcw, X } from "lucide-react";
 import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
@@ -243,6 +243,17 @@ export const ProviderConfigForm: React.FC<{
               {form.iconDataUrl && (
                 <span className="text-[10px] text-muted-foreground">{t('ai.providers.icon.uploadedNote')}</span>
               )}
+              <div className="ml-auto" />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowIconPicker(false)}
+                aria-label={t('ai.providers.icon.close')}
+                title={t('ai.providers.icon.close')}
+              >
+                <X size={12} className="mr-1.5" />
+                {t('ai.providers.icon.close')}
+              </Button>
             </div>
             {iconError && <p className="text-[11px] text-destructive">{iconError}</p>}
           </div>

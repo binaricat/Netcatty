@@ -1942,6 +1942,7 @@ const ru: Messages = {
   'ai.providers.icon.change': 'Изменить иконку',
   'ai.providers.icon.upload': 'Загрузить изображение',
   'ai.providers.icon.reset': 'Сбросить',
+  'ai.providers.icon.close': 'Свернуть',
   'ai.providers.icon.uploadedNote': 'Своя иконка (64×64 WebP)',
   'ai.providers.icon.errorType': 'Пожалуйста, выберите файл изображения.',
   'ai.providers.apiKey': 'API-ключ',
