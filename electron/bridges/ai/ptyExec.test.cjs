@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   resolveEffectiveShellKind,
+  execViaChannel,
 } = require("./ptyExec.cjs");
 
 test("uses PowerShell wrapping when a session with no confirmed shell sees a PowerShell prompt", () => {
@@ -106,4 +107,69 @@ test("falls back to posix when neither shell kind nor prompt is informative", ()
 test("does not misclassify command output that happens to contain 'PS'", () => {
   assert.equal(resolveEffectiveShellKind(undefined, "PSO>"), "posix");
   assert.equal(resolveEffectiveShellKind(undefined, "ZIPS>"), "posix");
+});
+
+test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {
+  // Regression for the IPC-transit race surfaced by codex on #1101
+  // problem 3: if `cancelPtyExecsForSession` runs while we're still
+  // waiting on `sshClient.exec`'s callback, the cancel finds nothing in
+  // `activePtyExecs` and the channel opens anyway. The fix registers a
+  // pending marker synchronously so the cancel has something to act on.
+  const track = new Map();
+  let execCallback;
+  const fakeClient = {
+    exec(_command, callback) {
+      // Capture but do not invoke yet — simulates the channel-open
+      // delay where the race window lives.
+      execCallback = callback;
+    },
+  };
+  void execViaChannel(fakeClient, "echo hi", {
+    trackForCancellation: track,
+    chatSessionId: "chat-1",
+    timeoutMs: 5_000,
+  });
+  assert.equal(track.size, 1, "pending marker should be registered before the channel opens");
+  const entry = Array.from(track.values())[0];
+  assert.equal(entry.chatSessionId, "chat-1");
+  assert.equal(typeof entry.cancel, "function");
+  // Drain the callback so the timeout the test set doesn't fire later.
+  execCallback(new Error("test teardown"), null);
+});
+
+test("execViaChannel short-circuits when cancel fires before the SSH channel opens", async () => {
+  const track = new Map();
+  let execCallback;
+  const fakeClient = {
+    exec(_command, callback) {
+      execCallback = callback;
+    },
+  };
+  const resultPromise = execViaChannel(fakeClient, "sleep 5", {
+    trackForCancellation: track,
+    chatSessionId: "chat-2",
+    timeoutMs: 5_000,
+  });
+
+  // Cancel while still waiting for the channel-open callback.
+  assert.equal(track.size, 1);
+  for (const entry of track.values()) {
+    if (entry.chatSessionId === "chat-2") entry.cancel();
+  }
+
+  // Now the channel "opens" — even though `sshClient.exec` would
+  // hand us a working stream, we must short-circuit because the user
+  // already cancelled.
+  const fakeExecStream = {
+    closed: false,
+    close() { this.closed = true; },
+    stderr: { on() {} },
+    on() {},
+  };
+  execCallback(null, fakeExecStream);
+  const result = await resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(fakeExecStream.closed, true, "should close the now-unwanted stream");
+  assert.equal(track.size, 0, "pending marker should be removed after callback runs");
 });
