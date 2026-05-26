@@ -2,6 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { ProviderConfig } from '../types';
+import { resolveProviderStyle } from '../types';
 import {
   applyOpenAIChatContinuationToBody,
   extractProviderContinuationFromRawChunk,
@@ -413,57 +414,47 @@ export function createModelFromConfig(
   const safeApiKey = config.apiKey ? API_KEY_PLACEHOLDER : undefined;
   const customFetch = createBridgeFetchForSDK(config.id, requestContext);
   const modelId = config.defaultModel || '';
+  const style = resolveProviderStyle(config);
 
-  switch (config.providerId) {
+  // ProviderId still carries per-vendor quirks (baseURL fallback, ollama's
+  // throwaway apiKey) on top of the style-based wire-protocol routing.
+  let baseURL = config.baseURL;
+  let apiKey = safeApiKey;
+  if (style === 'openai') {
+    if (config.providerId === 'ollama') {
+      baseURL = baseURL || 'http://localhost:11434/v1';
+      apiKey = 'ollama';
+    } else if (config.providerId === 'openrouter') {
+      baseURL = baseURL || 'https://openrouter.ai/api/v1';
+    }
+  }
+
+  switch (style) {
     case 'openai':
       // Use .chat() to force Chat Completions API (not Responses API)
       return createOpenAI({
-        apiKey: safeApiKey,
-        baseURL: config.baseURL,
+        apiKey,
+        baseURL,
         fetch: customFetch,
       }).chat(modelId);
 
     case 'anthropic':
       return createAnthropic({
-        apiKey: safeApiKey,
-        baseURL: config.baseURL,
+        apiKey,
+        baseURL,
         fetch: customFetch,
       })(modelId);
 
     case 'google':
       return createGoogleGenerativeAI({
-        apiKey: safeApiKey,
-        baseURL: config.baseURL,
+        apiKey,
+        baseURL,
         fetch: customFetch,
       })(modelId);
 
-    case 'ollama':
-      // Ollama uses OpenAI-compatible Chat Completions API
-      return createOpenAI({
-        apiKey: 'ollama',
-        baseURL: config.baseURL || 'http://localhost:11434/v1',
-        fetch: customFetch,
-      }).chat(modelId);
-
-    case 'openrouter':
-      // OpenRouter uses OpenAI-compatible Chat Completions API
-      return createOpenAI({
-        apiKey: safeApiKey,
-        baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
-        fetch: customFetch,
-      }).chat(modelId);
-
-    case 'custom':
-      // Custom providers use OpenAI-compatible Chat Completions API
-      return createOpenAI({
-        apiKey: safeApiKey,
-        baseURL: config.baseURL,
-        fetch: customFetch,
-      }).chat(modelId);
-
     default: {
-      const _exhaustive: never = config.providerId;
-      throw new Error(`Unsupported provider: ${_exhaustive}`);
+      const _exhaustive: never = style;
+      throw new Error(`Unsupported provider style: ${_exhaustive}`);
     }
   }
 }

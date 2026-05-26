@@ -30,7 +30,7 @@ export const ProviderCard: React.FC<{
     >
       <div className="flex items-center gap-3">
         {/* Provider icon */}
-        <ProviderIconBadge providerId={provider.providerId} />
+        <ProviderIconBadge provider={provider} />
 
         {/* Info */}
         <div className="flex-1 min-w-0">

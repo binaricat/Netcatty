@@ -1,12 +1,50 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
-import type { ProviderConfig, ProviderAdvancedParams } from "../../../../infrastructure/ai/types";
-import { PROVIDER_PRESETS } from "../../../../infrastructure/ai/types";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Upload, RotateCcw } from "lucide-react";
+import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
+import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
+import { cn } from "../../../../lib/utils";
+import { BUILTIN_PROVIDER_ICONS } from "./types";
 import type { ProviderFormState } from "./types";
 import { ModelSelector } from "./ModelSelector";
+import { ProviderIconBadge } from "./ProviderIconBadge";
+
+const ICON_PIXEL_SIZE = 64;
+const ICON_WEBP_QUALITY = 0.85;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+async function compressIconFileToDataUrl(file: File): Promise<string> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("Image too large; please use an image under 5 MB.");
+  }
+  const sourceUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Failed to decode image"));
+    el.src = sourceUrl;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = ICON_PIXEL_SIZE;
+  canvas.height = ICON_PIXEL_SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.clearRect(0, 0, ICON_PIXEL_SIZE, ICON_PIXEL_SIZE);
+  const scale = Math.min(ICON_PIXEL_SIZE / img.width, ICON_PIXEL_SIZE / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  ctx.drawImage(img, (ICON_PIXEL_SIZE - w) / 2, (ICON_PIXEL_SIZE - h) / 2, w, h);
+  return canvas.toDataURL("image/webp", ICON_WEBP_QUALITY);
+}
+
+const STYLE_OPTIONS: ReadonlyArray<ProviderStyle> = ["anthropic", "openai", "google"];
 
 export const ProviderConfigForm: React.FC<{
   provider: ProviderConfig;
@@ -14,6 +52,8 @@ export const ProviderConfigForm: React.FC<{
   onCancel: () => void;
 }> = ({ provider, onSave, onCancel }) => {
   const { t } = useI18n();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [form, setForm] = useState<ProviderFormState>({
     name: provider.name ?? PROVIDER_PRESETS[provider.providerId]?.name ?? "",
     apiKey: "",
@@ -21,13 +61,24 @@ export const ProviderConfigForm: React.FC<{
     defaultModel: provider.defaultModel ?? "",
     skipTLSVerify: provider.skipTLSVerify ?? false,
     advancedParams: provider.advancedParams ?? {},
+    style: provider.style ?? "",
+    iconId: provider.iconId ?? "",
+    iconDataUrl: provider.iconDataUrl ?? "",
   });
-  const isCustom = provider.providerId === "custom";
   const [showApiKey, setShowApiKey] = useState(false);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [iconError, setIconError] = useState<string | null>(null);
 
   const preset = PROVIDER_PRESETS[provider.providerId];
+  const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
+  const previewProvider: Pick<ProviderConfig, "providerId" | "name" | "iconId" | "iconDataUrl"> = {
+    providerId: provider.providerId,
+    name: form.name,
+    iconId: form.iconId || undefined,
+    iconDataUrl: form.iconDataUrl || undefined,
+  };
 
   // Decrypt and load existing API key on mount
   useEffect(() => {
@@ -62,6 +113,31 @@ export const ProviderConfigForm: React.FC<{
     });
   }, []);
 
+  const handleIconFileSelect = useCallback(async (file: File | null) => {
+    setIconError(null);
+    if (!file) return;
+    if (!/^image\//.test(file.type)) {
+      setIconError(t("ai.providers.icon.errorType"));
+      return;
+    }
+    try {
+      const dataUrl = await compressIconFileToDataUrl(file);
+      setForm((prev) => ({ ...prev, iconDataUrl: dataUrl, iconId: "" }));
+    } catch (err) {
+      setIconError(err instanceof Error ? err.message : String(err));
+    }
+  }, [t]);
+
+  const handlePickBuiltin = useCallback((iconId: string) => {
+    setIconError(null);
+    setForm((prev) => ({ ...prev, iconId, iconDataUrl: "" }));
+  }, []);
+
+  const handleResetIcon = useCallback(() => {
+    setIconError(null);
+    setForm((prev) => ({ ...prev, iconId: "", iconDataUrl: "" }));
+  }, []);
+
   const handleSave = useCallback(async () => {
     const cleanedParams: ProviderAdvancedParams = {};
     const ap = form.advancedParams;
@@ -71,12 +147,18 @@ export const ProviderConfigForm: React.FC<{
     if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = Math.min(2, Math.max(-2, ap.frequencyPenalty));
     if (ap.presencePenalty != null) cleanedParams.presencePenalty = Math.min(2, Math.max(-2, ap.presencePenalty));
 
+    const trimmedName = form.name.trim();
+    const defaultName = PROVIDER_PRESETS[provider.providerId]?.name ?? "";
+
     const updates: Partial<ProviderConfig> = {
+      name: trimmedName || defaultName,
       baseURL: form.baseURL || undefined,
       defaultModel: form.defaultModel || undefined,
       skipTLSVerify: form.skipTLSVerify || undefined,
       advancedParams: Object.keys(cleanedParams).length > 0 ? cleanedParams : undefined,
-      ...(isCustom && form.name.trim() ? { name: form.name.trim() } : {}),
+      style: form.style || undefined,
+      iconId: form.iconId || undefined,
+      iconDataUrl: form.iconDataUrl || undefined,
     };
 
     // Encrypt API key before saving
@@ -87,23 +169,111 @@ export const ProviderConfigForm: React.FC<{
     }
 
     onSave(updates);
-  }, [form, onSave, isCustom]);
+  }, [form, onSave, provider.providerId]);
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/40 pt-3">
-      {/* Name (custom providers only) */}
-      {isCustom && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.name')}</label>
+      {/* Display: icon + name */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.name')}</label>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowIconPicker((v) => !v)}
+            className="shrink-0"
+            aria-label={t('ai.providers.icon.change')}
+            title={t('ai.providers.icon.change')}
+          >
+            <ProviderIconBadge provider={previewProvider} />
+          </button>
           <input
             type="text"
             value={form.name}
             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
             placeholder={t('ai.providers.name.placeholder')}
-            className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>
-      )}
+        {showIconPicker && (
+          <div className="rounded-md border border-border/50 bg-muted/20 p-2 space-y-2">
+            <div className="grid grid-cols-8 gap-1.5">
+              {BUILTIN_PROVIDER_ICONS.map((icon) => (
+                <button
+                  key={icon.id}
+                  type="button"
+                  onClick={() => handlePickBuiltin(icon.id)}
+                  title={icon.label}
+                  aria-label={icon.label}
+                  className={cn(
+                    "rounded-md p-0.5 transition-colors",
+                    form.iconId === icon.id && !form.iconDataUrl
+                      ? "ring-2 ring-primary/70"
+                      : "hover:ring-1 hover:ring-border",
+                  )}
+                >
+                  <ProviderIconBadge
+                    provider={{ providerId: provider.providerId, name: icon.label, iconId: icon.id }}
+                    size="sm"
+                  />
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void handleIconFileSelect(e.target.files?.[0] ?? null)}
+              />
+              <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload size={12} className="mr-1.5" />
+                {t('ai.providers.icon.upload')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleResetIcon}>
+                <RotateCcw size={12} className="mr-1.5" />
+                {t('ai.providers.icon.reset')}
+              </Button>
+              {form.iconDataUrl && (
+                <span className="text-[10px] text-muted-foreground">{t('ai.providers.icon.uploadedNote')}</span>
+              )}
+            </div>
+            {iconError && <p className="text-[11px] text-destructive">{iconError}</p>}
+          </div>
+        )}
+      </div>
+
+      {/* Provider style */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.style')}</label>
+        <div className="flex items-center gap-1.5">
+          {STYLE_OPTIONS.map((style) => {
+            const isSelected = resolvedStyle === style;
+            const isInherited = !form.style && isSelected;
+            return (
+              <button
+                key={style}
+                type="button"
+                onClick={() => setForm((prev) => ({ ...prev, style: prev.style === style ? "" : style }))}
+                className={cn(
+                  "h-7 px-2.5 rounded-md text-xs border transition-colors",
+                  isSelected
+                    ? "border-primary/70 bg-primary/15 text-foreground"
+                    : "border-border/50 bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                )}
+                aria-pressed={isSelected}
+              >
+                {t(`ai.providers.style.${style}`)}
+                {isInherited && (
+                  <span className="ml-1 text-[9px] text-muted-foreground/70">({t('ai.providers.style.inherited')})</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.style.help')}</p>
+      </div>
+
       {/* API Key */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.apiKey')}</label>

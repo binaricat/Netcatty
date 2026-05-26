@@ -4,6 +4,14 @@ import type { ProviderContinuation } from './providerContinuation';
 
 export type AIProviderId = 'openai' | 'anthropic' | 'google' | 'ollama' | 'openrouter' | 'custom';
 
+/**
+ * Wire-protocol family for a provider. Three are supported because every
+ * Anthropic/OpenAI-compatible third party reduces to one of these.
+ * `providerId` stays as the routing/display identity; `style` decides
+ * which Vercel AI SDK client builds the request.
+ */
+export type ProviderStyle = 'openai' | 'anthropic' | 'google';
+
 export interface ProviderAdvancedParams {
   maxTokens?: number;
   temperature?: number;       // 0–2
@@ -16,6 +24,12 @@ export interface ProviderConfig {
   id: string;
   providerId: AIProviderId;
   name: string;
+  /** Override the wire-protocol family; defaults from `providerId` via {@link resolveProviderStyle}. */
+  style?: ProviderStyle;
+  /** Built-in icon key (slug under public/ai/providers/), independent of providerId. */
+  iconId?: string;
+  /** User-supplied icon as a data URL (compressed to 64x64 webp at write time). Wins over iconId. */
+  iconDataUrl?: string;
   apiKey?: string;           // encrypted via credentialBridge (enc:v1: prefix)
   baseURL?: string;          // custom endpoint URL
   defaultModel?: string;
@@ -23,6 +37,19 @@ export interface ProviderConfig {
   enabled: boolean;
   skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)
   advancedParams?: ProviderAdvancedParams;
+}
+
+/** Pick the protocol family for a provider config, falling back from providerId when style is unset. */
+export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' | 'style'>): ProviderStyle {
+  if (config.style) return config.style;
+  switch (config.providerId) {
+    case 'anthropic':
+      return 'anthropic';
+    case 'google':
+      return 'google';
+    default:
+      return 'openai';
+  }
 }
 
 export interface ModelInfo {
