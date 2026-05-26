@@ -717,7 +717,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               aria-expanded={showModelPicker}
             >
               {hasProviderSwitcher && selectedSwitcherProvider ? (
-                <ProviderIconBadge provider={selectedSwitcherProvider} size="sm" />
+                <ProviderIconBadge provider={selectedSwitcherProvider} size="xs" />
               ) : (
                 <Cpu size={11} className="text-muted-foreground/64" />
               )}
@@ -753,9 +753,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                               providerSwitcher!.onSelect(p.id, p.defaultModel ?? '');
                               closeAllMenus();
                             }}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-muted/30 transition-colors cursor-pointer"
                           >
-                            <ProviderIconBadge provider={p} size="sm" />
+                            <ProviderIconBadge provider={p} size="md" />
                             <div className="flex-1 min-w-0">
                               <div className="truncate text-[12px] text-foreground/85">{p.name}</div>
                               <div className={`truncate text-[10.5px] ${hasModel ? 'text-muted-foreground/70 font-mono' : 'text-muted-foreground/55 italic'}`}>

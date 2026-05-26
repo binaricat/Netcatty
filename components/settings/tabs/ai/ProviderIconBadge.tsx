@@ -16,7 +16,7 @@ import {
 type ProviderLike = Pick<ProviderConfig, "providerId" | "name" | "iconId" | "iconDataUrl">;
 
 interface BaseProps {
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
 }
 
 type Props =
@@ -24,16 +24,19 @@ type Props =
   | (BaseProps & { provider: ProviderLike; providerId?: undefined });
 
 const BADGE_DIMENSIONS = {
+  xs: "w-4 h-4",
   sm: "w-5 h-5",
   md: "w-8 h-8",
 } as const;
 
 const IMG_DIMENSIONS = {
+  xs: "w-2.5 h-2.5",
   sm: "w-3 h-3",
   md: "w-4 h-4",
 } as const;
 
 const UPLOAD_IMG_DIMENSIONS = {
+  xs: "w-4 h-4",
   sm: "w-5 h-5",
   md: "w-8 h-8",
 } as const;
@@ -104,7 +107,7 @@ export const ProviderIconBadge: React.FC<Props> = (props) => {
       className={cn(
         "rounded-md flex items-center justify-center shrink-0 overflow-hidden bg-zinc-600 text-white font-medium",
         dim,
-        size === "sm" ? "text-[10px]" : "text-sm",
+        size === "md" ? "text-sm" : size === "sm" ? "text-[10px]" : "text-[9px]",
       )}
       aria-hidden="true"
     >
