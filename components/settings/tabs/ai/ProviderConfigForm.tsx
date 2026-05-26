@@ -337,6 +337,7 @@ export const ProviderConfigForm: React.FC<{
           modelsEndpoint={preset?.modelsEndpoint}
           apiKey={form.apiKey}
           providerId={provider.providerId}
+          style={resolvedStyle}
           skipTLSVerify={form.skipTLSVerify}
         />
       </div>
