@@ -334,6 +334,13 @@ export function useAIState() {
   const [agentProviderMap, setAgentProviderMapRaw] = useState<Record<string, string>>(() =>
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {}
   );
+  // Mirror for non-functional reads inside removeProvider — needed to know
+  // which agents were bound to the deleted provider so we can also drop
+  // their saved model ids (those ids belonged to the now-missing provider).
+  const agentProviderMapRef = useRef(agentProviderMap);
+  useEffect(() => {
+    agentProviderMapRef.current = agentProviderMap;
+  }, [agentProviderMap]);
 
   // ── Web Search Config ──
   const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
@@ -1106,6 +1113,41 @@ export function useAIState() {
       }
       return prevId;
     });
+    // Drop per-agent overrides pointing at this provider plus the saved
+    // model id for those agents — the id belonged to the now-missing
+    // provider, so feeding it to the fallback provider would just send
+    // a model name that target doesn't recognize.
+    const orphanedAgents = Object.keys(agentProviderMapRef.current)
+      .filter((agentId) => agentProviderMapRef.current[agentId] === id);
+    if (orphanedAgents.length > 0) {
+      setAgentProviderMapRaw(prev => {
+        const next: Record<string, string> = {};
+        let changed = false;
+        for (const agentId of Object.keys(prev)) {
+          if (prev[agentId] === id) {
+            changed = true;
+          } else {
+            next[agentId] = prev[agentId];
+          }
+        }
+        if (!changed) return prev;
+        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
+        return next;
+      });
+      setAgentModelMapRaw(prev => {
+        let changed = false;
+        const next: Record<string, string> = { ...prev };
+        for (const agentId of orphanedAgents) {
+          if (agentId in next) {
+            delete next[agentId];
+            changed = true;
+          }
+        }
+        if (!changed) return prev;
+        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, next);
+        return next;
+      });
+    }
   }, [setProviders]);
 
   // ── Computed ──

@@ -576,24 +576,29 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     if (overrideId) {
       const p = providers.find((cfg) => cfg.id === overrideId);
       if (p) return p;
+      // Override exists but points to a deleted provider — fall through
+      // to the global active selection.
     }
     return activeProvider;
   }, [agentProviderMap, providers, activeProvider]);
 
   const cattyAgentModelId = useMemo(() => {
-    const stored = agentModelMap['catty'];
-    if (stored) return stored;
-    // If the user explicitly picked a per-agent provider, never fall back
-    // to the global `activeModelId` — that id belongs to whichever provider
-    // was globally active, not the one Catty is bound to now. Sending a
-    // gpt-4o id to a DeepSeek/Anthropic-shaped provider would just yield
-    // a wrong-model error.
-    const hasProviderOverride = !!agentProviderMap['catty'];
-    if (hasProviderOverride) {
-      return cattyAgentProvider?.defaultModel ?? '';
+    const overrideId = agentProviderMap['catty'];
+    const overrideProvider = overrideId
+      ? providers.find((cfg) => cfg.id === overrideId)
+      : undefined;
+    if (overrideProvider) {
+      // Override intact — prefer the per-agent saved model, then the
+      // override provider's defaultModel. Never reach for the global
+      // `activeModelId` here: that id belongs to whichever provider
+      // was globally active, not the one Catty is bound to now.
+      return agentModelMap['catty'] || overrideProvider.defaultModel || '';
     }
+    // No override, OR a stale override (the bound provider was deleted):
+    // in either case the saved model id is no longer trustworthy as a
+    // Catty pick, so consult the global active selection instead.
     return cattyAgentProvider?.defaultModel ?? activeModelId ?? '';
-  }, [agentModelMap, agentProviderMap, cattyAgentProvider, activeModelId]);
+  }, [agentModelMap, agentProviderMap, providers, cattyAgentProvider, activeModelId]);
 
   const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
   const effectiveActiveModelId = currentAgentId === 'catty' ? cattyAgentModelId : activeModelId;
