@@ -574,7 +574,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const cattyAgentProvider = useMemo(() => {
     const overrideId = agentProviderMap['catty'];
     if (overrideId) {
-      const p = providers.find((cfg) => cfg.id === overrideId && cfg.enabled !== false);
+      const p = providers.find((cfg) => cfg.id === overrideId);
       if (p) return p;
     }
     return activeProvider;
@@ -589,11 +589,13 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
   const effectiveActiveModelId = currentAgentId === 'catty' ? cattyAgentModelId : activeModelId;
 
-  // Catty Agent surfaces its provider picker in the chat input via a
-  // two-level dropdown (provider on the left, that provider's model(s) on
-  // the right). External ACP agents skip this entirely.
-  const cattyEnabledProviders = useMemo(
-    () => (currentAgentId === 'catty' ? providers.filter((p) => p.enabled !== false) : []),
+  // Catty Agent surfaces its provider picker in the chat input. The list
+  // mirrors what Settings → AI → Providers shows — every configured
+  // provider, regardless of the per-provider `enabled` toggle, so the
+  // user can swap between everything they've set up without first going
+  // back into Settings to flip a switch.
+  const cattyConfiguredProviders = useMemo(
+    () => (currentAgentId === 'catty' ? providers : []),
     [currentAgentId, providers],
   );
 
@@ -1177,9 +1179,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
             selectedModelId={selectedAgentModel}
             onModelSelect={handleAgentModelSelect}
             providerSwitcher={
-              currentAgentId === 'catty' && cattyEnabledProviders.length > 0
+              currentAgentId === 'catty' && cattyConfiguredProviders.length > 0
                 ? {
-                    providers: cattyEnabledProviders,
+                    providers: cattyConfiguredProviders,
                     selectedProviderId: effectiveActiveProvider?.id,
                     selectedModelId: effectiveActiveModelId || undefined,
                     onSelect: handleAgentProviderModelSelect,

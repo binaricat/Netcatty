@@ -27,17 +27,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 // Keep in sync with the popover's Tailwind max-width below.
 const MODEL_PICKER_MAX_WIDTH = 360;
-// Wider when surfacing the provider→model two-column picker (Catty Agent).
-const PROVIDER_PICKER_MAX_WIDTH = 520;
+// Slightly wider for the provider picker so the per-row default-model
+// caption doesn't truncate.
+const PROVIDER_PICKER_MAX_WIDTH = 320;
 
 /**
- * Provider→model picker payload used by Catty Agent. When set, the model
- * chip switches to a two-column popover (providers on the left, that
- * provider's known model(s) on the right) and the chip itself shows the
- * provider's icon + name + model name in place of the generic Cpu glyph.
+ * Provider picker payload used by Catty Agent. When set, the model chip
+ * switches to a flat provider list (provider icon + name + the provider's
+ * configured default model as caption) in place of the generic Cpu glyph
+ * + model-preset dropdown. Each provider exposes a single model — its
+ * `defaultModel` — so a two-level menu would be empty noise; picking a
+ * provider implicitly picks its model.
  */
 export interface ProviderSwitcherConfig {
-  /** Enabled provider configs available to swap into. */
+  /** Every configured provider — Settings-level visibility, not the
+   *  `enabled` toggle, since the user expects to swap between everything
+   *  they've set up. */
   providers: ProviderConfig[];
   /** Currently bound provider id (falls back to providers[0] when missing). */
   selectedProviderId?: string;
@@ -127,7 +132,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [inputPanelPos, setInputPanelPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const [hoveredModelId, setHoveredModelId] = useState<string | null>(null);
-  const [hoveredProviderId, setHoveredProviderId] = useState<string | null>(null);
   const [slashQuery, setSlashQuery] = useState('');
   const [slashRange, setSlashRange] = useState<{ start: number; end: number } | null>(null);
   // Active highlight index for @ mention / slash skill keyboard navigation
@@ -145,7 +149,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setMenuPos(null);
     setInputPanelPos(null);
     setHoveredModelId(null);
-    setHoveredProviderId(null);
     setSlashQuery('');
     setSlashRange(null);
   }, []);
@@ -730,89 +733,41 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   aria-label={hasProviderSwitcher ? 'Select provider and model' : 'Select model'}
                   className="fixed z-[1000] w-max min-w-[160px] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
                   style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: popoverMaxWidth }}
-                  onMouseLeave={() => { setHoveredModelId(null); setHoveredProviderId(null); }}
+                  onMouseLeave={() => setHoveredModelId(null)}
                 >
-                  {hasProviderSwitcher ? (() => {
-                    const activeProviderRowId =
-                      hoveredProviderId ?? selectedSwitcherProvider?.id ?? providerSwitcher!.providers[0]?.id;
-                    const activeProviderRow = providerSwitcher!.providers.find((p) => p.id === activeProviderRowId);
-                    // For v1, each provider exposes a single model: its
-                    // configured `defaultModel`. The right column visualizes
-                    // this as a one-item list so the two-level structure is
-                    // ready to absorb more entries (cached /models listings,
-                    // manual additions) without UI surgery.
-                    const modelOptionsForActive = activeProviderRow?.defaultModel
-                      ? [activeProviderRow.defaultModel]
-                      : [];
-                    return (
-                      <div className="flex">
-                        {/* Left column: providers */}
-                        <div className="min-w-[200px] flex-1 py-0.5 max-h-[300px] overflow-y-auto">
-                          {providerSwitcher!.providers.map((p) => {
-                            const isHovered = activeProviderRowId === p.id;
-                            const isSelected = providerSwitcher!.selectedProviderId === p.id;
-                            const previewModel = p.defaultModel || '';
-                            return (
-                              <button
-                                key={p.id}
-                                type="button"
-                                role="option"
-                                aria-selected={isSelected}
-                                onMouseEnter={() => setHoveredProviderId(p.id)}
-                                onFocus={() => setHoveredProviderId(p.id)}
-                                onClick={() => {
-                                  providerSwitcher!.onSelect(p.id, previewModel);
-                                  closeAllMenus();
-                                }}
-                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors cursor-pointer ${isHovered ? 'bg-muted/40' : 'hover:bg-muted/30'}`}
-                              >
-                                <ProviderIconBadge provider={p} size="sm" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="truncate text-foreground/85">{p.name}</div>
-                                  {previewModel && (
-                                    <div className="truncate text-[10px] text-muted-foreground/70">{previewModel}</div>
-                                  )}
-                                </div>
-                                {isSelected && <Check size={11} className="text-primary shrink-0" />}
-                                <ChevronRight size={10} className="text-muted-foreground/50 shrink-0" />
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {/* Right column: models for the hovered/selected provider */}
-                        <div className="min-w-[200px] flex-1 border-l border-border/40 py-0.5 max-h-[300px] overflow-y-auto">
-                          {modelOptionsForActive.length === 0 ? (
-                            <div className="px-2.5 py-2 text-[11px] text-muted-foreground/70 italic">
-                              {t('ai.chat.noProviderModel')}
+                  {hasProviderSwitcher ? (
+                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
+                      {providerSwitcher!.providers.map((p) => {
+                        const isSelected = providerSwitcher!.selectedProviderId === p.id;
+                        const modelCaption = p.defaultModel?.trim()
+                          ? p.defaultModel
+                          : t('ai.chat.noProviderModel');
+                        const hasModel = !!p.defaultModel?.trim();
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              providerSwitcher!.onSelect(p.id, p.defaultModel ?? '');
+                              closeAllMenus();
+                            }}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-muted/30 transition-colors cursor-pointer"
+                          >
+                            <ProviderIconBadge provider={p} size="sm" />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-[12px] text-foreground/85">{p.name}</div>
+                              <div className={`truncate text-[10.5px] ${hasModel ? 'text-muted-foreground/70 font-mono' : 'text-muted-foreground/55 italic'}`}>
+                                {modelCaption}
+                              </div>
                             </div>
-                          ) : (
-                            modelOptionsForActive.map((modelId) => {
-                              const isSelected =
-                                providerSwitcher!.selectedProviderId === activeProviderRow?.id &&
-                                providerSwitcher!.selectedModelId === modelId;
-                              return (
-                                <button
-                                  key={modelId}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={isSelected}
-                                  onClick={() => {
-                                    if (!activeProviderRow) return;
-                                    providerSwitcher!.onSelect(activeProviderRow.id, modelId);
-                                    closeAllMenus();
-                                  }}
-                                  className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
-                                >
-                                  {isSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
-                                  <span className="flex-1 min-w-0 truncate text-foreground/85">{modelId}</span>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })() : modelPresets.map(preset => {
+                            {isSelected && <Check size={12} className="text-primary shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : modelPresets.map(preset => {
                     const isSelected = preset.id === selectedBaseModelId;
                     const hasThinking = preset.thinkingLevels && preset.thinkingLevels.length > 0;
                     return (
