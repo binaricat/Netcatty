@@ -152,8 +152,12 @@ function buildWrappedCommand(command, shellKind, marker) {
     }
 
     case "fish":
+      // Leading space: see the comment in the POSIX branch below. Fish
+      // does not skip leading-space commands by default, but users can
+      // define a `fish_should_add_to_history` function that filters them
+      // — this prefix is what lets that opt-in actually take effect.
       return (
-        `set ${marker} 0; function __ncmcp_int --on-signal INT; printf '%s\\n' '${marker}_E:130'; functions -e __ncmcp_int; end; ` +
+        ` set ${marker} 0; function __ncmcp_int --on-signal INT; printf '%s\\n' '${marker}_E:130'; functions -e __ncmcp_int; end; ` +
         `set -l ${marker}_cmd '${escapeFishSingleQuoted(command)}'; ` +
         `begin; set -gx PAGER cat; set -gx SYSTEMD_PAGER ''; set -gx GIT_PAGER cat; set -gx LESS ''; ` +
         `printf '%s\\n' '${marker}_S'; eval \$${marker}_cmd; set __NCMCP_rc $status; ` +
@@ -185,8 +189,15 @@ function buildWrappedCommand(command, shellKind, marker) {
       //    preventing the shell from aborting the compound command.
       const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
       const escaped = escapePosixSingleQuoted(command);
+      // Leading single space: lets bash/zsh skip recording this command
+      // in history when the user already has HISTCONTROL=ignorespace
+      // (bash) or HIST_IGNORE_SPACE (zsh) configured — Debian/Ubuntu and
+      // most Oh-My-Zsh setups have this on by default; CentOS/RHEL users
+      // can opt in by adding `HISTCONTROL=ignoreboth` to ~/.bashrc.
+      // Without that config the prefix is harmless; it just doesn't
+      // suppress history recording.
       return (
-        `${marker}=0; ${marker}_cmd='${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
+        ` ${marker}=0; ${marker}_cmd='${escaped}'; { printf '%s\\n' '${marker}_S'; trap ':' INT; ${noPager}eval "$${marker}_cmd"; __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }\n`
       );
     }
   }
