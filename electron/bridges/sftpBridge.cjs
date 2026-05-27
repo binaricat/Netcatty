@@ -918,10 +918,18 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
         keepaliveCountMax: hopCountMaxEffective,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
-        algorithms: buildSftpAlgorithms(options.legacyAlgorithms, {
-      skipEcdsaHostKey: options.skipEcdsaHostKey,
-      algorithmOverrides: options.algorithmOverrides,
-    }),
+        // Per-hop algorithm settings, falling back to the target's settings
+        // when the hop didn't override them (mirrors sshBridge.cjs jump
+        // loop). A bastion that needs the ECDSA skip or custom override
+        // can set it on its own host config instead of having to clone the
+        // target's settings.
+        algorithms: buildSftpAlgorithms(
+          jump.legacyAlgorithms ?? options.legacyAlgorithms,
+          {
+            skipEcdsaHostKey: jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey,
+            algorithmOverrides: jump.algorithmOverrides ?? options.algorithmOverrides,
+          },
+        ),
       };
 
       // Auth - support agent (certificate), key, and password fallback
