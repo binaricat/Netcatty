@@ -905,6 +905,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               <CollapsibleContent className="mt-2">
                 <AlgorithmOverridesPanel
                   value={form.algorithms}
+                  legacyEnabled={!!form.legacyAlgorithms}
                   onChange={(next) => update("algorithms", next)}
                 />
               </CollapsibleContent>

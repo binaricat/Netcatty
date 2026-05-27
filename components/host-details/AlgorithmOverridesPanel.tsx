@@ -1,6 +1,7 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import {
+  effectiveDefaultAlgorithms,
   SSH_ALGORITHM_CATEGORIES,
   SSHAlgorithmCategory,
   SUPPORTED_ALGORITHMS_BY_CATEGORY,
@@ -12,6 +13,14 @@ import { Card } from "../ui/card";
 interface Props {
   value: HostAlgorithmOverrides | undefined;
   onChange: (next: HostAlgorithmOverrides | undefined) => void;
+  /**
+   * The host's current `legacyAlgorithms` value, used to seed the very
+   * first customization in each category with the *effective* default
+   * list (modern-only vs modern+legacy) rather than the full SUPPORTED
+   * set. Without this, unchecking a single algorithm in modern mode
+   * would silently start advertising CBC / arcfour / MD5 algorithms.
+   */
+  legacyEnabled: boolean;
 }
 
 const CATEGORY_LABEL_KEY: Record<SSHAlgorithmCategory, string> = {
@@ -33,8 +42,12 @@ const CATEGORY_LABEL_KEY: Record<SSHAlgorithmCategory, string> = {
  * an empty array would make ssh2 fail negotiation, so we normalize it
  * back to `undefined` on save.
  */
-export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange }) => {
+export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange, legacyEnabled }) => {
   const { t } = useI18n();
+  const effectiveDefault = useMemo(
+    () => effectiveDefaultAlgorithms(legacyEnabled),
+    [legacyEnabled],
+  );
 
   const updateCategory = useCallback(
     (category: SSHAlgorithmCategory, selected: string[]) => {
@@ -54,10 +67,19 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange }) =>
     (category: SSHAlgorithmCategory, algo: string) => {
       const current = value?.[category];
       if (!current) {
-        // First click in this category — seed with every default-on algorithm
-        // EXCEPT the one being toggled off.
-        const all = SUPPORTED_ALGORITHMS_BY_CATEGORY[category];
-        updateCategory(category, all.filter((a) => a !== algo));
+        // First click in this category — seed with the *effective* default
+        // for the host's current legacy mode. Seeding from
+        // SUPPORTED_ALGORITHMS_BY_CATEGORY would silently introduce
+        // legacy algorithms (CBC, arcfour, MD5) into the offered list.
+        const baseline = effectiveDefault[category];
+        if (baseline.includes(algo)) {
+          updateCategory(category, baseline.filter((a) => a !== algo));
+        } else {
+          // The user clicked an algorithm not in the current effective
+          // default — they want to opt INTO it. Start the override with
+          // the default plus this extra entry.
+          updateCategory(category, [...baseline, algo]);
+        }
         return;
       }
       if (current.includes(algo)) {
@@ -66,7 +88,7 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange }) =>
         updateCategory(category, [...current, algo]);
       }
     },
-    [value, updateCategory],
+    [value, updateCategory, effectiveDefault],
   );
 
   const resetCategory = useCallback(
@@ -87,11 +109,15 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange }) =>
   const isChecked = useCallback(
     (category: SSHAlgorithmCategory, algo: string) => {
       const current = value?.[category];
-      // Uncustomized → treat every supported algorithm as on (the default).
-      if (!current) return true;
+      // Uncustomized → reflect the *effective* default so the visible
+      // checkbox state matches what NetCatty would actually advertise.
+      // Algorithms outside the effective default (e.g. arcfour in modern
+      // mode) appear unchecked, hinting that ticking them implies opting
+      // into something normally not offered.
+      if (!current) return effectiveDefault[category].includes(algo);
       return current.includes(algo);
     },
-    [value],
+    [value, effectiveDefault],
   );
 
   return (

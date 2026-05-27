@@ -745,6 +745,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         identityFilePaths: jumpIdentityFilePaths,
         keepaliveInterval: hopKeepalive.interval,
         keepaliveCountMax: hopKeepalive.countMax,
+        legacyAlgorithms: jumpHost.legacyAlgorithms,
+        skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
+        algorithmOverrides: jumpHost.algorithms,
       };
     });
 

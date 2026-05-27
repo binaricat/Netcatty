@@ -472,6 +472,9 @@ export const startPortForward = async (
             identityFilePaths: jumpKeyAuth.identityFilePaths,
             keepaliveInterval: hopKeepalive.interval,
             keepaliveCountMax: hopKeepalive.countMax,
+            legacyAlgorithms: jumpHost.legacyAlgorithms,
+            skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
+            algorithmOverrides: jumpHost.algorithms,
           };
         });
     }
@@ -552,6 +555,8 @@ export const startPortForward = async (
       jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
       identityFilePaths: keyAuth.identityFilePaths,
       legacyAlgorithms: host.legacyAlgorithms,
+      skipEcdsaHostKey: host.skipEcdsaHostKey,
+      algorithmOverrides: host.algorithms,
       keepaliveInterval: resolveHostKeepalive(host, globalKeepalive).interval,
       keepaliveCountMax: resolveHostKeepalive(host, globalKeepalive).countMax,
     });

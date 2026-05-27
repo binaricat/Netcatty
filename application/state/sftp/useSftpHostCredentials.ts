@@ -113,6 +113,9 @@ export const buildSftpHostCredentials = ({
         identityFilePaths: jumpKeyAuth.identityFilePaths,
         keepaliveInterval: hopKeepalive.interval,
         keepaliveCountMax: hopKeepalive.countMax,
+        legacyAlgorithms: jumpHost.legacyAlgorithms,
+        skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
+        algorithmOverrides: jumpHost.algorithms,
       };
     });
   }
@@ -159,6 +162,13 @@ export const buildSftpHostCredentials = ({
     identityFilePaths: keyAuth.identityFilePaths,
     keepaliveInterval: targetKeepalive.interval,
     keepaliveCountMax: targetKeepalive.countMax,
+    // Algorithm settings — must reach the SFTP bridge or hosts that need
+    // legacy mode / the ECDSA skip / advanced overrides would still hit
+    // the original negotiation failure when opening their SFTP pane,
+    // even though the terminal session works.
+    legacyAlgorithms: host.legacyAlgorithms,
+    skipEcdsaHostKey: host.skipEcdsaHostKey,
+    algorithmOverrides: host.algorithms,
   };
 };
 

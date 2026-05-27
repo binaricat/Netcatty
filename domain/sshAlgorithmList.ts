@@ -97,3 +97,99 @@ export const SSH_ALGORITHM_CATEGORIES: readonly SSHAlgorithmCategory[] = [
   "serverHostKey",
   "compress",
 ];
+
+// Mirror of what `electron/bridges/sshAlgorithms.cjs#buildAlgorithms(false)`
+// actually emits in non-legacy mode. Used by the UI to seed a category's
+// first customization with the *current effective default* rather than the
+// full SUPPORTED list — otherwise unchecking a single modern algorithm
+// would inadvertently introduce CBC / arcfour / MD5 into the offer list.
+//
+// `hmac` and `serverHostKey` here mirror ssh2's `DEFAULT_MAC` and
+// `DEFAULT_SERVER_HOST_KEY` because non-legacy mode leaves both fields
+// unset, letting ssh2 fall back to those defaults. Keep them in sync if
+// the ssh2 dependency bumps.
+const MODERN_DEFAULT_ALGORITHMS: Readonly<Record<SSHAlgorithmCategory, readonly string[]>> = {
+  kex: [
+    "curve25519-sha256",
+    "curve25519-sha256@libssh.org",
+    "ecdh-sha2-nistp256",
+    "ecdh-sha2-nistp384",
+    "ecdh-sha2-nistp521",
+    "diffie-hellman-group14-sha256",
+    "diffie-hellman-group16-sha512",
+    "diffie-hellman-group18-sha512",
+    "diffie-hellman-group-exchange-sha256",
+  ],
+  cipher: [
+    "aes128-gcm@openssh.com",
+    "aes256-gcm@openssh.com",
+    "aes128-ctr",
+    "aes192-ctr",
+    "aes256-ctr",
+  ],
+  hmac: [
+    "hmac-sha2-256-etm@openssh.com",
+    "hmac-sha2-512-etm@openssh.com",
+    "hmac-sha1-etm@openssh.com",
+    "hmac-sha2-256",
+    "hmac-sha2-512",
+    "hmac-sha1",
+  ],
+  serverHostKey: [
+    "ssh-ed25519",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "rsa-sha2-512",
+    "rsa-sha2-256",
+    "ssh-rsa",
+  ],
+  compress: ["none"],
+};
+
+// Additions appended when legacy mode is on — matches
+// `applyLegacyAlgorithms` + `applyLegacyHmacAlgorithms` in
+// `electron/bridges/sshAlgorithms.cjs`. `hmac-md5` is conditional on
+// runtime support there but we seed it unconditionally; ssh2 will surface
+// "Unsupported algorithm" at connect time on FIPS Node builds, which is
+// acceptable as a UI hint that the user picked something the runtime
+// rejects.
+const LEGACY_DEFAULT_ADDITIONS: Partial<Record<SSHAlgorithmCategory, readonly string[]>> = {
+  kex: [
+    "diffie-hellman-group14-sha1",
+    "diffie-hellman-group1-sha1",
+    "diffie-hellman-group-exchange-sha1",
+  ],
+  cipher: ["aes128-cbc", "aes256-cbc", "3des-cbc"],
+  hmac: ["hmac-md5"],
+  serverHostKey: ["ssh-dss"],
+};
+
+/**
+ * Return the algorithm list that NetCatty would actually offer for each
+ * category at connect time given the current legacy toggle. The advanced
+ * override UI seeds an untouched category from this list so a partial
+ * customization can't accidentally re-enable algorithms the connection
+ * wouldn't otherwise advertise.
+ */
+export function effectiveDefaultAlgorithms(
+  legacyEnabled: boolean,
+): Record<SSHAlgorithmCategory, readonly string[]> {
+  const result: Record<SSHAlgorithmCategory, string[]> = {
+    kex: [...MODERN_DEFAULT_ALGORITHMS.kex],
+    cipher: [...MODERN_DEFAULT_ALGORITHMS.cipher],
+    hmac: [...MODERN_DEFAULT_ALGORITHMS.hmac],
+    serverHostKey: [...MODERN_DEFAULT_ALGORITHMS.serverHostKey],
+    compress: [...MODERN_DEFAULT_ALGORITHMS.compress],
+  };
+  if (legacyEnabled) {
+    for (const category of SSH_ALGORITHM_CATEGORIES) {
+      const additions = LEGACY_DEFAULT_ADDITIONS[category];
+      if (!additions) continue;
+      for (const algo of additions) {
+        if (!result[category].includes(algo)) result[category].push(algo);
+      }
+    }
+  }
+  return result;
+}

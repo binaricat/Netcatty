@@ -1841,6 +1841,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             <CollapsibleContent className="mt-2">
               <AlgorithmOverridesPanel
                 value={form.algorithms}
+                legacyEnabled={!!form.legacyAlgorithms}
                 onChange={(next) => update("algorithms", next)}
               />
             </CollapsibleContent>
