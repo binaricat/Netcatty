@@ -2915,6 +2915,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             hosts={hosts}
             proxyProfiles={proxyProfiles}
             customGroups={customGroups}
+            groupConfigs={groupConfigs}
             managedSources={managedSources}
             onSave={(k) => onUpdateKeys([...keys, k])}
             onUpdate={(k) =>

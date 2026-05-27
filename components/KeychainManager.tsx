@@ -22,6 +22,8 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import { sanitizeCredentialValue } from "../domain/credentials";
+import { applyGroupDefaults, resolveGroupDefaults } from "../domain/groupConfig";
+import type { GroupConfig } from "../domain/models";
 import { resolveBridgeKeyAuth, resolveHostAuth } from "../domain/sshAuth";
 import { STORAGE_KEY_VAULT_KEYS_VIEW_MODE } from "../infrastructure/config/storageKeys";
 import { logger } from "../lib/logger";
@@ -75,6 +77,13 @@ interface KeychainManagerProps {
   hosts?: Host[];
   proxyProfiles?: ProxyProfile[];
   customGroups?: string[];
+  /**
+   * Group default configurations. Needed by the "export public key to
+   * host" flow so per-host SSH algorithm settings (legacy / skipEcdsa /
+   * overrides) that the host inherits from its group are honored when
+   * the export opens its one-off SSH connection.
+   */
+  groupConfigs?: GroupConfig[];
   managedSources?: ManagedSource[];
   onSave: (key: SSHKey) => void;
   onUpdate: (key: SSHKey) => void;
@@ -92,6 +101,7 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   hosts = [],
   proxyProfiles = [],
   customGroups = [],
+  groupConfigs = [],
   managedSources = [],
   onSave,
   onUpdate,
@@ -1069,11 +1079,22 @@ echo $3 >> "$FILE"`);
                       // Execute the script directly - SSH exec handles multiline commands
                       const command = scriptWithVars;
 
+                      // Resolve the effective host (applying group
+                      // defaults), so algorithm settings inherited from
+                      // the group reach the bridge — the host object on
+                      // its own only carries explicitly set fields.
+                      const effectiveExportHost = exportHost.group
+                        ? applyGroupDefaults(
+                          exportHost,
+                          resolveGroupDefaults(exportHost.group, groupConfigs),
+                        )
+                        : applyGroupDefaults(exportHost, {});
+
                       // Execute via SSH
                       const result = await execCommand({
-                        hostname: exportHost.hostname,
+                        hostname: effectiveExportHost.hostname,
                         username: exportAuth.username,
-                        port: exportHost.port || 22,
+                        port: effectiveExportHost.port || 22,
                         password: exportPassword,
                         privateKey: exportKeyAuth.privateKey,
                         certificate: exportAuth.key?.certificate,
@@ -1082,16 +1103,17 @@ echo $3 >> "$FILE"`);
                         keySource: exportAuth.key?.source,
                         passphrase: exportKeyAuth.passphrase,
                         identityFilePaths: exportKeyAuth.identityFilePaths,
-                        // Carry the host's algorithm settings so the
-                        // one-off SSH exec honors them just like the
-                        // interactive terminal does.
-                        legacyAlgorithms: exportHost.legacyAlgorithms,
-                        skipEcdsaHostKey: exportHost.skipEcdsaHostKey,
-                        algorithmOverrides: exportHost.algorithms,
+                        // Carry the effective host's algorithm settings
+                        // (host value falling back to its group default)
+                        // so the one-off SSH exec honors them just like
+                        // the interactive terminal does.
+                        legacyAlgorithms: effectiveExportHost.legacyAlgorithms,
+                        skipEcdsaHostKey: effectiveExportHost.skipEcdsaHostKey,
+                        algorithmOverrides: effectiveExportHost.algorithms,
                         command,
                         timeout: 30000,
                         enableKeyboardInteractive: true,
-                        sessionId: `export-key:${exportHost.id}:${panel.key.id}`,
+                        sessionId: `export-key:${effectiveExportHost.id}:${panel.key.id}`,
                       });
 
                       // Check result - code 0, null, or undefined with no stderr is success
