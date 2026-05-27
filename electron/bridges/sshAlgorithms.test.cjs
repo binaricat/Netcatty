@@ -326,4 +326,27 @@ for (const [label, buildAlgorithms] of [
       assert.deepEqual(algorithms.serverHostKey, ["ssh-ed25519", "ssh-rsa"]);
     });
   });
+
+  test(`${label} KEX override is filtered against the runtime's fixed-DH support`, () => {
+    // On Electron/BoringSSL where modp2 (the prime backing
+    // diffie-hellman-group1-sha1) is not available, the default builder
+    // already drops group1-sha1. An advanced user's KEX override that
+    // includes it must go through the same filter — otherwise the
+    // override silently re-introduces an algorithm ssh2 will throw
+    // "Unknown DH group" on mid-handshake.
+    withAlgorithmRuntime({ unsupportedGroups: new Set(["modp2"]) }, () => {
+      const algorithms = buildAlgorithms(true, {
+        algorithmOverrides: {
+          kex: [
+            "diffie-hellman-group14-sha1",
+            "diffie-hellman-group1-sha1",
+            "diffie-hellman-group-exchange-sha1",
+          ],
+        },
+      });
+      assert.ok(algorithms.kex.includes("diffie-hellman-group14-sha1"));
+      assert.ok(algorithms.kex.includes("diffie-hellman-group-exchange-sha1"));
+      assert.equal(algorithms.kex.includes("diffie-hellman-group1-sha1"), false);
+    });
+  });
 }

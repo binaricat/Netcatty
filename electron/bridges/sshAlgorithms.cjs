@@ -147,7 +147,13 @@ function applyAlgorithmOverrides(algorithms, overrides) {
     const list = overrides[key];
     if (Array.isArray(list) && list.length > 0) {
       // Copy so caller mutation cannot leak back into the host config object.
-      algorithms[key] = list.slice();
+      const copy = list.slice();
+      // KEX needs the same runtime fixed-DH support filter the default
+      // builder applies — BoringSSL drops modp2 (the prime backing
+      // `diffie-hellman-group1-sha1`), and an override that re-introduces
+      // an unsupported group would make ssh2 throw "Unknown DH group"
+      // mid-handshake instead of failing fast.
+      algorithms[key] = key === "kex" ? filterSupportedFixedDhKex(copy) : copy;
     }
   }
 }
