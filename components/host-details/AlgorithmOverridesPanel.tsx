@@ -21,6 +21,16 @@ interface Props {
    * would silently start advertising CBC / arcfour / MD5 algorithms.
    */
   legacyEnabled: boolean;
+  /**
+   * Algorithm overrides this host would inherit from its group when its
+   * own field is unset. Used purely for display: an `undefined` value
+   * here means the host can freely use NetCatty defaults by resetting
+   * a category; a populated value means the host would inherit those
+   * lists, and resetting locally falls back to them — the panel
+   * surfaces that so the user knows the local Reset button doesn't
+   * jump them to NetCatty's defaults in that case.
+   */
+  inheritedFromGroup?: HostAlgorithmOverrides;
 }
 
 const CATEGORY_LABEL_KEY: Record<SSHAlgorithmCategory, string> = {
@@ -42,12 +52,24 @@ const CATEGORY_LABEL_KEY: Record<SSHAlgorithmCategory, string> = {
  * an empty array would make ssh2 fail negotiation, so we normalize it
  * back to `undefined` on save.
  */
-export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange, legacyEnabled }) => {
+export const AlgorithmOverridesPanel: React.FC<Props> = ({
+  value,
+  onChange,
+  legacyEnabled,
+  inheritedFromGroup,
+}) => {
   const { t } = useI18n();
   const effectiveDefault = useMemo(
     () => effectiveDefaultAlgorithms(legacyEnabled),
     [legacyEnabled],
   );
+  const inheritedCategories = useMemo(() => {
+    if (!inheritedFromGroup) return [] as SSHAlgorithmCategory[];
+    return SSH_ALGORITHM_CATEGORIES.filter((category) => {
+      const list = inheritedFromGroup[category];
+      return Array.isArray(list) && list.length > 0;
+    });
+  }, [inheritedFromGroup]);
 
   const updateCategory = useCallback(
     (category: SSHAlgorithmCategory, selected: string[]) => {
@@ -125,6 +147,17 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({ value, onChange, lega
       <p className="text-xs text-muted-foreground break-words">
         {t("hostDetails.algorithms.advanced.desc")}
       </p>
+      {inheritedCategories.length > 0 && (
+        <div className="flex items-start gap-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/20">
+          <p className="text-xs text-blue-700 dark:text-blue-300 break-words">
+            {t("hostDetails.algorithms.inheritedNotice")
+              .replace(
+                "{categories}",
+                inheritedCategories.map((c) => t(CATEGORY_LABEL_KEY[c])).join(", "),
+              )}
+          </p>
+        </div>
+      )}
       {SSH_ALGORITHM_CATEGORIES.map((category) => {
         const supported = SUPPORTED_ALGORITHMS_BY_CATEGORY[category];
         const customized = isCustomized(category);

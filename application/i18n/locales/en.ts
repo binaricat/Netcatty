@@ -1159,6 +1159,7 @@ const en: Messages = {
   'hostDetails.skipEcdsaHostKey.desc': 'Some old Huawei / Cisco switches produce non-standard ECDSA host-key signatures that cause "signature verification failed". Turning this on drops every ecdsa-sha2-* from the client offer so negotiation falls back to RSA / Ed25519.',
   'hostDetails.algorithms.advanced': 'Advanced algorithm overrides',
   'hostDetails.algorithms.advanced.desc': 'Replace the offered algorithm list for any category on a per-host basis. Leaving a category untouched uses the default; selecting a subset fully replaces the default list. Incorrect values can make the host unreachable.',
+  'hostDetails.algorithms.inheritedNotice': 'The current group has algorithm overrides set for: {categories}. The "Reset" button here falls back to the group\'s lists, not NetCatty\'s defaults. To ignore the group restriction, clear the override in the group\'s algorithm settings.',
   'hostDetails.algorithms.customized': 'customized',
   'hostDetails.algorithms.reset': 'Reset',
   'hostDetails.algorithms.category.kex': 'Key Exchange (KEX)',

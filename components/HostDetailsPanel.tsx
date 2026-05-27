@@ -1862,6 +1862,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                    without saving first would seed from the original
                    group's flag and silently mis-populate the override. */
                 legacyEnabled={!!(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms)}
+                inheritedFromGroup={effectiveGroupDefaults?.algorithms}
                 onChange={(next) => update("algorithms", next)}
               />
             </CollapsibleContent>

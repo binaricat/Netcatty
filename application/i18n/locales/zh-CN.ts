@@ -758,6 +758,7 @@ const zhCN: Messages = {
   'hostDetails.skipEcdsaHostKey.desc': '某些老款华为 / 思科交换机的 ECDSA 主机密钥签名不规范，会导致连接报 "signature verification failed"。开启后客户端不再 advertise ecdsa-sha2-*，强制使用 RSA / Ed25519。',
   'hostDetails.algorithms.advanced': '高级算法配置',
   'hostDetails.algorithms.advanced.desc': '针对单个 host 自定义各分类的算法清单。不勾选 = 使用默认；勾选子集后将完全替换默认列表。配置错误可能导致无法连接。',
+  'hostDetails.algorithms.inheritedNotice': '当前组已设置以下分类的算法 override：{categories}。本面板的"恢复默认"只会回到组的设置，而不是 NetCatty 默认列表。若要忽略组的限制，请到组的算法设置里取消。',
   'hostDetails.algorithms.customized': '已自定义',
   'hostDetails.algorithms.reset': '恢复默认',
   'hostDetails.algorithms.category.kex': '密钥交换 (KEX)',

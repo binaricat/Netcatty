@@ -332,6 +332,15 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     if (!parentGroup || groupConfigs.length === 0) return false;
     return !!resolveGroupDefaults(parentGroup, groupConfigs).legacyAlgorithms;
   }, [groupConfigs, parentGroup]);
+
+  // Same idea for the algorithm-override lists themselves: surface what
+  // this group would inherit from its parent so the editor can warn that
+  // a local Reset falls back to the parent's lists, not NetCatty's
+  // defaults.
+  const inheritedAlgorithmOverrides = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return undefined;
+    return resolveGroupDefaults(parentGroup, groupConfigs).algorithms;
+  }, [groupConfigs, parentGroup]);
   const effectiveThemeId = form.themeOverride === false
     ? inheritedThemeId
     : (form.theme || inheritedThemeId);
@@ -930,6 +939,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                 <AlgorithmOverridesPanel
                   value={form.algorithms}
                   legacyEnabled={!!(form.legacyAlgorithms ?? inheritedLegacyAlgorithms)}
+                  inheritedFromGroup={inheritedAlgorithmOverrides}
                   onChange={(next) => update("algorithms", next)}
                 />
               </CollapsibleContent>
