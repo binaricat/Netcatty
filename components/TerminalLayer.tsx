@@ -1354,16 +1354,25 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         }
       } else {
         // Create stable fallback host object
+        const fallbackProtocol = session.protocol ?? 'local' as const;
         map.set(session.id, {
           id: session.hostId,
           label: session.hostLabel || 'Local Terminal',
           hostname: session.hostname || 'localhost',
           username: session.username || 'local',
           port: session.port ?? 22,
-          os: detectLocalOs(navigator.userAgent || navigator.platform),
+          // Only local terminals adopt the client OS — unsaved serial
+          // sessions and orphaned remote sessions (whose host was deleted
+          // while the session lives on) also hit this fallback, and the
+          // non-local autocomplete path in Terminal.tsx trusts host.os, so
+          // a Windows-client 'windows' tag here would mis-shape POSIX
+          // remote/serial autocomplete (#1112 review).
+          os: fallbackProtocol === 'local'
+            ? detectLocalOs(navigator.userAgent || navigator.platform)
+            : 'linux',
           group: '',
           tags: [],
-          protocol: session.protocol ?? 'local' as const,
+          protocol: fallbackProtocol,
           moshEnabled: session.moshEnabled,
           charset: session.charset,
           localShell: session.localShell,
