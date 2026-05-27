@@ -1360,7 +1360,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           hostname: session.hostname || 'localhost',
           username: session.username || 'local',
           port: session.port ?? 22,
-          os: 'linux',
+          os: detectLocalOs(navigator.userAgent || navigator.platform),
           group: '',
           tags: [],
           protocol: session.protocol ?? 'local' as const,

@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Cpu, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
+import { detectLocalOs } from "../lib/localShell";
 import { logger } from "../lib/logger";
 import { cn, normalizeLineEndings, wrapBracketedPaste } from "../lib/utils";
 import {
@@ -540,9 +541,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   // Autocomplete config — the hook itself lives in <TerminalAutocomplete> so
   // its state updates don't re-render this component (see render below).
-  const autocompleteHostOs: "linux" | "windows" | "macos" = host.os || (host.protocol === "local"
-    ? (navigator.platform?.startsWith("Win") ? "windows" : navigator.platform?.startsWith("Mac") ? "macos" : "linux")
-    : "linux");
+  // For local protocol the effective OS is the client OS: synthetic fallback
+  // hosts (TerminalLayer) and saved-host defaults (HostDetailsPanel) both
+  // stamp os: "linux", which mis-routes the autocomplete clear sequence to
+  // Ctrl-U on Windows where cmd/PowerShell render it literally (#1112).
+  const autocompleteHostOs: "linux" | "windows" | "macos" = host.protocol === "local"
+    ? detectLocalOs(navigator.userAgent || navigator.platform)
+    : (host.os || "linux");
   const autocompleteSettings = terminalSettings ? {
     enabled: terminalSettings.autocompleteEnabled ?? true,
     showGhostText: terminalSettings.autocompleteGhostText ?? true,
