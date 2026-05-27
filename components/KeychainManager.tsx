@@ -1082,6 +1082,12 @@ echo $3 >> "$FILE"`);
                         keySource: exportAuth.key?.source,
                         passphrase: exportKeyAuth.passphrase,
                         identityFilePaths: exportKeyAuth.identityFilePaths,
+                        // Carry the host's algorithm settings so the
+                        // one-off SSH exec honors them just like the
+                        // interactive terminal does.
+                        legacyAlgorithms: exportHost.legacyAlgorithms,
+                        skipEcdsaHostKey: exportHost.skipEcdsaHostKey,
+                        algorithmOverrides: exportHost.algorithms,
                         command,
                         timeout: 30000,
                         enableKeyboardInteractive: true,

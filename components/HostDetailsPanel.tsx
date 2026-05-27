@@ -1853,7 +1853,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
             <CollapsibleContent className="mt-2">
               <AlgorithmOverridesPanel
                 value={form.algorithms}
-                legacyEnabled={!!form.legacyAlgorithms}
+                /* Use the effective legacy flag (host value falling back to
+                   the group default) so the seed reflects what the host
+                   would actually advertise. Without the fallback, a host
+                   that inherits legacy=true from its group but doesn't
+                   set the field itself would seed the editor in
+                   modern-only mode, silently dropping the legacy
+                   algorithms the host needs on save. */
+                legacyEnabled={!!(form.legacyAlgorithms ?? groupDefaults?.legacyAlgorithms)}
                 onChange={(next) => update("algorithms", next)}
               />
             </CollapsibleContent>

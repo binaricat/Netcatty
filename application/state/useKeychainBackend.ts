@@ -17,6 +17,13 @@ export const useKeychainBackend = () => {
     timeout?: number;
     enableKeyboardInteractive?: boolean;
     sessionId?: string;
+    // Algorithm settings — let the keychain "export public key" flow honor
+    // the same per-host SSH algorithm config the terminal uses, so a host
+    // that needs the ECDSA skip / legacy mode / advanced overrides works
+    // here too.
+    legacyAlgorithms?: boolean;
+    skipEcdsaHostKey?: boolean;
+    algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
   }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.execCommand) throw new Error("execCommand unavailable");

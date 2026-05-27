@@ -1731,6 +1731,15 @@ async function execCommand(event, payload) {
       username: payload.username,
       readyTimeout: enableKeyboardInteractive ? Math.max(timeoutMs, 120000) : timeoutMs,
       keepaliveInterval: 0,
+      // Honor the host's algorithm settings so one-off commands (e.g. the
+      // keychain "export public key to host" flow) negotiate with the same
+      // KEX / cipher / host-key set as the interactive terminal. Without
+      // this, a host that needs the ECDSA skip or legacy algorithms would
+      // connect in the terminal but still fail the same handshake here.
+      algorithms: buildAlgorithms(payload.legacyAlgorithms, {
+        skipEcdsaHostKey: payload.skipEcdsaHostKey,
+        algorithmOverrides: payload.algorithmOverrides,
+      }),
     };
 
     let authAgent = null;

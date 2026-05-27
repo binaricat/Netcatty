@@ -321,6 +321,17 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     if (!parentGroup || groupConfigs.length === 0) return terminalThemeId;
     return resolveGroupTerminalThemeId(resolveGroupDefaults(parentGroup, groupConfigs), terminalThemeId);
   }, [groupConfigs, parentGroup, terminalThemeId]);
+
+  // Effective `legacyAlgorithms` for this group, considering inheritance
+  // from the parent chain. Used by the algorithm-overrides editor so the
+  // seed reflects what hosts in this group would actually advertise — if
+  // the parent group already turned legacy mode on, the editor should
+  // include legacy algorithms in its default list even when this group
+  // itself hasn't set the flag.
+  const inheritedLegacyAlgorithms = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return false;
+    return !!resolveGroupDefaults(parentGroup, groupConfigs).legacyAlgorithms;
+  }, [groupConfigs, parentGroup]);
   const effectiveThemeId = form.themeOverride === false
     ? inheritedThemeId
     : (form.theme || inheritedThemeId);
@@ -918,7 +929,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               <CollapsibleContent className="mt-2">
                 <AlgorithmOverridesPanel
                   value={form.algorithms}
-                  legacyEnabled={!!form.legacyAlgorithms}
+                  legacyEnabled={!!(form.legacyAlgorithms ?? inheritedLegacyAlgorithms)}
                   onChange={(next) => update("algorithms", next)}
                 />
               </CollapsibleContent>
