@@ -42,7 +42,15 @@ module.exports = {
         '!electron/.dev-config.json',
         'skills/**/*',
         'public/**/*',
-        'node_modules/**/*'
+        'node_modules/**/*',
+        // @anthropic-ai/claude-agent-sdk@0.3.x bundles the native Claude Code
+        // CLI (~211MB per arch) as optional sibling packages. Netcatty is
+        // designed around the user's own Claude Code install — the wrapper
+        // honors `CLAUDE_CODE_EXECUTABLE` (set by useAgentDiscovery.ts) and
+        // only falls back to the bundled binary if that env var is empty.
+        // Excluding the sibling packages from the build keeps the installer
+        // ~150MB smaller and preserves the "bring your own Claude" design.
+        '!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*'
     ],
     asarUnpack: [
         'node_modules/node-pty/**/*',
