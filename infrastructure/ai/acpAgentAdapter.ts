@@ -280,7 +280,13 @@ function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks): bo
     }
     case 'tool-call': {
       const toolName = (event.toolName as string) || 'unknown';
-      const input = (event.input as Record<string, unknown>) || {};
+      // The Electron bridge serializes tool args as `args` (see
+      // shellUtils.cjs serializeStreamChunk), while direct AI SDK paths
+      // use `input`. Read both so either source works.
+      const input =
+        (event.input as Record<string, unknown>) ||
+        (event.args as Record<string, unknown>) ||
+        {};
       const toolCallId = (event.toolCallId as string) || undefined;
       callbacks.onToolCall(toolName, input, toolCallId);
       return false;

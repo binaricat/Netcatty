@@ -8,6 +8,79 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useI18n } from '../../application/i18n/I18nProvider';
 
 /**
+ * Pull the user-meaningful shell command out of the tool-call args.
+ *
+ * Different tool surfaces hand us different shapes:
+ *   - Netcatty's own `terminal_execute` MCP tool → `{command: "<string>"}`
+ *   - Codex `local_shell` (ACP)                 → `{command: ["zsh","-lc","<full>"]}`
+ *   - Claude `Bash` (ACP)                       → `{command: "<string>"}`
+ *
+ * And under the "Skill + CLI" integration, the agent's shell tool wraps a
+ * call to our internal `netcatty-tool-cli` binary, so the real intent is one
+ * level deeper:
+ *
+ *   netcatty-tool-cli exec --session <id> --chat-session <id> -- <real-cmd>
+ *
+ * We unwrap both layers so the chat panel shows what the user actually
+ * cares about (the remote command), not Codex's wrapper title which is
+ * just the local path to the CLI binary.
+ */
+function extractDisplayCommand(args: Record<string, unknown> | undefined): string | null {
+  if (!args) return null;
+  const raw = (args as { command?: unknown }).command;
+
+  let cmdString: string;
+  if (typeof raw === 'string') {
+    if (!raw) return null;
+    cmdString = raw;
+  } else if (Array.isArray(raw) && raw.length > 0) {
+    const isShellWrap =
+      raw.length >= 3 &&
+      /(?:^|\/)(sh|bash|zsh|fish|ash|dash)$/.test(String(raw[0] ?? '')) &&
+      /^-l?c$/.test(String(raw[1] ?? ''));
+    cmdString = isShellWrap
+      ? String(raw[raw.length - 1] ?? '')
+      : raw.map((p) => String(p)).join(' ');
+  } else {
+    return null;
+  }
+
+  // Netcatty CLI wrapper extraction.
+  const cliIdx = cmdString.indexOf('netcatty-tool-cli');
+  if (cliIdx >= 0) {
+    const afterCli = cmdString
+      .slice(cliIdx + 'netcatty-tool-cli'.length)
+      .replace(/^["']?\s*/, '');
+    const subMatch = afterCli.match(/^(\S+)/);
+    const sub = subMatch ? subMatch[1] : '';
+
+    if (sub === 'exec' || sub === 'job-start') {
+      // Pull out the command after the ` -- ` separator.
+      const dashIdx = afterCli.indexOf(' -- ');
+      if (dashIdx >= 0) {
+        let inner = afterCli.slice(dashIdx + 4).trim();
+        if (
+          inner.length >= 2 &&
+          ((inner[0] === '"' && inner.endsWith('"')) ||
+            (inner[0] === "'" && inner.endsWith("'")))
+        ) {
+          inner = inner.slice(1, -1);
+        }
+        return inner;
+      }
+    }
+    if (sub === 'job-poll') return 'netcatty: poll job';
+    if (sub === 'job-stop') return 'netcatty: stop job';
+    if (sub === 'session') return 'netcatty: inspect session';
+    if (sub === 'env') return 'netcatty: list sessions';
+    if (sub === 'status') return 'netcatty: status';
+    if (sub) return `netcatty: ${sub}`;
+  }
+
+  return cmdString;
+}
+
+/**
  * Format tool result for display. Extracts stdout/stderr from structured
  * command results for terminal-like output.
  */
@@ -142,18 +215,22 @@ export const ToolCall = ({
           ? <ChevronDown size={12} className="text-muted-foreground/40 shrink-0" />
           : <ChevronRight size={12} className="text-muted-foreground/40 shrink-0" />
         }
-        {name === 'terminal_execute' && args?.command ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="font-mono text-muted-foreground/70 truncate cursor-default">
-                <span className="text-muted-foreground/40">$ </span>{String(args.command)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{String(args.command)}</TooltipContent>
-          </Tooltip>
-        ) : (
-          <span className="font-mono text-muted-foreground/70 truncate">{name}</span>
-        )}
+        {(() => {
+          const displayCmd = extractDisplayCommand(args);
+          if (displayCmd) {
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-mono text-muted-foreground/70 truncate cursor-default">
+                    <span className="text-muted-foreground/40">$ </span>{displayCmd}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{displayCmd}</TooltipContent>
+              </Tooltip>
+            );
+          }
+          return <span className="font-mono text-muted-foreground/70 truncate">{name}</span>;
+        })()}
         <span className="flex-1" />
         {/* Approval badge for resolved approvals */}
         {approvalStatus === 'approved' && (

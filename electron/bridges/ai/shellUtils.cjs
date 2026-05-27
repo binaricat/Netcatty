@@ -394,7 +394,7 @@ function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
 
   // Packaged build (or dev fallback): use npm-bundled binary
   try {
-    const resolved = require.resolve("@zed-industries/claude-agent-acp/dist/index.js");
+    const resolved = require.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js");
     const scriptPath = toUnpackedAsarPath(resolved);
 
     // On Windows, .js files cannot be spawned directly (no shebang support) —
@@ -429,12 +429,25 @@ function serializeStreamChunk(chunk) {
     case "reasoning-end":
       return { type: "reasoning-end", id: chunk.id ?? undefined };
     case "tool-call": {
-      // ACP wraps all tools as "acp.acp_provider_agent_dynamic_tool" —
-      // the real tool name and args are inside chunk.args
+      // ACP wraps all tools as "acp.acp_provider_agent_dynamic_tool".
+      // The real tool name and args are inside chunk.input — which the
+      // @mcpc-tech/acp-ai-provider emits as a JSON.stringified payload
+      // (see index.cjs, every controller.enqueue({ type: "tool-call", ...
+      // input: JSON.stringify({ toolCallId, toolName, args }) })). AI SDK
+      // may or may not pre-parse it before we see the chunk, so handle
+      // both string and object shapes.
       const isAcpWrapper = chunk.toolName === "acp.acp_provider_agent_dynamic_tool";
-      const acpInput = isAcpWrapper ? chunk.input : null;
+      let acpInput = null;
+      if (isAcpWrapper) {
+        const raw = chunk.input ?? chunk.args;
+        if (typeof raw === "string") {
+          try { acpInput = JSON.parse(raw); } catch { acpInput = null; }
+        } else if (raw && typeof raw === "object") {
+          acpInput = raw;
+        }
+      }
       let realToolName = isAcpWrapper ? (acpInput?.toolName || chunk.toolName) : chunk.toolName;
-      const realArgs = isAcpWrapper ? (acpInput?.args || chunk.args) : chunk.args;
+      const realArgs = isAcpWrapper ? (acpInput?.args || chunk.args || chunk.input) : (chunk.input ?? chunk.args);
       const realToolCallId = isAcpWrapper ? (acpInput?.toolCallId || chunk.toolCallId) : chunk.toolCallId;
       // Simplify MCP tool names: "mcp__netcatty-remote-hosts__get_environment" → "get_environment"
       if (realToolName && realToolName.includes("__")) {

@@ -36,6 +36,7 @@
     "test": "node --test --import tsx electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs scripts/*.test.cjs application/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.tsx components/editor/*.test.tsx components/ai/*.test.ts components/terminal/*.test.ts components/terminal/runtime/*.test.ts domain/*.test.ts infrastructure/ai/*.test.ts infrastructure/config/*.test.ts lib/*.test.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.37.0",
     "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/google": "^3.0.43",
     "@ai-sdk/openai": "^3.0.41",
@@ -43,7 +44,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "@google/genai": "1.33.0",
-    "@mcpc-tech/acp-ai-provider": "0.2.8",
+    "@mcpc-tech/acp-ai-provider": "0.3.3",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-collapsible": "1.1.12",
     "@radix-ui/react-context-menu": "2.2.16",
@@ -65,8 +66,7 @@
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
-    "@zed-industries/claude-agent-acp": "0.22.2",
-    "@zed-industries/codex-acp": "0.10.0",
+    "@zed-industries/codex-acp": "0.15.0",
     "ai": "^6.0.116",
     "clsx": "2.1.1",
     "electron-updater": "^6.8.3",
