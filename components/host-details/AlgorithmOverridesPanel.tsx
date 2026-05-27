@@ -63,13 +63,30 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
     () => effectiveDefaultAlgorithms(legacyEnabled),
     [legacyEnabled],
   );
+  // What the runtime *actually* inherits from the group for display
+  // purposes. `applyGroupDefaults` treats `host.algorithms` as an
+  // all-or-nothing boundary: once the host carries any local
+  // `algorithms` object the group's overrides stop being applied — even
+  // for categories the host didn't override. So as soon as `value` is
+  // non-undefined we must stop *displaying* inherited categories,
+  // otherwise the UI lies about what will be negotiated.
+  //
+  // The write-side (`updateCategory` / `toggleAlgorithm` / Reset) still
+  // consults the unconditional `inheritedFromGroup` so that the first
+  // user edit on an unset host carries the inherited categories into
+  // the host object, preventing the runtime's silent widening that
+  // motivated those write-side fixes.
+  const inheritedForDisplay = useMemo(
+    () => (value === undefined ? inheritedFromGroup : undefined),
+    [value, inheritedFromGroup],
+  );
   const inheritedCategories = useMemo(() => {
-    if (!inheritedFromGroup) return [] as SSHAlgorithmCategory[];
+    if (!inheritedForDisplay) return [] as SSHAlgorithmCategory[];
     return SSH_ALGORITHM_CATEGORIES.filter((category) => {
-      const list = inheritedFromGroup[category];
+      const list = inheritedForDisplay[category];
       return Array.isArray(list) && list.length > 0;
     });
-  }, [inheritedFromGroup]);
+  }, [inheritedForDisplay]);
 
   const updateCategory = useCallback(
     (category: SSHAlgorithmCategory, selected: string[]) => {
@@ -178,15 +195,16 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
     (category: SSHAlgorithmCategory, algo: string) => {
       const current = value?.[category];
       if (current) return current.includes(algo);
-      // No host-local override: reflect what the host would actually
-      // advertise — the group's inherited list when present, else
-      // NetCatty's effective default. Algorithms outside both
-      // (e.g. arcfour in modern mode) appear unchecked, hinting that
-      // ticking them implies opting into something normally not offered.
-      const baseline = inheritedFromGroup?.[category] ?? effectiveDefault[category];
+      // No host-local override for this category: reflect what the host
+      // would actually advertise. Uses `inheritedForDisplay` (the same
+      // gating the inherited notice uses) so that a host that already
+      // has any local override stops pretending its empty categories
+      // still come from the group — `applyGroupDefaults` won't apply
+      // them, and the runtime falls back to NetCatty defaults.
+      const baseline = inheritedForDisplay?.[category] ?? effectiveDefault[category];
       return baseline.includes(algo);
     },
-    [value, effectiveDefault, inheritedFromGroup],
+    [value, effectiveDefault, inheritedForDisplay],
   );
 
   return (
