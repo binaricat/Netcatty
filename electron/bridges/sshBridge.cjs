@@ -2059,7 +2059,9 @@ async function getSessionPwd(event, payload) {
     }, 5000);
 
     // POSIX sh script that:
-    //   1. Finds the sibling interactive shell under sshd ($PPID).
+    //   1. Finds the user's interactive shell on the same SSH connection
+    //      (sibling under $PPID on newer OpenSSH, cousin reachable via the
+    //      shared SSH_CONNECTION env var on older OpenSSH like CentOS 7).
     //   2. Follows foreground child shells only, which covers bash->fish
     //      without mistaking background shell scripts for the active shell.
     //   3. Reads /proc/<pid>/cwd via readlink.
@@ -2069,20 +2071,57 @@ async function getSessionPwd(event, payload) {
     // so sh keeps the same PID and $PPID = sshd. Starting another shell
     // without exec would make $PPID point at the intermediate shell instead.
     const posixScript = `SELF=$$
-# Find the interactive shell child of this exec channel's sshd ($PPID).
+# Find the user's interactive shell on this SSH connection.
 # Prefer the one attached to a controlling tty (the user's shell): probe exec
 # channels like this one have no tty ("?"), and ps output is unsorted, so
 # without the tty preference a concurrent probe's shell could be picked when
 # several exist under the same sshd (#1065 review). Falls back to any shell
 # child if none has a tty.
+#
+# Strategy: try direct siblings of $PPID first — works on newer OpenSSH where
+# the PTY session and this exec channel share the same per-connection sshd
+# parent. Fall back to matching by SSH_CONNECTION env var, which covers older
+# OpenSSH (e.g. CentOS 7 / RHEL 7) that forks a SEPARATE sshd child per
+# channel — there the PTY shell ends up as a cousin (same grandparent sshd,
+# different parent) of this exec session, so the sibling search misses it
+# entirely (#1123).
 find_login_shell() {
-  ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
+  _shell=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
     $1 != self && $2 == pp && $4 ~ /^-?(ba|z|fi|k|da|a)?sh$/ {
       if ($3 != "?") { print $1; found=1; exit }
       if (any == "") any=$1
     }
     END { if (!found && any != "") print any }
-  '
+  ')
+  [ -n "$_shell" ] && { echo "$_shell"; return; }
+  # SSH_CONNECTION is the unique client-port/server-port 4-tuple sshd injects
+  # into every channel of one SSH connection, so processes that share it are
+  # the channels of this very connection — and exactly one of them is the
+  # user's PTY shell. Read /proc/<pid>/environ (NUL-separated, same uid only)
+  # and pick the shell with a controlling tty.
+  _conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
+  [ -z "$_conn" ] && return
+  _any=""
+  for _d in /proc/[0-9]*; do
+    _pid=$(basename "$_d")
+    [ "$_pid" = "$SELF" ] && continue
+    [ -r "$_d/environ" ] || continue
+    _conn2=$(tr '\\0' '\\n' < "$_d/environ" 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
+    [ "$_conn2" = "$_conn" ] || continue
+    _info=$(ps -p "$_pid" -o tty=,comm= 2>/dev/null)
+    [ -n "$_info" ] || continue
+    set -- $_info
+    case "$2" in
+      sh|bash|zsh|fish|ksh|dash|ash|-sh|-bash|-zsh|-fish|-ksh|-dash|-ash) ;;
+      *) continue ;;
+    esac
+    if [ "$1" != "?" ] && [ -n "$1" ]; then
+      echo "$_pid"
+      return
+    fi
+    [ -z "$_any" ] && _any="$_pid"
+  done
+  [ -n "$_any" ] && echo "$_any"
 }
 # From the login shell, pick the DEEPEST foreground shell in its process
 # subtree. "Foreground" = the controlling tty's foreground process group ("+"
