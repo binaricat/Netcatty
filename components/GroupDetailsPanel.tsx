@@ -341,6 +341,16 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     if (!parentGroup || groupConfigs.length === 0) return undefined;
     return resolveGroupDefaults(parentGroup, groupConfigs).algorithms;
   }, [groupConfigs, parentGroup]);
+
+  // And for the per-flag toggles below — if the parent already turned
+  // a flag on, the runtime applies it to hosts in this group via
+  // `applyGroupDefaults`, so the local toggle must reflect that. Without
+  // this, a child group would show the flag as off while connections
+  // still negotiated with it.
+  const inheritedSkipEcdsaHostKey = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return false;
+    return !!resolveGroupDefaults(parentGroup, groupConfigs).skipEcdsaHostKey;
+  }, [groupConfigs, parentGroup]);
   const effectiveThemeId = form.themeOverride === false
     ? inheritedThemeId
     : (form.theme || inheritedThemeId);
@@ -901,17 +911,27 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               rows={3}
             />
 
-            {/* Legacy Algorithms */}
+            {/* Display the *effective* value (this group's field falling
+                back to the resolved parent default). Same rationale as
+                in HostDetailsPanel — without the fallback, a child group
+                that inherits a flag from a parent would show "off" in
+                the UI while connections still applied it. */}
             <ToggleRow
               label={t("hostDetails.legacyAlgorithms")}
-              enabled={!!form.legacyAlgorithms}
-              onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
+              enabled={!!(form.legacyAlgorithms ?? inheritedLegacyAlgorithms)}
+              onToggle={() => update(
+                "legacyAlgorithms",
+                !(form.legacyAlgorithms ?? inheritedLegacyAlgorithms),
+              )}
             />
 
             <ToggleRow
               label={t("hostDetails.skipEcdsaHostKey")}
-              enabled={!!form.skipEcdsaHostKey}
-              onToggle={() => update("skipEcdsaHostKey", !form.skipEcdsaHostKey)}
+              enabled={!!(form.skipEcdsaHostKey ?? inheritedSkipEcdsaHostKey)}
+              onToggle={() => update(
+                "skipEcdsaHostKey",
+                !(form.skipEcdsaHostKey ?? inheritedSkipEcdsaHostKey),
+              )}
             />
             <p className="text-xs text-muted-foreground break-words">
               {t("hostDetails.skipEcdsaHostKey.desc")}
