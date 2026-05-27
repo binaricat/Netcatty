@@ -1854,13 +1854,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               <AlgorithmOverridesPanel
                 value={form.algorithms}
                 /* Use the effective legacy flag (host value falling back to
-                   the group default) so the seed reflects what the host
-                   would actually advertise. Without the fallback, a host
-                   that inherits legacy=true from its group but doesn't
-                   set the field itself would seed the editor in
-                   modern-only mode, silently dropping the legacy
-                   algorithms the host needs on save. */
-                legacyEnabled={!!(form.legacyAlgorithms ?? groupDefaults?.legacyAlgorithms)}
+                   the currently selected group's default) so the seed
+                   reflects what the host would actually advertise. We
+                   read from `effectiveGroupDefaults` (re-resolved on
+                   every form.group change), not the `groupDefaults` prop
+                   — otherwise switching the host into a different group
+                   without saving first would seed from the original
+                   group's flag and silently mis-populate the override. */
+                legacyEnabled={!!(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms)}
                 onChange={(next) => update("algorithms", next)}
               />
             </CollapsibleContent>
