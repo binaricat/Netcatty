@@ -17,25 +17,41 @@ export type SSHAlgorithmCategory =
   | "serverHostKey"
   | "compress";
 
+// IMPORTANT: every algorithm in these lists must also appear in ssh2's
+// `SUPPORTED_*` constant (see `node_modules/ssh2/lib/protocol/constants.js`).
+// ssh2 throws `Unsupported algorithm` synchronously from `Client.connect()`
+// when it sees an algorithm outside its supported set, so exposing a dead
+// choice in the UI would make a host unreachable the moment the user
+// saved it.
+//
+// In particular, OpenSSL 3 disabled `blowfish`, `cast128`, and the
+// `arcfour` family — ssh2's `canUseCipher` filter then drops them from
+// `SUPPORTED_CIPHER` at startup. They are intentionally absent below.
+// `sshAlgorithmList.test.ts` enforces the subset invariant.
+
 export const SUPPORTED_KEX_ALGORITHMS: readonly string[] = [
   "curve25519-sha256",
   "curve25519-sha256@libssh.org",
   "ecdh-sha2-nistp256",
   "ecdh-sha2-nistp384",
   "ecdh-sha2-nistp521",
-  "diffie-hellman-group14-sha256",
-  "diffie-hellman-group16-sha512",
-  "diffie-hellman-group18-sha512",
   "diffie-hellman-group-exchange-sha256",
+  "diffie-hellman-group14-sha256",
+  "diffie-hellman-group15-sha512",
+  "diffie-hellman-group16-sha512",
+  "diffie-hellman-group17-sha512",
+  "diffie-hellman-group18-sha512",
+  "diffie-hellman-group-exchange-sha1",
   "diffie-hellman-group14-sha1",
   "diffie-hellman-group1-sha1",
-  "diffie-hellman-group-exchange-sha1",
 ];
 
 export const SUPPORTED_CIPHER_ALGORITHMS: readonly string[] = [
   "chacha20-poly1305@openssh.com",
   "aes128-gcm@openssh.com",
   "aes256-gcm@openssh.com",
+  "aes128-gcm",
+  "aes256-gcm",
   "aes128-ctr",
   "aes192-ctr",
   "aes256-ctr",
@@ -43,19 +59,14 @@ export const SUPPORTED_CIPHER_ALGORITHMS: readonly string[] = [
   "aes192-cbc",
   "aes256-cbc",
   "3des-cbc",
-  "blowfish-cbc",
-  "cast128-cbc",
-  "arcfour256",
-  "arcfour128",
-  "arcfour",
 ];
 
 export const SUPPORTED_HMAC_ALGORITHMS: readonly string[] = [
   "hmac-sha2-256-etm@openssh.com",
   "hmac-sha2-512-etm@openssh.com",
+  "hmac-sha1-etm@openssh.com",
   "hmac-sha2-256",
   "hmac-sha2-512",
-  "hmac-sha1-etm@openssh.com",
   "hmac-sha1",
   "hmac-sha2-256-96",
   "hmac-sha2-512-96",
