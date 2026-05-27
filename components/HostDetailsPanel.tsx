@@ -1801,11 +1801,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         </Card>
         )}
 
-        {/* Legacy Algorithms */}
+        {/* SSH Algorithms */}
         <Card className="p-3 space-y-2 bg-card border-border/80">
           <div className="flex items-center gap-2">
             <ShieldAlert size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.legacyAlgorithms")}</p>
+            <p className="text-xs font-semibold">{t("hostDetails.section.sshAlgorithms")}</p>
           </div>
           <ToggleRow
             label={t("hostDetails.legacyAlgorithms")}
@@ -1858,6 +1858,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               />
             </CollapsibleContent>
           </Collapsible>
+        </Card>
+
+        {/* Terminal Behavior — input/output key mappings (backspace, etc.) */}
+        <Card className="p-3 space-y-2 bg-card border-border/80">
+          <div className="flex items-center gap-2">
+            <TerminalSquare size={14} className="text-muted-foreground" />
+            <p className="text-xs font-semibold">{t("hostDetails.section.terminalBehavior")}</p>
+          </div>
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
             <Select

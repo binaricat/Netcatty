@@ -924,23 +924,6 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Backspace behavior */}
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
-              <Select
-                value={form.backspaceBehavior ?? "default"}
-                onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
-              >
-                <SelectTrigger className="h-8 w-auto text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">{t("hostDetails.backspaceBehavior.default")}</SelectItem>
-                  <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
             {/* Proxy */}
             <button
               type="button"
@@ -1025,6 +1008,25 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                 className="h-10"
               />
             )}
+
+            {/* Backspace behavior — terminal input mapping, lives at the
+                bottom of the SSH section so it doesn't get visually
+                grouped with the algorithm controls above. */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
+              <Select
+                value={form.backspaceBehavior ?? "default"}
+                onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
+              >
+                <SelectTrigger className="h-8 w-auto text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{t("hostDetails.backspaceBehavior.default")}</SelectItem>
+                  <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </Card>
         )}
 
