@@ -428,14 +428,25 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         keepaliveCountMax: hopInterval > 0 ? hopCountMax : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
-        // Per-hop algorithm settings, falling back to the target's settings
-        // when the hop didn't override them (matches the historic
-        // `options.legacyAlgorithms` chain-wide fallback).
+        // Per-hop algorithm settings. `legacyAlgorithms` and
+        // `skipEcdsaHostKey` are *append/safety* toggles — they widen
+        // the offered list — so falling back to the target's setting
+        // when the hop didn't override is safe and matches the historic
+        // chain-wide behavior of `options.legacyAlgorithms` (a user with
+        // a single old leaf only needs to flip the toggle on the leaf).
+        //
+        // `algorithmOverrides` is different — it *replaces* the offered
+        // list for a category, so propagating the leaf's override onto a
+        // bastion can lock the hop to algorithms the bastion doesn't
+        // accept (e.g. a target restricted to `serverHostKey: ["ssh-rsa"]`
+        // would block negotiation against an Ed25519-only jump host).
+        // Treat overrides as strictly per-host: an unset hop value uses
+        // the hop's default offer, not the leaf's override.
         algorithms: buildAlgorithms(
           jump.legacyAlgorithms ?? options.legacyAlgorithms,
           {
             skipEcdsaHostKey: jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey,
-            algorithmOverrides: jump.algorithmOverrides ?? options.algorithmOverrides,
+            algorithmOverrides: jump.algorithmOverrides,
           },
         ),
       };
@@ -445,7 +456,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         port: jump.port || 22,
         legacyAlgorithms: !!(jump.legacyAlgorithms ?? options.legacyAlgorithms),
         skipEcdsaHostKey: !!(jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey),
-        hasAlgorithmOverrides: !!(jump.algorithmOverrides ?? options.algorithmOverrides),
+        hasAlgorithmOverrides: !!jump.algorithmOverrides,
       });
 
       // Auth - support agent (certificate), key, password, and default key fallback
