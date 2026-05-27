@@ -24,6 +24,18 @@ export interface HostChainConfig {
   hostIds: string[]; // Array of host IDs in order (first = closest to client)
 }
 
+// Per-host SSH algorithm override lists (advanced). Each property, when
+// present and non-empty, fully replaces the offered list for that category.
+// Category names mirror ssh2's `algorithms` shape (note: `compress`, not
+// `compression`). Empty arrays or missing properties keep the default.
+export interface HostAlgorithmOverrides {
+  kex?: string[];
+  cipher?: string[];
+  hmac?: string[];
+  serverHostKey?: string[];
+  compress?: string[];
+}
+
 // Environment variable for SSH session
 export interface EnvVar {
   name: string;
@@ -129,6 +141,15 @@ export interface Host {
   keywordHighlightEnabled?: boolean;
   // Legacy SSH algorithm support for older network equipment (switches, routers)
   legacyAlgorithms?: boolean;
+  // Drop every ecdsa-sha2-* from the offered host-key list. Some old Huawei
+  // VRP / Cisco IOS stacks negotiate ECDSA but produce signatures ssh2's
+  // strict RFC verifier rejects ("signature verification failed"). Forcing
+  // RSA / DSA / Ed25519 fallback restores compatibility — see #1027.
+  skipEcdsaHostKey?: boolean;
+  // Per-host SSH algorithm overrides (advanced). When a category's array is
+  // non-empty, it fully replaces the offered list for that category. Use
+  // sparingly — incorrect values make the host unreachable.
+  algorithms?: HostAlgorithmOverrides;
   // Per-host SSH keepalive override. When `keepaliveOverride === true`, the
   // host uses its own `keepaliveInterval` / `keepaliveCountMax` instead of
   // inheriting the global TerminalSettings values. Lets a user keep an
@@ -229,6 +250,8 @@ export interface GroupConfig {
   hostChain?: HostChainConfig;
   startupCommand?: string;
   legacyAlgorithms?: boolean;
+  skipEcdsaHostKey?: boolean;
+  algorithms?: HostAlgorithmOverrides;
   environmentVariables?: EnvVar[];
   charset?: string;
   moshEnabled?: boolean;

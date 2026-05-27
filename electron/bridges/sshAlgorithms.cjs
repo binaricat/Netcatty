@@ -114,17 +114,75 @@ function applyLegacyHmacAlgorithms(algorithms) {
   }
 }
 
+// Mirror of ssh2's DEFAULT_SERVER_HOST_KEY (see ssh2/lib/protocol/constants.js)
+// minus every ecdsa-sha2-*. Used when skipEcdsaHostKey is on but legacy mode
+// is off, so the field would otherwise be undefined and ssh2 would fall back
+// to its built-in defaults (which still include ecdsa-sha2-*).
+const MODERN_SERVER_HOST_KEY_WITHOUT_ECDSA = Object.freeze([
+  "ssh-ed25519",
+  "rsa-sha2-512",
+  "rsa-sha2-256",
+  "ssh-rsa",
+]);
+
+function applyEcdsaHostKeySkip(algorithms) {
+  if (algorithms.serverHostKey) {
+    algorithms.serverHostKey = algorithms.serverHostKey.filter(
+      (algo) => !algo.startsWith("ecdsa-sha2-"),
+    );
+  } else {
+    algorithms.serverHostKey = [...MODERN_SERVER_HOST_KEY_WITHOUT_ECDSA];
+  }
+}
+
+// Categories the user can override via host.algorithms. Mirrors ssh2's
+// algorithm-object shape (note ssh2 uses 'compress', not 'compression').
+const OVERRIDABLE_CATEGORIES = Object.freeze([
+  "kex", "cipher", "hmac", "serverHostKey", "compress",
+]);
+
+function applyAlgorithmOverrides(algorithms, overrides) {
+  if (!overrides || typeof overrides !== "object") return;
+  for (const key of OVERRIDABLE_CATEGORIES) {
+    const list = overrides[key];
+    if (Array.isArray(list) && list.length > 0) {
+      // Copy so caller mutation cannot leak back into the host config object.
+      algorithms[key] = list.slice();
+    }
+  }
+}
+
 /**
  * Build SSH algorithm configuration.
  * When legacyEnabled is true, legacy algorithms are appended to each list
  * (lower priority than modern ones) for compatibility with older network equipment.
+ *
+ * @param {boolean} legacyEnabled
+ * @param {{
+ *   skipEcdsaHostKey?: boolean,
+ *   algorithmOverrides?: Partial<Record<"kex"|"cipher"|"hmac"|"serverHostKey"|"compress", string[]>>,
+ * }} [options]
+ *   skipEcdsaHostKey: drop every ecdsa-sha2-* from the host-key advertisement.
+ *     Useful when a server (e.g. old Huawei VRP) negotiates ECDSA but produces
+ *     a signature that ssh2's strict RFC verification rejects — see #1027.
+ *   algorithmOverrides: per-category replacement lists (advanced). When a
+ *     category's array is non-empty, it fully replaces the negotiated list
+ *     for that category. Applied BEFORE skipEcdsaHostKey.
  */
-function buildAlgorithms(legacyEnabled) {
+function buildAlgorithms(legacyEnabled, options = {}) {
   const algorithms = buildBaseAlgorithms();
 
   if (legacyEnabled) {
     applyLegacyAlgorithms(algorithms);
     applyLegacyHmacAlgorithms(algorithms);
+  }
+
+  // User overrides apply BEFORE the ECDSA kill switch so the latter remains
+  // unconditional ("never advertise ECDSA on this host").
+  applyAlgorithmOverrides(algorithms, options.algorithmOverrides);
+
+  if (options.skipEcdsaHostKey) {
+    applyEcdsaHostKeySkip(algorithms);
   }
 
   return algorithms;
@@ -133,13 +191,24 @@ function buildAlgorithms(legacyEnabled) {
 /**
  * Build SSH algorithm configuration for SFTP connections.
  * When legacyEnabled is true, legacy algorithms are appended for older device compatibility.
+ *
+ * @param {boolean} legacyEnabled
+ * @param {{ skipEcdsaHostKey?: boolean }} [options]
  */
-function buildSftpAlgorithms(legacyEnabled) {
+function buildSftpAlgorithms(legacyEnabled, options = {}) {
   const algorithms = buildBaseAlgorithms();
 
   if (legacyEnabled) {
     applyLegacyAlgorithms(algorithms);
     applyLegacyHmacAlgorithms(algorithms);
+  }
+
+  // User overrides apply BEFORE the ECDSA kill switch so the latter remains
+  // unconditional ("never advertise ECDSA on this host").
+  applyAlgorithmOverrides(algorithms, options.algorithmOverrides);
+
+  if (options.skipEcdsaHostKey) {
+    applyEcdsaHostKeySkip(algorithms);
   }
 
   return algorithms;

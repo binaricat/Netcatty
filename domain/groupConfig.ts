@@ -87,7 +87,8 @@ export function resolveGroupDefaults(
 const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
   'username', 'password', 'savePassword', 'authMethod', 'identityId', 'identityFileId', 'identityFilePaths',
   'port', 'protocol', 'agentForwarding', 'proxyProfileId', 'proxyConfig', 'hostChain', 'startupCommand',
-  'legacyAlgorithms', 'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
+  'legacyAlgorithms', 'skipEcdsaHostKey', 'algorithms',
+  'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
   'telnetEnabled', 'telnetPort', 'telnetUsername', 'telnetPassword',
   'theme', 'themeOverride', 'fontFamily', 'fontFamilyOverride', 'fontSize', 'fontSizeOverride', 'fontWeight', 'fontWeightOverride',
   'backspaceBehavior',

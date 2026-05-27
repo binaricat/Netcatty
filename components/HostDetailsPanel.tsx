@@ -55,6 +55,8 @@ import { EnvVar, GroupConfig, Host, Identity, ManagedSource, ProxyConfig, ProxyP
 import { DISTRO_COLORS, DISTRO_LOGOS } from "./DistroAvatar";
 import { DistroAvatar } from "./DistroAvatar";
 import ThemeSelectPanel from "./ThemeSelectPanel";
+import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import {
   AsidePanel,
   AsidePanelContent,
@@ -1819,6 +1821,30 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               </p>
             </div>
           )}
+          <ToggleRow
+            label={t("hostDetails.skipEcdsaHostKey")}
+            enabled={!!form.skipEcdsaHostKey}
+            onToggle={() => update("skipEcdsaHostKey", !form.skipEcdsaHostKey)}
+          />
+          <p className="text-xs text-muted-foreground break-words">
+            {t("hostDetails.skipEcdsaHostKey.desc")}
+          </p>
+          <Collapsible>
+            <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+              {t("hostDetails.algorithms.advanced")}
+              {form.algorithms && Object.keys(form.algorithms).length > 0 && (
+                <span className="ml-1.5 text-[10px] text-yellow-600 dark:text-yellow-400">
+                  ({t("hostDetails.algorithms.customized")})
+                </span>
+              )}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <AlgorithmOverridesPanel
+                value={form.algorithms}
+                onChange={(next) => update("algorithms", next)}
+              />
+            </CollapsibleContent>
+          </Collapsible>
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
             <Select

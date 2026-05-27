@@ -214,3 +214,116 @@ test("Comware legacy group-exchange requests OpenSSH 6.4-sized DH groups", () =>
     { min: 1024, preferred: 1024, max: 8192 },
   );
 });
+
+// --- skipEcdsaHostKey toggle (#1027) ---------------------------------------
+// Some old Huawei / Cisco SSH stacks negotiate an ECDSA host key but produce
+// signatures that ssh2's strict RFC verification rejects ("Handshake failed:
+// signature verification failed"). Forcing the client to drop all
+// ecdsa-sha2-* from its host key advertisement makes the negotiation fall
+// back to ssh-rsa / ssh-dss / ssh-ed25519, which those stacks implement
+// correctly.
+
+for (const [label, buildAlgorithms] of [
+  ["SSH", sshBridge.buildAlgorithms],
+  ["SFTP", sftpBridge.buildSftpAlgorithms],
+]) {
+  test(`${label} skipEcdsaHostKey removes every ecdsa-sha2-* from serverHostKey (legacy on)`, () => {
+    withAlgorithmRuntime({}, () => {
+      const algorithms = buildAlgorithms(true, { skipEcdsaHostKey: true });
+      assert.ok(algorithms.serverHostKey, "legacy mode must populate serverHostKey");
+      for (const algo of algorithms.serverHostKey) {
+        assert.ok(!algo.startsWith("ecdsa-sha2-"), `${algo} should be filtered out`);
+      }
+      // Non-ECDSA legacy host key algos must remain available.
+      assert.ok(algorithms.serverHostKey.includes("ssh-rsa"));
+      assert.ok(algorithms.serverHostKey.includes("ssh-dss"));
+      assert.ok(algorithms.serverHostKey.includes("ssh-ed25519"));
+    });
+  });
+
+  test(`${label} skipEcdsaHostKey also filters serverHostKey when legacy is off`, () => {
+    withAlgorithmRuntime({}, () => {
+      const algorithms = buildAlgorithms(false, { skipEcdsaHostKey: true });
+      // Modern (non-legacy) mode delegates serverHostKey to ssh2 defaults
+      // unless we explicitly populate the field. When the skip toggle is on,
+      // we must populate it with the ssh2 defaults minus ecdsa-sha2-*.
+      assert.ok(algorithms.serverHostKey, "skip toggle must populate serverHostKey");
+      for (const algo of algorithms.serverHostKey) {
+        assert.ok(!algo.startsWith("ecdsa-sha2-"), `${algo} should be filtered out`);
+      }
+    });
+  });
+
+  test(`${label} skipEcdsaHostKey leaves other algorithm categories untouched`, () => {
+    withAlgorithmRuntime({}, () => {
+      const reference = buildAlgorithms(true);
+      const filtered = buildAlgorithms(true, { skipEcdsaHostKey: true });
+      assert.deepEqual(filtered.kex, reference.kex);
+      assert.deepEqual(filtered.cipher, reference.cipher);
+      assert.deepEqual(filtered.hmac, reference.hmac);
+      assert.deepEqual(filtered.compress, reference.compress);
+    });
+  });
+}
+
+// --- algorithmOverrides (per-host custom lists) ----------------------------
+// Expert users can fully replace any individual algorithm category with their
+// own ordered list. An empty / missing override leaves the category at the
+// default (base ∪ legacy if enabled). Overrides apply BEFORE skipEcdsaHostKey
+// so the skip toggle remains an unconditional kill switch.
+
+for (const [label, buildAlgorithms] of [
+  ["SSH", sshBridge.buildAlgorithms],
+  ["SFTP", sftpBridge.buildSftpAlgorithms],
+]) {
+  test(`${label} algorithmOverrides.serverHostKey replaces the host-key list verbatim`, () => {
+    withAlgorithmRuntime({}, () => {
+      const algorithms = buildAlgorithms(true, {
+        algorithmOverrides: { serverHostKey: ["ssh-rsa", "ssh-dss"] },
+      });
+      assert.deepEqual(algorithms.serverHostKey, ["ssh-rsa", "ssh-dss"]);
+    });
+  });
+
+  test(`${label} algorithmOverrides apply to every category independently`, () => {
+    withAlgorithmRuntime({}, () => {
+      const algorithms = buildAlgorithms(false, {
+        algorithmOverrides: {
+          kex: ["curve25519-sha256"],
+          cipher: ["aes256-ctr"],
+          hmac: ["hmac-sha2-512"],
+          serverHostKey: ["ssh-ed25519"],
+          compress: ["none"],
+        },
+      });
+      assert.deepEqual(algorithms.kex, ["curve25519-sha256"]);
+      assert.deepEqual(algorithms.cipher, ["aes256-ctr"]);
+      assert.deepEqual(algorithms.hmac, ["hmac-sha2-512"]);
+      assert.deepEqual(algorithms.serverHostKey, ["ssh-ed25519"]);
+      assert.deepEqual(algorithms.compress, ["none"]);
+    });
+  });
+
+  test(`${label} empty or missing algorithmOverrides leave defaults intact`, () => {
+    withAlgorithmRuntime({}, () => {
+      const reference = buildAlgorithms(true);
+      const withEmpty = buildAlgorithms(true, {
+        algorithmOverrides: { kex: [], cipher: undefined },
+      });
+      assert.deepEqual(withEmpty.kex, reference.kex);
+      assert.deepEqual(withEmpty.cipher, reference.cipher);
+    });
+  });
+
+  test(`${label} skipEcdsaHostKey wins over algorithmOverrides that include ECDSA`, () => {
+    withAlgorithmRuntime({}, () => {
+      const algorithms = buildAlgorithms(false, {
+        skipEcdsaHostKey: true,
+        algorithmOverrides: {
+          serverHostKey: ["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"],
+        },
+      });
+      assert.deepEqual(algorithms.serverHostKey, ["ssh-ed25519", "ssh-rsa"]);
+    });
+  });
+}

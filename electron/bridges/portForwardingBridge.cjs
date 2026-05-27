@@ -82,6 +82,8 @@ async function startPortForward(event, payload) {
     jumpHosts = [],
     identityFilePaths,
     legacyAlgorithms,
+    skipEcdsaHostKey,
+    algorithmOverrides,
     keepaliveInterval: resolvedKeepaliveInterval,
     keepaliveCountMax: resolvedKeepaliveCountMax,
   } = payload;
@@ -134,7 +136,7 @@ async function startPortForward(event, payload) {
     keepaliveCountMax: tunnelKeepaliveCountMax,
     // Enable keyboard-interactive authentication (required for 2FA/MFA)
     tryKeyboard: true,
-    algorithms: buildAlgorithms(legacyAlgorithms),
+    algorithms: buildAlgorithms(legacyAlgorithms, { skipEcdsaHostKey, algorithmOverrides }),
   };
 
   const hasCertificate = typeof certificate === "string" && certificate.trim().length > 0;
@@ -233,6 +235,8 @@ async function startPortForward(event, payload) {
           proxy,
           jumpHosts,
           legacyAlgorithms,
+          skipEcdsaHostKey,
+          algorithmOverrides,
           _defaultKeys: defaultKeys,
           _connectionsRef: chainConnections,
           _tunnelRef: tunnelState,

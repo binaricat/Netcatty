@@ -428,13 +428,18 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         keepaliveCountMax: hopInterval > 0 ? hopCountMax : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
-        algorithms: buildAlgorithms(options.legacyAlgorithms),
+        algorithms: buildAlgorithms(options.legacyAlgorithms, {
+          skipEcdsaHostKey: options.skipEcdsaHostKey,
+          algorithmOverrides: options.algorithmOverrides,
+        }),
       };
       attachSshDebugLogger(connOpts);
       logSshAlgorithms("Jump host", connOpts.algorithms, {
         hostname: jump.hostname,
         port: jump.port || 22,
         legacyAlgorithms: !!options.legacyAlgorithms,
+        skipEcdsaHostKey: !!options.skipEcdsaHostKey,
+        hasAlgorithmOverrides: !!options.algorithmOverrides,
       });
 
       // Auth - support agent (certificate), key, password, and default key fallback
@@ -712,13 +717,18 @@ async function startSSHSession(event, options) {
       keepaliveCountMax: options.keepaliveInterval > 0 ? (options.keepaliveCountMax ?? 10) : 0,
       // Enable keyboard-interactive authentication (required for 2FA/MFA)
       tryKeyboard: true,
-      algorithms: buildAlgorithms(options.legacyAlgorithms),
+      algorithms: buildAlgorithms(options.legacyAlgorithms, {
+        skipEcdsaHostKey: options.skipEcdsaHostKey,
+        algorithmOverrides: options.algorithmOverrides,
+      }),
     };
     attachSshDebugLogger(connectOpts);
     logSshAlgorithms("Target host", connectOpts.algorithms, {
       hostname: options.hostname,
       port: options.port || 22,
       legacyAlgorithms: !!options.legacyAlgorithms,
+      skipEcdsaHostKey: !!options.skipEcdsaHostKey,
+      hasAlgorithmOverrides: !!options.algorithmOverrides,
     });
 
     connectOpts.hostVerifier = hostKeyVerifier.createHostVerifier({

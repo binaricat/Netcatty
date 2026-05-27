@@ -208,3 +208,32 @@ test("sanitizeGroupConfig keeps a still-valid fontFamily untouched", () => {
   assert.equal(after.fontFamily, "jetbrains-mono");
   assert.equal(after.fontFamilyOverride, true);
 });
+
+test("applyGroupDefaults inherits skipEcdsaHostKey from the group when host has no value", () => {
+  const result = applyGroupDefaults(host(), { skipEcdsaHostKey: true });
+  assert.equal(result.skipEcdsaHostKey, true);
+});
+
+test("applyGroupDefaults keeps host-level skipEcdsaHostKey instead of group default", () => {
+  const result = applyGroupDefaults(
+    host({ skipEcdsaHostKey: false }),
+    { skipEcdsaHostKey: true },
+  );
+  assert.equal(result.skipEcdsaHostKey, false);
+});
+
+test("applyGroupDefaults inherits algorithm overrides from the group", () => {
+  const overrides = { serverHostKey: ["ssh-rsa", "ssh-dss"] };
+  const result = applyGroupDefaults(host(), { algorithms: overrides });
+  assert.deepEqual(result.algorithms, overrides);
+});
+
+test("applyGroupDefaults keeps host algorithm overrides instead of inheriting", () => {
+  const hostOverrides = { kex: ["curve25519-sha256"] };
+  const groupOverrides = { kex: ["diffie-hellman-group14-sha256"] };
+  const result = applyGroupDefaults(
+    host({ algorithms: hostOverrides }),
+    { algorithms: groupOverrides },
+  );
+  assert.deepEqual(result.algorithms, hostOverrides);
+});

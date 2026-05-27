@@ -98,6 +98,10 @@ declare global {
     keepaliveCountMax?: number;
     // Enable legacy SSH algorithms for older network equipment
     legacyAlgorithms?: boolean;
+    // Drop ecdsa-sha2-* from offered host-key algorithms (#1027)
+    skipEcdsaHostKey?: boolean;
+    // Per-category algorithm override lists (advanced, see HostAlgorithmOverrides)
+    algorithmOverrides?: import("./domain/models").HostAlgorithmOverrides;
     // Use sudo for SFTP server
     sudo?: boolean;
     // Session log configuration for real-time streaming
@@ -145,6 +149,8 @@ declare global {
     jumpHosts?: NetcattyJumpHost[];
     identityFilePaths?: string[];
     legacyAlgorithms?: boolean;
+    skipEcdsaHostKey?: boolean;
+    algorithmOverrides?: import("./domain/models").HostAlgorithmOverrides;
     // Resolved keepalive for the target connection (caller has already
     // applied host override / global fallback). interval in seconds.
     keepaliveInterval?: number;

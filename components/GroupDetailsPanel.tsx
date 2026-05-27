@@ -34,6 +34,8 @@ import {
   SSHKey,
 } from "../types";
 import ThemeSelectPanel from "./ThemeSelectPanel";
+import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import {
   ChainPanel,
   EnvVarsPanel,
@@ -113,7 +115,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     c.protocol === 'ssh' ||
     c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
     c.agentForwarding !== undefined || c.authMethod !== undefined || !!c.identityId ||
-    !!c.proxyProfileId || !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.legacyAlgorithms !== undefined || c.backspaceBehavior !== undefined ||
+    !!c.proxyProfileId || !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.legacyAlgorithms !== undefined || c.skipEcdsaHostKey !== undefined || c.algorithms !== undefined || c.backspaceBehavior !== undefined ||
     (c.environmentVariables && c.environmentVariables.length > 0) ||
     c.moshEnabled !== undefined || !!c.moshServerPath ||
     (c.identityFilePaths && c.identityFilePaths.length > 0);
@@ -173,6 +175,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
       delete next.agentForwarding;
       delete next.startupCommand;
       delete next.legacyAlgorithms;
+      delete next.skipEcdsaHostKey;
+      delete next.algorithms;
       delete next.backspaceBehavior;
       delete next.proxyProfileId;
       delete next.proxyConfig;
@@ -362,6 +366,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
         ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
         ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
         ...(form.legacyAlgorithms !== undefined && { legacyAlgorithms: form.legacyAlgorithms }),
+        ...(form.skipEcdsaHostKey !== undefined && { skipEcdsaHostKey: form.skipEcdsaHostKey }),
+        ...(form.algorithms !== undefined && { algorithms: form.algorithms }),
         ...(form.backspaceBehavior !== undefined && { backspaceBehavior: form.backspaceBehavior }),
         ...(form.proxyProfileId !== undefined && { proxyProfileId: form.proxyProfileId }),
         ...(normalizedProxyConfig !== undefined && { proxyConfig: normalizedProxyConfig }),
@@ -878,6 +884,31 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
               enabled={!!form.legacyAlgorithms}
               onToggle={() => update("legacyAlgorithms", !form.legacyAlgorithms)}
             />
+
+            <ToggleRow
+              label={t("hostDetails.skipEcdsaHostKey")}
+              enabled={!!form.skipEcdsaHostKey}
+              onToggle={() => update("skipEcdsaHostKey", !form.skipEcdsaHostKey)}
+            />
+            <p className="text-xs text-muted-foreground break-words">
+              {t("hostDetails.skipEcdsaHostKey.desc")}
+            </p>
+            <Collapsible>
+              <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+                {t("hostDetails.algorithms.advanced")}
+                {form.algorithms && Object.keys(form.algorithms).length > 0 && (
+                  <span className="ml-1.5 text-[10px] text-yellow-600 dark:text-yellow-400">
+                    ({t("hostDetails.algorithms.customized")})
+                  </span>
+                )}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2">
+                <AlgorithmOverridesPanel
+                  value={form.algorithms}
+                  onChange={(next) => update("algorithms", next)}
+                />
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Backspace behavior */}
             <div className="flex items-center justify-between gap-2">
