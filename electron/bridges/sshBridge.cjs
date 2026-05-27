@@ -2098,7 +2098,11 @@ find_login_shell() {
   # into every channel of one SSH connection, so processes that share it are
   # the channels of this very connection — and exactly one of them is the
   # user's PTY shell. Read /proc/<pid>/environ (NUL-separated, same uid only)
-  # and pick the shell with a controlling tty.
+  # to find candidates, then pick the one with a shell comm and a controlling
+  # tty. /proc/<pid>/comm is read directly here because ps -p PID -o tty=,comm=
+  # gets misparsed on older procps (CentOS 7): the trailing ",comm=" is folded
+  # into the tty column header instead of starting a second column, so tty and
+  # comm come back swapped.
   _conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
   [ -z "$_conn" ] && return
   _any=""
@@ -2108,14 +2112,13 @@ find_login_shell() {
     [ -r "$_d/environ" ] || continue
     _conn2=$(tr '\\0' '\\n' < "$_d/environ" 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
     [ "$_conn2" = "$_conn" ] || continue
-    _info=$(ps -p "$_pid" -o tty=,comm= 2>/dev/null)
-    [ -n "$_info" ] || continue
-    set -- $_info
-    case "$2" in
-      sh|bash|zsh|fish|ksh|dash|ash|-sh|-bash|-zsh|-fish|-ksh|-dash|-ash) ;;
+    _comm=$(cat "$_d/comm" 2>/dev/null)
+    case "$_comm" in
+      sh|bash|zsh|fish|ksh|dash|ash) ;;
       *) continue ;;
     esac
-    if [ "$1" != "?" ] && [ -n "$1" ]; then
+    _tty=$(ps -p "$_pid" -o tty= 2>/dev/null | tr -d '[:space:]')
+    if [ "$_tty" != "?" ] && [ -n "$_tty" ]; then
       echo "$_pid"
       return
     fi
