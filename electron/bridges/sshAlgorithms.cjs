@@ -141,6 +141,16 @@ const OVERRIDABLE_CATEGORIES = Object.freeze([
   "kex", "cipher", "hmac", "serverHostKey", "compress",
 ]);
 
+function filterRuntimeUnsupportedHmac(list) {
+  if (md5Supported()) return list;
+  // FIPS-enabled Node disables MD5. ssh2's generateAlgorithmList rejects
+  // hmac-md5 / hmac-md5-96 against its SUPPORTED_MAC (filtered by
+  // canUseMAC at startup) and throws "Unsupported algorithm" before any
+  // SSH negotiation — drop those entries from a user override the same
+  // way applyLegacyHmacAlgorithms gates the legacy seed.
+  return list.filter((algo) => !algo.startsWith("hmac-md5"));
+}
+
 function applyAlgorithmOverrides(algorithms, overrides) {
   if (!overrides || typeof overrides !== "object") return;
   for (const key of OVERRIDABLE_CATEGORIES) {
@@ -148,12 +158,20 @@ function applyAlgorithmOverrides(algorithms, overrides) {
     if (Array.isArray(list) && list.length > 0) {
       // Copy so caller mutation cannot leak back into the host config object.
       const copy = list.slice();
-      // KEX needs the same runtime fixed-DH support filter the default
-      // builder applies — BoringSSL drops modp2 (the prime backing
-      // `diffie-hellman-group1-sha1`), and an override that re-introduces
-      // an unsupported group would make ssh2 throw "Unknown DH group"
-      // mid-handshake instead of failing fast.
-      algorithms[key] = key === "kex" ? filterSupportedFixedDhKex(copy) : copy;
+      let filtered;
+      if (key === "kex") {
+        // KEX needs the same runtime fixed-DH support filter the default
+        // builder applies — BoringSSL drops modp2 (the prime backing
+        // `diffie-hellman-group1-sha1`), and an override that re-introduces
+        // an unsupported group would make ssh2 throw "Unknown DH group"
+        // mid-handshake instead of failing fast.
+        filtered = filterSupportedFixedDhKex(copy);
+      } else if (key === "hmac") {
+        filtered = filterRuntimeUnsupportedHmac(copy);
+      } else {
+        filtered = copy;
+      }
+      algorithms[key] = filtered;
     }
   }
 }

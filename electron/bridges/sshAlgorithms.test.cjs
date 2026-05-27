@@ -327,6 +327,31 @@ for (const [label, buildAlgorithms] of [
     });
   });
 
+  test(`${label} HMAC override drops MD5 entries when the runtime disables MD5`, () => {
+    // Mirrors the KEX-override-runtime-filter test above: a user might
+    // seed an HMAC override from the legacy default list (which includes
+    // hmac-md5) on a FIPS-disabled MD5 runtime. ssh2's
+    // generateAlgorithmList() throws "Unsupported algorithm" synchronously
+    // for hmac-md5 in that case, so the override path must apply the same
+    // md5Supported() gate that applyLegacyHmacAlgorithms uses.
+    withAlgorithmRuntime({ hashes: ["sha1", "sha256", "sha512"] }, () => {
+      const algorithms = buildAlgorithms(true, {
+        algorithmOverrides: {
+          hmac: [
+            "hmac-sha2-256",
+            "hmac-md5",
+            "hmac-sha1",
+            "hmac-md5-96",
+          ],
+        },
+      });
+      assert.ok(algorithms.hmac.includes("hmac-sha2-256"));
+      assert.ok(algorithms.hmac.includes("hmac-sha1"));
+      assert.equal(algorithms.hmac.includes("hmac-md5"), false);
+      assert.equal(algorithms.hmac.includes("hmac-md5-96"), false);
+    });
+  });
+
   test(`${label} KEX override is filtered against the runtime's fixed-DH support`, () => {
     // On Electron/BoringSSL where modp2 (the prime backing
     // diffie-hellman-group1-sha1) is not available, the default builder
