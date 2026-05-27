@@ -428,24 +428,27 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         keepaliveCountMax: hopInterval > 0 ? hopCountMax : 0,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
-        // Per-hop algorithm settings. `legacyAlgorithms` and
-        // `skipEcdsaHostKey` are *append/safety* toggles — they widen
-        // the offered list — so falling back to the target's setting
-        // when the hop didn't override is safe and matches the historic
-        // chain-wide behavior of `options.legacyAlgorithms` (a user with
-        // a single old leaf only needs to flip the toggle on the leaf).
+        // Per-hop algorithm settings. Two distinct semantics:
         //
-        // `algorithmOverrides` is different — it *replaces* the offered
-        // list for a category, so propagating the leaf's override onto a
-        // bastion can lock the hop to algorithms the bastion doesn't
-        // accept (e.g. a target restricted to `serverHostKey: ["ssh-rsa"]`
-        // would block negotiation against an Ed25519-only jump host).
-        // Treat overrides as strictly per-host: an unset hop value uses
-        // the hop's default offer, not the leaf's override.
+        // - `legacyAlgorithms` is *append-only* — it widens the offered
+        //   list — so falling back to the target's setting when the hop
+        //   didn't override is safe and matches the historic chain-wide
+        //   behavior (a user with a single old leaf only needs to flip
+        //   the toggle on the leaf).
+        //
+        // - `skipEcdsaHostKey` and `algorithmOverrides` *narrow* the
+        //   offered list (the first removes every `ecdsa-sha2-*`, the
+        //   second replaces a category outright). Propagating those to
+        //   a bastion that doesn't need them can lock the hop to
+        //   algorithms it doesn't accept — e.g. an Ed25519-only bastion
+        //   would still negotiate while ECDSA was offered, but breaks
+        //   when the leaf's ECDSA skip is applied to it. Treat both as
+        //   strictly per-host: an unset hop value uses the hop's default
+        //   offer, not the leaf's narrower setting.
         algorithms: buildAlgorithms(
           jump.legacyAlgorithms ?? options.legacyAlgorithms,
           {
-            skipEcdsaHostKey: jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey,
+            skipEcdsaHostKey: jump.skipEcdsaHostKey,
             algorithmOverrides: jump.algorithmOverrides,
           },
         ),
@@ -455,7 +458,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
         hostname: jump.hostname,
         port: jump.port || 22,
         legacyAlgorithms: !!(jump.legacyAlgorithms ?? options.legacyAlgorithms),
-        skipEcdsaHostKey: !!(jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey),
+        skipEcdsaHostKey: !!jump.skipEcdsaHostKey,
         hasAlgorithmOverrides: !!jump.algorithmOverrides,
       });
 

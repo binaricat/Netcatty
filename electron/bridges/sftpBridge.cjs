@@ -919,15 +919,17 @@ async function connectThroughChainForSftp(event, options, jumpHosts, targetHost,
         // Enable keyboard-interactive authentication (required for 2FA/MFA)
         tryKeyboard: true,
         // Per-hop algorithm settings, mirroring sshBridge.cjs:
-        //   - `legacyAlgorithms` / `skipEcdsaHostKey` fall back to the
-        //     target's setting (append/safety toggles — safe to widen
-        //     hop's offer for chain convenience).
-        //   - `algorithmOverrides` is strictly per-host (the leaf's
-        //     replacement list must not be applied to bastions).
+        //   - `legacyAlgorithms` falls back to the target's setting
+        //     (append-only — safe to widen the hop's offer for chain
+        //     convenience).
+        //   - `skipEcdsaHostKey` and `algorithmOverrides` are strictly
+        //     per-host. They *narrow* the offered list (drop ecdsa-* or
+        //     replace a category), so propagating the leaf's setting
+        //     would break an ECDSA-required or Ed25519-only bastion.
         algorithms: buildSftpAlgorithms(
           jump.legacyAlgorithms ?? options.legacyAlgorithms,
           {
-            skipEcdsaHostKey: jump.skipEcdsaHostKey ?? options.skipEcdsaHostKey,
+            skipEcdsaHostKey: jump.skipEcdsaHostKey,
             algorithmOverrides: jump.algorithmOverrides,
           },
         ),

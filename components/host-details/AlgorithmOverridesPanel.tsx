@@ -73,7 +73,20 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
 
   const updateCategory = useCallback(
     (category: SSHAlgorithmCategory, selected: string[]) => {
-      const next: HostAlgorithmOverrides = { ...(value ?? {}) };
+      // Start from the inherited group overrides so that touching one
+      // category doesn't silently drop inheritance for the others.
+      // `applyGroupDefaults` treats `host.algorithms` as an
+      // all-or-nothing inherit boundary: once the host carries any
+      // explicit object, the host's `algorithms` shadows the group's
+      // `algorithms` entirely. If the user customized cipher locally
+      // and the group restricted serverHostKey, simply storing
+      // `{ cipher: [...] }` on the host would lose the group's
+      // serverHostKey restriction. Persisting the inherited categories
+      // alongside keeps the effective offer intact.
+      const base: HostAlgorithmOverrides = inheritedFromGroup
+        ? { ...inheritedFromGroup }
+        : {};
+      const next: HostAlgorithmOverrides = { ...base, ...(value ?? {}) };
       if (selected.length === 0) {
         delete next[category];
       } else {
@@ -82,24 +95,27 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
       const hasAny = Object.values(next).some((arr) => Array.isArray(arr) && arr.length > 0);
       onChange(hasAny ? next : undefined);
     },
-    [value, onChange],
+    [value, onChange, inheritedFromGroup],
   );
 
   const toggleAlgorithm = useCallback(
     (category: SSHAlgorithmCategory, algo: string) => {
       const current = value?.[category];
       if (!current) {
-        // First click in this category — seed with the *effective* default
-        // for the host's current legacy mode. Seeding from
+        // First click in this category — seed with the *effective* offer
+        // for this category. If the group has set a list for this
+        // category, use that (so customizing one entry doesn't lose the
+        // group's narrowing). Otherwise seed from NetCatty's effective
+        // default, which already accounts for legacy mode. Seeding from
         // SUPPORTED_ALGORITHMS_BY_CATEGORY would silently introduce
         // legacy algorithms (CBC, arcfour, MD5) into the offered list.
-        const baseline = effectiveDefault[category];
+        const baseline = inheritedFromGroup?.[category] ?? effectiveDefault[category];
         if (baseline.includes(algo)) {
           updateCategory(category, baseline.filter((a) => a !== algo));
         } else {
-          // The user clicked an algorithm not in the current effective
-          // default — they want to opt INTO it. Start the override with
-          // the default plus this extra entry.
+          // The user clicked an algorithm not in the baseline — they
+          // want to opt INTO it. Start the override with the baseline
+          // plus this extra entry.
           updateCategory(category, [...baseline, algo]);
         }
         return;
@@ -110,7 +126,7 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
         updateCategory(category, [...current, algo]);
       }
     },
-    [value, updateCategory, effectiveDefault],
+    [value, updateCategory, effectiveDefault, inheritedFromGroup],
   );
 
   const resetCategory = useCallback(
@@ -131,15 +147,16 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
   const isChecked = useCallback(
     (category: SSHAlgorithmCategory, algo: string) => {
       const current = value?.[category];
-      // Uncustomized → reflect the *effective* default so the visible
-      // checkbox state matches what NetCatty would actually advertise.
-      // Algorithms outside the effective default (e.g. arcfour in modern
-      // mode) appear unchecked, hinting that ticking them implies opting
-      // into something normally not offered.
-      if (!current) return effectiveDefault[category].includes(algo);
-      return current.includes(algo);
+      if (current) return current.includes(algo);
+      // No host-local override: reflect what the host would actually
+      // advertise — the group's inherited list when present, else
+      // NetCatty's effective default. Algorithms outside both
+      // (e.g. arcfour in modern mode) appear unchecked, hinting that
+      // ticking them implies opting into something normally not offered.
+      const baseline = inheritedFromGroup?.[category] ?? effectiveDefault[category];
+      return baseline.includes(algo);
     },
-    [value, effectiveDefault],
+    [value, effectiveDefault, inheritedFromGroup],
   );
 
   return (
