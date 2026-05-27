@@ -9,6 +9,7 @@ const {
   isPlausibleCliVersionOutput,
   looksLikeIdleAutoLogout,
   prepareCommandForSpawn,
+  resolveClaudeAcpBinaryPath,
   resolveClaudeCodeExecutableForAcp,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
@@ -282,4 +283,66 @@ test("looksLikeIdleAutoLogout returns false for empty / non-string input", () =>
   assert.equal(looksLikeIdleAutoLogout(""), false);
   assert.equal(looksLikeIdleAutoLogout(undefined), false);
   assert.equal(looksLikeIdleAutoLogout(null), false);
+});
+
+function withExecPath(fakePath, fn) {
+  const original = process.execPath;
+  Object.defineProperty(process, "execPath", { value: fakePath, configurable: true, writable: true });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, "execPath", { value: original, configurable: true, writable: true });
+  }
+}
+
+test("resolveClaudeAcpBinaryPath sets ELECTRON_RUN_AS_NODE when packaged execPath is not node", (t) => {
+  // Simulate the packaged Electron case where process.execPath is the app
+  // binary (e.g. Netcatty.exe).  We copy the real node binary to a fake path
+  // so existsSync() succeeds while basename != "node".
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-acp-runtime-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakeRuntime = path.join(tempDir, process.platform === "win32" ? "Netcatty.exe" : "Netcatty");
+  fs.copyFileSync(process.execPath, fakeRuntime);
+
+  const result = withExecPath(fakeRuntime, () =>
+    resolveClaudeAcpBinaryPath(null, { app: { isPackaged: true } }),
+  );
+
+  assert.equal(result.command, fakeRuntime);
+  assert.equal(result.prependArgs.length, 1);
+  assert.ok(
+    result.prependArgs[0].endsWith(path.join("claude-agent-acp", "dist", "index.js")),
+    `prependArgs[0] should point at the bundled script, got: ${result.prependArgs[0]}`,
+  );
+  assert.deepEqual(result.env, { ELECTRON_RUN_AS_NODE: "1" });
+});
+
+test("resolveClaudeAcpBinaryPath leaves env empty when execPath is a real node binary", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-acp-runtime-node-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakeRuntime = path.join(tempDir, process.platform === "win32" ? "node.exe" : "node");
+  fs.copyFileSync(process.execPath, fakeRuntime);
+
+  const result = withExecPath(fakeRuntime, () =>
+    resolveClaudeAcpBinaryPath(null, { app: { isPackaged: true } }),
+  );
+
+  assert.equal(result.command, fakeRuntime);
+  assert.deepEqual(result.env, {});
+});
+
+test("resolveClaudeAcpBinaryPath falls back to bundled script in dev mode when nothing is on PATH", () => {
+  // Dev mode (isPackaged = false) with a shellEnv whose PATH cannot resolve
+  // claude-agent-acp falls through to the bundled-script branch, which uses
+  // process.execPath as the runtime.
+  const result = resolveClaudeAcpBinaryPath({ PATH: "" }, { app: { isPackaged: false } });
+
+  assert.equal(result.command, process.execPath);
+  assert.equal(result.prependArgs.length, 1);
+  assert.ok(
+    result.prependArgs[0].endsWith(path.join("claude-agent-acp", "dist", "index.js")),
+    `prependArgs[0] should point at the bundled script, got: ${result.prependArgs[0]}`,
+  );
+  // Test runner's process.execPath is a real node, so no ELECTRON_RUN_AS_NODE here.
+  assert.deepEqual(result.env, {});
 });

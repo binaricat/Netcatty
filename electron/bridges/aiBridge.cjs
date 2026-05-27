@@ -2407,6 +2407,9 @@ function registerHandlers(ipcMain) {
       const resolvedArgs = claudeAcp
         ? [...claudeAcp.prependArgs, ...(acpArgs || [])]
         : acpArgs || [];
+      if (claudeAcp?.env) {
+        Object.assign(agentEnv, claudeAcp.env);
+      }
 
       provider = createACPProvider({
         command: resolvedCommand,
@@ -2732,6 +2735,9 @@ function registerHandlers(ipcMain) {
         const resolvedArgs = claudeAcp
           ? [...claudeAcp.prependArgs, ...(acpArgs || [])]
           : acpArgs || [];
+        if (claudeAcp?.env) {
+          Object.assign(agentEnv, claudeAcp.env);
+        }
         const sessionMcpServers = isCopilotAgent ? [] : mcpSnapshot.mcpServers;
 
         const provider = createACPProvider({
@@ -2844,6 +2850,9 @@ function registerHandlers(ipcMain) {
             if (isCopilotAgent) {
               const fallbackCopilotConfig = prepareCopilotHome(shellEnv, mcpSnapshot.mcpServers, chatSessionId);
               fallbackEnv.COPILOT_HOME = fallbackCopilotConfig.copilotHome;
+            }
+            if (fallbackClaudeAcp?.env) {
+              Object.assign(fallbackEnv, fallbackClaudeAcp.env);
             }
             return fallbackEnv;
           })(),
