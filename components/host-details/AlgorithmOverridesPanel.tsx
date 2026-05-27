@@ -131,17 +131,47 @@ export const AlgorithmOverridesPanel: React.FC<Props> = ({
 
   const resetCategory = useCallback(
     (category: SSHAlgorithmCategory) => {
+      const inherited = inheritedFromGroup?.[category];
       const next: HostAlgorithmOverrides = { ...(value ?? {}) };
-      delete next[category];
+      if (Array.isArray(inherited) && inherited.length > 0) {
+        // The group has an override for this category. Just deleting
+        // `next[category]` would *widen* the effective offer: because
+        // `applyGroupDefaults` treats `host.algorithms` as an
+        // all-or-nothing inherit boundary, once any other category
+        // remains on the host the group's `algorithms` object stops
+        // being inherited as a whole, and the missing category falls
+        // back to NetCatty defaults — not the group's narrower list.
+        // Persist the inherited list verbatim instead, so Reset means
+        // "use what this host would otherwise inherit" rather than
+        // "silently switch to NetCatty defaults".
+        next[category] = inherited.slice();
+      } else {
+        delete next[category];
+      }
       const hasAny = Object.values(next).some((arr) => Array.isArray(arr) && arr.length > 0);
       onChange(hasAny ? next : undefined);
     },
-    [value, onChange],
+    [value, onChange, inheritedFromGroup],
   );
 
   const isCustomized = useCallback(
-    (category: SSHAlgorithmCategory) => Array.isArray(value?.[category]),
-    [value],
+    (category: SSHAlgorithmCategory) => {
+      const local = value?.[category];
+      if (!Array.isArray(local) || local.length === 0) return false;
+      // If the host's list is identical (order + contents) to the
+      // inherited list, the user hasn't really customized it — they
+      // either reset to the upstream value or never touched it directly.
+      // Suppressing the "customized" badge in that case keeps the UI
+      // honest about what the user actually changed.
+      const inherited = inheritedFromGroup?.[category];
+      if (Array.isArray(inherited)
+          && inherited.length === local.length
+          && inherited.every((a, i) => a === local[i])) {
+        return false;
+      }
+      return true;
+    },
+    [value, inheritedFromGroup],
   );
 
   const isChecked = useCallback(
