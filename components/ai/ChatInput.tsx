@@ -418,7 +418,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const selectedSkillChipClassName =
     'inline-flex h-7 items-center gap-1.5 rounded-full border border-primary/18 bg-primary/8 pl-2.5 pr-1.5 text-[11px] font-medium text-foreground/86 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]';
   const iconButtonClassName =
-    'h-6 w-6 rounded-full bg-transparent text-foreground/62 hover:bg-muted/24 hover:text-foreground';
+    'h-6 w-6 shrink-0 rounded-full bg-transparent text-foreground/62 hover:bg-muted/24 hover:text-foreground';
 
   return (
     <div className="shrink-0 px-4 pb-4">
@@ -618,7 +618,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
         {/* Footer toolbar */}
         <PromptInputFooter className="gap-1.5 border-t-0 bg-transparent px-3 pb-2 pt-0">
-          <PromptInputTools className="gap-1 flex-wrap">
+          <PromptInputTools className="gap-1 min-w-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -717,7 +717,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   closeAllMenus();
                 }
               }}
-              className={`${chipClassName} ${hasModelPicker ? 'cursor-pointer hover:bg-muted/24 transition-colors' : ''}`}
+              className={`${chipClassName} min-w-0 ${hasModelPicker ? 'cursor-pointer hover:bg-muted/24 transition-colors' : ''}`}
               aria-label={hasProviderSwitcher ? 'Select provider and model' : 'Select model'}
               aria-expanded={showModelPicker}
             >
@@ -726,7 +726,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               ) : (
                 <Cpu size={11} className="text-muted-foreground/64" />
               )}
-              <span className={`truncate ${hasProviderSwitcher ? 'max-w-[180px]' : 'max-w-[82px]'}`}>{modelLabel}</span>
+              <span className={`truncate min-w-0 ${hasProviderSwitcher ? 'max-w-[180px]' : 'max-w-[82px]'}`}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
             {showModelPicker && hasModelPicker && menuPos && createPortal(
@@ -873,7 +873,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                           closeAllMenus();
                         }
                       }}
-                      className={`${chipClassName} cursor-pointer hover:bg-muted/24 transition-colors`}
+                      className={`${chipClassName} shrink-0 cursor-pointer hover:bg-muted/24 transition-colors`}
                       aria-label={t('ai.safety.permissionMode')}
                       aria-expanded={showPermPicker}
                     >
