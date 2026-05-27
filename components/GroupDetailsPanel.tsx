@@ -1,6 +1,8 @@
 import {
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Eye,
   EyeOff,
   FileKey,
@@ -131,6 +133,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
   // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
   const [showTelnetPassword, setShowTelnetPassword] = useState(false);
+  const [showAlgorithmOverrides, setShowAlgorithmOverrides] = useState(false);
   const [addProtocolOpen, setAddProtocolOpen] = useState(false);
 
   // Credential selection state
@@ -893,14 +896,24 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             <p className="text-xs text-muted-foreground break-words">
               {t("hostDetails.skipEcdsaHostKey.desc")}
             </p>
-            <Collapsible>
-              <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
-                {t("hostDetails.algorithms.advanced")}
-                {form.algorithms && Object.keys(form.algorithms).length > 0 && (
-                  <span className="ml-1.5 text-[10px] text-yellow-600 dark:text-yellow-400">
-                    ({t("hostDetails.algorithms.customized")})
+            <Collapsible open={showAlgorithmOverrides} onOpenChange={setShowAlgorithmOverrides}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-between h-8 px-2 hover:bg-accent/50"
+                >
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t("hostDetails.algorithms.advanced")}
+                    {form.algorithms && Object.keys(form.algorithms).length > 0 && (
+                      <span className="ml-1.5 text-[10px] text-yellow-600 dark:text-yellow-400">
+                        ({t("hostDetails.algorithms.customized")})
+                      </span>
+                    )}
                   </span>
-                )}
+                  {showAlgorithmOverrides
+                    ? <ChevronUp size={14} className="text-muted-foreground" />
+                    : <ChevronDown size={14} className="text-muted-foreground" />}
+                </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2">
                 <AlgorithmOverridesPanel
