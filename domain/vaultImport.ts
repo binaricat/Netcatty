@@ -1,5 +1,7 @@
 import { Host, HostChainConfig, HostProtocol } from "./models";
 import { parseQuickConnectInput } from "./quickConnect";
+import { findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
+export { exportHostsToCsvWithStats, getVaultCsvTemplate } from "./vaultImport/csvExport";
 
 interface ParsedJumpHost {
   hostname: string;
@@ -66,7 +68,6 @@ const parseJumpHostSpec = (spec: string): ParsedJumpHost | null => {
   if (!hostname) return null;
   return { hostname, username, port };
 };
-
 const parseProxyJump = (value: string): ParsedJumpHost[] => {
   if (!value || value.toLowerCase() === "none") return [];
   return value
@@ -103,10 +104,6 @@ interface VaultImportResult {
   groups: string[];
   issues: VaultImportIssue[];
   stats: VaultImportStats;
-}
-
-interface VaultCsvTemplateOptions {
-  includeExampleRows?: boolean;
 }
 
 const DEFAULT_SSH_PORT = 22;
@@ -243,76 +240,6 @@ const parseTarget = (
   return null;
 };
 
-const parseCsv = (text: string): string[][] => {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        const next = text[i + 1];
-        if (next === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inQuotes = true;
-      continue;
-    }
-
-    if (ch === ",") {
-      row.push(field);
-      field = "";
-      continue;
-    }
-
-    if (ch === "\r" || ch === "\n") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      field = "";
-      rows.push(row);
-      row = [];
-      continue;
-    }
-
-    field += ch;
-  }
-
-  row.push(field);
-  rows.push(row);
-  return rows;
-};
-
-const normalizeHeaderKey = (raw: string): string => {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "")
-    .replace(/[^\p{L}\p{N}]/gu, "");
-};
-
-const findHeaderIndex = (headers: string[], candidates: string[]): number => {
-  const normalized = headers.map((h) => normalizeHeaderKey(h));
-  for (const cand of candidates) {
-    const c = cand.toLowerCase();
-    for (let i = 0; i < normalized.length; i++) {
-      const h = normalized[i];
-      if (h === c || h.startsWith(c)) return i;
-    }
-  }
-  return -1;
-};
 
 const importFromCsv = (text: string): VaultImportResult => {
   const issues: VaultImportIssue[] = [];
@@ -998,102 +925,4 @@ export const importVaultHostsFromText = (
       return _exhaustive;
     }
   }
-};
-
-export const getVaultCsvTemplate = (
-  opts: VaultCsvTemplateOptions = {},
-): string => {
-  const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
-  const rows: string[][] = [header];
-  if (includeExampleRows) {
-    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "192.168.1.10", "ssh", "22", "root", ""]);
-    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "server-a.example.com", "ssh", "22", "ubuntu", ""]);
-    rows.push(["Database", "DB", "db,mysql", "db.example.com", "ssh", "4567", "admin", ""]);
-  }
-
-  const escapeCsv = (value: string) => {
-    if (value.includes('"')) value = value.replace(/"/g, '""');
-    if (/[",\r\n]/.test(value)) return `"${value}"`;
-    return value;
-  };
-
-  return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
-};
-
-const exportHostsToCsv = (hosts: Host[]): string => {
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
-  const rows: string[][] = [header];
-
-  const escapeCsv = (value: string, skipFormulaGuard = false) => {
-    // Prevent CSV formula injection by prefixing dangerous characters with a single quote
-    // These characters can be interpreted as formulas by spreadsheet applications
-    // Skip for password fields to preserve credentials verbatim for round-trip
-    if (!skipFormulaGuard && /^[=+\-@\t\r]/.test(value)) {
-      value = "'" + value;
-    }
-    if (value.includes('"')) value = value.replace(/"/g, '""');
-    if (/[",\r\n]/.test(value)) return `"${value}"`;
-    return value;
-  };
-
-  // Filter out serial hosts - CSV format doesn't support serial port configuration
-  // Note: mosh-enabled hosts are exported as SSH (losing mosh flag) rather than being skipped,
-  // since exporting partial data is better than losing the entire host entry
-  const isUnsupported = (h: Host) => h.protocol === "serial";
-  const exportableHosts = hosts.filter((h) => !isUnsupported(h));
-
-  // Helper to bracket IPv6 addresses for CSV export
-  // IPv6 addresses contain colons which would be misinterpreted as port separators on import
-  const formatHostname = (hostname: string): string => {
-    // Check if it looks like an IPv6 address (contains colons but not already bracketed)
-    if (hostname.includes(":") && !hostname.startsWith("[")) {
-      return `[${hostname}]`;
-    }
-    return hostname;
-  };
-
-  for (const host of exportableHosts) {
-    // For telnet hosts, use telnet-specific port and username
-    const isTelnet = host.protocol === "telnet";
-    const effectivePort = isTelnet
-      ? (host.telnetPort ?? host.port ?? 23)
-      : (host.port ?? 22);
-    const effectiveUsername = isTelnet
-      ? (host.telnetUsername ?? host.username ?? "")
-      : (host.username ?? "");
-
-    rows.push([
-      host.group ?? "",
-      host.label ?? "",
-      (host.tags ?? []).join(","),
-      formatHostname(host.hostname),
-      host.protocol ?? "ssh",
-      String(effectivePort),
-      effectiveUsername,
-      host.password ?? "",
-    ]);
-  }
-
-  const passwordColIdx = header.indexOf("Password");
-  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(c, rowIdx > 0 && i === passwordColIdx)).join(",")).join("\r\n") + "\r\n";
-};
-
-interface ExportHostsResult {
-  csv: string;
-  exportedCount: number;
-  skippedCount: number;
-}
-
-export const exportHostsToCsvWithStats = (hosts: Host[]): ExportHostsResult => {
-  // Only serial hosts are truly unsupported - mosh hosts are exported as SSH
-  const isUnsupported = (h: Host) => h.protocol === "serial";
-  const skippedHosts = hosts.filter((h) => isUnsupported(h));
-  const exportableHosts = hosts.filter((h) => !isUnsupported(h));
-
-  return {
-    csv: exportHostsToCsv(hosts),
-    exportedCount: exportableHosts.length,
-    skippedCount: skippedHosts.length,
-  };
 };

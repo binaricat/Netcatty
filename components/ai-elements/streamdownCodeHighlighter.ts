@@ -1,9 +1,10 @@
 import type {
   CodeHighlighterPlugin,
   HighlightOptions,
-  HighlightResult,
 } from 'streamdown';
 import type { BundledLanguage } from 'shiki';
+
+type HighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin['highlight']>>;
 
 const PLAIN_TEXT_LANGUAGES = new Set([
   '',

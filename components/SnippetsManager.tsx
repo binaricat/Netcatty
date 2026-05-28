@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clock, Copy, Edit2, FileCode, FolderPlus, Keyboard, LayoutGrid, List as ListIcon, Loader2, Package, Play, Plus, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, Clock, Copy, Edit2, FileCode, FolderPlus, LayoutGrid, List as ListIcon, Package, Play, Plus, Search, Trash2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useStoredViewMode } from '../application/state/useStoredViewMode';
@@ -6,19 +6,15 @@ import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/s
 import { cn, isMacPlatform } from '../lib/utils';
 import { Host, ProxyProfile, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import { HotkeyScheme, KeyBinding, keyEventToString, ManagedSource, matchesKeyBinding, parseKeyCombo } from '../domain/models';
-import { DistroAvatar } from './DistroAvatar';
-import SelectHostPanel from './SelectHostPanel';
-import { AsidePanel, AsidePanelContent, AsidePanelFooter } from './ui/aside-panel';
 import { Button } from './ui/button';
-import { Card } from './ui/card';
-import { Combobox, ComboboxOption } from './ui/combobox';
+import { ComboboxOption } from './ui/combobox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
 import { Dropdown, DropdownContent, DropdownTrigger } from './ui/dropdown';
 import { Input } from './ui/input';
-import { Label } from './ui/label';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
-import { Textarea } from './ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { SnippetsRightPanel } from './SnippetsRightPanel';
+import { SnippetsPackageDialogs } from './SnippetsPackageDialogs';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -33,7 +29,6 @@ interface SnippetsManagerProps {
   onDelete: (id: string) => void;
   onPackagesChange: (packages: string[]) => void;
   onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
-  // Props for inline host creation
   availableKeys?: SSHKey[];
   proxyProfiles?: ProxyProfile[];
   managedSources?: ManagedSource[];
@@ -65,7 +60,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   onCreateGroup,
 }) => {
   const { t } = useI18n();
-  // Panel state
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [editingSnippet, setEditingSnippet] = useState<Partial<Snippet>>({
     label: '',
@@ -79,13 +73,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const [newPackageName, setNewPackageName] = useState('');
   const [isPackageDialogOpen, setIsPackageDialogOpen] = useState(false);
 
-  // Rename package state
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [renamingPackagePath, setRenamingPackagePath] = useState<string | null>(null);
   const [renamePackageName, setRenamePackageName] = useState('');
   const [renameError, setRenameError] = useState('');
 
-  // Search, sort, and view mode state
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useStoredViewMode(
     STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE,
@@ -93,12 +85,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   );
   const [sortMode, setSortMode] = useState<SortMode>('az');
 
-  // Shell history lazy loading state
   const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  // Shortkey recording state
   const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
   const [shortkeyError, setShortkeyError] = useState<string | null>(null);
 
@@ -182,7 +172,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     });
   }, []);
 
-  // Validate shortkey for conflicts (case-insensitive comparison)
   const normalizeKeyString = useCallback((value: string) => (
     value.toLowerCase().replace(/\s+/g, '')
   ), []);
@@ -200,7 +189,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       }
     }
     
-    // Check other snippet shortcuts
     if (syntheticEvent) {
       for (const snippet of existingShortkeys) {
         if (snippet.shortkey && matchesKeyBinding(syntheticEvent, snippet.shortkey, isMac)) {
@@ -227,7 +215,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     t,
   ]);
 
-  // Handle shortkey recording
   useEffect(() => {
     if (!isRecordingShortkey) return;
 
@@ -235,23 +222,19 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       e.preventDefault();
       e.stopPropagation();
 
-      // Escape cancels recording
       if (e.key === 'Escape') {
         setIsRecordingShortkey(false);
         setShortkeyError(null);
         return;
       }
 
-      // Skip pure modifier keys
       if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
 
       const keyString = keyEventToString(e, isMac);
       
-      // Validate the new shortkey
       const error = validateShortkey(keyString);
       if (error) {
         setShortkeyError(error);
-        // Don't stop recording, let user try again
         return;
       }
       
@@ -265,8 +248,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       setShortkeyError(null);
     };
 
-    // Delay adding click handler by 100ms to prevent the button click that
-    // initiated recording from immediately triggering the click handler
     const timer = setTimeout(() => {
       window.addEventListener('click', handleClick, true);
     }, 100);
@@ -345,13 +326,11 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
 
   const displayedPackages = useMemo(() => {
     if (!selectedPackage) {
-      // Separate absolute paths (starting with /) from relative paths
       const absolutePaths = packages.filter(p => p.startsWith('/'));
       const relativePaths = packages.filter(p => !p.startsWith('/'));
       
       const results: { name: string; path: string; count: number }[] = [];
       
-      // Process relative paths (traditional behavior)
       const relativeRoots = relativePaths
         .map((p) => p.split('/')[0])
         .filter((name): name is string => Boolean(name) && name.length > 0);
@@ -365,7 +344,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         results.push({ name, path, count });
       });
       
-      // Process absolute paths - show them as separate roots with "/" prefix
       const absoluteRoots = absolutePaths
         .map((p) => {
           const cleanPath = p.substring(1); // Remove leading slash
@@ -394,7 +372,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       .filter((name): name is string => Boolean(name) && name.length > 0);
     return Array.from(new Set(children)).map((name) => {
       const path = `${selectedPackage}/${name}`;
-      // Count snippets in this package AND all nested packages
       const count = snippets.filter((s) => {
         const pkg = s.package || '';
         return pkg === path || pkg.startsWith(path + '/');
@@ -404,10 +381,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   }, [packages, selectedPackage, snippets]);
 
   const displayedSnippets = useMemo(() => {
-    // Search spans all packages (#777): when the user types in the search
-    // box we drop the current-package scoping so cross-package matches are
-    // reachable without navigating into each one. Otherwise the user is
-    // browsing and we keep the package scope.
     const hasSearch = search.trim().length > 0;
     let result = hasSearch
       ? snippets
@@ -419,7 +392,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         sn.command.toLowerCase().includes(s)
       );
     }
-    // Apply sorting
     result = [...result].sort((a, b) => {
       switch (sortMode) {
         case 'az':
@@ -448,32 +420,24 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     const name = newPackageName.trim();
     if (!name) return;
     
-    // Allow leading slash and validate the rest - allow hyphens and Unicode letters/numbers
     if (!/^\/?([\w\p{L}\p{N}-]+(\/[\w\p{L}\p{N}-]+)*)\/?$/u.test(name)) {
-      // Could add toast notification here for invalid characters
       return;
     }
     
-    // Normalize path construction to avoid double slashes
     let full: string;
     if (selectedPackage) {
-      // Strip leading slash from name when we're inside a package to avoid double slashes
       const normalizedName = name.startsWith('/') ? name.substring(1) : name;
       full = `${selectedPackage}/${normalizedName}`;
     } else {
-      // At root level, preserve the leading slash if user intended it
       full = name;
     }
 
-    // Strip trailing slash to ensure consistent path handling
     if (full.endsWith('/')) {
       full = full.slice(0, -1);
     }
     
-    // Check for duplicate package names (case-insensitive)
     const existingPackage = packages.find(p => p.toLowerCase() === full.toLowerCase());
     if (existingPackage) {
-      // Could add toast notification here for duplicate package
       return;
     }
     
@@ -483,10 +447,8 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   };
 
   const deletePackage = (path: string) => {
-    // Remove the package and all its children
     const keep = packages.filter((p) => !(p === path || p.startsWith(path + '/')));
     
-    // Move all snippets from deleted packages to root
     const updatedSnippets = snippets.map((s) => {
       if (!s.package) return s;
       if (s.package === path || s.package.startsWith(path + '/')) {
@@ -495,13 +457,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       return s;
     });
     
-    // Update packages first, then save snippets
     onPackagesChange(keep);
     
-    // Bulk-save all snippets to avoid stale-closure overwrites
     onBulkSave(updatedSnippets);
     
-    // Reset selected package if it was deleted
     if (selectedPackage && (selectedPackage === path || selectedPackage.startsWith(path + '/'))) {
       setSelectedPackage(null);
     }
@@ -513,12 +472,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     const newPath = target ? `${target}/${name}` : (isAbsolute ? `/${name}` : name);
     if (newPath === source || newPath.startsWith(source + '/')) return;
 
-    // Check if target path already exists
     if (packages.includes(newPath)) return;
 
     const updatedPackages = packages.map((p) => {
       if (p === source) return newPath;
-      // Use more precise replacement to avoid substring issues
       if (p.startsWith(source + '/')) {
         return newPath + p.substring(source.length);
       }
@@ -528,7 +485,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     const updatedSnippets = snippets.map((s) => {
       if (!s.package) return s;
       if (s.package === source) return { ...s, package: newPath };
-      // Use more precise replacement to avoid substring issues
       if (s.package.startsWith(source + '/')) {
         return { ...s, package: newPath + s.package.substring(source.length) };
       }
@@ -553,38 +509,31 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
 
     const newName = renamePackageName.trim();
 
-    // Validate: empty name
     if (!newName) {
       setRenameError(t('snippets.renameDialog.error.empty'));
       return;
     }
 
-    // Validate: same rules as createPackage - allow Unicode letters, numbers, hyphens, underscores
-    // Since we're renaming a single segment (no slashes allowed), use the segment-level pattern
     if (!/^[\w\p{L}\p{N}-]+$/u.test(newName)) {
       setRenameError(t('snippets.renameDialog.error.invalidChars'));
       return;
     }
 
-    // Build new path
     const parts = renamingPackagePath.split('/');
     parts[parts.length - 1] = newName;
     const newPath = parts.join('/');
 
-    // Validate: same name
     if (newPath === renamingPackagePath) {
       setIsRenameDialogOpen(false);
       return;
     }
 
-    // Validate: duplicate (case-insensitive), excluding the package being renamed
     const existingPackage = packages.find(p => p !== renamingPackagePath && p.toLowerCase() === newPath.toLowerCase());
     if (existingPackage) {
       setRenameError(t('snippets.renameDialog.error.duplicate'));
       return;
     }
 
-    // Update all packages with this path or nested under it
     const updatedPackages = packages.map((p) => {
       if (p === renamingPackagePath) return newPath;
       if (p.startsWith(renamingPackagePath + '/')) {
@@ -593,7 +542,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       return p;
     });
 
-    // Update all snippets with this package or nested under it
     const updatedSnippets = snippets.map((s) => {
       if (!s.package) return s;
       if (s.package === renamingPackagePath) return { ...s, package: newPath };
@@ -606,14 +554,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     onPackagesChange(Array.from(new Set(updatedPackages)));
     onBulkSave(updatedSnippets);
 
-    // Update selected package if it was renamed
     if (selectedPackage === renamingPackagePath) {
       setSelectedPackage(newPath);
     } else if (selectedPackage?.startsWith(renamingPackagePath + '/')) {
       setSelectedPackage(newPath + selectedPackage.substring(renamingPackagePath.length));
     }
 
-    // Update editingSnippet.package if it's in the renamed package (fixes stale state when editing)
     if (editingSnippet.package) {
       if (editingSnippet.package === renamingPackagePath) {
         setEditingSnippet(prev => ({ ...prev, package: newPath }));
@@ -634,16 +580,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     onSave({ ...sn, package: pkg || '' });
   };
 
-  // Package options for Combobox
   const packageOptions: ComboboxOption[] = useMemo(() => {
-    // Generate all possible parent paths for each package
     const allPaths = new Set<string>();
     
     packages.forEach(pkg => {
-      // Add the full package path
       allPaths.add(pkg);
       
-      // Add all parent paths
       const parts = pkg.split('/').filter(Boolean);
       const isAbsolute = pkg.startsWith('/');
       
@@ -655,7 +597,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     
     return Array.from(allPaths)
       .sort((a, b) => {
-        // Sort by depth first (shorter paths first), then alphabetically
         const depthA = (a.match(/\//g) || []).length;
         const depthB = (b.match(/\//g) || []).length;
         if (depthA !== depthB) return depthA - depthB;
@@ -668,7 +609,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       }));
   }, [packages]);
 
-  // Shell history lazy loading
   const visibleHistory = useMemo(() => {
     return shellHistory.slice(0, historyVisibleCount);
   }, [shellHistory, historyVisibleCount]);
@@ -678,14 +618,12 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   const loadMoreHistory = useCallback(() => {
     if (isLoadingMore || !hasMoreHistory) return;
     setIsLoadingMore(true);
-    // Simulate loading delay for smooth UX
     setTimeout(() => {
       setHistoryVisibleCount((prev) => Math.min(prev + HISTORY_PAGE_SIZE, shellHistory.length));
       setIsLoadingMore(false);
     }, 200);
   }, [isLoadingMore, hasMoreHistory, shellHistory.length]);
 
-  // Scroll handler for lazy loading
   const handleHistoryScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
     const scrollBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
@@ -694,7 +632,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     }
   }, [hasMoreHistory, isLoadingMore, loadMoreHistory]);
 
-  // Reset visible count when history panel opens
   useEffect(() => {
     if (rightPanelMode === 'history') {
       setHistoryVisibleCount(HISTORY_PAGE_SIZE);
@@ -712,283 +649,47 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     });
   };
 
-  // Render right panel based on mode
-  const renderRightPanel = () => {
-    if (rightPanelMode === 'select-targets') {
-      return (
-        <SelectHostPanel
-          hosts={hosts}
-          customGroups={customGroups}
-          selectedHostIds={targetSelection}
-          multiSelect={true}
-          onSelect={handleTargetSelect}
-          onBack={handleTargetPickerBack}
-          onContinue={handleTargetPickerBack}
-          availableKeys={availableKeys}
-          proxyProfiles={proxyProfiles}
-          managedSources={managedSources}
-          onSaveHost={onSaveHost}
-          onCreateGroup={onCreateGroup}
-          title={t('snippets.targets.add')}
-          layout="inline"
-        />
-      );
-    }
-
-    if (rightPanelMode === 'edit-snippet') {
-      return (
-        <AsidePanel
-          open={true}
-          onClose={handleClosePanel}
-          title={editingSnippet.id ? t('snippets.panel.editTitle') : t('snippets.panel.newTitle')}
-          layout="inline"
-          actions={
-            <>
-              {editingSnippet.id && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => {
-                        const id = editingSnippet.id;
-                        if (!id) return;
-                        onDelete(id);
-                        handleClosePanel();
-                      }}
-                      aria-label={t('common.delete')}
-                    >
-                      <Trash2 size={16} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t('common.delete')}</TooltipContent>
-                </Tooltip>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleSubmit}
-                disabled={!editingSnippet.label || !editingSnippet.command}
-                aria-label={t('common.save')}
-              >
-                <Check size={16} />
-              </Button>
-            </>
-          }
-        >
-          <AsidePanelContent>
-            {/* Action Description */}
-            <Card className="p-3 space-y-2 bg-card border-border/80">
-              <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.description')}</p>
-              <Input
-                placeholder={t('snippets.field.descriptionPlaceholder')}
-                value={editingSnippet.label || ''}
-                onChange={(e) => setEditingSnippet({ ...editingSnippet, label: e.target.value })}
-                className="h-10"
-              />
-            </Card>
-
-            {/* Package */}
-            <Card className="p-3 space-y-2 bg-card border-border/80">
-              <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.package')}</p>
-              <Combobox
-                options={packageOptions}
-                value={editingSnippet.package || selectedPackage || ''}
-                onValueChange={(val) => {
-                  setEditingSnippet({ ...editingSnippet, package: val });
-                  // If selecting an implicit parent path, persist it to packages
-                  if (val && !packages.includes(val)) {
-                    onPackagesChange([...packages, val]);
-                  }
-                }}
-                placeholder={t('snippets.field.packagePlaceholder')}
-                allowCreate={true}
-                onCreateNew={(val) => {
-                  if (!packages.includes(val)) {
-                    onPackagesChange([...packages, val]);
-                  }
-                }}
-                createText={t('snippets.field.createPackage')}
-                icon={<Package size={16} />}
-                triggerClassName="h-10"
-              />
-            </Card>
-
-            {/* Script */}
-            <Card className="p-3 space-y-2 bg-card border-border/80">
-              <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.scriptRequired')}</p>
-              <Textarea
-                placeholder="ls -l"
-                className="min-h-[120px] font-mono text-xs"
-                value={editingSnippet.command || ''}
-                onChange={(e) => setEditingSnippet({ ...editingSnippet, command: e.target.value })}
-              />
-            </Card>
-
-            {/* No Auto Run */}
-            <label className="flex items-center gap-2 cursor-pointer px-1">
-              <input
-                type="checkbox"
-                checked={editingSnippet.noAutoRun ?? false}
-                onChange={(e) => setEditingSnippet({ ...editingSnippet, noAutoRun: e.target.checked || undefined })}
-                className="rounded border-input"
-              />
-              <span className="text-xs text-muted-foreground">{t('snippets.field.noAutoRun')}</span>
-            </label>
-
-            {/* Shortkey */}
-            <Card className="p-3 space-y-2 bg-card border-border/80">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-muted-foreground">{t('snippets.field.shortkey')}</p>
-                {editingSnippet.shortkey && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => {
-                          setEditingSnippet(prev => ({ ...prev, shortkey: undefined }));
-                          setShortkeyError(null);
-                        }}
-                      >
-                        <RotateCcw size={12} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t('snippets.shortkey.clear')}</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsRecordingShortkey(true);
-                  setShortkeyError(null);
-                }}
-                className={cn(
-                  "w-full h-10 px-3 text-sm font-mono rounded-lg border transition-colors flex items-center justify-center gap-2",
-                  isRecordingShortkey
-                    ? "border-primary bg-primary/10 animate-pulse"
-                    : "border-border hover:border-primary/50 bg-background"
-                )}
-              >
-                <Keyboard size={14} className="text-muted-foreground" />
-                {isRecordingShortkey
-                  ? t('snippets.shortkey.recording')
-                  : editingSnippet.shortkey || t('snippets.shortkey.placeholder')}
-              </button>
-              {shortkeyError && (
-                <p className="text-xs text-destructive">{shortkeyError}</p>
-              )}
-              <p className="text-[11px] text-muted-foreground">{t('snippets.shortkey.hint')}</p>
-            </Card>
-
-            {/* Targets */}
-            <Card className="p-3 space-y-3 bg-card border-border/80">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-muted-foreground">{t('snippets.targets.title')}</p>
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-primary" onClick={openTargetPicker}>
-                  {t('action.edit')}
-                </Button>
-              </div>
-
-              {targetHosts.length === 0 ? (
-                <Button
-                  variant="secondary"
-                  className="w-full h-10"
-                  onClick={openTargetPicker}
-                >
-                  {t('snippets.targets.add')}
-                </Button>
-              ) : (
-                <div className="space-y-2">
-                  {targetHosts.map((h) => (
-                    <div key={h.id} className="flex items-center gap-3 px-3 py-2 bg-background/60 border border-border/70 rounded-lg">
-                      <DistroAvatar host={h} fallback={h.os[0].toUpperCase()} className="h-10 w-10" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate">{h.hostname}</div>
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {h.protocol || 'ssh'}, {h.username}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </AsidePanelContent>
-
-          {/* Footer */}
-          <AsidePanelFooter>
-            <Button
-              className="w-full"
-              onClick={handleSubmit}
-              disabled={!editingSnippet.label || !editingSnippet.command}
-            >
-              {editingSnippet.targets?.length ? t('action.run') : t('common.save')}
-            </Button>
-          </AsidePanelFooter>
-        </AsidePanel>
-      );
-    }
-
-    if (rightPanelMode === 'history') {
-      return (
-        <AsidePanel
-          open={true}
-          onClose={handleClosePanel}
-          title={t('snippets.history.title')}
-          subtitle={t('snippets.history.subtitle', { count: shellHistory.length })}
-          showBackButton={true}
-          onBack={handleClosePanel}
-          layout="inline"
-        >
-          {/* History List */}
-          <div
-            className="flex-1 overflow-y-auto p-3 space-y-2"
-            onScroll={handleHistoryScroll}
-            ref={historyScrollRef}
-          >
-            {visibleHistory.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Clock size={32} className="mx-auto mb-3 opacity-50" />
-                <p className="text-sm">{t('snippets.history.emptyTitle')}</p>
-                <p className="text-xs mt-1">{t('snippets.history.emptyDesc')}</p>
-              </div>
-            ) : (
-              <>
-                {visibleHistory.map((entry) => (
-                  <HistoryItem
-                    key={entry.id}
-                    entry={entry}
-                    onSaveAsSnippet={saveHistoryAsSnippet}
-                    onCopy={() => handleCopy(entry.id, entry.command)}
-                    isCopied={copiedId === entry.id}
-                  />
-                ))}
-                {hasMoreHistory && (
-                  <div className="py-4 text-center">
-                    {isLoadingMore ? (
-                      <Loader2 size={20} className="animate-spin mx-auto text-muted-foreground" />
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={loadMoreHistory}>
-                        {t('snippets.history.loadMore')}
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </AsidePanel>
-      );
-    }
-
-    return null;
-  };
+  const renderRightPanel = () => (
+    <SnippetsRightPanel
+      rightPanelMode={rightPanelMode}
+      hosts={hosts}
+      customGroups={customGroups}
+      targetSelection={targetSelection}
+      handleTargetSelect={handleTargetSelect}
+      handleTargetPickerBack={handleTargetPickerBack}
+      availableKeys={availableKeys}
+      proxyProfiles={proxyProfiles}
+      managedSources={managedSources}
+      onSaveHost={onSaveHost}
+      onCreateGroup={onCreateGroup}
+      t={t}
+      handleClosePanel={handleClosePanel}
+      editingSnippet={editingSnippet}
+      onDelete={onDelete}
+      handleSubmit={handleSubmit}
+      setEditingSnippet={setEditingSnippet}
+      packageOptions={packageOptions}
+      selectedPackage={selectedPackage}
+      packages={packages}
+      onPackagesChange={onPackagesChange}
+      shortkeyError={shortkeyError}
+      setShortkeyError={setShortkeyError}
+      isRecordingShortkey={isRecordingShortkey}
+      setIsRecordingShortkey={setIsRecordingShortkey}
+      openTargetPicker={openTargetPicker}
+      targetHosts={targetHosts}
+      shellHistory={shellHistory}
+      handleHistoryScroll={handleHistoryScroll}
+      historyScrollRef={historyScrollRef}
+      visibleHistory={visibleHistory}
+      saveHistoryAsSnippet={saveHistoryAsSnippet}
+      handleCopy={handleCopy}
+      copiedId={copiedId}
+      hasMoreHistory={hasMoreHistory}
+      isLoadingMore={isLoadingMore}
+      loadMoreHistory={loadMoreHistory}
+    />
+  );
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -996,7 +697,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         <header className="border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm">
           <div className="h-14 px-4 py-2 flex items-center gap-3">
-            {/* Search box */}
             <div className="relative w-64">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -1028,7 +728,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             >
               <Clock size={14} /> {t('snippets.history.title')}
             </Button>
-            {/* View mode and sort controls */}
             <div className="flex items-center gap-1 ml-auto">
               <Dropdown>
                 <DropdownTrigger asChild>
@@ -1085,9 +784,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         )}
 
         <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
-          {/* Hide the sub-package grid while searching (#777) — search spans
-              all packages, so showing the package tiles alongside a flat
-              cross-package snippet list is noisy. */}
           {displayedPackages.length > 0 && !search.trim() && (
             <>
               <div className="flex items-center justify-between">
@@ -1235,16 +931,6 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               </div>
             </div>
           )}
-
-          {/* Search-with-no-results feedback (#777 codex follow-up). Package
-              tiles are already hidden during search, so the only visible
-              surface is the flat snippet list — if that's empty the content
-              area would be blank without this fallback. The gate intentionally
-              excludes the fully-empty workspace (snippets.length === 0 AND
-              displayedPackages.length === 0), which the global "Create
-              snippet" empty state renders instead — avoids stacking two
-              empty states. Package-only workspaces (no snippets yet) still
-              get this feedback when searching. */}
           {search.trim() && displayedSnippets.length === 0 && (snippets.length > 0 || displayedPackages.length > 0) && (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <div className="h-14 w-14 rounded-2xl bg-secondary/80 flex items-center justify-center mb-3">
@@ -1261,164 +947,27 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         </div>
       </div>
 
-      {/* New Package Inline Form */}
-      {isPackageDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <Card className="w-full max-w-sm p-4 space-y-4">
-            <div>
-              <p className="text-sm font-semibold">{t('snippets.packageDialog.title')}</p>
-              <p className="text-xs text-muted-foreground">{t('snippets.packageDialog.parent', { parent: selectedPackage || t('snippets.packageDialog.root') })}</p>
-            </div>
-            <div className="space-y-2">
-              <Label>{t('field.name')}</Label>
-              <Input
-                autoFocus
-                placeholder={t('snippets.packageDialog.placeholder')}
-                value={newPackageName}
-                onChange={(e) => setNewPackageName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && createPackage()}
-              />
-              <p className="text-[11px] text-muted-foreground">{t('snippets.packageDialog.hint')}</p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setIsPackageDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button onClick={createPackage}>{t('common.create')}</Button>
-            </div>
-          </Card>
-        </div>
-      )}
+      <SnippetsPackageDialogs
+        isPackageDialogOpen={isPackageDialogOpen}
+        t={t}
+        selectedPackage={selectedPackage}
+        newPackageName={newPackageName}
+        setNewPackageName={setNewPackageName}
+        createPackage={createPackage}
+        setIsPackageDialogOpen={setIsPackageDialogOpen}
+        isRenameDialogOpen={isRenameDialogOpen}
+        renamingPackagePath={renamingPackagePath}
+        renamePackageName={renamePackageName}
+        setRenamePackageName={setRenamePackageName}
+        setRenameError={setRenameError}
+        renamePackage={renamePackage}
+        renameError={renameError}
+        setIsRenameDialogOpen={setIsRenameDialogOpen}
+      />
 
-      {/* Rename Package Dialog */}
-      {isRenameDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <Card className="w-full max-w-sm p-4 space-y-4">
-            <div>
-              <p className="text-sm font-semibold">{t('snippets.renameDialog.title')}</p>
-              <p className="text-xs text-muted-foreground">{t('snippets.renameDialog.currentPath', { path: renamingPackagePath })}</p>
-            </div>
-            <div className="space-y-2">
-              <Label>{t('field.name')}</Label>
-              <Input
-                autoFocus
-                placeholder={t('snippets.renameDialog.placeholder')}
-                value={renamePackageName}
-                onChange={(e) => {
-                  setRenamePackageName(e.target.value);
-                  setRenameError('');
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && renamePackage()}
-              />
-              {renameError && (
-                <p className="text-[11px] text-destructive">{renameError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setIsRenameDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button onClick={renamePackage}>{t('common.rename')}</Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Right Panel */}
       {renderRightPanel()}
     </div>
     </TooltipProvider>
-  );
-};
-
-// History Item Component
-interface HistoryItemProps {
-  entry: ShellHistoryEntry;
-  onSaveAsSnippet: (entry: ShellHistoryEntry, label: string) => void;
-  onCopy: () => void;
-  isCopied: boolean;
-}
-
-const HistoryItem: React.FC<HistoryItemProps> = ({ entry, onSaveAsSnippet, onCopy, isCopied }) => {
-  const { t } = useI18n();
-  const [isEditing, setIsEditing] = useState(false);
-  const [label, setLabel] = useState('');
-
-  const handleSave = () => {
-    if (label.trim()) {
-      onSaveAsSnippet(entry, label);
-      setIsEditing(false);
-      setLabel('');
-    }
-  };
-
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return t('snippets.history.time.justNow');
-    if (diffMins < 60) return t('snippets.history.time.minutesAgo', { count: diffMins });
-    if (diffHours < 24) return t('snippets.history.time.hoursAgo', { count: diffHours });
-    if (diffDays < 7) return t('snippets.history.time.daysAgo', { count: diffDays });
-    return date.toLocaleDateString();
-  };
-
-  return (
-    <div className="group rounded-lg bg-background/60 border border-border/50 p-3">
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="font-mono text-sm truncate">{entry.command}</div>
-          <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
-            <span>{entry.hostLabel}</span>
-            <span>{t('snippets.history.separator')}</span>
-            <span>{formatTime(entry.timestamp)}</span>
-          </div>
-        </div>
-        {!isEditing && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2"
-              onClick={onCopy}
-            >
-              {isCopied ? <Check size={14} /> : <Copy size={14} />}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="h-7 px-3"
-              onClick={() => setIsEditing(true)}
-            >
-              {t('common.save')}
-            </Button>
-          </div>
-        )}
-      </div>
-      {isEditing && (
-        <div className="mt-3 space-y-2">
-          <Input
-            placeholder={t('snippets.history.labelPlaceholder')}
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => { setIsEditing(false); setLabel(''); }}>
-              {t('common.cancel')}
-            </Button>
-            <Button size="sm" onClick={handleSave} disabled={!label.trim()}>
-              {t('snippets.history.saveAsSnippet')}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
   );
 };
 

@@ -1,16 +1,15 @@
-import React, { Suspense, lazy, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { activeTabStore, useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive, toEditorTabId, fromEditorTabId, isEditorTabId } from './application/state/activeTabStore';
+import React, { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { activeTabStore, useActiveTabId, toEditorTabId, fromEditorTabId, isEditorTabId } from './application/state/activeTabStore';
 import { useAutoSync } from './application/state/useAutoSync';
 import { useImmersiveMode } from './application/state/useImmersiveMode';
 import { useManagedSourceSync } from './application/state/useManagedSourceSync';
-import { usePortForwardingAutoStart } from './application/state/usePortForwardingAutoStart';
 import { usePortForwardingState } from './application/state/usePortForwardingState';
 import { useSessionState } from './application/state/useSessionState';
 import { useSettingsState } from './application/state/useSettingsState';
 import { useUpdateCheck } from './application/state/useUpdateCheck';
 import { useVaultState } from './application/state/useVaultState';
 import { useWindowControls } from './application/state/useWindowControls';
-import { useEditorTabs, editorTabStore } from './application/state/editorTabStore';
+import { useEditorTabs } from './application/state/editorTabStore';
 import {
   clearReferenceKeyPassphrases,
   clearKeyPassphrasesByIds,
@@ -48,163 +47,33 @@ import {
 import { getCredentialProtectionAvailability } from './infrastructure/services/credentialProtection';
 import { netcattyBridge } from './infrastructure/services/netcattyBridge';
 import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
-import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import {
   STORAGE_KEY_DEBUG_HOTKEYS,
   STORAGE_KEY_PORT_FORWARDING,
 } from './infrastructure/config/storageKeys';
 import { getEffectiveKnownHosts } from './infrastructure/syncHelpers';
-import { TopTabs } from './components/TopTabs';
-import { Button } from './components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
-import { Input } from './components/ui/input';
-import { Label } from './components/ui/label';
 import { ToastProvider, toast } from './components/ui/toast';
 import { TooltipProvider } from './components/ui/tooltip';
-import { VaultView, VaultSection } from './components/VaultView';
-import { QuickAddSnippetDialog } from './components/QuickAddSnippetDialog';
-import { AddToWorkspaceDialog } from './components/workspace/AddToWorkspaceDialog';
-import { KeyboardInteractiveModal, KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
-import { PassphraseModal, PassphraseRequest } from './components/PassphraseModal';
-import { cn } from './lib/utils';
+import { VaultSection } from './components/VaultView';
+import { KeyboardInteractiveRequest } from './components/KeyboardInteractiveModal';
+import { PassphraseRequest } from './components/PassphraseModal';
 import { classifyLocalShellType } from './lib/localShell';
 import { useDiscoveredShells, resolveShellSetting } from './lib/useDiscoveredShells';
-import { ConnectionLog, Host, HostProtocol, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalTheme } from './types';
-import { LogView as LogViewType } from './application/state/useSessionState';
-import type { SftpView as SftpViewComponent } from './components/SftpView';
-import type { TerminalLayer as TerminalLayerComponent } from './components/TerminalLayer';
-import { TextEditorTabView } from './components/editor/TextEditorTabView';
-import { UnsavedChangesProvider } from './components/editor/UnsavedChangesDialog';
-import { releaseEditorTabSaveCoordinator, saveEditorTab } from './application/state/editorTabSave';
+import { Host, HostProtocol, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalTheme } from './types';
+import { AppView } from './application/app/AppView';
+import { useAppStartupEffects } from './application/app/useAppStartupEffects';
+import { LogViewWrapper, SftpViewMount, TerminalLayerMount, VaultViewContainer } from './application/app/AppMounts';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleToggleThemeImpl, handleRootContextMenuImpl } from './application/app/AppHandlers';
 
 // Initialize fonts eagerly at app startup
 initializeFonts();
 initializeUIFonts();
 
-// Visibility container for VaultView - isolates isActive subscription
-const VaultViewContainer: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const isActive = useIsVaultActive();
-  const containerStyle: React.CSSProperties = isActive
-    ? {}
-    : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
-
-  return (
-    <div className={cn("absolute inset-0", isActive ? "z-20" : "")} style={containerStyle}>
-      {children}
-    </div>
-  );
-};
-
-// LogView wrapper - manages visibility based on active tab
-interface LogViewWrapperProps {
-  logView: LogViewType;
-  defaultTerminalTheme: TerminalTheme;
-  defaultFontSize: number;
-  onClose: () => void;
-  onUpdateLog: (logId: string, updates: Partial<ConnectionLog>) => void;
-}
-
-const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, defaultTerminalTheme, defaultFontSize, onClose, onUpdateLog }) => {
-  const activeTabId = useActiveTabId();
-  const isVisible = activeTabId === logView.id;
-
-  // Use same pattern as VaultViewContainer for visibility
-  const containerStyle: React.CSSProperties = isVisible
-    ? {}
-    : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
-
-  return (
-    <div className={cn("absolute inset-0", isVisible ? "z-20" : "")} style={containerStyle}>
-      <Suspense fallback={null}>
-        <LazyLogView
-          log={logView.log}
-          defaultTerminalTheme={defaultTerminalTheme}
-          defaultFontSize={defaultFontSize}
-          isVisible={isVisible}
-          onClose={onClose}
-          onUpdateLog={onUpdateLog}
-        />
-      </Suspense>
-    </div>
-  );
-};
-
-const LazyLogView = lazy(() => import('./components/LogView'));
-const LazyProtocolSelectDialog = lazy(() => import('./components/ProtocolSelectDialog'));
-const LazyQuickSwitcher = lazy(() =>
-  import('./components/QuickSwitcher').then((m) => ({ default: m.QuickSwitcher })),
-);
-const LazyCreateWorkspaceDialog = lazy(() =>
-  import('./components/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
-);
+type SettingsState = ReturnType<typeof useSettingsState>;
 
 const IS_DEV = import.meta.env.DEV;
 const HOTKEY_DEBUG =
-  IS_DEV &&
-  localStorageAdapter.readString(STORAGE_KEY_DEBUG_HOTKEYS) === "1";
-
-const LazySftpView = lazy(() =>
-  import('./components/SftpView').then((m) => ({ default: m.SftpView })),
-);
-
-const LazyTerminalLayer = lazy(() =>
-  import('./components/TerminalLayer').then((m) => ({ default: m.TerminalLayer })),
-);
-
-type SettingsState = ReturnType<typeof useSettingsState>;
-type SftpViewProps = React.ComponentProps<typeof SftpViewComponent>;
-type TerminalLayerProps = React.ComponentProps<typeof TerminalLayerComponent>;
-
-const SftpViewMount: React.FC<SftpViewProps> = (props) => {
-  const isActive = useIsSftpActive();
-  const [shouldMount, setShouldMount] = useState(isActive);
-
-  useEffect(() => {
-    if (isActive) setShouldMount(true);
-  }, [isActive]);
-
-  if (!shouldMount) return null;
-
-  return (
-    <Suspense fallback={null}>
-      <LazySftpView {...props} />
-    </Suspense>
-  );
-};
-
-const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
-  const isVisible = useIsTerminalLayerVisible(props.draggingSessionId);
-  const [shouldMount, setShouldMount] = useState(isVisible);
-
-  useEffect(() => {
-    if (isVisible) setShouldMount(true);
-  }, [isVisible]);
-
-  useEffect(() => {
-    if (shouldMount) return;
-    type IdleWindow = Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (id: number) => void;
-    };
-    const idleWindow = window as IdleWindow;
-    if (typeof idleWindow.requestIdleCallback === "function") {
-      const id = idleWindow.requestIdleCallback(() => setShouldMount(true), { timeout: 5000 });
-      return () => idleWindow.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(() => setShouldMount(true), 5000);
-    return () => window.clearTimeout(id);
-  }, [shouldMount]);
-
-  const shouldRender = shouldMount || isVisible;
-
-  if (!shouldRender) return null;
-
-  return (
-    <Suspense fallback={null}>
-      <LazyTerminalLayer {...props} />
-    </Suspense>
-  );
-};
+  IS_DEV && localStorageAdapter.readString(STORAGE_KEY_DEBUG_HOTKEYS) === '1';
 
 function App({ settings }: { settings: SettingsState }) {
   const { t } = useI18n();
@@ -634,270 +503,13 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();
-  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => {
-    const session = sessions.find((item) => item.id === sessionId);
-    if (session?.workspaceId) {
-      setActiveTabId(session.workspaceId);
-      setWorkspaceFocusedSession(session.workspaceId, sessionId);
-      return;
-    }
-    setActiveTabId(sessionId);
-  });
-  const _handleTrayTogglePortForward = useEffectEvent((ruleId: string, start: boolean) => {
-    const rule = portForwardingRules.find((item) => item.id === ruleId);
-    if (!rule) return;
-    const host = rule.hostId ? hosts.find((item) => item.id === rule.hostId) : undefined;
-    if (!host) {
-      toast.error(t("pf.error.hostNotFound"));
-      return;
-    }
+  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => { return handleTrayJumpToSessionImpl(() => ({ sessionId, sessions, setActiveTabId, setWorkspaceFocusedSession }), sessionId); });
+  const _handleTrayTogglePortForward = useEffectEvent((ruleId: string, start: boolean) => { return handleTrayTogglePortForwardImpl(() => ({ hosts, identities, keys, portForwardingRules, resolveEffectiveHost, ruleId, start, startTunnel, stopTunnel, t, terminalSettings, toast, undefined }), ruleId, start); });
+  const _handleTrayPanelConnect = useEffectEvent((hostId: string) => { return handleTrayPanelConnectImpl(() => ({ addConnectionLog, connectToHost, hostId, hosts, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef, t, toast }), hostId); });
+  const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleGlobalHotkeyKeyDownImpl(() => ({ HOTKEY_DEBUG, closeTabKeyStr, e, executeHotkeyAction, hotkeyScheme, keyBindings, matchesKeyBinding }), e); });
+  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleEscapeKeyDownImpl(() => ({ e, isQuickSwitcherOpen, setIsQuickSwitcherOpen }), e); });
 
-    if (start) {
-      const effectiveHost = resolveEffectiveHost(host);
-      void startTunnel(rule, effectiveHost, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
-        if (status === "error" && error) toast.error(error);
-      }, rule.autoStart, terminalSettings);
-      return;
-    }
-
-    void stopTunnel(ruleId);
-  });
-  const _handleTrayPanelConnect = useEffectEvent((hostId: string) => {
-    const host = hosts.find((item) => item.id === hostId);
-    if (!host) {
-      toast.error(t("pf.error.hostNotFound"));
-      return;
-    }
-
-    const effectiveHost = resolveEffectiveHost(host);
-
-    const { username, hostname: localHost } = systemInfoRef.current;
-    if (effectiveHost.protocol === 'serial') {
-      const portName = host.hostname.split('/').pop() || host.hostname;
-      const sessionId = connectToHost(effectiveHost);
-      addConnectionLog({
-        sessionId,
-        hostId: host.id,
-        hostLabel: host.label || `Serial: ${portName}`,
-        hostname: host.hostname,
-        username,
-        protocol: 'serial',
-        startTime: Date.now(),
-        localUsername: username,
-        localHostname: localHost,
-        saved: false,
-      });
-      return;
-    }
-
-    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
-    const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
-    const sessionId = connectToHost(effectiveHost);
-    addConnectionLog({
-      sessionId,
-      hostId: host.id,
-      hostLabel: host.label,
-      hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
-      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
-      startTime: Date.now(),
-      localUsername: username,
-      localHostname: localHost,
-      saved: false,
-    });
-  });
-  const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => {
-    const isMac = hotkeyScheme === 'mac';
-    const target = e.target as HTMLElement;
-    const isCloseTabHotkey = closeTabKeyStr ? matchesKeyBinding(e, closeTabKeyStr, isMac) : false;
-    const dialogHotkeyScope = target.closest?.('[data-hotkey-close-tab="true"]');
-
-    if (isCloseTabHotkey && dialogHotkeyScope) {
-      return;
-    }
-
-    if (isCloseTabHotkey) {
-      const openDialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'));
-      const topmostOpenDialog = openDialogs[openDialogs.length - 1] ?? null;
-      const topmostDialogClose = topmostOpenDialog?.querySelector<HTMLElement>('[data-dialog-close="true"]');
-      if (topmostDialogClose) {
-        e.preventDefault();
-        e.stopPropagation();
-        topmostDialogClose.click();
-        return;
-      }
-    }
-
-    const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-    const isMonacoElement =
-      target instanceof HTMLElement &&
-      !!target.closest?.('.monaco-editor, .monaco-diff-editor, .monaco-inputbox');
-    const isXtermInput =
-      target instanceof HTMLElement &&
-      !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
-
-    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape') {
-      return;
-    }
-
-    const isTerminalElement =
-      target instanceof HTMLElement &&
-      !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
-    const isTerminalInPath = Boolean(
-      e.composedPath?.().some(
-        (node) =>
-          node instanceof HTMLElement &&
-          (node.classList.contains("xterm") ||
-            node.classList.contains("xterm-helper-textarea") ||
-            node.classList.contains("xterm-screen") ||
-            node.classList.contains("xterm-viewport") ||
-            node.hasAttribute("data-session-id")),
-      ),
-    );
-
-    for (const binding of keyBindings) {
-      const keyStr = isMac ? binding.mac : binding.pc;
-      if (!matchesKeyBinding(e, keyStr, isMac)) continue;
-      if (HOTKEY_DEBUG) console.log('[Hotkeys] Matched binding:', binding.action, keyStr);
-      if (binding.category === 'sftp') {
-        continue;
-      }
-      const terminalActions = ['copy', 'paste', 'pasteSelection', 'selectAll', 'clearBuffer', 'searchTerminal'];
-      if (terminalActions.includes(binding.action)) {
-        if (isTerminalElement) {
-          return;
-        }
-        continue;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-      if (HOTKEY_DEBUG) {
-        console.log('[Hotkeys] Global handle', {
-          action: binding.action,
-          key: e.key,
-          meta: e.metaKey,
-          ctrl: e.ctrlKey,
-          alt: e.altKey,
-          shift: e.shiftKey,
-          targetTag: target?.tagName,
-          isTerminalElement,
-          isTerminalInPath,
-        });
-      }
-      executeHotkeyAction(binding.action, e);
-      return;
-    }
-  });
-  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => {
-    if (e.key === 'Escape' && isQuickSwitcherOpen) {
-      setIsQuickSwitcherOpen(false);
-    }
-  });
-
-  // Show toast notification when update is available (only when auto-download is idle)
-  useEffect(() => {
-    // Skip "update available" toast if auto-download has already started or completed
-    if (updateState.autoDownloadStatus !== 'idle') return;
-    // Don't show automatic notification when auto-update is disabled
-    if (localStorageAdapter.readString('netcatty_auto_update_enabled_v1') === 'false') return;
-    if (updateState.hasUpdate && updateState.latestRelease) {
-      const version = updateState.latestRelease.version;
-      toast.info(
-        t('update.available.message', { version }),
-        {
-          title: t('update.available.title'),
-          duration: 8000, // Show longer for update notifications
-          onClick: () => {
-            void openSettingsWindow();
-            // Dismiss the update so the toast doesn't re-fire on every render.
-            // On unsupported platforms (where autoDownloadStatus stays 'idle')
-            // this is the only way to suppress the notification for this version.
-            // On supported platforms this toast only shows before auto-download
-            // starts, and the Settings window's own useUpdateCheck will pick up
-            // the download state via IPC events independently of the dismiss.
-            dismissUpdate();
-          },
-          actionLabel: t('update.viewInSettings'),
-        }
-      );
-    }
-  }, [updateState.hasUpdate, updateState.latestRelease, updateState.autoDownloadStatus, t, openSettingsWindow, dismissUpdate]);
-
-  // Track previous autoDownloadStatus so toast effects fire only on actual transitions,
-  // not when unrelated deps (installUpdate, openSettingsWindow) change their reference.
-  const prevAutoDownloadStatusRef = useRef(updateState.autoDownloadStatus);
-  useEffect(() => {
-    const prev = prevAutoDownloadStatusRef.current;
-    prevAutoDownloadStatusRef.current = updateState.autoDownloadStatus;
-    if (prev === updateState.autoDownloadStatus) return;
-
-    if (updateState.autoDownloadStatus === 'ready') {
-      const version = updateState.latestRelease?.version ?? '';
-      toast.info(
-        t('update.readyToInstall.message', { version }),
-        {
-          title: t('update.readyToInstall.title'),
-          duration: 0,
-          actionLabel: t('update.restartNow'),
-          onClick: () => installUpdate(),
-        }
-      );
-    } else if (updateState.autoDownloadStatus === 'error') {
-      toast.error(
-        t('update.downloadFailed.message'),
-        {
-          title: t('update.downloadFailed.title'),
-          actionLabel: t('update.viewInSettings'),
-          onClick: () => void openSettingsWindow(),
-        }
-      );
-    }
-  }, [updateState.autoDownloadStatus, updateState.latestRelease?.version, t, installUpdate, openSettingsWindow]);
-
-  // Auto-start port forwarding rules on app launch
-  usePortForwardingAutoStart({
-    isVaultInitialized,
-    hosts,
-    keys,
-    identities,
-    proxyProfiles,
-    groupConfigs,
-    terminalSettings,
-  });
-
-  // Sync tray menu data + handle tray actions
-  useEffect(() => {
-    const bridge = netcattyBridge.get();
-    if (!bridge?.updateTrayMenuData) return;
-
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-
-      const sessionsForTray = sessions.map((s) => {
-        const ws = s.workspaceId ? workspaces.find((w) => w.id === s.workspaceId) : undefined;
-        return {
-          id: s.id,
-          label: s.hostname,
-          hostLabel: s.hostLabel,
-          status: s.status,
-          workspaceId: s.workspaceId,
-          workspaceTitle: ws?.title,
-        };
-      });
-
-      void bridge.updateTrayMenuData({
-        sessions: sessionsForTray,
-        portForwardRules: portForwardingRules,
-      });
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [sessions, portForwardingRules, workspaces]);
+  useAppStartupEffects({ dismissUpdate, groupConfigs, hosts, identities, installUpdate, isVaultInitialized, keys, openSettingsWindow, portForwardingRules, proxyProfiles, sessions, setKeyboardInteractiveQueue, t, terminalSettings, updateState, workspaces });
 
   useEffect(() => {
     const bridge = netcattyBridge.get();
@@ -916,7 +528,6 @@ function App({ settings }: { settings: SettingsState }) {
     };
   }, []);
 
-  // Tray panel actions (from main process)
   useEffect(() => {
     const bridge = netcattyBridge.get();
     if (!bridge?.onTrayPanelJumpToSession || !bridge?.onTrayPanelConnectToHost) return;
@@ -933,94 +544,11 @@ function App({ settings }: { settings: SettingsState }) {
     };
   }, []);
 
-  // Quit guard: block app exit while any editor tab has unsaved changes.
-  // Main process sends "app:query-dirty-editors"; we respond with the result.
-  useEffect(() => {
-    const bridge = netcattyBridge.get();
-    if (!bridge?.onCheckDirtyEditors) return;
-    const unsub = bridge.onCheckDirtyEditors(() => {
-      // Always report SOMETHING so the main process doesn't time out for
-      // 5 s on an unhandled exception. If we can't determine the state,
-      // fail open — losing unsaved work is bad, but stranding the user
-      // on a slow quit and then quitting anyway after the timeout is
-      // exactly the same outcome.
-      let hasDirty = false;
-      try {
-        hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
-        if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
-      } catch (err) {
-        console.error('[App] dirty-editors check failed:', err);
-      }
-      try {
-        bridge.reportDirtyEditorsResult?.(hasDirty);
-      } catch (err) {
-        // Reporting itself shouldn't throw, but if the IPC bridge is in a
-        // bad state we'd rather log than bubble out of the listener and
-        // disable the quit guard for the rest of the session.
-        console.error('[App] reportDirtyEditorsResult failed:', err);
-      }
-    });
-    return unsub;
-  }, [t]);
-
-  // Keyboard-interactive authentication (2FA/MFA) event listener
-  useEffect(() => {
-    const bridge = netcattyBridge.get();
-    if (!bridge?.onKeyboardInteractive) return;
-
-    const unsubscribe = bridge.onKeyboardInteractive((request) => {
-      console.log('[App] Keyboard-interactive request received:', request);
-      // Add to queue instead of replacing - supports multiple concurrent sessions
-      setKeyboardInteractiveQueue(prev => [...prev, {
-        requestId: request.requestId,
-        sessionId: request.sessionId,
-        name: request.name,
-        instructions: request.instructions,
-        prompts: request.prompts,
-        hostname: request.hostname,
-        savedPassword: request.savedPassword,
-      }]);
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
-
   // Handle keyboard-interactive submit
-  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[], savePassword?: string) => {
-    const bridge = netcattyBridge.get();
-    if (bridge?.respondKeyboardInteractive) {
-      void bridge.respondKeyboardInteractive(requestId, responses, false);
-    }
-    // Save password to host if requested
-    if (savePassword) {
-      const request = keyboardInteractiveQueue.find(r => r.requestId === requestId);
-      if (request?.sessionId) {
-        const session = sessions.find(s => s.id === request.sessionId);
-        // Only save when the prompting hostname matches the session's host,
-        // to avoid overwriting the destination host's password with a jump host's password
-        if (session?.hostId && (!request.hostname || request.hostname === session.hostname)) {
-          const host = hosts.find(h => h.id === session.hostId);
-          if (host) {
-            updateHosts(hosts.map(h => h.id === host.id ? { ...h, password: savePassword } : h));
-          }
-        }
-      }
-    }
-    // Remove from queue by requestId
-    setKeyboardInteractiveQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, [keyboardInteractiveQueue, sessions, hosts, updateHosts]);
+  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[], savePassword?: string) => { return handleKeyboardInteractiveSubmitImpl(() => ({ hosts, keyboardInteractiveQueue, netcattyBridge, requestId, responses, savePassword, sessions, setKeyboardInteractiveQueue, updateHosts }), requestId, responses, savePassword); }, [keyboardInteractiveQueue, sessions, hosts, updateHosts]);
 
   // Handle keyboard-interactive cancel
-  const handleKeyboardInteractiveCancel = useCallback((requestId: string) => {
-    const bridge = netcattyBridge.get();
-    if (bridge?.respondKeyboardInteractive) {
-      void bridge.respondKeyboardInteractive(requestId, [], true);
-    }
-    // Remove from queue by requestId
-    setKeyboardInteractiveQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, []);
+  const handleKeyboardInteractiveCancel = useCallback((requestId: string) => { return handleKeyboardInteractiveCancelImpl(() => ({ netcattyBridge, requestId, setKeyboardInteractiveQueue }), requestId); }, []);
 
   // Passphrase request event listener for encrypted SSH keys
   useEffect(() => {
@@ -1081,57 +609,13 @@ function App({ settings }: { settings: SettingsState }) {
   }, [updateKeys]);
 
   // Handle passphrase submit
-  const handlePassphraseSubmit = useCallback(async (requestId: string, passphrase: string, remember: boolean) => {
-    const bridge = netcattyBridge.get();
-    const request = passphraseQueue.find((r: PassphraseRequest) => r.requestId === requestId);
-
-    // Save passphrase if requested
-    if (remember && request?.keyPath) {
-      console.log('[App] Saving passphrase for:', request.keyPath);
-      try {
-        await rememberKeyPassphrase({
-          keyPath: request.keyPath,
-          passphrase,
-          keys: keysRef.current,
-          updateKeys,
-          setCurrentKeys: (updated) => {
-            keysRef.current = updated;
-          },
-        });
-      } catch (err) {
-        console.warn('[App] Failed to save passphrase:', err);
-      }
-    }
-
-    if (bridge?.respondPassphrase) {
-      void bridge.respondPassphrase(requestId, passphrase, false);
-    }
-
-    setPassphraseQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, [passphraseQueue, updateKeys]);
+  const handlePassphraseSubmit = useCallback(async (requestId: string, passphrase: string, remember: boolean) => { return handlePassphraseSubmitImpl(() => ({ keysRef, netcattyBridge, passphrase, passphraseQueue, remember, rememberKeyPassphrase, requestId, setPassphraseQueue, updateKeys }), requestId, passphrase, remember); }, [passphraseQueue, updateKeys]);
 
   // Handle passphrase cancel
-  const handlePassphraseCancel = useCallback((requestId: string) => {
-    const bridge = netcattyBridge.get();
-    if (bridge?.respondPassphrase) {
-      // Cancel = stop the entire passphrase flow
-      void bridge.respondPassphrase(requestId, '', true);
-    }
-    setPassphraseQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, []);
+  const handlePassphraseCancel = useCallback((requestId: string) => { return handlePassphraseCancelImpl(() => ({ netcattyBridge, requestId, setPassphraseQueue }), requestId); }, []);
 
   // Handle passphrase skip (skip this key, continue with others)
-  const handlePassphraseSkip = useCallback((requestId: string) => {
-    const bridge = netcattyBridge.get();
-    if (bridge?.respondPassphraseSkip) {
-      // Skip = skip this key but continue asking for others
-      void bridge.respondPassphraseSkip(requestId);
-    } else if (bridge?.respondPassphrase) {
-      // Fallback for older API
-      void bridge.respondPassphrase(requestId, '', false);
-    }
-    setPassphraseQueue(prev => prev.filter(r => r.requestId !== requestId));
-  }, []);
+  const handlePassphraseSkip = useCallback((requestId: string) => { return handlePassphraseSkipImpl(() => ({ netcattyBridge, requestId, setPassphraseQueue }), requestId); }, []);
 
   // Handle passphrase timeout (request expired on backend)
   useEffect(() => {
@@ -1208,31 +692,11 @@ function App({ settings }: { settings: SettingsState }) {
   // close flow.
   const handleRequestCloseEditorTabRef = useRef<(id: string) => void>(() => {});
 
-  const createLocalTerminalWithCurrentShell = useCallback(() => {
-    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
-    const matchedShell = discoveredShells.find(s => s.id === terminalSettings.localShell);
-    return createLocalTerminal({
-      shellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
-      shell: resolved?.command,
-      shellArgs: resolved?.args,
-      shellName: matchedShell?.name,
-      shellIcon: matchedShell?.icon,
-    });
-  }, [createLocalTerminal, terminalSettings.localShell, discoveredShells]);
+  const createLocalTerminalWithCurrentShell = useCallback(() => { return createLocalTerminalWithCurrentShellImpl(() => ({ classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, terminalSettings })); }, [createLocalTerminal, terminalSettings, discoveredShells]);
 
-  const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => {
-    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
-    return splitSession(sessionId, direction, {
-      localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
-    });
-  }, [splitSession, terminalSettings.localShell, discoveredShells]);
+  const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => { return splitSessionWithCurrentShellImpl(() => ({ classifyLocalShellType, direction, discoveredShells, resolveShellSetting, sessionId, splitSession, terminalSettings }), sessionId, direction); }, [splitSession, terminalSettings, discoveredShells]);
 
-  const copySessionWithCurrentShell = useCallback((sessionId: string) => {
-    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
-    return copySession(sessionId, {
-      localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
-    });
-  }, [copySession, terminalSettings.localShell, discoveredShells]);
+  const copySessionWithCurrentShell = useCallback((sessionId: string) => { return copySessionWithCurrentShellImpl(() => ({ classifyLocalShellType, copySession, discoveredShells, resolveShellSetting, sessionId, terminalSettings }), sessionId); }, [copySession, terminalSettings, discoveredShells]);
 
   const closeTabKeyStr = useMemo(() => {
     if (hotkeyScheme === 'disabled') return null;
@@ -1242,40 +706,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, [hotkeyScheme, keyBindings]);
 
   const confirmIfBusyLocalTerminal = useCallback(
-    async (sessionIds: string[]): Promise<boolean> => {
-      const bridge = netcattyBridge.get();
-      const localIds = sessionIds.filter((id) => {
-        const s = sessions.find((x) => x.id === id);
-        return s?.protocol === 'local';
-      });
-      const busyCommands: string[] = [];
-      for (const id of localIds) {
-        const children = (await bridge?.ptyGetChildProcesses?.(id)) ?? [];
-        if (children.length > 0) {
-          busyCommands.push(children[0].command);
-        }
-      }
-      if (busyCommands.length === 0) return true;
-
-      const primary = busyCommands[0];
-      const extraCount = busyCommands.length - 1;
-      const message =
-        extraCount > 0
-          ? t('confirm.closeBusyTerminal.messageWithMore', {
-              command: primary,
-              count: extraCount,
-            })
-          : t('confirm.closeBusyTerminal.message', { command: primary });
-
-      const ok = await bridge?.confirmCloseBusy?.({
-        command: primary,
-        title: t('confirm.closeBusyTerminal.title'),
-        message,
-        cancelLabel: t('confirm.closeBusyTerminal.cancel'),
-        closeLabel: t('confirm.closeBusyTerminal.close'),
-      });
-      return ok === true;
-    },
+    async (sessionIds: string[]): Promise<boolean> => { return confirmIfBusyLocalTerminalImpl(() => ({ netcattyBridge, sessionIds, sessions, t }), sessionIds); },
     [sessions, t],
   );
 
@@ -1285,274 +716,12 @@ function App({ settings }: { settings: SettingsState }) {
   // Used by the "Close all / Close others / Close to the right" context-menu
   // actions on tabs (#748).
   const closeTabsBatch = useCallback(
-    async (targetIds: string[]) => {
-      if (targetIds.length === 0) return;
-      if (closeTabsInFlightRef.current) return;
-
-      // Expand workspace ids into their constituent session ids so the busy
-      // probe sees every local shell that's about to be killed.
-      const sessionIdsToProbe: string[] = [];
-      for (const tabId of targetIds) {
-        const ws = workspaces.find((w) => w.id === tabId);
-        if (ws) {
-          for (const s of sessions) {
-            if (s.workspaceId === tabId) sessionIdsToProbe.push(s.id);
-          }
-        } else if (sessions.find((s) => s.id === tabId)) {
-          sessionIdsToProbe.push(tabId);
-        }
-      }
-
-      closeTabsInFlightRef.current = true;
-      try {
-        const ok = await confirmIfBusyLocalTerminal(sessionIdsToProbe);
-        if (!ok) return;
-        for (const tabId of targetIds) {
-          if (workspaces.find((w) => w.id === tabId)) {
-            closeWorkspace(tabId);
-          } else if (sessions.find((s) => s.id === tabId)) {
-            closeSession(tabId);
-          } else if (logViews.find((lv) => lv.id === tabId)) {
-            closeLogView(tabId);
-          }
-        }
-      } finally {
-        closeTabsInFlightRef.current = false;
-      }
-    },
+    async (targetIds: string[]) => { return closeTabsBatchImpl(() => ({ closeLogView, closeSession, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds, workspaces }), targetIds); },
     [workspaces, sessions, logViews, confirmIfBusyLocalTerminal, closeWorkspace, closeSession, closeLogView],
   );
 
   // Shared hotkey action handler - used by both global handler and terminal callback
-  const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
-    // Build complete tab list: vault + (sftp when visible) + sessions/workspaces + editor tabs.
-    // Hiding the SFTP tab must also remove it from keyboard cycling so nextTab
-    // doesn't land on a hidden tab (which would get redirected back) and so
-    // number shortcuts don't shift.
-    const allTabs = settings.showSftpTab
-      ? ['vault', 'sftp', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))]
-      : ['vault', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))];
-    switch (action) {
-      case 'switchToTab': {
-        // Get the number key pressed (1-9)
-        const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= 9) {
-          if (num <= allTabs.length) {
-            setActiveTabId(allTabs[num - 1]);
-          }
-        }
-        break;
-      }
-      case 'nextTab': {
-        const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = allTabs.indexOf(currentId);
-        if (currentIdx !== -1 && allTabs.length > 0) {
-          const nextIdx = (currentIdx + 1) % allTabs.length;
-          setActiveTabId(allTabs[nextIdx]);
-        } else if (allTabs.length > 0) {
-          setActiveTabId(allTabs[0]);
-        }
-        break;
-      }
-      case 'prevTab': {
-        const currentId = activeTabStore.getActiveTabId();
-        const currentIdx = allTabs.indexOf(currentId);
-        if (currentIdx !== -1 && allTabs.length > 0) {
-          const prevIdx = (currentIdx - 1 + allTabs.length) % allTabs.length;
-          setActiveTabId(allTabs[prevIdx]);
-        } else if (allTabs.length > 0) {
-          setActiveTabId(allTabs[allTabs.length - 1]);
-        }
-        break;
-      }
-      case 'closeTab': {
-        const currentId = activeTabStore.getActiveTabId();
-        if (!currentId || currentId === 'vault' || currentId === 'sftp') break;
-        if (closeTabInFlightRef.current) break;
-
-        // Editor tabs route through their own dirty-confirm close flow.
-        if (isEditorTabId(currentId)) {
-          const editorId = fromEditorTabId(currentId);
-          if (editorId) handleRequestCloseEditorTabRef.current(editorId);
-          break;
-        }
-
-        const session = sessions.find((s) => s.id === currentId) ?? null;
-        const workspace = workspaces.find((w) => w.id === currentId) ?? null;
-
-        const focusIsInsideTerminal = !!document.activeElement?.closest('[data-session-id]');
-
-        const intent = resolveCloseIntent({
-          activeTabId: currentId,
-          workspace: workspace ? { id: workspace.id, focusedSessionId: workspace.focusedSessionId } : null,
-          sessionForTab: session,
-          focusIsInsideTerminal,
-        });
-
-        closeTabInFlightRef.current = true;
-        (async () => {
-          try {
-            switch (intent.kind) {
-              case 'closeTerminal':
-              case 'closeSingleTab': {
-                const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
-                if (ok) closeSession(intent.sessionId);
-                return;
-              }
-              case 'closeWorkspace': {
-                const ids = sessions.filter((s) => s.workspaceId === intent.workspaceId).map((s) => s.id);
-                const ok = await confirmIfBusyLocalTerminal(ids);
-                if (ok) closeWorkspace(intent.workspaceId);
-                return;
-              }
-              case 'noop':
-              default:
-                return;
-            }
-          } finally {
-            closeTabInFlightRef.current = false;
-          }
-        })();
-
-        break;
-      }
-      case 'newTab':
-      case 'openLocal':
-        // Add connection log for local terminal
-        addConnectionLogRef.current({
-          hostId: '',
-          hostLabel: 'Local Terminal',
-          hostname: 'localhost',
-          username: systemInfoRef.current.username,
-          protocol: 'local',
-          startTime: Date.now(),
-          localUsername: systemInfoRef.current.username,
-          localHostname: systemInfoRef.current.hostname,
-          saved: false,
-        });
-        createLocalTerminalWithCurrentShell();
-        break;
-      case 'openHosts':
-        setActiveTabId('vault');
-        break;
-      case 'openSftp':
-        if (settings.showSftpTab) {
-          setActiveTabId('sftp');
-        }
-        break;
-      case 'quickSwitch':
-      case 'commandPalette':
-        setIsQuickSwitcherOpen(true);
-        break;
-      case 'newWorkspace':
-        // Dedicated shortcut to launch the AddToWorkspaceDialog in
-        // create mode — same entry as QuickSwitcher's "New Workspace"
-        // button, but without having to open QS first.
-        setAddToWorkspaceDialog({ mode: 'create' });
-        break;
-      case 'portForwarding':
-        // Navigate to vault and open port forwarding section
-        setActiveTabId('vault');
-        setNavigateToSection('port');
-        break;
-      case 'snippets':
-        {
-          const currentId = activeTabStore.getActiveTabId();
-          const intent = resolveSnippetsShortcutIntent({
-            activeTabId: currentId,
-            sessionForTab: sessions.find((s) => s.id === currentId) ?? null,
-            workspaceForTab: workspaces.find((w) => w.id === currentId) ?? null,
-            terminalScriptsToggleAvailable: !!toggleScriptsSidePanelRef.current,
-          });
-
-          if (intent.kind === 'toggleTerminalScripts') {
-            toggleScriptsSidePanelRef.current();
-            break;
-          }
-
-          setActiveTabId('vault');
-          setNavigateToSection('snippets');
-        }
-        break;
-      case 'toggleSidePanel':
-        toggleSidePanelRef.current?.();
-        break;
-      case 'broadcast': {
-        // Toggle broadcast mode for the active workspace
-        const currentId = activeTabStore.getActiveTabId();
-        const activeWs = workspaces.find(w => w.id === currentId);
-        if (activeWs) {
-          toggleBroadcast(activeWs.id);
-        }
-        break;
-      }
-      case 'openSettings':
-        handleOpenSettingsRef.current();
-        break;
-      case 'splitHorizontal': {
-        const currentId = activeTabStore.getActiveTabId();
-        const activeSession = sessions.find(s => s.id === currentId);
-        const activeWs = workspaces.find(w => w.id === currentId);
-        if (activeSession && !activeSession.workspaceId) {
-          splitSessionWithCurrentShell(activeSession.id, 'horizontal');
-        } else if (activeWs) {
-          const liveIds = collectSessionIds(activeWs.root);
-          const targetId = (activeWs.focusedSessionId && liveIds.includes(activeWs.focusedSessionId))
-            ? activeWs.focusedSessionId
-            : liveIds[0];
-          if (targetId) splitSessionWithCurrentShell(targetId, 'horizontal');
-        }
-        break;
-      }
-      case 'splitVertical': {
-        const currentId = activeTabStore.getActiveTabId();
-        const activeSession = sessions.find(s => s.id === currentId);
-        const activeWs = workspaces.find(w => w.id === currentId);
-        if (activeSession && !activeSession.workspaceId) {
-          splitSessionWithCurrentShell(activeSession.id, 'vertical');
-        } else if (activeWs) {
-          const liveIds = collectSessionIds(activeWs.root);
-          const targetId = (activeWs.focusedSessionId && liveIds.includes(activeWs.focusedSessionId))
-            ? activeWs.focusedSessionId
-            : liveIds[0];
-          if (targetId) splitSessionWithCurrentShell(targetId, 'vertical');
-        }
-        break;
-      }
-      case 'moveFocus': {
-        // Debounce to prevent double-triggering when focus switches between terminals
-        const now = Date.now();
-        if (now - lastMoveFocusTimeRef.current < MOVE_FOCUS_DEBOUNCE_MS) {
-          if (IS_DEV) console.log('[App] moveFocus debounced, ignoring');
-          break;
-        }
-        lastMoveFocusTimeRef.current = now;
-
-        // Move focus between split panes
-        if (IS_DEV) console.log('[App] moveFocus action triggered, key:', e.key);
-        const direction = e.key === 'ArrowUp' ? 'up'
-          : e.key === 'ArrowDown' ? 'down'
-            : e.key === 'ArrowLeft' ? 'left'
-              : e.key === 'ArrowRight' ? 'right'
-                : null;
-        if (IS_DEV) console.log('[App] moveFocus direction:', direction);
-        if (direction) {
-          // Find the active workspace
-          const currentId = activeTabStore.getActiveTabId();
-          if (IS_DEV) console.log('[App] Active tab ID:', currentId);
-          const activeWs = workspaces.find(w => w.id === currentId);
-          if (IS_DEV) console.log('[App] Active workspace:', activeWs?.id, activeWs?.title);
-          if (activeWs) {
-            const result = moveFocusInWorkspace(activeWs.id, direction as 'up' | 'down' | 'left' | 'right');
-            if (IS_DEV) console.log('[App] moveFocusInWorkspace result:', result);
-          } else {
-            if (IS_DEV) console.log('[App] No active workspace found');
-          }
-        }
-        break;
-      }
-    }
-  }, [orderedTabs, editorTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSessionWithCurrentShell, moveFocusInWorkspace, toggleBroadcast, settings.showSftpTab, confirmIfBusyLocalTerminal]);
+  const executeHotkeyAction = useCallback((action: string, e: KeyboardEvent) => { return executeHotkeyActionImpl(() => ({ IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, action, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, e, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces }), action, e); }, [orderedTabs, editorTabs, sessions, workspaces, setActiveTabId, closeSession, closeWorkspace, createLocalTerminalWithCurrentShell, splitSessionWithCurrentShell, moveFocusInWorkspace, toggleBroadcast, settings, confirmIfBusyLocalTerminal]);
 
   // Callback for terminal to invoke app-level hotkey actions
   const handleHotkeyAction = useCallback((action: string, e: KeyboardEvent) => {
@@ -1630,33 +799,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, []);
 
   // Wrapper to create local terminal with logging
-  const handleCreateLocalTerminal = useCallback((shell?: { command: string; args?: string[]; name?: string; icon?: string }) => {
-    const { username, hostname } = systemInfoRef.current;
-    const resolved = shell ?? resolveShellSetting(terminalSettings.localShell, discoveredShells);
-    // Match by ID (not command) to avoid WSL distros all sharing wsl.exe
-    const matchedShell = !shell ? discoveredShells.find(s => s.id === terminalSettings.localShell) : undefined;
-    const shellName = shell?.name ?? matchedShell?.name;
-    const shellIcon = shell?.icon ?? matchedShell?.icon;
-    const sessionId = createLocalTerminal({
-      shellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
-      shell: resolved?.command,
-      shellArgs: resolved?.args,
-      shellName,
-      shellIcon,
-    });
-    addConnectionLog({
-      sessionId,
-      hostId: '',
-      hostLabel: shellName || 'Local Terminal',
-      hostname: 'localhost',
-      username: username,
-      protocol: 'local',
-      startTime: Date.now(),
-      localUsername: username,
-      localHostname: hostname,
-      saved: false,
-    });
-  }, [addConnectionLog, createLocalTerminal, terminalSettings.localShell, discoveredShells]);
+  const handleCreateLocalTerminal = useCallback((shell?: { command: string; args?: string[]; name?: string; icon?: string }) => { return handleCreateLocalTerminalImpl(() => ({ addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, shell, systemInfoRef, terminalSettings, undefined }), shell); }, [addConnectionLog, createLocalTerminal, terminalSettings, discoveredShells]);
 
   const proxyProfileIdSet = useMemo(
     () => new Set(proxyProfiles.map((profile) => profile.id)),
@@ -1675,46 +818,7 @@ function App({ settings }: { settings: SettingsState }) {
   }, [groupConfigs, proxyProfileIdSet, proxyProfiles]);
 
   // Wrapper to connect to host with logging
-  const handleConnectToHost = useCallback((host: Host) => {
-    const { username, hostname: localHost } = systemInfoRef.current;
-
-    const effectiveHost = resolveEffectiveHost(host);
-
-    // Handle serial hosts separately
-    if (effectiveHost.protocol === 'serial') {
-      const portName = host.hostname.split('/').pop() || host.hostname;
-      const sessionId = connectToHost(effectiveHost);
-      addConnectionLog({
-        sessionId,
-        hostId: host.id,
-        hostLabel: host.label || `Serial: ${portName}`,
-        hostname: host.hostname,
-        username: username,
-        protocol: 'serial',
-        startTime: Date.now(),
-        localUsername: username,
-        localHostname: localHost,
-        saved: false,
-      });
-      return;
-    }
-
-    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
-    const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
-    const sessionId = connectToHost(effectiveHost);
-    addConnectionLog({
-      sessionId,
-      hostId: host.id,
-      hostLabel: host.label,
-      hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
-      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
-      startTime: Date.now(),
-      localUsername: username,
-      localHostname: localHost,
-      saved: false,
-    });
-  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
+  const handleConnectToHost = useCallback((host: Host) => { return handleConnectToHostImpl(() => ({ addConnectionLog, connectToHost, host, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef }), host); }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
 
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
@@ -1753,94 +857,18 @@ function App({ settings }: { settings: SettingsState }) {
   }, [addConnectionLog, createSerialSession]);
 
   // Handle terminal data capture when session exits
-  const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => {
-    if (IS_DEV) console.log('[handleTerminalDataCapture] Called', { sessionId, dataLength: data.length });
-    const session = sessions.find(s => s.id === sessionId);
-    if (IS_DEV) console.log('[handleTerminalDataCapture] Session', session);
-    if (IS_DEV) console.log('[handleTerminalDataCapture] All logs:', connectionLogs.map(l => ({ id: l.id, sessionId: l.sessionId, hostname: l.hostname, endTime: l.endTime, hasTerminalData: !!l.terminalData })));
-
-    const matchingLog = selectConnectionLogForTerminalDataCapture(
-      connectionLogs,
-      { sessionId, hostname: session?.hostname },
-    );
-
-    if (IS_DEV) console.log('[handleTerminalDataCapture] Matching log', matchingLog);
-
-    if (matchingLog) {
-      updateConnectionLog(matchingLog.id, {
-        endTime: Date.now(),
-        terminalData: data,
-      });
-      if (IS_DEV) console.log('[handleTerminalDataCapture] Updated log with terminalData');
-
-      // Auto-save is now handled by real-time streaming in the main process
-      // via sessionLogStreamManager. No renderer-side fallback needed.
-    } else {
-      if (IS_DEV) console.log('[handleTerminalDataCapture] No matching log found!');
-    }
-  }, [sessions, connectionLogs, updateConnectionLog]);
+  const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => { return handleTerminalDataCaptureImpl(() => ({ IS_DEV, connectionLogs, data, selectConnectionLogForTerminalDataCapture, sessionId, sessions, updateConnectionLog }), sessionId, data); }, [sessions, connectionLogs, updateConnectionLog]);
 
   // Check if host has multiple protocols enabled (using effective/resolved host)
-  const hasMultipleProtocols = useCallback((host: Host) => {
-    const effective = resolveEffectiveHost(host);
-    let count = 0;
-    // SSH is always available as base protocol (unless explicitly set to something else)
-    if (effective.protocol === 'ssh' || !effective.protocol) count++;
-    // Mosh adds another option
-    if (effective.moshEnabled) count++;
-    // Telnet adds another option
-    if (effective.telnetEnabled) count++;
-    // If protocol is explicitly telnet (not ssh), count it
-    if (effective.protocol === 'telnet' && !effective.telnetEnabled) count++;
-    return count > 1;
-  }, [resolveEffectiveHost]);
+  const hasMultipleProtocols = useCallback((host: Host) => { return hasMultipleProtocolsImpl(() => ({ host, resolveEffectiveHost }), host); }, [resolveEffectiveHost]);
 
   // Handle host connect with protocol selection (used by QuickSwitcher)
-  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => {
-    if (hasMultipleProtocols(host)) {
-      setProtocolSelectHost(resolveEffectiveHost(host));
-      setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
-    } else {
-      handleConnectToHost(host);
-      setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
-    }
-  }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
+  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
 
   // Handle protocol selection from dialog
-  const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => {
-    if (protocolSelectHost) {
-      const hostWithProtocol: Host = {
-        ...protocolSelectHost,
-        protocol: protocol === 'mosh' ? 'ssh' : protocol,
-        port,
-        moshEnabled: protocol === 'mosh',
-      };
-      handleConnectToHost(hostWithProtocol);
-      setProtocolSelectHost(null);
-    }
-  }, [protocolSelectHost, handleConnectToHost]);
+  const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => { return handleProtocolSelectImpl(() => ({ handleConnectToHost, port, protocol, protocolSelectHost, setProtocolSelectHost }), protocol, port); }, [protocolSelectHost, handleConnectToHost]);
 
-  const handleToggleTheme = useCallback(() => {
-    if (theme === 'system') {
-      toast.info(
-        t('topTabs.toggleTheme.systemExitMessage'),
-        {
-          title: t('topTabs.toggleTheme.systemExitTitle'),
-          actionLabel: t('topTabs.toggleTheme.openSettings'),
-          onClick: () => {
-            void (async () => {
-              const opened = await openSettingsWindow();
-              if (!opened) toast.error(t('toast.settingsUnavailable'), t('common.settings'));
-            })();
-          },
-        }
-      );
-      return;
-    }
-    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
-  }, [openSettingsWindow, resolvedTheme, setTheme, t, theme]);
+  const handleToggleTheme = useCallback(() => { return handleToggleThemeImpl(() => ({ openSettingsWindow, resolvedTheme, setTheme, t, theme, toast })); }, [openSettingsWindow, resolvedTheme, setTheme, t, theme]);
 
   const handleOpenQuickSwitcher = useCallback(() => {
     setIsQuickSwitcherOpen(true);
@@ -1896,33 +924,7 @@ function App({ settings }: { settings: SettingsState }) {
     setDraggingSessionId(null);
   }, [setDraggingSessionId]);
 
-  const handleRootContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const editableSelector =
-      "input, textarea, [contenteditable], .monaco-editor, .monaco-diff-editor, .monaco-inputbox, .monaco-menu-container";
-
-    const nativeEvent = e.nativeEvent;
-    const path = typeof nativeEvent.composedPath === "function" ? nativeEvent.composedPath() : [];
-    const allowFromPath = path.some(
-      (node) => node instanceof Element && !!node.closest(editableSelector),
-    );
-
-    const target = e.target;
-    const targetElement =
-      target instanceof Element
-        ? target
-        : target instanceof Node
-          ? target.parentElement
-          : null;
-    const allowFromTarget = !!targetElement?.closest(editableSelector);
-
-    const allowNativeContextMenu = allowFromPath || allowFromTarget;
-
-    if (allowNativeContextMenu) {
-      return;
-    }
-
-    e.preventDefault();
-  }, []);
+  const handleRootContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => { return handleRootContextMenuImpl(() => ({ e }), e); }, []);
 
   // Combined ordered tab list including editor tab ids (for TopTabs scrollable area)
   const orderedTabsWithEditors = useMemo(
@@ -1930,502 +932,7 @@ function App({ settings }: { settings: SettingsState }) {
     [orderedTabs, editorTabs],
   );
 
-  return (
-    <UnsavedChangesProvider>
-      {({ prompt }) => {
-        // Helper: close an editor tab and activate the neighbor (left-preference), or vault.
-        const closeEditorAndActivateNeighbor = (id: string) => {
-          const closingTabId = toEditorTabId(id);
-          const list = orderedTabsWithEditors;
-          const idx = list.indexOf(closingTabId);
-          releaseEditorTabSaveCoordinator(id);
-          editorTabStore.close(id);
-          if (activeTabStore.getActiveTabId() !== closingTabId) return;
-          const next = list[idx - 1] ?? list[idx + 1] ?? 'vault';
-          activeTabStore.setActiveTabId(next === closingTabId ? 'vault' : next);
-        };
-
-        // Real dirty-confirm close handler.
-        const handleRequestCloseEditorTab = async (id: string) => {
-          const tab = editorTabStore.getTab(id);
-          if (!tab) return;
-          const dirty = tab.content !== tab.baselineContent;
-          if (!dirty) {
-            closeEditorAndActivateNeighbor(id);
-            return;
-          }
-          const choice = await prompt(tab.fileName);
-          if (choice === 'cancel') return;
-          if (choice === 'discard') {
-            closeEditorAndActivateNeighbor(id);
-            return;
-          }
-          if (choice === 'save') {
-            const ok = await saveEditorTab(id);
-            if (!ok) {
-              const msg = editorTabStore.getTab(id)?.saveError ?? 'Save failed';
-              toast.error(msg, 'SFTP');
-              return;
-            }
-            const latest = editorTabStore.getTab(id);
-            if (!latest || latest.content !== latest.baselineContent) return;
-            closeEditorAndActivateNeighbor(id);
-          }
-        };
-
-        // Expose to the hotkey dispatcher (Cmd/Ctrl+W).
-        handleRequestCloseEditorTabRef.current = handleRequestCloseEditorTab;
-
-        return (
-    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", activeTerminalTheme && "immersive-transition")} onContextMenu={handleRootContextMenu}>
-      <TopTabs
-        theme={resolvedTheme}
-        followAppTerminalTheme={followAppTerminalTheme}
-        hosts={hosts}
-        sessions={sessions}
-        orphanSessions={orphanSessions}
-        workspaces={workspaces}
-        logViews={logViews}
-        orderedTabs={orderedTabsWithEditors}
-        draggingSessionId={draggingSessionId}
-        isMacClient={isMacClient}
-        onCloseSession={closeSession}
-        onRenameSession={startSessionRename}
-        onCopySession={copySessionWithCurrentShell}
-        onRenameWorkspace={startWorkspaceRename}
-        onCloseWorkspace={closeWorkspace}
-        onCloseLogView={closeLogView}
-        onCloseTabsBatch={closeTabsBatch}
-        onOpenQuickSwitcher={handleOpenQuickSwitcher}
-        onToggleTheme={handleToggleTheme}
-        onOpenSettings={handleOpenSettings}
-        onSyncNow={handleSyncNowManual}
-        isImmersiveActive={activeTerminalTheme !== null}
-        onStartSessionDrag={setDraggingSessionId}
-        onEndSessionDrag={handleEndSessionDrag}
-        onReorderTabs={reorderTabs}
-        showSftpTab={settings.showSftpTab}
-        editorTabs={editorTabs}
-        onRequestCloseEditorTab={handleRequestCloseEditorTab}
-        hostById={hostById}
-      />
-
-      <div className="flex-1 relative min-h-0">
-        <VaultViewContainer>
-          <VaultView
-            hosts={hosts}
-            keys={keys}
-            identities={identities}
-            proxyProfiles={proxyProfiles}
-            snippets={snippets}
-            snippetPackages={snippetPackages}
-            customGroups={customGroups}
-            knownHosts={effectiveKnownHosts}
-            shellHistory={shellHistory}
-            connectionLogs={connectionLogs}
-            managedSources={managedSources}
-            sessionCount={sessions.length}
-            hotkeyScheme={hotkeyScheme}
-            keyBindings={keyBindings}
-            terminalThemeId={terminalThemeId}
-            terminalFontSize={terminalFontSize}
-            onOpenSettings={handleOpenSettings}
-            onOpenQuickSwitcher={handleOpenQuickSwitcher}
-            onCreateLocalTerminal={handleCreateLocalTerminal}
-            onConnectSerial={handleConnectSerial}
-            onDeleteHost={handleDeleteHost}
-            onConnect={handleConnectToHost}
-            groupConfigs={groupConfigs}
-            onUpdateGroupConfigs={updateGroupConfigs}
-            onUpdateHosts={updateHosts}
-            onUpdateKeys={updateKeys}
-            onImportOrReuseKey={importOrReuseKey}
-            onUpdateIdentities={updateIdentities}
-            onUpdateProxyProfiles={updateProxyProfiles}
-            onUpdateSnippets={updateSnippets}
-            onUpdateSnippetPackages={updateSnippetPackages}
-            onUpdateCustomGroups={updateCustomGroups}
-            onUpdateKnownHosts={updateKnownHosts}
-            onUpdateManagedSources={updateManagedSources}
-            onClearAndRemoveManagedSource={clearAndRemoveSource}
-            onClearAndRemoveManagedSources={clearAndRemoveSources}
-            onUnmanageSource={unmanageSource}
-            onConvertKnownHost={convertKnownHostToHost}
-            onToggleConnectionLogSaved={toggleConnectionLogSaved}
-            onDeleteConnectionLog={deleteConnectionLog}
-            onClearUnsavedConnectionLogs={clearUnsavedConnectionLogs}
-            onRunSnippet={runSnippet}
-            onOpenLogView={openLogView}
-            showRecentHosts={settings.showRecentHosts}
-            showOnlyUngroupedHostsInRoot={settings.showOnlyUngroupedHostsInRoot}
-            navigateToSection={navigateToSection}
-            onNavigateToSectionHandled={() => setNavigateToSection(null)}
-            terminalSettings={terminalSettings}
-          />
-        </VaultViewContainer>
-
-        <SftpViewMount
-          hosts={hosts}
-          keys={keys}
-          identities={identities}
-          proxyProfiles={proxyProfiles}
-          groupConfigs={groupConfigs}
-          updateHosts={updateHosts}
-          sftpDefaultViewMode={sftpDefaultViewMode}
-          sftpDoubleClickBehavior={sftpDoubleClickBehavior}
-          sftpAutoSync={sftpAutoSync}
-          sftpShowHiddenFiles={sftpShowHiddenFiles}
-          sftpUseCompressedUpload={sftpUseCompressedUpload}
-          hotkeyScheme={hotkeyScheme}
-          keyBindings={keyBindings}
-          editorWordWrap={editorWordWrap}
-          setEditorWordWrap={setEditorWordWrap}
-          terminalSettings={terminalSettings}
-        />
-
-        <TerminalLayerMount
-          hosts={hosts}
-          groupConfigs={groupConfigs}
-          proxyProfiles={proxyProfiles}
-          keys={keys}
-          identities={identities}
-          snippets={snippets}
-          snippetPackages={snippetPackages}
-          sessions={sessions}
-          workspaces={workspaces}
-          knownHosts={effectiveKnownHosts}
-          draggingSessionId={draggingSessionId}
-          terminalTheme={currentTerminalTheme}
-          followAppTerminalTheme={followAppTerminalTheme}
-          accentMode={accentMode}
-          customAccent={customAccent}
-          terminalSettings={terminalSettings}
-          terminalFontFamilyId={terminalFontFamilyId}
-          fontSize={terminalFontSize}
-          hotkeyScheme={hotkeyScheme}
-          keyBindings={keyBindings}
-          onHotkeyAction={handleHotkeyAction}
-          onUpdateTerminalThemeId={setTerminalThemeId}
-          onUpdateTerminalFontFamilyId={setTerminalFontFamilyId}
-          onUpdateTerminalFontSize={setTerminalFontSize}
-          onUpdateTerminalFontWeight={(w) => updateTerminalSetting('fontWeight', w)}
-          onCloseSession={closeSession}
-          onUpdateSessionStatus={handleSessionStatusChange}
-          onUpdateHostDistro={updateHostDistro}
-          onUpdateHost={handleUpdateHostFromTerminal}
-          onAddKnownHost={handleAddKnownHost}
-          onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
-            addShellHistoryEntry({ command, hostId, hostLabel, sessionId });
-          }}
-          onTerminalDataCapture={handleTerminalDataCapture}
-          onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
-          onAddSessionToWorkspace={addSessionToWorkspace}
-          onRequestAddToWorkspace={(workspaceId) =>
-            setAddToWorkspaceDialog({ mode: 'append', workspaceId })
-          }
-          onUpdateSplitSizes={updateSplitSizes}
-          onSetDraggingSessionId={setDraggingSessionId}
-          onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
-          onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
-          onReorderWorkspaceSessions={reorderWorkspaceSessions}
-          onSplitSession={splitSessionWithCurrentShell}
-          isBroadcastEnabled={isBroadcastEnabled}
-          onToggleBroadcast={toggleBroadcast}
-          updateHosts={updateHosts}
-          sftpDefaultViewMode={sftpDefaultViewMode}
-          sftpDoubleClickBehavior={sftpDoubleClickBehavior}
-          sftpAutoSync={sftpAutoSync}
-          sftpShowHiddenFiles={sftpShowHiddenFiles}
-          sftpUseCompressedUpload={sftpUseCompressedUpload}
-          sftpAutoOpenSidebar={sftpAutoOpenSidebar}
-          editorWordWrap={editorWordWrap}
-          setEditorWordWrap={setEditorWordWrap}
-          sessionLogsEnabled={sessionLogsEnabled}
-          sessionLogsDir={sessionLogsDir}
-          sessionLogsFormat={sessionLogsFormat}
-          toggleScriptsSidePanelRef={toggleScriptsSidePanelRef}
-          toggleSidePanelRef={toggleSidePanelRef}
-        />
-
-        {/* Log Views - readonly terminal replays */}
-        {logViews.map(logView => {
-          // Get the latest log data from connectionLogs to reflect updates
-          const latestLog = connectionLogs.find(l => l.id === logView.connectionLogId) || logView.log;
-          return (
-            <LogViewWrapper
-              key={logView.id}
-              logView={{ ...logView, log: latestLog }}
-              defaultTerminalTheme={currentTerminalTheme}
-              defaultFontSize={terminalFontSize}
-              onClose={() => closeLogView(logView.id)}
-              onUpdateLog={updateConnectionLog}
-            />
-          );
-        })}
-
-        {/* Editor Tabs — kept mounted for Monaco instance persistence; visibility toggled via CSS */}
-        {editorTabs.map((tab) => (
-          <TextEditorTabView
-            key={tab.id}
-            tabId={tab.id}
-            isVisible={activeTabId === toEditorTabId(tab.id)}
-            hotkeyScheme={hotkeyScheme}
-            keyBindings={keyBindings}
-            hostById={hostById}
-            onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
-          />
-        ))}
-      </div>
-
-      {/* Global "quick add / edit snippet" dialog, triggered by the
-          netcatty:snippets:add and :edit window events (from ScriptsSidePanel
-          "+" button and right-click menu). Delete is handled by a sibling
-          useEffect above — it does not need a dialog. */}
-      <QuickAddSnippetDialog
-        snippets={snippets}
-        packages={snippetPackages}
-        onCreateSnippet={(snippet) => updateSnippets([...snippets, snippet])}
-        onUpdateSnippet={(snippet) =>
-          updateSnippets(snippets.map((s) => (s.id === snippet.id ? snippet : s)))
-        }
-        onCreatePackage={(pkg) =>
-          updateSnippetPackages(Array.from(new Set([...snippetPackages, pkg])))
-        }
-      />
-
-      {/* Root-mounted AddToWorkspaceDialog — triggered by the focus-mode
-          "+" button (mode='append') or QuickSwitcher's "New Workspace"
-          button (mode='create'). Single instance so dialog state and
-          styling stay consistent across entry points. */}
-      {addToWorkspaceDialog && (
-        <AddToWorkspaceDialog
-          open
-          onOpenChange={(open) => { if (!open) setAddToWorkspaceDialog(null); }}
-          // Filter serial hosts only in append mode — appendHostToWorkspace
-          // has no serial code path. Create mode goes through
-          // createWorkspaceFromTargets, which builds a SerialConfig-backed
-          // session for serial hosts, so those should remain pickable.
-          hosts={addToWorkspaceDialog.mode === 'append'
-            ? hosts.filter((h) => h.protocol !== 'serial')
-            : hosts}
-          workspaceTitle={
-            addToWorkspaceDialog.mode === 'append'
-              ? workspaces.find((w) => w.id === addToWorkspaceDialog.workspaceId)?.title
-              : 'New Workspace'
-          }
-          onAdd={(targets) => {
-            if (addToWorkspaceDialog.mode === 'append') {
-              // Match the workspace root's current split direction so
-              // the new panes peer the existing siblings instead of
-              // wrapping the whole tree into one side of a fresh split
-              // (which would happen if we always passed the helper's
-              // default 'vertical').
-              const ws = workspaces.find((w) => w.id === addToWorkspaceDialog.workspaceId);
-              const rootDir = ws && ws.root.type === 'split' ? ws.root.direction : 'vertical';
-              for (const target of targets) {
-                if (target.kind === 'local') {
-                  appendLocalTerminalToWorkspace(addToWorkspaceDialog.workspaceId, undefined, rootDir);
-                } else {
-                  appendHostToWorkspace(addToWorkspaceDialog.workspaceId, target.host, rootDir);
-                }
-              }
-            } else {
-              createWorkspaceFromTargets(targets);
-            }
-          }}
-        />
-      )}
-
-      {isQuickSwitcherOpen && (
-        <Suspense fallback={null}>
-          <LazyQuickSwitcher
-            isOpen={isQuickSwitcherOpen}
-            query={quickSearch}
-            results={quickResults}
-            sessions={sessions}
-            workspaces={workspaces}
-            showSftpTab={settings.showSftpTab}
-            onQueryChange={setQuickSearch}
-            onSelect={handleHostConnectWithProtocolCheck}
-            onSelectTab={(tabId) => {
-              setActiveTabId(tabId);
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            onCreateLocalTerminal={(shell) => {
-              handleCreateLocalTerminal(shell);
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            onCreateWorkspace={() => {
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-              setAddToWorkspaceDialog({ mode: 'create' });
-            }}
-            onClose={() => {
-              setIsQuickSwitcherOpen(false);
-              setQuickSearch('');
-            }}
-            keyBindings={keyBindings}
-          />
-        </Suspense>
-      )}
-
-      <Dialog open={!!sessionRenameTarget} onOpenChange={(open) => {
-        if (!open) {
-          resetSessionRename();
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t('dialog.renameSession.title')}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="session-name">{t('field.name')}</Label>
-            <Input
-              id="session-name"
-              value={sessionRenameValue}
-              onChange={(e) => setSessionRenameValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submitSessionRename(); }}
-              autoFocus
-              placeholder={t('placeholder.sessionName')}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={resetSessionRename}>{t('common.cancel')}</Button>
-            <Button onClick={submitSessionRename} disabled={!sessionRenameValue.trim()}>{t('common.save')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!workspaceRenameTarget} onOpenChange={(open) => {
-        if (!open) {
-          resetWorkspaceRename();
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{t('dialog.renameWorkspace.title')}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="workspace-name">{t('field.name')}</Label>
-            <Input
-              id="workspace-name"
-              value={workspaceRenameValue}
-              onChange={(e) => setWorkspaceRenameValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submitWorkspaceRename(); }}
-              autoFocus
-              placeholder={t('placeholder.workspaceName')}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={resetWorkspaceRename}>{t('common.cancel')}</Button>
-            <Button onClick={submitWorkspaceRename} disabled={!workspaceRenameValue.trim()}>{t('common.save')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {isCreateWorkspaceOpen && (
-        <Suspense fallback={null}>
-          <LazyCreateWorkspaceDialog
-            isOpen={isCreateWorkspaceOpen}
-            onClose={() => setIsCreateWorkspaceOpen(false)}
-            hosts={hosts}
-            onCreate={createWorkspaceWithHosts}
-          />
-        </Suspense>
-      )}
-
-      {/* Protocol Select Dialog for QuickSwitcher */}
-      {protocolSelectHost && (
-        <Suspense fallback={null}>
-          <LazyProtocolSelectDialog
-            host={protocolSelectHost}
-            onSelect={handleProtocolSelect}
-            onCancel={() => setProtocolSelectHost(null)}
-          />
-        </Suspense>
-      )}
-
-      {/* Global Keyboard-Interactive Authentication Modal (2FA/MFA) - processes queue */}
-      <KeyboardInteractiveModal
-        request={keyboardInteractiveQueue[0] || null}
-        onSubmit={handleKeyboardInteractiveSubmit}
-        onCancel={handleKeyboardInteractiveCancel}
-      />
-      {/* Indicator when more 2FA requests are pending */}
-      {keyboardInteractiveQueue.length > 1 && (
-        <div className="fixed bottom-4 right-4 z-50 bg-muted/90 backdrop-blur-sm text-sm px-3 py-1.5 rounded-full border shadow-sm">
-          {keyboardInteractiveQueue.length - 1} more pending
-        </div>
-      )}
-
-      {/* Global Passphrase Modal for encrypted SSH keys */}
-      <PassphraseModal
-        request={passphraseQueue[0] || null}
-        onSubmit={handlePassphraseSubmit}
-        onCancel={handlePassphraseCancel}
-        onSkip={handlePassphraseSkip}
-      />
-
-      {/* Empty vault vs cloud data confirmation dialog (#679).
-          This dialog intentionally cannot be dismissed — the user MUST
-          choose "Restore" or "Keep Empty" before the sync flow can
-          proceed. hideCloseButton removes the X button, onOpenChange
-          is a no-op so ESC also does nothing, and onInteractOutside
-          prevents click-away. */}
-      <Dialog open={!!emptyVaultConflict} onOpenChange={() => { /* intentionally non-dismissable */ }}>
-        <DialogContent className="max-w-md" hideCloseButton onInteractOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              {t('sync.autoSync.emptyVaultConflict.title')}
-            </DialogTitle>
-            <DialogDescription>
-              {t('sync.autoSync.emptyVaultConflict.description')}
-            </DialogDescription>
-          </DialogHeader>
-          {emptyVaultConflict && (
-            <div className="bg-muted/30 rounded-lg p-3 text-sm">
-              <div className="font-medium text-muted-foreground mb-1">{t('sync.autoSync.emptyVaultConflict.cloudLabel')}</div>
-              <div>{t('sync.autoSync.emptyVaultConflict.cloudSummary', {
-                hosts: emptyVaultConflict.hostCount,
-                keys: emptyVaultConflict.keyCount,
-                snippets: emptyVaultConflict.snippetCount,
-                proxyProfiles: emptyVaultConflict.proxyProfileCount,
-              })}</div>
-            </div>
-          )}
-          <DialogFooter className="flex-col gap-2 sm:flex-col">
-            <Button
-              onClick={() => resolveEmptyVaultConflict('restore')}
-              className="w-full justify-start gap-2"
-            >
-              <Download className="w-4 h-4" />
-              <span>
-                {t('sync.autoSync.emptyVaultConflict.restore')}
-                <span className="text-xs opacity-70 ml-1">— {t('sync.autoSync.emptyVaultConflict.restoreDesc')}</span>
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => resolveEmptyVaultConflict('keep-empty')}
-              className="w-full justify-start gap-2"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>
-                {t('sync.autoSync.emptyVaultConflict.keepEmpty')}
-                <span className="text-xs opacity-70 ml-1">— {t('sync.autoSync.emptyVaultConflict.keepEmptyDesc')}</span>
-              </span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-        );
-      }}
-    </UnsavedChangesProvider>
-  );
+  return <AppView ctx={{ accentMode, activeTabId, activeTerminalTheme, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, copySessionWithCurrentShell, closeWorkspace, connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent, customGroups, currentTerminalTheme, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict, followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost, handleEndSessionDrag, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit, handleOpenQuickSwitcher, handleOpenSettings, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect, handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal, hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen, keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, orderedTabsWithEditors, orphanSessions, passphraseQueue, protocolSelectHost, proxyProfiles, quickResults, quickSearch, reorderTabs, reorderWorkspaceSessions, resetSessionRename, resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionRenameTarget, sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen, setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior, sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename, startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog, updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources, updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces, VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper }} />;
 }
 
 function AppWithProviders() {

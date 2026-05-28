@@ -20,7 +20,6 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import type {
   AIDraft,
-  AIPanelView,
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -34,225 +33,36 @@ import type {
 import { DEFAULT_COMMAND_BLOCKLIST } from '../../infrastructure/ai/types';
 import {
   activateDraftView,
-  bumpDraftMutationVersionState,
-  bumpDraftUploadGenerationState,
   clearScopeDraftState,
   ensureDraftForScopeState,
-  getDraftUploadGenerationState,
   setSessionView,
   updateDraftForScope,
 } from './aiDraftState';
-import {
-  pruneInactiveScopedSessions,
-  pruneInactiveScopedTransientState,
-} from './aiScopeCleanup';
 import { convertFilesToUploads } from './useFileUpload';
+import { removeProviderReferences } from './aiProviderCleanup';
 
-/** Typed accessor for the Electron IPC bridge exposed on `window.netcatty`. */
-interface AIBridge {
-  aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
-  aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
-  aiMcpSetToolIntegrationMode?: (mode: AIToolIntegrationMode) => Promise<unknown> | unknown;
-  aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
-  aiMcpSetCommandTimeout?: (timeout: number) => Promise<unknown> | unknown;
-  aiMcpSetMaxIterations?: (maxIterations: number) => Promise<unknown> | unknown;
-}
-
-function getAIBridge() {
-  return (window as unknown as { netcatty?: AIBridge }).netcatty;
-}
-
+import {
+  AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
+  AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
+  bumpDraftMutationVersion,
+  bumpDraftUploadGeneration,
+  cleanupAcpSessions,
+  cleanupOrphanedAISessions,
+  getAIBridge,
+  getDraftUploadGeneration,
+  latestAIActiveSessionMapSnapshot,
+  latestAIDraftsByScopeSnapshot,
+  latestAIPanelViewByScopeSnapshot,
+  latestAISessionsSnapshot,
+  pruneSessionsForStorage,
+  setLatestAIActiveSessionMapSnapshot,
+  setLatestAIDraftsByScopeSnapshot,
+  setLatestAIPanelViewByScopeSnapshot,
+  setLatestAISessionsSnapshot,
+  type DraftsByScope,
+  type PanelViewByScope,
+} from './aiStateSnapshots';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
-
-const AI_STATE_CHANGED_DRAFTS_BY_SCOPE = 'netcatty:ai-drafts-by-scope';
-const AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE = 'netcatty:ai-panel-view-by-scope';
-
-type DraftsByScope = Partial<Record<string, AIDraft>>;
-type PanelViewByScope = Partial<Record<string, AIPanelView>>;
-
-function cleanupAcpSessions(sessionIds: string[]) {
-  const bridge = getAIBridge();
-  if (!bridge?.aiAcpCleanup || sessionIds.length === 0) return;
-  for (const sessionId of sessionIds) {
-    void bridge.aiAcpCleanup(sessionId).catch(() => {});
-  }
-}
-
-function isScopeKeyActive(scopeKey: string, activeTargetIds: Set<string>) {
-  const separatorIndex = scopeKey.indexOf(':');
-  if (separatorIndex === -1) return true;
-
-  const targetId = scopeKey.slice(separatorIndex + 1);
-  if (!targetId) return true;
-
-  return activeTargetIds.has(targetId);
-}
-
-export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
-  const currentSessions = latestAISessionsSnapshot
-    ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
-    ?? [];
-
-  // Sessions shown by a still-live scope must be protected from cleanup
-  // even when their own `scope.targetId` points at a closed terminal —
-  // history can be resumed into a different terminal and we must not
-  // delete it outright while it's actively being used.
-  const preCleanupActiveSessionMap = latestAIActiveSessionMapSnapshot
-    ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
-    ?? {};
-  const activeSessionIds = new Set<string>();
-  for (const [scopeKey, sessionId] of Object.entries(preCleanupActiveSessionMap)) {
-    if (!sessionId) continue;
-    if (!isScopeKeyActive(scopeKey, activeTargetIds)) continue;
-    activeSessionIds.add(sessionId);
-  }
-
-  const nextSessionCleanup = pruneInactiveScopedSessions(
-    currentSessions,
-    activeTargetIds,
-    activeSessionIds,
-  );
-
-  if (nextSessionCleanup.orphanedSessionIds.length > 0) {
-    cleanupAcpSessions(nextSessionCleanup.orphanedSessionIds);
-  }
-
-  if (nextSessionCleanup.sessions !== currentSessions) {
-    setLatestAISessionsSnapshot(nextSessionCleanup.sessions);
-    localStorageAdapter.write(
-      STORAGE_KEY_AI_SESSIONS,
-      pruneSessionsForStorage(nextSessionCleanup.sessions),
-    );
-    emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
-  }
-
-  const activeSessionIdMap = preCleanupActiveSessionMap;
-  let activeSessionMapChanged = false;
-  const nextActiveSessionIdMap = { ...activeSessionIdMap };
-
-  for (const scopeKey of Object.keys(activeSessionIdMap)) {
-    if (isScopeKeyActive(scopeKey, activeTargetIds)) continue;
-    delete nextActiveSessionIdMap[scopeKey];
-    activeSessionMapChanged = true;
-  }
-
-  if (activeSessionMapChanged) {
-    setLatestAIActiveSessionMapSnapshot(nextActiveSessionIdMap);
-    localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, nextActiveSessionIdMap);
-    emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
-  }
-
-  const currentActiveSessionIdMap = activeSessionMapChanged
-    ? nextActiveSessionIdMap
-    : activeSessionIdMap;
-  const currentDraftsByScope = latestAIDraftsByScopeSnapshot ?? {};
-  const currentPanelViewByScope = latestAIPanelViewByScopeSnapshot ?? {};
-  const prunedScopedTransientState = pruneInactiveScopedTransientState(
-    currentActiveSessionIdMap,
-    currentDraftsByScope,
-    currentPanelViewByScope,
-    activeTargetIds,
-  );
-
-  if (prunedScopedTransientState.activeSessionIdMap !== currentActiveSessionIdMap) {
-    setLatestAIActiveSessionMapSnapshot(prunedScopedTransientState.activeSessionIdMap);
-    localStorageAdapter.write(
-      STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
-      prunedScopedTransientState.activeSessionIdMap,
-    );
-    emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
-  }
-
-  if (prunedScopedTransientState.draftsByScope !== currentDraftsByScope) {
-    for (const scopeKey of Object.keys(currentDraftsByScope)) {
-      if (scopeKey in prunedScopedTransientState.draftsByScope) continue;
-      bumpDraftMutationVersion(scopeKey);
-      bumpDraftUploadGeneration(scopeKey);
-    }
-    setLatestAIDraftsByScopeSnapshot(prunedScopedTransientState.draftsByScope);
-    emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }
-
-  if (prunedScopedTransientState.panelViewByScope !== currentPanelViewByScope) {
-    for (const scopeKey of Object.keys(currentPanelViewByScope)) {
-      if (scopeKey in prunedScopedTransientState.panelViewByScope) continue;
-      bumpDraftMutationVersion(scopeKey);
-    }
-    setLatestAIPanelViewByScopeSnapshot(prunedScopedTransientState.panelViewByScope);
-    emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
-  }
-}
-
-
-/** Maximum number of sessions to keep in localStorage. */
-const MAX_STORED_SESSIONS = 50;
-/** Maximum number of messages per session when persisting to localStorage. */
-const MAX_SESSION_MESSAGES = 200;
-
-/**
- * Prune sessions before writing to localStorage to prevent hitting the
- * ~5-10 MB storage quota. Only affects what is persisted — the in-memory
- * state retains all messages until the session is reloaded.
- *
- * - Keeps only the MAX_STORED_SESSIONS most-recently-updated sessions.
- * - Trims each session's messages to the last MAX_SESSION_MESSAGES.
- */
-function pruneSessionsForStorage(sessions: AISession[]): AISession[] {
-  // Sort by updatedAt descending so we keep the newest
-  const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
-  const limited = sorted.slice(0, MAX_STORED_SESSIONS);
-  return limited.map(s => {
-    if (s.messages.length > MAX_SESSION_MESSAGES) {
-      return { ...s, messages: s.messages.slice(-MAX_SESSION_MESSAGES) };
-    }
-    return s;
-  });
-}
-
-let latestAISessionsSnapshot: AISession[] | null = null;
-let latestAIActiveSessionMapSnapshot: Record<string, string | null> | null = null;
-let latestAIDraftsByScopeSnapshot: DraftsByScope | null = null;
-let latestAIPanelViewByScopeSnapshot: PanelViewByScope | null = null;
-let latestAIDraftMutationVersionByScopeSnapshot: Record<string, number> = {};
-let latestAIDraftUploadGenerationByScopeSnapshot: Record<string, number> = {};
-
-function setLatestAISessionsSnapshot(sessions: AISession[]) {
-  latestAISessionsSnapshot = sessions;
-}
-
-function setLatestAIActiveSessionMapSnapshot(activeSessionIdMap: Record<string, string | null>) {
-  latestAIActiveSessionMapSnapshot = activeSessionIdMap;
-}
-
-function setLatestAIDraftsByScopeSnapshot(draftsByScope: DraftsByScope) {
-  latestAIDraftsByScopeSnapshot = draftsByScope;
-}
-
-function setLatestAIPanelViewByScopeSnapshot(panelViewByScope: PanelViewByScope) {
-  latestAIPanelViewByScopeSnapshot = panelViewByScope;
-}
-
-function bumpDraftMutationVersion(scopeKey: string) {
-  latestAIDraftMutationVersionByScopeSnapshot = bumpDraftMutationVersionState(
-    latestAIDraftMutationVersionByScopeSnapshot,
-    scopeKey,
-  );
-}
-
-function getDraftUploadGeneration(scopeKey: string) {
-  return getDraftUploadGenerationState(
-    latestAIDraftUploadGenerationByScopeSnapshot,
-    scopeKey,
-  );
-}
-
-function bumpDraftUploadGeneration(scopeKey: string) {
-  latestAIDraftUploadGenerationByScopeSnapshot = bumpDraftUploadGenerationState(
-    latestAIDraftUploadGenerationByScopeSnapshot,
-    scopeKey,
-  );
-}
-
 export function useAIState() {
   // ── Provider Config ──
   const [providers, setProvidersRaw] = useState<ProviderConfig[]>(() =>
@@ -324,6 +134,10 @@ export function useAIState() {
   const [agentModelMap, setAgentModelMapRaw] = useState<Record<string, string>>(() =>
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {}
   );
+  const agentModelMapRef = useRef(agentModelMap);
+  useEffect(() => {
+    agentModelMapRef.current = agentModelMap;
+  }, [agentModelMap]);
   // Per-agent provider override: remembers which provider config each agent
   // should bind to. Falls back to the global `activeProviderId` when an agent
   // has no entry. Used so that e.g. Catty Agent can stay on DeepSeek while
@@ -1101,7 +915,6 @@ export function useAIState() {
 
   const removeProvider = useCallback((id: string) => {
     setProviders(prev => prev.filter(p => p.id !== id));
-    // Use the raw setter to avoid stale closure over setActiveProviderId
     setActiveProviderIdRaw(prevId => {
       if (prevId === id) {
         const next = '';
@@ -1110,40 +923,18 @@ export function useAIState() {
       }
       return prevId;
     });
-    // Drop per-agent overrides pointing at this provider plus the saved
-    // model id for those agents — the id belonged to the now-missing
-    // provider, so feeding it to the fallback provider would just send
-    // a model name that target doesn't recognize.
-    const orphanedAgents = Object.keys(agentProviderMapRef.current)
-      .filter((agentId) => agentProviderMapRef.current[agentId] === id);
-    if (orphanedAgents.length > 0) {
-      setAgentProviderMapRaw(prev => {
-        const next: Record<string, string> = {};
-        let changed = false;
-        for (const agentId of Object.keys(prev)) {
-          if (prev[agentId] === id) {
-            changed = true;
-          } else {
-            next[agentId] = prev[agentId];
-          }
-        }
-        if (!changed) return prev;
-        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
-        return next;
-      });
-      setAgentModelMapRaw(prev => {
-        let changed = false;
-        const next: Record<string, string> = { ...prev };
-        for (const agentId of orphanedAgents) {
-          if (agentId in next) {
-            delete next[agentId];
-            changed = true;
-          }
-        }
-        if (!changed) return prev;
-        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, next);
-        return next;
-      });
+    const cleanup = removeProviderReferences(
+      id,
+      agentProviderMapRef.current,
+      agentModelMapRef.current,
+    );
+    if (cleanup.providerMapChanged) {
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, cleanup.agentProviderMap);
+      setAgentProviderMapRaw(cleanup.agentProviderMap);
+    }
+    if (cleanup.modelMapChanged) {
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, cleanup.agentModelMap);
+      setAgentModelMapRaw(cleanup.agentModelMap);
     }
   }, [setProviders]);
 
@@ -1151,7 +942,6 @@ export function useAIState() {
   const activeProvider = providers.find(p => p.id === activeProviderId) ?? null;
 
   return {
-    // Provider config
     providers,
     setProviders,
     addProvider,
@@ -1162,41 +952,28 @@ export function useAIState() {
     activeModelId,
     setActiveModelId,
     activeProvider,
-
-    // Permission model
     globalPermissionMode,
     setGlobalPermissionMode,
     toolIntegrationMode,
     setToolIntegrationMode,
     hostPermissions,
     setHostPermissions,
-
-    // External agents
     externalAgents,
     setExternalAgents,
     defaultAgentId,
     setDefaultAgentId,
-
-    // Safety
     commandBlocklist,
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
     maxIterations,
     setMaxIterations,
-
-    // Per-agent model memory
     agentModelMap,
     setAgentModel,
-    // Per-agent provider override (falls back to activeProviderId when unset)
     agentProviderMap,
     setAgentProvider,
-
-    // Web search
     webSearchConfig,
     setWebSearchConfig,
-
-    // Sessions (per-scope active session)
     sessions,
     activeSessionIdMap,
     draftsByScope,

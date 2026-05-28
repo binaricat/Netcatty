@@ -1,5 +1,7 @@
 import { MouseEvent,useCallback,useMemo,useRef,useState } from 'react';
 import { ConnectionLog,Host,SerialConfig,Snippet,TerminalSession,Workspace,WorkspaceViewMode } from '../../domain/models';
+import { addLogView, getLogViewTabId, removeLogView, type LogView } from './logViewState';
+import { createHostTerminalSession, createLocalTerminalSession, createSerialTerminalSession, type LocalTerminalOptions } from './sessionFactories';
 import {
 appendPaneToWorkspaceRoot,
 collectSessionIds,
@@ -16,12 +18,6 @@ updateWorkspaceSplitSizes,
 } from '../../domain/workspace';
 import { activeTabStore } from './activeTabStore';
 
-// LogView represents an open log replay tab
-export interface LogView {
-  id: string; // Tab ID (log-${connectionLogId})
-  connectionLogId: string;
-  log: ConnectionLog;
-}
 
 export const useSessionState = () => {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
@@ -46,100 +42,22 @@ export const useSessionState = () => {
   // Log views: stores open log replay tabs
   const [logViews, setLogViews] = useState<LogView[]>([]);
 
-  const createLocalTerminal = useCallback((options?: {
-    shellType?: TerminalSession['shellType'];
-    shell?: string;
-    shellArgs?: string[];
-    shellName?: string;
-    shellIcon?: string;
-  }) => {
+  const createLocalTerminal = useCallback((options?: LocalTerminalOptions) => {
     const sessionId = crypto.randomUUID();
-    const localHostId = `local-${sessionId}`;
-    const newSession: TerminalSession = {
-      id: sessionId,
-      hostId: localHostId,
-      hostLabel: options?.shellName || 'Local Terminal',
-      hostname: 'localhost',
-      username: 'local',
-      status: 'connecting',
-      protocol: 'local',
-      shellType: options?.shellType,
-      localShell: options?.shell,
-      localShellArgs: options?.shellArgs,
-      localShellName: options?.shellName,
-      localShellIcon: options?.shellIcon,
-    };
-    setSessions(prev => [...prev, newSession]);
+    setSessions(prev => [...prev, createLocalTerminalSession(sessionId, options)]);
     setActiveTabId(sessionId);
     return sessionId;
   }, [setActiveTabId]);
 
   const createSerialSession = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const sessionId = crypto.randomUUID();
-    const serialHostId = `serial-${sessionId}`;
-    const portName = config.path.split('/').pop() || config.path;
-    const newSession: TerminalSession = {
-      id: sessionId,
-      hostId: serialHostId,
-      hostLabel: `Serial: ${portName}`,
-      hostname: config.path,
-      username: '',
-      status: 'connecting',
-      protocol: 'serial',
-      serialConfig: config,
-      charset: options?.charset,
-    };
-    setSessions(prev => [...prev, newSession]);
+    setSessions(prev => [...prev, createSerialTerminalSession(sessionId, config, options)]);
     setActiveTabId(sessionId);
     return sessionId;
   }, [setActiveTabId]);
 
   const connectToHost = useCallback((host: Host) => {
-    // Handle serial hosts specially - use createSerialSession for them
-    if (host.protocol === 'serial') {
-      // Use stored serialConfig or construct from host data
-      const serialConfig: SerialConfig = host.serialConfig || {
-        path: host.hostname,
-        baudRate: host.port || 115200,
-        dataBits: 8,
-        stopBits: 1,
-        parity: 'none',
-        flowControl: 'none',
-        localEcho: false,
-        lineMode: false,
-      };
-      
-      const sessionId = crypto.randomUUID();
-      const portName = serialConfig.path.split('/').pop() || serialConfig.path;
-      const newSession: TerminalSession = {
-        id: sessionId,
-        hostId: host.id,
-        hostLabel: host.label || `Serial: ${portName}`,
-        hostname: serialConfig.path,
-        username: '',
-        status: 'connecting',
-        protocol: 'serial',
-        serialConfig: serialConfig,
-        charset: host.charset,
-      };
-      setSessions(prev => [...prev, newSession]);
-      setActiveTabId(sessionId);
-      return sessionId;
-    }
-
-    const newSession: TerminalSession = {
-      id: crypto.randomUUID(),
-      hostId: host.id,
-      hostLabel: host.label,
-      hostname: host.hostname,
-      username: host.username,
-      status: 'connecting',
-      // Store connection-time protocol settings from the host object
-      protocol: host.protocol,
-      port: host.port,
-      moshEnabled: host.moshEnabled,
-      charset: host.charset,
-    };
+    const newSession = createHostTerminalSession(crypto.randomUUID(), host);
     setSessions(prev => [...prev, newSession]);
     setActiveTabId(newSession.id);
     return newSession.id;
@@ -853,36 +771,17 @@ export const useSessionState = () => {
 
   const orphanSessions = useMemo(() => sessions.filter(s => !s.workspaceId), [sessions]);
 
-  // Open a log view tab
   const openLogView = useCallback((log: ConnectionLog) => {
-    const tabId = `log-${log.id}`;
-    // Check if already open
-    setLogViews(prev => {
-      if (prev.some(lv => lv.connectionLogId === log.id)) {
-        // Already open, just switch to it
-        setActiveTabId(tabId);
-        return prev;
-      }
-      // Open new log view
-      const newLogView: LogView = {
-        id: tabId,
-        connectionLogId: log.id,
-        log,
-      };
-      setActiveTabId(tabId);
-      return [...prev, newLogView];
-    });
+    const tabId = getLogViewTabId(log);
+    setLogViews(prev => addLogView(prev, log));
+    setActiveTabId(tabId);
   }, [setActiveTabId]);
 
-  // Close a log view tab
   const closeLogView = useCallback((logViewId: string) => {
     setLogViews(prev => {
-      const updated = prev.filter(lv => lv.id !== logViewId);
-      // If this was the active tab, switch to vault
-      const currentActiveTabId = activeTabStore.getActiveTabId();
-      if (currentActiveTabId === logViewId) {
-        const fallback = updated.length > 0 ? updated[updated.length - 1].id : 'vault';
-        setActiveTabId(fallback);
+      const updated = removeLogView(prev, logViewId);
+      if (activeTabStore.getActiveTabId() === logViewId) {
+        setActiveTabId(updated.length > 0 ? updated[updated.length - 1].id : 'vault');
       }
       return updated;
     });

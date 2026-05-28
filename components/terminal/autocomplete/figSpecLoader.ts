@@ -51,6 +51,7 @@ interface FigSpecBridge {
 }
 
 function getBridge(): FigSpecBridge | undefined {
+  if (typeof window === "undefined") return undefined;
   return (window as Window & { netcatty?: FigSpecBridge }).netcatty;
 }
 

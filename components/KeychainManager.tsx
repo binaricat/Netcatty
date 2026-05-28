@@ -1,12 +1,7 @@
 import {
   BadgeCheck,
   ChevronDown,
-  ChevronRight,
   Edit2,
-  Eye,
-  EyeOff,
-  FileKey,
-  Info,
   Key,
   LayoutGrid,
   List as ListIcon,
@@ -21,10 +16,7 @@ import {
 import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
-import { sanitizeCredentialValue } from "../domain/credentials";
-import { applyGroupDefaults, resolveGroupDefaults } from "../domain/groupConfig";
 import type { GroupConfig } from "../domain/models";
-import { resolveBridgeKeyAuth, resolveHostAuth } from "../domain/sshAuth";
 import { STORAGE_KEY_VAULT_KEYS_VIEW_MODE } from "../infrastructure/config/storageKeys";
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
@@ -39,11 +31,8 @@ import {
   AsidePanelContent,
 } from "./ui/aside-panel";
 import { Button } from "./ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "./ui/collapsible";
+
+
 import {
   ContextMenu,
   ContextMenuContent,
@@ -53,10 +42,9 @@ import {
 } from "./ui/context-menu";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
 import { toast } from "./ui/toast";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { KeychainExportPanel } from "./KeychainExportPanel";
+import { KeychainEditPanel } from "./KeychainEditPanel";
 
 // Import utilities and components from keychain module
 import {
@@ -905,437 +893,46 @@ echo $3 >> "$FILE"`);
               />
             )}
 
-            {/* Key Export Panel */}
             {panel.type === "export" && !showHostSelector && (
-              <>
-                {/* Key info card */}
-                <div className="flex items-center gap-3 p-3 bg-card border border-border/80 rounded-lg">
-                  <div
-                    className={cn(
-                      "h-10 w-10 rounded-md flex items-center justify-center",
-                      panel.key.certificate
-                        ? "bg-emerald-500/15 text-emerald-500"
-                        : "bg-primary/15 text-primary",
-                    )}
-                  >
-                    {getKeyIcon(panel.key)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold truncate">
-                      {panel.key.label}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("auth.keyType", { type: getKeyTypeDisplay(panel.key) })}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Export to field */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-muted-foreground">
-                      {t("keychain.export.exportTo")}
-                    </Label>
-                    <Button
-                      variant="link"
-                      className="h-auto p-0 text-primary text-sm"
-                      onClick={() => setShowHostSelector(true)}
-                    >
-                      {t("keychain.export.selectHost")}
-                    </Button>
-                  </div>
-                  <Input
-                    value={exportHost?.label || ""}
-                    readOnly
-                    placeholder={t("common.selectAHostPlaceholder")}
-                    className="bg-muted/50 cursor-pointer"
-                    onClick={() => setShowHostSelector(true)}
-                  />
-                </div>
-
-                {/* Location field */}
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">
-                    {t("keychain.export.location")}
-                  </Label>
-                  <Input
-                    value={exportLocation}
-                    onChange={(e) => setExportLocation(e.target.value)}
-                    placeholder=".ssh"
-                  />
-                </div>
-
-                {/* Filename field */}
-                <div className="space-y-2">
-                  <Label className="text-muted-foreground">
-                    {t("keychain.export.filename")}
-                  </Label>
-                  <Input
-                    value={exportFilename}
-                    onChange={(e) => setExportFilename(e.target.value)}
-                    placeholder="authorized_keys"
-                  />
-                </div>
-
-                {/* Info note */}
-                <div className="flex items-start gap-2 p-3 bg-muted/50 border border-border/60 rounded-lg">
-                  <Info
-                    size={14}
-                    className="mt-0.5 text-muted-foreground shrink-0"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("keychain.export.note", {
-                      unix: "UNIX",
-                      advanced: t("common.advanced"),
-                    })}
-                  </p>
-                </div>
-
-                {/* Advanced collapsible */}
-                <Collapsible
-                  open={exportAdvancedOpen}
-                  onOpenChange={setExportAdvancedOpen}
-                >
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-between px-0 h-10 hover:bg-transparent hover:text-current"
-                    >
-                      <span className="font-medium">{t("common.advanced")}</span>
-                      <ChevronRight
-                        size={16}
-                        className={cn(
-                          "transition-transform",
-                          exportAdvancedOpen && "rotate-90",
-                        )}
-                      />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="space-y-2 pt-2">
-                    <Label className="text-muted-foreground">
-                      {t("keychain.export.script")}
-                    </Label>
-                    <Textarea
-                      value={exportScript}
-                      onChange={(e) => setExportScript(e.target.value)}
-                      className="min-h-[180px] font-mono text-xs"
-                      placeholder={t("keychain.export.scriptPlaceholder")}
-                    />
-                  </CollapsibleContent>
-                </Collapsible>
-
-                {/* Export button */}
-                <Button
-                  className="w-full h-11"
-                  disabled={
-                    !exportHost ||
-                    !exportLocation ||
-                    !exportFilename ||
-                    isExporting
-                  }
-                  onClick={async () => {
-                    if (!exportHost || !panel.key.publicKey) return;
-
-                    setIsExporting(true);
-
-                    try {
-                      const exportAuth = resolveHostAuth({
-                        host: exportHost,
-                        keys,
-                        identities,
-                      });
-                      const exportKeyAuth = resolveBridgeKeyAuth({
-                        key: exportAuth.key,
-                        fallbackIdentityFilePaths: exportAuth.authMethod === "password" || exportAuth.keyId
-                          ? undefined
-                          : exportHost.identityFilePaths,
-                        passphrase: exportAuth.passphrase,
-                      });
-                      const exportPassword = sanitizeCredentialValue(exportAuth.password);
-
-                      // Need either password or a usable key to run remote command.
-                      if (
-                        !exportPassword &&
-                        !exportKeyAuth.privateKey &&
-                        !exportKeyAuth.identityFilePaths?.length
-                      ) {
-                        throw new Error(
-                          t("keychain.export.missingCredentials"),
-                        );
-                      }
-
-                      // Escape the public key for shell (single quotes, escape existing quotes)
-                      const escapedPublicKey = panel.key.publicKey.replace(
-                        /'/g,
-                        "'\\''",
-                      );
-
-                      // Build the command by replacing $1, $2, $3
-                      const scriptWithVars = exportScript
-                        .replace(/\$1/g, exportLocation)
-                        .replace(/\$2/g, exportFilename)
-                        .replace(/\$3/g, `'${escapedPublicKey}'`);
-
-                      // Execute the script directly - SSH exec handles multiline commands
-                      const command = scriptWithVars;
-
-                      // Resolve the effective host (applying group
-                      // defaults), so algorithm settings inherited from
-                      // the group reach the bridge — the host object on
-                      // its own only carries explicitly set fields.
-                      const effectiveExportHost = exportHost.group
-                        ? applyGroupDefaults(
-                          exportHost,
-                          resolveGroupDefaults(exportHost.group, groupConfigs),
-                        )
-                        : applyGroupDefaults(exportHost, {});
-
-                      // Execute via SSH
-                      const result = await execCommand({
-                        hostname: effectiveExportHost.hostname,
-                        username: exportAuth.username,
-                        port: effectiveExportHost.port || 22,
-                        password: exportPassword,
-                        privateKey: exportKeyAuth.privateKey,
-                        certificate: exportAuth.key?.certificate,
-                        publicKey: exportAuth.key?.publicKey,
-                        keyId: exportAuth.keyId,
-                        keySource: exportAuth.key?.source,
-                        passphrase: exportKeyAuth.passphrase,
-                        identityFilePaths: exportKeyAuth.identityFilePaths,
-                        // Carry the effective host's algorithm settings
-                        // (host value falling back to its group default)
-                        // so the one-off SSH exec honors them just like
-                        // the interactive terminal does.
-                        legacyAlgorithms: effectiveExportHost.legacyAlgorithms,
-                        skipEcdsaHostKey: effectiveExportHost.skipEcdsaHostKey,
-                        algorithmOverrides: effectiveExportHost.algorithms,
-                        command,
-                        timeout: 30000,
-                        enableKeyboardInteractive: true,
-                        sessionId: `export-key:${effectiveExportHost.id}:${panel.key.id}`,
-                      });
-
-                      // Check result - code 0, null, or undefined with no stderr is success
-                      const exitCode = result?.code;
-                      const hasError = result?.stderr?.trim();
-                      if (exitCode === 0 || (exitCode == null && !hasError)) {
-                        // Update identity (preferred) or host to use this key for authentication
-                        if (exportHost.identityId && onSaveIdentity) {
-                          const existing = identities.find(
-                            (i) => i.id === exportHost.identityId,
-                          );
-                          if (existing) {
-                            onSaveIdentity({
-                              ...existing,
-                              authMethod: "key",
-                              keyId: panel.key.id,
-                            });
-                          }
-                        } else if (onSaveHost) {
-                          onSaveHost({
-                            ...exportHost,
-                            identityFileId: panel.key.id,
-                            authMethod: "key",
-                          });
-                        }
-                        toast.success(
-                          t("keychain.export.successMessage", {
-                            host: exportHost.label,
-                          }),
-                          t("keychain.export.successTitle"),
-                        );
-                        closePanel();
-                      } else {
-                        const errorMsg =
-                          hasError ||
-                          result?.stdout?.trim() ||
-                          t("keychain.export.exitCode", { code: exitCode });
-                        toast.error(
-                          t("keychain.export.failedMessage", { error: errorMsg }),
-                          t("keychain.export.failedTitle"),
-                        );
-                      }
-                    } catch (err) {
-                      const message =
-                        err instanceof Error ? err.message : String(err);
-                      toast.error(
-                        t("keychain.export.failedPrefix", { error: message }),
-                        t("keychain.export.failedTitle"),
-                      );
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
-                >
-                  {isExporting
-                    ? t("keychain.export.exporting")
-                    : t("keychain.export.exportAndAttach")}
-                </Button>
-              </>
+              <KeychainExportPanel
+                panel={panel}
+                t={t}
+                getKeyIcon={getKeyIcon}
+                getKeyTypeDisplay={getKeyTypeDisplay}
+                setShowHostSelector={setShowHostSelector}
+                exportHost={exportHost}
+                exportLocation={exportLocation}
+                setExportLocation={setExportLocation}
+                exportFilename={exportFilename}
+                setExportFilename={setExportFilename}
+                exportAdvancedOpen={exportAdvancedOpen}
+                setExportAdvancedOpen={setExportAdvancedOpen}
+                exportScript={exportScript}
+                setExportScript={setExportScript}
+                isExporting={isExporting}
+                setIsExporting={setIsExporting}
+                keys={keys}
+                identities={identities}
+                groupConfigs={groupConfigs}
+                execCommand={execCommand}
+                onSaveIdentity={onSaveIdentity}
+                onSaveHost={onSaveHost}
+                closePanel={closePanel}
+              />
             )}
 
-            {/* Edit Key Panel */}
             {panel.type === "edit" && (
-              <>
-                <div className="space-y-2">
-                  <Label>{t("keychain.edit.labelRequired")}</Label>
-                  <Input
-                    value={draftKey.label || ""}
-                    onChange={(e) =>
-                      setDraftKey({ ...draftKey, label: e.target.value })
-                    }
-                    placeholder={t("keychain.edit.keyLabelPlaceholder")}
-                  />
-                </div>
-
-                {/* Reference key: show file path read-only */}
-                {draftKey.source === 'reference' && draftKey.filePath && (
-                  <div className="space-y-2">
-                    <Label className="text-muted-foreground">
-                      {t("keychain.edit.filePath")}
-                    </Label>
-                    <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
-                      <FileKey size={14} className="text-primary shrink-0" />
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="text-xs font-mono truncate cursor-default">
-                            {draftKey.filePath}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{draftKey.filePath}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                )}
-
-                {/* Managed key: show private key editor */}
-                {draftKey.source !== 'reference' && (
-                  <div className="space-y-2">
-                    <Label className="text-destructive">
-                      {t("keychain.edit.privateKeyRequired")}
-                    </Label>
-                    <Textarea
-                      value={draftKey.privateKey || ""}
-                      onChange={(e) =>
-                        setDraftKey({ ...draftKey, privateKey: e.target.value })
-                      }
-                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                      className="min-h-[180px] font-mono text-xs"
-                    />
-                  </div>
-                )}
-
-                {draftKey.source !== 'reference' && (
-                  <div className="space-y-2">
-                    <Label className="text-muted-foreground">
-                      {t("keychain.edit.publicKey")}
-                    </Label>
-                    <Textarea
-                      value={draftKey.publicKey || ""}
-                      onChange={(e) =>
-                        setDraftKey({ ...draftKey, publicKey: e.target.value })
-                      }
-                      placeholder="ssh-ed25519 AAAA..."
-                      className="min-h-[80px] font-mono text-xs"
-                    />
-                  </div>
-                )}
-
-                {draftKey.source !== 'reference' && (
-                  <div className="space-y-2">
-                    <Label className="text-muted-foreground">
-                      {t("keychain.edit.certificate")}
-                    </Label>
-                    <Textarea
-                      value={draftKey.certificate || ""}
-                      onChange={(e) =>
-                        setDraftKey({ ...draftKey, certificate: e.target.value })
-                      }
-                      placeholder={t("keychain.edit.certificatePlaceholder")}
-                      className="min-h-[60px] font-mono text-xs"
-                    />
-                  </div>
-                )}
-
-                {/* Passphrase section */}
-                <div className="space-y-2">
-                  <Label>{t('terminal.auth.passphrase')}</Label>
-                  <div className="relative">
-                    <Input
-                      type={showPassphrase ? 'text' : 'password'}
-                      value={draftKey.passphrase || ''}
-                      onChange={(e) =>
-                        setDraftKey({ ...draftKey, passphrase: e.target.value })
-                      }
-                      placeholder={t('keychain.generate.passphrasePlaceholder')}
-                      className="pr-10"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-                      onClick={() => setShowPassphrase(!showPassphrase)}
-                    >
-                      {showPassphrase ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="editSavePassphrase"
-                      checked={draftKey.savePassphrase || false}
-                      onChange={(e) =>
-                        setDraftKey({ ...draftKey, savePassphrase: e.target.checked })
-                      }
-                      className="h-4 w-4 rounded border-border"
-                    />
-                    <Label htmlFor="editSavePassphrase" className="text-sm font-normal cursor-pointer">
-                      {t('keychain.generate.savePassphrase')}
-                    </Label>
-                  </div>
-                </div>
-
-                {/* Key Export section - only for managed keys */}
-                {draftKey.source !== 'reference' && (
-                  <div className="pt-4 mt-4 border-t border-border/60">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-sm font-medium">
-                        {t("keychain.edit.keyExport")}
-                      </span>
-                      <div className="h-4 w-4 rounded-full bg-muted flex items-center justify-center">
-                        <Info size={10} className="text-muted-foreground" />
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full h-11"
-                      onClick={() => openKeyExport(panel.key)}
-                    >
-                      {t("keychain.edit.exportToHost")}
-                    </Button>
-                  </div>
-                )}
-
-                {/* Save button */}
-                <Button
-                  className="w-full h-11 mt-4"
-                  disabled={
-                    !draftKey.label?.trim() ||
-                    (draftKey.source !== 'reference' && !draftKey.privateKey?.trim())
-                  }
-                  onClick={() => {
-                    if (draftKey.id) {
-                      onUpdate({
-                        ...panel.key,
-                        ...(draftKey as SSHKey),
-                      });
-                      closePanel();
-                    }
-                  }}
-                >
-                  {t("common.saveChanges")}
-                </Button>
-              </>
+              <KeychainEditPanel
+                panel={panel}
+                t={t}
+                draftKey={draftKey}
+                setDraftKey={setDraftKey}
+                showPassphrase={showPassphrase}
+                setShowPassphrase={setShowPassphrase}
+                openKeyExport={openKeyExport}
+                onUpdate={onUpdate}
+                closePanel={closePanel}
+              />
             )}
           </AsidePanelContent>
 

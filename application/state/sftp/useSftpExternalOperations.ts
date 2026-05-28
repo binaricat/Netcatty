@@ -1,9 +1,9 @@
-import React, { useCallback, useRef, useMemo, useState } from "react";
-import { FileConflict, FileConflictAction, TransferTask, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
+import { useCallback, useRef, useMemo, useState } from "react";
+import { FileConflict, FileConflictAction, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
-import { SftpPane } from "./types";
 import { joinPath } from "./utils";
+import { createUploadTaskCallbacks } from "./uploadTaskCallbacks";
 import {
   UploadController,
   uploadFromDataTransfer,
@@ -12,7 +12,6 @@ import {
   UploadBridge,
   UploadCallbacks,
   UploadResult,
-  UploadTaskInfo,
   startUploadScanningTask,
 } from "../../../lib/uploadService";
 import type { DropEntry } from "../../../lib/sftpFileUtils";
@@ -20,64 +19,7 @@ import type { DropEntry } from "../../../lib/sftpFileUtils";
 // Re-export UploadResult for external usage
 export type { UploadResult };
 
-interface UseSftpExternalOperationsParams {
-  getActivePane: (side: "left" | "right") => SftpPane | null;
-  getPaneByConnectionId: (connectionId: string) => SftpPane | null;
-  refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
-  sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
-  connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
-  clearDirCacheEntry?: (connectionId: string, path: string) => void;
-  useCompressedUpload?: boolean;
-  addExternalUpload?: (task: TransferTask) => void;
-  updateExternalUpload?: (taskId: string, updates: Partial<TransferTask>) => void;
-  isTransferCancelled?: (taskId: string) => boolean;
-  dismissExternalUpload?: (taskId: string) => void;
-}
-
-interface SftpExternalOperationsResult {
-  readTextFile: (side: "left" | "right", filePath: string) => Promise<string>;
-  readBinaryFile: (side: "left" | "right", filePath: string) => Promise<ArrayBuffer>;
-  writeTextFile: (side: "left" | "right", filePath: string, content: string) => Promise<void>;
-  writeTextFileByConnection: (
-    connectionId: string,
-    expectedHostId: string,
-    filePath: string,
-    content: string,
-    filenameEncoding?: SftpFilenameEncoding,
-  ) => Promise<void>;
-  downloadToTempAndOpen: (
-    side: "left" | "right",
-    remotePath: string,
-    fileName: string,
-    appPath: string,
-    options?: { enableWatch?: boolean }
-  ) => Promise<{ localTempPath: string; watchId?: string }>;
-  activeFileWatchCountRef: React.MutableRefObject<number>;
-  uploadExternalFiles: (
-    side: "left" | "right",
-    dataTransfer: DataTransfer,
-    targetPath?: string
-  ) => Promise<UploadResult[]>;
-  uploadExternalFileList: (
-    side: "left" | "right",
-    fileList: FileList | File[],
-    targetPath?: string
-  ) => Promise<UploadResult[]>;
-  uploadExternalFolderPath: (
-    side: "left" | "right",
-    folderPath: string,
-    targetPath?: string
-  ) => Promise<UploadResult[]>;
-  uploadExternalEntries: (
-    side: "left" | "right",
-    entries: DropEntry[],
-    options?: { targetPath?: string }
-  ) => Promise<UploadResult[]>;
-  cancelExternalUpload: () => Promise<void>;
-  selectApplication: () => Promise<{ path: string; name: string } | null>;
-  uploadConflicts: FileConflict[];
-  resolveUploadConflict: (conflictId: string, action: FileConflictAction, applyToAll?: boolean) => void;
-}
+import type { UseSftpExternalOperationsParams, SftpExternalOperationsResult } from "./useSftpExternalOperations.types";
 
 export const useSftpExternalOperations = (
   params: UseSftpExternalOperationsParams
@@ -421,99 +363,15 @@ export const useSftpExternalOperations = (
     targetPath: string,
     targetHostId?: string,
     targetConnectionKey?: string,
-  ): UploadCallbacks => {
-    return {
-      onScanningStart: (taskId: string) => {
-        if (addExternalUpload) {
-          const scanningTask: TransferTask = {
-            id: taskId,
-            fileName: "Scanning files...",
-            sourcePath: "local",
-            targetPath,
-            sourceConnectionId: "external",
-            targetConnectionId: connectionId,
-            targetHostId,
-            targetConnectionKey,
-            direction: "upload",
-            status: "pending" as TransferStatus,
-            totalBytes: 0,
-            transferredBytes: 0,
-            speed: 0,
-            startTime: Date.now(),
-            isDirectory: true,
-            progressMode: "bytes",
-          };
-          addExternalUpload(scanningTask);
-        }
-      },
-      onScanningEnd: (taskId: string) => {
-        if (dismissExternalUpload) {
-          dismissExternalUpload(taskId);
-        }
-      },
-      onTaskCreated: (task: UploadTaskInfo) => {
-        if (addExternalUpload) {
-          const transferTask: TransferTask = {
-            id: task.id,
-            fileName: task.displayName,
-            sourcePath: "local",
-            targetPath: joinPath(targetPath, task.fileName),
-            sourceConnectionId: "external",
-            targetConnectionId: connectionId,
-            targetHostId,
-            targetConnectionKey,
-            direction: "upload",
-            status: "transferring" as TransferStatus,
-            totalBytes: task.totalBytes,
-            transferredBytes: 0,
-            speed: 0,
-            startTime: Date.now(),
-            isDirectory: task.isDirectory,
-            progressMode: task.progressMode ?? "bytes",
-            parentTaskId: task.parentTaskId,
-          };
-          addExternalUpload(transferTask);
-        }
-      },
-      onTaskProgress: (taskId: string, progress) => {
-        if (updateExternalUpload) {
-          updateExternalUpload(taskId, {
-            transferredBytes: progress.transferred,
-            speed: progress.speed,
-          });
-        }
-      },
-      onTaskCompleted: (taskId: string, totalBytes: number) => {
-        if (updateExternalUpload) {
-          updateExternalUpload(taskId, {
-            status: "completed" as TransferStatus,
-            endTime: Date.now(),
-            transferredBytes: totalBytes,
-            speed: 0,
-          });
-        }
-      },
-      onTaskFailed: (taskId: string, error: string) => {
-        if (updateExternalUpload) {
-          updateExternalUpload(taskId, {
-            status: "failed" as TransferStatus,
-            endTime: Date.now(),
-            error,
-            speed: 0,
-          });
-        }
-      },
-      onTaskCancelled: (taskId: string) => {
-        if (updateExternalUpload) {
-          updateExternalUpload(taskId, {
-            status: "cancelled" as TransferStatus,
-            endTime: Date.now(),
-            speed: 0,
-          });
-        }
-      },
-    };
-  }, [addExternalUpload, updateExternalUpload, dismissExternalUpload]);
+  ): UploadCallbacks => createUploadTaskCallbacks({
+    connectionId,
+    targetPath,
+    targetHostId,
+    targetConnectionKey,
+    addExternalUpload,
+    updateExternalUpload,
+    dismissExternalUpload,
+  }), [addExternalUpload, updateExternalUpload, dismissExternalUpload]);
 
   const resolveUploadConflict = useCallback((conflictId: string, action: FileConflictAction, applyToAll = false) => {
     const conflict = uploadConflicts.find((item) => item.transferId === conflictId);

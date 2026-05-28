@@ -3,13 +3,14 @@ import test from 'node:test';
 import type {
   CodeHighlighterPlugin,
   HighlightOptions,
-  HighlightResult,
 } from 'streamdown';
 import {
   createPlainCodeHighlightResult,
   createSafeCodeHighlighter,
   resolveSupportedCodeLanguage,
 } from '../ai-elements/streamdownCodeHighlighter';
+
+type HighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin['highlight']>>;
 
 const createFakeHighlighter = (
   supportedLanguages: string[],

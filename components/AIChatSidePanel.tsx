@@ -1,48 +1,19 @@
-/**
- * AIChatSidePanel - Main AI chat interface side panel
- *
- * Zed-style agent panel with agent selector, scoped chat sessions,
- * message list, input area, and session history drawer.
- *
- * Core logic is decomposed into focused hooks:
- * - useAIChatStreaming: stream processing, abort management, agent sub-flows
- * - useConversationExport: export formats & object URL lifecycle
- */
 
-import {
-  History,
-  Plus,
-  Trash2,
-  X,
-} from 'lucide-react';
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '../lib/utils';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useWindowControls } from '../application/state/useWindowControls';
 import type {
   AIDraft,
   AIPanelView,
-  AIPermissionMode,
-  AIToolIntegrationMode,
   AgentModelPreset,
-  AISession,
   AISessionScope,
-  ChatMessage,
   DiscoveredAgent,
-  ExternalAgentConfig,
-  ProviderConfig,
-  WebSearchConfig,
 } from '../infrastructure/ai/types';
+import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
 import { matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
-import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import AgentSelector from './ai/AgentSelector';
-import ChatInput from './ai/ChatInput';
-import ChatMessageList from './ai/ChatMessageList';
-import ConversationExport from './ai/ConversationExport';
 import {
   getReadyUserSkillOptions,
   getNextSelectedUserSkillSlugsMap,
@@ -59,7 +30,6 @@ import {
   tryBeginDraftSend,
 } from './ai/draftSendGate';
 import { getSessionScopeMatchRank } from './ai/sessionScopeMatch';
-import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
 import { selectDraftForAgentSwitch } from '../application/state/aiDraftState';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
@@ -71,133 +41,9 @@ import { buildAcpHistoryMessagesForBridge } from './ai/acpHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
 import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
-import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
-
-function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
-  if (preset.thinkingLevels?.length) {
-    return preset.thinkingLevels.some((level) => `${preset.id}/${level}` === modelId);
-  }
-  return preset.id === modelId;
-}
-
-function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
-  return presets.some((preset) => modelPresetMatchesId(preset, modelId));
-}
-
-function isCopilotAgentConfig(agent?: ExternalAgentConfig): boolean {
-  if (!agent) return false;
-  const tokens = [
-    agent.id,
-    agent.name,
-    agent.icon,
-    agent.command,
-    agent.acpCommand,
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .map((value) => value.split('/').pop()?.toLowerCase() ?? value.toLowerCase());
-  return tokens.some((token) => token.includes('copilot'));
-}
-
-// -------------------------------------------------------------------
-// Props
-// -------------------------------------------------------------------
-
-interface AIChatSidePanelProps {
-  // Session state (per-scope)
-  sessions: AISession[];
-  activeSessionIdMap: Record<string, string | null>;
-  draftsByScope: Partial<Record<string, AIDraft>>;
-  panelViewByScope: Partial<Record<string, AIPanelView>>;
-  setActiveSessionId: (scopeKey: string, id: string | null) => void;
-  ensureDraftForScope: (scopeKey: string, agentId: string) => void;
-  updateDraft: (
-    scopeKey: string,
-    fallbackAgentId: string,
-    updater: (draft: AIDraft) => AIDraft,
-  ) => void;
-  showDraftView: (scopeKey: string) => void;
-  showSessionView: (scopeKey: string, sessionId: string) => void;
-  clearDraftForScope: (scopeKey: string) => void;
-  addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<void>;
-  removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
-  createSession: (scope: AISessionScope, agentId?: string) => AISession;
-  deleteSession: (sessionId: string, scopeKey?: string) => void;
-  updateSessionTitle: (sessionId: string, title: string) => void;
-  updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
-  addMessageToSession: (sessionId: string, message: ChatMessage) => void;
-  updateLastMessage: (
-    sessionId: string,
-    updater: (msg: ChatMessage) => ChatMessage,
-  ) => void;
-  updateMessageById: (
-    sessionId: string,
-    messageId: string,
-    updater: (msg: ChatMessage) => ChatMessage,
-  ) => void;
-  // Provider config
-  providers: ProviderConfig[];
-  activeProviderId: string;
-  activeModelId: string;
-
-  // Agent info
-  defaultAgentId: string;
-  toolIntegrationMode: AIToolIntegrationMode;
-  externalAgents: ExternalAgentConfig[];
-  setExternalAgents?: (value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => void;
-  agentModelMap: Record<string, string>;
-  setAgentModel: (agentId: string, modelId: string) => void;
-  agentProviderMap: Record<string, string>;
-  setAgentProvider: (agentId: string, providerId: string) => void;
-
-  // Safety
-  globalPermissionMode: AIPermissionMode;
-  setGlobalPermissionMode?: (mode: AIPermissionMode) => void;
-  commandBlocklist?: string[];
-  maxIterations?: number;
-
-  // Web search
-  webSearchConfig?: WebSearchConfig | null;
-
-  // Context
-  scopeType: 'terminal' | 'workspace';
-  scopeTargetId?: string;
-  scopeHostIds?: string[];
-  scopeLabel?: string;
-
-  // Terminal session context (from parent)
-  terminalSessions?: Array<{
-    sessionId: string;
-    hostId: string;
-    hostname: string;
-    label: string;
-    os?: string;
-    username?: string;
-    protocol?: string;
-    shellType?: string;
-    deviceType?: string;
-    connected: boolean;
-  }>;
-  resolveExecutorContext?: (scope: {
-    type: 'terminal' | 'workspace';
-    targetId?: string;
-    label?: string;
-  }) => ExecutorContext;
-
-  // Visibility
-  isVisible?: boolean;
-}
-
-// -------------------------------------------------------------------
-// Helpers
-// -------------------------------------------------------------------
-
-function generateId(): string {
-  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-// -------------------------------------------------------------------
-// Component
-// -------------------------------------------------------------------
+import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
+import { generateId, isCopilotAgentConfig, modelPresetsContainId } from './AIChatSidePanelHelpers';
+import { AIChatPanelContent } from './AIChatPanelContent';
 
 const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   sessions,
@@ -244,8 +90,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   isVisible = true,
 }) => {
   const { t } = useI18n();
-  // ── Per-scope state ──
-  // Derive scope key for per-scope isolation
   const scopeKey = `${scopeType}:${scopeTargetId ?? ''}`;
 
   const [showHistory, setShowHistory] = useState(false);
@@ -257,7 +101,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const resolveExecutorContextRef = useRef(resolveExecutorContext);
   resolveExecutorContextRef.current = resolveExecutorContext;
 
-  // ── Streaming hook ──
   const {
     streamingSessionIds,
     setStreamingForScope,
@@ -353,7 +196,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     return undefined;
   }, [terminalSessions, scopeType, scopeTargetId]);
 
-  // Proactively sync terminal session metadata to main process whenever scope or sessions change
   useEffect(() => {
     const bridge = getNetcattyBridge();
     if (bridge?.aiMcpUpdateSessions) {
@@ -380,11 +222,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setActiveSessionId,
   ]);
 
-  // When the resolved view is draft but activeSessionIdMap still points at a
-  // previously-shown session, clear that stale entry. Otherwise
-  // activeTerminalTargetIds keeps claiming ownership of the old session's
-  // target and getSessionScopeMatchRank suppresses matching history from
-  // other terminals until another action rewrites the map.
   useEffect(() => {
     if (!isVisible) return;
     if (normalizedPanelView.mode !== 'draft') return;
@@ -500,8 +337,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     };
   }, [isVisible, scopeKey, toolIntegrationMode, updateScopeDraft]);
 
-  // Sync provider configs to main process so it can decrypt API keys server-side.
-  // Keys stay encrypted in transit; main process decrypts only when making HTTP requests.
   useEffect(() => {
     const bridge = getNetcattyBridge();
     if (bridge?.aiSyncProviders && providers.length > 0) {
@@ -509,9 +344,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [providers]);
 
-  // Sync web search config to main process (allowlist + encrypted API key for server-side decryption).
-  // Note: This is fire-and-forget; if the first search fires before sync completes, it will fail
-  // with a clear error and succeed on retry. Making this blocking would require async tool creation.
   useEffect(() => {
     const bridge = getNetcattyBridge();
     if (bridge?.aiSyncWebSearch) {
@@ -519,15 +351,11 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     }
   }, [webSearchConfig?.apiHost, webSearchConfig?.apiKey, webSearchConfig?.enabled]);
 
-  // Preserve active streams across tab switches. The panel is conditionally
-  // mounted per tab, so unmounting here should not cancel in-flight work.
   useEffect(() => {
     return () => {
-      // no-op: stream lifecycle is managed by explicit stop/delete actions
     };
   }, []);
 
-  // Agent discovery
   const {
     discoveredAgents,
     isDiscovering,
@@ -557,61 +385,37 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     [selectedUserSkillSlugs, userSkillOptions],
   );
 
-  // ── Export hook ──
   const { handleExport } = useConversationExport(activeSession);
 
-  // Active provider info
   const activeProvider = useMemo(
     () => providers.find((p) => p.id === activeProviderId),
     [providers, activeProviderId],
   );
 
-  // Catty Agent honors a per-agent provider/model override from
-  // `agentProviderMap` / `agentModelMap`, falling back to the global active
-  // selection. External ACP agents (Claude/Codex/Copilot) keep their
-  // existing provider plumbing — the user picks them inside the ACP CLI
-  // itself, so a per-agent provider override doesn't apply.
   const cattyAgentProvider = useMemo(() => {
     const overrideId = agentProviderMap['catty'];
     if (overrideId) {
       const p = providers.find((cfg) => cfg.id === overrideId);
       if (p) return p;
-      // Override exists but points to a deleted provider — fall through
-      // to the global active selection.
     }
     return activeProvider;
   }, [agentProviderMap, providers, activeProvider]);
 
   const cattyAgentModelId = useMemo(() => {
-    // Whitespace-only model ids are treated as "no model" everywhere
-    // (picker, send guard, SDK) — normalize at the resolution boundary
-    // so a stored "   " never slips through downstream checks.
     const trim = (s: string | undefined | null): string => (s ?? '').trim();
     const overrideId = agentProviderMap['catty'];
     const overrideProvider = overrideId
       ? providers.find((cfg) => cfg.id === overrideId)
       : undefined;
     if (overrideProvider) {
-      // Override intact — prefer the per-agent saved model, then the
-      // override provider's defaultModel. Never reach for the global
-      // `activeModelId` here: that id belongs to whichever provider
-      // was globally active, not the one Catty is bound to now.
       return trim(agentModelMap['catty']) || trim(overrideProvider.defaultModel);
     }
-    // No override, OR a stale override (the bound provider was deleted):
-    // in either case the saved model id is no longer trustworthy as a
-    // Catty pick, so consult the global active selection instead.
     return trim(cattyAgentProvider?.defaultModel) || trim(activeModelId);
   }, [agentModelMap, agentProviderMap, providers, cattyAgentProvider, activeModelId]);
 
   const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
   const effectiveActiveModelId = currentAgentId === 'catty' ? cattyAgentModelId : activeModelId;
 
-  // Catty Agent surfaces its provider picker in the chat input. The list
-  // mirrors what Settings → AI → Providers shows — every configured
-  // provider, regardless of the per-provider `enabled` toggle, so the
-  // user can swap between everything they've set up without first going
-  // back into Settings to flip a switch.
   const cattyConfiguredProviders = useMemo(
     () => (currentAgentId === 'catty' ? providers : []),
     [currentAgentId, providers],
@@ -628,7 +432,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   const providerDisplayName = effectiveActiveProvider?.name ?? '';
   const modelDisplayName = effectiveActiveModelId || effectiveActiveProvider?.defaultModel || '';
 
-  // Agent model presets for the current external agent
   const currentAgentConfig = useMemo(
     () => currentAgentId !== 'catty' ? externalAgents.find(a => a.id === currentAgentId) : undefined,
     [currentAgentId, externalAgents],
@@ -646,10 +449,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  // For Codex, pick up the model declared in ~/.codex/config.toml (if any)
-  // so the picker can show just that model instead of the hardcoded ChatGPT
-  // preset list. Probing codex-acp for its full catalog returns the stock
-  // OpenAI models regardless of the active provider, which is misleading.
   const [codexConfigModel, setCodexConfigModel] = useState<string | null>(null);
   const [codexCustomConfigResolved, setCodexCustomConfigResolved] = useState(false);
   useEffect(() => {
@@ -667,9 +466,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       if (cancelled) return;
       const hasCustom = info?.state === 'connected_custom_config';
       setCodexConfigModel(info?.customConfig?.model ?? null);
-      // Only flip "resolved" to true when the probe confirms this is a
-      // custom-config session; otherwise keep it false so we fall back to
-      // the static CODEX_MODEL_PRESETS.
       setCodexCustomConfigResolved(hasCustom);
     }).catch(() => {
       if (!cancelled) {
@@ -685,9 +481,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   useEffect(() => {
     if (!currentAgentConfig?.acpCommand) return;
-    // ACP agents can expose their runtime model catalog during session setup.
-    // Codex also exposes model/reasoning selectors through ACP config options,
-    // which keeps the picker aligned with the user's installed CLI version.
     if (!isCopilotExternalAgent && !isClaudeManagedAgent && !isCodexManagedAgent) return;
 
     const bridge = getNetcattyBridge();
@@ -703,11 +496,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       currentAgentConfig.env,
     ).then((result) => {
       if (cancelled || !result?.ok || !Array.isArray(result.models)) return;
-      // If the probe came back empty, drop any stale cached catalog for this
-      // agent so `agentModelPresets` falls back to the hardcoded presets via
-      // the `?? getAgentModelPresets(...)` branch. Without this, a previously
-      // successful probe would keep surfacing models the backend no longer
-      // advertises.
       if (result.models.length === 0) {
         setRuntimeAgentModelPresets((prev) => {
           if (!(currentAgentId in prev)) return prev;
@@ -736,11 +524,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     };
   }, [currentAgentConfig, currentAgentId, isCopilotExternalAgent, isClaudeManagedAgent, isCodexManagedAgent, setAgentModel]);
 
-  // When Codex is backed by a ~/.codex/config.toml custom provider, the
-  // stock CODEX_MODEL_PRESETS catalog is invalid for that endpoint.
-  // codexCustomConfigResolved (declared above alongside codexConfigModel)
-  // stays false until the integration probe confirms this session is
-  // custom-config, so we don't flash an empty picker while loading.
   const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent;
 
   const agentModelPresets = useMemo(() => {
@@ -749,25 +532,19 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       if (runtimePresets) {
         return runtimePresets;
       }
-      // Config.toml with a pinned model → show just that model.
       if (codexConfigModel) {
         return [{ id: codexConfigModel, name: codexConfigModel }];
       }
-      // Config.toml custom provider without a pinned model → codex-acp
-      // uses its provider default. Don't surface the OpenAI presets; they
-      // wouldn't work. Empty list disables the picker.
       return [];
     }
     return runtimePresets ?? getAgentModelPresets(currentAgentConfig?.command);
   }, [currentAgentConfig?.command, currentAgentId, runtimeAgentModelPresets, hasCodexCustomConfig, codexConfigModel]);
 
-  // Per-agent model: recall last selection or use first preset as default
   const selectedAgentModel = useMemo(() => {
     const stored = agentModelMap[currentAgentId];
     if (stored && modelPresetsContainId(agentModelPresets, stored)) {
       return stored;
     }
-    // Default to first preset; for models with thinking levels, use the default level
     if (agentModelPresets.length > 0) {
       const first = agentModelPresets[0];
       if (first.thinkingLevels?.length) {
@@ -788,9 +565,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setAgentModel(currentAgentId, modelId);
   }, [currentAgentId, setAgentModel]);
 
-  // -------------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------------
 
   const handleNewChat = useCallback(() => {
     clearScopeDraft();
@@ -809,9 +583,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     void openSettingsWindow();
   }, [openSettingsWindow]);
 
-  // -------------------------------------------------------------------
-  // Shared helpers for handleSend sub-flows
-  // -------------------------------------------------------------------
 
   /** Ref to always access latest sessions (avoids stale closure in autoTitleSession). */
   const sessionsRef = useRef(sessions);
@@ -872,9 +643,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     });
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
-  // -------------------------------------------------------------------
-  // Main send handler (thin orchestrator)
-  // -------------------------------------------------------------------
 
   const handleSend = useCallback(async () => {
     const draft = currentDraftRef.current;
@@ -882,9 +650,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     const currentSessionView = activeSessionRef.current;
     const trimmed = draft?.text.trim() ?? '';
     const sendScopeKey = scopeKey;
-    // Double-submit protection currently relies on the draft being cleared
-    // immediately after the first send path starts; `isStreaming` alone does
-    // not protect the initial draft->session transition.
     if (!trimmed || isStreaming) return;
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
@@ -922,13 +687,9 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
       const isExternalAgent = sendAgentId !== 'catty';
 
-      // Catty Agent picks up the per-agent provider/model override. External
-      // ACP agents continue to ride the global selection (they wire their
-      // own provider through the CLI).
       const sendActiveProvider = isExternalAgent ? activeProvider : effectiveActiveProvider;
       const sendActiveModelId = isExternalAgent ? activeModelId : effectiveActiveModelId;
 
-      // No provider configured for built-in agent
       if (!isExternalAgent && !sendActiveProvider) {
         addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
@@ -939,13 +700,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         return;
       }
 
-      // Catty needs a concrete model id — the SDK would otherwise dispatch
-      // an empty string and surface a vague backend error. The chat-input
-      // chip already disables provider rows with no defaultModel, but a
-      // stale binding (e.g. user emptied the provider's defaultModel after
-      // selecting it) can still land here. Trim before checking so
-      // whitespace-only ids (which the picker also treats as empty) don't
-      // sneak past either.
       if (!isExternalAgent && !sendActiveModelId.trim()) {
         addMessageToSession(sessionId, { id: generateId(), role: 'user', content: trimmed, timestamp: Date.now() });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
@@ -956,7 +710,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
         return;
       }
 
-      // Add user message
       addMessageToSession(sessionId, {
         id: generateId(), role: 'user', content: trimmed,
         ...(attachments.length > 0 ? { attachments } : {}),
@@ -967,7 +720,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);
 
-      // Create assistant message placeholder with a tracked ID
       const assistantMsgId = generateId();
       addMessageToSession(sessionId, {
         id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now(),
@@ -1051,15 +803,12 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     controller?.abort();
     abortControllersRef.current.delete(activeSessionId);
     setStreamingForScope(activeSessionId, false);
-    // Clear statusText on the last message so stale status indicators disappear
     updateLastMessage(activeSessionId, msg => ({
       ...msg,
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    // Clear pending approvals for this session (so tool execute functions don't hang)
     clearAllPendingApprovals(activeSessionId);
-    // Cancel in-flight command executions (Catty Agent + ACP Agent)
     const bridge = getNetcattyBridge();
     bridge?.aiCattyCancelExec?.(activeSessionId);
     bridge?.aiAcpCancel?.('', activeSessionId);
@@ -1080,7 +829,6 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
       deleteSession(sessionId, scopeKey);
-      // Active session clearing is handled by deleteSession with scopeKey
     },
     [deleteSession, scopeKey],
   );
@@ -1098,256 +846,59 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     setShowHistory(false);
   }, [ensureScopeDraft, showScopeDraftView, updateScopeDraft]);
 
-  // -------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------
 
   if (!isVisible) return null;
 
   return (
-    <div className="flex flex-col h-full bg-background" data-section="ai-chat-panel">
-      {/* ── Header ── */}
-      <div className="px-2.5 py-1.5 flex items-center justify-between border-b border-border/50 shrink-0">
-        <AgentSelector
-          currentAgentId={currentAgentId}
-          externalAgents={externalAgents}
-          discoveredAgents={discoveredAgents}
-          isDiscovering={isDiscovering}
-          onSelectAgent={handleAgentChange}
-          onEnableDiscoveredAgent={handleEnableDiscoveredAgent}
-          onRediscover={rediscover}
-          onManageAgents={handleOpenSettings}
-        />
-        <div className="flex items-center gap-0.5">
-          <ConversationExport
-            session={activeSession}
-            onExport={handleExport}
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-md text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
-                onClick={() => setShowHistory(!showHistory)}
-              >
-                <History size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('ai.chat.sessionHistory')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 rounded-md text-primary/82 hover:bg-primary/[0.10] hover:text-primary"
-                onClick={handleNewChat}
-              >
-                <Plus size={15} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('ai.chat.newChat')}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* ── Main content ── */}
-      {showHistory ? (
-        <SessionHistoryDrawer
-          sessions={historySessions}
-          activeSessionId={activeSessionId}
-          onSelect={handleSelectSession}
-          onDelete={handleDeleteSession}
-          onClose={() => setShowHistory(false)}
-        />
-      ) : (
-        <>
-          {/* Chat messages */}
-          <ChatMessageList
-            messages={messages}
-            isStreaming={isStreaming}
-            activeSessionId={activeSessionId}
-          />
-
-          {/* Recent sessions (Zed-style, shown when no messages) */}
-          {messages.length === 0 && historySessions.length > 0 && (
-            <div className="shrink-0 px-4 pb-1">
-              <div className="flex items-baseline justify-between mb-2">
-                <span className="text-[11px] text-muted-foreground/30 tracking-wide">{t('ai.chat.recent')}</span>
-                <button
-                  onClick={() => setShowHistory(true)}
-                  className="text-[11px] text-muted-foreground/30 hover:text-muted-foreground/50 transition-colors cursor-pointer"
-                >
-                  {t('ai.chat.viewAll')}
-                </button>
-              </div>
-              {historySessions.slice(0, 3).map((session) => (
-                <button
-                  key={session.id}
-                  onClick={() => handleSelectSession(session.id)}
-                  className="w-full flex items-baseline justify-between py-1.5 text-left hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <span className="text-[13px] text-foreground/60 truncate pr-4">
-                    {session.title || t('ai.chat.untitled')}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground/25 shrink-0">
-                    {formatRelativeTime(new Date(session.updatedAt), t)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Input area */}
-          <ChatInput
-            value={inputValue}
-            onChange={setInputValue}
-            onSend={handleSend}
-            onStop={handleStop}
-            isStreaming={isStreaming}
-            disabled={!canSendCurrentAgent}
-            providerName={providerDisplayName}
-            modelName={modelDisplayName}
-            agentName={currentAgentId === 'catty' ? 'Catty Agent' : externalAgents.find(a => a.id === currentAgentId)?.name}
-            modelPresets={agentModelPresets}
-            selectedModelId={selectedAgentModel}
-            onModelSelect={handleAgentModelSelect}
-            providerSwitcher={
-              currentAgentId === 'catty' && cattyConfiguredProviders.length > 0
-                ? {
-                    providers: cattyConfiguredProviders,
-                    selectedProviderId: effectiveActiveProvider?.id,
-                    selectedModelId: effectiveActiveModelId || undefined,
-                    onSelect: handleAgentProviderModelSelect,
-                  }
-                : undefined
-            }
-            files={files}
-            onAddFiles={addFiles}
-            onRemoveFile={removeFile}
-            hosts={terminalSessions.map(s => ({ sessionId: s.sessionId, hostname: s.hostname, label: s.label, connected: s.connected }))}
-            selectedUserSkills={selectedUserSkills}
-            userSkills={userSkillOptions}
-            onAddUserSkill={addSelectedUserSkill}
-            onRemoveUserSkill={removeSelectedUserSkill}
-            permissionMode={globalPermissionMode}
-            onPermissionModeChange={setGlobalPermissionMode}
-          />
-        </>
-      )}
-
-    </div>
+    <AIChatPanelContent
+      t={t}
+      currentAgentId={currentAgentId}
+      externalAgents={externalAgents}
+      discoveredAgents={discoveredAgents}
+      isDiscovering={isDiscovering}
+      handleAgentChange={handleAgentChange}
+      handleEnableDiscoveredAgent={handleEnableDiscoveredAgent}
+      rediscover={rediscover}
+      handleOpenSettings={handleOpenSettings}
+      activeSession={activeSession}
+      handleExport={handleExport}
+      showHistory={showHistory}
+      setShowHistory={setShowHistory}
+      handleNewChat={handleNewChat}
+      historySessions={historySessions}
+      activeSessionId={activeSessionId}
+      handleSelectSession={handleSelectSession}
+      handleDeleteSession={handleDeleteSession}
+      messages={messages}
+      isStreaming={isStreaming}
+      inputValue={inputValue}
+      setInputValue={setInputValue}
+      handleSend={handleSend}
+      handleStop={handleStop}
+      canSendCurrentAgent={canSendCurrentAgent}
+      providerDisplayName={providerDisplayName}
+      modelDisplayName={modelDisplayName}
+      agentModelPresets={agentModelPresets}
+      selectedAgentModel={selectedAgentModel}
+      handleAgentModelSelect={handleAgentModelSelect}
+      cattyConfiguredProviders={cattyConfiguredProviders}
+      effectiveActiveProvider={effectiveActiveProvider}
+      effectiveActiveModelId={effectiveActiveModelId}
+      handleAgentProviderModelSelect={handleAgentProviderModelSelect}
+      files={files}
+      addFiles={addFiles}
+      removeFile={removeFile}
+      terminalSessions={terminalSessions}
+      selectedUserSkills={selectedUserSkills}
+      userSkillOptions={userSkillOptions}
+      addSelectedUserSkill={addSelectedUserSkill}
+      removeSelectedUserSkill={removeSelectedUserSkill}
+      globalPermissionMode={globalPermissionMode}
+      setGlobalPermissionMode={setGlobalPermissionMode}
+    />
   );
 };
 
-// -------------------------------------------------------------------
-// Session History Drawer
-// -------------------------------------------------------------------
-
-interface SessionHistoryDrawerProps {
-  sessions: AISession[];
-  activeSessionId: string | null;
-  onSelect: (sessionId: string) => void;
-  onDelete: (e: React.MouseEvent, sessionId: string) => void;
-  onClose: () => void;
-}
-
-const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
-  sessions,
-  activeSessionId,
-  onSelect,
-  onDelete,
-  onClose,
-}) => {
-  const { t } = useI18n();
-  return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-4 py-2.5 flex items-center justify-between shrink-0 border-b border-border/30">
-        <span className="text-[13px] font-medium text-foreground/80">{t('ai.chat.allSessions')}</span>
-        <button
-          onClick={onClose}
-          className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
-        >
-          <X size={14} />
-        </button>
-      </div>
-      <ScrollArea className="flex-1">
-        <div className="px-3">
-          {sessions.length === 0 ? (
-            <div className="py-12 text-center">
-              <p className="text-[13px] text-muted-foreground/40">
-                {t('ai.chat.noSessions')}
-              </p>
-            </div>
-          ) : (
-            sessions.map((session) => {
-              const isActive = session.id === activeSessionId;
-              const time = new Date(session.updatedAt);
-              const timeStr = formatRelativeTime(time, t);
-
-              return (
-                <div
-                  key={session.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onSelect(session.id)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(session.id); }}
-                  className={cn(
-                    SESSION_HISTORY_ROW_CLASSNAMES.row,
-                    isActive ? 'text-foreground' : 'text-foreground/70 hover:text-foreground',
-                  )}
-                >
-                  <span className={SESSION_HISTORY_ROW_CLASSNAMES.title}>
-                    {session.title || t('ai.chat.untitled')}
-                  </span>
-                  <div className={SESSION_HISTORY_ROW_CLASSNAMES.meta}>
-                    <span className={SESSION_HISTORY_ROW_CLASSNAMES.time}>
-                      {timeStr}
-                    </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={(e) => onDelete(e, session.id)}
-                          className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t('common.delete')}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-};
-
-// -------------------------------------------------------------------
-// Helpers
-// -------------------------------------------------------------------
-
-function formatRelativeTime(date: Date, t: (key: string) => string): string {
-  const now = Date.now();
-  const diff = now - date.getTime();
-  const minutes = Math.floor(diff / 60_000);
-  const hours = Math.floor(diff / 3_600_000);
-  const days = Math.floor(diff / 86_400_000);
-
-  if (minutes < 1) return t('ai.chat.justNow');
-  if (minutes < 60) return t('ai.chat.minutesAgo').replace('{n}', String(minutes));
-  if (hours < 24) return t('ai.chat.hoursAgo').replace('{n}', String(hours));
-  if (days < 7) return t('ai.chat.daysAgo').replace('{n}', String(days));
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-// -------------------------------------------------------------------
-// Export
-// -------------------------------------------------------------------
 
 const AIChatSidePanel = React.memo(AIChatSidePanelInner);
 AIChatSidePanel.displayName = 'AIChatSidePanel';
