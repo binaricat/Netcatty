@@ -303,6 +303,16 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [newHostGroupPath, setNewHostGroupPath] = useState<string | null>(null);
 
+  // When the side panel is open, Tailwind's viewport-based grid-cols-* can't
+  // react to the narrowed content area, so we drive the host-grid column count
+  // off the actual container width (measured below). A fixed column count keeps
+  // a lone card at one column's width instead of stretching it across the row
+  // the way auto-fit + 1fr would. The count is published as a CSS variable
+  // (set imperatively) rather than React state, so re-flowing the grid never
+  // re-renders this (large) component during panel transitions / window resize.
+  const hostListScrollRef = useRef<HTMLDivElement>(null);
+  const splitGridColsRef = useRef(0);
+
   // Close host panel if the host being edited was deleted.
   // Track previous host IDs so we only close for actual deletions, not for
   // unsaved new/duplicated hosts whose IDs were never in the hosts array.
@@ -1520,12 +1530,41 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const hasHostsSidePanel =
     isHostsSectionActive &&
     ((isGroupPanelOpen && !!editingGroupPath) || isHostPanelOpen);
+  // Fixed N columns (not auto-fit) so populated rows fill the width with no
+  // trailing gap AND a section with a single card (e.g. Pinned) keeps it at one
+  // column's width instead of stretching it across the whole row — matching the
+  // no-panel grid-cols-* behaviour, just measured from the container. The actual
+  // column count rides on the --vault-grid-cols custom property (set by the
+  // ResizeObserver below); the fallback applies until the first measurement.
   const splitViewGridStyle = hasHostsSidePanel
-    ? {
-      gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 220px), 280px))",
-      justifyContent: "start" as const,
-    }
+    ? { gridTemplateColumns: "var(--vault-grid-cols, repeat(2, minmax(0, 1fr)))" }
     : undefined;
+
+  // Track the host-list container width and derive the column count the same way
+  // the auto-fit grid did (≈220px min card + 12px gap), but as a fixed count so
+  // lone cards don't stretch. We write the whole grid-template-columns value into
+  // a CSS variable imperatively (no setState) and only when the count actually
+  // changes, so panel transitions / window resizing reflow the grid natively
+  // without re-rendering this component.
+  useEffect(() => {
+    const el = hostListScrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const GAP = 12; // matches gap-3
+    const MIN_CARD = 220;
+    const PADDING_X = 32; // matches px-4 on both sides
+    const recompute = () => {
+      const usable = el.clientWidth - PADDING_X;
+      if (usable <= 0) return; // hidden / not laid out yet
+      const next = Math.max(1, Math.floor((usable + GAP) / (MIN_CARD + GAP)));
+      if (next === splitGridColsRef.current) return;
+      splitGridColsRef.current = next;
+      el.style.setProperty("--vault-grid-cols", `repeat(${next}, minmax(0, 1fr))`);
+    };
+    recompute();
+    const observer = new ResizeObserver(recompute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const isSameDropTarget = useCallback((a: DropTarget | null, b: DropTarget | null) => {
     if (!a || !b) return a === b;
@@ -2084,6 +2123,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
         {/* Keep hosts mounted so switching sections does not reset scroll or remount the list. */}
         <div
+          ref={hostListScrollRef}
           className={cn(
             "flex-1 overflow-auto px-4 py-4 space-y-6",
             !isHostsSectionActive && "hidden",

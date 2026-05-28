@@ -280,9 +280,22 @@ interface RootTopTabProps {
 
 const RootTopTab: React.FC<RootTopTabProps> = memo(({ tabId, label, icon, className }) => {
   const isActive = useIsTabActive(tabId);
-  const handleClick = useCallback(() => {
+  // The Vaults tab is the app's persistent "home", so keep its selected state
+  // visually flat — no active background fill (the label/icon still brighten to
+  // the active foreground for subtle feedback). Other root tabs (SFTP) keep the
+  // normal filled active state.
+  const suppressActiveBg = tabId === 'vault';
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Flat tabs never change their React-managed backgroundColor (transparent
+    // when inactive AND active), so React can't diff transparent → transparent
+    // to clear the hover fill that onMouseEnter wrote imperatively. Clicking
+    // straight from a hover would otherwise leave a stuck highlight, so reset
+    // it here before activating.
+    if (suppressActiveBg) {
+      e.currentTarget.style.backgroundColor = 'transparent';
+    }
     activeTabStore.setActiveTabId(tabId);
-  }, [tabId]);
+  }, [tabId, suppressActiveBg]);
 
   return (
     <div
@@ -295,7 +308,7 @@ const RootTopTab: React.FC<RootTopTabProps> = memo(({ tabId, label, icon, classN
         className,
       )}
       style={{
-        backgroundColor: isActive
+        backgroundColor: isActive && !suppressActiveBg
           ? 'var(--top-tabs-active-bg, hsl(var(--background)))'
           : 'transparent',
         color: isActive
