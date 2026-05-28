@@ -328,11 +328,16 @@ export const CODEX_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning' },
 ];
 
+export const CODEBUDDY_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'auto', name: 'Auto', description: 'Automatically select the best model' },
+];
+
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
   if (!agentCommand) return [];
   const basename = agentCommand.split('/').pop()?.toLowerCase() ?? '';
   if (basename.startsWith('claude')) return CLAUDE_MODEL_PRESETS;
   if (basename.startsWith('codex')) return CODEX_MODEL_PRESETS;
+  if (basename.startsWith('codebuddy')) return CODEBUDDY_MODEL_PRESETS;
   return [];
 }
 

@@ -1,11 +1,12 @@
 import type { DiscoveredAgent, ExternalAgentConfig } from './types';
 
-export type ManagedAgentKey = 'codex' | 'claude' | 'copilot';
+export type ManagedAgentKey = 'codex' | 'claude' | 'copilot' | 'codebuddy';
 
 const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; acpCommand: string }> = {
   codex: { commandNames: ['codex', 'codex-acp'], acpCommand: 'codex-acp' },
   claude: { commandNames: ['claude'], acpCommand: 'claude-agent-acp' },
   copilot: { commandNames: ['copilot'], acpCommand: 'copilot' },
+  codebuddy: { commandNames: ['codebuddy'], acpCommand: 'codebuddy' },
 };
 
 function getCommandBasename(command: string | undefined): string {
@@ -28,7 +29,7 @@ function matchesPrimaryCliBasename(command: string | undefined, agentKey: Manage
 export function isSettingsManagedDiscoveredAgent(
   agent: Pick<DiscoveredAgent, 'command'>,
 ): agent is Pick<DiscoveredAgent, 'command'> & { command: ManagedAgentKey } {
-  return agent.command === 'codex' || agent.command === 'claude' || agent.command === 'copilot';
+  return agent.command === 'codex' || agent.command === 'claude' || agent.command === 'copilot' || agent.command === 'codebuddy';
 }
 
 export function matchesManagedAgentConfig(

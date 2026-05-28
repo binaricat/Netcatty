@@ -448,6 +448,10 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     () => currentAgentConfig ? matchesManagedAgentConfig(currentAgentConfig, 'claude') : false,
     [currentAgentConfig],
   );
+  const isCodebuddyManagedAgent = useMemo(
+    () => currentAgentConfig ? matchesManagedAgentConfig(currentAgentConfig, 'codebuddy') : false,
+    [currentAgentConfig],
+  );
 
   const [codexConfigModel, setCodexConfigModel] = useState<string | null>(null);
   const [codexCustomConfigResolved, setCodexCustomConfigResolved] = useState(false);
@@ -481,7 +485,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
 
   useEffect(() => {
     if (!currentAgentConfig?.acpCommand) return;
-    if (!isCopilotExternalAgent && !isClaudeManagedAgent && !isCodexManagedAgent) return;
+    if (!isCopilotExternalAgent && !isClaudeManagedAgent && !isCodexManagedAgent && !isCodebuddyManagedAgent) return;
 
     const bridge = getNetcattyBridge();
     if (!bridge?.aiAcpListModels) return;
@@ -522,7 +526,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentAgentConfig, currentAgentId, isCopilotExternalAgent, isClaudeManagedAgent, isCodexManagedAgent, setAgentModel]);
+  }, [currentAgentConfig, currentAgentId, isCopilotExternalAgent, isClaudeManagedAgent, isCodexManagedAgent, isCodebuddyManagedAgent, setAgentModel]);
 
   const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent;
 
@@ -537,8 +541,19 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       }
       return [];
     }
-    return runtimePresets ?? getAgentModelPresets(currentAgentConfig?.command);
-  }, [currentAgentConfig?.command, currentAgentId, runtimeAgentModelPresets, hasCodexCustomConfig, codexConfigModel]);
+    const staticPresets = getAgentModelPresets(currentAgentConfig?.command);
+    if (runtimePresets) {
+      // For Codebuddy, ensure the static "auto" preset always appears first
+      // even when dynamic ACP models are available
+      if (isCodebuddyManagedAgent && staticPresets.length > 0) {
+        const staticIds = new Set(staticPresets.map((p) => p.id));
+        const filtered = runtimePresets.filter((p) => !staticIds.has(p.id));
+        return [...staticPresets, ...filtered];
+      }
+      return runtimePresets;
+    }
+    return staticPresets;
+  }, [currentAgentConfig?.command, currentAgentId, runtimeAgentModelPresets, hasCodexCustomConfig, codexConfigModel, isCodebuddyManagedAgent]);
 
   const selectedAgentModel = useMemo(() => {
     const stored = agentModelMap[currentAgentId];

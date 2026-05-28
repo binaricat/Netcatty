@@ -130,6 +130,13 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     acpCommand: "copilot",
     acpArgs: ["--acp", "--stdio"],
   },
+  codebuddy: {
+    name: "CodeBuddy Code",
+    args: ["-p", "{prompt}"],
+    icon: "codebuddy",
+    acpCommand: "codebuddy",
+    acpArgs: ["--acp"],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -156,13 +163,14 @@ export function normalizeCodexBridgeError(error: unknown): string {
 // Provider icon helper
 // ---------------------------------------------------------------------------
 
-export type SettingsIconId = AIProviderId | "claude" | "copilot";
+export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy";
 
 export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   openai: "/ai/providers/openai.svg",
   anthropic: "/ai/providers/anthropic.svg",
   claude: "/ai/agents/claude.svg",
   copilot: "/ai/agents/copilot.svg",
+  codebuddy: "/ai/agents/codebuddy.svg",
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
@@ -174,6 +182,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   anthropic: "bg-orange-600",
   claude: "bg-orange-600",
   copilot: "border border-zinc-300 bg-white",
+  codebuddy: "bg-indigo-600",
   google: "bg-blue-600",
   ollama: "bg-purple-600",
   openrouter: "bg-pink-600",

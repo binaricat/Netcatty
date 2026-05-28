@@ -15,7 +15,8 @@ function registerAcpHandlers(ctx) {
       const isCodexAgent = matchesAgentCommand(acpCommand, "codex-acp");
       const isClaudeAgent = matchesAgentCommand(acpCommand, "claude-agent-acp");
       const isCopilotAgent = matchesAgentCommand(acpCommand, "copilot");
-      const agentLabel = isCodexAgent ? "codex" : isClaudeAgent ? "claude" : isCopilotAgent ? "copilot" : acpCommand;
+      const isCodebuddyAgent = matchesAgentCommand(acpCommand, "codebuddy");
+      const agentLabel = isCodexAgent ? "codex" : isClaudeAgent ? "claude" : isCopilotAgent ? "copilot" : isCodebuddyAgent ? "codebuddy" : acpCommand;
 
       const resolvedProvider = providerId ? resolveProviderApiKey(providerId) : null;
       const apiKey = resolvedProvider?.apiKey || undefined;
@@ -183,13 +184,14 @@ function registerAcpHandlers(ctx) {
       const isCodexAgent = matchesAgentCommand(acpCommand, "codex-acp");
       isClaudeAgent = matchesAgentCommand(acpCommand, "claude-agent-acp");
       const isCopilotAgent = matchesAgentCommand(acpCommand, "copilot");
+      const isCodebuddyAgent = matchesAgentCommand(acpCommand, "codebuddy");
       // For Claude: detect whether any auth is reachable so we can turn an
       // opaque "-32603 Internal error" into actionable guidance on failure.
       // Heuristic only (macOS may keep creds in Keychain) — never hard-block.
       claudeAuthPresence = isClaudeAgent
         ? detectClaudeAuthPresence({ ...shellEnv, ...normalizeAgentEnv(requestedAgentEnv) })
         : null;
-      const agentLabel = isCodexAgent ? "codex" : isClaudeAgent ? "claude" : isCopilotAgent ? "copilot" : acpCommand;
+      const agentLabel = isCodexAgent ? "codex" : isClaudeAgent ? "claude" : isCopilotAgent ? "copilot" : isCodebuddyAgent ? "codebuddy" : acpCommand;
       const effectiveToolIntegrationMode = normalizeToolIntegrationMode(toolIntegrationMode);
       debugMcpLog("ACP request start", {
         requestId,
@@ -201,6 +203,7 @@ function registerAcpHandlers(ctx) {
         sessionCwd,
         isCodexAgent,
         isClaudeAgent,
+        isCodebuddyAgent,
         toolIntegrationMode: effectiveToolIntegrationMode,
       });
 
@@ -257,6 +260,11 @@ function registerAcpHandlers(ctx) {
           // settings change invalidates the cached per-session provider and the
           // next turn respawns with the new config instead of reusing a stale
           // process spawned with the old env.
+          ? JSON.stringify(normalizeAgentEnv(requestedAgentEnv))
+        : isCodebuddyAgent
+          // Same rationale as Claude: Codebuddy auth/config (API key, internet
+          // environment) is carried entirely in agentEnv, so a change must
+          // invalidate the cached provider to avoid serving stale credentials.
           ? JSON.stringify(normalizeAgentEnv(requestedAgentEnv))
           : null;
       const mcpSnapshot = isCodexAgent
@@ -395,6 +403,9 @@ function registerAcpHandlers(ctx) {
         if (claudeAcp?.env) {
           Object.assign(agentEnv, claudeAcp.env);
         }
+        // Copilot manages its own MCP connections via COPILOT_HOME config;
+        // all other agents (Claude, Codex, Codebuddy, etc.) receive MCP
+        // servers through the ACP session config.
         const sessionMcpServers = isCopilotAgent ? [] : mcpSnapshot.mcpServers;
 
         const provider = createACPProvider({
@@ -515,6 +526,9 @@ function registerAcpHandlers(ctx) {
           })(),
           session: {
             cwd: sessionCwd,
+            // Same Copilot MCP exclusion as the primary provider path:
+            // Copilot manages its own MCP connections via COPILOT_HOME;
+            // all other agents receive MCP servers through session config.
             mcpServers: isCopilotAgent ? [] : mcpSnapshot.mcpServers,
           },
           ...(isCodexAgent

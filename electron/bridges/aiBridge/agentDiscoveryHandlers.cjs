@@ -33,6 +33,15 @@ function registerAgentDiscoveryHandlers(ctx) {
         acpArgs: ["--acp", "--stdio"],
         args: ["-p", "{prompt}"],
       },
+      {
+        command: "codebuddy",
+        name: "CodeBuddy Code",
+        icon: "codebuddy",
+        description: "CodeBuddy Code - AI coding assistant",
+        acpCommand: "codebuddy",
+        acpArgs: ["--acp"],
+        args: ["-p", "{prompt}"],
+      },
     ];
 
     const shellEnv = await getShellEnv();
