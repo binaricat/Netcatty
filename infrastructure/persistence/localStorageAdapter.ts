@@ -9,7 +9,10 @@ const safeParse = <T>(value: string | null): T | null => {
 
 export const LOCAL_STORAGE_ADAPTER_CHANGED_EVENT = 'netcatty:local-storage-adapter-changed';
 
-function emitLocalStorageAdapterChanged(key: string): void {
+const pendingChangedKeys = new Set<string>();
+let emitChangedKeysTimer: ReturnType<typeof setTimeout> | null = null;
+
+function dispatchLocalStorageAdapterChanged(key: string): void {
   try {
     const target = globalThis as typeof globalThis & {
       dispatchEvent?: (event: Event) => boolean;
@@ -23,6 +26,22 @@ function emitLocalStorageAdapterChanged(key: string): void {
   } catch {
     // ignore
   }
+}
+
+function emitLocalStorageAdapterChanged(key: string): void {
+  pendingChangedKeys.add(key);
+  if (emitChangedKeysTimer) return;
+
+  // Defer same-window storage notifications so React render-phase writes do
+  // not synchronously trigger state updates in unrelated components.
+  emitChangedKeysTimer = setTimeout(() => {
+    emitChangedKeysTimer = null;
+    const keys = Array.from(pendingChangedKeys);
+    pendingChangedKeys.clear();
+    for (const changedKey of keys) {
+      dispatchLocalStorageAdapterChanged(changedKey);
+    }
+  }, 0);
 }
 
 /**
