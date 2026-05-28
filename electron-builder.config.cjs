@@ -63,6 +63,8 @@ module.exports = {
         'node_modules/@zed-industries/codex-acp/**/*',
         'node_modules/@zed-industries/codex-acp-*/**/*',
         'node_modules/@modelcontextprotocol/sdk/**/*',
+        'lib/**/*.cjs',
+        'lib/**/*.json',
         'node_modules/zod/**/*',
         'node_modules/zod-to-json-schema/**/*',
         'node_modules/ajv/**/*',
