@@ -10,6 +10,10 @@ const { exec } = require("node:child_process");
 const { utils: sshUtils } = require("ssh2");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
+const {
+  normalizePrivateKeyForSsh2,
+  PrivateKeyPassphraseError,
+} = require("./privateKeyNormalizer.cjs");
 
 // Default SSH key names in priority order
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -133,6 +137,30 @@ function notifyPassphraseAuthFailed(sender, keyPath, resolvedPath, keyIds) {
   }
 }
 
+/**
+ * Resolve a private key (and optional passphrase) into a form ssh2 can parse.
+ * PKCS#8 keys, which ssh2 rejects, are transparently converted to a legacy PEM
+ * (see privateKeyNormalizer.cjs).
+ *
+ * @returns {{ privateKey: string, passphrase: string|undefined } | null}
+ *   The usable key, or null when the passphrase is wrong / the key can't be parsed.
+ * @throws {UnsupportedPrivateKeyError} When a PKCS#8 key has no convertible legacy form.
+ */
+function resolveKeyForAuth(privateKey, passphrase) {
+  let normalized;
+  try {
+    normalized = normalizePrivateKeyForSsh2(privateKey, passphrase);
+  } catch (err) {
+    if (err instanceof PrivateKeyPassphraseError) return null;
+    throw err;
+  }
+  const parsed = sshUtils.parseKey(normalized.privateKey, normalized.passphrase);
+  if (parsed && !(parsed instanceof Error)) {
+    return { privateKey: normalized.privateKey, passphrase: normalized.passphrase };
+  }
+  return null;
+}
+
 async function preparePrivateKeyForAuth({
   sender,
   privateKey,
@@ -147,7 +175,8 @@ async function preparePrivateKeyForAuth({
   if (!privateKey) return null;
 
   if (!isKeyEncrypted(privateKey)) {
-    return { privateKey, keyPath, keyName };
+    const resolved = resolveKeyForAuth(privateKey, undefined);
+    return { privateKey: resolved ? resolved.privateKey : privateKey, keyPath, keyName };
   }
 
   const promptKeyPath = keyPath || `SSH key for ${keyName || hostname || "connection"}`;
@@ -155,9 +184,9 @@ async function preparePrivateKeyForAuth({
   let passphraseInvalid = false;
 
   if (initialPassphrase) {
-    const parsed = sshUtils.parseKey(privateKey, initialPassphrase);
-    if (parsed && !(parsed instanceof Error)) {
-      return { privateKey, keyPath, keyName, passphrase: initialPassphrase };
+    const resolved = resolveKeyForAuth(privateKey, initialPassphrase);
+    if (resolved) {
+      return { privateKey: resolved.privateKey, keyPath, keyName, passphrase: resolved.passphrase };
     }
     console.log(`${logPrefix} Stored passphrase failed for private key`, { keyPath: promptKeyPath });
     notifyPassphraseAuthFailed(sender, promptKeyPath, undefined, keyId ? [keyId] : undefined);
@@ -184,9 +213,9 @@ async function preparePrivateKeyForAuth({
       return null;
     }
 
-    const parsed = sshUtils.parseKey(privateKey, result.passphrase);
-    if (parsed && !(parsed instanceof Error)) {
-      return { privateKey, keyPath, keyName, passphrase: result.passphrase };
+    const resolved = resolveKeyForAuth(privateKey, result.passphrase);
+    if (resolved) {
+      return { privateKey: resolved.privateKey, keyPath, keyName, passphrase: resolved.passphrase };
     }
 
     console.log(`${logPrefix} Entered passphrase failed for private key`, { keyPath: promptKeyPath });
@@ -208,14 +237,15 @@ async function loadIdentityFileForAuth({
   const keyName = path.basename(resolvedPath);
 
   if (!isKeyEncrypted(privateKey)) {
-    return { privateKey, keyPath: resolvedPath, keyName };
+    const resolved = resolveKeyForAuth(privateKey, undefined);
+    return { privateKey: resolved ? resolved.privateKey : privateKey, keyPath: resolvedPath, keyName };
   }
 
   let passphraseInvalid = false;
   if (initialPassphrase) {
-    const parsed = sshUtils.parseKey(privateKey, initialPassphrase);
-    if (parsed && !(parsed instanceof Error)) {
-      return { privateKey, keyPath: resolvedPath, keyName, passphrase: initialPassphrase };
+    const resolved = resolveKeyForAuth(privateKey, initialPassphrase);
+    if (resolved) {
+      return { privateKey: resolved.privateKey, keyPath: resolvedPath, keyName, passphrase: resolved.passphrase };
     }
     console.log(`${logPrefix} Stored passphrase failed for identity file`, { keyPath: resolvedPath });
     notifyPassphraseAuthFailed(sender, keyPath, resolvedPath);
@@ -242,9 +272,9 @@ async function loadIdentityFileForAuth({
       return null;
     }
 
-    const parsed = sshUtils.parseKey(privateKey, result.passphrase);
-    if (parsed && !(parsed instanceof Error)) {
-      return { privateKey, keyPath: resolvedPath, keyName, passphrase: result.passphrase };
+    const resolved = resolveKeyForAuth(privateKey, result.passphrase);
+    if (resolved) {
+      return { privateKey: resolved.privateKey, keyPath: resolvedPath, keyName, passphrase: resolved.passphrase };
     }
 
     console.log(`${logPrefix} Entered passphrase failed for identity file`, { keyPath: resolvedPath });
