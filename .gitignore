@@ -40,7 +40,6 @@ coverage
 
 # Codex
 /.codex/
-/CLAUDE.md
 
 # AI / Superpowers generated docs (local only)
 /docs/superpowers/
