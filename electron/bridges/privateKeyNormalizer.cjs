@@ -40,6 +40,38 @@ class UnsupportedPrivateKeyError extends Error {
   }
 }
 
+// Matches a private-key PEM block by its BEGIN/END markers (which survive even
+// when the surrounding newlines are lost), capturing the label and raw body.
+const PEM_BLOCK_RE =
+  /-----BEGIN ((?:RSA |DSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----([\s\S]*?)-----END \1-----/;
+
+/**
+ * Rebuild clean PEM framing for a key whose text was mangled in transit —
+ * newlines collapsed to spaces, turned into literal "\n", or lines indented.
+ * Returns the repaired PEM, or null when it isn't a recoverable block.
+ *
+ * The base64 body is preserved byte-for-byte (only non-base64 characters are
+ * stripped before re-wrapping), so this can never produce a different key.
+ * Encrypted legacy PEM (Proc-Type / DEK-Info header lines inside the body) is
+ * left alone — those lines aren't base64 and can't be safely re-wrapped.
+ */
+function repairMalformedPem(text) {
+  // Newlines flattened into literal "\n" / "\r\n" escape sequences.
+  const unescaped = text.replace(/\\r\\n|\\n|\\r/g, "\n");
+  const match = PEM_BLOCK_RE.exec(unescaped);
+  if (!match) return null;
+
+  const label = match[1];
+  const body = match[2];
+  if (/Proc-Type:|DEK-Info:/i.test(body)) return null;
+
+  const base64 = body.replace(/[^A-Za-z0-9+/=]/g, "");
+  if (!base64) return null;
+
+  const wrapped = base64.replace(/.{1,64}/g, "$&\n").trimEnd();
+  return `-----BEGIN ${label}-----\n${wrapped}\n-----END ${label}-----\n`;
+}
+
 /**
  * Normalize a private key into a form ssh2 can parse.
  *
@@ -60,17 +92,29 @@ function normalizePrivateKeyForSsh2(privateKey, passphrase) {
     return { privateKey, passphrase, converted: false };
   }
 
+  // The key text may have been mangled before it reached us — newlines lost,
+  // turned into literal "\n", or lines indented. Rebuild clean PEM framing and
+  // retry; a repaired key also feeds cleanly into the PKCS#8 path below.
+  const repaired = repairMalformedPem(privateKey);
+  if (repaired && repaired !== privateKey) {
+    const reparsed = sshUtils.parseKey(repaired, passphrase);
+    if (reparsed && !(reparsed instanceof Error)) {
+      return { privateKey: repaired, passphrase, converted: true };
+    }
+  }
+  const candidate = repaired || privateKey;
+
   // We can only rescue PKCS#8 keys, which Node's crypto can read.
-  if (!PKCS8_HEADER_RE.test(privateKey)) {
+  if (!PKCS8_HEADER_RE.test(candidate)) {
     return { privateKey, passphrase, converted: false };
   }
 
-  const encrypted = privateKey.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----");
+  const encrypted = candidate.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----");
 
   let keyObject;
   try {
     keyObject = crypto.createPrivateKey(
-      passphrase ? { key: privateKey, passphrase } : privateKey,
+      passphrase ? { key: candidate, passphrase } : candidate,
     );
   } catch (err) {
     if (encrypted) {

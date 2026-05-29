@@ -90,3 +90,52 @@ test("passes through content that is not a PKCS#8 key", () => {
   assert.equal(result.converted, false);
   assert.equal(result.privateKey, junk);
 });
+
+const indentLines = (key) =>
+  key.split("\n").map((line) => (line ? "  " + line : line)).join("\n");
+const dropEndLine = (key) => key.split("\n").slice(0, -2).join("\n");
+const legacyEncryptedRsa = (passphrase) =>
+  crypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs1", format: "pem", cipher: "aes-128-cbc", passphrase },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  }).privateKey;
+
+test("repairs an RSA key whose newlines were collapsed to spaces", () => {
+  const result = normalizePrivateKeyForSsh2(rsaPkcs1().replace(/\n/g, " "));
+  assert.equal(result.converted, true);
+  assert.ok(parseOk(result.privateKey), "repaired key should be parseable by ssh2");
+});
+
+test("repairs an RSA key whose newlines became literal backslash-n", () => {
+  const result = normalizePrivateKeyForSsh2(rsaPkcs1().replace(/\n/g, "\\n"));
+  assert.equal(result.converted, true);
+  assert.ok(parseOk(result.privateKey));
+});
+
+test("repairs an RSA key whose lines are indented", () => {
+  const result = normalizePrivateKeyForSsh2(indentLines(rsaPkcs1()));
+  assert.equal(result.converted, true);
+  assert.ok(parseOk(result.privateKey));
+});
+
+test("repairs and converts a collapsed PKCS#8 key", () => {
+  const result = normalizePrivateKeyForSsh2(rsaPkcs8().replace(/\n/g, " "));
+  assert.equal(result.converted, true);
+  const parsed = parseOk(result.privateKey);
+  assert.ok(parsed);
+  assert.equal(parsed.type, "ssh-rsa");
+});
+
+test("cannot repair a truncated key and leaves it unchanged", () => {
+  const truncated = dropEndLine(rsaPkcs1());
+  const result = normalizePrivateKeyForSsh2(truncated);
+  assert.equal(result.converted, false);
+  assert.equal(result.privateKey, truncated);
+});
+
+test("does not attempt to repair an encrypted legacy PEM (DEK-Info)", () => {
+  const collapsed = legacyEncryptedRsa("secret").replace(/\n/g, " ");
+  const result = normalizePrivateKeyForSsh2(collapsed, "secret");
+  assert.equal(result.converted, false);
+});
