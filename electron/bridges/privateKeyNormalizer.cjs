@@ -142,6 +142,7 @@ function normalizePrivateKeyForSsh2(privateKey, passphrase) {
 
 module.exports = {
   normalizePrivateKeyForSsh2,
+  repairMalformedPem,
   PrivateKeyPassphraseError,
   UnsupportedPrivateKeyError,
 };

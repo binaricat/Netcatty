@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { utils: sshUtils } = require("ssh2");
 
 const {
@@ -83,4 +84,45 @@ test("loadIdentityFileForAuth converts an unencrypted PKCS#8 identity file", asy
 
   assert.ok(result, "expected a loaded identity file");
   assert.ok(isParseable(result.privateKey), "prepared key should be parseable by ssh2");
+});
+
+test("preparePrivateKeyForAuth recovers a mangled encrypted OpenSSH key via passphrase prompt", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mangled-openssh-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keyPath = path.join(dir, "id_ed25519");
+  const gen = spawnSync(
+    "ssh-keygen",
+    ["-q", "-t", "ed25519", "-N", "secret", "-f", keyPath, "-C", "netcatty-test"],
+    { encoding: "utf8" },
+  );
+  if (gen.status !== 0) {
+    t.skip("ssh-keygen is unavailable");
+    return;
+  }
+  // Simulate a key whose line breaks were flattened into literal "\n" on paste.
+  const mangled = fs.readFileSync(keyPath, "utf8").replace(/\n/g, "\\n");
+
+  const originalRequest = passphraseHandler.requestPassphrase;
+  t.after(() => {
+    passphraseHandler.requestPassphrase = originalRequest;
+  });
+  let prompts = 0;
+  passphraseHandler.requestPassphrase = async () => {
+    prompts += 1;
+    return { passphrase: "secret" };
+  };
+
+  const result = await preparePrivateKeyForAuth({
+    sender,
+    privateKey: mangled,
+    keyName: "id_ed25519",
+    hostname: "example.test",
+    logPrefix: "[Test]",
+  });
+
+  assert.ok(result, "expected a prepared key");
+  assert.equal(prompts, 1, "the encrypted key should trigger exactly one passphrase prompt");
+  assert.equal(result.passphrase, "secret");
+  const parsed = sshUtils.parseKey(result.privateKey, result.passphrase);
+  assert.ok(parsed && !(parsed instanceof Error), "prepared key + passphrase should parse in ssh2");
 });

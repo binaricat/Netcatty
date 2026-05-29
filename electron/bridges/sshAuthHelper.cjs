@@ -12,6 +12,7 @@ const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 const {
   normalizePrivateKeyForSsh2,
+  repairMalformedPem,
   PrivateKeyPassphraseError,
 } = require("./privateKeyNormalizer.cjs");
 
@@ -86,8 +87,11 @@ function isKeyEncrypted(keyContent) {
   // Check for OpenSSH format keys
   if (keyContent.includes("-----BEGIN OPENSSH PRIVATE KEY-----")) {
     try {
+      // Repair mangled framing (lost or escaped newlines) first, so the cipher
+      // name can be read from the base64 blob even when the key was flattened.
+      const source = repairMalformedPem(keyContent) || keyContent;
       // Extract the base64 content between the markers
-      const base64Match = keyContent.match(
+      const base64Match = source.match(
         /-----BEGIN OPENSSH PRIVATE KEY-----\s*([\s\S]*?)\s*-----END OPENSSH PRIVATE KEY-----/
       );
       if (base64Match) {
