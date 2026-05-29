@@ -47,7 +47,7 @@ export function matchesManagedAgentConfig(
   }
   return (
     agent.id === `discovered_${agentKey}` ||
-    agent.acpCommand === meta.acpCommand ||
+    getCommandBasename(agent.acpCommand) === meta.acpCommand ||
     meta.commandNames.some((commandName) => basename === commandName || basename.startsWith(`${commandName}.`))
   );
 }

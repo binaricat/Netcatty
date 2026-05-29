@@ -50,11 +50,19 @@ export function buildManagedAgentState(
   const managedEnv = agentKey === "claude"
     ? { ...(existingManaged?.env ?? {}), CLAUDE_CODE_EXECUTABLE: pathInfo.path }
     : existingManaged?.env;
+  // When the ACP command is the same binary as the agent CLI (e.g. codebuddy,
+  // copilot), use the resolved path so custom installations not on PATH still work.
+  // Agents with a separate ACP binary (e.g. codex-acp, claude-agent-acp) keep their
+  // literal acpCommand unchanged.
+  const resolvedAcpCommand = defaults.acpCommand === agentKey
+    ? pathInfo.path
+    : defaults.acpCommand;
   const nextManagedAgent: ExternalAgentConfig = {
     ...existingManaged,
     ...defaults,
     id: managedId,
     command: pathInfo.path,
+    acpCommand: resolvedAcpCommand,
     ...(managedEnv ? { env: managedEnv } : {}),
     enabled: managedAgents.length === 0 ? true : managedAgents.some((agent) => agent.enabled),
   };
