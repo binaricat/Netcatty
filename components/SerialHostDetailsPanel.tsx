@@ -20,6 +20,7 @@ import {
   AsidePanelFooter,
   type AsidePanelLayout,
 } from './ui/aside-panel';
+import { HostNotesEditor } from './host/HostNotesEditor';
 
 interface SerialPort {
   path: string;
@@ -73,6 +74,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
   const [charset, setCharset] = useState(initialData.charset || 'UTF-8');
   const [tags, setTags] = useState<string[]>(initialData.tags || []);
   const [group, setGroup] = useState(initialData.group || '');
+  const [notes, setNotes] = useState(initialData.notes ?? '');
 
   const loadPorts = useCallback(async () => {
     setIsLoadingPorts(true);
@@ -114,6 +116,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
       group,
       charset,
       serialConfig: config,
+      notes: notes.trim() || undefined,
     };
 
     onSave(updatedHost);
@@ -256,6 +259,12 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelProps> = ({
             createText={t('hostDetails.createTag')}
           />
         </div>
+
+        <HostNotesEditor
+          panelKey={initialData.id}
+          value={notes}
+          onChange={setNotes}
+        />
 
         {/* Group */}
         <div className="space-y-2">

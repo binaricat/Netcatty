@@ -157,8 +157,10 @@ const createHost = (input: {
   protocol?: Exclude<HostProtocol, "mosh">;
   group?: string;
   tags?: string[];
+  notes?: string;
 }): Host => {
   const now = Date.now();
+  const notes = input.notes?.trim() || undefined;
   return {
     id: crypto.randomUUID(),
     label: input.label?.trim() || input.hostname,
@@ -171,6 +173,7 @@ const createHost = (input: {
     os: "linux",
     protocol: input.protocol ?? "ssh",
     createdAt: now,
+    ...(notes ? { notes } : {}),
   };
 };
 
@@ -259,6 +262,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   const groupsIdx = findHeaderIndex(header, ["groups", "group", "folder", "path"]);
   const labelIdx = findHeaderIndex(header, ["label", "name"]);
   const tagsIdx = findHeaderIndex(header, ["tags", "tag"]);
+  const notesIdx = findHeaderIndex(header, ["notes", "note", "remark", "description", "memo"]);
   const hostnameIdx = findHeaderIndex(header, ["hostname", "host", "server"]);
   const protocolIdx = findHeaderIndex(header, ["protocol", "proto", "scheme"]);
   const portIdx = findHeaderIndex(header, ["port"]);
@@ -303,6 +307,8 @@ const importFromCsv = (text: string): VaultImportResult => {
     const group = groupsIdx >= 0 ? normalizeGroupPath(row[groupsIdx]) : undefined;
     const label = labelIdx >= 0 ? row[labelIdx] : undefined;
     const tags = tagsIdx >= 0 ? splitTags(row[tagsIdx]) : [];
+    const notesRaw = notesIdx >= 0 ? row[notesIdx] : undefined;
+    const notes = notesRaw?.trim() || undefined;
     const protocol =
       normalizeProtocol(protocolIdx >= 0 ? row[protocolIdx] : undefined) ??
       target.protocol ??
@@ -321,6 +327,7 @@ const importFromCsv = (text: string): VaultImportResult => {
         protocol,
         group,
         tags,
+        notes,
       }),
     );
   }

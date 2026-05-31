@@ -146,7 +146,8 @@ export function useVaultHostCollections({
           (h) =>
             h.label.toLowerCase().includes(s) ||
             h.hostname.toLowerCase().includes(s) ||
-            h.tags.some((t) => t.toLowerCase().includes(s)),
+            h.tags.some((t) => t.toLowerCase().includes(s)) ||
+            (h.notes?.toLowerCase().includes(s) ?? false),
         );
       }
       // Apply tag filter
@@ -189,7 +190,8 @@ export function useVaultHostCollections({
           (h) =>
             h.label.toLowerCase().includes(s) ||
             h.hostname.toLowerCase().includes(s) ||
-            h.tags.some((t) => t.toLowerCase().includes(s)),
+            h.tags.some((t) => t.toLowerCase().includes(s)) ||
+            (h.notes?.toLowerCase().includes(s) ?? false),
         );
       }
       if (selectedTags.length > 0) {
@@ -211,7 +213,8 @@ export function useVaultHostCollections({
           (h) =>
             h.label.toLowerCase().includes(s) ||
             h.hostname.toLowerCase().includes(s) ||
-            h.tags.some((t) => t.toLowerCase().includes(s)),
+            h.tags.some((t) => t.toLowerCase().includes(s)) ||
+            (h.notes?.toLowerCase().includes(s) ?? false),
         );
       }
       if (selectedTags.length > 0) {
@@ -242,7 +245,8 @@ export function useVaultHostCollections({
           (h) =>
             h.label.toLowerCase().includes(s) ||
             h.hostname.toLowerCase().includes(s) ||
-            h.tags.some((t) => t.toLowerCase().includes(s)),
+            h.tags.some((t) => t.toLowerCase().includes(s)) ||
+            (h.notes?.toLowerCase().includes(s) ?? false),
         );
       }
       // Apply tag filter

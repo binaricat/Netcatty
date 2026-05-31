@@ -176,6 +176,8 @@ export interface Host {
   localShellArgs?: string[];
   localShellName?: string;
   localShellIcon?: string;
+  /** User-authored Markdown notes (project, hardware, region, etc.) */
+  notes?: string;
 }
 
 export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';

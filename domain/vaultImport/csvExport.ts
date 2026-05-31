@@ -8,12 +8,12 @@ export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
-    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "192.168.1.10", "ssh", "22", "root", ""]);
-    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "server-a.example.com", "ssh", "22", "ubuntu", ""]);
-    rows.push(["Database", "DB", "db,mysql", "db.example.com", "ssh", "4567", "admin", ""]);
+    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", ""]);
+    rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "Production", "server-a.example.com", "ssh", "22", "ubuntu", ""]);
+    rows.push(["Database", "DB", "db,mysql", "MySQL primary", "db.example.com", "ssh", "4567", "admin", ""]);
   }
 
   const escapeCsv = (value: string) => {
@@ -26,7 +26,7 @@ export const getVaultCsvTemplate = (
 };
 
 const exportHostsToCsv = (hosts: Host[]): string => {
-  const header = ["Groups", "Label", "Tags", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password"];
   const rows: string[][] = [header];
 
   const escapeCsv = (value: string, skipFormulaGuard = false) => {
@@ -71,6 +71,7 @@ const exportHostsToCsv = (hosts: Host[]): string => {
       host.group ?? "",
       host.label ?? "",
       (host.tags ?? []).join(","),
+      host.notes ?? "",
       formatHostname(host.hostname),
       host.protocol ?? "ssh",
       String(effectivePort),

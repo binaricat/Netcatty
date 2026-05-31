@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
+import { HostNotesIndicator } from "../host/HostNotesIndicator";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -151,9 +152,12 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     )}
                                     <DistroAvatar host={safeHost} fallback={distroBadge.text} />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                      <span className="text-sm font-semibold truncate leading-5">
-                                        {safeHost.label}
-                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-sm font-semibold truncate leading-5">
+                                          {safeHost.label}
+                                        </span>
+                                        <HostNotesIndicator notes={safeHost.notes} />
+                                      </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
                                         {safeHost.username}@{safeHost.hostname}
                                       </div>
@@ -256,9 +260,12 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     )}
                                     <DistroAvatar host={safeHost} fallback={distroBadge.text} />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-                                      <span className="text-sm font-semibold truncate leading-5">
-                                        {safeHost.label}
-                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-sm font-semibold truncate leading-5">
+                                          {safeHost.label}
+                                        </span>
+                                        <HostNotesIndicator notes={safeHost.notes} />
+                                      </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
                                         {safeHost.username}@{safeHost.hostname}
                                       </div>
@@ -592,6 +599,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                                   managed
                                                 </Badge>
                                               )}
+                                              <HostNotesIndicator notes={safeHost.notes} />
                                             </div>
                                             <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
                                               {safeHost.username}@{safeHost.hostname}
@@ -737,6 +745,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                             managed
                                           </Badge>
                                         )}
+                                        <HostNotesIndicator notes={safeHost.notes} />
                                       </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
                                         {safeHost.username}@{safeHost.hostname}

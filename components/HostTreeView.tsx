@@ -10,6 +10,7 @@ import { GroupConfig, GroupNode, Host } from '../types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu';
 import { DistroAvatar } from './DistroAvatar';
+import { HostNotesIndicator } from './host/HostNotesIndicator';
 import { Button } from './ui/button';
 
 interface HostTreeViewProps {
@@ -392,7 +393,10 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="sm" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="font-medium truncate">{host.label}</div>
+            <div className="font-medium truncate flex items-center gap-1.5">
+              <span className="truncate">{host.label}</span>
+              <HostNotesIndicator notes={host.notes} />
+            </div>
             <div className="text-xs text-muted-foreground truncate">
               {displayUsername}@{host.hostname}:{displayPort}
             </div>

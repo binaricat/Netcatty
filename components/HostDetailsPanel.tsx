@@ -47,6 +47,7 @@ import {
   EnvVarsPanel,
   ProxyPanel,
 } from "./host-details";
+import { HostNotesEditor } from "./host/HostNotesEditor";
 
 type CredentialType = "sshid" | "key" | "certificate" | "localKeyFile" | null;
 type SubPanel =
@@ -388,6 +389,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       label: finalLabel,
       group: finalGroup,
       tags: form.tags || [],
+      notes: form.notes?.trim() || undefined,
       port: finalPort,
       password: form.savePassword === false ? undefined : form.password,
       managedSourceId: finalManagedSourceId,
@@ -759,6 +761,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               triggerClassName="flex-1 min-h-10"
             />
           </div>
+
+          <HostNotesEditor
+            panelKey={form.id}
+            value={form.notes ?? ""}
+            onChange={(notes) => update("notes", notes)}
+          />
         </Card>
 
         <HostDetailsConnectionSections

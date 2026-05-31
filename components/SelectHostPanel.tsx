@@ -165,7 +165,8 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         (h) =>
           h.label.toLowerCase().includes(q) ||
           h.hostname.toLowerCase().includes(q) ||
-          h.username.toLowerCase().includes(q),
+          h.username.toLowerCase().includes(q) ||
+          (h.notes?.toLowerCase().includes(q) ?? false),
       );
     }
 

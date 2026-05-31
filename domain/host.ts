@@ -254,11 +254,13 @@ export const sanitizeHost = (host: Host): Host => {
         ? 'auto'
         : undefined;
   const migrated = migrateDeprecatedFontOverride(host);
+  const cleanNotes = host.notes?.trim() || undefined;
   return {
     ...migrated,
     hostname: cleanHostname,
     distro: cleanDistro,
     distroMode: cleanDistroMode,
     manualDistro: cleanManualDistro || undefined,
+    notes: cleanNotes,
   };
 };
