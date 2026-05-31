@@ -4,6 +4,8 @@ export const STORAGE_KEY_GROUPS = 'netcatty_groups_v1';
 export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'netcatty_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'netcatty_snippet_packages_v1';
+/** Last-filled values per snippet id for {{variable}} placeholders. */
+export const STORAGE_KEY_SNIPPET_VAR_VALUES = 'netcatty_snippet_var_values_v1';
 export const STORAGE_KEY_THEME = 'netcatty_theme_v1';
 export const STORAGE_KEY_COLOR = 'netcatty_color_v1';
 export const STORAGE_KEY_ACCENT_MODE = 'netcatty_accent_mode_v1';

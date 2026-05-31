@@ -545,6 +545,18 @@ export const zhCNTerminalMessages: Messages = {
   'snippets.shortkey.error.systemConflict': '此快捷键与系统快捷键冲突',
   'snippets.shortkey.error.snippetConflict': '此快捷键已被代码片段使用：{name}',
 
+  'snippets.variables.dialogTitle': '填写变量',
+  'snippets.variables.dialogDesc': '运行「{label}」前请填写以下变量。',
+  'snippets.variables.hint': '变量值将原样插入脚本（不会进行 shell 转义）。',
+  'snippets.variables.preview': '预览',
+  'snippets.variables.placeholder': '请输入',
+  'snippets.variables.placeholderDefault': '默认：{value}',
+  'snippets.variables.required': '请填写此变量',
+  'snippets.variables.run': '运行',
+  'snippets.field.variablesHelp': '在脚本中使用 {{名称}} 或 {{名称:默认值}} 定义变量。',
+  'snippets.field.variablesDetected': '变量',
+  'snippets.field.variableDefault': '默认 {value}',
+
   // Serial Port
   'serial.button': '串口',
   'serial.modal.title': '连接串口',

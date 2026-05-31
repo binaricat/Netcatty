@@ -12,6 +12,7 @@ import { KeyboardInteractiveModal } from '../../components/KeyboardInteractiveMo
 import { PassphraseModal } from '../../components/PassphraseModal';
 import { TextEditorTabView } from '../../components/editor/TextEditorTabView';
 import { UnsavedChangesProvider } from '../../components/editor/UnsavedChangesDialog';
+import { SnippetExecutionProvider } from '../../components/SnippetExecutionProvider';
 import { Button } from '../../components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
@@ -55,6 +56,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
   } = ctx;
 
   return (
+    <SnippetExecutionProvider>
     <UnsavedChangesProvider>
       {({ prompt }) => {
         // Helper: close an editor tab and activate the neighbor (left-preference), or vault.
@@ -549,5 +551,6 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         );
       }}
     </UnsavedChangesProvider>
+    </SnippetExecutionProvider>
   );
 }

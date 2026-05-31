@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 interface ScriptsSidePanelProps {
   snippets: Snippet[];
   packages: string[];
-  onSnippetClick: (command: string, noAutoRun?: boolean) => void;
+  onSnippetClick: (snippet: Snippet) => void;
   isVisible?: boolean;
 }
 
@@ -203,8 +203,8 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   }, [normalizedPackages, snippets, expandedPaths, searchMatches]);
 
   const handleSnippetClick = useCallback(
-    (command: string, noAutoRun?: boolean) => {
-      onSnippetClick(command, noAutoRun);
+    (snippet: Snippet) => {
+      onSnippetClick(snippet);
     },
     [onSnippetClick],
   );
@@ -282,7 +282,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                 snippet={s}
                 depth={0}
                 subtitle={s.package || t('terminal.toolbar.library')}
-                onClick={() => handleSnippetClick(s.command, s.noAutoRun)}
+                onClick={() => handleSnippetClick(s)}
                 onEdit={() => handleEditSnippet(s)}
                 onDelete={() => handleDeleteSnippet(s.id)}
                 editLabel={t('action.edit')}
@@ -305,7 +305,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                   key={`snip:${row.id}`}
                   snippet={row.snippet}
                   depth={row.depth}
-                  onClick={() => handleSnippetClick(row.snippet.command, row.snippet.noAutoRun)}
+                  onClick={() => handleSnippetClick(row.snippet)}
                   onEdit={() => handleEditSnippet(row.snippet)}
                   onDelete={() => handleDeleteSnippet(row.snippet.id)}
                   editLabel={t('action.edit')}

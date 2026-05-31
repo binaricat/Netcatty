@@ -29,7 +29,7 @@ import {
   resolveHostTerminalFontWeight,
 } from "../../../domain/terminalAppearance";
 import { logger } from "../../../lib/logger";
-import { isMacPlatform, normalizeLineEndings, wrapBracketedPaste } from "../../../lib/utils";
+import { isMacPlatform } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import {
   clearTerminalViewport,
@@ -64,7 +64,7 @@ import type {
   TerminalSettings,
   TerminalTheme,
 } from "../../../types";
-import { matchesKeyBinding } from "../../../domain/models";
+import { matchesKeyBinding, type Snippet } from "../../../domain/models";
 
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
@@ -113,7 +113,8 @@ export type CreateXTermRuntimeContext = {
   >;
 
   // Snippets for shortkey support
-  snippetsRef?: RefObject<{ id: string; command: string; shortkey?: string }[]>;
+  snippetsRef?: RefObject<{ id: string; command: string; shortkey?: string; noAutoRun?: boolean }[]>;
+  onSnippetShortkeyRef?: RefObject<((snippet: Snippet) => void) | undefined>;
 
   sessionId: string;
   statusRef: RefObject<TerminalSession["status"]>;
@@ -555,25 +556,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           if (id && ctx.statusRef.current === "connected") {
             e.preventDefault();
             e.stopPropagation();
-            // Send the snippet command to the terminal
-            let snippetData = normalizeLineEndings(snippet.command);
-            if (!snippet.noAutoRun) snippetData = `${snippetData}\r`;
-            // Broadcast the normalized (un-wrapped) data so each target
-            // session can apply its own bracket paste state
-            if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
-              ctx.onBroadcastInputRef.current(snippetData, ctx.sessionId);
-            }
-            // Wrap for this terminal only, after broadcasting
-            const snippetIsMultiLine = snippetData.includes("\n");
-            if (snippetIsMultiLine && term.modes.bracketedPasteMode && !ctx.terminalSettingsRef.current?.disableBracketedPaste) snippetData = wrapBracketedPaste(snippetData);
-            // Notify autocomplete with the final (possibly bracket-wrapped)
-            // bytes so its keystroke buffer can tell literal multi-line
-            // paste ("\x1b[200~...\x1b[201~") from the non-bracketed path
-            // where each \n executes an intermediate command (#814 P2).
-            ctx.onAutocompleteInput?.(snippetData);
-            ctx.terminalBackend.writeToSession(id, snippetData);
-            if (!snippet.noAutoRun) {
-              recordTerminalCommandExecution(snippet.command, ctx, term);
+            const runSnippet = ctx.onSnippetShortkeyRef?.current;
+            if (runSnippet) {
+              void runSnippet(snippet as Snippet);
             }
             return false;
           }

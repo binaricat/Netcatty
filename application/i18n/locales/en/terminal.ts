@@ -544,6 +544,18 @@ export const enTerminalMessages: Messages = {
   'snippets.shortkey.error.systemConflict': 'This shortcut conflicts with a system shortcut',
   'snippets.shortkey.error.snippetConflict': 'This shortcut is already used by snippet: {name}',
 
+  'snippets.variables.dialogTitle': 'Snippet variables',
+  'snippets.variables.dialogDesc': 'Fill in values for "{label}" before running.',
+  'snippets.variables.hint': 'Values are inserted as-is into the script (not shell-escaped).',
+  'snippets.variables.preview': 'Preview',
+  'snippets.variables.placeholder': 'Enter a value',
+  'snippets.variables.placeholderDefault': 'Default: {value}',
+  'snippets.variables.required': 'This variable is required',
+  'snippets.variables.run': 'Run',
+  'snippets.field.variablesHelp': 'Use {{name}} or {{name:default}} for placeholders in the script.',
+  'snippets.field.variablesDetected': 'Variables',
+  'snippets.field.variableDefault': 'default {value}',
+
   // Serial Port
   'serial.button': 'Serial',
   'serial.modal.title': 'Connect to Serial Port',

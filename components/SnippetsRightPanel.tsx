@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { parseSnippetVariables } from '../domain/snippetVariables';
 import { Check, Clock, Keyboard, Loader2, Package, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SelectHostPanel from './SelectHostPanel';
@@ -54,6 +55,11 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
   isLoadingMore,
   loadMoreHistory,
 }) => {
+  const detectedVariables = useMemo(
+    () => parseSnippetVariables(editingSnippet?.command || ''),
+    [editingSnippet?.command],
+  );
+
     if (rightPanelMode === 'select-targets') {
       return (
         <SelectHostPanel
@@ -127,6 +133,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
                 value={editingSnippet.label || ''}
                 onChange={(e) => setEditingSnippet({ ...editingSnippet, label: e.target.value })}
                 className="h-10"
+                spellCheck={false}
               />
             </Card>
 
@@ -165,6 +172,29 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
                 value={editingSnippet.command || ''}
                 onChange={(e) => setEditingSnippet({ ...editingSnippet, command: e.target.value })}
               />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {t('snippets.field.variablesHelp')}
+              </p>
+              {detectedVariables.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] font-semibold text-muted-foreground shrink-0">
+                    {t('snippets.field.variablesDetected')}:
+                  </span>
+                  {detectedVariables.map((variable) => (
+                    <span
+                      key={variable.name}
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono"
+                    >
+                      {variable.name}
+                      {variable.defaultValue !== undefined && (
+                        <span className="text-muted-foreground font-sans ml-1">
+                          ({t('snippets.field.variableDefault', { value: variable.defaultValue })})
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
             </Card>
 
             {/* No Auto Run */}

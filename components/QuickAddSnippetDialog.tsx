@@ -170,6 +170,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
               onChange={(e) => setLabel(e.target.value)}
               placeholder={t('snippets.field.descriptionPlaceholder')}
               className="h-9"
+              spellCheck={false}
             />
           </div>
 

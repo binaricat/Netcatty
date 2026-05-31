@@ -731,8 +731,9 @@ export const useSessionState = () => {
   }, [workspaces]);
 
   // Run a snippet on multiple target hosts - creates a focus mode workspace
-  const runSnippet = useCallback((snippet: Snippet, targetHosts: Host[]) => {
+  const runSnippet = useCallback((snippet: Snippet, targetHosts: Host[], commandOverride?: string) => {
     if (targetHosts.length === 0) return;
+    const resolvedCommand = commandOverride ?? snippet.command;
 
     // Create sessions for each target host
     const newSessions: TerminalSession[] = targetHosts.map(host => ({
@@ -760,7 +761,7 @@ export const useSessionState = () => {
       ...s,
       workspaceId: workspace.id,
       // Store the command to run after connection
-      startupCommand: snippet.command,
+      startupCommand: resolvedCommand,
       noAutoRun: snippet.noAutoRun,
     }));
 
