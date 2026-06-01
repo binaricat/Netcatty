@@ -19,6 +19,18 @@ import type {
   SyncResult,
 } from '../../../domain/sync';
 
+function getSyncSecurityGeneration(manager: any): number | undefined {
+  return typeof manager.getSyncSecurityGeneration === 'function'
+    ? manager.getSyncSecurityGeneration()
+    : undefined;
+}
+
+function assertSyncSecurityGeneration(manager: any, generation?: number): void {
+  if (typeof manager.assertSyncSecurityGeneration === 'function') {
+    manager.assertSyncSecurityGeneration(generation);
+  }
+}
+
 async function uploadLocalPayloadImpl(this: any,
   provider: CloudProvider,
   adapter: CloudAdapter,
@@ -26,11 +38,14 @@ async function uploadLocalPayloadImpl(this: any,
   opts: { overrideShrink?: boolean },
   baseVersion: number,
   remoteFile?: SyncedFile | null,
+  syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
   const overrideShrinkRequested = opts.overrideShrink === true;
   const directBase = await this.loadSyncBase(provider);
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
   let directRemoteRef: SyncPayload | null = null;
   if (!directBase && remoteFile) {
+    assertSyncSecurityGeneration(this, syncSecurityGeneration);
     try {
       directRemoteRef = await EncryptionService.decryptPayload(
         remoteFile,
@@ -39,6 +54,7 @@ async function uploadLocalPayloadImpl(this: any,
     } catch {
       directRemoteRef = null;
     }
+    assertSyncSecurityGeneration(this, syncSecurityGeneration);
   }
   const metadataBase = directBase ?? directRemoteRef;
   const payloadForUpload = withSyncReliabilityMeta(payload, metadataBase, {
@@ -73,8 +89,9 @@ async function uploadLocalPayloadImpl(this: any,
     packageJson.version,
     baseVersion,
   );
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
-  const result = await this.uploadToProvider(provider, adapter, syncedFile, payloadForUpload);
+  const result = await this.uploadToProvider(provider, adapter, syncedFile, payloadForUpload, syncSecurityGeneration);
 
   if (result.success) {
     this.exitBlockedState();
@@ -92,8 +109,10 @@ async function uploadLocalPayloadImpl(this: any,
 async function downloadRemoteConflictPayloadImpl(this: any,
   provider: CloudProvider,
   remoteFile: SyncedFile,
+  syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
   let remotePayload: SyncPayload;
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
   try {
     remotePayload = await EncryptionService.decryptPayload(
       remoteFile,
@@ -102,6 +121,7 @@ async function downloadRemoteConflictPayloadImpl(this: any,
   } catch (decryptError) {
     throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
   }
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
   this.exitBlockedState();
   this.state.syncState = 'IDLE';
@@ -125,9 +145,12 @@ export async function uploadToProviderImpl(this: any,
   adapter: CloudAdapter,
   syncedFile: SyncedFile,
   payloadForBase?: SyncPayload,
+  syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
     try {
+      assertSyncSecurityGeneration(this, syncSecurityGeneration);
       const resourceId = await adapter.upload(syncedFile);
+      assertSyncSecurityGeneration(this, syncSecurityGeneration);
       this.state.lastError = null;
 
       // Update local state (safe to do multiple times if values are same)
@@ -244,6 +267,7 @@ export async function syncToProviderImpl(this: any,
     }
 
     const overrideShrinkRequested = opts.overrideShrink === true;
+    const syncSecurityGeneration = getSyncSecurityGeneration(this);
 
     let adapter: CloudAdapter;
     try {
@@ -256,6 +280,7 @@ export async function syncToProviderImpl(this: any,
         error: 'Provider not connected',
       };
     }
+    assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
     this.updateProviderStatus(provider, 'syncing');
     this.state.lastError = null;
@@ -268,6 +293,7 @@ export async function syncToProviderImpl(this: any,
       // SYNC_ERROR path — so we never reach the upload branch with an
       // unknown remote state.
       const checkResult = await this.checkProviderConflict(provider, adapter);
+      assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
       if (checkResult.conflict && checkResult.remoteFile) {
         const conflictAction = resolveCloudSyncConflictAction(this.state.syncStrategy, {
@@ -280,6 +306,7 @@ export async function syncToProviderImpl(this: any,
             this,
             provider,
             checkResult.remoteFile,
+            syncSecurityGeneration,
           );
         }
 
@@ -292,6 +319,7 @@ export async function syncToProviderImpl(this: any,
             opts,
             checkResult.remoteFile.meta.version,
             checkResult.remoteFile,
+            syncSecurityGeneration,
           );
         }
 
@@ -310,6 +338,7 @@ export async function syncToProviderImpl(this: any,
           } catch (decryptError) {
             throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
           }
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
           const base = await this.loadSyncBase(provider);
           baseForConflict = base;
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
@@ -353,12 +382,14 @@ export async function syncToProviderImpl(this: any,
             packageJson.version,
             checkResult.remoteFile.meta.version, // base on remote version
           );
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
           const uploadResult = await this.uploadToProvider(
             provider,
             adapter,
             mergedSyncedFile,
             mergedPayload,
+            syncSecurityGeneration,
           );
 
           if (uploadResult.success) {
@@ -390,6 +421,7 @@ export async function syncToProviderImpl(this: any,
           this.state.lastError = uploadResult.error || 'Upload failed after merge';
           return uploadResult;
         } catch (mergeError) {
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
           // Merge failed — fall back to conflict UI
           console.error('[CloudSyncManager] Merge failed, falling back to conflict UI', mergeError);
           const remoteFile = checkResult.remoteFile;
@@ -429,6 +461,7 @@ export async function syncToProviderImpl(this: any,
         opts,
         this.state.localVersion,
         checkResult.remoteFile,
+        syncSecurityGeneration,
       );
 
     } catch (error) {

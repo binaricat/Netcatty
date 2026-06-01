@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { EncryptionService } from "../EncryptionService.ts";
 import { commitRemoteInspectionImpl } from "./authMethods.ts";
-import { syncToProviderImpl } from "./providerSyncMethods.ts";
+import { syncToProviderImpl, uploadToProviderImpl } from "./providerSyncMethods.ts";
 import {
   loadSyncSnapshotsImpl,
   saveSyncBaseImpl,
@@ -191,6 +191,130 @@ test("syncToProvider uses the checked remote as metadata base when no stored bas
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;
   }
+});
+
+test("syncToProvider aborts an upload when the master key changes after encryption", async () => {
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const localPayload = payload("local");
+  let generation = 0;
+  let uploaded = false;
+
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => {
+    generation += 1;
+    return {
+      ...remoteFile("github", 2, 200),
+      payload: JSON.stringify(outgoing),
+    };
+  };
+
+  try {
+    const manager = {
+      masterPassword: "old-master-password",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getSyncSecurityGeneration: () => 0,
+      assertSyncSecurityGeneration: (expected: number) => {
+        if (generation !== expected) {
+          throw new Error("Sync cancelled because master key changed");
+        }
+      },
+      getConnectedAdapter: async () => ({ provider: "github" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false }),
+      loadSyncBase: async () => null,
+      uploadToProvider: async (provider: CloudProvider) => {
+        uploaded = true;
+        return { success: true, provider, action: "upload" as const, version: 2 };
+      },
+      exitBlockedState: () => {},
+      addSyncHistoryEntry: () => {},
+    };
+
+    const result = await syncToProviderImpl.call(manager, "github", localPayload);
+
+    assert.equal(uploaded, false);
+    assert.equal(result.success, false);
+    assert.match(result.error ?? "", /master key changed/);
+  } finally {
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
+test("uploadToProvider skips local commits when the master key changes during upload", async () => {
+  let generation = 0;
+  let savedAnchor = false;
+  let savedBase = false;
+  let savedProvider = false;
+  const file = remoteFile("github", 2, 200);
+
+  const manager = {
+    providerDecryptSeq: { github: 0 },
+    state: {
+      providers: {
+        github: { enabled: true, connected: true, status: "syncing" },
+      },
+      lastError: null,
+      syncState: "SYNCING",
+      localVersion: 1,
+      localUpdatedAt: 100,
+      remoteVersion: 1,
+      remoteUpdatedAt: 100,
+      deviceName: "Local",
+    },
+    assertSyncSecurityGeneration: (expected: number) => {
+      if (generation !== expected) {
+        throw new Error("Sync cancelled because master key changed");
+      }
+    },
+    saveSyncConfig: () => {},
+    saveSyncBase: async () => {
+      savedBase = true;
+    },
+    saveSyncAnchor: async () => {
+      savedAnchor = true;
+    },
+    saveProviderConnection: async () => {
+      savedProvider = true;
+    },
+    notifyStateChange: () => {},
+    addSyncHistoryEntry: () => {},
+    updateProviderStatus: () => {},
+    emit: () => {},
+  };
+
+  const adapter = {
+    upload: async () => {
+      generation += 1;
+      return "resource-id";
+    },
+  };
+
+  const result = await uploadToProviderImpl.call(
+    manager,
+    "github",
+    adapter,
+    file,
+    payload("local"),
+    0,
+  );
+
+  assert.equal(result.success, false);
+  assert.match(result.error ?? "", /master key changed/);
+  assert.equal(savedBase, false);
+  assert.equal(savedAnchor, false);
+  assert.equal(savedProvider, false);
 });
 
 test("syncAllProviders uses the checked remote as metadata base when provider base is missing", async () => {

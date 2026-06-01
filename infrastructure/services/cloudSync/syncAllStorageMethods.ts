@@ -24,11 +24,26 @@ import type {
   SyncResult,
 } from '../../../domain/sync';
 
+function getSyncSecurityGeneration(manager: any): number | undefined {
+  return typeof manager.getSyncSecurityGeneration === 'function'
+    ? manager.getSyncSecurityGeneration()
+    : undefined;
+}
+
+function assertSyncSecurityGeneration(manager: any, generation?: number): void {
+  if (typeof manager.assertSyncSecurityGeneration === 'function') {
+    manager.assertSyncSecurityGeneration(generation);
+  }
+}
+
 async function downloadRemoteForSyncAllImpl(this: any,
   provider: CloudProvider,
   remoteFile: SyncedFile,
+  syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
   const payload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
+  assertSyncSecurityGeneration(this, syncSecurityGeneration);
   this.updateProviderStatus(provider, 'connected');
 
   const result: SyncResult = {
@@ -100,6 +115,7 @@ export async function syncAllProvidersImpl(this: any,
     let wasMerged = false;
 
     const overrideShrinkRequested = opts.overrideShrink === true;
+    const syncSecurityGeneration = getSyncSecurityGeneration(this);
 
     if (!payload) {
       // Caller should provide payload from app state
@@ -142,7 +158,9 @@ export async function syncAllProvidersImpl(this: any,
         this.updateProviderStatus(provider, 'syncing');
         this.emit({ type: 'SYNC_STARTED', provider });
 
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
         const check = await this.checkProviderConflict(provider, adapter);
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
         return { provider, adapter, check };
       } catch (error) {
         return { provider, error: String(error) };
@@ -226,6 +244,7 @@ export async function syncAllProvidersImpl(this: any,
             this,
             newestConflict.provider as CloudProvider,
             newestConflict.check!.remoteFile!,
+            syncSecurityGeneration,
           );
           const sourceProvider = newestConflict.provider as CloudProvider;
           results.set(sourceProvider, remoteResult);
@@ -268,6 +287,7 @@ export async function syncAllProvidersImpl(this: any,
               c.check!.remoteFile!,
               this.masterPassword,
             );
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
             const result = mergeSyncPayloads(providerBase, merged, remotePayload);
             merged = result.payload;
           }
@@ -285,20 +305,26 @@ export async function syncAllProvidersImpl(this: any,
             if (r.check) r.check.conflict = false;
           }
         } catch (mergeError) {
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
           // Merge failed — fall back to conflict UI
           console.error('[CloudSyncManager] syncAll: merge failed', mergeError);
           const { provider, check } = conflicts[0];
           const remoteFile = check!.remoteFile!;
           let conflictSummary;
           try {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            const base = await this.loadSyncBase(provider as CloudProvider);
+            const remotePayload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
             conflictSummary = summarizeSyncChanges(
-              await this.loadSyncBase(provider as CloudProvider),
+              base,
               payload,
-              await EncryptionService.decryptPayload(remoteFile, this.masterPassword),
+              remotePayload,
             );
           } catch {
             conflictSummary = undefined;
           }
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
 
           this.state.syncState = 'CONFLICT';
           this.state.currentConflict = {
@@ -371,6 +397,7 @@ export async function syncAllProvidersImpl(this: any,
         const entry = checkResults.find((r) => r.provider === provider);
         const remoteFile = entry?.check?.remoteFile;
         if (remoteFile) {
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
           try {
             providerRemoteRef = await EncryptionService.decryptPayload(
               remoteFile,
@@ -379,6 +406,7 @@ export async function syncAllProvidersImpl(this: any,
           } catch {
             providerRemoteRef = null;
           }
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
         }
       }
       const finding = detectSuspiciousShrink(payload, providerBase, providerRemoteRef);
@@ -493,6 +521,7 @@ export async function syncAllProvidersImpl(this: any,
           const entry = checkResults.find((r) => r.provider === provider);
           const remoteFile = entry?.check?.remoteFile;
           if (remoteFile) {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
             try {
               providerRemoteRef = await EncryptionService.decryptPayload(
                 remoteFile,
@@ -501,6 +530,7 @@ export async function syncAllProvidersImpl(this: any,
             } catch {
               providerRemoteRef = null;
             }
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
           }
         }
         const providerPayload = withSyncReliabilityMeta(payload, providerBase ?? providerRemoteRef, {
@@ -515,7 +545,8 @@ export async function syncAllProvidersImpl(this: any,
           packageJson.version,
           baseVersion
         );
-        const result = await this.uploadToProvider(provider, adapter, syncedFile, providerPayload);
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
+        const result = await this.uploadToProvider(provider, adapter, syncedFile, providerPayload, syncSecurityGeneration);
         results.set(provider, result);
       } catch (error) {
         const msg = String(error);

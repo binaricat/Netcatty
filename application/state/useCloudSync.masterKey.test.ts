@@ -12,6 +12,7 @@ test("master key replacement from another window locks the current window and cl
   const originalWindow = globalThis.window;
   let notifyCount = 0;
   let stopAutoSyncCount = 0;
+  let syncSecurityGenerationCount = 0;
 
   (globalThis as typeof globalThis & { window?: unknown }).window = {
     localStorage: fakeStorage,
@@ -27,6 +28,9 @@ test("master key replacement from another window locks the current window and cl
     safeJsonParse: (value: string | null) => (value ? JSON.parse(value) : null),
     stopAutoSync: () => {
       stopAutoSyncCount += 1;
+    },
+    bumpSyncSecurityGeneration: () => {
+      syncSecurityGenerationCount += 1;
     },
     notifyStateChange: () => {
       notifyCount += 1;
@@ -48,5 +52,6 @@ test("master key replacement from another window locks the current window and cl
   assert.equal(manager.state.unlockedKey, null);
   assert.equal(manager.masterPassword, null);
   assert.equal(stopAutoSyncCount, 1);
+  assert.equal(syncSecurityGenerationCount, 1);
   assert.equal(notifyCount, 1);
 });

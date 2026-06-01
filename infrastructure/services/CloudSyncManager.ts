@@ -177,6 +177,7 @@ export class CloudSyncManager {
   private stateChangeListeners: Set<() => void> = new Set(); // For useSyncExternalStore
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private masterPassword: string | null = null; // In memory only!
+  private syncSecurityGeneration = 0;
   private hasStorageListener = false;
   // Promise that resolves once startup provider secret decryption finishes.
   // Awaited by getConnectedAdapter() to prevent using still-encrypted tokens.
@@ -320,6 +321,25 @@ export class CloudSyncManager {
       currentConflict: this.state.currentConflict ? { ...this.state.currentConflict } : null,
     };
     this.stateChangeListeners.forEach(cb => cb());
+  }
+
+  private bumpSyncSecurityGeneration(): void {
+    this.syncSecurityGeneration += 1;
+  }
+
+  private getSyncSecurityGeneration(): number {
+    return this.syncSecurityGeneration;
+  }
+
+  private assertSyncSecurityGeneration(expectedGeneration?: number): void {
+    if (expectedGeneration === undefined) return;
+    if (
+      expectedGeneration !== this.syncSecurityGeneration
+      || this.state.securityState !== 'UNLOCKED'
+      || !this.masterPassword
+    ) {
+      throw new Error('Sync cancelled because master key changed');
+    }
   }
 
   // ==========================================================================
@@ -606,8 +626,9 @@ export class CloudSyncManager {
     adapter: CloudAdapter,
     syncedFile: SyncedFile,
     payloadForBase?: SyncPayload,
+    syncSecurityGeneration?: number,
   ): Promise<SyncResult> {
-    return uploadToProviderImpl.call(this, provider, adapter, syncedFile, payloadForBase);
+    return uploadToProviderImpl.call(this, provider, adapter, syncedFile, payloadForBase, syncSecurityGeneration);
   }
 
   /**
