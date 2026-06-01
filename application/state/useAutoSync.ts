@@ -320,7 +320,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
       // Apply merged payloads first (before checking for failures) so local
       // state gets updated even when some providers failed
-      for (const result of results.values()) {
+      const resultList = Array.from(results.values());
+      const allProvidersSynced = resultList.length > 0
+        && resultList.every((result) => result.success);
+
+      for (const result of resultList) {
         if (result.mergedPayload) {
           await Promise.resolve(onApplyPayload(result.mergedPayload));
           if (result.remoteFile) {
@@ -328,12 +332,15 @@ export const useAutoSync = (config: AutoSyncConfig) => {
               recordDownload: true,
             });
           }
-          skipNextSyncRef.current = true;
+          skipNextSyncRef.current = allProvidersSynced;
+          if (!allProvidersSynced) {
+            console.warn('[AutoSync] Remote payload applied locally, but not every provider synced; leaving next auto-sync enabled for retry.');
+          }
           break; // All providers share the same merged payload
         }
       }
 
-      for (const result of results.values()) {
+      for (const result of resultList) {
         if (!result.success) {
           if (result.conflictDetected) {
             throw new Error(t('sync.autoSync.conflictDetected'));
@@ -459,6 +466,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     // are consistent with the local vault. Only then should we latch
     // hasCheckedRemoteRef so that transient failures are retryable.
     let startupConsistent = false;
+    let markCurrentDataSynced = true;
     try {
       // Load base BEFORE observing the remote payload (commitRemoteInspection overwrites the base).
       const base = await manager.loadSyncBase(connectedProvider);
@@ -532,6 +540,8 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload, {
           recordDownload: true,
         });
+        startupConsistent = true;
+        markCurrentDataSynced = false;
         const roundTripResults = await manager.syncAllProviders(remotePayload, {
           conflictActionOverride: 'upload-local',
         });
@@ -540,7 +550,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         const roundTripFullySynced = roundTripResultList.length > 0
           && roundTripResultList.every((result) => result.success);
         skipNextSyncRef.current = roundTripFullySynced || wasShrinkBlocked;
-        startupConsistent = true;
+        markCurrentDataSynced = roundTripFullySynced || wasShrinkBlocked;
         if (wasShrinkBlocked) {
           console.warn('[AutoSync] Cloud-wins round-trip was shrink-blocked; cloud data applied locally, leaving sync blocked for user review.');
         } else if (!roundTripFullySynced) {
@@ -553,10 +563,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       if (conflictAction === 'upload-local') {
         const pushResults = await manager.syncAllProviders(localPayload);
         const results = Array.from(pushResults.values());
-        const hasSuccess = results.some((result) => result.success);
+        const allProvidersSynced = results.length > 0
+          && results.every((result) => result.success);
         const wasShrinkBlocked = results.some((result) => result.shrinkBlocked === true);
 
-        if (hasSuccess && !wasShrinkBlocked) {
+        if (allProvidersSynced) {
           startupConsistent = true;
           return;
         }
@@ -565,7 +576,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           return;
         }
 
-        throw new Error('Startup local-wins sync failed');
+        throw new Error('Startup local-wins sync failed for one or more providers');
       }
 
       const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
@@ -579,6 +590,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // local-only state.
       await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload);
       startupConsistent = true;
+      markCurrentDataSynced = false;
       notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
 
       // If the three-way merge introduced any local-only additions that the
@@ -597,9 +609,10 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       if (mergeResult.payload) {
         try {
           const roundTripResults = await manager.syncAllProviders(mergeResult.payload);
-          const wasShrinkBlocked = Array.from(roundTripResults.values()).some(
-            (r) => r.shrinkBlocked === true,
-          );
+          const roundTripResultList = Array.from(roundTripResults.values());
+          const wasShrinkBlocked = roundTripResultList.some((r) => r.shrinkBlocked === true);
+          const roundTripFullySynced = roundTripResultList.length > 0
+            && roundTripResultList.every((result) => result.success);
           if (wasShrinkBlocked) {
             // The merged payload is already applied locally and is the source of truth
             // for THIS device. The blocking only prevents pushing it to cloud, which
@@ -609,11 +622,15 @@ export const useAutoSync = (config: AutoSyncConfig) => {
             // in BLOCKED with no banner visible.
             console.warn('[AutoSync] Post-merge round-trip was shrink-blocked; merged data applied locally, reset syncState to IDLE for next attempt.');
             manager.clearShrinkBlockedState();
+          } else if (!roundTripFullySynced) {
+            console.warn('[AutoSync] Post-merge round-trip did not update every provider; leaving next auto-sync enabled for retry.');
           }
           // Suppress the debounced follow-up tick that otherwise fires
           // once React commits the applied state, since we've just
-          // already pushed that exact payload upstream.
-          skipNextSyncRef.current = true;
+          // already pushed that exact payload upstream. If some provider
+          // failed, allow the follow-up tick to retry the applied payload.
+          skipNextSyncRef.current = roundTripFullySynced || wasShrinkBlocked;
+          markCurrentDataSynced = roundTripFullySynced || wasShrinkBlocked;
         } catch (error) {
           // Non-fatal: the next user edit will drive another sync cycle.
           console.warn('[AutoSync] Post-merge round-trip push failed:', error);
@@ -637,7 +654,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       if (startupConsistent) {
         if (!isInitializedRef.current) {
           isInitializedRef.current = true;
+        }
+        if (markCurrentDataSynced) {
           lastSyncedDataRef.current = getDataHashRef.current();
+        } else {
+          lastSyncedDataRef.current = '';
         }
         hasCheckedRemoteRef.current = true;
         // Only open the auto-sync gate when the inspect actually
