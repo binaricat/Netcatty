@@ -5,6 +5,7 @@ import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
+import { resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
 import type { CloudAdapter } from '../adapters';
 import type GitHubAdapter from '../adapters/GitHubAdapter';
 import type {
@@ -15,6 +16,112 @@ import type {
   SyncPayload,
   SyncResult,
 } from '../../../domain/sync';
+
+async function uploadLocalPayloadImpl(this: any,
+  provider: CloudProvider,
+  adapter: CloudAdapter,
+  payload: SyncPayload,
+  opts: { overrideShrink?: boolean },
+  baseVersion: number,
+  remoteFile?: SyncedFile | null,
+): Promise<SyncResult> {
+  const overrideShrinkRequested = opts.overrideShrink === true;
+  const directBase = await this.loadSyncBase(provider);
+  let directRemoteRef: SyncPayload | null = null;
+  if (!directBase && remoteFile) {
+    try {
+      directRemoteRef = await EncryptionService.decryptPayload(
+        remoteFile,
+        this.masterPassword,
+      );
+    } catch {
+      directRemoteRef = null;
+    }
+  }
+  const directShrink = detectSuspiciousShrink(payload, directBase, directRemoteRef);
+  const shouldBlockDirect = directShrink.suspicious && !overrideShrinkRequested;
+  const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
+  if (shouldBlockDirect) {
+    this.state.syncState = 'BLOCKED';
+    this.state.lastShrinkFinding = directShrink;
+    this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
+    this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
+    return {
+      success: false,
+      provider,
+      action: 'none',
+      shrinkBlocked: true,
+      finding: directShrink,
+    };
+  }
+  if (shouldForceDirect) {
+    this.emit({ type: 'SYNC_FORCED', provider, finding: directShrink });
+  }
+
+  const syncedFile = await EncryptionService.encryptPayload(
+    payload,
+    this.masterPassword,
+    this.state.deviceId,
+    this.state.deviceName,
+    packageJson.version,
+    baseVersion,
+  );
+
+  const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
+
+  if (result.success) {
+    this.exitBlockedState();
+    this.state.syncState = 'IDLE';
+    this.state.lastShrinkFinding = undefined;
+  } else {
+    this.state.syncState = 'ERROR';
+    if (result.error) {
+      this.state.lastError = result.error;
+    }
+  }
+  return result;
+}
+
+async function downloadRemoteConflictPayloadImpl(this: any,
+  provider: CloudProvider,
+  remoteFile: SyncedFile,
+): Promise<SyncResult> {
+  let remotePayload: SyncPayload;
+  try {
+    remotePayload = await EncryptionService.decryptPayload(
+      remoteFile,
+      this.masterPassword,
+    );
+  } catch (decryptError) {
+    throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
+  }
+
+  await this.commitRemoteInspection(provider, remoteFile, remotePayload);
+
+  this.exitBlockedState();
+  this.state.syncState = 'IDLE';
+  this.state.lastError = null;
+  this.updateProviderStatus(provider, 'connected');
+  this.addSyncHistoryEntry({
+    timestamp: Date.now(),
+    provider,
+    action: 'download',
+    success: true,
+    localVersion: remoteFile.meta.version,
+    remoteVersion: remoteFile.meta.version,
+    deviceName: remoteFile.meta.deviceName,
+  });
+
+  const result: SyncResult = {
+    success: true,
+    provider,
+    action: 'download',
+    version: remoteFile.meta.version,
+    mergedPayload: remotePayload,
+  };
+  this.emit({ type: 'SYNC_COMPLETED', provider, result });
+  return result;
+}
 
 export async function uploadToProviderImpl(this: any,
   provider: CloudProvider,
@@ -166,6 +273,31 @@ export async function syncToProviderImpl(this: any,
       const checkResult = await this.checkProviderConflict(provider, adapter);
 
       if (checkResult.conflict && checkResult.remoteFile) {
+        const conflictAction = resolveCloudSyncConflictAction(this.state.syncStrategy, {
+          hasConflict: checkResult.conflict,
+          hasRemoteFile: Boolean(checkResult.remoteFile),
+        });
+
+        if (conflictAction === 'download-remote') {
+          return await downloadRemoteConflictPayloadImpl.call(
+            this,
+            provider,
+            checkResult.remoteFile,
+          );
+        }
+
+        if (conflictAction === 'upload-local') {
+          return await uploadLocalPayloadImpl.call(
+            this,
+            provider,
+            adapter,
+            payload,
+            opts,
+            checkResult.remoteFile.meta.version,
+            checkResult.remoteFile,
+          );
+        }
+
         // Remote is newer — attempt three-way merge instead of blocking
         try {
           let remotePayload: SyncPayload;
@@ -280,74 +412,15 @@ export async function syncToProviderImpl(this: any,
         }
       }
 
-      // Shrink guard (no-conflict path): same rationale as the merge branch —
-      // refuse a payload that drops entities versus the stored base. When the
-      // stored base is absent (first sync, re-auth, or decrypt failure) fall
-      // back to the current remote payload if one exists — the guard must
-      // have *some* reference to catch a degraded local from wiping the
-      // cloud (#779).
-      const directBase = await this.loadSyncBase(provider);
-      let directRemoteRef: SyncPayload | null = null;
-      if (!directBase && checkResult.remoteFile) {
-        try {
-          directRemoteRef = await EncryptionService.decryptPayload(
-            checkResult.remoteFile,
-            this.masterPassword,
-          );
-        } catch {
-          // Decrypt failure means we can't trust the remote contents as a
-          // reference; leave `null` and let the guard return not-suspicious
-          // rather than block on garbage. The upload itself will likely fail
-          // downstream if the password mismatch is real.
-          directRemoteRef = null;
-        }
-      }
-      const directShrink = detectSuspiciousShrink(payload, directBase, directRemoteRef);
-      const shouldBlockDirect = directShrink.suspicious && !overrideShrinkRequested;
-      const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
-      if (shouldBlockDirect) {
-        this.state.syncState = 'BLOCKED';
-        this.state.lastShrinkFinding = directShrink;
-        this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding: directShrink });
-        this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
-        return {
-          success: false,
-          provider,
-          action: 'none',
-          shrinkBlocked: true,
-          finding: directShrink,
-        };
-      }
-      if (shouldForceDirect) {
-        this.emit({ type: 'SYNC_FORCED', provider, finding: directShrink });
-      }
-
-      // 2. Encrypt
-      const syncedFile = await EncryptionService.encryptPayload(
+      return await uploadLocalPayloadImpl.call(
+        this,
+        provider,
+        adapter,
         payload,
-        this.masterPassword,
-        this.state.deviceId,
-        this.state.deviceName,
-        packageJson.version,
-        this.state.localVersion
+        opts,
+        this.state.localVersion,
+        checkResult.remoteFile,
       );
-
-      // 3. Upload — base is persisted inside uploadToProvider before
-      // the anchor advances so a crash between them cannot leave the
-      // base pointing at a pre-upload snapshot.
-      const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
-
-      if (result.success) {
-        this.exitBlockedState();
-        this.state.syncState = 'IDLE';
-        this.state.lastShrinkFinding = undefined;
-      } else {
-        this.state.syncState = 'ERROR';
-        if (result.error) {
-          this.state.lastError = result.error;
-        }
-      }
-      return result;
 
     } catch (error) {
       this.state.syncState = 'ERROR';

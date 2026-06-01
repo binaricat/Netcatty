@@ -23,6 +23,7 @@ import {
   getSyncDotColor,
   isProviderReadyForSync,
 } from '../../domain/sync';
+import type { CloudSyncStrategy } from '../../domain/syncStrategy';
 import {
   getCloudSyncManager,
   type SyncManagerState,
@@ -48,6 +49,7 @@ export interface CloudSyncHook {
   deviceName: string;
   autoSyncEnabled: boolean;
   autoSyncInterval: number;
+  syncStrategy: CloudSyncStrategy;
   localVersion: number;
   localUpdatedAt: number;
   remoteVersion: number;
@@ -113,6 +115,7 @@ export interface CloudSyncHook {
   // Settings
   setAutoSync: (enabled: boolean, intervalMinutes?: number) => void;
   setDeviceName: (name: string) => void;
+  setSyncStrategy: (strategy: CloudSyncStrategy) => void;
 
   // Local Data Reset
   resetLocalVersion: () => void;
@@ -631,6 +634,10 @@ export const useCloudSync = (): CloudSyncHook => {
   const setDeviceName = useCallback((name: string) => {
     manager.setDeviceName(name);
   }, []);
+
+  const setSyncStrategy = useCallback((strategy: CloudSyncStrategy) => {
+    manager.setSyncStrategy(strategy);
+  }, []);
   
   // ========== Utilities ==========
   
@@ -703,6 +710,7 @@ export const useCloudSync = (): CloudSyncHook => {
     deviceName: state.deviceName,
     autoSyncEnabled: state.autoSyncEnabled,
     autoSyncInterval: state.autoSyncInterval,
+    syncStrategy: state.syncStrategy,
     localVersion: state.localVersion,
     localUpdatedAt: state.localUpdatedAt,
     remoteVersion: state.remoteVersion,
@@ -747,6 +755,7 @@ export const useCloudSync = (): CloudSyncHook => {
     // Settings
     setAutoSync,
     setDeviceName,
+    setSyncStrategy,
 
     // Local Data Reset
     resetLocalVersion: () => manager.resetLocalVersion(),

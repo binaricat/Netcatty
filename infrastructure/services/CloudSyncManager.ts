@@ -27,6 +27,7 @@ import {
   type S3Config,
   type SyncedFile,
 } from '../../domain/sync';
+import type { CloudSyncStrategy } from '../../domain/syncStrategy';
 import { type CloudAdapter } from './adapters';
 import type { DeviceFlowState } from './adapters/GitHubAdapter';
 
@@ -129,6 +130,7 @@ export interface SyncManagerState {
   lastError: string | null;
   autoSyncEnabled: boolean;
   autoSyncInterval: number;
+  syncStrategy: CloudSyncStrategy;
   syncHistory: SyncHistoryEntry[];
   /** Last shrink finding that put us into BLOCKED state, retained until
    * a sync actually succeeds (SYNC_COMPLETED with result.success) or
@@ -730,6 +732,12 @@ export class CloudSyncManager {
 
   setAutoSync(enabled: boolean, intervalMinutes?: number): void {
     return setAutoSyncImpl.call(this, enabled, intervalMinutes);
+  }
+
+  setSyncStrategy(strategy: CloudSyncStrategy): void {
+    this.state.syncStrategy = strategy;
+    this.saveSyncConfig();
+    this.notifyStateChange();
   }
 
   private startAutoSync(): void {

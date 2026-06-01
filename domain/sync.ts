@@ -348,7 +348,7 @@ export interface SyncResult {
   version?: number;
   error?: string;
   conflictDetected?: boolean;
-  /** Present when action === 'merge'; caller should apply this to update local state */
+  /** Present when sync produced or selected a payload that caller should apply locally */
   mergedPayload?: import('./sync').SyncPayload;
   /** True when a shrink-detection guard blocked the upload */
   shrinkBlocked?: boolean;

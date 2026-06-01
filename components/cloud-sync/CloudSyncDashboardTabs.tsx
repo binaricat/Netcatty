@@ -5,6 +5,7 @@ import type { useCloudSync } from '../../application/state/useCloudSync';
 import { isProviderReadyForSync } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { GoogleDriveIcon, OneDriveIcon, ProviderCard, Toggle } from './CloudSyncControls';
@@ -173,6 +174,35 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                 disabled={!sync.hasAnyConnectedProvider}
                             />
                         </div>
+                    </div>
+
+                    <div className="p-4 rounded-lg border bg-card space-y-3">
+                        <div>
+                            <div className="text-sm font-medium">{t('cloudSync.strategy.title')}</div>
+                            <div className="text-xs text-muted-foreground">
+                                {t('cloudSync.strategy.desc')}
+                            </div>
+                        </div>
+                        <Select
+                            value={sync.syncStrategy}
+                            onValueChange={(value) => sync.setSyncStrategy(value as typeof sync.syncStrategy)}
+                        >
+                            <SelectTrigger aria-label={t('cloudSync.strategy.title')}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="smartMerge">{t('cloudSync.strategy.smartMerge')}</SelectItem>
+                                <SelectItem value="preferCloud">{t('cloudSync.strategy.preferCloud')}</SelectItem>
+                                <SelectItem value="preferLocal">{t('cloudSync.strategy.preferLocal')}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        {sync.syncStrategy !== 'smartMerge' && (
+                            <div className="text-xs text-amber-600 dark:text-amber-400">
+                                {sync.syncStrategy === 'preferCloud'
+                                    ? t('cloudSync.strategy.preferCloudHint')
+                                    : t('cloudSync.strategy.preferLocalHint')}
+                            </div>
+                        )}
                     </div>
 
                     {sync.hasAnyConnectedProvider && (

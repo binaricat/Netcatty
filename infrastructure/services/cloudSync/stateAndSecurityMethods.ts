@@ -5,6 +5,10 @@ import {
   generateDeviceId,
   getDefaultDeviceName,
 } from '../../../domain/sync';
+import {
+  DEFAULT_CLOUD_SYNC_STRATEGY,
+  normalizeCloudSyncStrategy,
+} from '../../../domain/syncStrategy';
 import { EncryptionService } from '../EncryptionService';
 import { createAdapter } from '../adapters';
 import { localStorageAdapter } from '../../persistence/localStorageAdapter';
@@ -43,6 +47,7 @@ export function loadInitialStateImpl(this: any): SyncManagerState {
       localUpdatedAt: number;
       remoteVersion: number;
       remoteUpdatedAt: number;
+      syncStrategy?: unknown;
     }>(SYNC_STORAGE_KEYS.SYNC_CONFIG);
 
     // Load sync history
@@ -80,6 +85,7 @@ export function loadInitialStateImpl(this: any): SyncManagerState {
       lastError: null,
       autoSyncEnabled: syncConfig?.autoSync || false,
       autoSyncInterval: syncConfig?.interval || SYNC_CONSTANTS.DEFAULT_AUTO_SYNC_INTERVAL,
+      syncStrategy: normalizeCloudSyncStrategy(syncConfig?.syncStrategy ?? DEFAULT_CLOUD_SYNC_STRATEGY),
       syncHistory,
     };
   }
@@ -208,6 +214,7 @@ export function handleStorageEventImpl(this: any, event: StorageEvent): void {
         localUpdatedAt?: number;
         remoteVersion?: number;
         remoteUpdatedAt?: number;
+        syncStrategy?: unknown;
       }>(event.newValue) || {
         autoSync: false,
         interval: SYNC_CONSTANTS.DEFAULT_AUTO_SYNC_INTERVAL,
@@ -215,6 +222,7 @@ export function handleStorageEventImpl(this: any, event: StorageEvent): void {
         localUpdatedAt: 0,
         remoteVersion: 0,
         remoteUpdatedAt: 0,
+        syncStrategy: DEFAULT_CLOUD_SYNC_STRATEGY,
       };
 
       this.state.autoSyncEnabled = Boolean(next.autoSync);
@@ -229,6 +237,7 @@ export function handleStorageEventImpl(this: any, event: StorageEvent): void {
       this.state.localUpdatedAt = Number(next.localUpdatedAt ?? 0);
       this.state.remoteVersion = Number(next.remoteVersion ?? 0);
       this.state.remoteUpdatedAt = Number(next.remoteUpdatedAt ?? 0);
+      this.state.syncStrategy = normalizeCloudSyncStrategy(next.syncStrategy);
 
       this.notifyStateChange();
       return;
