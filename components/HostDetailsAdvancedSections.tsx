@@ -6,32 +6,22 @@ import { MAX_FONT_SIZE, MIN_FONT_SIZE } from "../infrastructure/config/fonts";
 import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
+import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { cn } from "../lib/utils";
-import { useI18n } from "../application/i18n/I18nProvider";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HostDetailsAdvancedSectionsProps = Record<string, any>;
 
-const ToggleRow: React.FC<{ label: string; enabled: boolean; onToggle: () => void }> = ({ label, enabled, onToggle }) => {
-  const { t } = useI18n();
+const ToggleRow: React.FC<{ label: string; hint?: React.ReactNode; enabled: boolean; onToggle: () => void }> = ({ label, hint, enabled, onToggle }) => {
   return (
-    <div className="flex items-center justify-between h-10 px-3 rounded-md border border-border/70 bg-secondary/70">
-      <span className="text-sm">{label}</span>
-      <Button
-        variant={enabled ? "secondary" : "ghost"}
-        size="sm"
-        className={cn("h-8 min-w-[72px]", enabled && "bg-primary/20")}
-        onClick={onToggle}
-      >
-        {enabled ? t("common.enabled") : t("common.disabled")}
-      </Button>
-    </div>
+    <HostDetailsSettingRow label={label} hint={hint}>
+      <Switch checked={enabled} onCheckedChange={() => onToggle()} />
+    </HostDetailsSettingRow>
   );
 };
 
@@ -58,13 +48,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   groupDefaults,
 }) => (
   <>
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Palette size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("hostDetails.section.appearance")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<Palette size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.appearance")}
+        >
 
           {/* SSH Theme Selection */}
           <button
@@ -107,78 +94,78 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           )}
 
           {/* Font Size */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Font Size:</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (effectiveFontSize > MIN_FONT_SIZE) {
-                  setForm((prev) => ({
-                    ...prev,
-                    fontSize: effectiveFontSize - 1,
-                    fontSizeOverride: true,
-                  }));
-                }
-              }}
-              disabled={effectiveFontSize <= MIN_FONT_SIZE}
-              className="px-2 h-8"
-            >
-              -
-            </Button>
-            <Input
-              type="number"
-              min={MIN_FONT_SIZE}
-              max={MAX_FONT_SIZE}
-              value={effectiveFontSize}
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                if (val >= MIN_FONT_SIZE && val <= MAX_FONT_SIZE) {
-                  setForm((prev) => ({
-                    ...prev,
-                    fontSize: val,
-                    fontSizeOverride: true,
-                  }));
-                }
-              }}
-              className="w-16 text-center h-8"
-            />
-            <span className="text-sm text-muted-foreground">pt</span>
-            {hasEffectiveFontSizeOverride && (
+          <HostDetailsSettingRow label="Font Size">
+            <div className="flex items-center gap-2">
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="ml-auto h-8 text-primary"
-                onClick={() => setForm((prev) => clearHostFontSizeOverride(prev))}
+                onClick={() => {
+                  if (effectiveFontSize > MIN_FONT_SIZE) {
+                    setForm((prev) => ({
+                      ...prev,
+                      fontSize: effectiveFontSize - 1,
+                      fontSizeOverride: true,
+                    }));
+                  }
+                }}
+                disabled={effectiveFontSize <= MIN_FONT_SIZE}
+                className="h-8 w-8 px-0"
               >
-                {t("common.useGlobal")}
+                -
               </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (effectiveFontSize < MAX_FONT_SIZE) {
-                  setForm((prev) => ({
-                    ...prev,
-                    fontSize: effectiveFontSize + 1,
-                    fontSizeOverride: true,
-                  }));
-                }
-              }}
-              disabled={effectiveFontSize >= MAX_FONT_SIZE}
-              className="px-2 h-8"
-            >
-              +
-            </Button>
-          </div>
-        </Card>
+              <Input
+                type="number"
+                min={MIN_FONT_SIZE}
+                max={MAX_FONT_SIZE}
+                value={effectiveFontSize}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  if (val >= MIN_FONT_SIZE && val <= MAX_FONT_SIZE) {
+                    setForm((prev) => ({
+                      ...prev,
+                      fontSize: val,
+                      fontSizeOverride: true,
+                    }));
+                  }
+                }}
+                className="h-8 w-16 text-center"
+              />
+              <span className="text-sm text-muted-foreground">pt</span>
+              {hasEffectiveFontSizeOverride && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-primary"
+                  onClick={() => setForm((prev) => clearHostFontSizeOverride(prev))}
+                >
+                  {t("common.useGlobal")}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (effectiveFontSize < MAX_FONT_SIZE) {
+                    setForm((prev) => ({
+                      ...prev,
+                      fontSize: effectiveFontSize + 1,
+                      fontSizeOverride: true,
+                    }));
+                  }
+                }}
+                disabled={effectiveFontSize >= MAX_FONT_SIZE}
+                className="h-8 w-8 px-0"
+              >
+                +
+              </Button>
+            </div>
+          </HostDetailsSettingRow>
+        </HostDetailsSection>
 
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Wifi size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.mosh")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<Wifi size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.mosh")}
+        >
           <ToggleRow
             label="Mosh"
             enabled={!!form.moshEnabled}
@@ -196,22 +183,19 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               }
             }}
           />
-        </Card>
+        </HostDetailsSection>
 
         {/* Agent Forwarding */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Forward size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.agentForwarding")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<Forward size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.agentForwarding")}
+        >
           <ToggleRow
             label={t("hostDetails.agentForwarding")}
+            hint={t("hostDetails.agentForwarding.desc")}
             enabled={!!form.agentForwarding}
             onToggle={() => update("agentForwarding", !form.agentForwarding)}
           />
-          <p className="text-xs text-muted-foreground">
-            {t("hostDetails.agentForwarding.desc")}
-          </p>
           {form.agentForwarding && sshAgentStatus && !sshAgentStatus.running && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
@@ -225,41 +209,35 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               </div>
             </div>
           )}
-        </Card>
+        </HostDetailsSection>
 
         {/* X11 Forwarding */}
         {(!form.protocol || form.protocol === "ssh") && !form.moshEnabled && (
-          <Card className="p-3 space-y-2 bg-card border-border/80">
-            <div className="flex items-center gap-2">
-              <TerminalSquare size={14} className="text-muted-foreground" />
-              <p className="text-xs font-semibold">{t("hostDetails.section.x11Forwarding")}</p>
-            </div>
+          <HostDetailsSection
+            icon={<TerminalSquare size={14} className="text-muted-foreground" />}
+            title={t("hostDetails.section.x11Forwarding")}
+          >
             <ToggleRow
               label={t("hostDetails.x11Forwarding")}
+              hint={t("hostDetails.x11Forwarding.desc")}
               enabled={!!form.x11Forwarding}
               onToggle={() => update("x11Forwarding", !form.x11Forwarding)}
             />
-            <p className="text-xs text-muted-foreground">
-              {t("hostDetails.x11Forwarding.desc")}
-            </p>
-          </Card>
+          </HostDetailsSection>
         )}
 
         {/* Network Device Mode — only for SSH hosts without Mosh (serial already uses raw mode) */}
         {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && (
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Router size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.deviceType")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<Router size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.deviceType")}
+        >
           <ToggleRow
             label={t("hostDetails.deviceType")}
+            hint={t("hostDetails.deviceType.desc")}
             enabled={form.deviceType === 'network'}
             onToggle={() => update("deviceType", form.deviceType === 'network' ? undefined : 'network')}
           />
-          <p className="text-xs text-muted-foreground break-words">
-            {t("hostDetails.deviceType.desc")}
-          </p>
           {form.deviceType === 'network' && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
@@ -268,15 +246,14 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               </p>
             </div>
           )}
-        </Card>
+        </HostDetailsSection>
         )}
 
         {/* SSH Algorithms */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <ShieldAlert size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.sshAlgorithms")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<ShieldAlert size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.sshAlgorithms")}
+        >
           {/* Display the *effective* value of these toggles (host field
               falling back to the resolved group default). Without the
               fallback a host that inherits the flag from its group would
@@ -285,15 +262,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               value from the raw host field. */}
           <ToggleRow
             label={t("hostDetails.legacyAlgorithms")}
+            hint={t("hostDetails.legacyAlgorithms.desc")}
             enabled={!!(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms)}
             onToggle={() => update(
               "legacyAlgorithms",
               !(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms),
             )}
           />
-          <p className="text-xs text-muted-foreground break-words">
-            {t("hostDetails.legacyAlgorithms.desc")}
-          </p>
           {(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms) && (
             <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
@@ -304,15 +279,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           )}
           <ToggleRow
             label={t("hostDetails.skipEcdsaHostKey")}
+            hint={t("hostDetails.skipEcdsaHostKey.desc")}
             enabled={!!(form.skipEcdsaHostKey ?? effectiveGroupDefaults?.skipEcdsaHostKey)}
             onToggle={() => update(
               "skipEcdsaHostKey",
               !(form.skipEcdsaHostKey ?? effectiveGroupDefaults?.skipEcdsaHostKey),
             )}
           />
-          <p className="text-xs text-muted-foreground break-words">
-            {t("hostDetails.skipEcdsaHostKey.desc")}
-          </p>
           <Collapsible open={showAlgorithmOverrides} onOpenChange={setShowAlgorithmOverrides}>
             <CollapsibleTrigger asChild>
               <Button
@@ -349,21 +322,19 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               />
             </CollapsibleContent>
           </Collapsible>
-        </Card>
+        </HostDetailsSection>
 
         {/* Terminal Behavior — input/output key mappings (backspace, etc.) */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.terminalBehavior")}</p>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
+        <HostDetailsSection
+          icon={<TerminalSquare size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.terminalBehavior")}
+        >
+          <HostDetailsSettingRow label={t("hostDetails.backspaceBehavior")}>
             <Select
               value={form.backspaceBehavior ?? "default"}
               onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
             >
-              <SelectTrigger className="h-8 w-auto text-xs">
+              <SelectTrigger className="h-10 w-36 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -371,17 +342,17 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        </Card>
+          </HostDetailsSettingRow>
+        </HostDetailsSection>
 
         {/* Per-host keepalive override */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <HeartPulse size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.section.keepalive")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<HeartPulse size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.keepalive")}
+        >
           <ToggleRow
             label={t("hostDetails.keepalive.override")}
+            hint={t("hostDetails.keepalive.desc")}
             enabled={!!form.keepaliveOverride}
             onToggle={() => {
               const next = !form.keepaliveOverride;
@@ -394,18 +365,14 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               }
             }}
           />
-          <p className="text-xs text-muted-foreground break-words">
-            {t("hostDetails.keepalive.desc")}
-          </p>
           {form.keepaliveOverride && (
             <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">{t("hostDetails.keepalive.interval")}</p>
-                <input
+              <HostDetailsSettingRow label={t("hostDetails.keepalive.interval")}>
+                <Input
                   type="number"
                   min={0}
                   max={3600}
-                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+                  className="h-8 w-24 text-xs"
                   value={form.keepaliveInterval ?? 0}
                   onChange={(e) => {
                     const v = parseInt(e.target.value, 10);
@@ -414,14 +381,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                     update("keepaliveInterval", v);
                   }}
                 />
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">{t("hostDetails.keepalive.countMax")}</p>
-                <input
+              </HostDetailsSettingRow>
+              <HostDetailsSettingRow label={t("hostDetails.keepalive.countMax")}>
+                <Input
                   type="number"
                   min={1}
                   max={100}
-                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs"
+                  className="h-8 w-24 text-xs"
                   value={form.keepaliveCountMax ?? 3}
                   onChange={(e) => {
                     const v = parseInt(e.target.value, 10);
@@ -430,7 +396,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                     update("keepaliveCountMax", v);
                   }}
                 />
-              </div>
+              </HostDetailsSettingRow>
               {(form.keepaliveInterval ?? 0) === 0 && (
                 <p className="text-xs text-muted-foreground break-words pl-1">
                   {t("hostDetails.keepalive.disabledHint")}
@@ -438,30 +404,24 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               )}
             </div>
           )}
-        </Card>
+        </HostDetailsSection>
 
         {/* Proxy via Hosts (Jump Hosts / ProxyJump) */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Link2 size={14} className="text-muted-foreground" />
-              <p className="text-xs font-semibold">
-                {t("hostDetails.jumpHosts")}
-              </p>
-            </div>
-            {chainedHosts.length > 0 ? (
+        <HostDetailsSection
+          icon={<Link2 size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.jumpHosts")}
+          action={
+            chainedHosts.length > 0 ? (
               <Badge variant="secondary" className="text-xs">
                 {t("hostDetails.jumpHosts.hops", { count: chainedHosts.length })}
               </Badge>
             ) : (
-              <Badge
-                variant="outline"
-                className="text-xs text-muted-foreground"
-              >
+              <Badge variant="outline" className="text-xs text-muted-foreground">
                 {t("hostDetails.jumpHosts.direct")}
               </Badge>
-            )}
-          </div>
+            )
+          }
+        >
           {chainedHosts.length > 0 && (
             <button
               className="w-full flex flex-col items-start gap-1 p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
@@ -513,14 +473,14 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               {t("hostDetails.jumpHosts.configure")}
             </Button>
           )}
-        </Card>
+        </HostDetailsSection>
 
         {/* Proxy Configuration */}
-        <Card className="p-3 space-y-2 bg-card border-border/80 overflow-hidden">
-          <div className="flex items-center gap-2">
-            <Globe size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.proxy")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<Globe size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.proxy")}
+          className="overflow-hidden"
+        >
           {form.proxyConfig?.host || form.proxyProfileId ? (
             <div className="w-full min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
               <button
@@ -565,16 +525,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               {t("hostDetails.proxy.configure")}
             </Button>
           )}
-        </Card>
+        </HostDetailsSection>
 
         {/* Environment Variables */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Variable size={14} className="text-muted-foreground" />
-              <p className="text-xs font-semibold">{t("hostDetails.envVars")}</p>
-            </div>
-          </div>
+        <HostDetailsSection
+          icon={<Variable size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.envVars")}
+        >
           {(form.environmentVariables?.length || 0) > 0 ? (
             <button
               className="w-full flex items-center gap-1 p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
@@ -606,14 +563,14 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               {t("hostDetails.envVars.add")}
             </Button>
           )}
-        </Card>
+        </HostDetailsSection>
 
         {/* Startup Command */}
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">{t("hostDetails.startupCommand")}</p>
-          </div>
+        <HostDetailsSection
+          icon={<TerminalSquare size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.startupCommand")}
+          hint={t("hostDetails.startupCommand.help")}
+        >
           <Textarea
             placeholder={groupDefaults?.startupCommand || t("hostDetails.startupCommand.placeholder")}
             value={form.startupCommand || ""}
@@ -621,9 +578,6 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             className="min-h-[80px] font-mono text-sm"
             rows={3}
           />
-          <p className="text-xs text-muted-foreground">
-            {t("hostDetails.startupCommand.help")}
-          </p>
-        </Card>
+        </HostDetailsSection>
   </>
 );

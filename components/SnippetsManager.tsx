@@ -10,11 +10,16 @@ import { Button } from './ui/button';
 import { ComboboxOption } from './ui/combobox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
 import { Dropdown, DropdownContent, DropdownTrigger } from './ui/dropdown';
-import { Input } from './ui/input';
 import { SortDropdown, SortMode } from './ui/sort-dropdown';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { SnippetsRightPanel } from './SnippetsRightPanel';
 import { SnippetsPackageDialogs } from './SnippetsPackageDialogs';
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
+} from './vault/VaultPageHeader';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -695,18 +700,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     <TooltipProvider delayDuration={300}>
     <div className="h-full min-h-0 flex relative">
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-        <header className="border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm">
-          <div className="h-14 px-4 py-2 flex items-center gap-3">
-            <div className="relative w-64">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder={t('snippets.searchPlaceholder')}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-10 pl-9 bg-secondary border-border/60 text-sm"
-              />
-            </div>
-            <Button onClick={() => handleEdit()} size="sm" className="h-10">
+        <VaultPageHeader>
+            <VaultHeaderSearch
+              placeholder={t('snippets.searchPlaceholder')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-64"
+            />
+            <Button onClick={() => handleEdit()} size="sm" className="h-10 px-3">
               <Plus size={14} className="mr-2" /> {t('snippets.action.newSnippet')}
             </Button>
             <Button
@@ -716,14 +717,17 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               }}
               size="sm"
               variant="secondary"
-              className="h-10 gap-2 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+              className={vaultHeaderSecondaryButtonClass}
             >
               <FolderPlus size={14} className="mr-1" /> {t('snippets.action.newPackage')}
             </Button>
             <Button
-              variant={rightPanelMode === 'history' ? 'secondary' : 'ghost'}
+              variant="secondary"
               size="sm"
-              className="h-10 gap-2"
+              className={cn(
+                vaultHeaderSecondaryButtonClass,
+                rightPanelMode === 'history' && "bg-foreground/10 hover:bg-foreground/15",
+              )}
               onClick={() => setRightPanelMode(rightPanelMode === 'history' ? 'none' : 'history')}
             >
               <Clock size={14} /> {t('snippets.history.title')}
@@ -731,7 +735,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
             <div className="flex items-center gap-1 ml-auto">
               <Dropdown>
                 <DropdownTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-10 w-10">
+                  <Button variant="ghost" size="icon" className={vaultHeaderIconButtonClass}>
                     {viewMode === 'grid' ? <LayoutGrid size={16} /> : <ListIcon size={16} />}
                     <ChevronDown size={10} className="ml-0.5" />
                   </Button>
@@ -756,11 +760,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
               <SortDropdown
                 value={sortMode}
                 onChange={setSortMode}
-                className="h-10 w-10"
+                className={vaultHeaderIconButtonClass}
               />
             </div>
-          </div>
-        </header>
+        </VaultPageHeader>
         <div className="flex items-center gap-2 text-sm font-semibold px-4 py-2">
           <button className="text-primary hover:underline" onClick={() => setSelectedPackage(null)}>{t('snippets.breadcrumb.allPackages')}</button>
           {breadcrumb.map((b) => (

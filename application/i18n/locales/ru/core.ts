@@ -191,6 +191,7 @@ export const ruCoreMessages: Messages = {
   // Vault Sidebar
   'vault.sidebar.collapse': 'Свернуть боковую панель',
   'vault.sidebar.expand': 'Развернуть боковую панель',
+  'vault.sidebar.resize': 'Изменить ширину боковой панели',
 
   // Settings > Application
   'settings.application.checkUpdates': 'Проверить обновления',

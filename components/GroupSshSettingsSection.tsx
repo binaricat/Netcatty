@@ -1,37 +1,27 @@
 import React from "react";
 import { ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, FileKey, FolderOpen, Globe, Key, Link2, MoreHorizontal, Plus, Shield, TerminalSquare, Trash2, Variable, X } from "lucide-react";
-import { useI18n } from "../application/i18n/I18nProvider";
 import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
-import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
+import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Combobox } from "./ui/combobox";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GroupSshSettingsSectionProps = Record<string, any>;
 
-const ToggleRow: React.FC<{ label: string; enabled: boolean; onToggle: () => void }> = ({ label, enabled, onToggle }) => {
-  const { t } = useI18n();
+const ToggleRow: React.FC<{ label: string; hint?: React.ReactNode; enabled: boolean; onToggle: () => void }> = ({ label, hint, enabled, onToggle }) => {
   return (
-    <div className="flex items-center justify-between h-10 px-3 rounded-md border border-border/70 bg-secondary/70">
-      <span className="text-sm">{label}</span>
-      <Button
-        variant={enabled ? "secondary" : "ghost"}
-        size="sm"
-        className={cn("h-8 min-w-[72px]", enabled && "bg-primary/20")}
-        onClick={onToggle}
-      >
-        {enabled ? t("common.enabled") : t("common.disabled")}
-      </Button>
-    </div>
+    <HostDetailsSettingRow label={label} hint={hint}>
+      <Switch checked={enabled} onCheckedChange={() => onToggle()} />
+    </HostDetailsSettingRow>
   );
 };
 
@@ -63,12 +53,11 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
   if (!sshEnabled) return null;
 
   return (
-          <Card className="p-3 space-y-3 bg-card border-border/80 overflow-hidden">
-            <div className="flex items-center gap-2">
-              <TerminalSquare size={14} className="text-muted-foreground" />
-              <p className="text-xs font-semibold flex-1">
-                {t("vault.groups.details.ssh")}
-              </p>
+          <HostDetailsSection
+            icon={<TerminalSquare size={14} className="text-muted-foreground" />}
+            title={t("vault.groups.details.ssh")}
+            className="overflow-hidden"
+            action={
               <Dropdown>
                 <DropdownTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -85,7 +74,8 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
                   </button>
                 </DropdownContent>
               </Dropdown>
-            </div>
+            }
+          >
 
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
@@ -380,6 +370,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             <ToggleRow
               label={t("hostDetails.agentForwarding")}
+              hint={t("hostDetails.agentForwarding.desc")}
               enabled={!!form.agentForwarding}
               onToggle={() => update("agentForwarding", !form.agentForwarding)}
             />
@@ -401,6 +392,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
                 the UI while connections still applied it. */}
             <ToggleRow
               label={t("hostDetails.legacyAlgorithms")}
+              hint={t("hostDetails.legacyAlgorithms.desc")}
               enabled={!!(form.legacyAlgorithms ?? inheritedLegacyAlgorithms)}
               onToggle={() => update(
                 "legacyAlgorithms",
@@ -410,15 +402,13 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
 
             <ToggleRow
               label={t("hostDetails.skipEcdsaHostKey")}
+              hint={t("hostDetails.skipEcdsaHostKey.desc")}
               enabled={!!(form.skipEcdsaHostKey ?? inheritedSkipEcdsaHostKey)}
               onToggle={() => update(
                 "skipEcdsaHostKey",
                 !(form.skipEcdsaHostKey ?? inheritedSkipEcdsaHostKey),
               )}
             />
-            <p className="text-xs text-muted-foreground break-words">
-              {t("hostDetails.skipEcdsaHostKey.desc")}
-            </p>
             <Collapsible open={showAlgorithmOverrides} onOpenChange={setShowAlgorithmOverrides}>
               <CollapsibleTrigger asChild>
                 <Button
@@ -451,7 +441,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             {/* Proxy */}
             <button
               type="button"
-              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              className="w-full flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3 py-2 transition-colors hover:bg-secondary/70"
               onClick={() => setActiveSubPanel("proxy")}
             >
               <div className="flex items-center gap-2">
@@ -481,7 +471,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             {/* Host Chaining */}
             <button
               type="button"
-              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              className="w-full flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3 py-2 transition-colors hover:bg-secondary/70"
               onClick={() => setActiveSubPanel("chain")}
             >
               <div className="flex items-center gap-2">
@@ -501,7 +491,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             {/* Environment Variables */}
             <button
               type="button"
-              className="w-full flex items-center justify-between p-2 rounded-md bg-secondary/50 hover:bg-secondary transition-colors cursor-pointer"
+              className="w-full flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3 py-2 transition-colors hover:bg-secondary/70"
               onClick={() => setActiveSubPanel("env-vars")}
             >
               <div className="flex items-center gap-2">
@@ -536,8 +526,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
             {/* Backspace behavior — terminal input mapping, lives at the
                 bottom of the SSH section so it doesn't get visually
                 grouped with the algorithm controls above. */}
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">{t("hostDetails.backspaceBehavior")}</p>
+            <HostDetailsSettingRow label={t("hostDetails.backspaceBehavior")}>
               <Select
                 value={form.backspaceBehavior ?? "default"}
                 onValueChange={(v) => update("backspaceBehavior", v === "default" ? undefined : v)}
@@ -550,7 +539,7 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
                   <SelectItem value="ctrl-h">^H (0x08)</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-          </Card>
+            </HostDetailsSettingRow>
+          </HostDetailsSection>
   );
 };

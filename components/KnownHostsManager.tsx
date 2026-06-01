@@ -6,7 +6,6 @@ import {
   LayoutGrid,
   List as ListIcon,
   RefreshCw,
-  Search,
   Server,
   Shield,
   Trash2,
@@ -35,11 +34,16 @@ import {
   ContextMenuTrigger,
 } from "./ui/context-menu";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
-import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { SortDropdown, SortMode } from "./ui/sort-dropdown";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "./ui/toast";
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
+} from "./vault/VaultPageHeader";
 
 interface KnownHostsManagerProps {
   knownHosts: KnownHost[];
@@ -476,27 +480,20 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="h-14 px-4 py-2 flex items-center gap-3 border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm">
+      <VaultPageHeader>
         <div className="flex-1 min-w-0 flex items-center gap-2">
-          <div className="relative flex-1 max-w-xs">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              placeholder={t("knownHosts.search.placeholder")}
-              className="pl-9 h-10 bg-secondary border-border/60 text-sm"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <VaultHeaderSearch
+            placeholder={t("knownHosts.search.placeholder")}
+            className="flex-1 max-w-xs"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <div className="flex items-center gap-1">
           {/* View Mode Toggle */}
           <Dropdown>
             <DropdownTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-10 w-10">
+              <Button variant="ghost" size="icon" className={vaultHeaderIconButtonClass}>
                 {viewMode === "grid" ? (
                   <LayoutGrid size={16} />
                 ) : (
@@ -527,14 +524,14 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           <SortDropdown
             value={sortMode}
             onChange={setSortMode}
-            className="h-10 w-10"
+            className={vaultHeaderIconButtonClass}
           />
         </div>
         <div className="w-px h-5 bg-border/50" />
         <div className="flex items-center gap-2">
           <Button
             variant="secondary"
-            className="h-10 px-3 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+            className={vaultHeaderSecondaryButtonClass}
             onClick={() => handleScanSystem()}
             disabled={isScanning}
           >
@@ -553,14 +550,14 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           />
           <Button
             variant="secondary"
-            className="h-10 px-3 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+            className={vaultHeaderSecondaryButtonClass}
             onClick={openFilePicker}
           >
             <Import size={14} className="mr-2" />
             {t("knownHosts.action.importFile")}
           </Button>
         </div>
-      </div>
+      </VaultPageHeader>
 
       {/* Content */}
       <ScrollArea className="flex-1">

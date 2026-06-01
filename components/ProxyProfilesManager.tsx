@@ -9,7 +9,7 @@ import {
   List as ListIcon,
   Pencil,
   Plus,
-  Search,
+  Route,
   Settings2,
   Trash2,
 } from "lucide-react";
@@ -48,6 +48,12 @@ import {
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
 import { toast } from "./ui/toast";
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
+} from "./vault/VaultPageHeader";
 
 interface ProxyProfilesManagerProps {
   proxyProfiles: ProxyProfile[];
@@ -83,6 +89,23 @@ const getProfileUsageCount = (
 
 type ProxyProfilesViewMode = "grid" | "list";
 
+const proxyProtocolMeta = {
+  http: {
+    label: "HTTP",
+    Icon: Globe,
+    iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  },
+  socks5: {
+    label: "SOCKS5",
+    Icon: Route,
+    iconClassName: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  },
+} satisfies Record<ProxyConfig["type"], {
+  label: string;
+  Icon: React.ComponentType<{ size?: number; className?: string }>;
+  iconClassName: string;
+}>;
+
 interface ProxyProfileCardProps {
   profile: ProxyProfile;
   usageCount: number;
@@ -106,7 +129,9 @@ const ProxyProfileCard: React.FC<ProxyProfileCardProps> = ({
 }) => {
   const { t } = useI18n();
   const usageLabel = t("proxyProfiles.usage", { count: usageCount });
-  const accessibleLabel = `${profile.label}, ${profile.config.type.toUpperCase()}, ${profile.config.host}:${profile.config.port}, ${usageLabel}`;
+  const protocol = proxyProtocolMeta[profile.config.type];
+  const ProtocolIcon = protocol.Icon;
+  const accessibleLabel = `${profile.label}, ${protocol.label}, ${profile.config.host}:${profile.config.port}, ${usageLabel}`;
 
   return (
     <ContextMenu>
@@ -124,19 +149,22 @@ const ProxyProfileCard: React.FC<ProxyProfileCardProps> = ({
           onClick={onClick}
         >
           <div className="flex items-center gap-3 h-full">
-            <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center">
-              <Globe size={18} />
+            <div
+              className={cn(
+                "h-11 w-11 rounded-xl flex items-center justify-center",
+                protocol.iconClassName,
+              )}
+              title={protocol.label}
+            >
+              <ProtocolIcon size={18} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="text-sm font-semibold truncate">{profile.label}</div>
-                <Badge variant="secondary" className="text-[10px] shrink-0">
-                  {profile.config.type.toUpperCase()}
-                </Badge>
               </div>
               <div className="text-[11px] font-mono text-muted-foreground truncate">
                 {profile.config.host}:{profile.config.port} -{" "}
-                {usageLabel}
+                {protocol.label}
               </div>
             </div>
           </div>
@@ -289,34 +317,30 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
   return (
     <div className="h-full flex relative">
       <div className={cn("flex-1 flex flex-col min-h-0 transition-all duration-200", draft && "mr-[380px]")}>
-        <header className="border-b border-border/50 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm shrink-0">
-          <div className="h-14 px-4 py-2 flex items-center gap-3">
+        <VaultPageHeader>
             <Button
               onClick={openCreate}
               variant="secondary"
-              className="h-10 px-3 gap-2 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+              className={vaultHeaderSecondaryButtonClass}
             >
               <Plus size={14} />
               {t("proxyProfiles.action.add")}
             </Button>
             <div className="ml-auto flex items-center gap-2 min-w-0 flex-shrink">
-              <div className="relative flex-shrink min-w-[100px]">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  aria-label={t("proxyProfiles.search.placeholder")}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t("proxyProfiles.search.placeholder")}
-                  className="h-10 pl-9 w-full bg-secondary border-border/60 text-sm"
-                />
-              </div>
+              <VaultHeaderSearch
+                aria-label={t("proxyProfiles.search.placeholder")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("proxyProfiles.search.placeholder")}
+                className="flex-shrink w-64"
+              />
               <Dropdown>
                 <DropdownTrigger asChild>
                   <Button
                     aria-label={t("proxyProfiles.viewMode")}
                     variant="ghost"
                     size="icon"
-                    className="h-10 w-10 flex-shrink-0"
+                    className={cn(vaultHeaderIconButtonClass, "flex-shrink-0")}
                   >
                     {proxyProfilesViewMode === "grid" ? (
                       <LayoutGrid size={16} />
@@ -344,8 +368,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
                 </DropdownContent>
               </Dropdown>
             </div>
-          </div>
-        </header>
+        </VaultPageHeader>
 
         <div className="flex-1 overflow-y-auto">
           <div className="space-y-3 p-3">

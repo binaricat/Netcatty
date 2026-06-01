@@ -2,6 +2,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  FileText,
   FolderPlus,
   Plus,
   Settings2,
@@ -38,7 +39,6 @@ import { HostDetailsConnectionSections } from "./HostDetailsConnectionSections";
 import { LINUX_DISTRO_OPTION_IDS, parseOptionalPortInput, resolveDetailsTelnetPassword, resolveDetailsTelnetPort, resolveDetailsTelnetUsername } from "./HostDetailsPanel.helpers";
 export { parseOptionalPortInput } from "./HostDetailsPanel.helpers";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
 import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
@@ -47,6 +47,7 @@ import { toast } from "./ui/toast";
 import {
   ChainPanel,
   CreateGroupPanel,
+  HostDetailsSection,
   EnvVarsPanel,
   ProxyPanel,
 } from "./host-details";
@@ -703,13 +704,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       }
     >
       <AsidePanelContent>
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Settings2 size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("hostDetails.section.general")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<Settings2 size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.general")}
+        >
           <Input
             placeholder={t("hostDetails.label.placeholder")}
             value={form.label}
@@ -766,13 +764,20 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
               triggerClassName="flex-1 min-h-10"
             />
           </div>
+        </HostDetailsSection>
 
+        <HostDetailsSection
+          icon={<FileText size={14} className="text-muted-foreground shrink-0" />}
+          title={t("hostDetails.notes.label")}
+          hint={t("hostDetails.notes.help")}
+        >
           <HostNotesEditor
             panelKey={form.id}
             value={form.notes ?? ""}
             onChange={(notes) => update("notes", notes)}
+            showHeader={false}
           />
-        </Card>
+        </HostDetailsSection>
 
         <HostDetailsConnectionSections
           t={t}
@@ -835,7 +840,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         </div>
 
         {form.telnetEnabled || form.protocol === "telnet" ? (
-          <Card className="p-3 space-y-3 bg-card border-border/80">
+          <HostDetailsSection
+            icon={<Plus size={14} className="text-muted-foreground" />}
+            title="Telnet"
+          >
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
                 <span className="text-xs text-muted-foreground">{t("hostDetails.telnetOn")}</span>
@@ -932,7 +940,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                 {customThemeStore.getThemeById(effectiveTelnetThemeId)?.name || "Flexoki Dark"}
               </span>
             </button>
-          </Card>
+          </HostDetailsSection>
         ) : (
           <Button
             variant="ghost"

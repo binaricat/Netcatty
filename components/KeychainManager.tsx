@@ -7,7 +7,6 @@ import {
   List as ListIcon,
   MoreHorizontal,
   Plus,
-  Search,
   Shield,
   Trash2,
   Upload,
@@ -41,10 +40,14 @@ import {
   ContextMenuTrigger,
 } from "./ui/context-menu";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
-import { Input } from "./ui/input";
 import { toast } from "./ui/toast";
 import { KeychainExportPanel } from "./KeychainExportPanel";
 import { KeychainEditPanel } from "./KeychainEditPanel";
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+} from "./vault/VaultPageHeader";
 
 // Import utilities and components from keychain module
 import {
@@ -524,8 +527,7 @@ echo $3 >> "$FILE"`);
           panel.type !== "closed" && "mr-[380px]",
         )}
       >
-        {/* Toolbar */}
-        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm border-b border-border/50 shrink-0">
+        <VaultPageHeader>
           {/* Filter Tabs */}
           <div className="flex items-center gap-1">
             {/* KEY button with split interaction: left=switch view, right=dropdown */}
@@ -628,25 +630,19 @@ echo $3 >> "$FILE"`);
           {/* Search and View Mode - hide search when panel is open */}
           <div className="ml-auto flex items-center gap-2 min-w-0 flex-shrink">
             {panel.type === "closed" && (
-              <div className="relative flex-shrink min-w-[100px]">
-                <Search
-                  size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t("common.searchPlaceholder")}
-                  className="h-10 pl-9 w-full bg-secondary border-border/60 text-sm"
-                />
-              </div>
+              <VaultHeaderSearch
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("common.searchPlaceholder")}
+                className="flex-shrink w-64"
+              />
             )}
             <Dropdown>
               <DropdownTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-10 w-10 flex-shrink-0"
+                  className={cn(vaultHeaderIconButtonClass, "flex-shrink-0")}
                 >
                   {viewMode === "grid" ? (
                     <LayoutGrid size={16} />
@@ -674,7 +670,7 @@ echo $3 >> "$FILE"`);
               </DropdownContent>
             </Dropdown>
           </div>
-        </div>
+        </VaultPageHeader>
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto">

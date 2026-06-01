@@ -5,7 +5,6 @@ import {
   Globe,
   LayoutGrid,
   List as ListIcon,
-  Search,
   Server,
   Shuffle,
   Zap,
@@ -41,9 +40,14 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
-import { Input } from "./ui/input";
 import { SortDropdown } from "./ui/sort-dropdown";
 import { toast } from "./ui/toast";
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
+} from "./vault/VaultPageHeader";
 
 // Import components and utilities from port-forwarding module
 import {
@@ -586,13 +590,12 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
           showWizard || showEditPanel || showNewForm ? "mr-[360px]" : "",
         )}
       >
-        {/* Toolbar */}
-        <div className="h-14 px-4 py-2 flex items-center gap-3 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm border-b border-border/50 relative z-20">
+        <VaultPageHeader className="z-20">
           <Dropdown open={showNewMenu} onOpenChange={setShowNewMenu}>
             <DropdownTrigger asChild>
               <Button
                 variant="secondary"
-                className="h-10 px-3 gap-2 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+                className={vaultHeaderSecondaryButtonClass}
               >
                 <Zap size={14} />
                 {t("pf.action.newForwarding")}
@@ -634,23 +637,17 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
           </Dropdown>
 
           <div className="ml-auto flex items-center gap-2">
-            <div className="relative">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                placeholder={t("common.searchPlaceholder")}
-                className="h-10 pl-9 w-44 bg-secondary border-border/60 text-sm"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+            <VaultHeaderSearch
+              placeholder={t("common.searchPlaceholder")}
+              className="w-64"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
 
             {/* View mode toggle */}
             <Dropdown>
               <DropdownTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-10 w-10">
+                <Button variant="ghost" size="icon" className={vaultHeaderIconButtonClass}>
                   {viewMode === "grid" ? (
                     <LayoutGrid size={16} />
                   ) : (
@@ -687,10 +684,10 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             <SortDropdown
               value={sortMode}
               onChange={setSortMode}
-              className="h-10 w-10"
+              className={vaultHeaderIconButtonClass}
             />
           </div>
-        </div>
+        </VaultPageHeader>
 
         {/* Rules List */}
         <div className="flex-1 overflow-auto p-4">

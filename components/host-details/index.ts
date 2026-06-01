@@ -14,3 +14,9 @@ export type { ChainPanelProps } from './ChainPanel';
 
 export { EnvVarsPanel } from './EnvVarsPanel';
 export type { EnvVarsPanelProps } from './EnvVarsPanel';
+
+export {
+  HostDetailsHelp,
+  HostDetailsSection,
+  HostDetailsSettingRow,
+} from './HostDetailsSection';

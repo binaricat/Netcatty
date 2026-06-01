@@ -175,6 +175,7 @@ export const zhCNCoreMessages: Messages = {
   // Vault Sidebar
   'vault.sidebar.collapse': '收起侧边栏',
   'vault.sidebar.expand': '展开侧边栏',
+  'vault.sidebar.resize': '调整侧边栏宽度',
 
   // Settings > Application
   'settings.application.checkUpdates': '检查更新',

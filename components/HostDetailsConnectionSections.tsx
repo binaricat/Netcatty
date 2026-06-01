@@ -4,8 +4,8 @@ import type { Host } from "../types";
 import { cn } from "../lib/utils";
 import { DistroAvatar } from "./DistroAvatar";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
+import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { ScrollArea } from "./ui/scroll-area";
@@ -47,13 +47,10 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   getDistroOptionLabel,
 }) => (
   <>
-        <Card className="p-3 space-y-2 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <MapPin size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("hostDetails.section.address")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<MapPin size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.address")}
+        >
           <div className="flex items-center gap-2">
             <DistroAvatar
               host={form as Host}
@@ -71,15 +68,13 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               className="h-10 flex-1"
             />
           </div>
-        </Card>
+        </HostDetailsSection>
 
-        <Card className="p-3 space-y-3 bg-card border-border/80 overflow-hidden">
-          <div className="flex items-center gap-2">
-            <KeyRound size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("hostDetails.section.portCredentials")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<KeyRound size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.portCredentials")}
+          className="overflow-hidden"
+        >
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
               <span className="text-xs text-muted-foreground">SSH on</span>
@@ -594,48 +589,35 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 </div>
               )}
           </div>
-        </Card>
+        </HostDetailsSection>
 
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <FolderLock size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("hostDetails.section.sftp")}
-            </p>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <div className="text-sm font-medium">
-                {t("hostDetails.sftp.sudo")}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t("hostDetails.sftp.sudo.desc")}
-              </div>
-            </div>
+        <HostDetailsSection
+          icon={<FolderLock size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.sftp")}
+        >
+          <HostDetailsSettingRow
+            label={t("hostDetails.sftp.sudo")}
+            hint={t("hostDetails.sftp.sudo.desc")}
+          >
             <Switch
               checked={form.sftpSudo || false}
               onCheckedChange={(val) => update("sftpSudo", val)}
             />
-          </div>
+          </HostDetailsSettingRow>
           {form.sftpSudo && !form.password && !selectedIdentity?.password && (
             <p className="text-xs text-amber-500">
               {t("hostDetails.sftp.sudo.passwordWarning")}
             </p>
           )}
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <div className="text-sm font-medium">
-                {t("hostDetails.sftp.encoding")}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t("hostDetails.sftp.encoding.desc")}
-              </div>
-            </div>
+          <HostDetailsSettingRow
+            label={t("hostDetails.sftp.encoding")}
+            hint={t("hostDetails.sftp.encoding.desc")}
+          >
             <Select
               value={form.sftpEncoding || "auto"}
               onValueChange={(val) => update("sftpEncoding", val as Host["sftpEncoding"])}
             >
-              <SelectTrigger className="h-8 w-28">
+              <SelectTrigger className="h-10 w-32">
                 <SelectValue placeholder={t("sftp.encoding.label")} />
               </SelectTrigger>
               <SelectContent>
@@ -644,17 +626,15 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 <SelectItem value="gb18030">{t("sftp.encoding.gb18030")}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        </Card>
+          </HostDetailsSettingRow>
+        </HostDetailsSection>
 
         {form.os === "linux" && (
-          <Card className="p-3 space-y-3 bg-card border-border/80">
-            <div className="flex items-center gap-2">
-              <img src="/distro/linux.svg" alt="Linux" className="h-3.5 w-3.5 opacity-70 dark:invert" />
-              <p className="text-xs font-semibold">{t("hostDetails.distro.title")}</p>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("hostDetails.distro.desc")}</p>
-
+          <HostDetailsSection
+            icon={<img src="/distro/linux.svg" alt="Linux" className="h-3.5 w-3.5 opacity-70 dark:invert" />}
+            title={t("hostDetails.distro.title")}
+            hint={t("hostDetails.distro.desc")}
+          >
             <div className="grid gap-2 md:grid-cols-2">
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground">{t("hostDetails.distro.mode")}</span>
@@ -749,7 +729,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                 </div>
               )}
             </div>
-          </Card>
+          </HostDetailsSection>
         )}
   </>
 );

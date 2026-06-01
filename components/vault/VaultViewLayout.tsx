@@ -1,20 +1,69 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { VaultHostListSection } from "./VaultHostListSection";
+import {
+  VaultHeaderSearch,
+  VaultPageHeader,
+  vaultHeaderIconButtonClass,
+  vaultHeaderSecondaryButtonClass,
+} from "./VaultPageHeader";
 
 type VaultViewLayoutContext = Record<string, any>;
 
 export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
-  const { Activity, allGroupPaths, allTags, AppLogo, Array, Badge, BookMarked, Boolean, Button, CheckSquare, ChevronDown, clearHostSelection, ClipboardCopy, Clock, cn, connectionLogs, connectSelectedHosts, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, currentSection, customGroups, deleteGroupPath, deleteGroupWithHosts, deleteSelectedHosts, deleteTargetPath, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, displayedGroups, displayedHosts, DistroAvatar, Download, Dropdown, DropdownContent, DropdownTrigger, Edit2, editingGroupPath, editingHost, editingHostGroupDefaults, FileCode, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, Globe, groupConfigs, GroupDetailsPanel, groupedDisplayHosts, handleConnectClick, handleCopyCredentials, handleDeleteTag, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleEditTag, handleExportHosts, handleHostConnect, handleImportFileSelected, handleNewHost, handleProtocolSelect, handleQuickConnect, handleQuickConnectSaveHost, handleSaveGroupConfig, handleSearchKeyDown, handleUnmanageGroup, hasHostsSidePanel, HostDetailsPanel, hostListScrollRef, hosts, HostTreeView, hotkeyScheme, identities, ImportVaultDialog, Input, isDeleteGroupOpen, isGroupPanelOpen, isHostPanelOpen, isHostsSectionActive, isImportOpen, isMultiSelectMode, isNewFolderOpen, isQuickConnectOpen, isRenameGroupOpen, isSearchQuickConnect, isSerialModalOpen, Key, keyBindings, KeychainManager, keys, knownHostsManagerElement, Label, lastPinnedId, LayoutGrid, LazyConnectionLogsManager, LazyProtocolSelectDialog, List, managedGroupPaths, managedSources, moveGroup, moveHostToGroup, Network, newFolderName, newHostGroupPath, onClearUnsavedConnectionLogs, onConnectSerial, onCreateLocalTerminal, onDeleteConnectionLog, onDeleteHost, onImportOrReuseKey, onOpenLogView, onOpenSettings, onRunSnippet, onToggleConnectionLogSaved, onUpdateCustomGroups, onUpdateGroupConfigs, onUpdateHosts, onUpdateIdentities, onUpdateKeys, onUpdateProxyProfiles, onUpdateSnippetPackages, onUpdateSnippets, Pin, pinnedHosts, pinnedRecentIds, Plug, Plus, PortForwarding, protocolSelectHost, proxyProfiles, ProxyProfilesManager, quickConnectTarget, quickConnectWarnings, QuickConnectWizard, recentHosts, renameGroupError, renameGroupName, renameTargetPath, RippleButton, rootRef, sanitizeHost, search, Search, selectedGroupPath, selectedHostIds, selectedTags, SerialConnectModal, SerialHostDetailsPanel, sessionCount, Set, setCurrentSection, setDeleteGroupWithHosts, setDeleteTargetPath, setDragOverDropTarget, setEditingGroupPath, setEditingHost, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsGroupPanelOpen, setIsHostPanelOpen, setIsImportOpen, setIsMultiSelectMode, setIsNewFolderOpen, setIsQuickConnectOpen, setIsRenameGroupOpen, setIsSerialModalOpen, setLastPinnedId, setNewFolderName, setNewHostGroupPath, setProtocolSelectHost, setQuickConnectTarget, setQuickConnectWarnings, setRenameGroupError, setRenameGroupName, setRenameTargetPath, setSearch, setSelectedGroupPath, setSelectedHostIds, setSelectedTags, setSidebarCollapsed, setSortMode, setTargetParentPath, Settings, setViewMode, shellHistory, shouldHideEmptyRootHostsSection, showRecentHosts, sidebarCollapsed, snippetPackages, snippets, SnippetsManager, SortDropdown, sortMode, splitViewGridStyle, Square, Star, submitNewFolder, submitRenameGroup, Suspense, t, TagFilterDropdown, targetParentPath, terminalFontSize, terminalSettings, TerminalSquare, terminalThemeId, toggleHostPinned, toggleHostSelection, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, Upload, upsertHostById, Usb, viewMode, visibleDisplayedHosts, X, Zap } = ctx;
+  const { Activity, allGroupPaths, allTags, AppLogo, Array, Badge, BookMarked, Boolean, Button, CheckSquare, ChevronDown, clearHostSelection, ClipboardCopy, Clock, cn, connectionLogs, connectSelectedHosts, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, currentSection, customGroups, deleteGroupPath, deleteGroupWithHosts, deleteSelectedHosts, deleteTargetPath, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, displayedGroups, displayedHosts, DistroAvatar, Download, Dropdown, DropdownContent, DropdownTrigger, Edit2, editingGroupPath, editingHost, editingHostGroupDefaults, FileCode, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, Globe, groupConfigs, GroupDetailsPanel, groupedDisplayHosts, handleConnectClick, handleCopyCredentials, handleDeleteTag, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleEditTag, handleExportHosts, handleHostConnect, handleImportFileSelected, handleNewHost, handleProtocolSelect, handleQuickConnect, handleQuickConnectSaveHost, handleSaveGroupConfig, handleSearchKeyDown, handleUnmanageGroup, handleSidebarWidthCommit, hasHostsSidePanel, HostDetailsPanel, hostListScrollRef, hosts, HostTreeView, hotkeyScheme, identities, ImportVaultDialog, Input, isDeleteGroupOpen, isGroupPanelOpen, isHostPanelOpen, isHostsSectionActive, isImportOpen, isMultiSelectMode, isNewFolderOpen, isQuickConnectOpen, isRenameGroupOpen, isSearchQuickConnect, isSerialModalOpen, Key, keyBindings, KeychainManager, keys, knownHostsManagerElement, Label, lastPinnedId, LayoutGrid, LazyConnectionLogsManager, LazyProtocolSelectDialog, List, managedGroupPaths, managedSources, moveGroup, moveHostToGroup, Network, newFolderName, newHostGroupPath, onClearUnsavedConnectionLogs, onConnectSerial, onCreateLocalTerminal, onDeleteConnectionLog, onDeleteHost, onImportOrReuseKey, onOpenLogView, onOpenSettings, onRunSnippet, onToggleConnectionLogSaved, onUpdateCustomGroups, onUpdateGroupConfigs, onUpdateHosts, onUpdateIdentities, onUpdateKeys, onUpdateProxyProfiles, onUpdateSnippetPackages, onUpdateSnippets, Pin, pinnedHosts, pinnedRecentIds, Plug, Plus, PortForwarding, protocolSelectHost, proxyProfiles, ProxyProfilesManager, quickConnectTarget, quickConnectWarnings, QuickConnectWizard, recentHosts, renameGroupError, renameGroupName, renameTargetPath, RippleButton, rootRef, sanitizeHost, search, selectedGroupPath, selectedHostIds, selectedTags, SerialConnectModal, SerialHostDetailsPanel, sessionCount, Set, setCurrentSection, setDeleteGroupWithHosts, setDeleteTargetPath, setDragOverDropTarget, setEditingGroupPath, setEditingHost, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsGroupPanelOpen, setIsHostPanelOpen, setIsImportOpen, setIsMultiSelectMode, setIsNewFolderOpen, setIsQuickConnectOpen, setIsRenameGroupOpen, setIsSerialModalOpen, setLastPinnedId, setNewFolderName, setNewHostGroupPath, setProtocolSelectHost, setQuickConnectTarget, setQuickConnectWarnings, setRenameGroupError, setRenameGroupName, setRenameTargetPath, setSearch, setSelectedGroupPath, setSelectedHostIds, setSelectedTags, setSidebarCollapsed, setSidebarWidth, setSortMode, setTargetParentPath, Settings, setViewMode, shellHistory, shouldHideEmptyRootHostsSection, showRecentHosts, sidebarCollapsed, sidebarWidth, snippetPackages, snippets, SnippetsManager, SortDropdown, sortMode, splitViewGridStyle, Square, Star, submitNewFolder, submitRenameGroup, Suspense, t, TagFilterDropdown, targetParentPath, terminalFontSize, terminalSettings, TerminalSquare, terminalThemeId, toggleHostPinned, toggleHostSelection, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, Upload, upsertHostById, Usb, viewMode, visibleDisplayedHosts, X, Zap } = ctx;
+  const [isSidebarResizing, setIsSidebarResizing] = React.useState(false);
+  const sidebarMinWidth = 56;
+  const sidebarMaxWidth = 320;
+  const effectiveSidebarWidth = Math.max(
+    sidebarMinWidth,
+    Math.min(sidebarMaxWidth, Number(sidebarWidth) || 208),
+  );
+  const handleSidebarResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = effectiveSidebarWidth;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    setIsSidebarResizing(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const clampWidth = (value: number) =>
+      Math.max(sidebarMinWidth, Math.min(sidebarMaxWidth, value));
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampWidth(startWidth + moveEvent.clientX - startX));
+    };
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      const nextWidth = clampWidth(startWidth + upEvent.clientX - startX);
+      setSidebarWidth(nextWidth);
+      handleSidebarWidthCommit(nextWidth);
+      setIsSidebarResizing(false);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  }, [effectiveSidebarWidth, handleSidebarWidthCommit, setSidebarWidth]);
   return (
-    <div ref={rootRef} className="absolute inset-0 min-h-0 flex" data-section="vault-view">
+    <div ref={rootRef} className="absolute inset-0 min-h-0 flex bg-secondary" data-section="vault-view">
       {/* Sidebar */}
       <TooltipProvider delayDuration={100}>
         <div
           className={cn(
-            "bg-secondary border-r border-border/60 flex flex-col transition-all duration-200",
-            sidebarCollapsed ? "w-14" : "w-52"
+            "relative shrink-0 bg-secondary flex flex-col",
+            isSidebarResizing ? "transition-none" : "transition-[width] duration-200",
           )}
+          style={{ width: effectiveSidebarWidth }}
           data-section="vault-sidebar"
         >
           <div className={cn(
@@ -197,50 +246,57 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               {sidebarCollapsed && <TooltipContent side="right">{t("common.settings")}</TooltipContent>}
             </Tooltip>
           </div>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("vault.sidebar.resize")}
+            className={cn(
+              "app-no-drag absolute right-0 top-0 z-20 h-full w-2 translate-x-1/2 cursor-col-resize",
+              "after:absolute after:right-1/2 after:top-2 after:h-[calc(100%-16px)] after:w-px after:translate-x-1/2 after:bg-border/0 after:transition-colors",
+              "hover:after:bg-border/70",
+              isSidebarResizing && "after:bg-primary/70",
+            )}
+            onPointerDown={handleSidebarResizeStart}
+          />
         </div>
       </TooltipProvider>
 
-      {/* Main Area */}
-      <div
-        className="flex-1 min-w-0 flex flex-col min-h-0 relative"
-        data-section="vault-main"
-      >
-        <header
-          className={cn(
-            "border-b border-border/50 bg-secondary/80 backdrop-blur app-drag",
-            !isHostsSectionActive && "hidden",
-          )}
-          data-section="vault-hosts-header"
+      <div className="flex min-w-0 flex-1 p-2 pl-1" data-section="vault-stage">
+        <div
+          className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"
+          data-section="vault-surface"
         >
-          <div className="h-14 px-4 py-2 flex items-center gap-3">
-            <div className="relative flex-1 app-no-drag">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
+          {/* Main Area */}
+          <div
+            className="flex-1 min-w-0 flex flex-col min-h-0 relative"
+            data-section="vault-main"
+          >
+        <VaultPageHeader
+          className={cn(!isHostsSectionActive && "hidden")}
+          dataSection="vault-hosts-header"
+        >
+              <VaultHeaderSearch
                 placeholder={t("vault.hosts.search.placeholder")}
-                className={cn(
-                  "pl-9 h-10 bg-secondary border-border/60 text-sm",
+                className="flex-1"
+                inputClassName={cn(
                   isSearchQuickConnect &&
                   "border-primary/50 ring-1 ring-primary/20",
                 )}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
+                rightAdornment={
+                  isSearchQuickConnect ? (
+                    <Zap size={14} className="text-primary" />
+                  ) : null
+                }
               />
-              {isSearchQuickConnect && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <Zap size={14} className="text-primary" />
-                </div>
-              )}
-            </div>
             <Button
               variant={isSearchQuickConnect ? "default" : "secondary"}
               className={cn(
-                "h-10 px-4 app-no-drag",
+                "h-10 px-4",
                 !isSearchQuickConnect &&
-                "bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40",
+                vaultHeaderSecondaryButtonClass,
               )}
               onClick={handleConnectClick}
             >
@@ -250,7 +306,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <div className="flex items-center gap-1 app-no-drag">
               <Dropdown>
                 <DropdownTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-10 w-10 app-no-drag">
+                  <Button variant="ghost" size="icon" className={vaultHeaderIconButtonClass}>
                     {viewMode === "grid" ? (
                       <LayoutGrid size={16} />
                     ) : viewMode === "list" ? (
@@ -291,19 +347,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 onChange={setSelectedTags}
                 onEditTag={handleEditTag}
                 onDeleteTag={handleDeleteTag}
-                className="h-10 w-10"
+                className={vaultHeaderIconButtonClass}
               />
               <SortDropdown
                 value={sortMode}
                 onChange={setSortMode}
-                className="h-10 w-10"
+                className={vaultHeaderIconButtonClass}
               />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant={isMultiSelectMode ? "secondary" : "ghost"}
                     size="icon"
-                    className="h-10 w-10"
+                    className={vaultHeaderIconButtonClass}
                     onClick={() => {
                       if (isMultiSelectMode) {
                         clearHostSelection();
@@ -334,7 +390,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 <div className="flex items-center rounded-md bg-primary text-primary-foreground">
                   <Button
                     size="sm"
-                    className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none app-no-drag"
+                    className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
                     onClick={handleNewHost}
                     tabIndex={isHostPanelOpen ? -1 : 0}
                   >
@@ -343,7 +399,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   <DropdownTrigger asChild>
                     <Button
                       size="sm"
-                      className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none app-no-drag"
+                      className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none"
                       tabIndex={isHostPanelOpen ? -1 : 0}
                     >
                       <ChevronDown size={14} />
@@ -396,7 +452,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <Button
                 size="sm"
                 variant="secondary"
-                className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+                className={vaultHeaderSecondaryButtonClass}
                 onClick={onCreateLocalTerminal}
                 tabIndex={isHostPanelOpen ? -1 : 0}
               >
@@ -405,15 +461,14 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <Button
                 size="sm"
                 variant="secondary"
-                className="h-10 px-3 app-no-drag bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40"
+                className={vaultHeaderSecondaryButtonClass}
                 onClick={() => setIsSerialModalOpen(true)}
                 tabIndex={isHostPanelOpen ? -1 : 0}
               >
                 <Usb size={14} className="mr-2" /> {t("serial.button")}
               </Button>
             </div>
-          </div>
-        </header>
+        </VaultPageHeader>
 
         {isMultiSelectMode && isHostsSectionActive && (
           <div className="px-4 py-1.5 bg-background border-b border-border/40 flex items-center gap-2">
@@ -626,7 +681,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         />
       )}
 
-      {/* Host Details Panel - positioned at VaultView root level for correct top alignment */}
+      {/* Host Details Panel */}
       {currentSection === "hosts" && isHostPanelOpen && editingHost?.protocol !== 'serial' && (
         <HostDetailsPanel
           initialData={editingHost}
@@ -683,6 +738,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           layout="inline"
         />
       )}
+        </div>
+      </div>
 
       <Dialog open={isNewFolderOpen} onOpenChange={(open) => {
         setIsNewFolderOpen(open);

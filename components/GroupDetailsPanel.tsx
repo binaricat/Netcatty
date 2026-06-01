@@ -27,6 +27,8 @@ import ThemeSelectPanel from "./ThemeSelectPanel";
 import {
   ChainPanel,
   EnvVarsPanel,
+  HostDetailsSection,
+  HostDetailsSettingRow,
   ProxyPanel,
 } from "./host-details";
 import {
@@ -35,7 +37,6 @@ import {
   type AsidePanelLayout,
 } from "./ui/aside-panel";
 import { Button } from "./ui/button";
-import { Card } from "./ui/card";
 import { Combobox } from "./ui/combobox";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { Input } from "./ui/input";
@@ -532,13 +533,10 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
     >
       <AsidePanelContent>
         {/* General Section */}
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Settings2 size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.general")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<Settings2 size={14} className="text-muted-foreground" />}
+          title={t("vault.groups.details.general")}
+        >
           <Input
             placeholder={t("vault.groups.field.name")}
             value={groupName}
@@ -558,7 +556,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
             placeholder={t("vault.groups.details.parentGroup")}
             className="w-full"
           />
-        </Card>
+        </HostDetailsSection>
 
         <GroupSshSettingsSection
           sshEnabled={sshEnabled}
@@ -588,12 +586,10 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
 
         {/* Telnet Section (if enabled) */}
         {telnetEnabled && (
-          <Card className="p-3 space-y-3 bg-card border-border/80">
-            <div className="flex items-center gap-2">
-              <Globe size={14} className="text-muted-foreground" />
-              <p className="text-xs font-semibold flex-1">
-                {t("vault.groups.details.telnet")}
-              </p>
+          <HostDetailsSection
+            icon={<Globe size={14} className="text-muted-foreground" />}
+            title={t("vault.groups.details.telnet")}
+            action={
               <Dropdown>
                 <DropdownTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -610,7 +606,8 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                   </button>
                 </DropdownContent>
               </Dropdown>
-            </div>
+            }
+          >
 
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
@@ -654,34 +651,28 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
                 {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-          </Card>
+          </HostDetailsSection>
         )}
 
         {/* Charset & Appearance — only when at least one protocol is added */}
         {(sshEnabled || telnetEnabled) && (<>
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Globe size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.advanced")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<Globe size={14} className="text-muted-foreground" />}
+          title={t("vault.groups.details.advanced")}
+        >
           <Input
             placeholder="UTF-8"
             value={form.charset || ""}
             onChange={(e) => update("charset", e.target.value || undefined)}
             className="h-10"
           />
-        </Card>
+        </HostDetailsSection>
 
         {/* Appearance Section */}
-        <Card className="p-3 space-y-3 bg-card border-border/80">
-          <div className="flex items-center gap-2">
-            <Palette size={14} className="text-muted-foreground" />
-            <p className="text-xs font-semibold">
-              {t("vault.groups.details.appearance")}
-            </p>
-          </div>
+        <HostDetailsSection
+          icon={<Palette size={14} className="text-muted-foreground" />}
+          title={t("vault.groups.details.appearance")}
+        >
 
           <button
             type="button"
@@ -758,21 +749,23 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelProps> = ({
           )}
 
           {/* Font Size */}
-          <Input
-            type="number"
-            placeholder={String(terminalFontSize)}
-            value={form.fontSize ?? ""}
-            onChange={(e) => {
-              const val = e.target.value ? parseInt(e.target.value) : undefined;
-              setForm((prev) => ({
-                ...prev,
-                fontSize: val,
-                fontSizeOverride: val !== undefined ? true : undefined,
-              }));
-            }}
-            className="h-10"
-          />
-        </Card>
+          <HostDetailsSettingRow label="Font Size">
+            <Input
+              type="number"
+              placeholder={String(terminalFontSize)}
+              value={form.fontSize ?? ""}
+              onChange={(e) => {
+                const val = e.target.value ? parseInt(e.target.value) : undefined;
+                setForm((prev) => ({
+                  ...prev,
+                  fontSize: val,
+                  fontSizeOverride: val !== undefined ? true : undefined,
+                }));
+              }}
+              className="h-8 w-24 text-center"
+            />
+          </HostDetailsSettingRow>
+        </HostDetailsSection>
         </>)}
 
         {/* Add Protocol Button — always at the bottom */}

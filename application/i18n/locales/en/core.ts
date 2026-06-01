@@ -191,6 +191,7 @@ export const enCoreMessages: Messages = {
   // Vault Sidebar
   'vault.sidebar.collapse': 'Collapse sidebar',
   'vault.sidebar.expand': 'Expand sidebar',
+  'vault.sidebar.resize': 'Resize sidebar',
 
   // Settings > Application
   'settings.application.checkUpdates': 'Check for updates',

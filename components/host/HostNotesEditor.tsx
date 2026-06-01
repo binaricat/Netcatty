@@ -20,6 +20,7 @@ export interface HostNotesEditorProps {
   /** Changes when opening a different host (e.g. host id) to reset the active tab */
   panelKey?: string;
   className?: string;
+  showHeader?: boolean;
 }
 
 export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
@@ -27,6 +28,7 @@ export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
   onChange,
   panelKey,
   className,
+  showHeader = true,
 }) => {
   const { t } = useI18n();
   const [tab, setTab] = useState<"edit" | "preview">(() => defaultNotesTab(value));
@@ -42,13 +44,17 @@ export const HostNotesEditor: React.FC<HostNotesEditorProps> = ({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="flex items-center gap-2">
-        <FileText size={14} className="text-muted-foreground shrink-0" />
-        <p className="text-xs font-semibold text-muted-foreground">
-          {t("hostDetails.notes.label")}
-        </p>
-      </div>
-      <p className="text-xs text-muted-foreground">{t("hostDetails.notes.help")}</p>
+      {showHeader && (
+        <>
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-muted-foreground shrink-0" />
+            <p className="text-xs font-semibold">
+              {t("hostDetails.notes.label")}
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("hostDetails.notes.help")}</p>
+        </>
+      )}
       <Tabs value={tab} onValueChange={(v) => setTab(v as "edit" | "preview")}>
         <TabsList className="h-8 w-full">
           <TabsTrigger value="edit" className="flex-1 text-xs">
