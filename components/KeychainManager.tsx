@@ -1,11 +1,12 @@
 import {
   BadgeCheck,
   ChevronDown,
+  Copy,
   Edit2,
+  ExternalLink,
   Key,
   LayoutGrid,
   List as ListIcon,
-  MoreHorizontal,
   Plus,
   Shield,
   Trash2,
@@ -838,9 +839,35 @@ echo $3 >> "$FILE"`);
                 </AsideActionMenuItem>
               </AsideActionMenu>
             ) : panel.type === "view" ? (
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal size={16} />
-              </Button>
+              <AsideActionMenu>
+                {panel.key.publicKey ? (
+                  <AsideActionMenuItem
+                    icon={<Copy size={14} />}
+                    onClick={() => copyPublicKey(panel.key)}
+                  >
+                    {t("action.copyPublicKey")}
+                  </AsideActionMenuItem>
+                ) : null}
+                <AsideActionMenuItem
+                  icon={<ExternalLink size={14} />}
+                  onClick={() => openKeyExport(panel.key)}
+                >
+                  {t("action.keyExport")}
+                </AsideActionMenuItem>
+                <AsideActionMenuItem
+                  icon={<Edit2 size={14} />}
+                  onClick={() => openKeyEdit(panel.key)}
+                >
+                  {t("action.edit")}
+                </AsideActionMenuItem>
+                <AsideActionMenuItem
+                  variant="destructive"
+                  icon={<Trash2 size={14} />}
+                  onClick={() => handleDelete(panel.key.id)}
+                >
+                  {t("action.delete")}
+                </AsideActionMenuItem>
+              </AsideActionMenu>
             ) : undefined
           }
         >

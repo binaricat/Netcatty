@@ -2,12 +2,13 @@
  * View Key Panel - Display SSH key details
  */
 
-import { Copy,Info } from 'lucide-react';
-import React from 'react';
+import { Check, Copy, Info } from 'lucide-react';
+import React, { useCallback, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { SSHKey } from '../../types';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { copyToClipboard } from './utils';
 
 interface ViewKeyPanelProps {
@@ -20,6 +21,15 @@ export const ViewKeyPanel: React.FC<ViewKeyPanelProps> = ({
     onExport,
 }) => {
     const { t } = useI18n();
+    const [copied, setCopied] = useState(false);
+
+    const handleCopyPublicKey = useCallback(async () => {
+        const ok = await copyToClipboard(keyItem.publicKey || '');
+        if (!ok) return;
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    }, [keyItem.publicKey]);
+
     return (
         <>
             <div className="space-y-2">
@@ -30,18 +40,34 @@ export const ViewKeyPanel: React.FC<ViewKeyPanelProps> = ({
             {keyItem.publicKey && (
                 <div className="space-y-2">
                     <Label className="text-muted-foreground">{t('keychain.field.publicKey')}</Label>
-                    <div className="relative">
-                        <div className="p-3 bg-card border border-border/80 rounded-lg font-mono text-xs break-all max-h-32 overflow-y-auto">
+                    <div className="flex rounded-lg border border-border/80 bg-card overflow-hidden">
+                        <div className="flex-1 min-w-0 p-3 font-mono text-xs break-all max-h-32 overflow-y-auto">
                             {keyItem.publicKey}
                         </div>
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute top-2 right-2 h-7 w-7"
-                            onClick={() => copyToClipboard(keyItem.publicKey || '')}
-                        >
-                            <Copy size={12} />
-                        </Button>
+                        <div className="shrink-0 flex flex-col border-l border-border/60 p-1">
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7"
+                                        onClick={() => void handleCopyPublicKey()}
+                                        aria-label={
+                                            copied
+                                                ? t('cloudSync.githubFlow.copied')
+                                                : t('action.copyPublicKey')
+                                        }
+                                    >
+                                        {copied ? <Check size={12} /> : <Copy size={12} />}
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left">
+                                    {copied
+                                        ? t('cloudSync.githubFlow.copied')
+                                        : t('action.copyPublicKey')}
+                                </TooltipContent>
+                            </Tooltip>
+                        </div>
                     </div>
                 </div>
             )}
