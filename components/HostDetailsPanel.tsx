@@ -167,6 +167,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       setGroupInputValue(initialData.group || "");
       setPendingReferenceKeyPath(null);
       setShowPassword(false);
+      setShowTelnetPassword(false);
     }
   }, [initialData]);
 
