@@ -187,22 +187,39 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                             value={sync.syncStrategy}
                             onValueChange={(value) => sync.setSyncStrategy(value as typeof sync.syncStrategy)}
                         >
-                            <SelectTrigger aria-label={t('cloudSync.strategy.title')}>
+                            <SelectTrigger
+                                aria-label={t('cloudSync.strategy.title')}
+                                className="h-auto min-h-[64px] py-2 [&>span]:line-clamp-none"
+                            >
                                 <SelectValue />
                             </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="smartMerge">{t('cloudSync.strategy.smartMerge')}</SelectItem>
-                                <SelectItem value="preferCloud">{t('cloudSync.strategy.preferCloud')}</SelectItem>
-                                <SelectItem value="preferLocal">{t('cloudSync.strategy.preferLocal')}</SelectItem>
+                            <SelectContent className="max-w-[min(520px,var(--radix-select-trigger-width))]">
+                                <SelectItem value="smartMerge" className="items-start py-2">
+                                    <div className="space-y-0.5">
+                                        <div>{t('cloudSync.strategy.smartMerge')}</div>
+                                        <div className="text-xs text-muted-foreground leading-snug">
+                                            {t('cloudSync.strategy.smartMergeDesc')}
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="preferCloud" className="items-start py-2">
+                                    <div className="space-y-0.5">
+                                        <div>{t('cloudSync.strategy.preferCloud')}</div>
+                                        <div className="text-xs text-muted-foreground leading-snug">
+                                            {t('cloudSync.strategy.preferCloudDesc')}
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="preferLocal" className="items-start py-2">
+                                    <div className="space-y-0.5">
+                                        <div>{t('cloudSync.strategy.preferLocal')}</div>
+                                        <div className="text-xs text-muted-foreground leading-snug">
+                                            {t('cloudSync.strategy.preferLocalDesc')}
+                                        </div>
+                                    </div>
+                                </SelectItem>
                             </SelectContent>
                         </Select>
-                        {sync.syncStrategy !== 'smartMerge' && (
-                            <div className="text-xs text-amber-600 dark:text-amber-400">
-                                {sync.syncStrategy === 'preferCloud'
-                                    ? t('cloudSync.strategy.preferCloudHint')
-                                    : t('cloudSync.strategy.preferLocalHint')}
-                            </div>
-                        )}
                     </div>
 
                     {sync.hasAnyConnectedProvider && (
