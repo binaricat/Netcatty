@@ -596,15 +596,6 @@ if (!gotLock) {
       console.warn("[Main] Failed to install permission handlers:", err);
     }
 
-    // Set dock icon on macOS
-    if (isMac && appIcon && app.dock?.setIcon) {
-      try {
-        app.dock.setIcon(appIcon);
-      } catch (err) {
-        console.warn("Failed to set dock icon", err);
-      }
-    }
-
     // Build and set application menu. A broken menu should not take down
     // the entire app — fall back to no custom menu and continue startup.
     try {
