@@ -11,6 +11,7 @@ import type GitHubAdapter from '../adapters/GitHubAdapter';
 import type {
   CloudProvider,
   ConflictResolution,
+  RemoteSyncPayload,
   SyncedFile,
   SyncFileMeta,
   SyncPayload,
@@ -96,21 +97,10 @@ async function downloadRemoteConflictPayloadImpl(this: any,
     throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
   }
 
-  await this.commitRemoteInspection(provider, remoteFile, remotePayload);
-
   this.exitBlockedState();
   this.state.syncState = 'IDLE';
   this.state.lastError = null;
   this.updateProviderStatus(provider, 'connected');
-  this.addSyncHistoryEntry({
-    timestamp: Date.now(),
-    provider,
-    action: 'download',
-    success: true,
-    localVersion: remoteFile.meta.version,
-    remoteVersion: remoteFile.meta.version,
-    deviceName: remoteFile.meta.deviceName,
-  });
 
   const result: SyncResult = {
     success: true,
@@ -118,6 +108,7 @@ async function downloadRemoteConflictPayloadImpl(this: any,
     action: 'download',
     version: remoteFile.meta.version,
     mergedPayload: remotePayload,
+    remoteFile,
   };
   this.emit({ type: 'SYNC_COMPLETED', provider, result });
   return result;
@@ -449,7 +440,7 @@ export async function syncToProviderImpl(this: any,
     }
   }
 
-export async function downloadFromProviderImpl(this: any,provider: CloudProvider): Promise<SyncPayload | null> {
+export async function downloadFromProviderImpl(this: any,provider: CloudProvider): Promise<RemoteSyncPayload | null> {
     if (this.state.securityState !== 'UNLOCKED' || !this.masterPassword) {
       throw new Error('Vault is locked');
     }
@@ -475,20 +466,7 @@ export async function downloadFromProviderImpl(this: any,provider: CloudProvider
         throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
       }
 
-      await this.commitRemoteInspection(provider, remoteFile, payload);
-
-      // Add to sync history
-      this.addSyncHistoryEntry({
-        timestamp: Date.now(),
-        provider,
-        action: 'download',
-        success: true,
-        localVersion: remoteFile.meta.version,
-        remoteVersion: remoteFile.meta.version,
-        deviceName: remoteFile.meta.deviceName,
-      });
-
-      return payload;
+      return { provider, payload, remoteFile };
     } catch (error) {
       // Add to sync history
       this.addSyncHistoryEntry({
@@ -552,7 +530,7 @@ export async function downloadGistRevisionImpl(this: any,sha: string): Promise<{
     };
   }
 
-export async function resolveConflictImpl(this: any,resolution: ConflictResolution): Promise<SyncPayload | null> {
+export async function resolveConflictImpl(this: any,resolution: ConflictResolution): Promise<RemoteSyncPayload | null> {
     if (!this.state.currentConflict) {
       throw new Error('No conflict to resolve');
     }

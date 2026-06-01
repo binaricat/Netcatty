@@ -1,6 +1,6 @@
 import React, { type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { AlertTriangle, Cloud, Database, Download, History, Key, Loader2, ShieldCheck, Trash2 } from 'lucide-react';
-import type { CloudProvider, ConflictResolution, SyncPayload, WebDAVAuthType } from '../../domain/sync';
+import type { CloudProvider, ConflictResolution, SyncPayload, SyncResult, WebDAVAuthType } from '../../domain/sync';
 import type { ShrinkFinding } from '../../domain/syncGuards';
 import type { useCloudSync } from '../../application/state/useCloudSync';
 import { cn } from '../../lib/utils';
@@ -873,17 +873,23 @@ export const CloudSyncDialogs: React.FC<CloudSyncDialogsProps> = ({
                                         for (const result of results.values()) {
                                             if (result.mergedPayload) {
                                                 await Promise.resolve(onApplyPayload(result.mergedPayload));
+                                                if (result.remoteFile) {
+                                                    await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+                                                        recordDownload: true,
+                                                    });
+                                                }
                                                 break; // All providers share the same merged payload
                                             }
                                         }
 
-                                        const allOk = Array.from(results.values()).every((r) => r.success);
+                                        const syncResults = Array.from(results.values()) as SyncResult[];
+                                        const allOk = syncResults.every((r) => r.success);
                                         if (allOk) {
                                             setBlockedFinding(null);
                                         } else {
                                             // Surface the failure but KEEP the banner so the user can retry or
                                             // restore. Find the first error string to display.
-                                            const firstError = Array.from(results.values())
+                                            const firstError = syncResults
                                                 .find((r) => !r.success)
                                                 ?.error ?? t('sync.toast.errorTitle');
                                             toast.error(firstError, t('sync.toast.errorTitle'));

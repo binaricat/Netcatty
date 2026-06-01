@@ -17,6 +17,7 @@ import {
 } from '../../domain/credentials';
 import { isProviderReadyForSync, type CloudProvider, type SyncPayload } from '../../domain/sync';
 import { mergeSyncPayloads } from '../../domain/syncMerge';
+import { resolveCloudSyncConflictAction } from '../../domain/syncStrategy';
 import {
   SYNCABLE_SETTING_STORAGE_KEYS,
   collectSyncableSettings,
@@ -322,6 +323,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       for (const result of results.values()) {
         if (result.mergedPayload) {
           await Promise.resolve(onApplyPayload(result.mergedPayload));
+          if (result.remoteFile) {
+            await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+              recordDownload: true,
+            });
+          }
           skipNextSyncRef.current = true;
           break; // All providers share the same merged payload
         }
@@ -403,6 +409,10 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   useEffect(() => {
     buildPayloadRef.current = buildPayload;
   }, [buildPayload]);
+  const getDataHashRef = useRef(getDataHash);
+  useEffect(() => {
+    getDataHashRef.current = getDataHash;
+  }, [getDataHash]);
 
   // Serialize `checkRemoteVersion` invocations. Overlapping runs would
   // race on `commitRemoteInspection` + `onApplyPayload`: two merges
@@ -491,7 +501,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           // remote while local is still empty — the exact overwrite window
           // we're trying to close.
           await Promise.resolve(onApplyPayloadRef.current(remotePayload));
-          await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload);
+          await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload, {
+            recordDownload: true,
+          });
           skipNextSyncRef.current = true;
           startupConsistent = true;
           notify.success(t('sync.autoSync.restoredMessage'), t('sync.autoSync.restoredTitle'));
@@ -505,6 +517,55 @@ export const useAutoSync = (config: AutoSyncConfig) => {
           notify.info(t('sync.autoSync.keptLocalMessage'), t('sync.autoSync.keptLocalTitle'));
         }
         return;
+      }
+
+      const conflictAction = resolveCloudSyncConflictAction(state.syncStrategy, {
+        hasConflict: inspection.remoteChanged,
+        hasRemoteFile: Boolean(inspection.remoteFile),
+      });
+
+      if (conflictAction === 'download-remote') {
+        // Apply remote FIRST; only commit anchor/base after the UI-side
+        // state has accepted the remote payload, matching the empty-vault
+        // restore ordering above.
+        await Promise.resolve(onApplyPayloadRef.current(remotePayload));
+        await manager.commitRemoteInspection(connectedProvider, remoteFile, remotePayload, {
+          recordDownload: true,
+        });
+        const roundTripResults = await manager.syncAllProviders(remotePayload, {
+          conflictActionOverride: 'upload-local',
+        });
+        const roundTripResultList = Array.from(roundTripResults.values());
+        const wasShrinkBlocked = roundTripResultList.some((result) => result.shrinkBlocked === true);
+        const roundTripFullySynced = roundTripResultList.length > 0
+          && roundTripResultList.every((result) => result.success);
+        skipNextSyncRef.current = roundTripFullySynced || wasShrinkBlocked;
+        startupConsistent = true;
+        if (wasShrinkBlocked) {
+          console.warn('[AutoSync] Cloud-wins round-trip was shrink-blocked; cloud data applied locally, leaving sync blocked for user review.');
+        } else if (!roundTripFullySynced) {
+          console.warn('[AutoSync] Cloud-wins round-trip did not update every provider; leaving next auto-sync enabled for retry.');
+        }
+        notify.success(t('sync.autoSync.syncedMessage'), t('sync.autoSync.syncedTitle'));
+        return;
+      }
+
+      if (conflictAction === 'upload-local') {
+        const pushResults = await manager.syncAllProviders(localPayload);
+        const results = Array.from(pushResults.values());
+        const hasSuccess = results.some((result) => result.success);
+        const wasShrinkBlocked = results.some((result) => result.shrinkBlocked === true);
+
+        if (hasSuccess && !wasShrinkBlocked) {
+          startupConsistent = true;
+          return;
+        }
+
+        if (wasShrinkBlocked) {
+          return;
+        }
+
+        throw new Error('Startup local-wins sync failed');
       }
 
       const mergeResult = mergeSyncPayloads(base, localPayload, remotePayload);
@@ -574,6 +635,10 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // provider/unlock transition) can retry.
     } finally {
       if (startupConsistent) {
+        if (!isInitializedRef.current) {
+          isInitializedRef.current = true;
+          lastSyncedDataRef.current = getDataHashRef.current();
+        }
         hasCheckedRemoteRef.current = true;
         // Only open the auto-sync gate when the inspect actually
         // validated the remote state. Leaving the gate closed on

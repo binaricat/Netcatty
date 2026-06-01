@@ -20,6 +20,7 @@ import {
   type MasterKeyConfig,
   type UnlockedMasterKey,
   type ProviderConnection,
+  type RemoteSyncPayload,
   type ProviderAccount,
   type SyncEvent,
   type SyncHistoryEntry,
@@ -27,7 +28,7 @@ import {
   type S3Config,
   type SyncedFile,
 } from '../../domain/sync';
-import type { CloudSyncStrategy } from '../../domain/syncStrategy';
+import type { CloudSyncConflictAction, CloudSyncStrategy } from '../../domain/syncStrategy';
 import { type CloudAdapter } from './adapters';
 import type { DeviceFlowState } from './adapters/GitHubAdapter';
 
@@ -579,8 +580,9 @@ export class CloudSyncManager {
     provider: CloudProvider,
     remoteFile: SyncedFile,
     payload: SyncPayload,
+    opts: { recordDownload?: boolean } = {},
   ): Promise<void> {
-    return commitRemoteInspectionImpl.call(this, provider, remoteFile, payload);
+    return commitRemoteInspectionImpl.call(this, provider, remoteFile, payload, opts);
   }
 
   /**
@@ -635,7 +637,7 @@ export class CloudSyncManager {
   /**
    * Download and apply data from a provider
    */
-  async downloadFromProvider(provider: CloudProvider): Promise<SyncPayload | null> {
+  async downloadFromProvider(provider: CloudProvider): Promise<RemoteSyncPayload | null> {
     return downloadFromProviderImpl.call(this, provider);
   }
 
@@ -676,7 +678,7 @@ export class CloudSyncManager {
   /**
    * Resolve a sync conflict
    */
-  async resolveConflict(resolution: ConflictResolution): Promise<SyncPayload | null> {
+  async resolveConflict(resolution: ConflictResolution): Promise<RemoteSyncPayload | null> {
     return resolveConflictImpl.call(this, resolution);
   }
 
@@ -717,7 +719,7 @@ export class CloudSyncManager {
    */
   async syncAllProviders(
     inputPayload?: SyncPayload,
-    opts: { overrideShrink?: boolean } = {},
+    opts: { overrideShrink?: boolean; conflictActionOverride?: CloudSyncConflictAction } = {},
   ): Promise<Map<CloudProvider, SyncResult>> {
     return syncAllProvidersImpl.call(this, inputPayload, opts);
   }

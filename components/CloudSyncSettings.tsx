@@ -527,6 +527,11 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 // Apply merged data if a three-way merge happened
                 if (result.mergedPayload && onApplyPayload) {
                     await Promise.resolve(onApplyPayload(result.mergedPayload));
+                    if (result.remoteFile) {
+                        await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+                            recordDownload: true,
+                        });
+                    }
                 }
                 toast.success(t('cloudSync.sync.success', { provider }));
             } else if (result.conflictDetected) {
@@ -542,14 +547,20 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Resolve conflict
     const handleResolveConflict = async (resolution: 'USE_LOCAL' | 'USE_REMOTE') => {
         try {
-            const payload = await sync.resolveConflict(resolution);
-            if (payload && resolution === 'USE_REMOTE') {
+            const remoteResult = await sync.resolveConflict(resolution);
+            if (remoteResult && resolution === 'USE_REMOTE') {
                 // USE_REMOTE applies cloud data over local — same data-loss
                 // shape as a local backup restore, so gate auto-sync in
                 // every other window the same way.
                 await withRestoreBarrier(async () => {
-                    await Promise.resolve(onApplyPayload(payload));
+                    await Promise.resolve(onApplyPayload(remoteResult.payload));
                 });
+                await sync.commitRemoteInspection(
+                    remoteResult.provider,
+                    remoteResult.remoteFile,
+                    remoteResult.payload,
+                    { recordDownload: true },
+                );
                 toast.success(t('cloudSync.resolve.downloaded'));
             } else if (resolution === 'USE_LOCAL') {
                 // Re-sync with local data. Hold the same cross-window
@@ -575,6 +586,11 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     for (const result of (results as Map<CloudProvider, SyncResult>).values()) {
                         if (result.mergedPayload) {
                             await Promise.resolve(onApplyPayload(result.mergedPayload));
+                            if (result.remoteFile) {
+                                await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+                                    recordDownload: true,
+                                });
+                            }
                             break;
                         }
                     }

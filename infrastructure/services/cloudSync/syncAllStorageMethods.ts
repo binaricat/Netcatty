@@ -8,7 +8,7 @@ import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
-import { resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
+import { resolveCloudSyncConflictAction, type CloudSyncConflictAction } from '../../../domain/syncStrategy';
 import type { CloudAdapter } from '../adapters';
 import type {
   CloudProvider,
@@ -23,17 +23,7 @@ async function downloadRemoteForSyncAllImpl(this: any,
   remoteFile: SyncedFile,
 ): Promise<SyncResult> {
   const payload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
-  await this.commitRemoteInspection(provider, remoteFile, payload);
   this.updateProviderStatus(provider, 'connected');
-  this.addSyncHistoryEntry({
-    timestamp: Date.now(),
-    provider,
-    action: 'download',
-    success: true,
-    localVersion: remoteFile.meta.version,
-    remoteVersion: remoteFile.meta.version,
-    deviceName: remoteFile.meta.deviceName,
-  });
 
   const result: SyncResult = {
     success: true,
@@ -41,6 +31,7 @@ async function downloadRemoteForSyncAllImpl(this: any,
     action: 'download',
     version: remoteFile.meta.version,
     mergedPayload: payload,
+    remoteFile,
   };
   this.emit({ type: 'SYNC_COMPLETED', provider, result });
   return result;
@@ -50,7 +41,7 @@ const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
 
 export async function syncAllProvidersImpl(this: any,
   inputPayload?: SyncPayload,
-  opts: { overrideShrink?: boolean } = {},
+  opts: { overrideShrink?: boolean; conflictActionOverride?: CloudSyncConflictAction } = {},
 ): Promise<Map<CloudProvider, SyncResult>> {
     const results = new Map<CloudProvider, SyncResult>();
     let payload = inputPayload;
@@ -166,10 +157,11 @@ export async function syncAllProvidersImpl(this: any,
     }
 
     if (conflicts.length > 0) {
-      const conflictAction = resolveCloudSyncConflictAction(this.state.syncStrategy, {
-        hasConflict: true,
-        hasRemoteFile: true,
-      });
+      const conflictAction = opts.conflictActionOverride
+        ?? resolveCloudSyncConflictAction(this.state.syncStrategy, {
+          hasConflict: true,
+          hasRemoteFile: true,
+        });
 
       if (conflictAction === 'download-remote') {
         const newestConflict = conflicts.reduce((latest, entry) => {
@@ -214,7 +206,7 @@ export async function syncAllProvidersImpl(this: any,
         for (const r of checkResults) {
           if (r.check) r.check.conflict = false;
         }
-      } else {
+      } else if (conflictAction === 'smart-merge') {
         // Three-way merge: incorporate remote data from every conflicting provider
         try {
           let merged = payload;
@@ -595,8 +587,9 @@ export async function saveSyncBaseImpl(this: any,payload: SyncPayload, provider?
         binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
       }
       this.saveToStorage(this.syncBaseKey(provider), btoa(binary));
-    } catch {
-      console.warn('[CloudSyncManager] Failed to save sync base');
+    } catch (error) {
+      console.warn('[CloudSyncManager] Failed to save sync base', error);
+      throw error;
     }
   }
 

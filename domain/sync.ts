@@ -350,10 +350,18 @@ export interface SyncResult {
   conflictDetected?: boolean;
   /** Present when sync produced or selected a payload that caller should apply locally */
   mergedPayload?: import('./sync').SyncPayload;
+  /** Present with a downloaded payload so callers can commit the remote anchor after local apply succeeds. */
+  remoteFile?: SyncedFile;
   /** True when a shrink-detection guard blocked the upload */
   shrinkBlocked?: boolean;
   /** The finding that triggered the shrink block or force-push */
   finding?: ShrinkFinding;
+}
+
+export interface RemoteSyncPayload {
+  provider: CloudProvider;
+  payload: SyncPayload;
+  remoteFile: SyncedFile;
 }
 
 /**

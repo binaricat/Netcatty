@@ -554,6 +554,7 @@ export async function commitRemoteInspectionImpl(this: any,
   provider: CloudProvider,
   remoteFile: SyncedFile,
   payload: SyncPayload,
+  opts: { recordDownload?: boolean } = {},
 ): Promise<void> {
     const adapter = await this.getConnectedAdapter(provider);
     const resourceId = adapter.resourceId || this.state.providers[provider].resourceId || null;
@@ -572,9 +573,20 @@ export async function commitRemoteInspectionImpl(this: any,
     this.state.providers[provider].lastSync = Date.now();
     this.state.providers[provider].lastSyncVersion = remoteFile.meta.version;
 
+    await this.saveSyncBase(payload, provider);
     this.saveSyncConfig();
     await this.saveSyncAnchor(provider, remoteFile, resourceId);
-    await this.saveSyncBase(payload, provider);
     await this.saveProviderConnection(provider, this.state.providers[provider]);
+    if (opts.recordDownload === true) {
+      this.addSyncHistoryEntry({
+        timestamp: Date.now(),
+        provider,
+        action: 'download',
+        success: true,
+        localVersion: remoteFile.meta.version,
+        remoteVersion: remoteFile.meta.version,
+        deviceName: remoteFile.meta.deviceName,
+      });
+    }
     this.notifyStateChange();
   }

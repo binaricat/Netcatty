@@ -14,6 +14,8 @@ import {
   type ProviderConnection,
   type ConflictInfo,
   type ConflictResolution,
+  type RemoteSyncPayload,
+  type SyncedFile,
   type SyncPayload,
   type SyncResult,
   type SyncHistoryEntry,
@@ -24,6 +26,7 @@ import {
   isProviderReadyForSync,
 } from '../../domain/sync';
 import type { CloudSyncStrategy } from '../../domain/syncStrategy';
+import type { CloudSyncConflictAction } from '../../domain/syncStrategy';
 import {
   getCloudSyncManager,
   type SyncManagerState,
@@ -93,10 +96,11 @@ export interface CloudSyncHook {
   resetProviderStatus: (provider: CloudProvider) => void;
 
   // Sync Actions
-  syncNow: (payload: SyncPayload, opts?: { overrideShrink?: boolean }) => Promise<Map<CloudProvider, SyncResult>>;
+  syncNow: (payload: SyncPayload, opts?: { overrideShrink?: boolean; conflictActionOverride?: CloudSyncConflictAction }) => Promise<Map<CloudProvider, SyncResult>>;
   syncToProvider: (provider: CloudProvider, payload: SyncPayload, opts?: { overrideShrink?: boolean }) => Promise<SyncResult>;
-  downloadFromProvider: (provider: CloudProvider) => Promise<SyncPayload | null>;
-  resolveConflict: (resolution: ConflictResolution) => Promise<SyncPayload | null>;
+  downloadFromProvider: (provider: CloudProvider) => Promise<RemoteSyncPayload | null>;
+  commitRemoteInspection: (provider: CloudProvider, remoteFile: SyncedFile, payload: SyncPayload, opts?: { recordDownload?: boolean }) => Promise<void>;
+  resolveConflict: (resolution: ConflictResolution) => Promise<RemoteSyncPayload | null>;
 
   // Gist Revision History
   getGistRevisionHistory: () => Promise<Array<{ version: string; date: Date }>>;
@@ -668,7 +672,7 @@ export const useCloudSync = (): CloudSyncHook => {
     throw new Error('Vault is locked');
   }, []);
 
-  const syncNowWithUnlock = useCallback(async (payload: SyncPayload, opts?: { overrideShrink?: boolean }) => {
+  const syncNowWithUnlock = useCallback(async (payload: SyncPayload, opts?: { overrideShrink?: boolean; conflictActionOverride?: CloudSyncConflictAction }) => {
     await ensureUnlocked();
     return await manager.syncAllProviders(payload, opts);
   }, [ensureUnlocked]);
@@ -681,6 +685,16 @@ export const useCloudSync = (): CloudSyncHook => {
   const downloadFromProviderWithUnlock = useCallback(async (provider: CloudProvider) => {
     await ensureUnlocked();
     return await manager.downloadFromProvider(provider);
+  }, [ensureUnlocked]);
+
+  const commitRemoteInspectionWithUnlock = useCallback(async (
+    provider: CloudProvider,
+    remoteFile: SyncedFile,
+    payload: SyncPayload,
+    opts: { recordDownload?: boolean } = {},
+  ) => {
+    await ensureUnlocked();
+    await manager.commitRemoteInspection(provider, remoteFile, payload, opts);
   }, [ensureUnlocked]);
 
   const subscribeToEvents = useCallback(
@@ -746,6 +760,7 @@ export const useCloudSync = (): CloudSyncHook => {
     syncNow: syncNowWithUnlock,
     syncToProvider: syncToProviderWithUnlock,
     downloadFromProvider: downloadFromProviderWithUnlock,
+    commitRemoteInspection: commitRemoteInspectionWithUnlock,
     resolveConflict: resolveConflictWithUnlock,
 
     // Gist Revision History (#679)
