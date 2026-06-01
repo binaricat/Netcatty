@@ -242,6 +242,9 @@ export interface SyncPayload {
 
   // Sync metadata
   syncedAt: number;         // When this payload was created
+
+  // Reliability metadata used to make sync decisions auditable across devices.
+  syncMeta?: SyncReliabilityMeta;
 }
 
 export const SYNC_PAYLOAD_ENTITY_KEYS = [
@@ -271,6 +274,55 @@ export const CLOUD_SYNC_PAYLOAD_ENTITY_KEYS = [
 
 export type SyncPayloadEntityKey = typeof SYNC_PAYLOAD_ENTITY_KEYS[number];
 export type CloudSyncPayloadEntityKey = typeof CLOUD_SYNC_PAYLOAD_ENTITY_KEYS[number];
+export type SyncChangeEntityKey = CloudSyncPayloadEntityKey | 'settings';
+
+export interface SyncEntityChangeCounts {
+  added: { local: number; remote: number };
+  modified: { local: number; remote: number };
+  deleted: { local: number; remote: number };
+}
+
+export interface SyncConflictDetail {
+  entityType: SyncChangeEntityKey;
+  id?: string;
+  kind:
+    | 'both-added'
+    | 'both-modified'
+    | 'local-deleted-remote-modified'
+    | 'remote-deleted-local-modified';
+}
+
+export interface SyncChangeSummary {
+  hasLocalChanges: boolean;
+  hasRemoteChanges: boolean;
+  hasConflicts: boolean;
+  byEntity: Partial<Record<SyncChangeEntityKey, SyncEntityChangeCounts>>;
+  conflicts: SyncConflictDetail[];
+}
+
+export interface SyncDeletionRecord {
+  entityType: CloudSyncPayloadEntityKey;
+  id: string;
+  deletedAt: number;
+  deviceId?: string;
+}
+
+export interface SyncReliabilityMeta {
+  schemaVersion: 1;
+  generatedAt: number;
+  deviceId?: string;
+  baseSyncedAt?: number;
+  localChanged: boolean;
+  deletions: SyncDeletionRecord[];
+  changeSummary: SyncChangeSummary;
+}
+
+export interface SyncSnapshotEntry {
+  id: string;
+  timestamp: number;
+  provider?: CloudProvider;
+  payload: SyncPayload;
+}
 
 export function hasSyncPayloadEntityData(
   payload: SyncPayload,
@@ -375,6 +427,7 @@ export interface ConflictInfo {
   remoteVersion: number;
   remoteUpdatedAt: number;
   remoteDeviceName?: string;
+  changeSummary?: SyncChangeSummary;
 }
 
 /**

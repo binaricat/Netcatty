@@ -32,7 +32,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { useCloudSync } from '../../application/state/useCloudSync';
 
 
-import { type CloudProvider, type ConflictInfo } from '../../domain/sync';
+import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -532,6 +532,19 @@ interface ConflictModalProps {
     onClose: () => void;
 }
 
+const CONFLICT_ENTITY_LABEL_KEYS: Record<SyncChangeEntityKey, string> = {
+    hosts: 'cloudSync.conflict.entity.hosts',
+    keys: 'cloudSync.conflict.entity.keys',
+    identities: 'cloudSync.conflict.entity.identities',
+    proxyProfiles: 'cloudSync.conflict.entity.proxyProfiles',
+    snippets: 'cloudSync.conflict.entity.snippets',
+    customGroups: 'cloudSync.conflict.entity.customGroups',
+    snippetPackages: 'cloudSync.conflict.entity.snippetPackages',
+    portForwardingRules: 'cloudSync.conflict.entity.portForwardingRules',
+    groupConfigs: 'cloudSync.conflict.entity.groupConfigs',
+    settings: 'cloudSync.conflict.entity.settings',
+};
+
 export const ConflictModal: React.FC<ConflictModalProps> = ({
     open,
     conflict,
@@ -545,10 +558,21 @@ export const ConflictModal: React.FC<ConflictModalProps> = ({
     const formatDate = (timestamp: number) => {
         return new Date(timestamp).toLocaleString(resolvedLocale || undefined);
     };
+    const changeRows = conflict.changeSummary
+        ? Object.entries(conflict.changeSummary.byEntity)
+            .filter(([, counts]) => counts)
+            .map(([entityType, counts]) => ({
+                entityType: entityType as SyncChangeEntityKey,
+                localTotal: (counts?.added.local ?? 0) + (counts?.modified.local ?? 0) + (counts?.deleted.local ?? 0),
+                remoteTotal: (counts?.added.remote ?? 0) + (counts?.modified.remote ?? 0) + (counts?.deleted.remote ?? 0),
+                conflictTotal: conflict.changeSummary?.conflicts.filter((item) => item.entityType === entityType).length ?? 0,
+            }))
+            .filter((row) => row.localTotal > 0 || row.remoteTotal > 0 || row.conflictTotal > 0)
+        : [];
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-background rounded-lg shadow-xl w-full max-w-lg p-6 relative">
+            <div className="bg-background rounded-lg shadow-xl w-full max-w-lg max-h-[calc(100vh-2rem)] p-6 relative flex flex-col">
                 <button
                     onClick={onClose}
                     className="absolute top-4 right-4 text-muted-foreground hover:text-foreground"
@@ -556,47 +580,73 @@ export const ConflictModal: React.FC<ConflictModalProps> = ({
                     <X size={18} />
                 </button>
 
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-                        <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <div className="flex-1 overflow-y-auto pr-1">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+                            <AlertTriangle className="w-5 h-5 text-amber-500" />
+                        </div>
+                        <div className="min-w-0">
+                            <h3 className="text-lg font-semibold">{t('cloudSync.conflict.title')}</h3>
+                            <p className="text-sm text-muted-foreground">
+                                {t('cloudSync.conflict.desc')}
+                            </p>
+                        </div>
                     </div>
-                    <div>
-                        <h3 className="text-lg font-semibold">{t('cloudSync.conflict.title')}</h3>
-                        <p className="text-sm text-muted-foreground">
-                            {t('cloudSync.conflict.desc')}
-                        </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                        <div className="p-4 rounded-lg border bg-muted/30 min-w-0">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">{t('cloudSync.conflict.local')}</div>
+                            <div className="text-sm font-medium">v{conflict.localVersion}</div>
+                            <div className="text-xs text-muted-foreground mt-1 break-words">
+                                {formatDate(conflict.localUpdatedAt)}
+                            </div>
+                            {conflict.localDeviceName && (
+                                <div className="text-xs text-muted-foreground break-words">
+                                    {conflict.localDeviceName}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-4 rounded-lg border bg-muted/30 min-w-0">
+                            <div className="text-xs font-medium text-muted-foreground mb-2">{t('cloudSync.conflict.cloud')}</div>
+                            <div className="text-sm font-medium">v{conflict.remoteVersion}</div>
+                            <div className="text-xs text-muted-foreground mt-1 break-words">
+                                {formatDate(conflict.remoteUpdatedAt)}
+                            </div>
+                            {conflict.remoteDeviceName && (
+                                <div className="text-xs text-muted-foreground break-words">
+                                    {conflict.remoteDeviceName}
+                                </div>
+                            )}
+                        </div>
                     </div>
+
+                    {changeRows.length > 0 && (
+                        <div className="rounded-lg border bg-muted/20 p-3 mb-6 space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground">
+                                {t('cloudSync.conflict.detailsTitle')}
+                            </div>
+                            <div className="space-y-2">
+                                {changeRows.map((row) => (
+                                    <div key={row.entityType} className="grid gap-1 text-sm">
+                                        <span className="font-medium break-words">
+                                            {t(CONFLICT_ENTITY_LABEL_KEYS[row.entityType])}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground break-words">
+                                            {t('cloudSync.conflict.detailsCounts', {
+                                                local: row.localTotal,
+                                                cloud: row.remoteTotal,
+                                                conflicts: row.conflictTotal,
+                                            })}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-4 rounded-lg border bg-muted/30">
-                        <div className="text-xs font-medium text-muted-foreground mb-2">{t('cloudSync.conflict.local')}</div>
-                        <div className="text-sm font-medium">v{conflict.localVersion}</div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                            {formatDate(conflict.localUpdatedAt)}
-                        </div>
-                        {conflict.localDeviceName && (
-                            <div className="text-xs text-muted-foreground">
-                                {conflict.localDeviceName}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="p-4 rounded-lg border bg-muted/30">
-                        <div className="text-xs font-medium text-muted-foreground mb-2">{t('cloudSync.conflict.cloud')}</div>
-                        <div className="text-sm font-medium">v{conflict.remoteVersion}</div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                            {formatDate(conflict.remoteUpdatedAt)}
-                        </div>
-                        {conflict.remoteDeviceName && (
-                            <div className="text-xs text-muted-foreground">
-                                {conflict.remoteDeviceName}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 pt-4 shrink-0">
                     <Button
                         variant="outline"
                         className="w-full gap-2"

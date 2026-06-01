@@ -19,7 +19,8 @@
  * merge by entity ID, preferring local for duplicates.
  */
 
-import type { SyncPayload } from './sync';
+import { carryForwardSyncDeletions, getDeletedEntityIds } from './syncReliability';
+import type { CloudSyncPayloadEntityKey, SyncPayload } from './sync';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -37,6 +38,14 @@ interface MergeResult {
   hadConflicts: boolean;
   summary: MergeSummary;
 }
+
+const OPTIONAL_ENTITY_KEYS = new Set<CloudSyncPayloadEntityKey>([
+  'identities',
+  'proxyProfiles',
+  'snippetPackages',
+  'portForwardingRules',
+  'groupConfigs',
+]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,6 +67,21 @@ function fingerprint(value: unknown): string {
   });
 }
 
+function entityArray<T>(
+  payload: SyncPayload,
+  key: CloudSyncPayloadEntityKey,
+  fallback: T[],
+): T[] {
+  if (
+    OPTIONAL_ENTITY_KEYS.has(key)
+    && !Object.prototype.hasOwnProperty.call(payload, key)
+  ) {
+    return fallback;
+  }
+  const value = payload[key];
+  return Array.isArray(value) ? value as T[] : [];
+}
+
 // ---------------------------------------------------------------------------
 // Entity-array merge (hosts, keys, identities, snippets, etc.)
 // ---------------------------------------------------------------------------
@@ -74,6 +98,7 @@ function mergeEntityArrays<T extends { id: string }>(
   base: T[],
   local: T[],
   remote: T[],
+  tombstones?: { local: Set<string>; remote: Set<string> },
 ): EntityMergeResult<T> {
   const baseMap = new Map(base.map((e) => [e.id, e]));
   const localMap = new Map(local.map((e) => [e.id, e]));
@@ -100,7 +125,14 @@ function mergeEntityArrays<T extends { id: string }>(
     const inLocal = localItem !== undefined;
     const inRemote = remoteItem !== undefined;
 
-    if (!inBase && inLocal && !inRemote) {
+    if (!inBase && inLocal && !inRemote && tombstones?.remote.has(id)) {
+      // Remote explicitly records this entity as deleted. When no base is
+      // available, this tombstone is the only durable signal that absence is
+      // intentional rather than an old client omitting the entity.
+      deleted.remote++;
+    } else if (!inBase && !inLocal && inRemote && tombstones?.local.has(id)) {
+      deleted.local++;
+    } else if (!inBase && inLocal && !inRemote) {
       // Local addition
       merged.push(localItem);
       added.local++;
@@ -171,6 +203,7 @@ function mergeStringArrays(
   base: string[],
   local: string[],
   remote: string[],
+  tombstones?: { local: Set<string>; remote: Set<string> },
 ): string[] {
   const baseSet = new Set(base);
   const localSet = new Set(local);
@@ -186,7 +219,11 @@ function mergeStringArrays(
     const inLocal = localSet.has(value);
     const inRemote = remoteSet.has(value);
 
-    if (!inBase) {
+    if (!inBase && inLocal && !inRemote && tombstones?.remote.has(value)) {
+      // Remote tombstone wins over a stale local value when no base exists.
+    } else if (!inBase && !inLocal && inRemote && tombstones?.local.has(value)) {
+      // Local tombstone wins over a stale remote value when no base exists.
+    } else if (!inBase) {
       // Addition — keep if either side added it
       if (inLocal || inRemote) result.add(value);
     } else {
@@ -359,22 +396,35 @@ export function mergeSyncPayloads(
     deleted: { local: 0, remote: 0 },
     modified: { local: 0, remote: 0, conflicts: 0 },
   };
+  const tombstones = (entityType: CloudSyncPayloadEntityKey) => ({
+    local: getDeletedEntityIds(local, entityType),
+    remote: getDeletedEntityIds(remote, entityType),
+  });
 
   // Merge each entity type
-  const hosts = mergeEntityArrays(b.hosts ?? [], local.hosts ?? [], remote.hosts ?? []);
-  const keys = mergeEntityArrays(b.keys ?? [], local.keys ?? [], remote.keys ?? []);
-  const identities = mergeEntityArrays(b.identities ?? [], local.identities ?? [], remote.identities ?? []);
+  const hosts = mergeEntityArrays(b.hosts ?? [], local.hosts ?? [], remote.hosts ?? [], tombstones('hosts'));
+  const keys = mergeEntityArrays(b.keys ?? [], local.keys ?? [], remote.keys ?? [], tombstones('keys'));
+  const baseIdentities = b.identities ?? [];
+  const identities = mergeEntityArrays(
+    baseIdentities,
+    entityArray(local, 'identities', baseIdentities),
+    entityArray(remote, 'identities', baseIdentities),
+    tombstones('identities'),
+  );
   const baseProxyProfiles = b.proxyProfiles ?? [];
   const proxyProfiles = mergeEntityArrays(
     baseProxyProfiles,
-    local.proxyProfiles ?? baseProxyProfiles,
-    remote.proxyProfiles ?? baseProxyProfiles,
+    entityArray(local, 'proxyProfiles', baseProxyProfiles),
+    entityArray(remote, 'proxyProfiles', baseProxyProfiles),
+    tombstones('proxyProfiles'),
   );
-  const snippets = mergeEntityArrays(b.snippets ?? [], local.snippets ?? [], remote.snippets ?? []);
+  const snippets = mergeEntityArrays(b.snippets ?? [], local.snippets ?? [], remote.snippets ?? [], tombstones('snippets'));
+  const basePortForwardingRules = b.portForwardingRules ?? [];
   const portForwardingRules = mergeEntityArrays(
-    b.portForwardingRules ?? [],
-    local.portForwardingRules ?? [],
-    remote.portForwardingRules ?? [],
+    basePortForwardingRules,
+    entityArray(local, 'portForwardingRules', basePortForwardingRules),
+    entityArray(remote, 'portForwardingRules', basePortForwardingRules),
+    tombstones('portForwardingRules'),
   );
 
   // Merge group configs (keyed by path — wrap with virtual id for entity merge)
@@ -386,8 +436,9 @@ export function mergeSyncPayloads(
   const baseGroupConfigs = b.groupConfigs ?? [];
   const groupConfigsResult = mergeEntityArrays(
     wrapGC(baseGroupConfigs),
-    wrapGC(local.groupConfigs ?? baseGroupConfigs),
-    wrapGC(remote.groupConfigs ?? baseGroupConfigs),
+    wrapGC(entityArray(local, 'groupConfigs', baseGroupConfigs)),
+    wrapGC(entityArray(remote, 'groupConfigs', baseGroupConfigs)),
+    tombstones('groupConfigs'),
   );
 
   // Aggregate stats
@@ -408,11 +459,14 @@ export function mergeSyncPayloads(
     b.customGroups ?? [],
     local.customGroups ?? [],
     remote.customGroups ?? [],
+    tombstones('customGroups'),
   );
+  const baseSnippetPackages = b.snippetPackages ?? [];
   const snippetPackages = mergeStringArrays(
-    b.snippetPackages ?? [],
-    local.snippetPackages ?? [],
-    remote.snippetPackages ?? [],
+    baseSnippetPackages,
+    entityArray<string>(local, 'snippetPackages', baseSnippetPackages),
+    entityArray<string>(remote, 'snippetPackages', baseSnippetPackages),
+    tombstones('snippetPackages'),
   );
 
   // Merge settings
@@ -430,7 +484,7 @@ export function mergeSyncPayloads(
 
   const groupConfigs = unwrapGC(groupConfigsResult.merged);
 
-  const payload: SyncPayload = {
+  const payload: SyncPayload = carryForwardSyncDeletions({
     hosts: hosts.merged,
     keys: keys.merged,
     identities: identities.merged,
@@ -442,7 +496,7 @@ export function mergeSyncPayloads(
     groupConfigs,
     settings,
     syncedAt: Date.now(),
-  };
+  }, [local, remote]);
 
   return {
     payload,

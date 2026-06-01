@@ -24,6 +24,7 @@ import {
   type ProviderAccount,
   type SyncEvent,
   type SyncHistoryEntry,
+  type SyncSnapshotEntry,
   type WebDAVConfig,
   type S3Config,
   type SyncedFile,
@@ -83,11 +84,13 @@ import {
   stopAutoSyncImpl,
   saveSyncConfigImpl,
   syncBaseKeyImpl,
+  syncSnapshotsKeyImpl,
   providerAccountIdKeyImpl,
   loadProviderAccountIdImpl,
   saveProviderAccountIdImpl,
   saveSyncBaseImpl,
   loadSyncBaseImpl,
+  loadSyncSnapshotsImpl,
   clearSyncBaseImpl,
   addSyncHistoryEntryImpl,
   resetLocalVersionImpl,
@@ -762,6 +765,10 @@ export class CloudSyncManager {
     return syncBaseKeyImpl.call(this, provider);
   }
 
+  private syncSnapshotsKey(provider?: CloudProvider): string {
+    return syncSnapshotsKeyImpl.call(this, provider);
+  }
+
   private providerAccountIdKey(provider: CloudProvider): string {
     return providerAccountIdKeyImpl.call(this, provider);
   }
@@ -780,6 +787,10 @@ export class CloudSyncManager {
 
   async loadSyncBase(provider?: CloudProvider): Promise<SyncPayload | null> {
     return loadSyncBaseImpl.call(this, provider);
+  }
+
+  async loadSyncSnapshots(provider?: CloudProvider): Promise<SyncSnapshotEntry[]> {
+    return loadSyncSnapshotsImpl.call(this, provider);
   }
 
   private clearSyncBase(): void {

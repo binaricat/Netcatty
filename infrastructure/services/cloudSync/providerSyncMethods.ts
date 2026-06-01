@@ -4,6 +4,7 @@
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import { summarizeSyncChanges, withSyncReliabilityMeta } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
 import { resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
 import type { CloudAdapter } from '../adapters';
@@ -28,6 +29,10 @@ async function uploadLocalPayloadImpl(this: any,
 ): Promise<SyncResult> {
   const overrideShrinkRequested = opts.overrideShrink === true;
   const directBase = await this.loadSyncBase(provider);
+  const payloadForUpload = withSyncReliabilityMeta(payload, directBase, {
+    deviceId: this.state.deviceId,
+    now: Date.now(),
+  });
   let directRemoteRef: SyncPayload | null = null;
   if (!directBase && remoteFile) {
     try {
@@ -39,7 +44,7 @@ async function uploadLocalPayloadImpl(this: any,
       directRemoteRef = null;
     }
   }
-  const directShrink = detectSuspiciousShrink(payload, directBase, directRemoteRef);
+  const directShrink = detectSuspiciousShrink(payloadForUpload, directBase, directRemoteRef);
   const shouldBlockDirect = directShrink.suspicious && !overrideShrinkRequested;
   const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
   if (shouldBlockDirect) {
@@ -60,7 +65,7 @@ async function uploadLocalPayloadImpl(this: any,
   }
 
   const syncedFile = await EncryptionService.encryptPayload(
-    payload,
+    payloadForUpload,
     this.masterPassword,
     this.state.deviceId,
     this.state.deviceName,
@@ -68,7 +73,7 @@ async function uploadLocalPayloadImpl(this: any,
     baseVersion,
   );
 
-  const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
+  const result = await this.uploadToProvider(provider, adapter, syncedFile, payloadForUpload);
 
   if (result.success) {
     this.exitBlockedState();
@@ -289,6 +294,9 @@ export async function syncToProviderImpl(this: any,
           );
         }
 
+        let remotePayloadForConflict: SyncPayload | null = null;
+        let baseForConflict: SyncPayload | null = null;
+
         // Remote is newer — attempt three-way merge instead of blocking
         try {
           let remotePayload: SyncPayload;
@@ -297,11 +305,17 @@ export async function syncToProviderImpl(this: any,
               checkResult.remoteFile,
               this.masterPassword,
             );
+            remotePayloadForConflict = remotePayload;
           } catch (decryptError) {
             throw new Error(`Decryption failed (master password may differ between devices): ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
           }
           const base = await this.loadSyncBase(provider);
+          baseForConflict = base;
           const mergeResult = mergeSyncPayloads(base, payload, remotePayload);
+          const mergedPayload = withSyncReliabilityMeta(mergeResult.payload, base, {
+            deviceId: this.state.deviceId,
+            now: Date.now(),
+          });
 
           console.info('[CloudSyncManager] Three-way merge completed', mergeResult.summary);
 
@@ -309,7 +323,7 @@ export async function syncToProviderImpl(this: any,
           // entities we still have in base. The merge itself is correct if local
           // state is trustworthy — but a degraded local (keychain failure,
           // partial load) can make merge produce a smaller-than-expected result.
-          const mergedShrink = detectSuspiciousShrink(mergeResult.payload, base, remotePayload);
+          const mergedShrink = detectSuspiciousShrink(mergedPayload, base, remotePayload);
           const shouldBlockMerged = mergedShrink.suspicious && !overrideShrinkRequested;
           const shouldForceMerged = mergedShrink.suspicious && overrideShrinkRequested;
           if (shouldBlockMerged) {
@@ -331,7 +345,7 @@ export async function syncToProviderImpl(this: any,
 
           // Encrypt and upload merged payload
           const mergedSyncedFile = await EncryptionService.encryptPayload(
-            mergeResult.payload,
+            mergedPayload,
             this.masterPassword,
             this.state.deviceId,
             this.state.deviceName,
@@ -343,7 +357,7 @@ export async function syncToProviderImpl(this: any,
             provider,
             adapter,
             mergedSyncedFile,
-            mergeResult.payload,
+            mergedPayload,
           );
 
           if (uploadResult.success) {
@@ -366,7 +380,7 @@ export async function syncToProviderImpl(this: any,
             return {
               ...uploadResult,
               action: 'merge',
-              mergedPayload: mergeResult.payload,
+              mergedPayload,
             };
           }
 
@@ -387,6 +401,9 @@ export async function syncToProviderImpl(this: any,
             remoteVersion: remoteFile.meta.version,
             remoteUpdatedAt: remoteFile.meta.updatedAt,
             remoteDeviceName: remoteFile.meta.deviceName,
+            ...(remotePayloadForConflict
+              ? { changeSummary: summarizeSyncChanges(baseForConflict, payload, remotePayloadForConflict) }
+              : {}),
           };
 
           this.emit({

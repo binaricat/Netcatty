@@ -7,6 +7,11 @@ import {
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import {
+  SYNC_SNAPSHOT_LIMIT,
+  summarizeSyncChanges,
+  withSyncReliabilityMeta,
+} from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
 import { resolveCloudSyncConflictAction, type CloudSyncConflictAction } from '../../../domain/syncStrategy';
 import type { CloudAdapter } from '../adapters';
@@ -14,6 +19,7 @@ import type {
   CloudProvider,
   SyncedFile,
   SyncHistoryEntry,
+  SyncSnapshotEntry,
   SyncPayload,
   SyncResult,
 } from '../../../domain/sync';
@@ -38,6 +44,52 @@ async function downloadRemoteForSyncAllImpl(this: any,
 }
 
 const SYNC_HISTORY_STORAGE_KEY = 'netcatty_sync_history_v1';
+const SYNC_SNAPSHOTS_STORAGE_KEY = 'netcatty_sync_snapshots_v1';
+
+async function encryptForLocalStorage(payload: unknown, key: CryptoKey): Promise<string> {
+  const data = new TextEncoder().encode(JSON.stringify(payload));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+  const combined = new Uint8Array(iv.length + encrypted.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encrypted), iv.length);
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < combined.length; i += CHUNK) {
+    binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function decryptFromLocalStorage<T>(encoded: string, key: CryptoKey): Promise<T> {
+  const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  return JSON.parse(new TextDecoder().decode(decrypted)) as T;
+}
+
+async function loadRawSyncBase(this: any, provider?: CloudProvider): Promise<SyncPayload | null> {
+  const key = this.state.unlockedKey?.derivedKey;
+  if (!key || typeof this.loadFromStorage !== 'function') return null;
+  const encoded = this.loadFromStorage(this.syncBaseKey(provider));
+  if (!encoded || typeof encoded !== 'string') return null;
+  return decryptFromLocalStorage<SyncPayload>(encoded, key);
+}
+
+async function rememberCurrentSyncBaseSnapshot(this: any, provider?: CloudProvider): Promise<void> {
+  if (typeof this.syncSnapshotsKey !== 'function') return;
+  const previous = await loadRawSyncBase.call(this, provider);
+  if (!previous) return;
+  const snapshots = await loadSyncSnapshotsImpl.call(this, provider);
+  const entry: SyncSnapshotEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    timestamp: Date.now(),
+    ...(provider ? { provider } : {}),
+    payload: previous,
+  };
+  await saveSyncSnapshotsImpl.call(this, [entry, ...snapshots].slice(0, SYNC_SNAPSHOT_LIMIT), provider);
+}
 
 export async function syncAllProvidersImpl(this: any,
   inputPayload?: SyncPayload,
@@ -237,6 +289,16 @@ export async function syncAllProvidersImpl(this: any,
           console.error('[CloudSyncManager] syncAll: merge failed', mergeError);
           const { provider, check } = conflicts[0];
           const remoteFile = check!.remoteFile!;
+          let conflictSummary;
+          try {
+            conflictSummary = summarizeSyncChanges(
+              await this.loadSyncBase(provider as CloudProvider),
+              payload,
+              await EncryptionService.decryptPayload(remoteFile, this.masterPassword),
+            );
+          } catch {
+            conflictSummary = undefined;
+          }
 
           this.state.syncState = 'CONFLICT';
           this.state.currentConflict = {
@@ -247,6 +309,7 @@ export async function syncAllProvidersImpl(this: any,
             remoteVersion: remoteFile.meta.version,
             remoteUpdatedAt: remoteFile.meta.updatedAt,
             remoteDeviceName: remoteFile.meta.deviceName,
+            ...(conflictSummary ? { changeSummary: conflictSummary } : {}),
           };
 
           this.emit({
@@ -416,43 +479,41 @@ export async function syncAllProvidersImpl(this: any,
       }
     }
 
-    let syncedFile: SyncedFile;
-    try {
-      syncedFile = await EncryptionService.encryptPayload(
-        payload,
-        this.masterPassword,
-        this.state.deviceId,
-        this.state.deviceName,
-        packageJson.version,
-        baseVersion
-      );
-    } catch (error) {
-      const msg = String(error);
-      this.state.syncState = 'ERROR';
-      this.state.lastError = msg;
-
-      // Fail all
-      for (const r of validUploads) {
-        this.updateProviderStatus(r.provider, 'error', msg);
-        this.emit({ type: 'SYNC_ERROR', provider: r.provider, error: msg });
-        results.set(r.provider, {
-          success: false,
-          provider: r.provider,
-          action: 'none',
-          error: msg,
-        });
-      }
-      return results;
-    }
-
-    // 4. Parallel Uploads — pass the payload so base is persisted
+    // 4. Parallel Uploads — each provider gets metadata derived from its own
+    // base, then that exact payload is persisted as the provider base
     // inside uploadToProvider BEFORE the per-provider anchor advances.
     // Ordering matters: a crash between the two writes must leave the
     // stale anchor re-triggering inspection on next startup, not a
     // fresh anchor paired with a stale base.
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
-      const result = await this.uploadToProvider(provider, adapter, syncedFile, payload);
-      results.set(provider, result);
+      try {
+        const providerBase = await this.loadSyncBase(provider);
+        const providerPayload = withSyncReliabilityMeta(payload, providerBase, {
+          deviceId: this.state.deviceId,
+          now: Date.now(),
+        });
+        const syncedFile = await EncryptionService.encryptPayload(
+          providerPayload,
+          this.masterPassword,
+          this.state.deviceId,
+          this.state.deviceName,
+          packageJson.version,
+          baseVersion
+        );
+        const result = await this.uploadToProvider(provider, adapter, syncedFile, providerPayload);
+        results.set(provider, result);
+      } catch (error) {
+        const msg = String(error);
+        this.state.lastError = msg;
+        this.updateProviderStatus(provider, 'error', msg);
+        this.emit({ type: 'SYNC_ERROR', provider, error: msg });
+        results.set(provider, {
+          success: false,
+          provider,
+          action: 'none',
+          error: msg,
+        });
+      }
     });
 
     await Promise.all(uploadTasks);
@@ -572,21 +633,16 @@ export function saveProviderAccountIdImpl(this: any,provider: CloudProvider, id:
 
 export async function saveSyncBaseImpl(this: any,payload: SyncPayload, provider?: CloudProvider): Promise<void> {
     const key = this.state.unlockedKey?.derivedKey;
-    if (!key) return;
+    if (!key) {
+      throw new Error('Sync base encryption key is unavailable');
+    }
     try {
-      const data = new TextEncoder().encode(JSON.stringify(payload));
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-      const combined = new Uint8Array(iv.length + encrypted.byteLength);
-      combined.set(iv);
-      combined.set(new Uint8Array(encrypted), iv.length);
-      // Encode in chunks to avoid stack overflow with large buffers
-      let binary = '';
-      const CHUNK = 8192;
-      for (let i = 0; i < combined.length; i += CHUNK) {
-        binary += String.fromCharCode(...combined.subarray(i, i + CHUNK));
+      try {
+        await rememberCurrentSyncBaseSnapshot.call(this, provider);
+      } catch (snapshotError) {
+        console.warn('[CloudSyncManager] Failed to save previous sync snapshot', snapshotError);
       }
-      this.saveToStorage(this.syncBaseKey(provider), btoa(binary));
+      this.saveToStorage(this.syncBaseKey(provider), await encryptForLocalStorage(payload, key));
     } catch (error) {
       console.warn('[CloudSyncManager] Failed to save sync base', error);
       throw error;
@@ -599,20 +655,51 @@ export async function loadSyncBaseImpl(this: any,provider?: CloudProvider): Prom
     try {
       const encoded = this.loadFromStorage<string>(this.syncBaseKey(provider));
       if (!encoded || typeof encoded !== 'string') return null;
-      const combined = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-      const iv = combined.slice(0, 12);
-      const ciphertext = combined.slice(12);
-      const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-      return JSON.parse(new TextDecoder().decode(decrypted));
+      return decryptFromLocalStorage<SyncPayload>(encoded, key);
     } catch {
       return null;
     }
   }
 
+export function syncSnapshotsKeyImpl(this: any,provider?: CloudProvider): string {
+    const suffix = provider ? `_${provider}` : '';
+    return `${SYNC_SNAPSHOTS_STORAGE_KEY}${suffix}`;
+  }
+
+export async function loadSyncSnapshotsImpl(this: any,provider?: CloudProvider): Promise<SyncSnapshotEntry[]> {
+    const key = this.state.unlockedKey?.derivedKey;
+    if (!key) return [];
+    try {
+      const encoded = this.loadFromStorage<string>(this.syncSnapshotsKey(provider));
+      if (!encoded || typeof encoded !== 'string') return [];
+      const snapshots = await decryptFromLocalStorage<SyncSnapshotEntry[]>(encoded, key);
+      return Array.isArray(snapshots) ? snapshots : [];
+    } catch {
+      return [];
+    }
+  }
+
+export async function saveSyncSnapshotsImpl(this: any,snapshots: SyncSnapshotEntry[], provider?: CloudProvider): Promise<void> {
+    const key = this.state.unlockedKey?.derivedKey;
+    if (!key) {
+      throw new Error('Sync snapshot encryption key is unavailable');
+    }
+    this.saveToStorage(
+      this.syncSnapshotsKey(provider),
+      await encryptForLocalStorage(snapshots.slice(0, SYNC_SNAPSHOT_LIMIT), key),
+    );
+  }
+
 export function clearSyncBaseImpl(this: any): void {
     this.removeFromStorage(SYNC_STORAGE_KEYS.SYNC_BASE_PAYLOAD);
+    if (typeof this.syncSnapshotsKey === 'function') {
+      this.removeFromStorage(this.syncSnapshotsKey());
+    }
     for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
       this.removeFromStorage(this.syncBaseKey(p));
+      if (typeof this.syncSnapshotsKey === 'function') {
+        this.removeFromStorage(this.syncSnapshotsKey(p));
+      }
     }
     this.clearSyncAnchor();
   }

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { mergeSyncPayloads } from "./syncMerge.ts";
+import { withSyncReliabilityMeta } from "./syncReliability.ts";
 import type { SyncPayload } from "./sync.ts";
 
 function payload(overrides: Partial<SyncPayload> = {}): SyncPayload {
@@ -135,4 +136,139 @@ test("mergeSyncPayloads keeps missing proxy references visible to connection gua
 
   assert.equal(result.payload.hosts[0]?.proxyProfileId, "proxy-1");
   assert.equal(result.payload.groupConfigs?.[0]?.proxyProfileId, "proxy-1");
+});
+
+test("mergeSyncPayloads honors remote deletion records when base is unavailable", () => {
+  const result = mergeSyncPayloads(
+    null,
+    payload({
+      hosts: [{
+        id: "host-1",
+        label: "Stale local copy",
+        hostname: "old.example.com",
+        username: "root",
+        tags: [],
+        os: "linux",
+      }],
+    }),
+    payload({
+      syncMeta: {
+        schemaVersion: 1,
+        generatedAt: 123,
+        localChanged: true,
+        deletions: [{
+          entityType: "hosts",
+          id: "host-1",
+          deletedAt: 123,
+          deviceId: "remote-device",
+        }],
+        changeSummary: {
+          hasLocalChanges: true,
+          hasRemoteChanges: false,
+          hasConflicts: false,
+          byEntity: {},
+          conflicts: [],
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(result.payload.hosts, []);
+  assert.equal(result.summary.deleted.remote, 1);
+});
+
+test("mergeSyncPayloads carries deletion records forward after applying a tombstone", () => {
+  const remote = payload({
+    syncMeta: {
+      schemaVersion: 1,
+      generatedAt: 123,
+      localChanged: true,
+      deletions: [{
+        entityType: "hosts",
+        id: "host-1",
+        deletedAt: 123,
+        deviceId: "remote-device",
+      }],
+      changeSummary: {
+        hasLocalChanges: true,
+        hasRemoteChanges: false,
+        hasConflicts: false,
+        byEntity: {},
+        conflicts: [],
+      },
+    },
+  });
+
+  const result = mergeSyncPayloads(
+    null,
+    payload({
+      hosts: [{
+        id: "host-1",
+        label: "Stale local copy",
+        hostname: "old.example.com",
+        username: "root",
+        tags: [],
+        os: "linux",
+      }],
+    }),
+    remote,
+  );
+  const enriched = withSyncReliabilityMeta(result.payload, null, {
+    deviceId: "local-device",
+    now: 456,
+  });
+
+  assert.deepEqual(enriched.syncMeta?.deletions, [{
+    entityType: "hosts",
+    id: "host-1",
+    deletedAt: 123,
+    deviceId: "remote-device",
+  }]);
+});
+
+test("mergeSyncPayloads treats missing optional arrays as legacy payloads, not deletions", () => {
+  const identity = {
+    id: "identity-1",
+    label: "Prod",
+    username: "root",
+    authMethod: "password" as const,
+    created: 1,
+  };
+  const rule = {
+    id: "rule-1",
+    name: "Web",
+    hostId: "host-1",
+    type: "local" as const,
+    localHost: "127.0.0.1",
+    localPort: 8080,
+    remoteHost: "127.0.0.1",
+    remotePort: 80,
+    enabled: true,
+    createdAt: 1,
+  };
+
+  const base = payload({
+    identities: [identity],
+    snippetPackages: ["ops"],
+    portForwardingRules: [rule],
+    groupConfigs: [{ path: "prod", username: "root" }],
+  });
+  const local = payload({
+    identities: [identity],
+    snippetPackages: ["ops"],
+    portForwardingRules: [rule],
+    groupConfigs: [{ path: "prod", username: "root" }],
+  });
+  const remote = payload();
+  delete remote.identities;
+  delete remote.snippetPackages;
+  delete remote.portForwardingRules;
+  delete remote.groupConfigs;
+
+  const result = mergeSyncPayloads(base, local, remote);
+
+  assert.deepEqual(result.payload.identities, [identity]);
+  assert.deepEqual(result.payload.snippetPackages, ["ops"]);
+  assert.deepEqual(result.payload.portForwardingRules, [rule]);
+  assert.deepEqual(result.payload.groupConfigs, [{ path: "prod", username: "root" }]);
 });

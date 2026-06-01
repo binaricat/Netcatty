@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 
 import { EncryptionService } from "../EncryptionService.ts";
 import { commitRemoteInspectionImpl } from "./authMethods.ts";
-import { saveSyncBaseImpl, syncAllProvidersImpl } from "./syncAllStorageMethods.ts";
+import {
+  loadSyncSnapshotsImpl,
+  saveSyncBaseImpl,
+  syncAllProvidersImpl,
+} from "./syncAllStorageMethods.ts";
 import type { CloudProvider, SyncedFile, SyncPayload } from "../../../domain/sync.ts";
 
 function payload(hostId: string): SyncPayload {
@@ -114,7 +118,8 @@ test("syncAllProviders uses the newest cloud payload without merging other remot
     assert.equal(results.get("github")?.remoteFile, githubRemote);
     assert.equal(uploaded.length, 1);
     assert.equal(uploaded[0].provider, "google");
-    assert.equal(uploaded[0].payload, githubPayload);
+    assert.equal(uploaded[0].payload.hosts[0]?.id, "github-winner");
+    assert.equal(uploaded[0].payload.syncMeta?.schemaVersion, 1);
     assert.deepEqual(committed, []);
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
@@ -212,5 +217,109 @@ test("saveSyncBase reports storage failures so callers do not advance anchors", 
     );
   } finally {
     console.warn = originalWarn;
+  }
+});
+
+test("saveSyncBase reports a missing local encryption key", async () => {
+  const manager = {
+    state: { unlockedKey: null },
+    syncBaseKey: () => "sync-base",
+    saveToStorage: () => {},
+  };
+
+  await assert.rejects(
+    () => saveSyncBaseImpl.call(manager, payload("cloud"), "github"),
+    /Sync base encryption key is unavailable/,
+  );
+});
+
+test("saveSyncBase keeps a bounded encrypted snapshot history before replacing the base", async () => {
+  const stored = new Map<string, string>();
+  const key = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"],
+  );
+  const manager = {
+    state: { unlockedKey: { derivedKey: key } },
+    syncBaseKey: (provider?: CloudProvider) => `base-${provider ?? "default"}`,
+    syncSnapshotsKey: (provider?: CloudProvider) => `snapshots-${provider ?? "default"}`,
+    saveToStorage: (storageKey: string, value: string) => stored.set(storageKey, value),
+    loadFromStorage: (storageKey: string) => stored.get(storageKey),
+  };
+
+  await saveSyncBaseImpl.call(manager, payload("base-0"), "github");
+  for (let i = 1; i <= 7; i += 1) {
+    await saveSyncBaseImpl.call(manager, payload(`base-${i}`), "github");
+  }
+
+  const snapshots = await loadSyncSnapshotsImpl.call(manager, "github");
+
+  assert.equal(snapshots.length, 5);
+  assert.deepEqual(
+    snapshots.map((snapshot) => snapshot.payload.hosts[0]?.id),
+    ["base-6", "base-5", "base-4", "base-3", "base-2"],
+  );
+});
+
+test("syncAllProviders builds provider-specific sync metadata from each provider base", async () => {
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const uploaded: Array<{ provider: CloudProvider; payload: SyncPayload }> = [];
+  const baseByProvider = {
+    github: payload("shared"),
+    google: payload("deleted-on-local"),
+  } as Partial<Record<CloudProvider, SyncPayload>>;
+  const localPayload = payload("shared");
+
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
+    ...remoteFile("github", 4, 400),
+    payload: JSON.stringify(outgoing),
+  });
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: true, connected: true, status: "connected" },
+          onedrive: { enabled: false, connected: false, status: "disconnected" },
+          webdav: { enabled: false, connected: false, status: "disconnected" },
+          s3: { enabled: false, connected: false, status: "disconnected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: null }),
+      loadSyncBase: async (provider: CloudProvider) => baseByProvider[provider] ?? null,
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, outgoing: SyncPayload) => {
+        uploaded.push({ provider, payload: outgoing });
+        return { success: true, provider, action: "upload" as const, version: 4 };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    await syncAllProvidersImpl.call(manager, localPayload);
+
+    assert.equal(uploaded.length, 2);
+    assert.deepEqual(uploaded.find((entry) => entry.provider === "github")?.payload.syncMeta?.deletions, []);
+    assert.deepEqual(uploaded.find((entry) => entry.provider === "google")?.payload.syncMeta?.deletions, [{
+      entityType: "hosts",
+      id: "deleted-on-local",
+      deletedAt: uploaded.find((entry) => entry.provider === "google")?.payload.syncMeta?.generatedAt,
+      deviceId: "local-device",
+    }]);
+  } finally {
+    EncryptionService.encryptPayload = originalEncryptPayload;
   }
 });
