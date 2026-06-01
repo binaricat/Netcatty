@@ -2,8 +2,10 @@
 import type React from 'react';
 import type { Host, HostProtocol } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
+import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 
 type AppContextGetter = () => Record<string, any>;
+const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
 
 export function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
   const { sessions, setActiveTabId, setWorkspaceFocusedSession } = getCtx();
@@ -147,8 +149,7 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       if (binding.category === 'sftp') {
         continue;
       }
-      const terminalActions = ['copy', 'paste', 'pasteSelection', 'selectAll', 'clearBuffer', 'searchTerminal'];
-      if (terminalActions.includes(binding.action)) {
+      if (TERMINAL_PASSTHROUGH_ACTIONS.has(binding.action)) {
         if (isTerminalElement) {
           return;
         }
