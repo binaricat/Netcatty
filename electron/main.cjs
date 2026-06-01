@@ -596,8 +596,11 @@ if (!gotLock) {
       console.warn("[Main] Failed to install permission handlers:", err);
     }
 
-    // Set dock icon on macOS
-    if (isMac && appIcon && app.dock?.setIcon) {
+    // Set the dock icon on macOS only when unpackaged (dev). Packaged builds
+    // already ship the multi-resolution Contents/Resources/icon.icns; overriding
+    // it at runtime with the single-resolution PNG makes the running dock icon
+    // render at a slightly different size than the closed-state .icns (#1165).
+    if (isMac && appIcon && app.dock?.setIcon && !app.isPackaged) {
       try {
         app.dock.setIcon(appIcon);
       } catch (err) {
