@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { EncryptionService } from "../EncryptionService.ts";
 import { commitRemoteInspectionImpl } from "./authMethods.ts";
+import { syncToProviderImpl } from "./providerSyncMethods.ts";
 import {
   loadSyncSnapshotsImpl,
   saveSyncBaseImpl,
@@ -11,8 +12,12 @@ import {
 import type { CloudProvider, SyncedFile, SyncPayload } from "../../../domain/sync.ts";
 
 function payload(hostId: string): SyncPayload {
+  return payloadWithHosts([hostId]);
+}
+
+function payloadWithHosts(hostIds: string[]): SyncPayload {
   return {
-    hosts: [{
+    hosts: hostIds.map((hostId) => ({
       id: hostId,
       label: hostId,
       hostname: `${hostId}.example.com`,
@@ -20,7 +25,7 @@ function payload(hostId: string): SyncPayload {
       username: "root",
       tags: [],
       os: "linux",
-    }],
+    })),
     keys: [],
     identities: [],
     proxyProfiles: [],
@@ -121,6 +126,132 @@ test("syncAllProviders uses the newest cloud payload without merging other remot
     assert.equal(uploaded[0].payload.hosts[0]?.id, "github-winner");
     assert.equal(uploaded[0].payload.syncMeta?.schemaVersion, 1);
     assert.deepEqual(committed, []);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
+test("syncToProvider uses the checked remote as metadata base when no stored base exists", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const checkedRemote = remoteFile("github", 3, 300);
+  const remotePayload = payloadWithHosts(["kept", "deleted-on-local"]);
+  const localPayload = payload("kept");
+  let uploadedPayload: SyncPayload | undefined;
+
+  EncryptionService.decryptPayload = async (file: SyncedFile) => {
+    assert.equal(file, checkedRemote);
+    return remotePayload;
+  };
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
+    ...remoteFile("github", 4, 400),
+    payload: JSON.stringify(outgoing),
+  });
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      providerDecryptSeq: { github: 0 },
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async () => ({ provider: "github" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      loadSyncBase: async () => null,
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, outgoing: SyncPayload) => {
+        uploadedPayload = outgoing;
+        return { success: true, provider, action: "upload" as const, version: 4 };
+      },
+      exitBlockedState: () => {},
+    };
+
+    const result = await syncToProviderImpl.call(manager, "github", localPayload);
+
+    assert.equal(result.success, true);
+    assert.deepEqual(uploadedPayload?.syncMeta?.deletions, [{
+      entityType: "hosts",
+      id: "deleted-on-local",
+      deletedAt: uploadedPayload?.syncMeta?.generatedAt,
+      deviceId: "local-device",
+    }]);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
+test("syncAllProviders uses the checked remote as metadata base when provider base is missing", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const checkedRemote = remoteFile("github", 3, 300);
+  const remotePayload = payloadWithHosts(["kept", "deleted-on-local"]);
+  const localPayload = payload("kept");
+  let uploadedPayload: SyncPayload | undefined;
+
+  EncryptionService.decryptPayload = async (file: SyncedFile) => {
+    assert.equal(file, checkedRemote);
+    return remotePayload;
+  };
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
+    ...remoteFile("github", 4, 400),
+    payload: JSON.stringify(outgoing),
+  });
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: false, connected: false, status: "disconnected" },
+          onedrive: { enabled: false, connected: false, status: "disconnected" },
+          webdav: { enabled: false, connected: false, status: "disconnected" },
+          s3: { enabled: false, connected: false, status: "disconnected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 1,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async () => ({ provider: "github" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      loadSyncBase: async () => null,
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, outgoing: SyncPayload) => {
+        uploadedPayload = outgoing;
+        return { success: true, provider, action: "upload" as const, version: 4 };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const results = await syncAllProvidersImpl.call(manager, localPayload);
+
+    assert.equal(results.get("github")?.success, true);
+    assert.deepEqual(uploadedPayload?.syncMeta?.deletions, [{
+      entityType: "hosts",
+      id: "deleted-on-local",
+      deletedAt: uploadedPayload?.syncMeta?.generatedAt,
+      deviceId: "local-device",
+    }]);
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;

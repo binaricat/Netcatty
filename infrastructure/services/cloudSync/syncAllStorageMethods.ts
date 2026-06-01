@@ -488,7 +488,22 @@ export async function syncAllProvidersImpl(this: any,
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
       try {
         const providerBase = await this.loadSyncBase(provider);
-        const providerPayload = withSyncReliabilityMeta(payload, providerBase, {
+        let providerRemoteRef: SyncPayload | null = null;
+        if (!providerBase) {
+          const entry = checkResults.find((r) => r.provider === provider);
+          const remoteFile = entry?.check?.remoteFile;
+          if (remoteFile) {
+            try {
+              providerRemoteRef = await EncryptionService.decryptPayload(
+                remoteFile,
+                this.masterPassword,
+              );
+            } catch {
+              providerRemoteRef = null;
+            }
+          }
+        }
+        const providerPayload = withSyncReliabilityMeta(payload, providerBase ?? providerRemoteRef, {
           deviceId: this.state.deviceId,
           now: Date.now(),
         });

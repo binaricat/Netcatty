@@ -29,10 +29,6 @@ async function uploadLocalPayloadImpl(this: any,
 ): Promise<SyncResult> {
   const overrideShrinkRequested = opts.overrideShrink === true;
   const directBase = await this.loadSyncBase(provider);
-  const payloadForUpload = withSyncReliabilityMeta(payload, directBase, {
-    deviceId: this.state.deviceId,
-    now: Date.now(),
-  });
   let directRemoteRef: SyncPayload | null = null;
   if (!directBase && remoteFile) {
     try {
@@ -44,6 +40,11 @@ async function uploadLocalPayloadImpl(this: any,
       directRemoteRef = null;
     }
   }
+  const metadataBase = directBase ?? directRemoteRef;
+  const payloadForUpload = withSyncReliabilityMeta(payload, metadataBase, {
+    deviceId: this.state.deviceId,
+    now: Date.now(),
+  });
   const directShrink = detectSuspiciousShrink(payloadForUpload, directBase, directRemoteRef);
   const shouldBlockDirect = directShrink.suspicious && !overrideShrinkRequested;
   const shouldForceDirect = directShrink.suspicious && overrideShrinkRequested;
