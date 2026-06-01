@@ -1,5 +1,7 @@
 import {
   Check,
+  Eye,
+  EyeOff,
   FolderPlus,
   Plus,
   Settings2,
@@ -134,6 +136,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
   const [identitySuggestionsOpen, setIdentitySuggestionsOpen] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
+  const [showTelnetPassword, setShowTelnetPassword] = useState(false);
   const [showAlgorithmOverrides, setShowAlgorithmOverrides] = useState(false);
 
   const [newKeyFilePath, setNewKeyFilePath] = useState("");
@@ -874,15 +877,24 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
 	              }
               className="h-10"
             />
-            <Input
-	              placeholder={t("hostDetails.telnet.password")}
-	              type="password"
-	              value={effectiveTelnetPassword}
-	              onChange={(e) =>
-	                update("telnetPassword" as keyof Host, e.target.value)
-              }
-              className="h-10"
-            />
+            <div className="relative">
+              <Input
+                placeholder={t("hostDetails.telnet.password")}
+                type={showTelnetPassword ? "text" : "password"}
+                value={effectiveTelnetPassword}
+                onChange={(e) =>
+                  update("telnetPassword" as keyof Host, e.target.value)
+                }
+                className="h-10 pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTelnetPassword(!showTelnetPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
 
             <Input
               placeholder={groupDefaults?.charset || t("hostDetails.charset.placeholder")}
