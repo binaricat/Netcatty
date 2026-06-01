@@ -641,6 +641,8 @@ export const enCoreMessages: Messages = {
   'vault.hosts.deselectAll': 'Deselect All',
   'vault.hosts.deleteSelected': 'Delete ({count})',
   'vault.hosts.deleteMultiple.success': 'Deleted {count} hosts',
+  'vault.hosts.connectSelected': 'Connect ({count})',
+  'vault.hosts.connectMultiple.success': 'Connecting {count} hosts',
   'vault.hosts.moveToGroup.success': 'Moved {host} to {group}',
   'vault.hosts.empty.title': 'Set up your hosts',
   'vault.hosts.empty.desc': 'Save hosts to quickly connect to your servers, VMs, and containers.',

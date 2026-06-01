@@ -30,6 +30,8 @@ export const ruVaultMessages: Messages = {
   'vault.hosts.deselectAll': 'Снять выделение',
   'vault.hosts.deleteSelected': 'Удалить ({count})',
   'vault.hosts.deleteMultiple.success': 'Удалено хостов: {count}',
+  'vault.hosts.connectSelected': 'Подключить ({count})',
+  'vault.hosts.connectMultiple.success': 'Подключение хостов: {count}',
   'vault.hosts.moveToGroup.success': 'Хост {host} перемещён в {group}',
   'vault.hosts.empty.title': 'Настройте свои хосты',
   'vault.hosts.empty.desc': 'Сохраняйте хосты, чтобы быстро подключаться к серверам, виртуальным машинам и контейнерам.',
