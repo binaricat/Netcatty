@@ -111,6 +111,11 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
   onConnect,
   onDisconnect,
 }) => {
+  // Focus the confirm button when a confirmation dialog opens so Enter confirms it.
+  // These dialogs are opened from a context menu, whose focus-return can otherwise
+  // leave focus outside the dialog, making Enter do nothing.
+  const deleteConfirmButtonRef = React.useRef<HTMLButtonElement>(null);
+  const overwriteConfirmButtonRef = React.useRef<HTMLButtonElement>(null);
   const isSingleDeleteTarget = deleteTargets.length === 1;
   const deletePath = (() => {
     if (isSingleDeleteTarget) {
@@ -225,7 +230,13 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
 
     {/* Overwrite Confirmation Dialog */}
     <Dialog open={showOverwriteConfirm} onOpenChange={setShowOverwriteConfirm}>
-      <DialogContent className="max-w-sm">
+      <DialogContent
+        className="max-w-sm"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          overwriteConfirmButtonRef.current?.focus();
+        }}
+      >
         <DialogHeader>
           <HostHint label={hostLabel} />
           <DialogTitle>{t("sftp.overwrite.title")}</DialogTitle>
@@ -241,6 +252,7 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
             {t("common.cancel")}
           </Button>
           <Button
+            ref={overwriteConfirmButtonRef}
             variant="destructive"
             onClick={handleOverwriteConfirm}
           >
@@ -289,7 +301,13 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
     </Dialog>
 
     <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-      <DialogContent className="max-w-sm">
+      <DialogContent
+        className="max-w-sm"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          deleteConfirmButtonRef.current?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
             {t("sftp.deleteConfirm.title", { count: deleteTargets.length })}
@@ -337,6 +355,7 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
             {t("common.cancel")}
           </Button>
           <Button
+            ref={deleteConfirmButtonRef}
             variant="destructive"
             onClick={handleDelete}
             disabled={isDeleting}
