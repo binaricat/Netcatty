@@ -118,6 +118,7 @@ function createOpenAIChatStreamFieldCapture(
 
 function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) => string {
   const toolCallIdsByChoiceAndIndex = new Map<string, string>();
+  const pendingToolCallsByChoiceAndIndex = new Map<string, Record<string, unknown>>();
   const requestIdToken = requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
   return (data: string): string => {
@@ -146,28 +147,48 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
 
       const choiceIndex = typeof choiceRecord.index === 'number' ? choiceRecord.index : choicePosition;
       let deltaChanged = false;
-      const normalizedToolCalls = deltaRecord.tool_calls.map((toolCall, toolCallPosition) => {
-        if (!toolCall || typeof toolCall !== 'object') return toolCall;
+      const normalizedToolCalls: unknown[] = [];
+      for (const [toolCallPosition, toolCall] of deltaRecord.tool_calls.entries()) {
+        if (!toolCall || typeof toolCall !== 'object') {
+          normalizedToolCalls.push(toolCall);
+          continue;
+        }
         const toolCallRecord = toolCall as Record<string, unknown>;
         const toolCallIndex = typeof toolCallRecord.index === 'number' ? toolCallRecord.index : toolCallPosition;
         const key = `${choiceIndex}:${toolCallIndex}`;
         const existingId = toolCallIdsByChoiceAndIndex.get(key);
+        const pendingToolCall = pendingToolCallsByChoiceAndIndex.get(key);
+        const candidateToolCall = pendingToolCall
+          ? mergeOpenAIChatToolCallDeltas(pendingToolCall, toolCallRecord)
+          : toolCallRecord;
 
-        if (typeof toolCallRecord.id === 'string' && toolCallRecord.id) {
-          toolCallIdsByChoiceAndIndex.set(key, toolCallRecord.id);
-          return toolCall;
+        if (existingId) {
+          normalizedToolCalls.push(toolCall);
+          continue;
         }
 
-        if (existingId || !hasFunctionName(toolCallRecord)) {
-          return toolCall;
+        if (!hasFunctionName(candidateToolCall)) {
+          pendingToolCallsByChoiceAndIndex.set(key, candidateToolCall);
+          changed = true;
+          deltaChanged = true;
+          continue;
         }
 
-        const syntheticId = `call_netcatty_${requestIdToken}_${choiceIndex}_${toolCallIndex}`;
-        toolCallIdsByChoiceAndIndex.set(key, syntheticId);
+        const toolCallId = typeof candidateToolCall.id === 'string' && candidateToolCall.id
+          ? candidateToolCall.id
+          : `call_netcatty_${requestIdToken}_${choiceIndex}_${toolCallIndex}`;
+        toolCallIdsByChoiceAndIndex.set(key, toolCallId);
+        pendingToolCallsByChoiceAndIndex.delete(key);
+
+        if (candidateToolCall === toolCallRecord && toolCallId === toolCallRecord.id) {
+          normalizedToolCalls.push(toolCall);
+          continue;
+        }
+
         changed = true;
         deltaChanged = true;
-        return { ...toolCallRecord, id: syntheticId };
-      });
+        normalizedToolCalls.push({ ...candidateToolCall, id: toolCallId });
+      }
 
       if (!deltaChanged) return choice;
       return {
@@ -184,6 +205,35 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
       ...(parsed as Record<string, unknown>),
       choices: normalizedChoices,
     });
+  };
+}
+
+function mergeOpenAIChatToolCallDeltas(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const currentFn = current.function;
+  const incomingFn = incoming.function;
+  const currentFunction = currentFn && typeof currentFn === 'object'
+    ? currentFn as Record<string, unknown>
+    : undefined;
+  const incomingFunction = incomingFn && typeof incomingFn === 'object'
+    ? incomingFn as Record<string, unknown>
+    : undefined;
+  const mergedFunction = {
+    ...(currentFunction ?? {}),
+    ...(incomingFunction ?? {}),
+  };
+  const currentArgs = currentFunction?.arguments;
+  const incomingArgs = incomingFunction?.arguments;
+  if (typeof currentArgs === 'string' && typeof incomingArgs === 'string') {
+    mergedFunction.arguments = currentArgs + incomingArgs;
+  }
+
+  return {
+    ...current,
+    ...incoming,
+    function: mergedFunction,
   };
 }
 
