@@ -123,6 +123,15 @@ export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
   );
 }
 
+/**
+ * Returns true only when the payload contains synced vault entities.
+ * Settings are intentionally ignored so default settings written on first
+ * launch do not make a new device look non-empty during cloud restore checks.
+ */
+export function hasCloudSyncEntityData(payload: SyncPayload): boolean {
+  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS);
+}
+
 export function sanitizePortForwardingRulesForSync(
   rules: PortForwardingRule[] | undefined,
 ): PortForwardingRule[] | undefined {

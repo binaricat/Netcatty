@@ -22,6 +22,7 @@ import {
   SYNCABLE_SETTING_STORAGE_KEYS,
   collectSyncableSettings,
   getEffectivePortForwardingRulesForSync,
+  hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
 } from '../syncPayload';
 import { readInterruptedVaultApply } from '../localVaultBackups';
@@ -482,7 +483,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       const remoteFile = inspection.remoteFile;
       const remotePayload = inspection.payload;
       const localPayload = buildPayloadRef.current();
-      const localIsEmpty = !hasMeaningfulCloudSyncData(localPayload);
+      const localIsEmpty = !hasCloudSyncEntityData(localPayload);
       const remoteHasData = hasMeaningfulCloudSyncData(remotePayload);
 
       // If local vault is empty but cloud has data, this almost certainly
