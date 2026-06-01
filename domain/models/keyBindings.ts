@@ -206,6 +206,9 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'select-all', action: 'selectAll', label: 'Select All in Terminal', mac: '⌘ + A', pc: 'Ctrl + Shift + A', category: 'terminal' },
   { id: 'clear-buffer', action: 'clearBuffer', label: 'Clear Terminal Buffer', mac: '⌘ + ⌃ + K', pc: 'Ctrl + Shift + K', category: 'terminal' },
   { id: 'search-terminal', action: 'searchTerminal', label: 'Open Terminal Search', mac: '⌘ + F', pc: 'Ctrl + F', category: 'terminal' },
+  { id: 'increase-terminal-font-size', action: 'increaseTerminalFontSize', label: 'Increase Terminal Font Size', mac: '⌘ + =', pc: 'Ctrl + =', category: 'terminal' },
+  { id: 'decrease-terminal-font-size', action: 'decreaseTerminalFontSize', label: 'Decrease Terminal Font Size', mac: '⌘ + -', pc: 'Ctrl + -', category: 'terminal' },
+  { id: 'reset-terminal-font-size', action: 'resetTerminalFontSize', label: 'Reset Terminal Font Size', mac: '⌘ + 0', pc: 'Ctrl + 0', category: 'terminal' },
 
   // Navigation / Split View
   { id: 'move-focus', action: 'moveFocus', label: 'Move focus between Split View panes', mac: '⌘ + ⌥ + arrows', pc: 'Ctrl + Alt + arrows', category: 'navigation' },

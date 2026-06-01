@@ -450,6 +450,7 @@ interface TerminalPaneProps {
   isComposeBarOpen: boolean;
   sessionLog?: { enabled: true; directory: string; format: string };
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
+  onTerminalFontSizeChange?: (sessionId: string, fontSize: number) => void;
   onOpenSftp: (
     host: Host,
     initialPath?: string,
@@ -516,6 +517,7 @@ const terminalPanePropsAreEqual = (
   prev.isComposeBarOpen === next.isComposeBarOpen &&
   prev.sessionLog === next.sessionLog &&
   prev.onHotkeyAction === next.onHotkeyAction &&
+  prev.onTerminalFontSizeChange === next.onTerminalFontSizeChange &&
   prev.onOpenSftp === next.onOpenSftp &&
   prev.onTerminalCwdChange === next.onTerminalCwdChange &&
   prev.onOpenScripts === next.onOpenScripts &&
@@ -565,6 +567,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   isComposeBarOpen,
   sessionLog,
   onHotkeyAction,
+  onTerminalFontSizeChange,
   onOpenSftp,
   onTerminalCwdChange,
   onOpenScripts,
@@ -641,6 +644,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
   }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, session.id]);
+  const handleTerminalFontSizeChange = useCallback((nextFontSize: number) => {
+    onTerminalFontSizeChange?.(session.id, nextFontSize);
+  }, [onTerminalFontSizeChange, session.id]);
 
   return (
     <div
@@ -681,6 +687,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         hotkeyScheme={hotkeyScheme}
         keyBindings={keyBindings}
         onHotkeyAction={onHotkeyAction}
+        onTerminalFontSizeChange={handleTerminalFontSizeChange}
         onOpenSftp={onOpenSftp}
         onTerminalCwdChange={onTerminalCwdChange}
         onOpenScripts={onOpenScripts}
@@ -738,6 +745,7 @@ interface TerminalPanesHostProps {
   isComposeBarOpen: boolean;
   sessionLog?: { enabled: true; directory: string; format: string };
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
+  onTerminalFontSizeChange?: TerminalPaneProps['onTerminalFontSizeChange'];
   onOpenSftp: TerminalPaneProps['onOpenSftp'];
   onTerminalCwdChange: TerminalPaneProps['onTerminalCwdChange'];
   onOpenScripts: () => void;

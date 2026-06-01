@@ -89,6 +89,7 @@ export interface TerminalProps {
   hotkeyScheme?: "disabled" | "mac" | "pc";
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
+  onTerminalFontSizeChange?: (fontSize: number) => void;
   onStatusChange?: (sessionId: string, status: TerminalSession["status"]) => void;
   onSessionExit?: (sessionId: string, evt: { exitCode?: number; signal?: number; error?: string; reason?: "exited" | "error" | "timeout" | "closed" }) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;

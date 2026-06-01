@@ -48,6 +48,10 @@ import { optionArrowWordJumpSequence } from "./optionArrowWordJump";
 import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
+  nextTerminalFontSizeForAction,
+  nextTerminalFontSizeForWheel,
+} from "./terminalFontZoom";
+import {
   markExpectedTerminalCursorPositionReport,
   pasteTextIntoTerminal,
   shouldBroadcastTerminalUserInput,
@@ -106,6 +110,7 @@ export type CreateXTermRuntimeContext = {
   onHotkeyActionRef: RefObject<
     ((action: string, event: KeyboardEvent) => void) | undefined
   >;
+  onTerminalFontSizeChange?: (fontSize: number) => void;
 
   isBroadcastEnabledRef: RefObject<boolean | undefined>;
   onBroadcastInputRef: RefObject<
@@ -489,6 +494,33 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       term.scrollToBottom();
     }
   };
+  const currentTerminalFontSize = () => {
+    const optionFontSize = term.options.fontSize;
+    return typeof optionFontSize === "number" ? optionFontSize : effectiveFontSize;
+  };
+  const applyTerminalFontSize = (nextFontSize: number | null): boolean => {
+    if (nextFontSize === null) return false;
+    const currentFontSize = currentTerminalFontSize();
+    if (nextFontSize !== currentFontSize) {
+      term.options.fontSize = nextFontSize;
+      clearWebglTextureAtlas();
+      try {
+        fitAddon.fit();
+      } catch (err) {
+        logger.warn("[XTerm] fit after font size change failed", err);
+      }
+      ctx.onTerminalFontSizeChange?.(nextFontSize);
+    }
+    return true;
+  };
+  const handleFontSizeWheel = (event: WheelEvent) => {
+    const nextFontSize = nextTerminalFontSizeForWheel(event, currentTerminalFontSize());
+    if (nextFontSize === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyTerminalFontSize(nextFontSize);
+  };
+  ctx.container.addEventListener("wheel", handleFontSizeWheel, { passive: false });
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
     // Preserve mouse selection across keystrokes when enabled. xterm.js
@@ -619,6 +651,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             }
             case "searchTerminal": {
               ctx.setIsSearchOpen(true);
+              break;
+            }
+            case "increaseTerminalFontSize":
+            case "decreaseTerminalFontSize":
+            case "resetTerminalFontSize": {
+              applyTerminalFontSize(
+                nextTerminalFontSizeForAction(action, currentTerminalFontSize()),
+              );
               break;
             }
           }
@@ -938,6 +978,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     keywordHighlighter,
     clearTextureAtlas: clearWebglTextureAtlas,
     dispose: () => {
+      ctx.container.removeEventListener("wheel", handleFontSizeWheel);
       cleanupMiddleClick?.();
       stopDprWatch();
       keywordHighlighter.dispose();

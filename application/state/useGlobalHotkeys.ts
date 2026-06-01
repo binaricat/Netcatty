@@ -49,5 +49,8 @@ export const getTerminalPassthroughActions = (): Set<string> => {
     'selectAll',
     'clearBuffer',
     'searchTerminal',
+    'increaseTerminalFontSize',
+    'decreaseTerminalFontSize',
+    'resetTerminalFontSize',
   ]);
 };
