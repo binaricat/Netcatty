@@ -189,12 +189,25 @@ export function handleStorageEventImpl(this: any, event: StorageEvent): void {
     if (key === SYNC_STORAGE_KEYS.MASTER_KEY_CONFIG) {
       const nextConfig = this.safeJsonParse<MasterKeyConfig>(event.newValue);
 
-      if (nextConfig && !this.state.masterKeyConfig) {
-        // Master key was set up in another window - update our state
+      if (nextConfig) {
+        const currentConfig = this.state.masterKeyConfig as MasterKeyConfig | null;
+        const configChanged = !currentConfig
+          || currentConfig.verificationHash !== nextConfig.verificationHash
+          || currentConfig.salt !== nextConfig.salt
+          || currentConfig.kdf !== nextConfig.kdf
+          || currentConfig.kdfIterations !== nextConfig.kdfIterations;
+
+        if (!configChanged) return;
+
+        // Master key was set up or changed in another window. Lock this
+        // window so it cannot keep syncing with the stale in-memory password.
         this.state.masterKeyConfig = nextConfig;
         this.state.securityState = 'LOCKED';
+        this.state.unlockedKey = null;
+        this.masterPassword = null;
+        this.stopAutoSync();
         this.notifyStateChange();
-      } else if (!nextConfig && this.state.masterKeyConfig) {
+      } else if (this.state.masterKeyConfig) {
         // Master key was removed in another window
         this.state.masterKeyConfig = null;
         this.state.securityState = 'NO_KEY';
