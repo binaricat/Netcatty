@@ -43,6 +43,7 @@ const {
   buildSyncPayload,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
+  shouldPromptCloudVaultRecovery,
 } = await import("./syncPayload.ts");
 const storageKeys = await import("../infrastructure/config/storageKeys.ts");
 
@@ -546,6 +547,23 @@ test("hasCloudSyncEntityData ignores settings-only payloads for empty-vault reco
       settings: { theme: "system", terminalTheme: "default" },
       syncedAt: 1,
     }),
+    false,
+  );
+});
+
+test("shouldPromptCloudVaultRecovery ignores settings-only remote payloads", () => {
+  const settingsOnlyPayload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: { theme: "system", terminalTheme: "default" },
+    syncedAt: 1,
+  };
+
+  assert.equal(
+    shouldPromptCloudVaultRecovery(settingsOnlyPayload, settingsOnlyPayload),
     false,
   );
 });

@@ -132,6 +132,13 @@ export function hasCloudSyncEntityData(payload: SyncPayload): boolean {
   return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS);
 }
 
+export function shouldPromptCloudVaultRecovery(
+  localPayload: SyncPayload,
+  remotePayload: SyncPayload,
+): boolean {
+  return !hasCloudSyncEntityData(localPayload) && hasCloudSyncEntityData(remotePayload);
+}
+
 export function sanitizePortForwardingRulesForSync(
   rules: PortForwardingRule[] | undefined,
 ): PortForwardingRule[] | undefined {
