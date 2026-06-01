@@ -61,6 +61,7 @@ export const DISTRO_COLORS: Record<string, string> = {
   fortinet: "bg-[#EE3124]",
   paloalto: "bg-[#FA582D]",
   zyxel: "bg-[#00497A]",
+  ruijie: "bg-[#E60012]",
   default: "bg-slate-600",
 };
 

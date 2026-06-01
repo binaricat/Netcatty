@@ -1,4 +1,4 @@
-import { detectVendorFromSshVersion } from "../../../domain/host";
+import { classifyDistroId, detectVendorFromSshVersion } from "../../../domain/host";
 import { logger } from "../../../lib/logger";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
@@ -44,6 +44,12 @@ export const runDistroDetection = async (
   const isStillCurrent = () => isConnectionTokenCurrent(sessionId, connectionToken);
 
   if (!isStillCurrent()) return;
+  if (
+    ctx.host.deviceType === "network" ||
+    classifyDistroId(ctx.host.distro) === "network-device"
+  ) {
+    return;
+  }
 
   // Step 1: try to classify from the SSH server identification string
   // captured at handshake time. This is free (no extra channel) and
@@ -92,4 +98,3 @@ export const runDistroDetection = async (
     logger.warn("OS probe failed", err);
   }
 };
-

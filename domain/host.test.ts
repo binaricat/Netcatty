@@ -165,6 +165,11 @@ test("detectVendorFromSshVersion recognizes legacy Huawei VRP dash banner", () =
   assert.equal(detectVendorFromSshVersion("SSH-2.0--"), "huawei");
 });
 
+test("detectVendorFromSshVersion recognizes Ruijie RGOS banner", () => {
+  assert.equal(detectVendorFromSshVersion("RGOS_SSH"), "ruijie");
+  assert.equal(detectVendorFromSshVersion("SSH-2.0-RGOS_SSH"), "ruijie");
+});
+
 test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {
   assert.equal(
     shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "OpenSSH_9.6" }),

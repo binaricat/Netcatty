@@ -75,6 +75,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.distro.option.fortinet': '飞塔',
   'hostDetails.distro.option.paloalto': 'Palo Alto Networks',
   'hostDetails.distro.option.zyxel': '合勤',
+  'hostDetails.distro.option.ruijie': '锐捷',
   'hostDetails.section.mosh': 'Mosh',
   'hostDetails.username.placeholder': '用户名',
   'hostDetails.password.placeholder': '密码',

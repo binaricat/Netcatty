@@ -481,6 +481,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.distro.option.fortinet': 'Fortinet',
   'hostDetails.distro.option.paloalto': 'Palo Alto Networks',
   'hostDetails.distro.option.zyxel': 'ZyXEL',
+  'hostDetails.distro.option.ruijie': 'Ruijie',
   'hostDetails.section.mosh': 'Mosh',
   'hostDetails.username.placeholder': 'Username',
   'hostDetails.password.placeholder': 'Password',

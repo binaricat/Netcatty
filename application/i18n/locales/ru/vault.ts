@@ -516,6 +516,7 @@ export const ruVaultMessages: Messages = {
   'hostDetails.distro.option.fortinet': 'Fortinet',
   'hostDetails.distro.option.paloalto': 'Palo Alto Networks',
   'hostDetails.distro.option.zyxel': 'ZyXEL',
+  'hostDetails.distro.option.ruijie': 'Ruijie',
   'hostDetails.section.mosh': 'Mosh',
   'hostDetails.username.placeholder': 'Имя пользователя',
   'hostDetails.password.placeholder': 'Пароль',
