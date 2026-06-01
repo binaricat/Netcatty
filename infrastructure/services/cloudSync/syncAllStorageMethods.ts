@@ -183,32 +183,17 @@ export async function syncAllProvidersImpl(this: any,
             newestConflict.provider as CloudProvider,
             newestConflict.check!.remoteFile!,
           );
-          results.set(newestConflict.provider as CloudProvider, remoteResult);
+          const sourceProvider = newestConflict.provider as CloudProvider;
+          results.set(sourceProvider, remoteResult);
+          payload = remoteResult.mergedPayload ?? payload;
+
           for (const r of checkResults) {
             const provider = r.provider as CloudProvider;
-            if (provider === newestConflict.provider) continue;
-            if (r.error) {
-              results.set(provider, {
-                success: false,
-                provider,
-                action: 'none',
-                error: r.error,
-              });
-              this.updateProviderStatus(provider, 'error', r.error);
-              this.emit({ type: 'SYNC_ERROR', provider, error: r.error });
-            } else {
-              this.updateProviderStatus(provider, 'connected');
-              results.set(provider, {
-                success: true,
-                provider,
-                action: 'none',
-              });
+            if (provider === sourceProvider) continue;
+            if (r.check) {
+              r.check.conflict = false;
             }
           }
-          this.exitBlockedState();
-          this.state.syncState = 'IDLE';
-          this.notifyStateChange();
-          return results;
         } catch (error) {
           const msg = String(error);
           this.state.syncState = 'ERROR';
@@ -420,13 +405,19 @@ export async function syncAllProvidersImpl(this: any,
           this.emit({ type: 'SYNC_ERROR', provider: r.provider as CloudProvider, error: r.error });
         }
       });
-      this.state.syncState = 'ERROR';
+      if (Array.from(results.values()).some((r) => r.success)) {
+        this.exitBlockedState();
+        this.state.syncState = 'IDLE';
+      } else {
+        this.state.syncState = 'ERROR';
+      }
+      this.notifyStateChange();
       return results;
     }
 
     // Use the highest version as base: either local or any remote that was merged
     let baseVersion = this.state.localVersion;
-    if (wasMerged || (this.state.syncStrategy === 'preferLocal' && conflicts.length > 0)) {
+    if (wasMerged || (this.state.syncStrategy !== 'smartMerge' && conflicts.length > 0)) {
       for (const c of conflicts) {
         const rv = c.check?.remoteFile?.meta?.version ?? 0;
         if (rv > baseVersion) baseVersion = rv;
