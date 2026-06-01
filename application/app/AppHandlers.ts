@@ -736,17 +736,11 @@ export function handleTerminalDataCaptureImpl(getCtx: AppContextGetter, sessionI
 export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
   const { resolveEffectiveHost } = getCtx();
 {
+    // Gates the protocol picker (legacy name kept for its existing wiring).
+    // Only prompt when Telnet is available but isn't the host's default protocol;
+    // SSH-only, SSH+Mosh and Telnet-default all connect directly.
     const effective = resolveEffectiveHost(host);
-    let count = 0;
-    // SSH is always available as base protocol (unless explicitly set to something else)
-    if (effective.protocol === 'ssh' || !effective.protocol) count++;
-    // Mosh adds another option
-    if (effective.moshEnabled) count++;
-    // Telnet adds another option
-    if (effective.telnetEnabled) count++;
-    // If protocol is explicitly telnet (not ssh), count it
-    if (effective.protocol === 'telnet' && !effective.telnetEnabled) count++;
-    return count > 1;
+    return Boolean(effective.telnetEnabled) && effective.protocol !== 'telnet';
   }
 }
 

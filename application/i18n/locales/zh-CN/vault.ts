@@ -152,6 +152,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.telnet.password': 'Telnet 密码',
   'hostDetails.charset.placeholder': '字符集（例如 UTF-8）',
   'hostDetails.telnet.add': '添加 Telnet 协议',
+  'hostDetails.telnet.setDefault': '默认用 Telnet 连接',
   'hostDetails.tags': '标签',
   'hostDetails.group': '分组',
   'hostDetails.selectGroup': '选择分组',

@@ -39,6 +39,7 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
+import { Switch } from "./ui/switch";
 import { toast } from "./ui/toast";
 
 import {
@@ -854,6 +855,14 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
                   <X size={14} />
                 </Button>
               )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">{t("hostDetails.telnet.setDefault")}</span>
+              <Switch
+                checked={form.protocol === "telnet"}
+                onCheckedChange={(checked) => update("protocol", checked ? "telnet" : "ssh")}
+              />
             </div>
 
             <p className="text-xs font-semibold">{t("hostDetails.telnet.credentials")}</p>

@@ -370,37 +370,27 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     [isSearchQuickConnect, handleConnectClick],
   );
 
-  // Check if host has multiple protocols enabled (using effective/resolved host)
-  const hasMultipleProtocols = useCallback((host: Host) => {
-    const effective = host.group
-      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-      : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
-    let count = 0;
-    // SSH is always available as base protocol (unless explicitly set to something else)
-    if (effective.protocol === "ssh" || !effective.protocol) count++;
-    // Mosh adds another option
-    if (effective.moshEnabled) count++;
-    // Telnet adds another option
-    if (effective.telnetEnabled) count++;
-    // If protocol is explicitly telnet (not ssh), count it
-    if (effective.protocol === "telnet" && !effective.telnetEnabled) count++;
-    return count > 1;
-  }, [groupConfigs, proxyProfileIdSet]);
-
-  // Handle host connect with protocol selection
+  // Handle host connect. Resolution order:
+  //   Telnet set as default (protocol === 'telnet')  -> connect Telnet
+  //   Telnet enabled but not the default             -> ask (protocol picker)
+  //   Mosh enabled                                   -> connect Mosh
+  //   otherwise                                      -> connect SSH
   const handleHostConnect = useCallback(
     (host: Host) => {
-      if (hasMultipleProtocols(host)) {
-        // Pass effective host to protocol dialog so it shows correct ports/protocols
-        const effective = host.group
-          ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-          : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
+      const effective = host.group
+        ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
+        : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
+      // Only prompt when Telnet is available but isn't the host's default protocol.
+      if (effective.telnetEnabled && effective.protocol !== "telnet") {
         setProtocolSelectHost(effective);
+      } else if (effective.protocol === "telnet") {
+        // Telnet-as-default wins over a stray moshEnabled flag.
+        onConnect({ ...host, moshEnabled: false });
       } else {
         onConnect(host);
       }
     },
-    [hasMultipleProtocols, onConnect, groupConfigs, proxyProfileIdSet],
+    [onConnect, groupConfigs, proxyProfileIdSet],
   );
 
   // Handle protocol selection

@@ -626,6 +626,7 @@ export const ruVaultMessages: Messages = {
   'hostDetails.telnet.password': 'Пароль Telnet',
   'hostDetails.charset.placeholder': 'Кодировка (например, UTF-8)',
   'hostDetails.telnet.add': 'Добавить протокол Telnet',
+  'hostDetails.telnet.setDefault': 'Подключаться по Telnet по умолчанию',
   'hostDetails.tags': 'Теги',
   'hostDetails.group': 'Группа',
   'hostDetails.selectGroup': 'Выберите группу',

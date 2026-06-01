@@ -592,6 +592,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.telnet.password': 'Telnet Password',
   'hostDetails.charset.placeholder': 'Charset (e.g. UTF-8)',
   'hostDetails.telnet.add': 'Add Telnet Protocol',
+  'hostDetails.telnet.setDefault': 'Connect with Telnet by default',
   'hostDetails.tags': 'Tags',
   'hostDetails.group': 'Group',
   'hostDetails.selectGroup': 'Select Group',
