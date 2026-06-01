@@ -32,7 +32,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { useCloudSync } from '../../application/state/useCloudSync';
 
 
-import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey } from '../../domain/sync';
+import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey, type SyncEntityChangeCounts } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -559,14 +559,16 @@ export const ConflictModal: React.FC<ConflictModalProps> = ({
         return new Date(timestamp).toLocaleString(resolvedLocale || undefined);
     };
     const changeRows = conflict.changeSummary
-        ? Object.entries(conflict.changeSummary.byEntity)
-            .filter(([, counts]) => counts)
-            .map(([entityType, counts]) => ({
-                entityType: entityType as SyncChangeEntityKey,
-                localTotal: (counts?.added.local ?? 0) + (counts?.modified.local ?? 0) + (counts?.deleted.local ?? 0),
-                remoteTotal: (counts?.added.remote ?? 0) + (counts?.modified.remote ?? 0) + (counts?.deleted.remote ?? 0),
-                conflictTotal: conflict.changeSummary?.conflicts.filter((item) => item.entityType === entityType).length ?? 0,
-            }))
+        ? (Object.entries(conflict.changeSummary.byEntity) as Array<[SyncChangeEntityKey, SyncEntityChangeCounts | undefined]>)
+            .flatMap(([entityType, counts]) => {
+                if (!counts) return [];
+                return [{
+                    entityType,
+                    localTotal: counts.added.local + counts.modified.local + counts.deleted.local,
+                    remoteTotal: counts.added.remote + counts.modified.remote + counts.deleted.remote,
+                    conflictTotal: conflict.changeSummary?.conflicts.filter((item) => item.entityType === entityType).length ?? 0,
+                }];
+            })
             .filter((row) => row.localTotal > 0 || row.remoteTotal > 0 || row.conflictTotal > 0)
         : [];
 
