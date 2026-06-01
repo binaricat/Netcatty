@@ -5,7 +5,7 @@ import type { useCloudSync } from '../../application/state/useCloudSync';
 import { isProviderReadyForSync } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { GoogleDriveIcon, OneDriveIcon, ProviderCard, Toggle } from './CloudSyncControls';
@@ -189,9 +189,13 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                         >
                             <SelectTrigger
                                 aria-label={t('cloudSync.strategy.title')}
-                                className="h-auto min-h-[64px] py-2 [&>span]:line-clamp-none"
+                                className="h-10"
                             >
-                                <SelectValue />
+                                {sync.syncStrategy === 'preferCloud'
+                                    ? t('cloudSync.strategy.preferCloud')
+                                    : sync.syncStrategy === 'preferLocal'
+                                        ? t('cloudSync.strategy.preferLocal')
+                                        : t('cloudSync.strategy.smartMerge')}
                             </SelectTrigger>
                             <SelectContent className="max-w-[min(520px,var(--radix-select-trigger-width))]">
                                 <SelectItem value="smartMerge" className="items-start py-2">
