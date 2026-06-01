@@ -15,9 +15,13 @@ test('terminal font size actions step and reset within bounds', () => {
   assert.equal(nextTerminalFontSizeForAction('copy', 14), null);
 });
 
-test('ctrl wheel adjusts terminal font size without hijacking plain scroll', () => {
-  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, deltaY: -1 }, 14), 15);
-  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, deltaY: 1 }, 14), 13);
-  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: false, deltaY: -1 }, 14), null);
-  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, deltaY: 0 }, 14), null);
+test('wheel adjusts terminal font size with the platform modifier only', () => {
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, metaKey: false, deltaY: -1 }, 14, false), 15);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, metaKey: false, deltaY: 1 }, 14, false), 13);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: false, metaKey: true, deltaY: -1 }, 14, true), 15);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: false, metaKey: true, deltaY: 1 }, 14, true), 13);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: false, metaKey: true, deltaY: -1 }, 14, false), null);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, metaKey: false, deltaY: -1 }, 14, true), null);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: false, metaKey: false, deltaY: -1 }, 14, false), null);
+  assert.equal(nextTerminalFontSizeForWheel({ ctrlKey: true, metaKey: false, deltaY: 0 }, 14, false), null);
 });

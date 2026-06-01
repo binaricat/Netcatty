@@ -514,7 +514,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     return true;
   };
   const handleFontSizeWheel = (event: WheelEvent) => {
-    const nextFontSize = nextTerminalFontSizeForWheel(event, currentTerminalFontSize());
+    const currentScheme = ctx.hotkeySchemeRef.current;
+    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
+    const nextFontSize = nextTerminalFontSizeForWheel(
+      event,
+      currentTerminalFontSize(),
+      isMac,
+    );
     if (nextFontSize === null) return;
     event.preventDefault();
     event.stopPropagation();

@@ -4,7 +4,7 @@ import {
   MIN_FONT_SIZE,
 } from "../../../infrastructure/config/fonts";
 
-type WheelLike = Pick<WheelEvent, "ctrlKey" | "deltaY">;
+type WheelLike = Pick<WheelEvent, "ctrlKey" | "metaKey" | "deltaY">;
 
 export const clampTerminalFontSize = (fontSize: number): number =>
   Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize));
@@ -28,7 +28,11 @@ export const nextTerminalFontSizeForAction = (
 export const nextTerminalFontSizeForWheel = (
   event: WheelLike,
   currentFontSize: number,
+  isMac: boolean,
 ): number | null => {
-  if (!event.ctrlKey || event.deltaY === 0) return null;
+  const hasZoomModifier = isMac
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+  if (!hasZoomModifier || event.deltaY === 0) return null;
   return clampTerminalFontSize(currentFontSize + (event.deltaY < 0 ? 1 : -1));
 };
