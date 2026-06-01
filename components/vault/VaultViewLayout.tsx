@@ -261,7 +261,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         </div>
       </TooltipProvider>
 
-      <div className="flex min-w-0 flex-1 p-2 pl-1" data-section="vault-stage">
+      <div className="flex min-w-0 flex-1 p-2 pl-0" data-section="vault-stage">
         <div
           className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"
           data-section="vault-surface"
