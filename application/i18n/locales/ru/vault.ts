@@ -529,6 +529,7 @@ export const ruVaultMessages: Messages = {
   'hostDetails.credential.key': 'Ключ',
   'hostDetails.credential.certificate': 'Сертификат',
   'hostDetails.credential.localKeyFile': 'Локальный файл ключа',
+  'hostDetails.credential.defaultLocalKey': 'Локальный SSH-ключ / SSH Agent',
   'hostDetails.credential.localKeyFilePlaceholder': '~/.ssh/id_ed25519',
   'hostDetails.credential.browseKeyFile': 'Обзор...',
   'hostDetails.credential.missing': 'Учётные данные не найдены',

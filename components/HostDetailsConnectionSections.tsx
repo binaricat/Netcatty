@@ -45,7 +45,27 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   distroOptions,
   effectiveFormDistro,
   getDistroOptionLabel,
-}) => (
+}) => {
+  const selectedCredentialKey = form.identityFileId
+    ? availableKeys.find((key: { id: string }) => key.id === form.identityFileId)
+    : undefined;
+  const referenceKeyFilePath =
+    selectedCredentialKey?.source === "reference" && selectedCredentialKey.filePath
+      ? selectedCredentialKey.filePath
+      : undefined;
+  const isReferenceKeySelected = Boolean(form.identityFileId && referenceKeyFilePath);
+  const localKeyFilePaths =
+    form.identityFilePaths && form.identityFilePaths.length > 0
+      ? form.identityFilePaths
+      : referenceKeyFilePath
+        ? [referenceKeyFilePath]
+        : [];
+  const usesDefaultLocalKey =
+    form.authMethod === "key" &&
+    !form.identityFileId &&
+    localKeyFilePaths.length === 0;
+
+  return (
   <>
         <HostDetailsSection
           icon={<MapPin size={14} className="text-muted-foreground" />}
@@ -326,10 +346,34 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               </div>
             )}
 
+            {/* Default local key / SSH agent display */}
+            {!selectedIdentity && usesDefaultLocalKey && (
+              <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
+                <FileKey size={14} className="text-primary shrink-0" />
+                <span className="text-sm flex-1 truncate">
+                  {t("hostDetails.credential.defaultLocalKey")}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => {
+                    update("authMethod", "password");
+                    setPendingReferenceKeyPath(null);
+                    setSelectedCredentialType(null);
+                  }}
+                >
+                  <X size={12} />
+                </Button>
+              </div>
+            )}
+
             {/* Local key file paths display */}
-            {!selectedIdentity && !form.identityFileId && form.identityFilePaths && form.identityFilePaths.length > 0 && (
+            {!selectedIdentity &&
+              localKeyFilePaths.length > 0 &&
+              (!form.identityFileId || isReferenceKeySelected) && (
               <div className="space-y-1.5">
-                {form.identityFilePaths.map((keyPath, idx) => (
+                {localKeyFilePaths.map((keyPath, idx) => (
                   <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60 overflow-hidden">
                     <FileKey size={14} className="text-primary shrink-0" />
                     <Tooltip>
@@ -345,9 +389,18 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                       size="icon"
                       className="h-6 w-6 shrink-0"
                       onClick={() => {
-                        const paths = form.identityFilePaths?.filter((_, i) => i !== idx) || [];
+                        const paths = localKeyFilePaths.filter((_, i) => i !== idx);
+                        if (isReferenceKeySelected) {
+                          update("identityFileId", undefined);
+                        }
                         update("identityFilePaths", paths.length > 0 ? paths : undefined);
-                        if (keyPath === pendingReferenceKeyPath) {
+                        if (paths.length === 0) {
+                          update("authMethod", "password");
+                          setSelectedCredentialType(null);
+                        } else if (isReferenceKeySelected) {
+                          update("authMethod", "key");
+                        }
+                        if (keyPath === pendingReferenceKeyPath || keyPath === referenceKeyFilePath) {
                           setPendingReferenceKeyPath(null);
                         }
                       }}
@@ -360,7 +413,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
             )}
 
             {/* Selected credential display */}
-            {!selectedIdentity && form.identityFileId && (
+            {!selectedIdentity && form.identityFileId && !isReferenceKeySelected && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-secondary/50 border border-border/60">
                 {form.authMethod === "certificate" ? (
                   <Shield size={14} className="text-primary" />
@@ -368,8 +421,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                   <Key size={14} className="text-primary" />
                 )}
                 <span className="text-sm flex-1 truncate">
-                  {availableKeys.find((k) => k.id === form.identityFileId)
-                    ?.label || "Key"}
+                  {selectedCredentialKey?.label || "Key"}
                 </span>
                 <Button
                   variant="ghost"
@@ -390,6 +442,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
             {/* Credential type selection with inline popover - hidden when credential is selected */}
             {!selectedIdentity &&
               !form.identityFileId &&
+              !usesDefaultLocalKey &&
               !selectedCredentialType && (
                 <Popover
                   open={credentialPopoverOpen}
@@ -443,6 +496,7 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-secondary/80 transition-colors text-left"
                         onClick={() => {
                           setSelectedCredentialType("localKeyFile");
+                          update("identityFileId", undefined);
                           setCredentialPopoverOpen(false);
                         }}
                       >
@@ -581,6 +635,9 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                       onClick={() => {
                         setSelectedCredentialType(null);
                         setNewKeyFilePath("");
+                        if (localKeyFilePaths.length === 0 && !form.identityFileId) {
+                          update("authMethod", "password");
+                        }
                       }}
                     >
                       <X size={14} />
@@ -732,4 +789,5 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
           </HostDetailsSection>
         )}
   </>
-);
+  );
+};

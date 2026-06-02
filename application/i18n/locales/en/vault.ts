@@ -494,6 +494,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.credential.key': 'Key',
   'hostDetails.credential.certificate': 'Certificate',
   'hostDetails.credential.localKeyFile': 'Local Key File',
+  'hostDetails.credential.defaultLocalKey': 'Local SSH key / SSH Agent',
   'hostDetails.credential.localKeyFilePlaceholder': '~/.ssh/id_ed25519',
   'hostDetails.credential.browseKeyFile': 'Browse...',
   'hostDetails.credential.missing': 'Credential not found',

@@ -88,6 +88,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.credential.key': '密钥',
   'hostDetails.credential.certificate': '证书',
   'hostDetails.credential.localKeyFile': '本地密钥文件',
+  'hostDetails.credential.defaultLocalKey': '本地 SSH 密钥 / SSH Agent',
   'hostDetails.credential.localKeyFilePlaceholder': '~/.ssh/id_ed25519',
   'hostDetails.credential.browseKeyFile': '浏览…',
   'hostDetails.credential.missing': '凭据不存在',

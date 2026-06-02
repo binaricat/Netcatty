@@ -421,6 +421,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
         authMethod: "key",
       };
     }
+    const selectedReferenceKey = cleaned.identityFileId
+      ? availableKeys.find((key) => key.id === cleaned.identityFileId && key.source === "reference" && key.filePath)
+      : undefined;
+    if (selectedReferenceKey?.filePath) {
+      cleaned = {
+        ...cleaned,
+        authMethod: "key",
+        identityFilePaths: cleaned.identityFilePaths?.length
+          ? cleaned.identityFilePaths
+          : [selectedReferenceKey.filePath],
+      };
+    }
     const preserveLegacyTheme = initialData?.theme != null && cleaned.themeOverride !== false;
     const preserveLegacyFontFamily = initialData?.fontFamily != null && cleaned.fontFamilyOverride !== false;
     const preserveLegacyFontSize = initialData?.fontSize != null && cleaned.fontSizeOverride !== false;

@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { Trash2 } from "lucide-react";
 
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
-import type { Host } from "../types.ts";
+import type { Host, SSHKey } from "../types.ts";
+import { HostDetailsConnectionSections } from "./HostDetailsConnectionSections.tsx";
 import HostDetailsPanel, { parseOptionalPortInput } from "./HostDetailsPanel.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -22,7 +24,31 @@ const hostWithMissingProxyProfile: Host = {
   createdAt: 1,
 };
 
-const renderHostDetails = (initialData: Host = hostWithMissingProxyProfile) =>
+const referenceKey: SSHKey = {
+  id: "reference-key-1",
+  label: "id_ed25519",
+  type: "ED25519",
+  privateKey: "",
+  source: "reference",
+  category: "key",
+  created: 1,
+  filePath: "/Users/alice/.ssh/id_ed25519",
+};
+
+const importedKey: SSHKey = {
+  id: "imported-key-1",
+  label: "Imported Key",
+  type: "ED25519",
+  privateKey: "PRIVATE KEY",
+  source: "imported",
+  category: "key",
+  created: 1,
+};
+
+const renderHostDetails = (
+  initialData: Host = hostWithMissingProxyProfile,
+  availableKeys: SSHKey[] = [],
+) =>
   renderToStaticMarkup(
     React.createElement(
       I18nProvider,
@@ -32,7 +58,7 @@ const renderHostDetails = (initialData: Host = hostWithMissingProxyProfile) =>
         null,
         React.createElement(HostDetailsPanel, {
           initialData,
-          availableKeys: [],
+          availableKeys,
           identities: [],
           proxyProfiles: [],
           groups: [],
@@ -47,6 +73,98 @@ const renderHostDetails = (initialData: Host = hostWithMissingProxyProfile) =>
       ),
     ),
   );
+
+type InspectableElementProps = {
+  children?: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+};
+type ConnectionSectionProps = React.ComponentProps<typeof HostDetailsConnectionSections>;
+
+const createConnectionSectionProps = (
+  overrides: Partial<ConnectionSectionProps> = {},
+): ConnectionSectionProps => ({
+  t: (key: string) => key,
+  form: {
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    os: "windows",
+    password: undefined,
+  },
+  update: () => {},
+  groupDefaults: undefined,
+  selectedIdentity: undefined,
+  clearIdentity: () => {},
+  identities: [],
+  identitySuggestionsOpen: false,
+  filteredIdentitySuggestions: [],
+  setIdentitySuggestionsOpen: () => {},
+  availableKeys: [],
+  applyIdentity: () => {},
+  showPassword: false,
+  setShowPassword: () => {},
+  pendingReferenceKeyPath: null,
+  setPendingReferenceKeyPath: () => {},
+  selectedCredentialType: null,
+  setSelectedCredentialType: () => {},
+  credentialPopoverOpen: true,
+  setCredentialPopoverOpen: () => {},
+  keysByCategory: { key: [], certificate: [], identity: [] },
+  newKeyFilePath: "",
+  setNewKeyFilePath: () => {},
+  addLocalKeyFilePath: () => {},
+  handleDistroModeChange: () => {},
+  distroOptions: [],
+  effectiveFormDistro: undefined,
+  getDistroOptionLabel: (value?: string) => value || "",
+  ...overrides,
+});
+
+const collectText = (node: React.ReactNode): string => {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(collectText).join("");
+  }
+  if (!React.isValidElement<InspectableElementProps>(node)) {
+    return "";
+  }
+  return collectText(node.props.children);
+};
+
+const containsElementType = (
+  node: React.ReactNode,
+  type: React.ElementType,
+): boolean => {
+  if (Array.isArray(node)) {
+    return node.some((child) => containsElementType(child, type));
+  }
+  if (!React.isValidElement<InspectableElementProps>(node)) {
+    return false;
+  }
+  return node.type === type || containsElementType(node.props.children, type);
+};
+
+const findElement = (
+  node: React.ReactNode,
+  predicate: (element: React.ReactElement<InspectableElementProps>) => boolean,
+): React.ReactElement<InspectableElementProps> | undefined => {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findElement(child, predicate);
+      if (match) return match;
+    }
+    return undefined;
+  }
+  if (!React.isValidElement<InspectableElementProps>(node)) {
+    return undefined;
+  }
+  if (predicate(node)) {
+    return node;
+  }
+  return findElement(node.props.children, predicate);
+};
 
 const findInputByValue = (markup: string, value: string) => {
   const match = markup.match(new RegExp(`<input(?=[^>]*value="${value}")[^>]*>`));
@@ -234,6 +352,145 @@ test("HostDetailsPanel displays inherited telnet credentials", () => {
   assert.match(markup, /placeholder="Telnet Password"[^>]*value="group-telnet-password"/);
   assert.doesNotMatch(markup, /placeholder="Telnet Username"[^>]*value="ssh-user"/);
   assert.doesNotMatch(markup, /placeholder="Telnet Password"[^>]*value="ssh-password"/);
+});
+
+test("HostDetailsPanel displays saved reference key identity paths as local key files", () => {
+  const markup = renderHostDetails(
+    {
+      ...hostWithMissingProxyProfile,
+      proxyProfileId: undefined,
+      authMethod: "key",
+      identityFileId: referenceKey.id,
+      identityFilePaths: [referenceKey.filePath!],
+      password: undefined,
+    },
+    [referenceKey],
+  );
+
+  assert.match(markup, /\/Users\/alice\/\.ssh\/id_ed25519/);
+  assert.match(markup, /placeholder="Password"/);
+});
+
+test("HostDetailsPanel falls back to reference key filePath when host paths are missing", () => {
+  const markup = renderHostDetails(
+    {
+      ...hostWithMissingProxyProfile,
+      proxyProfileId: undefined,
+      authMethod: "key",
+      identityFileId: referenceKey.id,
+      identityFilePaths: undefined,
+      password: undefined,
+    },
+    [referenceKey],
+  );
+
+  assert.match(markup, /\/Users\/alice\/\.ssh\/id_ed25519/);
+});
+
+test("HostDetailsPanel keeps imported keys in the regular key display", () => {
+  const markup = renderHostDetails(
+    {
+      ...hostWithMissingProxyProfile,
+      proxyProfileId: undefined,
+      authMethod: "key",
+      identityFileId: importedKey.id,
+      identityFilePaths: ["/Users/alice/.ssh/stale_ed25519"],
+      password: undefined,
+    },
+    [importedKey],
+  );
+
+  assert.match(markup, /Imported Key/);
+  assert.doesNotMatch(markup, /\/Users\/alice\/\.ssh\/stale_ed25519/);
+});
+
+test("HostDetailsPanel displays default local key auth when no concrete key path is saved", () => {
+  const markup = renderHostDetails({
+    ...hostWithMissingProxyProfile,
+    proxyProfileId: undefined,
+    authMethod: "key",
+    identityFileId: undefined,
+    identityFilePaths: undefined,
+    password: undefined,
+  });
+
+  assert.match(markup, /Local SSH key \/ SSH Agent/);
+  assert.doesNotMatch(markup, /Key, Certificate, Local Key File/);
+  assert.match(markup, /placeholder="Password"/);
+});
+
+test("HostDetailsConnectionSections waits for a local key file path before enabling key auth", () => {
+  const updateCalls: Array<[keyof Host, Host[keyof Host]]> = [];
+  const selectedTypes: Array<string | null> = [];
+  const props = createConnectionSectionProps({
+    update: <K extends keyof Host>(key: K, value: Host[K]) => {
+      updateCalls.push([key, value]);
+    },
+    setSelectedCredentialType: (type: string | null) => {
+      selectedTypes.push(type);
+    },
+  });
+
+  const tree = HostDetailsConnectionSections(props);
+  const localKeyFileButton = findElement(
+    tree,
+    (element) =>
+      element.type === "button" &&
+      collectText(element.props.children).includes("hostDetails.credential.localKeyFile"),
+  );
+
+  assert.ok(localKeyFileButton?.props.onClick, "expected local key file option");
+  localKeyFileButton.props.onClick();
+
+  assert.deepEqual(selectedTypes, ["localKeyFile"]);
+  assert.deepEqual(
+    updateCalls.filter(([key]) => key === "authMethod"),
+    [],
+  );
+});
+
+test("HostDetailsConnectionSections keeps key auth when deleting a reference key with paths remaining", () => {
+  const remainingPath = "/Users/alice/.ssh/backup_ed25519";
+  const updateCalls: Array<[keyof Host, Host[keyof Host]]> = [];
+  const props = createConnectionSectionProps({
+    form: {
+      ...hostWithMissingProxyProfile,
+      proxyProfileId: undefined,
+      os: "windows",
+      authMethod: "key",
+      identityFileId: referenceKey.id,
+      identityFilePaths: [referenceKey.filePath!, remainingPath],
+      password: undefined,
+    },
+    availableKeys: [referenceKey],
+    update: <K extends keyof Host>(key: K, value: Host[K]) => {
+      updateCalls.push([key, value]);
+    },
+  });
+
+  const tree = HostDetailsConnectionSections(props);
+  const deleteReferenceKeyButton = findElement(
+    tree,
+    (element) =>
+      typeof element.props.onClick === "function" &&
+      containsElementType(element.props.children, Trash2),
+  );
+
+  assert.ok(deleteReferenceKeyButton?.props.onClick, "expected reference key delete button");
+  deleteReferenceKeyButton.props.onClick();
+
+  assert.deepEqual(
+    updateCalls.find(([key]) => key === "identityFileId"),
+    ["identityFileId", undefined],
+  );
+  assert.deepEqual(
+    updateCalls.find(([key]) => key === "identityFilePaths"),
+    ["identityFilePaths", [remainingPath]],
+  );
+  assert.deepEqual(
+    updateCalls.filter(([key]) => key === "authMethod"),
+    [["authMethod", "key"]],
+  );
 });
 
 test("parseOptionalPortInput clears empty port values", () => {
