@@ -549,7 +549,12 @@ function createMoshSessionApi(ctx) {
       // Netcatty already holds are kept — a password typed interactively into
       // the handshake PTY is not captured, so that case degrades gracefully.
       session.moshStatsAuth = {
-        hostname: parsed.host || options.hostname,
+        // Use the configured SSH host, NOT parsed.host: a `MOSH IP` line
+        // advertises the UDP endpoint for mosh-client, which can differ from
+        // the SSH endpoint on NAT / multi-homed hosts. The companion is an
+        // SSH connection, so it must target the same host the handshake's ssh
+        // did.
+        hostname: options.hostname,
         port: options.port || 22,
         username: options.username,
         password: options.password,

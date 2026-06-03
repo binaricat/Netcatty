@@ -272,6 +272,28 @@ test("a transient error allows a reconnect on the next poll", async () => {
   assert.equal(FakeSSHClient.instances.length, 2);
 });
 
+test("a socket that closes mid-handshake settles the attempt instead of hanging", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  // Socket drops during the handshake with no prior "ready" or "error".
+  FakeSSHClient.instances[0].emit("close");
+
+  const result = await pending;
+  assert.equal(result, null);
+  // Transient — must not permanently disable stats, and the promise must clear.
+  assert.notEqual(session.moshStatsConnFailed, true);
+  assert.equal(session.moshStatsConnPromise, null);
+
+  // The next poll is allowed to retry.
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  assert.equal(FakeSSHClient.instances.length, 2);
+});
+
 test("a connection that becomes ready after the session closed is discarded", async () => {
   const { api, sessions } = makeApi();
   const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };

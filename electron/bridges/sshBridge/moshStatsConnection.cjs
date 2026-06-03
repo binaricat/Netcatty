@@ -253,6 +253,11 @@ function createMoshStatsConnectionApi(ctx) {
         conn.on("close", () => {
           if (session.conn === conn) session.conn = null;
           if (session.moshStatsConn === conn) session.moshStatsConn = null;
+          // If the socket closed mid-handshake without ever emitting "ready"
+          // or "error", settle the attempt here so the awaiting getServerStats
+          // call (and session.moshStatsConnPromise) don't hang forever. This
+          // is treated as transient — the next poll may retry.
+          finish(null);
         });
 
         try {
