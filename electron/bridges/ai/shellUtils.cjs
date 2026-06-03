@@ -424,123 +424,6 @@ function invalidateShellEnvCache() {
   _cachedShellEnv = null;
 }
 
-// ── Claude Code ACP binary resolution ──
-
-/**
- * Resolve the Claude ACP binary, returning { command, prependArgs, env }.
- *
- * `@zed-industries/claude-agent-acp`'s `dist/index.js` is shipped as a Node
- * script (`#!/usr/bin/env node`). We bundle it with the app, but the user's
- * machine may not have `node` on PATH — Windows doesn't honour the shebang at
- * all, and on macOS/Linux the shebang only works when `node` is installed.
- *
- * To make the bundled copy self-sufficient, packaged builds run the script
- * with the Electron binary itself (via `ELECTRON_RUN_AS_NODE=1`). Dev mode
- * still prefers a PATH-resolved `claude-agent-acp` wrapper since `node` is
- * almost always available there.
- */
-function resolveClaudeAcpBinaryPath(shellEnv, electronModule) {
-  const binaryName = "claude-agent-acp";
-
-  // Dev mode: prefer system PATH (npm creates platform-appropriate wrappers)
-  const isPackaged = electronModule?.app?.isPackaged;
-  if (!isPackaged && shellEnv) {
-    const systemPath = resolveCliFromPath(binaryName, shellEnv);
-    if (systemPath) return { command: systemPath, prependArgs: [], env: {} };
-  }
-
-  // Packaged build (or dev fallback): run the npm-bundled JS via process.execPath.
-  // In packaged Electron `process.execPath` is the app binary (e.g. Netcatty.exe);
-  // setting `ELECTRON_RUN_AS_NODE=1` makes it behave as the embedded Node so we
-  // don't depend on the user having `node` installed.  When `process.execPath`
-  // is already a real `node` (e.g. during tests), no env var is needed.
-  try {
-    const resolved = require.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js");
-    const scriptPath = toUnpackedAsarPath(resolved);
-
-    const runtime = process.execPath;
-    if (runtime && existsSync(runtime)) {
-      const runtimeBase = path.basename(runtime).toLowerCase();
-      const isNodeBinary = runtimeBase === "node" || runtimeBase.startsWith("node.");
-      const env = isNodeBinary ? {} : { ELECTRON_RUN_AS_NODE: "1" };
-      return { command: runtime, prependArgs: [scriptPath], env };
-    }
-
-    // Last resort: try a system `node`, then the bare command name.
-    const nodePath = shellEnv ? resolveCliFromPath("node", shellEnv) : null;
-    if (nodePath) {
-      return { command: nodePath, prependArgs: [scriptPath], env: {} };
-    }
-    return { command: binaryName, prependArgs: [], env: {} };
-  } catch {
-    return { command: binaryName, prependArgs: [], env: {} };
-  }
-}
-
-// ── Stream chunk serialization ──
-
-function serializeStreamChunk(chunk) {
-  if (!chunk || !chunk.type) return null;
-  switch (chunk.type) {
-    case "text-delta":
-      return { type: "text-delta", textDelta: chunk.text ?? chunk.textDelta ?? "" };
-    case "reasoning-delta":
-      return { type: "reasoning-delta", delta: chunk.text ?? chunk.delta ?? "" };
-    case "reasoning-start":
-      return { type: "reasoning-start", id: chunk.id ?? undefined };
-    case "reasoning-end":
-      return { type: "reasoning-end", id: chunk.id ?? undefined };
-    case "tool-call": {
-      // ACP wraps all tools as "acp.acp_provider_agent_dynamic_tool".
-      // The real tool name and args are inside chunk.input — which the
-      // @mcpc-tech/acp-ai-provider emits as a JSON.stringified payload
-      // (see index.cjs, every controller.enqueue({ type: "tool-call", ...
-      // input: JSON.stringify({ toolCallId, toolName, args }) })). AI SDK
-      // may or may not pre-parse it before we see the chunk, so handle
-      // both string and object shapes.
-      const isAcpWrapper = chunk.toolName === "acp.acp_provider_agent_dynamic_tool";
-      let acpInput = null;
-      if (isAcpWrapper) {
-        const raw = chunk.input ?? chunk.args;
-        if (typeof raw === "string") {
-          try { acpInput = JSON.parse(raw); } catch { acpInput = null; }
-        } else if (raw && typeof raw === "object") {
-          acpInput = raw;
-        }
-      }
-      let realToolName = isAcpWrapper ? (acpInput?.toolName || chunk.toolName) : chunk.toolName;
-      const realArgs = isAcpWrapper ? (acpInput?.args || chunk.args || chunk.input) : (chunk.input ?? chunk.args);
-      const realToolCallId = isAcpWrapper ? (acpInput?.toolCallId || chunk.toolCallId) : chunk.toolCallId;
-      // Simplify MCP tool names: "mcp__netcatty-remote-hosts__get_environment" → "get_environment"
-      if (realToolName && realToolName.includes("__")) {
-        realToolName = realToolName.split("__").pop();
-      }
-      return {
-        type: "tool-call",
-        toolCallId: realToolCallId,
-        toolName: realToolName,
-        args: realArgs,
-      };
-    }
-    case "tool-result":
-      return {
-        type: "tool-result",
-        toolCallId: chunk.toolCallId,
-        toolName: chunk.toolName,
-        result: chunk.result,
-        output: chunk.output,
-      };
-    case "error":
-      return { type: "error", error: chunk.error };
-    default:
-      try {
-        return JSON.parse(JSON.stringify(chunk));
-      } catch {
-        return { type: chunk.type };
-      }
-  }
-}
-
 module.exports = {
   stripAnsi,
   extractTrailingIdlePrompt,
@@ -558,11 +441,9 @@ module.exports = {
   resolveClaudeCodeExecutableForAcp,
   normalizeClaudeCodeExecutableEnvForAcp,
   resolveCliFromPath,
-  resolveClaudeAcpBinaryPath,
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,
   mergeLoginShellPath,
   getShellEnv,
   invalidateShellEnvCache,
-  serializeStreamChunk,
 };

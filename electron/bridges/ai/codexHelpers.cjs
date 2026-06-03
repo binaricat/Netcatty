@@ -36,63 +36,6 @@ const CODEX_AUTH_HINTS = [
   "credentials",
 ];
 
-// ── Package / binary resolution ──
-
-function getCodexPackageName() {
-  const key = `${process.platform}-${process.arch}`;
-  switch (key) {
-    case "darwin-arm64":
-      return "@zed-industries/codex-acp-darwin-arm64";
-    case "darwin-x64":
-      return "@zed-industries/codex-acp-darwin-x64";
-    case "linux-arm64":
-      return "@zed-industries/codex-acp-linux-arm64";
-    case "linux-x64":
-      return "@zed-industries/codex-acp-linux-x64";
-    case "win32-arm64":
-      return "@zed-industries/codex-acp-win32-arm64";
-    case "win32-x64":
-      return "@zed-industries/codex-acp-win32-x64";
-    default:
-      return null;
-  }
-}
-
-function resolveCodexAcpBinaryPath(shellEnv, electronModule) {
-  const binaryName = process.platform === "win32" ? "codex-acp.exe" : "codex-acp";
-  const isPackaged = electronModule?.app?.isPackaged;
-
-  // Dev mode: prefer system PATH
-  if (!isPackaged && shellEnv) {
-    try {
-      const whichCmd = process.platform === "win32" ? "where" : "which";
-      const systemPath = execFileSync(whichCmd, [binaryName], {
-        encoding: "utf8",
-        timeout: 3000,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: shellEnv,
-      }).trim().split("\n")[0].trim();
-      if (systemPath && existsSync(systemPath)) {
-        return systemPath;
-      }
-    } catch {
-      // Not on PATH
-    }
-  }
-
-  // Packaged build (or dev fallback): use npm-bundled binary
-  try {
-    const pkgName = getCodexPackageName();
-    if (!pkgName) return null;
-
-    const pkgRoot = path.dirname(require.resolve("@zed-industries/codex-acp/package.json"));
-    const resolved = require.resolve(`${pkgName}/bin/${binaryName}`, { paths: [pkgRoot] });
-    return toUnpackedAsarPath(resolved);
-  } catch {
-    return null;
-  }
-}
-
 // ── Login session helpers ──
 
 function appendCodexLoginOutput(session, chunk) {
@@ -316,21 +259,6 @@ function getCodexCustomConfigPreflightError(customConfig) {
   return `Codex is configured to use the "${customConfig.displayName}" provider from ~/.codex/config.toml, but the environment variable ${customConfig.envKey} is not set. Export it in your shell (e.g. add to ~/.zshrc) and click "Refresh Status" in Settings.`;
 }
 
-/**
- * Compute the ACP auth override object for Codex spawn sites.
- *   - netcatty-managed API key present → "codex-api-key"
- *   - user's own ~/.codex/config.toml custom provider detected → no override
- *     (so codex-acp resolves auth from the shell env / config itself)
- *   - otherwise → "chatgpt" (triggers the browser OAuth login flow)
- *
- * Returned as an object designed to be spread into createACPProvider options.
- */
-function getCodexAuthOverride(apiKey, shellEnv) {
-  if (apiKey) return { authMethodId: "codex-api-key" };
-  if (readCodexCustomProviderConfig(shellEnv)) return {};
-  return { authMethodId: "chatgpt" };
-}
-
 // ── Integration state ──
 
 function normalizeCodexIntegrationState(rawOutput) {
@@ -441,14 +369,11 @@ function setCodexValidationCache(value) {
 
 module.exports = {
   codexLoginSessions,
-  getCodexPackageName,
-  resolveCodexAcpBinaryPath,
   appendCodexLoginOutput,
   toCodexLoginSessionResponse,
   getActiveCodexLoginSession,
   normalizeCodexIntegrationState,
   readCodexCustomProviderConfig,
-  getCodexAuthOverride,
   getCodexCustomConfigPreflightError,
   extractCodexError,
   isCodexAuthError,
