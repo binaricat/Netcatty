@@ -12,6 +12,22 @@ const DEFAULT_SYNC_FILE_NAME = "netcatty-vault.json";
 const DEFAULT_SCOPE =
   "https://graph.microsoft.com/Files.ReadWrite.AppFolder https://graph.microsoft.com/User.Read offline_access";
 
+// Stable marker prefixed onto refresh errors when Microsoft says the refresh
+// token itself is dead (expired/revoked/consent withdrawn). Only IPC error
+// `message` survives the bridge boundary, so the renderer keys off this string
+// to flip OneDrive into a "needs reconnect" state instead of retrying forever.
+const ONEDRIVE_REAUTH_REQUIRED_MARKER = "ONEDRIVE_REAUTH_REQUIRED";
+
+// OAuth2 error codes that mean the refresh token can no longer be used and the
+// user must sign in again (vs. a transient/server error worth retrying).
+// https://learn.microsoft.com/azure/active-directory/develop/reference-error-codes
+const REFRESH_REAUTH_ERROR_CODES = new Set([
+  "invalid_grant", // expired/revoked refresh token (the common #1189 case)
+  "interaction_required",
+  "consent_required",
+  "login_required",
+]);
+
 const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
 
 const safeJsonParse = (text) => {
@@ -135,8 +151,12 @@ function registerHandlers(ipcMain, electronModule) {
     const text = await res.text();
     if (!res.ok) {
       const data = safeJsonParse(text) || { error: text };
+      const reauthRequired = REFRESH_REAUTH_ERROR_CODES.has(data.error);
+      const description = data.error_description || data.error || res.status;
       throw new Error(
-        `OneDrive token refresh failed: ${data.error_description || data.error || res.status}`
+        reauthRequired
+          ? `${ONEDRIVE_REAUTH_REQUIRED_MARKER}: OneDrive session expired, please reconnect. (${description})`
+          : `OneDrive token refresh failed: ${description}`
       );
     }
 
@@ -321,4 +341,6 @@ function registerHandlers(ipcMain, electronModule) {
 
 module.exports = {
   registerHandlers,
+  ONEDRIVE_REAUTH_REQUIRED_MARKER,
+  REFRESH_REAUTH_ERROR_CODES,
 };

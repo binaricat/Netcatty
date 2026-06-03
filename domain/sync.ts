@@ -92,6 +92,38 @@ export interface OAuthTokens {
 }
 
 /**
+ * Marker prefixed onto OneDrive refresh errors when Microsoft reports the
+ * refresh token can no longer be used (expired / revoked / consent withdrawn).
+ * Only an error's `message` survives the Electron IPC boundary, so the marker is
+ * the stable signal that the OneDrive session must be re-authorized. It is added
+ * in the bridge (electron/bridges/onedriveAuthBridge.cjs) and detected/cleaned
+ * here so the same logic is shared by infrastructure and UI layers.
+ */
+export const ONEDRIVE_REAUTH_REQUIRED_MARKER = 'ONEDRIVE_REAUTH_REQUIRED';
+
+/**
+ * True when an error indicates the OneDrive refresh token is dead and the user
+ * must reconnect. Robust to the error being re-wrapped (e.g. `new
+ * Error(String(err))`) as it bubbles through the provider-agnostic pipeline.
+ */
+export const isOneDriveReauthRequiredMessage = (message: string): boolean =>
+  message.includes(ONEDRIVE_REAUTH_REQUIRED_MARKER);
+
+/**
+ * Produce a clean, user-facing message from a (possibly multiply-wrapped) error
+ * string by dropping everything up to and including the internal reauth marker,
+ * e.g. "Error: OneDriveReauthRequiredError: ONEDRIVE_REAUTH_REQUIRED: OneDrive
+ * session expired..." -> "OneDrive session expired...". Returns the original
+ * string unchanged when the marker is absent.
+ */
+export const cleanOneDriveErrorMessage = (message: string): string => {
+  const token = `${ONEDRIVE_REAUTH_REQUIRED_MARKER}:`;
+  const markerIndex = message.lastIndexOf(token);
+  if (markerIndex === -1) return message;
+  return message.slice(markerIndex + token.length).trim();
+};
+
+/**
  * Provider account information
  */
 export interface ProviderAccount {

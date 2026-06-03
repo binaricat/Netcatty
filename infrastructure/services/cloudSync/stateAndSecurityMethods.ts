@@ -373,13 +373,63 @@ export async function getConnectedAdapterImpl(this: any,provider: CloudProvider)
 
     const existing = this.adapters.get(provider);
     if (existing?.isAuthenticated) {
+      attachTokenRefreshPersistence.call(this, provider, existing);
       return existing;
     }
 
     const adapter = await createAdapter(provider, tokens, connection.resourceId, config);
+    attachTokenRefreshPersistence.call(this, provider, adapter);
     this.adapters.set(provider, adapter);
     return adapter;
   }
+
+/**
+ * Wire an OAuth adapter's token-refresh callback so silently rotated tokens are
+ * persisted. Without this, OneDrive's rotating refresh tokens go stale after the
+ * first in-session refresh and the next launch is forced to reconnect (#1189).
+ * Only OneDrive currently exposes setOnTokensRefreshed; other adapters are no-ops.
+ */
+export function attachTokenRefreshPersistence(
+  this: any,
+  provider: CloudProvider,
+  adapter: CloudAdapter,
+): void {
+  const setCallback = (adapter as {
+    setOnTokensRefreshed?: (cb: (tokens: import('../../../domain/sync').OAuthTokens) => void) => void;
+  }).setOnTokensRefreshed;
+  if (typeof setCallback !== 'function') return;
+  setCallback.call(adapter, (tokens) => {
+    persistRefreshedProviderTokensImpl.call(this, provider, tokens);
+  });
+}
+
+/**
+ * Persist tokens that an adapter refreshed mid-session into provider state and
+ * encrypted storage. Bumps the decrypt sequence so a concurrent stale decrypt
+ * (startup / cross-window) can't clobber the rotated tokens; preserves the live
+ * status/account/resource fields. saveProviderConnection manages its own write
+ * sequence to serialize the encrypted persist.
+ */
+export function persistRefreshedProviderTokensImpl(
+  this: any,
+  provider: CloudProvider,
+  tokens: import('../../../domain/sync').OAuthTokens,
+): void {
+  const existing = this.state.providers[provider];
+  // Provider may have been disconnected during the async refresh — don't
+  // resurrect a connection that no longer has credentials.
+  if (!existing?.tokens) return;
+
+  // Invalidate any in-flight decrypt (startup / cross-window) so it cannot
+  // overwrite the rotated tokens we are about to commit.
+  ++this.providerDecryptSeq[provider];
+  this.state.providers[provider] = {
+    ...existing,
+    tokens,
+  };
+  void this.saveProviderConnection(provider, this.state.providers[provider]);
+  this.notifyStateChange();
+}
 
 export async function setupMasterKeyImpl(this: any,password: string): Promise<void> {
     if (this.state.masterKeyConfig) {

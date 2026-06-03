@@ -2,7 +2,7 @@ import React, { type Dispatch, type RefObject, type SetStateAction } from 'react
 import { Database, Github, History, Server, Trash2 } from 'lucide-react';
 import type { CloudProvider, SyncPayload } from '../../domain/sync';
 import type { useCloudSync } from '../../application/state/useCloudSync';
-import { isProviderReadyForSync } from '../../domain/sync';
+import { cleanOneDriveErrorMessage, isProviderReadyForSync } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../ui/select';
@@ -116,7 +116,11 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                         }
                         account={sync.providers.onedrive.account}
                         lastSync={sync.providers.onedrive.lastSync}
-                        error={sync.providers.onedrive.error}
+                        error={
+                            sync.providers.onedrive.error
+                                ? cleanOneDriveErrorMessage(sync.providers.onedrive.error)
+                                : undefined
+                        }
                         disabled={isConnectDisabled('onedrive')}
                         onConnect={handleConnectOneDrive}
                         onCancelConnect={sync.cancelOAuthConnect}
