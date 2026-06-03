@@ -220,8 +220,10 @@ test("resolve-cli probes Windows cmd paths with spaces", { skip: process.platfor
 
     assert.deepEqual(result, {
       path: codexPath,
+      binPath: codexPath,
       version: "codex-cli 1.2.3",
       available: true,
+      installed: true,
     });
   } finally {
     restore();
@@ -262,8 +264,10 @@ test("resolve-cli probes Windows Claude cmd paths with spaces", { skip: process.
 
     assert.deepEqual(result, {
       path: claudePath,
+      binPath: claudePath,
       version: "2.1.123 (Claude Code)",
       available: true,
+      installed: true,
     });
   } finally {
     restore();
@@ -300,8 +304,10 @@ test("resolve-cli probes Windows Claude exe paths with spaces", { skip: process.
 
     assert.deepEqual(result, {
       path: claudePath,
+      binPath: claudePath,
       version: process.version,
       available: true,
+      installed: true,
     });
   } finally {
     restore();
