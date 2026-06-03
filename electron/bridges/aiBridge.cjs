@@ -208,10 +208,6 @@ let cliDiscoveryFilePath = null;
 // Active streaming requests (for cancellation)
 const activeStreams = new Map();
 
-// External agent processes
-const agentProcesses = new Map();
-const MAX_CONCURRENT_AGENTS = 5;
-
 // ACP providers (module-level so cleanup() can access them)
 const acpProviders = new Map();
 const acpActiveStreams = new Map();
@@ -879,8 +875,6 @@ function createHandlerContext(ipcMain) {
     get cliDiscoveryFilePath() { return cliDiscoveryFilePath; },
     set cliDiscoveryFilePath(value) { cliDiscoveryFilePath = value; },
     activeStreams,
-    agentProcesses,
-    MAX_CONCURRENT_AGENTS,
     acpProviders,
     acpActiveStreams,
     acpRequestSessions,
@@ -931,45 +925,10 @@ function registerHandlers(ipcMain) {
   registerAgentDiscoveryHandlers(context);
   registerAgentProcessHandlers(context);
   registerAcpHandlers(context);
-
-  ipcMain.handle("netcatty:ai:agent:kill", async (event, { agentId }) => {
-    if (!validateSender(event)) {
-      return { ok: false, error: "Unauthorized IPC sender" };
-    }
-    const proc = agentProcesses.get(agentId);
-    if (!proc) return { ok: false, error: "Agent not found" };
-    try {
-      proc.kill("SIGTERM");
-      // Wait for the process to exit, or force-kill after 5 seconds
-      await new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          if (agentProcesses.has(agentId)) {
-            try { proc.kill("SIGKILL"); } catch {}
-          }
-          resolve();
-        }, 5000);
-        proc.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-      agentProcesses.delete(agentId);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err?.message || String(err) };
-    }
-  });
 }
 
-// Cleanup all agent processes on shutdown
+// Abort active streams and child processes on shutdown
 function cleanup() {
-  for (const [id, proc] of agentProcesses) {
-    try {
-      proc.kill("SIGTERM");
-    } catch {}
-  }
-  agentProcesses.clear();
-
   for (const [id, controller] of activeStreams) {
     try { controller.abort(); } catch {}
   }
