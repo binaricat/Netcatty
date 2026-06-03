@@ -1,0 +1,321 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
+
+const { createMoshStatsConnectionApi } = require("./moshStatsConnection.cjs");
+
+// The connection is created inside an async flow (after credentials are
+// resolved, which may touch the filesystem), so the fake SSH client appears a
+// few microtasks/immediates after ensureMoshStatsConnection() is called.
+function tick() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+// Minimal fake ssh2 Client. Records connect() opts and lets the test drive
+// the lifecycle via emitReady / emitError.
+class FakeSSHClient extends EventEmitter {
+  constructor() {
+    super();
+    FakeSSHClient.instances.push(this);
+    this.connectOpts = null;
+    this.ended = false;
+  }
+
+  connect(opts) {
+    this.connectOpts = opts;
+    return this;
+  }
+
+  end() {
+    this.ended = true;
+  }
+
+  emitReady() {
+    this.emit("ready");
+  }
+
+  emitError(err) {
+    this.emit("error", err);
+  }
+}
+FakeSSHClient.instances = [];
+
+function makeApi(overrides = {}) {
+  FakeSSHClient.instances = [];
+  const sessions = overrides.sessions || new Map();
+  const logs = [];
+  const api = createMoshStatsConnectionApi({
+    get sessions() {
+      return sessions;
+    },
+    SSHClient: overrides.SSHClient || FakeSSHClient,
+    sshUtils: overrides.sshUtils || {
+      // Default: treat any non-empty string as a parseable key.
+      parseKey: (key) => (key && key.length > 0 ? { ok: true } : new Error("bad key")),
+    },
+    NetcattyAgent: overrides.NetcattyAgent || class {},
+    buildAlgorithms: overrides.buildAlgorithms || (() => ({ algos: true })),
+    getSshAgentSocket: overrides.getSshAgentSocket || (() => null),
+    readFileNoFollow: overrides.readFileNoFollow || (async () => null),
+    expandIdentityFilePath: overrides.expandIdentityFilePath || ((p) => p),
+    log: (...args) => logs.push(args),
+  });
+  return { api, sessions, logs };
+}
+
+test("returns existing session.conn without opening a new connection", async () => {
+  const existing = { exec() {} };
+  const { api } = makeApi();
+  const session = { conn: existing, moshStatsAuth: { hostname: "h", password: "p" } };
+
+  const result = await api.ensureMoshStatsConnection(session, "sid");
+
+  assert.equal(result, existing);
+  assert.equal(FakeSSHClient.instances.length, 0);
+});
+
+test("gives up (no connection) when there is no usable non-interactive auth", async () => {
+  const { api } = makeApi();
+  // Only an interactively-typed password would have worked; nothing stored.
+  const session = { moshStatsAuth: { hostname: "h", username: "u" } };
+
+  const result = await api.ensureMoshStatsConnection(session, "sid");
+
+  assert.equal(result, null);
+  assert.equal(session.moshStatsConnFailed, true);
+  assert.equal(FakeSSHClient.instances.length, 0);
+});
+
+test("gives up when moshStatsAuth is missing", async () => {
+  const { api } = makeApi();
+  const session = {};
+
+  const result = await api.ensureMoshStatsConnection(session, "sid");
+
+  assert.equal(result, null);
+  assert.equal(session.moshStatsConnFailed, true);
+  assert.equal(FakeSSHClient.instances.length, 0);
+});
+
+test("connects with a stored password and adopts the connection on ready", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "example.com", port: 2222, username: "alice", password: "secret" } };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  // One connection attempt with the password and host wired in.
+  assert.equal(FakeSSHClient.instances.length, 1);
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.host, "example.com");
+  assert.equal(client.connectOpts.port, 2222);
+  assert.equal(client.connectOpts.username, "alice");
+  assert.equal(client.connectOpts.password, "secret");
+
+  client.emitReady();
+  const result = await pending;
+
+  assert.equal(result, client);
+  assert.equal(session.conn, client);
+  assert.equal(session.moshStatsConn, client);
+});
+
+test("uses a parseable private key and passphrase, not password fallback only", async () => {
+  const { api, sessions } = makeApi();
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      passphrase: "pw",
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.privateKey, session.moshStatsAuth.privateKey);
+  assert.equal(client.connectOpts.passphrase, "pw");
+});
+
+test("skips an unparseable (e.g. encrypted, wrong passphrase) private key", async () => {
+  const { api, sessions } = makeApi({
+    sshUtils: { parseKey: () => new Error("encrypted") },
+  });
+  const session = {
+    moshStatsAuth: { hostname: "h", username: "u", privateKey: "enc", password: "fallback" },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  // Falls back to the stored password instead of offering the bad key.
+  assert.equal(client.connectOpts.privateKey, undefined);
+  assert.equal(client.connectOpts.password, "fallback");
+});
+
+test("reads identity files non-interactively when no inline key is present", async () => {
+  const reads = [];
+  const { api, sessions } = makeApi({
+    readFileNoFollow: async (p) => {
+      reads.push(p);
+      return "FILEKEY";
+    },
+    sshUtils: { parseKey: (k) => (k === "FILEKEY" ? { ok: true } : new Error("no")) },
+  });
+  const session = {
+    moshStatsAuth: { hostname: "h", username: "u", identityFilePaths: ["~/.ssh/id_ed25519"] },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick(); // allow chained async identity read + client creation
+
+  assert.deepEqual(reads, ["~/.ssh/id_ed25519"]);
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.privateKey, "FILEKEY");
+});
+
+test("falls back to ssh-agent when a socket is available and no inline creds", async () => {
+  // The system ssh used by the Mosh handshake authenticates via the local
+  // agent by default, so the companion should too — regardless of the
+  // agentForwarding (remote forwarding) setting.
+  for (const agentForwarding of [true, false, undefined]) {
+    const { api, sessions } = makeApi({
+      getSshAgentSocket: () => "/tmp/agent.sock",
+    });
+    const session = { moshStatsAuth: { hostname: "h", username: "u", agentForwarding } };
+    sessions.set("sid", session);
+
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    const client = FakeSSHClient.instances[0];
+    assert.equal(client.connectOpts.agent, "/tmp/agent.sock");
+  }
+});
+
+test("does not attempt a connection when no agent socket and no inline creds", async () => {
+  const { api } = makeApi({ getSshAgentSocket: () => null });
+  const session = { moshStatsAuth: { hostname: "h", username: "u" } };
+
+  const result = await api.ensureMoshStatsConnection(session, "sid");
+  assert.equal(result, null);
+  assert.equal(FakeSSHClient.instances.length, 0);
+});
+
+test("inline credentials take precedence over ssh-agent", async () => {
+  const { api, sessions } = makeApi({ getSshAgentSocket: () => "/tmp/agent.sock" });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "pw" } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.password, "pw");
+  assert.equal(client.connectOpts.agent, undefined);
+});
+
+test("concurrent calls share a single in-flight connection attempt", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const p1 = api.ensureMoshStatsConnection(session, "sid");
+  const p2 = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+
+  assert.equal(FakeSSHClient.instances.length, 1);
+  FakeSSHClient.instances[0].emitReady();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  assert.equal(r1, FakeSSHClient.instances[0]);
+  assert.equal(r2, FakeSSHClient.instances[0]);
+});
+
+test("auth rejection is permanent: no reconnect on the next poll", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const p1 = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const authErr = new Error("All configured authentication methods failed");
+  authErr.level = "client-authentication";
+  FakeSSHClient.instances[0].emitError(authErr);
+  assert.equal(await p1, null);
+  assert.equal(session.moshStatsConnFailed, true);
+
+  // Second poll must not open a new connection.
+  const r2 = await api.ensureMoshStatsConnection(session, "sid");
+  assert.equal(r2, null);
+  assert.equal(FakeSSHClient.instances.length, 1);
+});
+
+test("a transient error allows a reconnect on the next poll", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const p1 = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const netErr = new Error("connect ETIMEDOUT");
+  netErr.level = "client-socket";
+  FakeSSHClient.instances[0].emitError(netErr);
+  assert.equal(await p1, null);
+  assert.notEqual(session.moshStatsConnFailed, true);
+
+  // Next poll is allowed to try again.
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  assert.equal(FakeSSHClient.instances.length, 2);
+});
+
+test("a connection that becomes ready after the session closed is discarded", async () => {
+  const { api, sessions } = makeApi();
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  // Session goes away before the handshake completes.
+  session.closed = true;
+  sessions.delete("sid");
+  FakeSSHClient.instances[0].emitReady();
+
+  const result = await pending;
+  assert.equal(result, null);
+  assert.equal(FakeSSHClient.instances[0].ended, true);
+  assert.equal(session.conn, undefined);
+});
+
+test("honors host algorithm settings via buildAlgorithms", async () => {
+  const calls = [];
+  const { api, sessions } = makeApi({
+    buildAlgorithms: (legacy, opts) => {
+      calls.push({ legacy, opts });
+      return { built: true };
+    },
+  });
+  const overrides = { cipher: ["aes128-cbc"] };
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      password: "p",
+      legacyAlgorithms: true,
+      skipEcdsaHostKey: true,
+      algorithmOverrides: overrides,
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].legacy, true);
+  assert.equal(calls[0].opts.skipEcdsaHostKey, true);
+  assert.equal(calls[0].opts.algorithmOverrides, overrides);
+  assert.deepEqual(FakeSSHClient.instances[0].connectOpts.algorithms, { built: true });
+});

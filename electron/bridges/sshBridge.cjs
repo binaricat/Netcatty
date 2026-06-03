@@ -27,6 +27,7 @@ const {
   findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
   getSshAgentSocket,
   readFileNoFollow,
+  expandIdentityFilePath,
   preparePrivateKeyForAuth,
   loadIdentityFileForAuth,
   loadFirstIdentityFileForAuth,
@@ -960,13 +961,25 @@ async function startSSHSessionWrapper(event, options) {
  * classify network devices from the banner without running any additional
  * exec channels.
  */
+// Companion stats connection for Mosh sessions (issue #1198). Mosh runs over
+// UDP and has no ssh2 connection, so getServerStats cannot open an exec
+// channel. This helper lazily establishes a best-effort, non-interactive
+// SSH connection reusing the handshake credentials and assigns it to
+// session.conn so the existing stats path works unchanged.
+const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
+const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
+  get sessions() { return sessions; },
+  SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
+  readFileNoFollow, expandIdentityFilePath, log,
+});
+
 const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
 const sessionOpsApi = createSessionOpsApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
   getSessionDecoder, resetSessionDecoders, sessionEncodings, resolveLangFromCharset, safeSend,
-  quoteShellArg, log,
+  quoteShellArg, log, ensureMoshStatsConnection,
   getServerStats: undefined,
 });
 const {

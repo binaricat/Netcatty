@@ -541,6 +541,27 @@ function createMoshSessionApi(ctx) {
       session.proc = mcPty;
       session.pty = mcPty;
       session.moshHandshakePhase = "mosh-client";
+
+      // The SSH handshake just succeeded, so these credentials are known
+      // good. Stash them so sshBridge can lazily open a best-effort companion
+      // SSH connection for host-info stats (CPU/mem/disk), which Mosh's UDP
+      // channel cannot provide on its own (issue #1198). Only credentials
+      // Netcatty already holds are kept — a password typed interactively into
+      // the handshake PTY is not captured, so that case degrades gracefully.
+      session.moshStatsAuth = {
+        hostname: parsed.host || options.hostname,
+        port: options.port || 22,
+        username: options.username,
+        password: options.password,
+        privateKey: options.privateKey,
+        passphrase: options.passphrase,
+        certificate: options.certificate,
+        keyId: options.keyId,
+        identityFilePaths: options.identityFilePaths,
+        legacyAlgorithms: options.legacyAlgorithms,
+        skipEcdsaHostKey: options.skipEcdsaHostKey,
+        algorithmOverrides: options.algorithmOverrides,
+      };
     
       if (process.platform !== "win32") {
         const decoder = new StringDecoder("utf8");
@@ -574,6 +595,9 @@ function createMoshSessionApi(ctx) {
         if (sessions.get(sessionId) !== session || session.closed) {
           return;
         }
+        // Tear down the host-info stats companion ssh2 connection (issue
+        // #1198) if one was opened — it outlives the mosh-client PTY otherwise.
+        try { session.conn?.end(); } catch { /* ignore */ }
         flush();
         sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
         const contents = electronModule.webContents.fromId(session.webContentsId);

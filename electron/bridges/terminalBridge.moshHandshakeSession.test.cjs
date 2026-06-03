@@ -371,6 +371,57 @@ test("startMoshSession handshake path sends the existing exit event after mosh-c
   assert.equal(exit.payload.reason, "exited");
 });
 
+test("startMoshSession stashes stats-companion auth after a successful handshake", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(
+    h.event,
+    {
+      ...h.options,
+      port: 2200,
+      password: "secret",
+      keyId: "key-1",
+      legacyAlgorithms: true,
+      skipEcdsaHostKey: true,
+      algorithmOverrides: { cipher: ["aes128-cbc"] },
+    },
+    { moshClientLookup: h.lookupOpts },
+  );
+
+  // No stats auth before the handshake completes — a failed handshake must
+  // not leave usable credentials lying around for the companion connection.
+  const before = h.sessions.get("mosh-test-session");
+  assert.equal(before.moshStatsAuth, undefined);
+
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+
+  const session = h.sessions.get("mosh-test-session");
+  assert.ok(session.moshStatsAuth, "expected moshStatsAuth to be set after swap");
+  assert.equal(session.moshStatsAuth.hostname, "example.com");
+  assert.equal(session.moshStatsAuth.port, 2200);
+  assert.equal(session.moshStatsAuth.username, "alice");
+  assert.equal(session.moshStatsAuth.password, "secret");
+  assert.equal(session.moshStatsAuth.legacyAlgorithms, true);
+  assert.equal(session.moshStatsAuth.skipEcdsaHostKey, true);
+  assert.deepEqual(session.moshStatsAuth.algorithmOverrides, { cipher: ["aes128-cbc"] });
+});
+
+test("closeSession ends a Mosh stats companion connection", async (t) => {
+  const h = makeHarness(t);
+  await h.bridge.startMoshSession(h.event, h.options, { moshClientLookup: h.lookupOpts });
+
+  h.spawns[0].emitData("MOSH CONNECT 60002 ABCDEFGHIJKLMNOPQRSTUV==\r\n");
+  h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
+
+  // Simulate a lazily-opened companion ssh2 connection on the live session.
+  const session = h.sessions.get("mosh-test-session");
+  let ended = false;
+  session.conn = { end() { ended = true; } };
+
+  h.bridge.closeSession(h.event, { sessionId: "mosh-test-session" });
+  assert.equal(ended, true);
+});
+
 test("startMoshSession fails when bundled mosh-client is missing even if PATH has mosh-client", async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-mosh-session-missing-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

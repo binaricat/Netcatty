@@ -483,11 +483,24 @@ function createSessionOpsApi(ctx) {
     async function getServerStats(event, payload) {
       const { sessionId } = payload;
       const session = sessions.get(sessionId);
-    
-      if (!session || !session.conn) {
+
+      if (!session) {
         return { success: false, error: 'Session not found or not connected' };
       }
-    
+
+      // Mosh sessions run over UDP via a local mosh-client PTY and have no
+      // ssh2 connection of their own. Lazily open a best-effort companion SSH
+      // connection (reusing the handshake credentials) so the host-info bar
+      // works for Mosh too (issue #1198). This is a no-op for real SSH
+      // sessions, which already carry session.conn.
+      if (!session.conn && typeof ensureMoshStatsConnection === 'function') {
+        await ensureMoshStatsConnection(session, sessionId, event?.sender);
+      }
+
+      if (!session.conn) {
+        return { success: false, error: 'Session not found or not connected' };
+      }
+
       const conn = session.conn;
     
       // macOS stats command: uses sysctl, vm_stat, top, ps, df, netstat

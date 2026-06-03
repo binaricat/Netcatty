@@ -29,6 +29,12 @@ declare global {
       moshServerPath?: string;
       moshClientPath?: string;
       agentForwarding?: boolean;
+      // Algorithm settings, forwarded so the host-info stats companion SSH
+      // connection (issue #1198) negotiates the same KEX / cipher / host-key
+      // set the interactive session would.
+      legacyAlgorithms?: boolean;
+      skipEcdsaHostKey?: boolean;
+      algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
       cols?: number;
       rows?: number;
       charset?: string;

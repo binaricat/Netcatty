@@ -712,6 +712,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         port: ctx.host.port || 22,
         moshServerPath: ctx.host.moshServerPath,
         agentForwarding: ctx.host.agentForwarding,
+        // Forwarded for the host-info stats companion SSH connection (#1198):
+        // Mosh's own handshake uses the system ssh (which reads ~/.ssh/config),
+        // but Netcatty's ssh2 companion needs these to match the host's
+        // negotiation on legacy / ECDSA-restricted servers.
+        legacyAlgorithms: ctx.host.legacyAlgorithms,
+        skipEcdsaHostKey: ctx.host.skipEcdsaHostKey,
+        algorithmOverrides: ctx.host.algorithms,
         cols: term.cols,
         rows: term.rows,
         charset: ctx.host.charset,
