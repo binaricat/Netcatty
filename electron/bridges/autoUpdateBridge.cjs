@@ -221,6 +221,48 @@ function cancelAutoCheck() {
   }
 }
 
+/**
+ * Flip the windowManager "quitting for update" flag, swallowing the case where
+ * the window manager module isn't available. Used by the install handler to
+ * commit the app to a clean quit before quitAndInstall, and to roll back if the
+ * install never actually quits (#1215).
+ */
+function setQuittingForUpdate(enabled) {
+  try {
+    const windowManager = require("./windowManager.cjs");
+    windowManager.setQuittingForUpdate(!!enabled);
+  } catch {
+    // ignore — window manager may not be available
+  }
+}
+
+/**
+ * If quitAndInstall doesn't lead to the app actually quitting (it returns
+ * without app.quit(), e.g. on a Squirrel.Mac follow-up error or a stale
+ * downloaded file), the quitting-for-update flags would stay set and
+ * permanently bypass close-to-tray + the dirty-editor quit guard. This
+ * watchdog clears them if we're still running after a short grace period.
+ */
+let _quittingForUpdateWatchdog = null;
+const QUITTING_FOR_UPDATE_WATCHDOG_MS = 10000;
+
+function scheduleQuittingForUpdateWatchdog() {
+  if (_quittingForUpdateWatchdog) {
+    clearTimeout(_quittingForUpdateWatchdog);
+  }
+  _quittingForUpdateWatchdog = setTimeout(() => {
+    _quittingForUpdateWatchdog = null;
+    // Still alive after the grace period — the install did not quit the app.
+    console.warn("[AutoUpdate] App still running after quitAndInstall; clearing quitting-for-update state");
+    setQuittingForUpdate(false);
+  }, QUITTING_FOR_UPDATE_WATCHDOG_MS);
+  // Don't let the watchdog keep the event loop (and thus the process) alive —
+  // if the app is otherwise ready to quit, the timer must not block it.
+  if (typeof _quittingForUpdateWatchdog.unref === "function") {
+    _quittingForUpdateWatchdog.unref();
+  }
+}
+
 function init(deps) {
   _deps = deps;
   setupGlobalListeners();
@@ -366,6 +408,18 @@ function registerHandlers(ipcMain) {
     const updater = getAutoUpdater();
     if (!updater) return;
 
+    // Commit the app to a real quit BEFORE quitAndInstall fires app.quit().
+    // Without this the in-place install silently fails (#1215): the main-window
+    // close handler hides to tray when close-to-tray is on, and the before-quit
+    // dirty-editor guard preventDefault()s the quit for a 5s renderer
+    // round-trip. Either keeps the process alive, so Squirrel.Mac's ShipIt
+    // helper — which waits on the parent PID to die before swapping the
+    // bundle — ends up in launchd "pending spawn" limbo and never installs.
+    // setQuittingForUpdate(true) also sets isQuitting so close-to-tray is
+    // bypassed; the before-quit handler checks isQuittingForUpdate() to skip
+    // the dirty-editor round-trip.
+    setQuittingForUpdate(true);
+
     // On macOS, the system tray keeps the app process alive even after all
     // windows are closed, which prevents quitAndInstall from completing.
     // Destroy the tray (and its panel window) before quitting so the app
@@ -377,7 +431,24 @@ function registerHandlers(ipcMain) {
       // ignore — bridge may not be available
     }
 
-    updater.quitAndInstall(false, true);
+    try {
+      updater.quitAndInstall(false, true);
+    } catch (err) {
+      // quitAndInstall threw synchronously — the app will NOT quit. Roll back
+      // the quitting-for-update flags so later closes/quits behave normally
+      // instead of permanently bypassing close-to-tray + the dirty-editor
+      // guard (#1215 review).
+      console.error("[AutoUpdate] quitAndInstall failed:", err?.message || err);
+      setQuittingForUpdate(false);
+      return;
+    }
+
+    // quitAndInstall can also fail to quit asynchronously (e.g. Squirrel.Mac's
+    // follow-up check errors, or a stale/missing downloaded file) — it returns
+    // without app.quit() ever firing. A watchdog clears the flags if we're
+    // still alive shortly after, so the app doesn't get stuck in a state where
+    // every window close bypasses close-to-tray and the dirty-editor guard.
+    scheduleQuittingForUpdateWatchdog();
   });
 
   // ---- Get auto-update preference -----------------------------------------

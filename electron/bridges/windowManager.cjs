@@ -35,6 +35,17 @@ let handlersRegistered = false; // Prevent duplicate IPC handler registration
 let menuDeps = null;
 let electronApp = null; // Reference to Electron app for userData path
 let isQuitting = false;
+// Set right before electron-updater's quitAndInstall() drives app.quit() for a
+// macOS/Windows in-place update. The install only succeeds if the app process
+// exits cleanly: Squirrel.Mac's ShipIt helper waits on the parent PID to die
+// before swapping the bundle. Two normal-quit behaviors would otherwise keep
+// the process alive and strand the installer (see #1215):
+//   1. close-to-tray hides the window instead of closing it, and
+//   2. the before-quit dirty-editor guard preventDefault()s the quit for a
+//      5s renderer round-trip.
+// This flag lets both paths recognize an update install and let the quit
+// through immediately.
+let quittingForUpdate = false;
 const rendererReadyCallbacksByWebContentsId = new Map();
 const rendererReadySeenByWebContentsId = new Set();
 const rendererReadyWaitersByWebContentsId = new Map();
@@ -68,6 +79,39 @@ function debugLog(...args) {
 
 function setIsQuitting(nextValue) {
   isQuitting = Boolean(nextValue);
+}
+
+/**
+ * Read the generic "app is quitting" flag. Window close handlers gate
+ * close-to-tray / settings-window hiding on this; exposed so the update-quit
+ * rollback can be verified.
+ */
+function getIsQuitting() {
+  return isQuitting;
+}
+
+/**
+ * Mark that the app is quitting to install a downloaded update. Mirrors the
+ * generic isQuitting flag so the main-window close handler bypasses
+ * close-to-tray. Call this right before electron-updater's quitAndInstall().
+ *
+ * Passing false rolls BOTH flags back — used when a quitAndInstall never
+ * actually quits the app (throw / Squirrel follow-up error / stale download).
+ * Without resetting isQuitting too, close-to-tray and settings-window hiding
+ * would stay disabled for the rest of the session (#1215 review).
+ */
+function setQuittingForUpdate(nextValue) {
+  quittingForUpdate = Boolean(nextValue);
+  isQuitting = quittingForUpdate;
+}
+
+/**
+ * True when quitAndInstall() initiated the current quit. The before-quit guard
+ * checks this to skip the dirty-editor round-trip and let the app exit so the
+ * updater's installer can run.
+ */
+function isQuittingForUpdate() {
+  return quittingForUpdate;
 }
 
 /**
@@ -943,6 +987,9 @@ module.exports = {
   restoreWindowInputFocus,
   waitForRendererReady,
   setIsQuitting,
+  getIsQuitting,
+  setQuittingForUpdate,
+  isQuittingForUpdate,
   openFallbackBrowser,
   tryOpenExternalWithFallback,
   resolveSettingsWindowBounds,

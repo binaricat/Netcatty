@@ -726,6 +726,13 @@ if (!gotLock) {
     // app.quit() re-fired before-quit. Let it through.
     if (quitConfirmed) return;
 
+    // Update install in progress: electron-updater's quitAndInstall() is
+    // driving this quit so its installer can swap the app bundle. The dirty
+    // editor round-trip would preventDefault() and stall the quit, leaving the
+    // process alive — which strands Squirrel.Mac's ShipIt helper (it waits on
+    // the parent PID to exit). Let the quit through immediately (#1215).
+    if (getWindowManager().isQuittingForUpdate()) return;
+
     // A check is already in flight — swallow this event; the in-flight handler
     // will issue commitQuit() when it completes if appropriate.
     if (quitGuardChannelBusy) {
