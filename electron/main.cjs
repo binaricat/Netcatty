@@ -794,9 +794,23 @@ if (!gotLock) {
       }
       _ipcMain.removeListener("app:dirty-editors-result", onResult);
       quitGuardChannelBusy = false;
-      if (decision === "commit") commitQuit();
-      // decision === "stay": renderer showed a toast for dirty editors.
-      // Do not touch isQuitting so tray / close-to-tray gating keeps working.
+      if (decision === "commit") {
+        commitQuit();
+      } else {
+        // decision === "stay": renderer showed a toast for dirty editors and
+        // the user is saving instead of quitting.
+        //
+        // A normal quit never sets isQuitting before commitQuit, so there is
+        // nothing to undo. But an update install (quitAndInstall) calls
+        // setQuittingForUpdate(true) — which also flips isQuitting=true to
+        // bypass close-to-tray — BEFORE this dirty check runs. If the user
+        // cancels to save, clear it NOW instead of waiting up to 10s for
+        // autoUpdateBridge's watchdog; otherwise close-to-tray and other
+        // !isQuitting-gated behavior stay bypassed while the app keeps running
+        // (#1215 review).
+        const wm = getWindowManager();
+        if (wm.isQuittingForUpdate?.()) wm.setQuittingForUpdate(false);
+      }
     };
     function onResult(evt, payload) {
       // Defence in depth: this channel is queried with a specific
