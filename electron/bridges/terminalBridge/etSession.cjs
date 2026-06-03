@@ -1,0 +1,672 @@
+/* eslint-disable no-undef */
+//
+// EternalTerminal session backend, factored into the createXxxSessionApi
+// pattern used by moshSession.cjs / telnetSession.cjs. Dependencies arrive
+// via `ctx`; `with (ctx)` exposes them as free identifiers.
+//
+// Unlike Mosh, the `et` client performs its own SSH bootstrap and ET protocol
+// handshake — Netcatty just spawns the bundled `et` binary as a PTY. Saved
+// credentials (password / passphrase / jump host) are injected into et's
+// internal ssh via a private ~/.ssh home + SSH_ASKPASS helper, since et drives
+// ssh itself rather than exposing the prompts for us to type into.
+function createEtSessionApi(ctx) {
+  with (ctx) {
+    // Node script invoked by ssh as SSH_ASKPASS. It reads the prompt text from
+    // argv, matches it against the entries in NETCATTY_ET_ASKPASS_MAP, and
+    // prints the matching secret. Written to the session's private .ssh dir.
+    const ET_ASKPASS_SCRIPT = String.raw`#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+
+function normalizePrompt(prompt) {
+  return String(prompt || "").toLowerCase();
+}
+
+function loadEntries() {
+  const mapPath = process.env.NETCATTY_ET_ASKPASS_MAP;
+  if (!mapPath) return [];
+  try {
+    const raw = fs.readFileSync(mapPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function matchesPrompt(entry, prompt) {
+  const matchers = Array.isArray(entry.matchers) ? entry.matchers : [];
+  return matchers.some((matcher) => prompt.includes(String(matcher || "").toLowerCase()));
+}
+
+function pickEntry(entries, prompt) {
+  const wantsPassphrase = prompt.includes("passphrase");
+  const scoped = entries.filter((entry) => entry.type === (wantsPassphrase ? "passphrase" : "password"));
+  const matched = scoped.find((entry) => matchesPrompt(entry, prompt));
+  if (matched) return matched;
+  if (scoped.length === 1) return scoped[0];
+  return null;
+}
+
+function main() {
+  const prompt = normalizePrompt(process.argv.slice(2).join(" "));
+  const entries = loadEntries();
+  const entry = pickEntry(entries, prompt);
+  if (!entry?.secretFile) return;
+  try {
+    const secret = fs.readFileSync(entry.secretFile, "utf8").replace(/\r?\n$/, "");
+    process.stdout.write(secret + "\n");
+  } catch {
+    // ignore
+  }
+}
+
+main();
+`;
+
+    /**
+     * Resolve Netcatty's bundled `et` client. System `et` installs are
+     * intentionally ignored so dev, CI, and release builds exercise the same
+     * binary (mirrors resolveBareMoshClient).
+     */
+    function resolveBareEtClient(opts = {}) {
+      return bundledEtClient(opts);
+    }
+
+    function writeSecureFile(filePath, content, mode = 0o600) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content, typeof content === "string" ? "utf8" : undefined);
+      if (process.platform === "win32") {
+        try {
+          // Remove inherited ACLs, grant only current user full control
+          execFileSync("icacls", [filePath, "/inheritance:r", "/grant:r", `${os.userInfo().username}:F`], {
+            windowsHide: true,
+            timeout: 5000,
+          });
+        } catch {
+          // ignore ACL failures (e.g. network drives)
+        }
+      } else {
+        try {
+          fs.chmodSync(filePath, mode);
+        } catch {
+          // ignore chmod failures on non-POSIX filesystems
+        }
+      }
+      return filePath;
+    }
+
+    function normalizeSshConfigPath(targetPath) {
+      return path.resolve(String(targetPath)).replace(/\\/g, "/");
+    }
+
+    function createPasswordPromptMatchers({ hostname, username, port }) {
+      const values = new Set();
+      const addHostVariant = (hostValue) => {
+        if (!hostValue) return;
+        const lowerHost = String(hostValue).toLowerCase();
+        values.add(lowerHost);
+        if (username) {
+          values.add(`${String(username).toLowerCase()}@${lowerHost}`);
+          values.add(`${String(username).toLowerCase()}@${lowerHost}'s password`);
+          if (port) values.add(`${String(username).toLowerCase()}@${lowerHost}:${port}`);
+        }
+      };
+
+      addHostVariant(hostname);
+      return [...values];
+    }
+
+    function createPassphrasePromptMatchers(keyPath) {
+      const normalizedPath = normalizeSshConfigPath(keyPath).toLowerCase();
+      return [normalizedPath, path.basename(normalizedPath)];
+    }
+
+    function addAskpassEntry(entries, type, matchers, secretFile) {
+      if (!secretFile) return;
+      entries.push({
+        type,
+        matchers: [...new Set((matchers || []).map((value) => String(value || "").toLowerCase()).filter(Boolean))],
+        secretFile,
+      });
+    }
+
+    function createEtAskpassArtifacts(sshDir, askpassEntries) {
+      if (!Array.isArray(askpassEntries) || askpassEntries.length === 0) {
+        return { env: {}, artifacts: [] };
+      }
+
+      const askpassMapPath = path.join(sshDir, "netcatty-et-askpass-map.json");
+      const askpassScriptPath = path.join(sshDir, "netcatty-et-askpass.cjs");
+      writeSecureFile(askpassMapPath, `${JSON.stringify(askpassEntries, null, 2)}\n`, 0o600);
+      writeSecureFile(askpassScriptPath, ET_ASKPASS_SCRIPT, 0o700);
+
+      if (process.platform === "win32") {
+        const askpassCmdPath = path.join(sshDir, "netcatty-et-askpass.cmd");
+        writeSecureFile(
+          askpassCmdPath,
+          `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath.replace(/"/g, '""')}" "%~dp0netcatty-et-askpass.cjs" %*\r\n`,
+          0o700,
+        );
+        return {
+          env: {
+            SSH_ASKPASS: askpassCmdPath,
+            SSH_ASKPASS_REQUIRE: "force",
+            DISPLAY: process.env.DISPLAY || "netcatty:0",
+            NETCATTY_ET_ASKPASS_MAP: askpassMapPath,
+          },
+          artifacts: [askpassMapPath, askpassScriptPath, askpassCmdPath],
+        };
+      }
+
+      return {
+        env: {
+          SSH_ASKPASS: askpassScriptPath,
+          SSH_ASKPASS_REQUIRE: "force",
+          DISPLAY: process.env.DISPLAY || "netcatty:0",
+          NETCATTY_ET_ASKPASS_MAP: askpassMapPath,
+        },
+        artifacts: [askpassMapPath, askpassScriptPath],
+      };
+    }
+
+    function copyIfExists(sourcePath, targetPath) {
+      try {
+        if (fs.existsSync(sourcePath)) {
+          fs.copyFileSync(sourcePath, targetPath);
+        }
+      } catch {
+        // ignore copy failures
+      }
+    }
+
+    /**
+     * Build a private SSH home + options for the `et` client's internal ssh.
+     * Returns { userHost, sshOptions, env, artifacts }. comma-free option
+     * values go in `sshOptions` (passed via --ssh-option); options that need
+     * commas/spaces are written to a config file under HOME/.ssh/config.
+     */
+    function prepareEtSshEnvironment(sessionId, options) {
+      const tempDir = tempDirBridge.getTempFilePath(`et-ssh-home-${sessionId}`);
+      const sshDir = path.join(tempDir, ".ssh");
+      fs.mkdirSync(sshDir, { recursive: true });
+
+      const safeId = String(sessionId || "session").replace(/[^\w.-]/g, "_");
+      // sshOptions: comma-free values safe for --ssh-option (ET may split on commas)
+      const sshOptions = [];
+      // configLines: options that need commas or spaces, written to config file
+      const configLines = [];
+      const askpassEntries = [];
+
+      // Copy known_hosts from real ~/.ssh so already-trusted hosts verify
+      // silently. Always point ssh at this private file (created on demand)
+      // so StrictHostKeyChecking=accept-new can persist a first-seen key here.
+      const realSshDir = path.join(os.homedir(), ".ssh");
+      const knownHostsPath = path.join(sshDir, "known_hosts");
+      copyIfExists(path.join(realSshDir, "known_hosts"), knownHostsPath);
+      sshOptions.push(`UserKnownHostsFile=${normalizeSshConfigPath(knownHostsPath)}`);
+
+      // et drives ssh itself and feeds credentials through SSH_ASKPASS, which
+      // only answers password/passphrase prompts — never the interactive
+      // host-key "yes/no" confirmation. Without this, a first-time host makes
+      // et's internal ssh stall on that unanswerable prompt while its
+      // handshake text leaks to the PTY, and the renderer flips the tab to
+      // "connected" on that first byte (terminalSessionAttachment.ts) even
+      // though no shell exists yet. accept-new trusts a brand-new host
+      // automatically but still rejects a *changed* key (MITM protection);
+      // LogLevel=ERROR silences the "Permanently added..." notice and other
+      // ssh banners so the first real PTY bytes are the remote shell. Mirrors
+      // the options already used by execOnEtSession.
+      sshOptions.push("StrictHostKeyChecking=accept-new");
+      sshOptions.push("LogLevel=ERROR");
+
+      // Port
+      if (options.port && options.port !== 22) {
+        sshOptions.push(`Port=${options.port}`);
+      }
+
+      // Private key
+      const identityPaths = [];
+      let tempKeyPath = null;
+      if (options.privateKey) {
+        tempKeyPath = path.join(sshDir, `${safeId}-key`);
+        writeSecureFile(tempKeyPath, options.privateKey, 0o600);
+        identityPaths.push(tempKeyPath);
+        if (options.passphrase) {
+          const passphrasePath = path.join(sshDir, `${safeId}-passphrase.txt`);
+          writeSecureFile(passphrasePath, `${options.passphrase}\n`, 0o600);
+          addAskpassEntry(askpassEntries, "passphrase", createPassphrasePromptMatchers(tempKeyPath), passphrasePath);
+        }
+      }
+
+      // Certificate
+      if (options.certificate) {
+        const certPath = path.join(sshDir, `${safeId}-cert.pub`);
+        writeSecureFile(certPath, options.certificate, 0o600);
+        sshOptions.push(`CertificateFile=${normalizeSshConfigPath(certPath)}`);
+      }
+
+      // Additional identity file paths from host config
+      if (Array.isArray(options.identityFilePaths)) {
+        for (const idPath of options.identityFilePaths) {
+          if (idPath) identityPaths.push(idPath);
+        }
+      }
+
+      for (const idPath of identityPaths) {
+        sshOptions.push(`IdentityFile=${normalizeSshConfigPath(idPath)}`);
+      }
+
+      if (identityPaths.length > 0 || options.authMethod === "key" || options.authMethod === "certificate") {
+        sshOptions.push("IdentitiesOnly=yes");
+      }
+
+      // Password
+      const hasPassword = typeof options.password === "string" && options.password.length > 0;
+      if (hasPassword) {
+        const passwordPath = path.join(sshDir, `${safeId}-password.txt`);
+        writeSecureFile(passwordPath, `${options.password}\n`, 0o600);
+        addAskpassEntry(askpassEntries, "password", createPasswordPromptMatchers({
+          hostname: options.hostname,
+          username: options.username,
+          port: options.port,
+        }), passwordPath);
+      }
+
+      // Auth method preferences
+      // NOTE: values with commas (e.g. "password,keyboard-interactive") MUST go into
+      // the config file — ET on Windows passes --ssh-option values through cmd.exe
+      // which treats commas as argument delimiters.
+      if (options.authMethod === "password") {
+        sshOptions.push("PubkeyAuthentication=no");
+        configLines.push("PreferredAuthentications password,keyboard-interactive");
+      } else if (identityPaths.length > 0 && hasPassword) {
+        configLines.push("PreferredAuthentications publickey,password,keyboard-interactive");
+      } else if (identityPaths.length > 0) {
+        sshOptions.push("PreferredAuthentications=publickey");
+      } else if (hasPassword) {
+        configLines.push("PreferredAuthentications password,keyboard-interactive");
+      }
+
+      sshOptions.push("KbdInteractiveAuthentication=yes");
+      sshOptions.push("NumberOfPasswordPrompts=1");
+
+      // Legacy algorithms (all values contain commas → config file only)
+      if (options.legacyAlgorithms) {
+        configLines.push("KexAlgorithms +diffie-hellman-group14-sha1,diffie-hellman-group1-sha1");
+        configLines.push("Ciphers +aes128-cbc,aes256-cbc,3des-cbc");
+        configLines.push("HostKeyAlgorithms +ssh-rsa,ssh-dss");
+        configLines.push("PubkeyAcceptedAlgorithms +ssh-rsa,ssh-dss");
+      }
+
+      // Jump host — use ProxyCommand with explicit ssh options for full auth control
+      // ProxyCommand contains spaces → config file only
+      const jumpHosts = Array.isArray(options.jumpHosts) ? options.jumpHosts : [];
+      if (jumpHosts.length > 1) {
+        throw new Error("EternalTerminal currently supports at most one jump host in Netcatty.");
+      }
+
+      if (jumpHosts[0]) {
+        const jump = jumpHosts[0];
+        const jumpUser = jump.username || os.userInfo().username;
+        const jumpHost = jump.hostname;
+        const jumpPort = jump.port || 22;
+
+        const proxyParts = ["ssh"];
+
+        // Jump host key
+        if (jump.privateKey) {
+          const jumpKeyPath = path.join(sshDir, `${safeId}-jump-key`);
+          writeSecureFile(jumpKeyPath, jump.privateKey, 0o600);
+          proxyParts.push("-i", normalizeSshConfigPath(jumpKeyPath));
+          proxyParts.push("-o", "IdentitiesOnly=yes");
+          if (jump.passphrase) {
+            const jumpPassPath = path.join(sshDir, `${safeId}-jump-passphrase.txt`);
+            writeSecureFile(jumpPassPath, `${jump.passphrase}\n`, 0o600);
+            addAskpassEntry(askpassEntries, "passphrase", createPassphrasePromptMatchers(jumpKeyPath), jumpPassPath);
+          }
+        } else if (Array.isArray(jump.identityFilePaths)) {
+          for (const idPath of jump.identityFilePaths) {
+            if (idPath) proxyParts.push("-i", normalizeSshConfigPath(idPath));
+          }
+          if (jump.identityFilePaths.filter(Boolean).length > 0) {
+            proxyParts.push("-o", "IdentitiesOnly=yes");
+          }
+        }
+
+        // Jump host certificate
+        if (jump.certificate) {
+          const jumpCertPath = path.join(sshDir, `${safeId}-jump-cert.pub`);
+          writeSecureFile(jumpCertPath, jump.certificate, 0o600);
+          proxyParts.push("-o", `CertificateFile=${normalizeSshConfigPath(jumpCertPath)}`);
+        }
+
+        // Jump host password
+        if (jump.password) {
+          const jumpPwPath = path.join(sshDir, `${safeId}-jump-password.txt`);
+          writeSecureFile(jumpPwPath, `${jump.password}\n`, 0o600);
+          addAskpassEntry(askpassEntries, "password", createPasswordPromptMatchers({
+            hostname: jumpHost,
+            username: jumpUser,
+            port: jumpPort,
+          }), jumpPwPath);
+        }
+
+        // Share known_hosts with the jump connection and apply the same
+        // non-interactive host-key handling as the target hop — the jump's
+        // ssh is just as unable to answer a yes/no prompt via SSH_ASKPASS.
+        proxyParts.push("-o", `UserKnownHostsFile=${normalizeSshConfigPath(knownHostsPath)}`);
+        proxyParts.push("-o", "StrictHostKeyChecking=accept-new");
+        proxyParts.push("-o", "LogLevel=ERROR");
+
+        proxyParts.push("-o", "KbdInteractiveAuthentication=yes");
+        proxyParts.push("-o", "NumberOfPasswordPrompts=1");
+
+        if (options.legacyAlgorithms) {
+          proxyParts.push("-o", "KexAlgorithms=+diffie-hellman-group14-sha1,diffie-hellman-group1-sha1");
+          proxyParts.push("-o", "Ciphers=+aes128-cbc,aes256-cbc,3des-cbc");
+          proxyParts.push("-o", "HostKeyAlgorithms=+ssh-rsa,ssh-dss");
+          proxyParts.push("-o", "PubkeyAcceptedAlgorithms=+ssh-rsa,ssh-dss");
+        }
+
+        proxyParts.push("-W", "%h:%p", "-p", String(jumpPort), `${jumpUser}@${jumpHost}`);
+        configLines.push(`ProxyCommand ${proxyParts.join(" ")}`);
+      }
+
+      // Write config file with comma/space-containing options (if any)
+      if (configLines.length > 0) {
+        const configPath = path.join(sshDir, "config");
+        writeSecureFile(configPath, configLines.join("\n") + "\n", 0o600);
+      }
+
+      // Create askpass artifacts
+      const askpass = createEtAskpassArtifacts(sshDir, askpassEntries);
+
+      const userHost = `${options.username || os.userInfo().username}@${options.hostname}`;
+
+      return {
+        userHost,
+        sshOptions,
+        env: {
+          // Set HOME/USERPROFILE so ssh finds .ssh/config for comma-containing options
+          ...(configLines.length > 0 ? { HOME: tempDir, USERPROFILE: tempDir } : {}),
+          ...askpass.env,
+        },
+        artifacts: [tempDir, ...askpass.artifacts],
+      };
+    }
+
+    /**
+     * Remove leftover et-ssh-home-* temp directories from previous sessions
+     * that were not cleaned up (e.g. due to a crash).
+     */
+    function cleanupStaleEtTempDirs() {
+      try {
+        const tempDir = tempDirBridge.getTempDir?.() || path.join(os.tmpdir(), "Netcatty");
+        if (!fs.existsSync(tempDir)) return;
+        const entries = fs.readdirSync(tempDir);
+        for (const entry of entries) {
+          if (!entry.includes("et-ssh-home-")) continue;
+          try {
+            fs.rmSync(path.join(tempDir, entry), { recursive: true, force: true });
+          } catch {
+            // ignore per-entry cleanup failures
+          }
+        }
+      } catch {
+        // ignore — best-effort cleanup
+      }
+    }
+
+    function cleanupSessionExternalAuthArtifacts(session) {
+      if (!session || session.externalAuthArtifactsCleaned) return;
+      session.externalAuthArtifactsCleaned = true;
+      const artifacts = Array.isArray(session.externalAuthArtifacts)
+        ? session.externalAuthArtifacts
+        : [];
+
+      for (const artifactPath of artifacts) {
+        try {
+          fs.rmSync(artifactPath, { recursive: true, force: true });
+        } catch {
+          // ignore cleanup failures
+        }
+      }
+    }
+
+    /**
+     * Prepend an optional bundled DLL directory (dynamically-linked Windows
+     * builds only) to PATH so the spawned et.exe can find its runtime DLLs.
+     * Static MSVC builds ship no DLLs and this is a no-op.
+     */
+    function addBundledEtDllPath(env, etClient, opts = {}) {
+      const platform = opts.platform || process.platform;
+      if (platform !== "win32" || !etClient) return env;
+      const clientDir = path.dirname(etClient);
+      const arch = opts.arch || process.arch;
+      const dllDir = path.join(clientDir, `et-win32-${arch}-dlls`);
+      if (fs.existsSync(dllDir) && fs.statSync(dllDir).isDirectory()) {
+        const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path") || "PATH";
+        const current = env[pathKey] || "";
+        env[pathKey] = current ? `${dllDir};${current}` : dllDir;
+      }
+      return env;
+    }
+
+    /**
+     * Execute a remote command on an ET session by spawning a system ssh
+     * process. Reuses the SSH environment (keys, config, askpass) already
+     * prepared by prepareEtSshEnvironment() for the ET connection.
+     */
+    function execOnEtSession(session, command, timeoutMs = 5000) {
+      if (!session?.sshUserHost || session.externalAuthArtifactsCleaned) {
+        return Promise.resolve({ success: false, error: "ET SSH environment not available" });
+      }
+
+      const sshCmd = process.platform === "win32" ? findExecutable("ssh") : "ssh";
+      const args = ["-o", "BatchMode=no", "-o", "StrictHostKeyChecking=accept-new"];
+      for (const opt of session.sshOptions) {
+        args.push("-o", opt);
+      }
+      args.push(session.sshUserHost, command);
+
+      return new Promise((resolve) => {
+        execFile(sshCmd, args, {
+          env: { ...process.env, ...session.sshEnv },
+          timeout: timeoutMs,
+          encoding: "utf8",
+          windowsHide: true,
+        }, (err, stdout, stderr) => {
+          if (err) {
+            resolve({ success: false, error: err.message, stdout, stderr });
+          } else {
+            resolve({ success: true, stdout: stdout || "", stderr: stderr || "" });
+          }
+        });
+      });
+    }
+
+    /**
+     * Start an EternalTerminal session using Netcatty's bundled `et` client.
+     */
+    async function startEtSession(event, options) {
+      const sessionId =
+        options.sessionId ||
+        `et-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const cols = options.cols || 80;
+      const rows = options.rows || 24;
+
+      const etCmd = resolveBareEtClient({});
+      if (!etCmd) {
+        throw new Error(
+          "Bundled et client not found. Run `npm run fetch:et:dev` for local dev, " +
+          "or ensure release packaging downloads the et binary release before building.",
+        );
+      }
+
+      const args = [];
+
+      // ET server port (default 2022)
+      if (options.etPort && options.etPort !== 2022) {
+        args.push("-p", String(options.etPort));
+      }
+
+      // SSH Agent forwarding (ET supports -f natively)
+      if (options.agentForwarding) {
+        args.push("-f");
+      }
+
+      let sshEnvironment;
+      try {
+        sshEnvironment = prepareEtSshEnvironment(sessionId, options);
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+
+      // Pass all SSH options inline via --ssh-option (bypasses config file lookup)
+      for (const opt of sshEnvironment.sshOptions) {
+        args.push("--ssh-option", opt);
+      }
+
+      args.push(sshEnvironment.userHost);
+
+      const env = {
+        ...process.env,
+        ...(options.env || {}),
+        ...(sshEnvironment?.env || {}),
+        TERM: "xterm-256color",
+        // et prints a 3-line telemetry notice to stdout on first run. The
+        // "first run" flag is tracked per-HOME, and prepareEtSshEnvironment
+        // gives each session a fresh private temp HOME, so et treats every
+        // connection as first-run and prints it every time. That banner is
+        // pre-connection output that both pollutes the terminal and trips the
+        // renderer's "first PTY byte = connected" check
+        // (terminalSessionAttachment.ts). Opt out unconditionally — this also
+        // suppresses the notice and disables anonymous error reporting.
+        ET_NO_TELEMETRY: "1",
+      };
+
+      if (options.agentForwarding && process.env.SSH_AUTH_SOCK) {
+        env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
+      }
+
+      addBundledEtDllPath(env, etCmd);
+
+      try {
+        const proc = pty.spawn(etCmd, args, {
+          cols,
+          rows,
+          env,
+          cwd: os.homedir(),
+          encoding: null, // Return Buffer for ZMODEM binary support
+        });
+
+        const session = {
+          proc,
+          pty: proc,
+          type: "et",
+          protocol: "et",
+          webContentsId: event.sender.id,
+          hostname: options.hostname || "",
+          username: options.username || "",
+          label: options.label || options.hostname || "ET Session",
+          shellKind: "posix",
+          shellExecutable: "remote-shell",
+          externalAuthArtifacts: sshEnvironment?.artifacts || [],
+          externalAuthArtifactsCleaned: false,
+          // SSH environment for remote command execution (stats, distro detection)
+          sshEnv: sshEnvironment?.env || {},
+          sshOptions: sshEnvironment?.sshOptions || [],
+          sshUserHost: sshEnvironment?.userHost || "",
+          flushPendingData: null,
+          lastIdlePrompt: "",
+          lastIdlePromptAt: 0,
+          _promptTrackTail: "",
+        };
+        sessions.set(sessionId, session);
+
+        // Start real-time session log stream if configured
+        if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+          sessionLogStreamManager.startStream(sessionId, {
+            hostLabel: options.label || options.hostname,
+            hostname: options.hostname,
+            directory: options.sessionLog.directory,
+            format: options.sessionLog.format || "txt",
+            startTime: Date.now(),
+          });
+        }
+
+        const { bufferData: bufferEtData, flush: flushEt } = createPtyOutputBuffer((data) => {
+          const contents = electronModule.webContents.fromId(session.webContentsId);
+          contents?.send("netcatty:data", { sessionId, data });
+        });
+        session.flushPendingData = flushEt;
+
+        if (process.platform !== "win32") {
+          const etDecoder = new StringDecoder("utf8");
+          const etZmodemSentry = createZmodemSentry({
+            sessionId,
+            onData(buf) {
+              const str = etDecoder.write(buf);
+              if (!str) return;
+              trackSessionIdlePrompt(session, str);
+              bufferEtData(str);
+              sessionLogStreamManager.appendData(sessionId, str);
+            },
+            writeToRemote(buf) {
+              try { return proc.write(buf); } catch { return true; }
+            },
+            getWebContents() {
+              return electronModule.webContents.fromId(session.webContentsId);
+            },
+            label: "ET",
+          });
+          session.zmodemSentry = etZmodemSentry;
+
+          proc.onData((data) => {
+            etZmodemSentry.consume(data);
+          });
+        } else {
+          proc.onData((data) => {
+            trackSessionIdlePrompt(session, data);
+            bufferEtData(data);
+            sessionLogStreamManager.appendData(sessionId, data);
+          });
+        }
+
+        proc.onExit((evt) => {
+          flushEt();
+          cleanupSessionExternalAuthArtifacts(session);
+          sessionLogStreamManager.stopStream(sessionId);
+          sessions.delete(sessionId);
+          const contents = electronModule.webContents.fromId(session.webContentsId);
+          contents?.send("netcatty:exit", { sessionId, ...evt, reason: evt.exitCode === 0 ? "exited" : "error" });
+        });
+
+        return { sessionId };
+      } catch (err) {
+        if (sshEnvironment?.artifacts) {
+          cleanupSessionExternalAuthArtifacts({
+            externalAuthArtifacts: sshEnvironment.artifacts,
+            externalAuthArtifactsCleaned: false,
+          });
+        }
+        console.error("[ET] Failed to start EternalTerminal session:", err.message);
+        throw err;
+      }
+    }
+
+    return {
+      resolveBareEtClient,
+      prepareEtSshEnvironment,
+      cleanupStaleEtTempDirs,
+      cleanupSessionExternalAuthArtifacts,
+      addBundledEtDllPath,
+      execOnEtSession,
+      startEtSession,
+    };
+  }
+}
+
+module.exports = { createEtSessionApi };

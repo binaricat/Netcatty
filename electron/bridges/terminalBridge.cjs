@@ -7,7 +7,7 @@ const os = require("node:os");
 const fs = require("node:fs");
 const net = require("node:net");
 const { randomUUID } = require("node:crypto");
-const { execFile } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
@@ -81,6 +81,7 @@ const getLoginShellArgs = (shellPath) => {
 function init(deps) {
   sessions = deps.sessions;
   electronModule = deps.electronModule;
+  cleanupStaleEtTempDirs();
 }
 
 /**
@@ -514,6 +515,29 @@ const {
 } = moshSessionApi;
 
 /**
+ * EternalTerminal session API. `et` is a self-contained client that performs
+ * its own SSH bootstrap + ET protocol handshake, so Netcatty just spawns the
+ * bundled `et` binary as a PTY (no Node handshake wrapper like Mosh needs).
+ */
+const { createEtSessionApi } = require("./terminalBridge/etSession.cjs");
+const etSessionApi = createEtSessionApi({
+  get sessions() { return sessions; },
+  get electronModule() { return electronModule; },
+  os, fs, path, pty, process, console,
+  randomUUID, execFile, execFileSync, StringDecoder,
+  sessionLogStreamManager, tempDirBridge,
+  createZmodemSentry, trackSessionIdlePrompt, createPtyOutputBuffer,
+  findExecutable,
+  bundledEtClient: (...args) => bundledEtClient(...args),
+});
+const {
+  startEtSession,
+  execOnEtSession,
+  cleanupStaleEtTempDirs,
+  cleanupSessionExternalAuthArtifacts,
+} = etSessionApi;
+
+/**
  * List available serial ports (hardware only)
  */
 async function listSerialPorts() {
@@ -781,6 +805,7 @@ function closeSession(event, payload) {
   try {
     session.zmodemSentry?.cancel();
     session.flushPendingData?.();
+    cleanupSessionExternalAuthArtifacts(session);
     if (session.stream) {
       // Snapshot multiplexing state *before* closing the channel: closing the
       // stream can synchronously fire its "close" handler, which nulls
@@ -862,6 +887,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:start", startLocalSession);
   ipcMain.handle("netcatty:telnet:start", startTelnetSession);
   ipcMain.handle("netcatty:mosh:start", startMoshSession);
+  ipcMain.handle("netcatty:et:start", startEtSession);
   ipcMain.handle("netcatty:serial:start", startSerialSession);
   ipcMain.handle("netcatty:serial:list", listSerialPorts);
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
@@ -926,6 +952,46 @@ function bundledMoshClient(opts = {}) {
 }
 
 /**
+ * Locate the EternalTerminal `et` client bundled by electron-builder via
+ * `extraResources` (see electron-builder.config.cjs and
+ * .github/workflows/build-et-binaries.yml).
+ *
+ * Returns an absolute path when the binary is on disk, otherwise null. In
+ * dev / non-packaged runs the path is computed against the project root so
+ * the helper is testable without packaging the app.
+ *
+ * `et` is a self-contained client that performs its own SSH bootstrap and
+ * EternalTerminal protocol handshake; Netcatty just spawns it as a PTY.
+ */
+function bundledEtClient(opts = {}) {
+  const isWin = (opts.platform || process.platform) === "win32";
+  const basename = isWin ? "et.exe" : "et";
+
+  // Packaged: <Resources>/et/et[.exe]
+  const resourcesPath = opts.resourcesPath || process.resourcesPath;
+  if (resourcesPath) {
+    const packaged = path.join(resourcesPath, "et", basename);
+    if (fs.existsSync(packaged) && isExecutableFile(packaged)) return packaged;
+  }
+
+  // Dev fallback: resources/et/<platform-arch>/et[.exe] under the project
+  // root. Useful for `npm run start` after running `npm run fetch:et` locally.
+  const projectRoot = opts.projectRoot || path.resolve(__dirname, "..", "..");
+  const platform = opts.platform || process.platform;
+  const arch = opts.arch || process.arch;
+  const candidates = [];
+  if (platform === "darwin") {
+    candidates.push(path.join(projectRoot, "resources", "et", "darwin-universal", basename));
+  } else {
+    candidates.push(path.join(projectRoot, "resources", "et", `${platform}-${arch}`, basename));
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c) && isExecutableFile(c)) return c;
+  }
+  return null;
+}
+
+/**
  * Cleanup all sessions - call before app quit
  */
 function cleanupAllSessions() {
@@ -933,6 +999,7 @@ function cleanupAllSessions() {
   for (const [sessionId, session] of sessions) {
     try {
       session.zmodemSentry?.cancel();
+      cleanupSessionExternalAuthArtifacts(session);
       if (session.stream) {
         session.stream.close();
         session.conn?.end();
@@ -979,6 +1046,9 @@ module.exports = {
   addBundledMoshDllPath,
   addBundledMoshTerminfoEnv,
   addBundledMoshRuntimeEnv,
+  startEtSession,
+  execOnEtSession,
+  bundledEtClient,
   startSerialSession,
   listSerialPorts,
   writeToSession,

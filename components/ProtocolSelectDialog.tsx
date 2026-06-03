@@ -63,6 +63,18 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
             });
         }
 
+        // EternalTerminal (if enabled)
+        if (host.etEnabled || host.protocols?.some(p => p.protocol === 'et' && p.enabled)) {
+            options.push({
+                protocol: 'et',
+                port: host.port || 22,
+                label: 'EternalTerminal',
+                icon: <Wifi size={18} />,
+                description: `et ${host.hostname}`,
+                enabled: true,
+            });
+        }
+
         // Telnet (if enabled)
         if (host.telnetEnabled || host.protocol === 'telnet' || host.protocols?.some(p => p.protocol === 'telnet' && p.enabled)) {
             const telnetConfig = host.protocols?.find(p => p.protocol === 'telnet');

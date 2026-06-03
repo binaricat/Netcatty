@@ -327,6 +327,7 @@ export interface TerminalSession {
   protocol?: 'ssh' | 'telnet' | 'local' | 'serial';
   port?: number;
   moshEnabled?: boolean;
+  etEnabled?: boolean;
   shellType?: 'posix' | 'fish' | 'powershell' | 'cmd' | 'unknown';
   charset?: string; // Connection-time charset override (e.g. for quick-connect serial)
   // Serial-specific connection settings

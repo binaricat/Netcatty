@@ -73,7 +73,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       return;
     }
 
-    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
+    const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
     const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
     const sessionId = connectToHost(effectiveHost);
     addConnectionLog({
@@ -82,7 +82,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       hostLabel: host.label,
       hostname: host.hostname,
       username: resolvedAuth.username || 'root',
-      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
+      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh' | 'et',
       startTime: Date.now(),
       localUsername: username,
       localHostname: localHost,
@@ -686,7 +686,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
       return;
     }
 
-    const protocol = effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
+    const protocol = effectiveHost.etEnabled ? 'et' : effectiveHost.moshEnabled ? 'mosh' : (effectiveHost.protocol || 'ssh');
     const resolvedAuth = resolveHostAuth({ host: effectiveHost, keys, identities });
     const sessionId = connectToHost(effectiveHost);
     addConnectionLog({
@@ -695,7 +695,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
       hostLabel: host.label,
       hostname: host.hostname,
       username: resolvedAuth.username || 'root',
-      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh',
+      protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh' | 'et',
       startTime: Date.now(),
       localUsername: username,
       localHostname: localHost,
@@ -766,9 +766,10 @@ export function handleProtocolSelectImpl(getCtx: AppContextGetter, protocol: Hos
     if (protocolSelectHost) {
       const hostWithProtocol: Host = {
         ...protocolSelectHost,
-        protocol: protocol === 'mosh' ? 'ssh' : protocol,
+        protocol: (protocol === 'mosh' || protocol === 'et') ? 'ssh' : protocol,
         port,
         moshEnabled: protocol === 'mosh',
+        etEnabled: protocol === 'et',
       };
       handleConnectToHost(hostWithProtocol);
       setProtocolSelectHost(null);

@@ -523,6 +523,25 @@ export const GroupSshSettingsSection: React.FC<GroupSshSettingsSectionProps> = (
               />
             )}
 
+            {/* EternalTerminal */}
+            <ToggleRow
+              label="EternalTerminal"
+              enabled={!!form.etEnabled}
+              onToggle={() => update("etEnabled", !form.etEnabled)}
+            />
+            {form.etEnabled && (
+              <Input
+                type="number"
+                placeholder={t("hostDetails.et.port") || "ET server port (2022)"}
+                value={form.etPort ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value.trim();
+                  update("etPort", v === "" ? undefined : Number(v));
+                }}
+                className="h-10"
+              />
+            )}
+
             {/* Backspace behavior — terminal input mapping, lives at the
                 bottom of the SSH section so it doesn't get visually
                 grouped with the algorithm controls above. */}

@@ -218,9 +218,9 @@ export const buildAITerminalSessionInfo = (
     username: host?.username || session?.username,
     protocol,
     shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
-    // Suppress deviceType for Mosh sessions — Mosh requires a shell-backed PTY
-    // and cannot connect to vendor CLIs, so network device mode doesn't apply.
-    deviceType: (session?.moshEnabled || host?.moshEnabled) ? undefined : host?.deviceType,
+    // Suppress deviceType for Mosh / ET sessions — both require a shell-backed
+    // PTY and cannot connect to vendor CLIs, so network device mode doesn't apply.
+    deviceType: (session?.moshEnabled || host?.moshEnabled || session?.etEnabled || host?.etEnabled) ? undefined : host?.deviceType,
     connected: session?.status === 'connected',
   };
 };

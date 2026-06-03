@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
+  'terminal.connection.protocol.et': 'EternalTerminal',
+  'terminal.et.proxyUnsupported': 'EternalTerminal 目前不支持 Netcatty 的代理设置。请改用 SSH，或移除该主机的代理。',
+  'terminal.et.multiJumpUnsupported': 'EternalTerminal 目前在 Netcatty 中最多支持一个跳板机。',
   // SFTP File Opener
   'sftp.context.copyPath': '复制文件路径',
   'sftp.context.openWith': '打开方式...',

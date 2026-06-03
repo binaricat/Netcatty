@@ -8,6 +8,7 @@ export type TerminalBackendApi = {
   backendAvailable: () => boolean;
   telnetAvailable: () => boolean;
   moshAvailable: () => boolean;
+  etAvailable: () => boolean;
   localAvailable: () => boolean;
   serialAvailable: () => boolean;
   execAvailable: () => boolean;
@@ -17,6 +18,9 @@ export type TerminalBackendApi = {
   ) => Promise<string>;
   startMoshSession: (
     options: Parameters<NonNullable<NetcattyBridge["startMoshSession"]>>[0],
+  ) => Promise<string>;
+  startEtSession: (
+    options: Parameters<NonNullable<NetcattyBridge["startEtSession"]>>[0],
   ) => Promise<string>;
   startLocalSession: (
     options: Parameters<NonNullable<NetcattyBridge["startLocalSession"]>>[0],

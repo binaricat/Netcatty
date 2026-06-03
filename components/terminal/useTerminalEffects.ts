@@ -254,6 +254,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           setStatus("connecting");
           setProgressLogs(["Initializing Mosh connection..."]);
           await sessionStarters.startMosh(term);
+        } else if (host.etEnabled) {
+          setStatus("connecting");
+          setProgressLogs(["Initializing EternalTerminal connection..."]);
+          await sessionStarters.startEt(term);
         } else {
           const resolvedAuth = resolveHostAuth({ host, keys, identities });
           const hasPassword = !!resolvedAuth.password;

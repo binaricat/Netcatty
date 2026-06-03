@@ -27,6 +27,10 @@ function createPreloadApi(ctx) {
     const result = await ipcRenderer.invoke("netcatty:mosh:start", options);
     return result.sessionId;
   },
+  startEtSession: async (options) => {
+    const result = await ipcRenderer.invoke("netcatty:et:start", options);
+    return result.sessionId;
+  },
   startLocalSession: async (options) => {
     const result = await ipcRenderer.invoke("netcatty:local:start", options || {});
     return result.sessionId;

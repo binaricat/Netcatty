@@ -443,7 +443,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelProps> = ({
       cleaned.fontSize = initialData?.fontSize;
     }
 
-    if ((cleaned.protocol && cleaned.protocol !== "ssh") || cleaned.moshEnabled) {
+    if ((cleaned.protocol && cleaned.protocol !== "ssh") || cleaned.moshEnabled || cleaned.etEnabled) {
       delete cleaned.x11Forwarding;
     }
     onSave(cleaned);

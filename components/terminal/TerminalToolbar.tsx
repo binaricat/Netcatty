@@ -61,13 +61,14 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     const isLocalTerminal = host?.protocol === 'local' || host?.id?.startsWith('local-');
     const isSerialTerminal = host?.protocol === 'serial' || host?.id?.startsWith('serial-');
     const isMoshSession = host?.protocol === 'mosh' || host?.moshEnabled;
-    // Local PTY inherits the OS locale and mosh always uses its own UTF-8
-    // framing, so the quick-switch menu only makes sense for sessions whose
+    const isEtSession = host?.protocol === 'et' || host?.etEnabled;
+    // Local PTY inherits the OS locale and mosh/ET always use their own framing,
+    // so the quick-switch menu only makes sense for sessions whose
     // backend decoder we actually control (SSH, telnet, serial). Hostname
     // isn't part of the gate — telnet/SSH targets pointed at localhost
     // (test daemons, forwarded endpoints) still have a real backend
     // decoder we can drive.
-    const encodingSwitchSupported = !isLocalTerminal && !isMoshSession;
+    const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && !isEtSession;
     const hidesSftp = isLocalTerminal || isSerialTerminal;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";

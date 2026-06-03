@@ -430,9 +430,10 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       if (protocolSelectHost) {
         const hostWithProtocol: Host = {
           ...protocolSelectHost,
-          protocol: protocol === "mosh" ? "ssh" : protocol,
+          protocol: (protocol === "mosh" || protocol === "et") ? "ssh" : protocol,
           port,
           moshEnabled: protocol === "mosh",
+          etEnabled: protocol === "et",
         };
         onConnect(hostWithProtocol);
         setProtocolSelectHost(null);

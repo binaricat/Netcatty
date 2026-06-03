@@ -738,6 +738,206 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
   };
 
+  const startEt = async (term: XTerm) => {
+    if (!ctx.terminalBackend.etAvailable()) {
+      ctx.setError("EternalTerminal bridge unavailable. Please run the desktop build.");
+      writeTerminalLine(ctx, term, "\r\n[EternalTerminal bridge unavailable. Please run the desktop build.]");
+      ctx.updateStatus("disconnected");
+      return;
+    }
+
+    try {
+      const stopEt = (message: string) => {
+        ctx.setError(message);
+        writeTerminalLine(ctx, term, `\r\n[${message}]`);
+        ctx.updateStatus("disconnected");
+      };
+
+      if (ctx.host.proxyProfileId && !ctx.host.proxyConfig) {
+        stopEt(`Saved proxy for host "${ctx.host.label || ctx.host.hostname}" is missing. Open host settings and select a valid proxy.`);
+        return;
+      }
+
+      if (ctx.host.proxyConfig?.host && ctx.host.proxyConfig?.port) {
+        stopEt(tr(
+          "terminal.et.proxyUnsupported",
+          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+        ));
+        return;
+      }
+
+      if (ctx.resolvedChainHosts.length > 1) {
+        stopEt(tr(
+          "terminal.et.multiJumpUnsupported",
+          "EternalTerminal currently supports at most one jump host in Netcatty.",
+        ));
+        return;
+      }
+
+      const pendingAuth = ctx.pendingAuthRef.current;
+      const resolvedAuth = resolveHostAuth({
+        host: ctx.host,
+        keys: ctx.keys,
+        identities: ctx.identities,
+        override: pendingAuth
+          ? {
+            authMethod: pendingAuth.authMethod,
+            username: pendingAuth.username,
+            password: pendingAuth.password,
+            keyId: pendingAuth.keyId,
+            passphrase: pendingAuth.passphrase,
+          }
+          : null,
+      });
+      const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
+      const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
+      const authMethod = resolvedAuth.authMethod;
+      const key = authMethod === "password" ? undefined : resolvedAuth.key;
+      const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
+      const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(resolvedAuth.key?.privateKey);
+      const allowsLocalIdentityFallback = !resolvedAuth.keyId;
+      const etReferenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
+      const etIdentityFilePaths = authMethod === "password"
+        ? undefined
+        : etReferenceKeyPath
+          ? [etReferenceKeyPath]
+          : allowsLocalIdentityFallback
+            ? ctx.host.identityFilePaths
+            : undefined;
+      const hasKeyMaterial = (!!sanitizeCredentialValue(key?.privateKey) || !!etIdentityFilePaths?.length) && authMethod !== "password";
+      const hasPassword = !!effectivePassword;
+      const needsCredentialReentry =
+        (authMethod === "password" && hasEncryptedPrimaryPassword && !hasPassword) ||
+        (authMethod !== "password" && hasEncryptedPrimaryKey && !hasKeyMaterial && !hasPassword);
+
+      if (needsCredentialReentry) {
+        ctx.setError(null);
+        ctx.setNeedsAuth(true);
+        ctx.setAuthRetryMessage(
+          tr(
+            "terminal.auth.credentialsUnavailable",
+            "Saved credentials cannot be decrypted on this device. Please re-enter and save them again.",
+          ),
+        );
+        ctx.setAuthPassword("");
+        ctx.setStatus("connecting");
+        return;
+      }
+
+      const jumpHostsWithUnavailableCredentials: string[] = [];
+      const unsupportedJumpProxies: string[] = [];
+      const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost) => {
+        const jumpAuth = resolveHostAuth({
+          host: jumpHost,
+          keys: ctx.keys,
+          identities: ctx.identities,
+        });
+        const jumpKey = jumpAuth.key;
+        const rawJumpPassword = jumpAuth.password;
+        const rawJumpPrivateKey = jumpKey?.privateKey;
+        const rawJumpPassphrase = jumpAuth.passphrase || jumpKey?.passphrase;
+        const jumpPassword = sanitizeCredentialValue(rawJumpPassword);
+        const jumpPrivateKey = sanitizeCredentialValue(rawJumpPrivateKey);
+        const jumpPassphrase = sanitizeCredentialValue(rawJumpPassphrase);
+
+        if (jumpHost.proxyConfig?.host && jumpHost.proxyConfig?.port) {
+          unsupportedJumpProxies.push(jumpHost.label || jumpHost.hostname);
+        }
+
+        const hasEncryptedJumpCredential =
+          isEncryptedCredentialPlaceholder(rawJumpPassword) ||
+          isEncryptedCredentialPlaceholder(rawJumpPrivateKey) ||
+          isEncryptedCredentialPlaceholder(rawJumpPassphrase);
+        if (hasEncryptedJumpCredential && !jumpPassword && !jumpPrivateKey && !jumpPassphrase) {
+          jumpHostsWithUnavailableCredentials.push(jumpHost.label || jumpHost.hostname);
+        }
+
+        return {
+          hostname: jumpHost.hostname,
+          port: jumpHost.port || 22,
+          username: jumpAuth.username || "root",
+          password: jumpPassword,
+          privateKey: jumpKey?.source === 'reference' ? undefined : jumpPrivateKey,
+          certificate: jumpKey?.certificate,
+          passphrase: jumpPassphrase,
+          keyId: jumpAuth.keyId,
+          keySource: jumpKey?.source,
+          label: jumpHost.label,
+          identityFilePaths: jumpHost.identityFilePaths,
+        };
+      });
+
+      if (unsupportedJumpProxies.length > 0) {
+        stopEt(tr(
+          "terminal.et.proxyUnsupported",
+          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+        ));
+        return;
+      }
+
+      if (jumpHostsWithUnavailableCredentials.length > 0) {
+        const jumpList = jumpHostsWithUnavailableCredentials.slice(0, 2).join(", ");
+        const suffix = jumpHostsWithUnavailableCredentials.length > 2
+          ? ` +${jumpHostsWithUnavailableCredentials.length - 2}`
+          : "";
+        const base = tr(
+          "terminal.auth.jumpCredentialsUnavailable",
+          "A jump host has saved credentials that cannot be decrypted on this device. Open host settings and re-enter them.",
+        );
+        stopEt(`${base} (${jumpList}${suffix})`);
+        return;
+      }
+
+      const etEnv = buildTermEnv(ctx.host, ctx.terminalSettings);
+      const id = await ctx.terminalBackend.startEtSession({
+        sessionId: ctx.sessionId,
+        hostname: ctx.host.hostname,
+        username: resolvedAuth.username || "root",
+        password: effectivePassword,
+        privateKey: key?.source === 'reference' ? undefined : sanitizeCredentialValue(key?.privateKey),
+        certificate: key?.certificate,
+        keyId: key?.id,
+        passphrase: key
+          ? (effectivePassphrase || sanitizeCredentialValue(key.passphrase))
+          : undefined,
+        authMethod,
+        identityFilePaths: etIdentityFilePaths,
+        port: ctx.host.port || 22,
+        etPort: ctx.host.etPort,
+        legacyAlgorithms: ctx.host.legacyAlgorithms,
+        jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
+        agentForwarding: ctx.host.agentForwarding,
+        cols: term.cols,
+        rows: term.rows,
+        charset: ctx.host.charset,
+        env: etEnv,
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
+      });
+
+      attachSessionToTerminal(ctx, term, id, {
+        onExitMessage: (evt) =>
+          `\r\n[EternalTerminal session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
+      });
+
+      scheduleStartupCommand(ctx, term, id);
+
+      // ET sessions are full remote shells, so run OS detection like SSH for
+      // server stats / distro icons.
+      {
+        const connectionToken = registerConnectionToken(id);
+        setTimeout(() => {
+          if (!isConnectionTokenCurrent(id, connectionToken)) return;
+          void runDistroDetection(ctx, id, connectionToken);
+        }, 600);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[Failed to start EternalTerminal: ${message}]`);
+      ctx.updateStatus("disconnected");
+    }
+  };
+
   const startLocal = async (term: XTerm) => {
     if (!ctx.terminalBackend.localAvailable()) {
       ctx.setError("Local shell bridge unavailable. Please run the desktop build.");
@@ -874,5 +1074,5 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
   };
 
-  return { startSSH, startTelnet, startMosh, startLocal, startSerial };
+  return { startSSH, startTelnet, startMosh, startEt, startLocal, startSerial };
 };

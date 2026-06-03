@@ -175,6 +175,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 setForm(prev => ({
                   ...prev,
                   moshEnabled: true,
+                  etEnabled: false,
                   deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
                   x11Forwarding: undefined,
                 }));
@@ -183,6 +184,46 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               }
             }}
           />
+        </HostDetailsSection>
+
+        <HostDetailsSection
+          icon={<Wifi size={14} className="text-muted-foreground" />}
+          title={t("hostDetails.section.et")}
+        >
+          <ToggleRow
+            label="EternalTerminal"
+            enabled={!!form.etEnabled}
+            onToggle={() => {
+              const enabling = !form.etEnabled;
+              if (enabling) {
+                setForm(prev => ({
+                  ...prev,
+                  etEnabled: true,
+                  moshEnabled: false,
+                  deviceType: prev.deviceType === 'network' ? undefined : prev.deviceType,
+                  x11Forwarding: undefined,
+                }));
+              } else {
+                update("etEnabled", false);
+              }
+            }}
+          />
+          {form.etEnabled && (
+            <>
+              <HostDetailsSettingRow label={t("hostDetails.et.port")} hint={t("hostDetails.et.port.desc")}>
+                <Input
+                  type="number"
+                  className="w-28"
+                  placeholder="2022"
+                  value={form.etPort ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    update("etPort", v === "" ? undefined : Number(v));
+                  }}
+                />
+              </HostDetailsSettingRow>
+            </>
+          )}
         </HostDetailsSection>
 
         {/* Agent Forwarding */}
@@ -212,7 +253,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         </HostDetailsSection>
 
         {/* X11 Forwarding */}
-        {(!form.protocol || form.protocol === "ssh") && !form.moshEnabled && (
+        {(!form.protocol || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
           <HostDetailsSection
             icon={<TerminalSquare size={14} className="text-muted-foreground" />}
             title={t("hostDetails.section.x11Forwarding")}
@@ -226,8 +267,8 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           </HostDetailsSection>
         )}
 
-        {/* Network Device Mode — only for SSH hosts without Mosh (serial already uses raw mode) */}
-        {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && (
+        {/* Network Device Mode — only for SSH hosts without Mosh / ET (serial already uses raw mode) */}
+        {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && !form.etEnabled && (
         <HostDetailsSection
           icon={<Router size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.deviceType")}

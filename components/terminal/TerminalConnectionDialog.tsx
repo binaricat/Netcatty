@@ -50,6 +50,10 @@ const getProtocolInfo = (host: Host): { i18nKey: string; showPort: boolean; port
     if (host.moshEnabled) {
         return { i18nKey: 'terminal.connection.protocol.mosh', showPort: true, port: host.port || 22 };
     }
+    // ET likewise uses protocol: "ssh" with etEnabled: true
+    if (host.etEnabled) {
+        return { i18nKey: 'terminal.connection.protocol.et', showPort: true, port: host.port || 22 };
+    }
     const protocol = host.protocol || 'ssh';
     switch (protocol) {
         case 'local':

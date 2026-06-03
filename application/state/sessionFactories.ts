@@ -84,6 +84,7 @@ export const createHostTerminalSession = (
     protocol: host.protocol,
     port: host.port,
     moshEnabled: host.moshEnabled,
+    etEnabled: host.etEnabled,
     charset: host.charset,
   };
 };

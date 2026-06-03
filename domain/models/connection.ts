@@ -46,7 +46,7 @@ export interface EnvVar {
 }
 
 // Protocol type for connections
-export type HostProtocol = 'ssh' | 'telnet' | 'mosh' | 'local' | 'serial';
+export type HostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial';
 
 // Serial port configuration
 export type SerialParity = 'none' | 'even' | 'odd' | 'mark' | 'space';
@@ -70,6 +70,8 @@ interface ProtocolConfig {
   enabled: boolean;
   // Mosh-specific
   moshServerPath?: string;
+  // EternalTerminal-specific
+  etPort?: number;
   // Protocol-specific theme override
   theme?: string;
 }
@@ -114,6 +116,8 @@ export interface Host {
   charset?: string;
   moshEnabled?: boolean;
   moshServerPath?: string; // Custom mosh-server path (e.g., /usr/local/bin/mosh-server)
+  etEnabled?: boolean;
+  etPort?: number; // EternalTerminal server port (default: 2022)
   theme?: string;
   themeOverride?: boolean; // Explicitly override the global terminal theme for this host
   fontFamily?: string; // Terminal font family for this host
@@ -261,6 +265,8 @@ export interface GroupConfig {
   charset?: string;
   moshEnabled?: boolean;
   moshServerPath?: string;
+  etEnabled?: boolean;
+  etPort?: number;
   telnetEnabled?: boolean;
   telnetPort?: number;
   telnetUsername?: string;

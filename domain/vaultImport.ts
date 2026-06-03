@@ -119,7 +119,7 @@ const normalizeGroupPath = (raw: string | undefined): string | undefined => {
 
 const normalizeProtocol = (
   raw: string | undefined,
-): Exclude<HostProtocol, "mosh"> | undefined => {
+): Exclude<HostProtocol, "mosh" | "et"> | undefined => {
   const s = raw?.trim().toLowerCase();
   if (!s) return undefined;
   if (s === "ssh" || s === "ssh2" || s === "ssh-2") return "ssh";
@@ -154,7 +154,7 @@ const createHost = (input: {
   username?: string;
   password?: string;
   port?: number;
-  protocol?: Exclude<HostProtocol, "mosh">;
+  protocol?: Exclude<HostProtocol, "mosh" | "et">;
   group?: string;
   tags?: string[];
   notes?: string;
@@ -210,7 +210,7 @@ const looksLikeHostnameToken = (token: string): boolean => {
 
 const parseTarget = (
   raw: string,
-): { hostname: string; username?: string; port?: number; protocol?: Exclude<HostProtocol, "mosh"> } | null => {
+): { hostname: string; username?: string; port?: number; protocol?: Exclude<HostProtocol, "mosh" | "et"> } | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
@@ -380,7 +380,7 @@ const importFromPuttyReg = (text: string): VaultImportResult => {
     hostname?: string;
     username?: string;
     port?: number;
-    protocol?: Exclude<HostProtocol, "mosh">;
+    protocol?: Exclude<HostProtocol, "mosh" | "et">;
   };
 
   const sessions: Session[] = [];
@@ -698,7 +698,7 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
     hostname?: string;
     username?: string;
     port?: number;
-    protocol?: Exclude<HostProtocol, "mosh">;
+    protocol?: Exclude<HostProtocol, "mosh" | "et">;
   };
 
   const sessions: Session[] = [];
@@ -832,7 +832,7 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
     const group =
       keyParts.length > 1 ? keyParts.slice(0, -1).join("/") : undefined;
 
-    let protocol: Exclude<HostProtocol, "mosh"> | undefined;
+    let protocol: Exclude<HostProtocol, "mosh" | "et"> | undefined;
     let hostname: string | undefined;
     let username: string | undefined;
     let port: number | undefined;

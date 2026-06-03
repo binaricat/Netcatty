@@ -286,6 +286,7 @@ export const useSessionState = () => {
         protocol: host.protocol,
         port: host.port,
         moshEnabled: host.moshEnabled,
+        etEnabled: host.etEnabled,
         charset: host.charset,
       };
     });
@@ -372,6 +373,7 @@ export const useSessionState = () => {
         protocol: host.protocol,
         port: host.port,
         moshEnabled: host.moshEnabled,
+        etEnabled: host.etEnabled,
         charset: host.charset,
       };
     });
@@ -475,6 +477,7 @@ export const useSessionState = () => {
       protocol: host.protocol,
       port: host.port,
       moshEnabled: host.moshEnabled,
+      etEnabled: host.etEnabled,
       charset: host.charset,
       workspaceId,
     };
@@ -592,6 +595,7 @@ export const useSessionState = () => {
           protocol: session.protocol,
           port: session.port,
           moshEnabled: session.moshEnabled,
+          etEnabled: session.etEnabled,
           shellType: nextShellType,
           charset: session.charset,
           localShell: session.localShell,
@@ -628,6 +632,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
+        etEnabled: session.etEnabled,
         shellType: nextShellType,
         charset: session.charset,
         localShell: session.localShell,
@@ -827,6 +832,7 @@ export const useSessionState = () => {
         protocol: session.protocol,
         port: session.port,
         moshEnabled: session.moshEnabled,
+        etEnabled: session.etEnabled,
         shellType: nextShellType,
         charset: session.charset,
         serialConfig: session.serialConfig,
