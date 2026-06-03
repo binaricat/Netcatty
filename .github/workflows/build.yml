@@ -29,6 +29,10 @@ on:
         description: "Release tag containing bundled mosh-client binaries"
         type: string
         default: ""
+      et_bin_release:
+        description: "Release tag containing bundled et (EternalTerminal) binaries"
+        type: string
+        default: ""
   push:
     branches:
       - "**"
@@ -54,6 +58,8 @@ permissions:
 env:
   MOSH_BIN_RELEASE: ${{ github.event.inputs.mosh_bin_release || vars.MOSH_BIN_RELEASE || '' }}
   BUNDLE_MOSH: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.mosh_bin_release != '') }}
+  ET_BIN_RELEASE: ${{ github.event.inputs.et_bin_release || vars.ET_BIN_RELEASE || '' }}
+  BUNDLE_ET: ${{ (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release))) || (github.event_name == 'workflow_dispatch' && inputs.et_bin_release != '') }}
   STRICT_VERSION_REF_RE: '^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[A-Za-z][0-9A-Za-z-]*|[0-9A-Za-z][0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
 
 jobs:
@@ -191,9 +197,38 @@ jobs:
           fi
           echo "mosh_bin_release=${release}" >> "$GITHUB_OUTPUT"
 
+  resolve-et:
+    name: resolve bundled et-client
+    needs: dedupe
+    if: |
+      needs.dedupe.outputs.skip_heavy_ci != 'true'
+      && (
+        (startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)))
+        || (github.event_name == 'workflow_dispatch' && inputs.et_bin_release != '')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      et_bin_release: ${{ steps.resolve.outputs.et_bin_release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve bundled et-client release
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/resolve-et-bin-release.cjs
+          release="$(grep '^ET_BIN_RELEASE=' "$GITHUB_ENV" | tail -n 1 | cut -d= -f2-)"
+          if [[ -z "$release" ]]; then
+            echo "::error::ET_BIN_RELEASE was not resolved."
+            exit 1
+          fi
+          echo "et_bin_release=${release}" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && format('deduped build-{0}', matrix.name) || format('build-{0}', matrix.name) }}
-    needs: [dedupe, resolve-mosh]
+    needs: [dedupe, resolve-mosh, resolve-et]
     if: |
       always()
       && needs.dedupe.result == 'success'
@@ -214,6 +249,7 @@ jobs:
             pack_script: pack:win-x64
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
+      ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_ID: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_ID }}
       VITE_SYNC_GOOGLE_CLIENT_SECRET: ${{ secrets.VITE_SYNC_GOOGLE_CLIENT_SECRET }}
@@ -227,6 +263,17 @@ jobs:
         run: |
           if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
             echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
+      - name: Validate bundled et-client release
+        if: env.BUNDLE_ET == 'true'
+        shell: bash
+        env:
+          RESOLVE_ET_RESULT: ${{ needs.resolve-et.result }}
+        run: |
+          if [[ "$RESOLVE_ET_RESULT" != "success" || -z "$ET_BIN_RELEASE" ]]; then
+            echo "::error::Bundled et-client release was not resolved for this package build."
             exit 1
           fi
 
@@ -265,6 +312,16 @@ jobs:
             npm run fetch:mosh -- --platform=darwin --arch=universal
           elif [[ "${{ matrix.name }}" == "windows" ]]; then
             npm run fetch:mosh -- --platform=win32 --arch=x64
+          fi
+
+      - name: Fetch bundled et-client
+        if: env.BUNDLE_ET == 'true'
+        shell: bash
+        run: |
+          if [[ "${{ matrix.name }}" == "macos" ]]; then
+            npm run fetch:et -- --platform=darwin --arch=universal
+          elif [[ "${{ matrix.name }}" == "windows" ]]; then
+            npm run fetch:et -- --platform=win32 --arch=x64
           fi
 
       - name: Set version
@@ -318,7 +375,7 @@ jobs:
   # See #264.
   build-linux-x64:
     name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-x64' || 'build-linux-x64' }}
-    needs: [dedupe, resolve-mosh]
+    needs: [dedupe, resolve-mosh, resolve-et]
     if: |
       always()
       && needs.dedupe.result == 'success'
@@ -326,6 +383,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
+      ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
       npm_config_arch: x64
       npm_config_target_arch: x64
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
@@ -341,6 +399,17 @@ jobs:
         run: |
           if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
             echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
+      - name: Validate bundled et-client release
+        if: env.BUNDLE_ET == 'true'
+        shell: bash
+        env:
+          RESOLVE_ET_RESULT: ${{ needs.resolve-et.result }}
+        run: |
+          if [[ "$RESOLVE_ET_RESULT" != "success" || -z "$ET_BIN_RELEASE" ]]; then
+            echo "::error::Bundled et-client release was not resolved for this package build."
             exit 1
           fi
 
@@ -379,6 +448,10 @@ jobs:
         if: env.BUNDLE_MOSH == 'true'
         run: npm run fetch:mosh -- --platform=linux --arch=x64
 
+      - name: Fetch bundled et-client
+        if: env.BUNDLE_ET == 'true'
+        run: npm run fetch:et -- --platform=linux --arch=x64
+
       - name: Build package
         env:
           npm_config_arch: x64
@@ -408,7 +481,7 @@ jobs:
   # Key: GLIBC < 2.34 avoids the libpthread-merge symbol requirement.
   build-linux-arm64:
     name: ${{ needs.dedupe.outputs.skip_heavy_ci == 'true' && 'deduped build-linux-arm64' || 'build-linux-arm64' }}
-    needs: [dedupe, resolve-mosh]
+    needs: [dedupe, resolve-mosh, resolve-et]
     if: |
       always()
       && needs.dedupe.result == 'success'
@@ -418,6 +491,7 @@ jobs:
       image: debian:bullseye
     env:
       MOSH_BIN_RELEASE: ${{ needs.resolve-mosh.outputs.mosh_bin_release }}
+      ET_BIN_RELEASE: ${{ needs.resolve-et.outputs.et_bin_release }}
       npm_config_arch: arm64
       npm_config_target_arch: arm64
       VITE_SYNC_GITHUB_CLIENT_ID: ${{ secrets.VITE_SYNC_GITHUB_CLIENT_ID }}
@@ -433,6 +507,17 @@ jobs:
         run: |
           if [[ "$RESOLVE_MOSH_RESULT" != "success" || -z "$MOSH_BIN_RELEASE" ]]; then
             echo "::error::Bundled mosh-client release was not resolved for this package build."
+            exit 1
+          fi
+
+      - name: Validate bundled et-client release
+        if: env.BUNDLE_ET == 'true'
+        shell: bash
+        env:
+          RESOLVE_ET_RESULT: ${{ needs.resolve-et.result }}
+        run: |
+          if [[ "$RESOLVE_ET_RESULT" != "success" || -z "$ET_BIN_RELEASE" ]]; then
+            echo "::error::Bundled et-client release was not resolved for this package build."
             exit 1
           fi
 
@@ -473,6 +558,10 @@ jobs:
       - name: Fetch bundled mosh-client
         if: env.BUNDLE_MOSH == 'true'
         run: npm run fetch:mosh -- --platform=linux --arch=arm64
+
+      - name: Fetch bundled et-client
+        if: env.BUNDLE_ET == 'true'
+        run: npm run fetch:et -- --platform=linux --arch=arm64
 
       - name: Build package
         env:

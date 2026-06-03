@@ -73,3 +73,12 @@ build_with_vs2022.bat
 /resources/mosh/*/mosh-client-*-dlls/
 /resources/mosh/*/*.dll
 /resources/mosh/*/terminfo/
+
+# Bundled EternalTerminal `et` client binaries fetched at pack time by
+# scripts/fetch-et-binaries.cjs. resources/et/README.md is committed; the
+# actual binaries (and any DLL bundle for dynamically-linked Windows builds)
+# are pulled from the dedicated et binary repository, never committed.
+/resources/et/*/et
+/resources/et/*/et.exe
+/resources/et/*/et-*-dlls/
+/resources/et/*/*.dll

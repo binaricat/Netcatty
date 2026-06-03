@@ -1,4 +1,5 @@
 const { moshExtraResources } = require('./scripts/mosh-extra-resources.cjs');
+const { etExtraResources } = require('./scripts/et-extra-resources.cjs');
 
 /**
  * @type {import('electron-builder').Configuration}
@@ -98,7 +99,7 @@ module.exports = {
             NSMicrophoneUsageDescription: 'Netcatty may use the microphone for audio',
             NSLocalNetworkUsageDescription: 'Netcatty needs local network access for SSH connections'
         },
-        extraResources: moshExtraResources('darwin')
+        extraResources: [...moshExtraResources('darwin'), ...etExtraResources('darwin')]
     },
     dmg: {
         title: '${productName}',
@@ -125,7 +126,7 @@ module.exports = {
                 arch: ['x64', 'arm64']
             }
         ],
-        extraResources: moshExtraResources('win32')
+        extraResources: [...moshExtraResources('win32'), ...etExtraResources('win32')]
     },
     portable: {
         artifactName: '${productName}-${version}-portable-${os}-${arch}.${ext}',
@@ -146,7 +147,7 @@ module.exports = {
         icon: 'public/icon-win.png',
         target: ['AppImage', 'deb', 'rpm'],
         category: 'Development',
-        extraResources: moshExtraResources('linux')
+        extraResources: [...moshExtraResources('linux'), ...etExtraResources('linux')]
     },
     deb: {
         // Use gzip instead of default xz(lzma) for better compatibility with
