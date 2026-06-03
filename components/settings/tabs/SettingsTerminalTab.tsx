@@ -93,6 +93,14 @@ export default function SettingsTerminalTab(props: {
     if (!terminalSettings.localShell) return;
     setShowCustomShellInput(!discoveredShells.some(s => s.id === terminalSettings.localShell));
   }, [discoveredShells, terminalSettings.localShell]);
+
+  // Seed the drafts from current settings and open the custom-shell editor.
+  // Used both when picking "Custom…" and when re-editing an existing custom shell.
+  const openCustomShellModal = useCallback(() => {
+    setCustomShellDraft(terminalSettings.localShell || "");
+    setCustomArgsDraft(formatShellArgs(terminalSettings.localShellArgs ?? []));
+    setCustomShellModalOpen(true);
+  }, [terminalSettings.localShell, terminalSettings.localShellArgs]);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [themeModalSlot, setThemeModalSlot] = useState<'dark' | 'light' | null>(null);
 
@@ -684,9 +692,7 @@ export default function SettingsTerminalTab(props: {
               }
               onValueChange={(value) => {
                 if (value === "__custom__") {
-                  setCustomShellDraft(terminalSettings.localShell || "");
-                  setCustomArgsDraft(formatShellArgs(terminalSettings.localShellArgs ?? []));
-                  setCustomShellModalOpen(true);
+                  openCustomShellModal();
                 } else if (value === "__default__") {
                   setShowCustomShellInput(false);
                   updateTerminalSetting("localShell", "");
@@ -717,10 +723,18 @@ export default function SettingsTerminalTab(props: {
               </SelectContent>
             </ShadcnSelect>
             {showCustomShellInput && (
-              <span className="text-xs text-muted-foreground truncate max-w-48">
-                {terminalSettings.localShell}
-                {terminalSettings.localShellArgs?.length ? ` ${formatShellArgs(terminalSettings.localShellArgs)}` : ""}
-              </span>
+              <button
+                type="button"
+                onClick={openCustomShellModal}
+                title={t("common.edit")}
+                className="flex items-center gap-1 text-xs text-muted-foreground max-w-48 hover:text-foreground"
+              >
+                <Pencil size={11} className="shrink-0" />
+                <span className="truncate">
+                  {terminalSettings.localShell}
+                  {terminalSettings.localShellArgs?.length ? ` ${formatShellArgs(terminalSettings.localShellArgs)}` : ""}
+                </span>
+              </button>
             )}
             {!showCustomShellInput && defaultShell && !terminalSettings.localShell && (
               <span className="text-xs text-muted-foreground">
