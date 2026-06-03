@@ -287,7 +287,7 @@ export function handlePassphraseSkipImpl(getCtx: AppContextGetter, requestId: st
 export function createLocalTerminalWithCurrentShellImpl(getCtx: AppContextGetter) {
   const { classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, terminalSettings } = getCtx();
 {
-    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
+    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
     const matchedShell = discoveredShells.find(s => s.id === terminalSettings.localShell);
     return createLocalTerminal({
       shellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
@@ -633,7 +633,7 @@ export function handleCreateLocalTerminalImpl(getCtx: AppContextGetter, shell?: 
   const { addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, systemInfoRef, terminalSettings } = getCtx();
 {
     const { username, hostname } = systemInfoRef.current;
-    const resolved = shell ?? resolveShellSetting(terminalSettings.localShell, discoveredShells);
+    const resolved = shell ?? resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
     // Match by ID (not command) to avoid WSL distros all sharing wsl.exe
     const matchedShell = !shell ? discoveredShells.find(s => s.id === terminalSettings.localShell) : undefined;
     const shellName = shell?.name ?? matchedShell?.name;

@@ -12,6 +12,7 @@ import { customThemeStore, useCustomThemes } from "../../../application/state/cu
 import { parseItermcolors } from "../../../infrastructure/parsers/itermcolorsParser";
 import { cn } from "../../../lib/utils";
 import { useDiscoveredShells } from "../../../lib/useDiscoveredShells";
+import { parseShellArgs, formatShellArgs } from "../../../domain/shellArgs";
 import { Button } from "../../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../ui/dialog";
 import { Input } from "../../ui/input";
@@ -85,6 +86,7 @@ export default function SettingsTerminalTab(props: {
   });
   const [customShellModalOpen, setCustomShellModalOpen] = useState(false);
   const [customShellDraft, setCustomShellDraft] = useState("");
+  const [customArgsDraft, setCustomArgsDraft] = useState("");
 
   // Update showCustomShellInput once discovered shells load
   useEffect(() => {
@@ -683,6 +685,7 @@ export default function SettingsTerminalTab(props: {
               onValueChange={(value) => {
                 if (value === "__custom__") {
                   setCustomShellDraft(terminalSettings.localShell || "");
+                  setCustomArgsDraft(formatShellArgs(terminalSettings.localShellArgs ?? []));
                   setCustomShellModalOpen(true);
                 } else if (value === "__default__") {
                   setShowCustomShellInput(false);
@@ -712,6 +715,7 @@ export default function SettingsTerminalTab(props: {
             {showCustomShellInput && (
               <span className="text-xs text-muted-foreground truncate max-w-48">
                 {terminalSettings.localShell}
+                {terminalSettings.localShellArgs?.length ? ` ${formatShellArgs(terminalSettings.localShellArgs)}` : ""}
               </span>
             )}
             {!showCustomShellInput && defaultShell && !terminalSettings.localShell && (
@@ -930,6 +934,16 @@ export default function SettingsTerminalTab(props: {
                 </span>
               )}
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{t("settings.terminal.localShell.shell.customArgs")}</label>
+              <Input
+                value={customArgsDraft}
+                placeholder={t("settings.terminal.localShell.shell.customArgs.placeholder")}
+                onChange={(e) => setCustomArgsDraft(e.target.value)}
+                className="w-full"
+              />
+              <span className="text-xs text-muted-foreground">{t("settings.terminal.localShell.shell.customArgs.desc")}</span>
+            </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">{t("settings.terminal.localShell.shell.commonPaths")}</label>
               <div className="flex flex-wrap gap-1.5">
@@ -958,6 +972,7 @@ export default function SettingsTerminalTab(props: {
               type="button"
               onClick={() => {
                 updateTerminalSetting("localShell", customShellDraft);
+                updateTerminalSetting("localShellArgs", parseShellArgs(customArgsDraft));
                 setShowCustomShellInput(true);
                 setCustomShellModalOpen(false);
               }}

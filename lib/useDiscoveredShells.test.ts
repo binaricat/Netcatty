@@ -1,0 +1,36 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { resolveShellSetting } from "./useDiscoveredShells";
+
+const DISCOVERED: DiscoveredShell[] = [
+  { id: "git-bash", name: "Git Bash", command: "C:\\Git\\bin\\bash.exe", args: ["--login", "-i"], icon: "git-bash" },
+];
+
+test("resolveShellSetting returns null for empty value", () => {
+  assert.equal(resolveShellSetting("", DISCOVERED), null);
+});
+
+test("resolveShellSetting passes custom args through for a custom path", () => {
+  const resolved = resolveShellSetting("C:\\msys64\\usr\\bin\\bash.exe", DISCOVERED, ["--login", "-i"]);
+  assert.equal(resolved?.command, "C:\\msys64\\usr\\bin\\bash.exe");
+  assert.deepEqual(resolved?.args, ["--login", "-i"]);
+});
+
+test("resolveShellSetting omits args when custom args are empty (preserves bridge fallback)", () => {
+  const resolved = resolveShellSetting("/usr/local/bin/fish", DISCOVERED, []);
+  assert.equal(resolved?.command, "/usr/local/bin/fish");
+  assert.equal(resolved?.args, undefined);
+});
+
+test("resolveShellSetting omits args when no custom args are given", () => {
+  const resolved = resolveShellSetting("/usr/local/bin/fish", DISCOVERED);
+  assert.equal(resolved?.command, "/usr/local/bin/fish");
+  assert.equal(resolved?.args, undefined);
+});
+
+test("resolveShellSetting ignores custom args when value matches a discovered shell", () => {
+  const resolved = resolveShellSetting("git-bash", DISCOVERED, ["--should-be-ignored"]);
+  assert.equal(resolved?.command, "C:\\Git\\bin\\bash.exe");
+  assert.deepEqual(resolved?.args, ["--login", "-i"]);
+});

@@ -64,6 +64,7 @@ export interface TerminalSettings {
 
   // Local Shell Configuration
   localShell: string; // Path to shell executable (empty = system default)
+  localShellArgs: string[]; // Launch args for a custom local shell (e.g. ["--login", "-i"] for msys2 bash); ignored for discovered shells
   localStartDir: string; // Starting directory for local terminal (empty = home directory)
 
   // SSH Connection
@@ -258,6 +259,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
   localShell: '', // Empty = use system default
+  localShellArgs: [], // Launch args for a custom local shell (empty = bridge default args)
   localStartDir: '', // Empty = use home directory
   // Cloud-friendly defaults: 30s interval keeps NAT/LB state tables alive,
   // and 10 unanswered keepalives provides headroom for brief network glitches

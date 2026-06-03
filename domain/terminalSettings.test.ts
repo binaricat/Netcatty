@@ -18,3 +18,14 @@ test("normalizeTerminalSettings preserves a provided startupCommandDelayMs", () 
   assert.equal(normalizeTerminalSettings({ startupCommandDelayMs: 1500 }).startupCommandDelayMs, 1500);
 });
 
+test("normalizeTerminalSettings defaults localShellArgs to an empty array", () => {
+  assert.deepEqual(normalizeTerminalSettings().localShellArgs, []);
+});
+
+test("normalizeTerminalSettings preserves provided localShellArgs", () => {
+  assert.deepEqual(
+    normalizeTerminalSettings({ localShellArgs: ["--login", "-i"] }).localShellArgs,
+    ["--login", "-i"],
+  );
+});
+
