@@ -485,12 +485,55 @@ export class GoogleDriveAdapter {
   private fileId: string | null = null;
   private account: ProviderAccount | null = null;
   private pkceChallenge: PKCEChallenge | null = null;
+  /**
+   * Invoked whenever the access token is silently refreshed. Lets the owner
+   * (CloudSyncManager) persist the rotated tokens so the next launch doesn't
+   * load a stale access token and force a reconnect. Mirrors the OneDrive fix
+   * (#1189 / #1208); Google differs in that its refresh response usually omits a
+   * new refresh token, so refreshTokens() carries the previous one forward.
+   */
+  private onTokensRefreshed: ((tokens: OAuthTokens) => void) | null = null;
 
   constructor(tokens?: OAuthTokens, fileId?: string) {
     if (tokens) {
       this.tokens = tokens;
     }
     this.fileId = fileId || null;
+  }
+
+  /**
+   * Register a callback that receives refreshed tokens so the caller can
+   * persist them. Passing null removes the callback.
+   */
+  setOnTokensRefreshed(callback: ((tokens: OAuthTokens) => void) | null): void {
+    this.onTokensRefreshed = callback;
+  }
+
+  /**
+   * Refresh the access token using the supplied refresh token, store the
+   * rotated tokens in-memory, and notify the persistence callback. Google
+   * typically returns the same (or no) refresh token on refresh, so the prior
+   * refresh token is preserved when the response omits one — otherwise the
+   * persisted credentials would lose the ability to refresh again and force a
+   * reconnect on the next launch.
+   */
+  private async refreshTokens(refreshToken: string): Promise<OAuthTokens> {
+    const refreshed = await refreshAccessToken(refreshToken);
+    // Google's refresh response frequently omits refresh_token (it does not
+    // rotate on every refresh). Never let a missing value clobber the working
+    // refresh token, or the persisted connection becomes unrefreshable.
+    const merged: OAuthTokens = {
+      ...refreshed,
+      refreshToken: refreshed.refreshToken || refreshToken,
+    };
+    this.tokens = merged;
+    try {
+      this.onTokensRefreshed?.(merged);
+    } catch {
+      // Persistence is best-effort; a failed save must not abort the sync that
+      // triggered the refresh — the fresh tokens still work for this session.
+    }
+    return merged;
   }
 
   get isAuthenticated(): boolean {
@@ -550,7 +593,7 @@ export class GoogleDriveAdapter {
     // Refresh if expired
     if (tokens.expiresAt && Date.now() > tokens.expiresAt - 60000) {
       if (tokens.refreshToken) {
-        this.tokens = await refreshAccessToken(tokens.refreshToken);
+        this.tokens = await this.refreshTokens(tokens.refreshToken);
       } else {
         throw new Error('Token expired and no refresh token');
       }
@@ -573,7 +616,7 @@ export class GoogleDriveAdapter {
 
     if (this.tokens.expiresAt && Date.now() > this.tokens.expiresAt - 60000) {
       if (this.tokens.refreshToken) {
-        this.tokens = await refreshAccessToken(this.tokens.refreshToken);
+        this.tokens = await this.refreshTokens(this.tokens.refreshToken);
       } else {
         throw new Error('Token expired');
       }
@@ -590,6 +633,7 @@ export class GoogleDriveAdapter {
     this.fileId = null;
     this.account = null;
     this.pkceChallenge = null;
+    this.onTokensRefreshed = null;
   }
 
   /**

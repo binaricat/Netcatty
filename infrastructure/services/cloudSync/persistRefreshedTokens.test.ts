@@ -110,6 +110,71 @@ test('attachTokenRefreshPersistence is a no-op for adapters without the hook', (
   );
 });
 
+test('attachTokenRefreshPersistence persists Google tokens refreshed mid-session', async () => {
+  // End-to-end: the real GoogleDriveAdapter refreshes during an operation and
+  // the rotated tokens reach saveProviderConnection (the regression #1208 fixed
+  // for OneDrive — Google previously had no setOnTokensRefreshed hook).
+  const { manager, saved } = createManager();
+  manager.providerDecryptSeq.google = 0;
+  manager.state.providers.google = {
+    provider: 'google',
+    status: 'connected',
+    tokens: { accessToken: 'old', refreshToken: 'google-refresh', tokenType: 'Bearer' },
+    account: { id: 'g1' },
+    resourceId: 'gfile-1',
+  } as ProviderConnection;
+
+  const g = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = g.window;
+  g.window = {
+    netcatty: {
+      // Google's refresh response omits refresh_token — the adapter must carry
+      // the previous one forward so the persisted connection stays refreshable.
+      googleRefreshAccessToken: async () => ({
+        accessToken: 'fresh-access',
+        expiresAt: Date.now() + 3_600_000,
+        tokenType: 'Bearer',
+      }),
+      googleDriveDownloadSyncFile: async () => ({
+        syncedFile: { meta: { version: 1 }, payload: 'x' },
+      }),
+    },
+  } as unknown as Window & typeof globalThis;
+
+  try {
+    const { GoogleDriveAdapter } = await import('../adapters/GoogleDriveAdapter.ts');
+    const adapter = new GoogleDriveAdapter(
+      {
+        accessToken: 'old',
+        refreshToken: 'google-refresh',
+        // Expired so the operation forces a refresh.
+        expiresAt: Date.now() - 60_000,
+        tokenType: 'Bearer',
+      },
+      'gfile-1',
+    );
+
+    attachTokenRefreshPersistence.call(manager, 'google', adapter as never);
+
+    await adapter.download();
+    // persistRefreshedProviderTokens fires saveProviderConnection fire-and-forget.
+    await Promise.resolve();
+
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].provider, 'google');
+    assert.equal(saved[0].tokens?.accessToken, 'fresh-access');
+    // Original refresh token preserved despite the omitted refresh_token.
+    assert.equal(saved[0].tokens?.refreshToken, 'google-refresh');
+    // State updated and other fields preserved.
+    assert.equal(manager.state.providers.google.tokens?.accessToken, 'fresh-access');
+    assert.equal(manager.state.providers.google.account?.id, 'g1');
+    assert.equal(manager.state.providers.google.resourceId, 'gfile-1');
+    assert.equal(manager.providerDecryptSeq.google, 1);
+  } finally {
+    g.window = originalWindow;
+  }
+});
+
 test('handleProviderReauthRequired clears OneDrive tokens and stops it being sync-ready', async () => {
   const { manager, saved } = createManager();
   let signedOut = false;

@@ -386,10 +386,13 @@ export async function getConnectedAdapterImpl(this: any,provider: CloudProvider)
   }
 
 /**
- * Wire an OAuth adapter's token-refresh callback so silently rotated tokens are
- * persisted. Without this, OneDrive's rotating refresh tokens go stale after the
- * first in-session refresh and the next launch is forced to reconnect (#1189).
- * Only OneDrive currently exposes setOnTokensRefreshed; other adapters are no-ops.
+ * Wire an OAuth adapter's token-refresh callback so silently refreshed tokens
+ * are persisted. Without this, an adapter that refreshes its access token only
+ * updates memory and the next launch loads a stale token and is forced to
+ * reconnect — OneDrive's rotating refresh tokens go stale after the first
+ * in-session refresh (#1189), and Google's refreshed access token is likewise
+ * lost on restart. OneDrive and Google expose setOnTokensRefreshed; adapters
+ * without it (GitHub, WebDAV, S3) are no-ops.
  */
 export function attachTokenRefreshPersistence(
   this: any,
