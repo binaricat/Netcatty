@@ -72,30 +72,6 @@ function createAgentCliHelpers(ctx) {
     }
   }
 
-  function isCodexAcpFallbackPath(command, usesAcpFallback, resolvedPath) {
-    return (
-      command === "codex" &&
-      usesAcpFallback &&
-      path.basename(resolvedPath || "").toLowerCase().startsWith("codex-acp")
-    );
-  }
-
-  function isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) {
-    if (!isCodexAcpFallbackPath(command, usesAcpFallback, resolvedPath) || !probe?.launched) {
-      return false;
-    }
-    const output = String(probe.output || "").toLowerCase();
-    const hasCodexAcpUsage = /\busage:\s*codex-acp(?:\.exe)?\s+\[options\]/.test(output);
-    const rejectedVersionFlag =
-      /(unexpected|unrecognized|unknown)\s+(argument|option|flag)\s+['"]?--version['"]?/.test(output) ||
-      /['"]?--version['"]?\s+(found|is\s+)?(unexpected|unrecognized|unknown)/.test(output);
-    return hasCodexAcpUsage && rejectedVersionFlag;
-  }
-
-  function isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe) {
-    return isCodexAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
-  }
-
   async function runCodexCli(args, options) {
     const shellEnv = await getShellEnv();
     const codexCliPath = resolveCliFromPath("codex", shellEnv) || "codex";
@@ -301,9 +277,6 @@ function createAgentCliHelpers(ctx) {
       getCommandOutput,
       getFirstCommandOutputLine,
       probeCliVersion,
-      isCodexAcpFallbackPath,
-      isCodexAcpFallbackProbeUsable,
-      isAcpFallbackProbeUsable,
       runCodexCli,
       runCodexCliChecked,
       validateCodexChatGptAuth,

@@ -5,125 +5,53 @@ function registerAgentDiscoveryHandlers(ctx) {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const agents = [];
     const knownAgents = [
-      {
-        command: "claude",
-        name: "Claude Code",
-        icon: "claude",
-        description: "Anthropic's agentic coding assistant",
-        acpCommand: "claude-agent-acp",
-        acpArgs: [],
-        args: ["-p", "--output-format", "text", "{prompt}"],
-      },
-      {
-        command: "codex",
-        name: "Codex CLI",
-        icon: "openai",
-        description: "OpenAI's coding agent",
-        acpCommand: "codex-acp",
-        acpArgs: [],
-        args: ["exec", "--full-auto", "--json", "{prompt}"],
-        resolveAcp: resolveCodexAcpBinaryPath,
-      },
-      {
-        command: "copilot",
-        name: "GitHub Copilot CLI",
-        icon: "copilot",
-        description: "GitHub's coding agent CLI",
-        acpCommand: "copilot",
-        acpArgs: ["--acp", "--stdio"],
-        args: ["-p", "{prompt}"],
-      },
+      { command: "claude", name: "Claude Code", icon: "claude",
+        description: "Anthropic's agentic coding assistant", sdkBackend: "claude", args: [] },
+      { command: "codex", name: "Codex CLI", icon: "openai",
+        description: "OpenAI's coding agent", sdkBackend: "codex", args: [] },
+      { command: "copilot", name: "GitHub Copilot CLI", icon: "copilot",
+        description: "GitHub's coding agent CLI", sdkBackend: "copilot", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
     const seenPaths = new Set();
 
     for (const agent of knownAgents) {
-      let resolvedPath = resolveCliFromPath(agent.command, shellEnv);
-      const supportsBundledAcpFallback = agent.command === "codex";
+      const resolvedPath = resolveCliFromPath(agent.command, shellEnv); // Layer-1: locate
+      if (!resolvedPath || seenPaths.has(resolvedPath)) continue;
 
-      // Codex can still work via bundled ACP if its standalone CLI is missing.
-      // Claude must resolve to the system `claude` executable and pass version probing.
-      // ACP resolvers return either a plain path or { command, prependArgs }.
-      let versionCommand = null;
-      let versionPrependArgs = [];
-      let usesAcpFallback = false;
-      const tryResolveAcpFallback = () => {
-        if (!agent.resolveAcp) return false;
-        const result = agent.resolveAcp(shellEnv, electronModule);
-        if (typeof result === "string") {
-          if (result && result !== agent.acpCommand && existsSync(result)) {
-            resolvedPath = result;
-            versionCommand = null;
-            versionPrependArgs = [];
-            usesAcpFallback = true;
-            return true;
-          }
-        } else if (result?.command) {
-          // On Windows the command may be `node` with the script in prependArgs.
-          // Use the script path for display/dedup so the UI shows the actual
-          // agent rather than the Node binary.
-          const scriptPath = result.prependArgs?.[0];
-          const displayPath = scriptPath || result.command;
-          if (displayPath !== agent.acpCommand && existsSync(displayPath)) {
-            resolvedPath = displayPath;
-            usesAcpFallback = true;
-            if (scriptPath) {
-              versionCommand = result.command;
-              versionPrependArgs = result.prependArgs;
-            } else {
-              versionCommand = null;
-              versionPrependArgs = [];
-            }
-            return true;
-          }
+      const probe = await probeCliVersion(resolvedPath, ["--version"], shellEnv); // Layer-2: version
+      const hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+      if (!hasPlausibleVersion) continue;
+
+      // Layer-3: authentication (best-effort; never blocks discovery).
+      let auth = { authenticated: false, authSource: null };
+      try {
+        if (agent.command === "claude") {
+          auth = probeClaudeAuth({ env: shellEnv });
+        } else if (agent.command === "copilot") {
+          auth = probeCopilotAuth({});
+        } else if (agent.command === "codex") {
+          // codex login status is async; resolve it then inject synchronously.
+          const codexStatus = await runCodexCli(["login", "status"]).catch(() => null);
+          auth = probeCodexAuth({ runLoginStatus: () => codexStatus || { exitCode: 1, stdout: "" } });
         }
-        return false;
-      };
-      if (!resolvedPath && supportsBundledAcpFallback) {
-        tryResolveAcpFallback();
-      }
+      } catch { /* auth probe is best-effort */ }
 
-      if (!resolvedPath || seenPaths.has(resolvedPath)) {
-        continue;
-      }
-
-      // When the agent is invoked via Node (Windows), probe version with
-      // the full command (e.g. `node /path/to/dist/index.js --version`).
-      let probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
-      let version = probe.version;
-      let hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
-      let hasUsableAcpFallback = isAcpFallbackProbeUsable(
-        agent.command,
-        usesAcpFallback,
-        resolvedPath,
-        probe,
-      );
-
-      if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && supportsBundledAcpFallback) {
-        const previousPath = resolvedPath;
-        if (tryResolveAcpFallback() && resolvedPath !== previousPath && !seenPaths.has(resolvedPath)) {
-          probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
-          version = probe.version;
-          hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
-          hasUsableAcpFallback = isAcpFallbackProbeUsable(
-            agent.command,
-            usesAcpFallback,
-            resolvedPath,
-            probe,
-          );
-        }
-      }
-
-      if (!hasPlausibleVersion && !hasUsableAcpFallback) continue;
-
-      const { resolveAcp: _unused, ...agentInfo } = agent;
       agents.push({
-        ...agentInfo,
-        acpCommand: agent.command === "copilot" ? resolvedPath : agentInfo.acpCommand,
+        command: agent.command,
+        name: agent.name,
+        icon: agent.icon,
+        description: agent.description,
+        sdkBackend: agent.sdkBackend,
+        args: agent.args,
         path: resolvedPath,
-        version: hasPlausibleVersion ? version : "Bundled ACP",
+        binPath: resolvedPath,
+        version: probe.version,
+        installed: true,
         available: true,
+        authenticated: auth.authenticated,
+        authSource: auth.authSource,
       });
       seenPaths.add(resolvedPath);
     }
@@ -135,40 +63,8 @@ function registerAgentDiscoveryHandlers(ctx) {
   ipcMain.handle("netcatty:ai:resolve-cli", async (event, { command, customPath }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const shellEnv = await getShellEnv();
-    let resolvedPath = null;
-    let versionCommand = null;
-    let versionPrependArgs = [];
-    let usesAcpFallback = false;
-    const getBundledAcpFallback = () => {
-      if (command === "codex") {
-        const acpPath = resolveCodexAcpBinaryPath(shellEnv, electronModule);
-        if (acpPath && acpPath !== "codex-acp" && existsSync(acpPath)) {
-          return {
-            displayPath: acpPath,
-            command: null,
-            prependArgs: [],
-          };
-        }
-        return null;
-      }
-      return null;
-    };
-    const resolveBundledAcpFallback = () => {
-      const fallback = getBundledAcpFallback();
-      if (!fallback) return false;
-      if (resolvedPath === fallback.displayPath) {
-        versionCommand = fallback.command;
-        versionPrependArgs = fallback.prependArgs;
-        usesAcpFallback = true;
-        return true;
-      }
-      resolvedPath = fallback.displayPath;
-      versionCommand = fallback.command;
-      versionPrependArgs = fallback.prependArgs;
-      usesAcpFallback = true;
-      return true;
-    };
 
+    let resolvedPath;
     if (customPath) {
       // Normalize Windows shim paths like `codex` -> `codex.cmd` when present.
       // Fall back to PATH search if the stored path no longer exists
@@ -177,38 +73,18 @@ function registerAgentDiscoveryHandlers(ctx) {
     } else {
       resolvedPath = resolveCliFromPath(command, shellEnv);
     }
-    if (!resolvedPath) {
-      resolveBundledAcpFallback();
-    } else {
-      const fallback = getBundledAcpFallback();
-      if (fallback && resolvedPath === fallback.displayPath) {
-        versionCommand = fallback.command;
-        versionPrependArgs = fallback.prependArgs;
-        usesAcpFallback = true;
-      }
-    }
 
     if (!resolvedPath) {
-      return { path: null, version: null, available: false };
+      return { path: null, binPath: null, version: null, available: false, installed: false };
     }
 
-    let probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
-    let version = probe.version;
-    let hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
-    let hasUsableAcpFallback = isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
-    if (!hasPlausibleVersion && !hasUsableAcpFallback && !usesAcpFallback && command === "codex") {
-      if (resolveBundledAcpFallback()) {
-        probe = await probeCliVersion(versionCommand || resolvedPath, [...versionPrependArgs, "--version"], shellEnv);
-        version = probe.version;
-        hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(version);
-        hasUsableAcpFallback = isAcpFallbackProbeUsable(command, usesAcpFallback, resolvedPath, probe);
-      }
-    }
-    if (!hasPlausibleVersion && !hasUsableAcpFallback) {
-      return { path: resolvedPath, version: null, available: false };
+    const probe = await probeCliVersion(resolvedPath, ["--version"], shellEnv);
+    const hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+    if (!hasPlausibleVersion) {
+      return { path: resolvedPath, binPath: resolvedPath, version: null, available: false, installed: true };
     }
 
-    return { path: resolvedPath, version: hasPlausibleVersion ? version : "Bundled ACP", available: true };
+    return { path: resolvedPath, binPath: resolvedPath, version: probe.version, available: true, installed: true };
   });
 
   ipcMain.handle("netcatty:ai:codex:get-integration", async (event, options) => {

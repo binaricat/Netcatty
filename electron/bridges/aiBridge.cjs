@@ -23,6 +23,7 @@ const {
 } = require("./ai/userSkills.cjs");
 const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerCattyExecHandlers } = require("./aiBridge/cattyExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerAcpHandlers } = require("./aiBridge/acpHandlers.cjs");
+const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth } = require("./aiBridge/agentAuthProbes.cjs");
 
 // ── Extracted modules ──
 const {
@@ -826,6 +827,9 @@ function createHandlerContext(ipcMain) {
     prepareCommandForSpawn,
     normalizeClaudeCodeExecutableEnvForAcp,
     resolveCliFromPath,
+    probeClaudeAuth,
+    probeCopilotAuth,
+    probeCodexAuth,
     resolveClaudeAcpBinaryPath,
     isPlausibleCliVersionOutput,
     getShellEnv,
