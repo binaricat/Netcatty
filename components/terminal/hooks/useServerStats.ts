@@ -137,6 +137,15 @@ export function useServerStats({
       // Discard stale responses from before a hide/show cycle or reconnect
       if (!isMountedRef.current || generation !== fetchGenerationRef.current) return;
 
+      if (result.pending) {
+        // Transient "not ready yet" — e.g. a Mosh session whose SSH handshake
+        // hasn't finished, so the stats companion connection can't exist yet
+        // (issue #1198). Do NOT count this toward the consecutive-failure
+        // give-up, or a slow/manual handshake would permanently disable stats
+        // before the credentials become available. Just wait for the next poll.
+        return;
+      }
+
       if (result.success && result.stats) {
         hasFetchedRef.current = true;
         consecutiveFailuresRef.current = 0;

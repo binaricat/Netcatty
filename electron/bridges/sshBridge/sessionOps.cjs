@@ -502,6 +502,15 @@ function createSessionOpsApi(ctx) {
 
       const conn = session.conn || session.moshStatsConn;
       if (!conn) {
+        // A Mosh session can be marked "connected" (and start polling) from
+        // the SSH bootstrap's visible output before swapToMoshClient stores
+        // moshStatsAuth. During that window there is nothing to connect with
+        // yet — report it as `pending` (not a hard failure) so the renderer's
+        // give-up-after-N-failures counter doesn't permanently disable stats
+        // before the handshake finishes and credentials become available.
+        if (session.type === 'mosh' && !session.moshStatsAuth && !session.moshStatsConnFailed) {
+          return { success: false, pending: true, error: 'Mosh handshake in progress' };
+        }
         return { success: false, error: 'Session not found or not connected' };
       }
     

@@ -120,6 +120,10 @@ declare global {
     /** Get server stats (CPU, Memory, Disk, Network) from an active SSH session */
     getServerStats?(sessionId: string): Promise<{
       success: boolean;
+      // Transient "not ready yet" (e.g. a Mosh session whose SSH handshake is
+      // still in progress, #1198). Callers should keep polling and NOT count
+      // this toward any consecutive-failure give-up.
+      pending?: boolean;
       error?: string;
       stats?: {
         cpu: number | null;           // CPU usage percentage (0-100)

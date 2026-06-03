@@ -123,6 +123,58 @@ test("getServerStats does not touch the companion path for a normal SSH session"
   assert.equal(result.success, true);
 });
 
+test("getServerStats reports pending (not a hard failure) for a Mosh session before the handshake swap", async () => {
+  const sessions = new Map();
+  // Connected (renderer polls) but moshStatsAuth not yet assigned.
+  const session = { type: "mosh" };
+  sessions.set("sid", session);
+
+  let ensureCalls = 0;
+  const api = createSessionOpsApi({
+    get sessions() {
+      return sessions;
+    },
+    setTimeout,
+    clearTimeout,
+    Buffer,
+    ensureMoshStatsConnection: async () => {
+      ensureCalls += 1;
+      return null; // nothing to connect with yet
+    },
+  });
+
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(ensureCalls, 1);
+  assert.equal(result.success, false);
+  // pending must be set so the renderer doesn't count this toward give-up.
+  assert.equal(result.pending, true);
+});
+
+test("getServerStats reports a hard failure (not pending) once the companion permanently failed", async () => {
+  const sessions = new Map();
+  // moshStatsAuth present but the companion has permanently failed (e.g. auth
+  // rejected) — this is a real failure, the renderer should be allowed to give
+  // up.
+  const session = { type: "mosh", moshStatsAuth: { hostname: "h" }, moshStatsConnFailed: true };
+  sessions.set("sid", session);
+
+  const api = createSessionOpsApi({
+    get sessions() {
+      return sessions;
+    },
+    setTimeout,
+    clearTimeout,
+    Buffer,
+    ensureMoshStatsConnection: async () => null,
+  });
+
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.notEqual(result.pending, true);
+});
+
 test("getServerStats returns an error for an unknown session", async () => {
   const sessions = new Map();
   const api = makeSessionOps(sessions);
