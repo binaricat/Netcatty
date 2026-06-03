@@ -791,18 +791,6 @@ function createPreloadApi(ctx) {
   aiCodexLogout: async () => {
     return ipcRenderer.invoke("netcatty:ai:codex:logout");
   },
-  aiSpawnAgent: async (agentId, command, args, env, options) => {
-    return ipcRenderer.invoke("netcatty:ai:agent:spawn", { agentId, command, args, env, closeStdin: options?.closeStdin });
-  },
-  aiWriteToAgent: async (agentId, data) => {
-    return ipcRenderer.invoke("netcatty:ai:agent:write", { agentId, data });
-  },
-  aiCloseAgentStdin: async (agentId) => {
-    return ipcRenderer.invoke("netcatty:ai:agent:close-stdin", { agentId });
-  },
-  aiKillAgent: async (agentId) => {
-    return ipcRenderer.invoke("netcatty:ai:agent:kill", { agentId });
-  },
   // MCP Server session metadata
   aiMcpUpdateSessions: async (sessions, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:update-sessions", { sessions, chatSessionId });
