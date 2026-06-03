@@ -21,10 +21,11 @@ test("unpacked MCP server includes its shared CommonJS dependencies", () => {
 test("build.files excludes per-platform agent binaries", () => {
   const files = config.files;
   const expectExclusions = [
-    "!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
+    "!**/@anthropic-ai/claude-agent-sdk-*/**/*",
     "!node_modules/@anthropic-ai/claude-code-*/**/*",
-    "!node_modules/@openai/codex-*/**/*",
+    "!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*",
     "!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*",
+    "!node_modules/@github/copilot/**/*",
   ];
   for (const glob of expectExclusions) {
     assert.ok(

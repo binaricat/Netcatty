@@ -48,10 +48,19 @@ module.exports = {
         // system-installed CLI via an absolute path override (claude
         // pathToClaudeCodeExecutable / codex codexPathOverride / copilot cliPath).
         // Only the SDKs' JS is bundled; the heavy per-arch binaries are dropped.
-        '!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*',
+        // NOTE: claude-agent-sdk vendors the `claude` binary as a NESTED package
+        // (claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-<arch>),
+        // so this exclusion must match at any depth (**/), not just top-level.
+        // The codex/copilot exclusions target only the per-arch binary packages
+        // (codex-<arch> / copilot-<arch>) — NOT @openai/codex-sdk / copilot-sdk,
+        // whose JS we DO bundle. @github/copilot is the full ~288MB CLI (with
+        // per-platform prebuilds); netcatty uses the user's copilot via cliPath,
+        // so it is excluded entirely.
+        '!**/@anthropic-ai/claude-agent-sdk-*/**/*',
         '!node_modules/@anthropic-ai/claude-code-*/**/*',
-        '!node_modules/@openai/codex-*/**/*',
-        '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*'
+        '!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*',
+        '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*',
+        '!node_modules/@github/copilot/**/*'
     ],
     asarUnpack: [
         'node_modules/node-pty/**/*',
