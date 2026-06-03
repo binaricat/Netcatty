@@ -330,8 +330,8 @@ function drainAuthHandler(authHandler) {
   return offered;
 }
 
-test("password auth attaches verifier + gated authHandler; key/agent auth does not", async () => {
-  // Password present -> verifier + authHandler attached.
+test("verifier is attached for every auth method; gated authHandler only with a password", async () => {
+  // Password present -> verifier + gated authHandler attached.
   {
     const { api, sessions } = makeApi();
     const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
@@ -341,7 +341,7 @@ test("password auth attaches verifier + gated authHandler; key/agent auth does n
     assert.equal(typeof FakeSSHClient.instances[0].connectOpts.hostVerifier, "function");
     assert.equal(typeof FakeSSHClient.instances[0].connectOpts.authHandler, "function");
   }
-  // Key only -> ssh2 defaults (no custom verifier / authHandler needed).
+  // Key only -> verifier still attached (the host must be vetted); no authHandler.
   {
     const { api, sessions } = makeApi();
     const session = {
@@ -354,26 +354,34 @@ test("password auth attaches verifier + gated authHandler; key/agent auth does n
     sessions.set("sid", session);
     api.ensureMoshStatsConnection(session, "sid");
     await tick();
-    assert.equal(FakeSSHClient.instances[0].connectOpts.hostVerifier, undefined);
+    assert.equal(typeof FakeSSHClient.instances[0].connectOpts.hostVerifier, "function");
     assert.equal(FakeSSHClient.instances[0].connectOpts.authHandler, undefined);
   }
-  // Agent only -> ssh2 defaults.
+  // Agent only -> verifier still attached; no authHandler.
   {
     const { api, sessions } = makeApi({ getSshAgentSocket: () => "/tmp/agent.sock" });
     const session = { moshStatsAuth: { hostname: "h", username: "u", agentForwarding: true } };
     sessions.set("sid", session);
     api.ensureMoshStatsConnection(session, "sid");
     await tick();
-    assert.equal(FakeSSHClient.instances[0].connectOpts.hostVerifier, undefined);
+    assert.equal(typeof FakeSSHClient.instances[0].connectOpts.hostVerifier, "function");
     assert.equal(FakeSSHClient.instances[0].connectOpts.authHandler, undefined);
   }
 });
 
-test("the trust-tracking verifier accepts the transport for any host (key/agent must work)", async () => {
+test("the verifier rejects the transport for an untrusted host (key auth included)", async () => {
   const hostKeyVerifier = require("../hostKeyVerifier.cjs");
   const { api, sessions } = makeApi({ hostKeyVerifier });
+  // Untrusted host: empty known-hosts, key auth and NO password — must still be
+  // refused, even though key auth would leak no reusable secret.
   const session = {
-    moshStatsAuth: { hostname: "unknown.example.com", port: 22, username: "u", password: "p", knownHosts: [] },
+    moshStatsAuth: {
+      hostname: "unknown.example.com",
+      port: 22,
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      knownHosts: [],
+    },
   };
   sessions.set("sid", session);
   api.ensureMoshStatsConnection(session, "sid");
@@ -382,8 +390,8 @@ test("the trust-tracking verifier accepts the transport for any host (key/agent 
   const verify = FakeSSHClient.instances[0].connectOpts.hostVerifier;
   let accepted = null;
   verify(require("node:crypto").randomBytes(32), (ok) => { accepted = ok; });
-  // Always accepts the transport — password gating happens in the authHandler.
-  assert.equal(accepted, true);
+  // Refuses an unvetted host outright — no auth attempted, no stats command run.
+  assert.equal(accepted, false);
 });
 
 test("the gated authHandler offers password ONLY when the host key is trusted", async () => {
@@ -427,24 +435,6 @@ test("the gated authHandler offers password ONLY when the host key is trusted", 
     assert.ok(!offered.includes("password"));
     assert.ok(!offered.includes("keyboard-interactive"));
   }
-});
-
-test("the gated authHandler still offers key/agent on an untrusted host", async () => {
-  const hostKeyVerifier = require("../hostKeyVerifier.cjs");
-  const { api, sessions } = makeApi({ hostKeyVerifier, getSshAgentSocket: () => "/tmp/agent.sock" });
-  // Untrusted host (empty known-hosts), with a saved password AND an agent.
-  const session = {
-    moshStatsAuth: { hostname: "unknown.example.com", port: 22, username: "u", password: "p", knownHosts: [] },
-  };
-  sessions.set("sid", session);
-  api.ensureMoshStatsConnection(session, "sid");
-  await tick();
-  const { hostVerifier, authHandler } = FakeSSHClient.instances[0].connectOpts;
-  hostVerifier(require("node:crypto").randomBytes(32), () => {});
-  const offered = drainAuthHandler(authHandler);
-  // Agent auth is offered even though the host is untrusted; password is not.
-  assert.ok(offered.includes("agent"));
-  assert.ok(!offered.includes("password"));
 });
 
 test("an explicit private key suppresses the ssh-agent fallback", async () => {
@@ -603,4 +593,81 @@ test("honors host algorithm settings via buildAlgorithms", async () => {
   assert.equal(calls[0].opts.skipEcdsaHostKey, true);
   assert.equal(calls[0].opts.algorithmOverrides, overrides);
   assert.deepEqual(FakeSSHClient.instances[0].connectOpts.algorithms, { built: true });
+});
+
+test("installs a host-key verifier even for key-only auth (no password)", async () => {
+  const { api, sessions } = makeApi();
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  // Regression (#1198 review): a background companion must verify the host key
+  // for EVERY auth method, not only when a password is present.
+  assert.equal(typeof client.connectOpts.hostVerifier, "function");
+});
+
+test("rejects an untrusted host key for key auth and treats it as permanent", async () => {
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "live-fp" }),
+      classifyHostKey: () => ({ status: "unknown" }),
+    },
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  // The verifier refuses the transport for an unvetted host, even though the
+  // companion would have authenticated with a key (no reusable secret leaked).
+  let verdict;
+  client.connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, false);
+
+  // ssh2 then aborts the handshake; an untrusted host must be a permanent
+  // failure so we don't reconnect (and re-reject) on every stats poll.
+  client.emitError(Object.assign(new Error("handshake failed"), { level: "protocol" }));
+  const result = await pending;
+  assert.equal(result, null);
+  assert.equal(session.moshStatsConnFailed, true);
+});
+
+test("accepts a trusted host key and adopts the connection", async () => {
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "fp" }),
+      classifyHostKey: () => ({ status: "trusted" }),
+    },
+  });
+  const session = {
+    moshStatsAuth: { hostname: "h", username: "u", password: "secret" },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  let verdict;
+  client.connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, true);
+
+  client.emitReady();
+  assert.equal(await pending, client);
 });

@@ -24,22 +24,24 @@
  *     keeps working; only the stats bar stays empty (graceful degradation).
  *
  * Security — host-key handling:
- *   - A *password* (plain or via keyboard-interactive) sends a plaintext,
- *     reusable secret to the server, so it is offered ONLY when the live host
- *     key is already "trusted" in Netcatty's known-hosts store. A
- *     trust-tracking host verifier records that during the transport
- *     handshake, and a gated authHandler withholds the password methods
- *     unless trusted. This is done silently and never prompts — the user
- *     drives host-key trust through the real interactive session, not a
- *     background stats poll. It prevents leaking a saved password to a
- *     spoofed / MITM host Netcatty has not vetted.
- *   - Public-key / ssh-agent auth proves possession via a session-bound
- *     signature and never discloses a reusable secret, so it is always
- *     allowed — even to a host Netcatty has not vetted — matching the
- *     existing one-off `execCommand` path (the handshake already vetted the
- *     host via system ssh's known_hosts). Gating the password at the
- *     authHandler rather than rejecting the whole connection is what lets
- *     key/agent auth keep working on such hosts.
+ *   - The companion connects ONLY to a host whose live key is already
+ *     "trusted" in Netcatty's known-hosts store. A host verifier classifies
+ *     the key during the transport handshake and REJECTS the connection for an
+ *     unknown / changed key — for every auth method, not just password. This is
+ *     done silently and never prompts: the user vets and trusts a host key
+ *     through the real interactive session (#1191), and this background stats
+ *     poll only ever rides on a host that vetting already approved. An
+ *     untrusted host just leaves the stats bar empty (graceful degradation).
+ *   - Rejecting outright (rather than merely withholding the password) is
+ *     deliberate. Even though public-key / ssh-agent auth discloses no reusable
+ *     secret and its signature is session-bound, a *background, user-invisible*
+ *     connection that authenticated against an unverified host would still run
+ *     the stats command there — letting a MITM / DNS-spoofed host feed bogus
+ *     host-info to the user and enumerate the agent's public keys. That breaks
+ *     the same host-key guarantee the interactive session enforces, so the
+ *     companion refuses unvetted hosts regardless of auth method.
+ *   - A gated authHandler additionally withholds the plaintext password until
+ *     the verifier has confirmed trust, as defense in depth.
  */
 function createMoshStatsConnectionApi(ctx) {
   with (ctx) {
@@ -84,19 +86,20 @@ function createMoshStatsConnectionApi(ctx) {
       return null;
     }
 
-    // An ssh2 hostVerifier that records whether the live host key is already
-    // trusted in Netcatty's known-hosts store, into the shared `trust` object,
-    // then accepts the transport so public-key / agent auth can proceed. It
-    // never prompts. The trust flag gates *password* auth in the authHandler
-    // below: ssh2 runs this verifier during the transport handshake, before
-    // any auth method, so `trust.trusted` is set by the time the authHandler
-    // is consulted.
+    // An ssh2 hostVerifier that ACCEPTS the transport only when the live host
+    // key is already trusted in Netcatty's known-hosts store, and REJECTS it
+    // for an unknown / changed key. It never prompts — an untrusted host fails
+    // the background companion silently (stats stay empty) instead of popping a
+    // modal the user can't meaningfully answer for a stats poll.
     //
-    // Accepting the transport for an unknown host is safe because the only
-    // secret-disclosing method (password) is withheld unless trusted;
-    // public-key / agent auth proves possession via a session-bound signature
-    // that a MITM cannot replay.
-    function createTrustTrackingHostVerifier({ hostname, port, knownHosts, trust }) {
+    // Rejecting (not merely gating password auth) is required: a background,
+    // user-invisible connection that completed key/agent auth against an
+    // unverified host would still run the stats command there, letting a MITM /
+    // DNS-spoofed host feed bogus host-info and enumerate the agent's public
+    // keys. `trust.trusted` additionally gates the password method in the
+    // authHandler (defense in depth); `trust.rejected` lets the caller treat an
+    // untrusted host as a permanent failure so it stops reconnecting every poll.
+    function createTrustEnforcingHostVerifier({ hostname, port, knownHosts, trust }) {
       return (rawKey, callback) => {
         try {
           const keyInfo = hostKeyVerifier.describeHostKey(rawKey);
@@ -112,7 +115,8 @@ function createMoshStatsConnectionApi(ctx) {
           log("[Mosh] stats companion host-key check failed:", err?.message || String(err));
           trust.trusted = false;
         }
-        callback(true);
+        if (!trust.trusted) trust.rejected = true;
+        callback(trust.trusted);
       };
     }
 
@@ -225,23 +229,24 @@ function createMoshStatsConnectionApi(ctx) {
         connectOpts.agent || connectOpts.privateKey || connectOpts.password,
       );
 
-      // Sending a plaintext password (directly or via keyboard-interactive)
-      // to an unverified host would disclose it to a possible MITM. When a
-      // password is in play, install a trust-tracking host verifier plus a
-      // gated authHandler: key/agent auth is always allowed (it discloses no
-      // reusable secret and lets stats work on unvetted hosts), but the
-      // password methods are offered ONLY when the host key is already trusted
-      // in Netcatty's known-hosts store. Gating at the authHandler — rather
-      // than rejecting the whole connection in the verifier — is what lets
-      // key/agent auth still succeed on a host Netcatty has not vetted.
+      // Always install a host verifier that refuses an untrusted host, for
+      // EVERY auth method — a background, user-invisible companion must never
+      // authenticate to or run commands against a host Netcatty has not vetted
+      // (it could feed bogus host-info or enumerate agent keys), even though
+      // key/agent auth discloses no reusable secret.
+      const trust = { trusted: false, rejected: false };
+      connectOpts.hostVerifier = createTrustEnforcingHostVerifier({
+        hostname: connectOpts.host,
+        port: connectOpts.port,
+        knownHosts: auth.knownHosts,
+        trust,
+      });
+
+      // When a plaintext password is in play, also gate it behind the trust
+      // flag in the authHandler (defense in depth): key/agent methods are
+      // offered first, and the password / keyboard-interactive methods only
+      // once the verifier has confirmed the host key is trusted.
       if (connectOpts.password) {
-        const trust = { trusted: false };
-        connectOpts.hostVerifier = createTrustTrackingHostVerifier({
-          hostname: connectOpts.host,
-          port: connectOpts.port,
-          knownHosts: auth.knownHosts,
-          trust,
-        });
         connectOpts.authHandler = createGatedAuthHandler({
           hasAgent: Boolean(connectOpts.agent),
           hasKey: Boolean(connectOpts.privateKey),
@@ -250,7 +255,7 @@ function createMoshStatsConnectionApi(ctx) {
         });
       }
 
-      return { connectOpts, hasAnyAuth };
+      return { connectOpts, hasAnyAuth, trust };
     }
 
     /**
@@ -313,7 +318,7 @@ function createMoshStatsConnectionApi(ctx) {
         return null;
       }
 
-      const { connectOpts, hasAnyAuth } = await buildStatsConnectOpts({
+      const { connectOpts, hasAnyAuth, trust } = await buildStatsConnectOpts({
         ...auth,
         webContents,
       });
@@ -388,9 +393,11 @@ function createMoshStatsConnectionApi(ctx) {
           // If this fired after we already adopted the connection, drop the
           // stale handle so the next poll can rebuild a fresh one.
           if (session.moshStatsConn === conn) session.moshStatsConn = null;
-          // Auth rejection won't change with the same stored credentials, so
-          // stop retrying. Everything else may be transient.
-          fail(err, err?.level === "client-authentication");
+          // Auth rejection won't change with the same stored credentials, and a
+          // host-key rejection (untrusted host) won't either until the user
+          // vets the host via a real session — treat both as permanent so we
+          // stop reconnecting on every poll. Everything else may be transient.
+          fail(err, err?.level === "client-authentication" || trust.rejected);
         });
 
         conn.on("close", () => {
