@@ -58,6 +58,8 @@ function makeApi(overrides = {}) {
     getSshAgentSocket: overrides.getSshAgentSocket || (() => null),
     readFileNoFollow: overrides.readFileNoFollow || (async () => null),
     expandIdentityFilePath: overrides.expandIdentityFilePath || ((p) => p),
+    isAutoFillablePasswordChallenge:
+      overrides.isAutoFillablePasswordChallenge || (() => false),
     log: (...args) => logs.push(args),
   });
   return { api, sessions, logs };
@@ -204,6 +206,88 @@ test("does not attempt a connection when no agent socket and no inline creds", a
   const result = await api.ensureMoshStatsConnection(session, "sid");
   assert.equal(result, null);
   assert.equal(FakeSSHClient.instances.length, 0);
+});
+
+test("enables keyboard-interactive and auto-fills the saved password for a single prompt", async () => {
+  // Use the real auto-fill predicate so this exercises the actual handler.
+  const { isAutoFillablePasswordChallenge } = require("../sshAuthHelper.cjs");
+  const { api, sessions } = makeApi({ isAutoFillablePasswordChallenge });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "secret" } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.tryKeyboard, true);
+
+  let answered = null;
+  client.emit(
+    "keyboard-interactive",
+    "",
+    "",
+    "",
+    [{ prompt: "Password:", echo: false }],
+    (responses) => { answered = responses; },
+  );
+  assert.deepEqual(answered, ["secret"]);
+});
+
+test("keyboard-interactive finishes empty on a 2FA / OTP challenge (no hang, no prompt)", async () => {
+  const { isAutoFillablePasswordChallenge } = require("../sshAuthHelper.cjs");
+  const { api, sessions } = makeApi({ isAutoFillablePasswordChallenge });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "secret" } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  let answered = null;
+  client.emit(
+    "keyboard-interactive",
+    "",
+    "",
+    "",
+    [{ prompt: "Verification code:", echo: false }],
+    (responses) => { answered = responses; },
+  );
+  assert.deepEqual(answered, []);
+});
+
+test("keyboard-interactive only auto-fills once, then finishes empty to avoid a loop", async () => {
+  const { isAutoFillablePasswordChallenge } = require("../sshAuthHelper.cjs");
+  const { api, sessions } = makeApi({ isAutoFillablePasswordChallenge });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "secret" } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  const prompts = [{ prompt: "Password:", echo: false }];
+  let first = null;
+  let second = null;
+  client.emit("keyboard-interactive", "", "", "", prompts, (r) => { first = r; });
+  client.emit("keyboard-interactive", "", "", "", prompts, (r) => { second = r; });
+  assert.deepEqual(first, ["secret"]);
+  assert.deepEqual(second, []); // retry not re-filled with the same wrong password
+});
+
+test("does not enable keyboard-interactive when there is no password", async () => {
+  const { api, sessions } = makeApi();
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.notEqual(client.connectOpts.tryKeyboard, true);
 });
 
 test("inline credentials take precedence over ssh-agent", async () => {

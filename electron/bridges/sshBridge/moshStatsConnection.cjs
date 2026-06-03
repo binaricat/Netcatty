@@ -123,6 +123,13 @@ function createMoshStatsConnectionApi(ctx) {
 
       if (typeof auth.password === "string" && auth.password.length > 0) {
         connectOpts.password = auth.password;
+        // Many SSH servers (PAM-backed) only offer password auth through
+        // keyboard-interactive, not the plain "password" method. The Mosh
+        // handshake's system ssh handles that via its PTY responder, so the
+        // companion must too — otherwise stats stay empty on those hosts
+        // despite a saved password. The handler (attached at connect time)
+        // auto-fills non-interactively and never shows a prompt.
+        connectOpts.tryKeyboard = true;
       }
 
       // ssh-agent fallback whenever a socket is available and no inline
@@ -215,6 +222,26 @@ function createMoshStatsConnectionApi(ctx) {
           settled = true;
           resolve(value);
         };
+
+        // Non-interactive keyboard-interactive auth: auto-fill the saved
+        // password for a single password prompt and never show a modal. On a
+        // 2FA / multi-prompt / OTP challenge we finish empty so ssh2 moves on
+        // to the next method (or fails) instead of hanging on a prompt the
+        // user can't answer for a background connection.
+        if (connectOpts.tryKeyboard && connectOpts.password) {
+          // Only auto-fill once. If the password was wrong, ssh2 may re-issue
+          // the challenge; finishing empty on the retry lets auth fail cleanly
+          // instead of looping on the same wrong password.
+          let autoFilledOnce = false;
+          conn.on("keyboard-interactive", (_name, _instr, _lang, prompts, finishKbd) => {
+            if (!autoFilledOnce && isAutoFillablePasswordChallenge(prompts, connectOpts.password)) {
+              autoFilledOnce = true;
+              finishKbd([connectOpts.password]);
+            } else {
+              finishKbd([]);
+            }
+          });
+        }
 
         // `permanent` distinguishes futile retries (auth rejected, or a throw
         // building the connection) from transient ones (network blip,

@@ -28,6 +28,7 @@ const {
   getSshAgentSocket,
   readFileNoFollow,
   expandIdentityFilePath,
+  isAutoFillablePasswordChallenge,
   preparePrivateKeyForAuth,
   loadIdentityFileForAuth,
   loadFirstIdentityFileForAuth,
@@ -970,7 +971,7 @@ const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnectio
 const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
   get sessions() { return sessions; },
   SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
-  readFileNoFollow, expandIdentityFilePath, log,
+  readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge, log,
 });
 
 const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
