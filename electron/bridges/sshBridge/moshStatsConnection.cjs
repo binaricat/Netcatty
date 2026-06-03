@@ -44,6 +44,11 @@
  *     the verifier has confirmed trust, as defense in depth.
  */
 function createMoshStatsConnectionApi(ctx) {
+  // Read off ctx (not via the `with` scope) so an absent dependency reads as
+  // `undefined` instead of throwing a ReferenceError under `with`. Optional:
+  // when not wired in (e.g. older callers / some unit tests) the verifier
+  // simply skips the system-known_hosts fallback.
+  const isHostKeyTrustedBySystem = ctx.isHostKeyTrustedBySystem;
   with (ctx) {
     // Resolve a usable, non-interactive private key (+ passphrase) for the
     // companion connection. Returns null when the key is missing, encrypted
@@ -87,10 +92,22 @@ function createMoshStatsConnectionApi(ctx) {
     }
 
     // An ssh2 hostVerifier that ACCEPTS the transport only when the live host
-    // key is already trusted in Netcatty's known-hosts store, and REJECTS it
-    // for an unknown / changed key. It never prompts — an untrusted host fails
-    // the background companion silently (stats stay empty) instead of popping a
-    // modal the user can't meaningfully answer for a stats poll.
+    // key is already trusted — by Netcatty's in-app known-hosts store OR by the
+    // user's *system* OpenSSH known_hosts — and REJECTS it for an unknown /
+    // changed key. It never prompts — an untrusted host fails the background
+    // companion silently (stats stay empty) instead of popping a modal the user
+    // can't meaningfully answer for a stats poll.
+    //
+    // Why also consult the system known_hosts: a Mosh session is bootstrapped
+    // by the system `ssh`, which records (and vets, via its own prompt) the
+    // host key in `~/.ssh/known_hosts`. Netcatty's vault snapshot is NOT updated
+    // by that handshake, so a host the user trusted purely through system ssh
+    // would otherwise be misread as "unknown" and the companion permanently
+    // disabled — leaving the stats bar empty even though the system already
+    // trusts the exact key. We match the LIVE key's SHA-256 fingerprint against
+    // those files, so this only ever grants trust for the precise key the user's
+    // own OpenSSH already trusts; it never accepts an arbitrary or mismatched
+    // key. Unknown / changed keys stay rejected.
     //
     // Rejecting (not merely gating password auth) is required: a background,
     // user-invisible connection that completed key/agent auth against an
@@ -111,6 +128,17 @@ function createMoshStatsConnectionApi(ctx) {
             fingerprint: keyInfo.fingerprint,
           });
           trust.trusted = decision.status === "trusted";
+          // Fall back to the system OpenSSH known_hosts (Mosh's real trust
+          // source) only when Netcatty's snapshot does not already vouch for
+          // the key. Matching is by the live key's fingerprint, so this can
+          // only confirm — never override a mismatch into acceptance.
+          if (!trust.trusted && isHostKeyTrustedBySystem) {
+            trust.trusted = isHostKeyTrustedBySystem({
+              hostname,
+              port,
+              fingerprint: keyInfo.fingerprint,
+            }) === true;
+          }
         } catch (err) {
           log("[Mosh] stats companion host-key check failed:", err?.message || String(err));
           trust.trusted = false;

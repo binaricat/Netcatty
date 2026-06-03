@@ -65,6 +65,13 @@ function makeApi(overrides = {}) {
       describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "fp" }),
       classifyHostKey: () => ({ status: "trusted" }),
     },
+    // Default: the system known_hosts vouches for nothing, so trust comes
+    // solely from the Netcatty classifier above. Individual tests override this
+    // to exercise the system-known_hosts fallback.
+    isHostKeyTrustedBySystem:
+      "isHostKeyTrustedBySystem" in overrides
+        ? overrides.isHostKeyTrustedBySystem
+        : () => false,
     log: (...args) => logs.push(args),
   });
   return { api, sessions, logs };
@@ -670,4 +677,152 @@ test("accepts a trusted host key and adopts the connection", async () => {
 
   client.emitReady();
   assert.equal(await pending, client);
+});
+
+test("trusts a host vouched for ONLY by the system known_hosts (Netcatty snapshot empty)", async () => {
+  // Netcatty's in-app vault has no record (classify -> unknown), but the user's
+  // system OpenSSH known_hosts already trusts the exact live key — which is
+  // what the Mosh handshake's system ssh actually used. The companion must
+  // accept it so Mosh stats appear.
+  const seen = [];
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "live-fp" }),
+      classifyHostKey: () => ({ status: "unknown" }),
+    },
+    isHostKeyTrustedBySystem: (args) => {
+      seen.push(args);
+      return args.hostname === "sys.example.com" && args.fingerprint === "live-fp";
+    },
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "sys.example.com",
+      port: 22,
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      knownHosts: [],
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  let verdict;
+  client.connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, true);
+  // The system check was consulted with the live key's fingerprint.
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].fingerprint, "live-fp");
+
+  client.emitReady();
+  assert.equal(await pending, client);
+});
+
+test("rejects (permanently) when NEITHER Netcatty nor the system known_hosts trust the key", async () => {
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "live-fp" }),
+      classifyHostKey: () => ({ status: "unknown" }),
+    },
+    isHostKeyTrustedBySystem: () => false,
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "untrusted.example.com",
+      port: 22,
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      knownHosts: [],
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+
+  let verdict;
+  client.connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, false);
+
+  // ssh2 aborts; an untrusted host is a permanent failure (no re-poll loop).
+  client.emitError(Object.assign(new Error("handshake failed"), { level: "protocol" }));
+  assert.equal(await pending, null);
+  assert.equal(session.moshStatsConnFailed, true);
+});
+
+test("the system fallback is NOT consulted when Netcatty already trusts the key", async () => {
+  // Netcatty says trusted -> accept without even touching the system files.
+  let consulted = false;
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "fp" }),
+      classifyHostKey: () => ({ status: "trusted" }),
+    },
+    isHostKeyTrustedBySystem: () => {
+      consulted = true;
+      return false;
+    },
+  });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p", knownHosts: [] } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  let verdict;
+  FakeSSHClient.instances[0].connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, true);
+  assert.equal(consulted, false);
+});
+
+test("a Netcatty 'changed' key is NOT rescued by a non-matching system check (key rotation stays rejected)", async () => {
+  // Netcatty flags a key rotation (changed). The system check is consulted with
+  // the LIVE fingerprint; since the system does not record this exact new key,
+  // it returns false and the connection is refused — the mismatch is never
+  // silently accepted.
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "rotated-fp" }),
+      classifyHostKey: () => ({ status: "changed", expectedFingerprint: "old-fp" }),
+    },
+    isHostKeyTrustedBySystem: () => false,
+  });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p", knownHosts: [] } };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  let verdict;
+  FakeSSHClient.instances[0].connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, false);
+});
+
+test("works when isHostKeyTrustedBySystem is not wired in (optional dependency)", async () => {
+  // Backward-compat: an api built without the system-known_hosts dependency
+  // must not throw; it simply falls back to the Netcatty-only decision.
+  const { api, sessions } = makeApi({
+    hostKeyVerifier: {
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "fp" }),
+      classifyHostKey: () => ({ status: "unknown" }),
+    },
+    isHostKeyTrustedBySystem: undefined,
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      knownHosts: [],
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  let verdict;
+  FakeSSHClient.instances[0].connectOpts.hostVerifier(Buffer.from("rawkey"), (ok) => { verdict = ok; });
+  assert.equal(verdict, false);
 });

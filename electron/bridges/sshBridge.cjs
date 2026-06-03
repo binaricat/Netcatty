@@ -967,12 +967,20 @@ async function startSSHSessionWrapper(event, options) {
 // channel. This helper lazily establishes a best-effort, non-interactive
 // SSH connection reusing the handshake credentials and assigns it to
 // session.conn so the existing stats path works unchanged.
+const { createSystemKnownHostsApi } = require("./sshBridge/systemKnownHosts.cjs");
+// Lets the Mosh stats companion trust a host whose key is already recorded in
+// the user's system OpenSSH known_hosts (the trust source the Mosh handshake's
+// system `ssh` actually uses), in addition to Netcatty's in-app vault.
+const { isHostKeyTrustedBySystem } = createSystemKnownHostsApi({
+  fs, path, os, crypto, log,
+});
+
 const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
 const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
   get sessions() { return sessions; },
   SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
   readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
-  hostKeyVerifier, log,
+  hostKeyVerifier, isHostKeyTrustedBySystem, log,
 });
 
 const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");
