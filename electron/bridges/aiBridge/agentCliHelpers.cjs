@@ -98,53 +98,40 @@ function createAgentCliHelpers(ctx) {
     const maxAgeMs = options?.maxAgeMs ?? 30000;
     const now = Date.now();
     const cached = getCodexValidationCache();
-    if (cached && now - cached.checkedAt < maxAgeMs) {
-      return cached;
-    }
+    if (cached && now - cached.checkedAt < maxAgeMs) return cached;
 
-    const { createACPProvider } = require("@mcpc-tech/acp-ai-provider");
     const shellEnv = await getShellEnv();
-    const resolvedCommand = resolveCodexAcpBinaryPath(shellEnv, electronModule);
-    if (!resolvedCommand) {
-      const result = { ok: false, checkedAt: now, error: "codex-acp binary not found", code: "ENOENT" };
+    const codexPath = resolveCliFromPath("codex", shellEnv);
+    if (!codexPath) {
+      const result = { ok: false, checkedAt: now, error: "codex binary not found", code: "ENOENT" };
       setCodexValidationCache(result);
       return result;
     }
-    const provider = createACPProvider({
-      command: resolvedCommand,
-      env: shellEnv,
-      session: {
-        cwd: process.cwd(),
-        mcpServers: [],
-      },
-      authMethodId: "chatgpt",
-    });
-
     try {
-      await provider.initSession();
+      // Minimal read-only probe turn through the SDK to confirm auth works.
+      const { Codex } = await import("@openai/codex-sdk");
+      const codex = new Codex({ codexPathOverride: codexPath, env: shellEnv });
+      const thread = codex.startThread({ skipGitRepoCheck: true });
+      const { events } = await thread.runStreamed("ping", { sandbox: "read-only" });
+      let failed = null;
+      for await (const event of events) {
+        if (event?.type === "turn.failed") { failed = event.error; break; }
+        if (event?.type === "turn.completed") break;
+        if (event?.type === "item.completed") break; // got a response, auth fine
+      }
+      if (failed) {
+        const result = { ok: false, checkedAt: now, error: failed.message || "Codex auth failed", code: undefined };
+        setCodexValidationCache(result);
+        return result;
+      }
       const result = { ok: true, checkedAt: now, error: null };
       setCodexValidationCache(result);
       return result;
     } catch (error) {
       const normalized = extractCodexError(error);
-      const result = {
-        ok: false,
-        checkedAt: now,
-        error: normalized.message,
-        code: normalized.code,
-      };
+      const result = { ok: false, checkedAt: now, error: normalized.message, code: normalized.code };
       setCodexValidationCache(result);
       return result;
-    } finally {
-      try {
-        if (typeof provider.forceCleanup === "function") {
-          provider.forceCleanup();
-        } else if (typeof provider.cleanup === "function") {
-          provider.cleanup();
-        }
-      } catch {
-        // Ignore validation cleanup failures.
-      }
     }
   }
 
