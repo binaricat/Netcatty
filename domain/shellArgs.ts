@@ -6,41 +6,33 @@
  * like `--login -i` in a single field; we store them as a string[] that flows
  * into `pty.spawn(shell, args)`.
  *
- * Quoting model (chosen so `formatShellArgs` ⇄ `parseShellArgs` round-trips):
- * - Single quotes are fully literal — nothing is escaped inside them. This is
- *   what keeps Windows paths (`C:\msys64\…`) and embedded double quotes intact.
- * - Inside double quotes, a backslash escapes only `"` and `\`; before any other
- *   character it stays literal, so unescaped Windows paths still survive.
- * - Outside quotes there is no backslash escaping at all.
+ * Quoting model (POSIX single-quote style, so format ⇄ parse round-trips):
+ * - Both quote types are fully literal inside their span — nothing is escaped.
+ *   This keeps Windows paths (`C:\msys64\…`, even a trailing `\`) and embedded
+ *   double quotes intact.
+ * - Outside quotes a backslash is literal too, EXCEPT `\'` which yields a
+ *   literal single quote. That is the only escape, and it exists solely to
+ *   support the POSIX `'\''` idiom that `formatShellArgs` emits for tokens that
+ *   themselves contain a single quote. Every other backslash stays literal, so
+ *   unquoted Windows paths survive.
  */
 export function parseShellArgs(input: string): string[] {
   const args: string[] = [];
   let current = "";
   let inToken = false;
   let quote: '"' | "'" | null = null;
-  let escaped = false; // pending backslash, only meaningful inside double quotes
 
-  for (const ch of input) {
-    if (quote === '"') {
-      if (escaped) {
-        current += ch === '"' || ch === "\\" ? ch : "\\" + ch;
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        quote = null;
-        continue;
-      }
-      current += ch;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
       continue;
     }
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      else current += ch;
+    if (ch === "\\" && input[i + 1] === "'") {
+      current += "'";
+      inToken = true;
+      i++;
       continue;
     }
     if (ch === '"' || ch === "'") {
@@ -59,25 +51,22 @@ export function parseShellArgs(input: string): string[] {
     current += ch;
     inToken = true;
   }
-  if (escaped) current += "\\"; // trailing backslash in an unterminated quote
   if (inToken) args.push(current);
   return args;
 }
 
 /**
- * Inverse of {@link parseShellArgs} for re-display in the editor. Tokens with
- * whitespace or quote characters are quoted so the value round-trips:
- * - prefer single quotes (no escaping needed — clean for Windows paths and
- *   embedded double quotes);
- * - when the token itself contains a single quote, fall back to double quotes
- *   and escape `\` and `"`.
+ * Inverse of {@link parseShellArgs} for re-display in the editor. Single-quote
+ * quoting keeps the contents literal (Windows paths and double quotes need no
+ * escaping); an embedded single quote uses the POSIX `'\''` idiom. An explicit
+ * empty arg is emitted as `''` so it is not dropped on the next save.
  */
 export function formatShellArgs(args: string[]): string {
   return args
     .map((arg) => {
+      if (arg === "") return "''";
       if (!/[\s"']/.test(arg)) return arg;
-      if (!arg.includes("'")) return `'${arg}'`;
-      return `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+      return `'${arg.replace(/'/g, "'\\''")}'`;
     })
     .join(" ");
 }

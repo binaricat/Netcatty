@@ -58,17 +58,26 @@ test("parse and format round-trip", () => {
     ["--msg", "it's fine"],
     ["-c", `echo "it's ok"`],
     ["a'b", 'c"d'],
+    ["C:\\dir\\"],
+    ["-c", ""],
   ];
   for (const args of cases) {
     assert.deepEqual(parseShellArgs(formatShellArgs(args)), args);
   }
 });
 
+test("parseShellArgs preserves a trailing backslash inside double quotes", () => {
+  assert.deepEqual(parseShellArgs('"C:\\dir\\"'), ["C:\\dir\\"]);
+});
+
 test("formatShellArgs uses single quotes for tokens containing double quotes", () => {
   assert.equal(formatShellArgs(['echo "x"']), `'echo "x"'`);
 });
 
-test("formatShellArgs escapes tokens containing both quote types", () => {
-  // Single quote present → can't single-quote; double-quote wrap escaping the "
-  assert.equal(formatShellArgs([`it's "x"`]), `"it's \\"x\\""`);
+test("formatShellArgs uses the POSIX '\\'' idiom for embedded single quotes", () => {
+  assert.equal(formatShellArgs(["it's"]), "'it'\\''s'");
+});
+
+test("formatShellArgs emits an explicit empty arg as ''", () => {
+  assert.equal(formatShellArgs(["-c", ""]), "-c ''");
 });
