@@ -12,12 +12,14 @@ import {
   type OAuthTokens,
 } from '../../../domain/sync.ts';
 
-type WindowWithNetcatty = typeof globalThis & { window?: { netcatty?: Record<string, unknown> } };
+type WindowGlobal = typeof globalThis & { window?: unknown };
 
 function setBridge(bridge: Record<string, unknown>): () => void {
-  const g = globalThis as WindowWithNetcatty;
+  const g = globalThis as WindowGlobal;
   const original = g.window;
-  g.window = { netcatty: bridge };
+  // Loosely typed: the real window.netcatty is a large NetcattyBridge; tests
+  // only stub the handful of OneDrive methods the adapter actually calls.
+  g.window = { netcatty: bridge } as unknown as Window & typeof globalThis;
   return () => {
     g.window = original;
   };

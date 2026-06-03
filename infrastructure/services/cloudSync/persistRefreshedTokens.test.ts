@@ -3,9 +3,15 @@ import test from 'node:test';
 
 import {
   attachTokenRefreshPersistence,
+  handleProviderReauthRequiredImpl,
   persistRefreshedProviderTokensImpl,
 } from './stateAndSecurityMethods.ts';
-import type { OAuthTokens } from '../../../domain/sync.ts';
+import {
+  ONEDRIVE_REAUTH_REQUIRED_MARKER,
+  isProviderReadyForSync,
+  type OAuthTokens,
+  type ProviderConnection,
+} from '../../../domain/sync.ts';
 
 const newTokens = (): OAuthTokens => ({
   accessToken: 'fresh-access',
@@ -18,7 +24,8 @@ function createManager() {
   const saved: Array<{ provider: string; tokens?: OAuthTokens }> = [];
   let notified = 0;
   const manager = {
-    providerDecryptSeq: { onedrive: 0 } as Record<string, number>,
+    providerDecryptSeq: { onedrive: 0, google: 0 } as Record<string, number>,
+    adapters: new Map<string, { signOut: () => void }>(),
     state: {
       providers: {
         onedrive: {
@@ -27,8 +34,8 @@ function createManager() {
           tokens: { accessToken: 'old', refreshToken: 'old-refresh', tokenType: 'Bearer' },
           account: { id: 'u1' },
           resourceId: 'file-1',
-        },
-      },
+        } as ProviderConnection,
+      } as Record<string, ProviderConnection>,
     },
     saveProviderConnection: async (provider: string, connection: { tokens?: OAuthTokens }) => {
       saved.push({ provider, tokens: connection.tokens });
@@ -50,7 +57,7 @@ test('persistRefreshedProviderTokens updates state, persists, and notifies', asy
 
   assert.deepEqual(manager.state.providers.onedrive.tokens, tokens);
   // Other fields are preserved.
-  assert.equal(manager.state.providers.onedrive.account.id, 'u1');
+  assert.equal(manager.state.providers.onedrive.account?.id, 'u1');
   assert.equal(manager.state.providers.onedrive.resourceId, 'file-1');
   assert.equal(manager.state.providers.onedrive.status, 'connected');
 
@@ -66,7 +73,7 @@ test('persistRefreshedProviderTokens updates state, persists, and notifies', asy
 test('persistRefreshedProviderTokens is a no-op when the provider was disconnected', async () => {
   const { manager, saved } = createManager();
   // Simulate a disconnect happening during the async refresh.
-  manager.state.providers.onedrive = { provider: 'onedrive', status: 'disconnected' } as never;
+  manager.state.providers.onedrive = { provider: 'onedrive', status: 'disconnected' };
 
   persistRefreshedProviderTokensImpl.call(manager, 'onedrive', newTokens());
   await Promise.resolve();
@@ -100,4 +107,60 @@ test('attachTokenRefreshPersistence is a no-op for adapters without the hook', (
   assert.doesNotThrow(() =>
     attachTokenRefreshPersistence.call(manager, 'github', {} as never),
   );
+});
+
+test('handleProviderReauthRequired clears OneDrive tokens and stops it being sync-ready', async () => {
+  const { manager, saved } = createManager();
+  let signedOut = false;
+  manager.adapters.set('onedrive', { signOut: () => { signedOut = true; } });
+
+  const handled = handleProviderReauthRequiredImpl.call(
+    manager,
+    'onedrive',
+    new Error(
+      `Download failed: ${ONEDRIVE_REAUTH_REQUIRED_MARKER}: OneDrive session expired, please reconnect. (AADSTS70000)`,
+    ),
+  );
+  await Promise.resolve();
+
+  assert.equal(handled, true);
+  assert.equal(signedOut, true);
+  // Stale adapter is evicted.
+  assert.equal(manager.adapters.has('onedrive'), false);
+
+  const conn = manager.state.providers.onedrive;
+  assert.equal(conn.tokens, undefined);
+  assert.equal(conn.status, 'error');
+  // Account is preserved for display; error message is cleaned of the marker.
+  assert.equal(conn.account?.id, 'u1');
+  assert.ok(conn.error && !conn.error.includes(ONEDRIVE_REAUTH_REQUIRED_MARKER));
+  assert.match(conn.error ?? '', /please reconnect/);
+
+  // Crucial: cleared tokens => not ready for sync => auto-sync won't retry.
+  assert.equal(isProviderReadyForSync(conn), false);
+
+  // Persisted the cleared connection.
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].tokens, undefined);
+});
+
+test('handleProviderReauthRequired ignores non-OneDrive providers and unrelated errors', () => {
+  const { manager } = createManager();
+
+  // Wrong provider.
+  assert.equal(
+    handleProviderReauthRequiredImpl.call(
+      manager,
+      'google',
+      new Error(`${ONEDRIVE_REAUTH_REQUIRED_MARKER}: x`),
+    ),
+    false,
+  );
+
+  // OneDrive but an ordinary (retryable) error — must not clear tokens.
+  assert.equal(
+    handleProviderReauthRequiredImpl.call(manager, 'onedrive', new Error('network timeout')),
+    false,
+  );
+  assert.ok(manager.state.providers.onedrive.tokens);
 });

@@ -112,6 +112,7 @@ import {
   lockImpl,
   changeMasterKeyImpl,
   verifyPasswordImpl,
+  handleProviderReauthRequiredImpl,
 } from './cloudSync/stateAndSecurityMethods';
 
 // ============================================================================
@@ -274,6 +275,15 @@ export class CloudSyncManager {
 
   private async getConnectedAdapter(provider: CloudProvider): Promise<CloudAdapter> {
     return getConnectedAdapterImpl.call(this, provider);
+  }
+
+  /**
+   * If `error` indicates OneDrive's refresh token is dead, clear the stale
+   * tokens so the provider drops to a reconnect state instead of retrying the
+   * dead token. Returns true when handled. Safe no-op otherwise.
+   */
+  private handleProviderReauthRequired(provider: CloudProvider, error: unknown): boolean {
+    return handleProviderReauthRequiredImpl.call(this, provider, error);
   }
 
   // ==========================================================================

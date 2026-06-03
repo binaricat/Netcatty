@@ -2,8 +2,10 @@
 import {
   SYNC_CONSTANTS,
   SYNC_STORAGE_KEYS,
+  cleanOneDriveErrorMessage,
   generateDeviceId,
   getDefaultDeviceName,
+  isOneDriveReauthRequiredMessage,
 } from '../../../domain/sync';
 import {
   DEFAULT_CLOUD_SYNC_STRATEGY,
@@ -429,6 +431,45 @@ export function persistRefreshedProviderTokensImpl(
   };
   void this.saveProviderConnection(provider, this.state.providers[provider]);
   this.notifyStateChange();
+}
+
+/**
+ * Handle a sync error that means OneDrive's refresh token is dead. Clears the
+ * now-useless tokens and tears down the adapter so the provider drops to a real
+ * "reconnect" (disconnected) state instead of staying `error`-with-tokens —
+ * which `isProviderReadyForSync` keeps treating as ready, so auto-sync would
+ * otherwise retry the dead token forever and never surface a reconnect prompt.
+ *
+ * Returns true when it handled a reauth-required OneDrive error so the caller
+ * can preserve a clean status message. No-op (returns false) for any other
+ * provider or error.
+ */
+export function handleProviderReauthRequiredImpl(
+  this: any,
+  provider: CloudProvider,
+  error: unknown,
+): boolean {
+  if (provider !== 'onedrive') return false;
+  const message = error instanceof Error ? error.message : String(error);
+  if (!isOneDriveReauthRequiredMessage(message)) return false;
+
+  const adapter = this.adapters.get(provider);
+  if (adapter) {
+    adapter.signOut();
+    this.adapters.delete(provider);
+  }
+
+  // Bump decrypt seq so a stale in-flight decrypt cannot resurrect the tokens.
+  ++this.providerDecryptSeq[provider];
+  this.state.providers[provider] = {
+    provider,
+    status: 'error',
+    account: this.state.providers[provider]?.account,
+    error: cleanOneDriveErrorMessage(message),
+  };
+  void this.saveProviderConnection(provider, this.state.providers[provider]);
+  this.notifyStateChange();
+  return true;
 }
 
 export async function setupMasterKeyImpl(this: any,password: string): Promise<void> {

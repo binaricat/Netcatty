@@ -31,6 +31,22 @@ function assertSyncSecurityGeneration(manager: any, generation?: number): void {
   }
 }
 
+/**
+ * Let the manager clear stale credentials when an error means a provider's
+ * refresh token is dead (OneDrive). Returns true when it set a reconnect state,
+ * so the caller skips the generic `error`-with-tokens status that would keep the
+ * provider "ready" and retrying. Safe no-op when the manager lacks the hook.
+ */
+function handleProviderReauthRequired(
+  manager: any,
+  provider: CloudProvider,
+  error: unknown,
+): boolean {
+  return typeof manager.handleProviderReauthRequired === 'function'
+    ? manager.handleProviderReauthRequired(provider, error)
+    : false;
+}
+
 async function uploadLocalPayloadImpl(this: any,
   provider: CloudProvider,
   adapter: CloudAdapter,
@@ -203,7 +219,9 @@ export async function uploadToProviderImpl(this: any,
       return result;
     } catch (error) {
       this.state.lastError = String(error);
-      this.updateProviderStatus(provider, 'error', String(error));
+      if (!handleProviderReauthRequired(this, provider, error)) {
+        this.updateProviderStatus(provider, 'error', String(error));
+      }
 
       // Add to sync history
       this.addSyncHistoryEntry({
@@ -467,7 +485,12 @@ export async function syncToProviderImpl(this: any,
     } catch (error) {
       this.state.syncState = 'ERROR';
       this.state.lastError = String(error);
-      this.updateProviderStatus(provider, 'error', String(error));
+      // A dead OneDrive refresh token clears its own credentials and sets a
+      // clean reconnect status; only fall back to the generic error status when
+      // it wasn't a reauth-required failure.
+      if (!handleProviderReauthRequired(this, provider, error)) {
+        this.updateProviderStatus(provider, 'error', String(error));
+      }
 
       // Add to sync history
       this.addSyncHistoryEntry({
@@ -519,6 +542,10 @@ export async function downloadFromProviderImpl(this: any,provider: CloudProvider
 
       return { provider, payload, remoteFile };
     } catch (error) {
+      // Surface a reconnect state if the failure was a dead OneDrive refresh
+      // token (clears stale credentials); the error is still rethrown to the
+      // caller below.
+      handleProviderReauthRequired(this, provider, error);
       // Add to sync history
       this.addSyncHistoryEntry({
         timestamp: Date.now(),
