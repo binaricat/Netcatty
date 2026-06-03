@@ -43,9 +43,17 @@ export function parseShellArgs(input: string): string[] {
 
 /**
  * Inverse of {@link parseShellArgs} for re-display in the editor. Tokens
- * containing whitespace or quote characters are wrapped in double quotes so the
- * value round-trips back through `parseShellArgs`.
+ * containing whitespace or quote characters are wrapped in quotes. The quote
+ * char is chosen so the contents need no escaping and round-trip back through
+ * `parseShellArgs`: prefer single quotes when the token contains a double quote
+ * (common in `-c "…"` scripts), otherwise use double quotes (which also keeps
+ * Windows backslash paths and apostrophes intact).
  */
 export function formatShellArgs(args: string[]): string {
-  return args.map((arg) => (/[\s"']/.test(arg) ? `"${arg}"` : arg)).join(" ");
+  return args
+    .map((arg) => {
+      if (!/[\s"']/.test(arg)) return arg;
+      return arg.includes('"') && !arg.includes("'") ? `'${arg}'` : `"${arg}"`;
+    })
+    .join(" ");
 }

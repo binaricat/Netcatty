@@ -690,9 +690,13 @@ export default function SettingsTerminalTab(props: {
                 } else if (value === "__default__") {
                   setShowCustomShellInput(false);
                   updateTerminalSetting("localShell", "");
+                  // Custom args only apply to a custom path; clear them so a stale
+                  // value can't leak into a discovered/default shell launch (#1221).
+                  updateTerminalSetting("localShellArgs", []);
                 } else {
                   setShowCustomShellInput(false);
                   updateTerminalSetting("localShell", value);
+                  updateTerminalSetting("localShellArgs", []);
                 }
               }}
             >

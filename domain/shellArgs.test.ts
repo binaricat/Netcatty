@@ -50,8 +50,14 @@ test("parse and format round-trip", () => {
     ["--login", "-i"],
     ["--msg", "hello world"],
     ["--rcfile", "C:\\Program Files\\rc"],
+    ["-c", 'echo "hello world"'],
+    ["--msg", "it's fine"],
   ];
   for (const args of cases) {
     assert.deepEqual(parseShellArgs(formatShellArgs(args)), args);
   }
+});
+
+test("formatShellArgs uses single quotes for tokens containing double quotes", () => {
+  assert.equal(formatShellArgs(['echo "x"']), `'echo "x"'`);
 });
