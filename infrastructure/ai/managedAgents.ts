@@ -3,8 +3,11 @@ import type { DiscoveredAgent, ExternalAgentConfig } from './types';
 export type ManagedAgentKey = 'codex' | 'claude' | 'copilot';
 
 const MANAGED_AGENT_META: Record<ManagedAgentKey, { commandNames: string[]; acpCommand: string }> = {
-  codex: { commandNames: ['codex', 'codex-acp'], acpCommand: 'codex-acp' },
-  claude: { commandNames: ['claude'], acpCommand: 'claude-agent-acp' },
+  // `acpCommand` now carries the SDK backend key (claude|codex|copilot), not an
+  // ACP binary name. The field name is kept so the renderer routing predicate
+  // (`if (agentConfig.acpCommand)`) and persisted ExternalAgentConfig stay stable.
+  codex: { commandNames: ['codex'], acpCommand: 'codex' },
+  claude: { commandNames: ['claude'], acpCommand: 'claude' },
   copilot: { commandNames: ['copilot'], acpCommand: 'copilot' },
 };
 
