@@ -311,6 +311,51 @@ function isPlausibleCliVersionOutput(value) {
 
 let _cachedShellEnv = null;
 
+/**
+ * Run the user's login shell once to print its PATH. Used as a fallback when
+ * the main `-ilc env` capture in getShellEnv fails (layer-0 fix-path).
+ */
+function defaultRunLoginShellPath() {
+  let shell = process.env.SHELL || "/bin/zsh";
+  if (!path.isAbsolute(shell) || !existsSync(shell)) {
+    shell = "/bin/zsh";
+  }
+  return execFileSync(shell, ["-ilc", 'echo -n "$PATH"'], {
+    encoding: "utf8",
+    timeout: 4000,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, HOME: process.env.HOME || "" },
+  });
+}
+
+/**
+ * Union a login-shell PATH ahead of basePath and de-duplicate, so a GUI launch
+ * (Finder/Dock) with a stripped PATH still discovers user-installed CLIs.
+ * Returns basePath unchanged on win32 or if the login-shell probe fails.
+ */
+function mergeLoginShellPath({
+  basePath,
+  runLoginShellPath = defaultRunLoginShellPath,
+  platform = process.platform,
+  delimiter = path.delimiter,
+}) {
+  if (platform === "win32") return basePath;
+  let shellPath = "";
+  try {
+    shellPath = String(runLoginShellPath() || "").trim();
+  } catch {
+    return basePath;
+  }
+  if (!shellPath) return basePath;
+  const seen = new Set();
+  const out = [];
+  for (const part of [...shellPath.split(delimiter), ...String(basePath || "").split(delimiter)]) {
+    const p = part.trim();
+    if (p && !seen.has(p)) { seen.add(p); out.push(p); }
+  }
+  return out.join(delimiter);
+}
+
 async function getShellEnv() {
   if (_cachedShellEnv) return _cachedShellEnv;
 
@@ -350,15 +395,21 @@ async function getShellEnv() {
       }
     }
     const shellPath = envMap.PATH || "";
+    const mergedPath = [...extraPaths, shellPath, process.env.PATH || ""].join(path.delimiter);
+    // Layer-0 fix-path: front-load + de-duplicate the login-shell PATH we just
+    // captured (reuse the `-ilc env` result above — no second shell spawn).
     _cachedShellEnv = {
       ...envMap,
       ...process.env,
-      PATH: [...extraPaths, shellPath, process.env.PATH || ""].join(path.delimiter),
+      PATH: mergeLoginShellPath({ basePath: mergedPath, runLoginShellPath: () => shellPath }),
     };
   } catch {
+    // `-ilc env` failed — try a lighter login-shell PATH probe as a fallback so
+    // GUI-launch PATH stripping still doesn't break CLI discovery (layer-0).
+    const basePath = [...extraPaths, process.env.PATH || ""].join(path.delimiter);
     _cachedShellEnv = {
       ...process.env,
-      PATH: [...extraPaths, process.env.PATH || ""].join(path.delimiter),
+      PATH: mergeLoginShellPath({ basePath }),
     };
   }
   return _cachedShellEnv;
@@ -510,6 +561,7 @@ module.exports = {
   resolveClaudeAcpBinaryPath,
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,
+  mergeLoginShellPath,
   getShellEnv,
   invalidateShellEnvCache,
   serializeStreamChunk,
