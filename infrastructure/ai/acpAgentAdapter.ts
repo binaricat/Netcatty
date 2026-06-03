@@ -149,7 +149,7 @@ export async function runAcpAgentTurn(
   const acpBridge = bridge as unknown as AcpBridge;
 
   if (!config.acpCommand) {
-    callbacks.onError('Agent does not support ACP protocol');
+    callbacks.onError('Agent has no SDK backend configured');
     return;
   }
 
@@ -280,9 +280,9 @@ function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks): bo
     }
     case 'tool-call': {
       const toolName = (event.toolName as string) || 'unknown';
-      // The Electron bridge serializes tool args as `args` (see
-      // shellUtils.cjs serializeStreamChunk), while direct AI SDK paths
-      // use `input`. Read both so either source works.
+      // The Electron bridge emits tool args as `args` (see sdk/emit.cjs
+      // toolCall), while direct AI SDK paths use `input`. Read both so
+      // either source works.
       const input =
         (event.input as Record<string, unknown>) ||
         (event.args as Record<string, unknown>) ||

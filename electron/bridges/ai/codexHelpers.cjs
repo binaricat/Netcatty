@@ -6,7 +6,6 @@
  */
 "use strict";
 
-const { execFileSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const { existsSync, readFileSync } = require("node:fs");
 const os = require("node:os");
