@@ -93,15 +93,26 @@ test("gives up (no connection) when there is no usable non-interactive auth", as
   assert.equal(FakeSSHClient.instances.length, 0);
 });
 
-test("gives up when moshStatsAuth is missing", async () => {
-  const { api } = makeApi();
+test("missing moshStatsAuth is transient (handshake not yet swapped), not a permanent failure", async () => {
+  const { api, sessions } = makeApi();
+  // Session is connected (renderer polls) but the handshake hasn't swapped to
+  // mosh-client yet, so moshStatsAuth is not assigned.
   const session = {};
+  sessions.set("sid", session);
 
   const result = await api.ensureMoshStatsConnection(session, "sid");
 
   assert.equal(result, null);
-  assert.equal(session.moshStatsConnFailed, true);
+  // Must NOT be permanently disabled — a later poll (after the swap sets
+  // moshStatsAuth) has to be able to establish the companion.
+  assert.notEqual(session.moshStatsConnFailed, true);
   assert.equal(FakeSSHClient.instances.length, 0);
+
+  // Once auth becomes available, a subsequent poll connects.
+  session.moshStatsAuth = { hostname: "h", username: "u", password: "p" };
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  assert.equal(FakeSSHClient.instances.length, 1);
 });
 
 test("connects with a stored password and adopts the connection on ready", async () => {
@@ -371,7 +382,28 @@ test("the password host-key verifier accepts only keys trusted in known-hosts", 
   }
 });
 
-test("inline credentials take precedence over ssh-agent", async () => {
+test("an explicit private key suppresses the ssh-agent fallback", async () => {
+  const { api, sessions } = makeApi({ getSshAgentSocket: () => "/tmp/agent.sock" });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.ok(client.connectOpts.privateKey);
+  assert.equal(client.connectOpts.agent, undefined);
+});
+
+test("a saved password does NOT suppress agent auth (agent offered alongside password)", async () => {
+  // A public-key host that authenticates via the agent may still carry a
+  // stored password; the companion must offer both so agent auth (tried
+  // first by ssh2) can succeed instead of failing on password only.
   const { api, sessions } = makeApi({ getSshAgentSocket: () => "/tmp/agent.sock" });
   const session = { moshStatsAuth: { hostname: "h", username: "u", password: "pw" } };
   sessions.set("sid", session);
@@ -379,8 +411,8 @@ test("inline credentials take precedence over ssh-agent", async () => {
   api.ensureMoshStatsConnection(session, "sid");
   await tick();
   const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.agent, "/tmp/agent.sock");
   assert.equal(client.connectOpts.password, "pw");
-  assert.equal(client.connectOpts.agent, undefined);
 });
 
 test("concurrent calls share a single in-flight connection attempt", async () => {

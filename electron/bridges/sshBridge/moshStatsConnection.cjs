@@ -166,13 +166,15 @@ function createMoshStatsConnectionApi(ctx) {
         connectOpts.tryKeyboard = true;
       }
 
-      // ssh-agent fallback whenever a socket is available and no inline
-      // credentials were resolved. The Mosh handshake runs the system `ssh`
-      // with the inherited environment, so it authenticates via the local
-      // ssh-agent by default — independent of agentForwarding (which only
-      // controls *remote* agent forwarding). Mirroring that here covers the
-      // common "key lives in the agent, no stored privateKey" case.
-      if (!agent && !connectOpts.privateKey && !connectOpts.password) {
+      // ssh-agent fallback whenever a socket is available and no *explicit*
+      // key / certificate-agent was resolved. The Mosh handshake runs the
+      // system `ssh` with the inherited environment, so it authenticates via
+      // the local ssh-agent by default — independent of agentForwarding
+      // (which only controls *remote* forwarding). This is offered alongside
+      // any saved password (ssh2 tries agent before password), so a
+      // public-key host that also happens to have a stored password still
+      // authenticates via the agent instead of failing on password-only.
+      if (!agent && !connectOpts.privateKey) {
         const agentSocket = getSshAgentSocket();
         if (agentSocket) {
           connectOpts.agent = agentSocket;
@@ -240,7 +242,12 @@ function createMoshStatsConnectionApi(ctx) {
     async function establishMoshStatsConnection(session, sessionId, webContents) {
       const auth = session.moshStatsAuth;
       if (!auth || !auth.hostname) {
-        session.moshStatsConnFailed = true;
+        // moshStatsAuth is only assigned once the handshake completes and the
+        // session swaps to mosh-client. The renderer can mark a session
+        // "connected" (and start polling) from the SSH bootstrap's visible
+        // PTY output *before* that swap, so a missing auth here is transient —
+        // do NOT permanently disable stats, or the companion would never be
+        // attempted after the handshake finishes.
         return null;
       }
 
