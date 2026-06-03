@@ -17,6 +17,11 @@ export const LINUX_DISTRO_OPTIONS = [
   'oracle',
   'kali',
   'alinux',
+  'anolis',
+  'openeuler',
+  'kylin',
+  'neokylin',
+  'ubuntukylin',
 ] as const;
 
 /**
@@ -43,6 +48,12 @@ export type NetworkDeviceVendor = typeof NETWORK_DEVICE_OPTIONS[number];
 export const normalizeDistroId = (value?: string) => {
   const v = (value || '').toLowerCase().trim();
   if (!v) return '';
+  // Ubuntu Kylin (优麒麟): os-release ID is `ubuntukylin`. Must come before the
+  // generic `ubuntu` and `kylin` branches because 'ubuntukylin' contains both
+  // substrings and would otherwise resolve to one of them.
+  if (v.includes('ubuntukylin') || v.includes('ubuntu kylin') || v.includes('ukylin')) {
+    return 'ubuntukylin';
+  }
   if (v.includes('ubuntu')) return 'ubuntu';
   if (v.includes('debian')) return 'debian';
   if (v.includes('centos')) return 'centos';
@@ -62,6 +73,20 @@ export const normalizeDistroId = (value?: string) => {
   if (v.includes('alinux') || v.includes('aliyun') || v.includes('alibaba cloud')) {
     return 'alinux';
   }
+  // Chinese Linux distributions (issue #1210). Each is keyed off the
+  // /etc/os-release ID field and must come before the generic `linux`
+  // fallback below; some IDs (anolis, kylin, neokylin) also contain other
+  // substrings, so ordering matters.
+  //
+  // Anolis OS (龙蜥): ID="anolis" (ID_LIKE="rhel fedora centos").
+  if (v.includes('anolis')) return 'anolis';
+  // openEuler (欧拉): ID="openEuler" — already lower-cased to `openeuler` here.
+  if (v.includes('openeuler')) return 'openeuler';
+  // NeoKylin / China Standard Kylin (中标麒麟): ID="neokylin". Must precede the
+  // `kylin` branch because 'neokylin'.includes('kylin') is true.
+  if (v.includes('neokylin')) return 'neokylin';
+  // Kylin / Galaxy Kylin (银河麒麟): ID="kylin" (server and desktop editions).
+  if (v.includes('kylin')) return 'kylin';
   // Network device vendor IDs may arrive here after detection — preserve them.
   if ((NETWORK_DEVICE_OPTIONS as readonly string[]).includes(v)) return v;
   if (v === 'linux' || v.includes('linux')) return 'linux';

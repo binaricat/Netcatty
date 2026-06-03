@@ -188,10 +188,75 @@ test("normalizeDistroId maps legacy Aliyun Linux IDs to alinux", () => {
 test("normalizeDistroId matches Alibaba Cloud Linux PRETTY_NAME/NAME fallback", () => {
   // When ID is absent the detector falls back to NAME / PRETTY_NAME text.
   assert.equal(normalizeDistroId("Alibaba Cloud Linux"), "alinux");
+  // Regression guard: this PRETTY_NAME contains the substring "anolis"
+  // ("OpenAnolis Edition") but must still resolve to alinux because the
+  // alinux branch (matching "alibaba cloud") runs before the anolis branch.
   assert.equal(
     normalizeDistroId("Alibaba Cloud Linux 3.2104 U13.1 (OpenAnolis Edition)"),
     "alinux",
   );
+});
+
+// --- Chinese Linux distributions (issue #1210) ---
+
+test("normalizeDistroId maps Anolis OS os-release ID to anolis", () => {
+  // /etc/os-release ID="anolis" (ID_LIKE="rhel fedora centos").
+  // Regression guard: 'anolis' has no "linux" substring, but assert it does
+  // not silently fall through to the generic icon.
+  assert.equal(normalizeDistroId("anolis"), "anolis");
+  assert.notEqual(normalizeDistroId("anolis"), "linux");
+  // PRETTY_NAME / NAME fallback when ID is unavailable.
+  assert.equal(normalizeDistroId("Anolis OS 8.10"), "anolis");
+});
+
+test("normalizeDistroId maps openEuler os-release ID to openeuler", () => {
+  // os-release ID="openEuler" — note the camelCase. The detector lower-cases
+  // its input, so the stored/normalized id is the lower-case 'openeuler'.
+  assert.equal(normalizeDistroId("openEuler"), "openeuler");
+  assert.equal(normalizeDistroId("openeuler"), "openeuler");
+  assert.notEqual(normalizeDistroId("openEuler"), "linux");
+  assert.equal(normalizeDistroId("openEuler 22.03 (LTS-SP3)"), "openeuler");
+});
+
+test("normalizeDistroId maps Kylin os-release ID to kylin", () => {
+  // 银河麒麟 / Kylin Linux Advanced Server — os-release ID="kylin".
+  assert.equal(normalizeDistroId("kylin"), "kylin");
+  assert.notEqual(normalizeDistroId("kylin"), "linux");
+  assert.equal(
+    normalizeDistroId("Kylin Linux Advanced Server V10 (Lance)"),
+    "kylin",
+  );
+});
+
+test("normalizeDistroId maps NeoKylin os-release ID to neokylin", () => {
+  // 中标麒麟 / NeoKylin — os-release ID="neokylin".
+  // Regression guard: 'neokylin'.includes('kylin') is true, so without a
+  // dedicated branch ordered before `kylin` this would resolve to 'kylin'.
+  assert.equal(normalizeDistroId("neokylin"), "neokylin");
+  assert.notEqual(normalizeDistroId("neokylin"), "kylin");
+  assert.notEqual(normalizeDistroId("neokylin"), "linux");
+  assert.equal(
+    normalizeDistroId("NeoKylin Linux Advanced Server V7"),
+    "neokylin",
+  );
+});
+
+test("normalizeDistroId maps Ubuntu Kylin os-release ID to ubuntukylin", () => {
+  // 优麒麟 / Ubuntu Kylin — os-release ID="ubuntukylin".
+  // Regression guard: 'ubuntukylin' contains both "ubuntu" and "kylin", so the
+  // branch must run before both the generic `ubuntu` and `kylin` branches.
+  assert.equal(normalizeDistroId("ubuntukylin"), "ubuntukylin");
+  assert.notEqual(normalizeDistroId("ubuntukylin"), "ubuntu");
+  assert.notEqual(normalizeDistroId("ubuntukylin"), "kylin");
+  assert.notEqual(normalizeDistroId("ubuntukylin"), "linux");
+  assert.equal(normalizeDistroId("Ubuntu Kylin"), "ubuntukylin");
+});
+
+test("normalizeDistroId keeps plain Ubuntu and plain Kylin distinct from the Kylin variants", () => {
+  // Ensure the new variant branches did not regress the base distros.
+  assert.equal(normalizeDistroId("ubuntu"), "ubuntu");
+  assert.equal(normalizeDistroId("Ubuntu 22.04.3 LTS"), "ubuntu");
+  assert.equal(normalizeDistroId("kylin"), "kylin");
 });
 
 test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {

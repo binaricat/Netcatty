@@ -19,6 +19,12 @@ export const DISTRO_LOGOS: Record<string, string> = {
   kali: "/distro/kali.svg",
   almalinux: "/distro/almalinux.svg",
   alinux: "/distro/alinux.svg",
+  // Chinese Linux distributions (see domain/host.ts `normalizeDistroId`).
+  anolis: "/distro/anolis.svg",
+  openeuler: "/distro/openeuler.svg",
+  kylin: "/distro/kylin.svg",
+  neokylin: "/distro/neokylin.svg",
+  ubuntukylin: "/distro/ubuntukylin.svg",
   // OS-level logos (used by local terminal tab icons)
   macos: "/distro/macos.svg",
   windows: "/distro/windows.svg",
@@ -50,6 +56,12 @@ export const DISTRO_COLORS: Record<string, string> = {
   kali: "bg-[#0F6DB3]",
   almalinux: "bg-[#173B66]",
   alinux: "bg-[#FF6A00]",
+  // Chinese Linux distribution brand colors
+  anolis: "bg-[#00A1A1]",
+  openeuler: "bg-[#002FA7]",
+  kylin: "bg-[#C7000B]",
+  neokylin: "bg-[#1A4FA0]",
+  ubuntukylin: "bg-[#DA4D1E]",
   // OS-level colors
   macos: "bg-[#333333]",
   windows: "bg-[#0078D4]",
