@@ -453,6 +453,13 @@ export function handleProviderReauthRequiredImpl(
   const message = error instanceof Error ? error.message : String(error);
   if (!isOneDriveReauthRequiredMessage(message)) return false;
 
+  // Idempotent: this error can surface on multiple paths in one sync (preflight
+  // inspection + the operation's own catch). Once the credentials are already
+  // cleared there is nothing more to do, but still report handled so callers
+  // skip the generic error status that would re-add the raw marker message.
+  const current = this.state.providers[provider];
+  if (!current?.tokens && !current?.config) return true;
+
   const adapter = this.adapters.get(provider);
   if (adapter) {
     adapter.signOut();
@@ -464,7 +471,7 @@ export function handleProviderReauthRequiredImpl(
   this.state.providers[provider] = {
     provider,
     status: 'error',
-    account: this.state.providers[provider]?.account,
+    account: current?.account,
     error: cleanOneDriveErrorMessage(message),
   };
   void this.saveProviderConnection(provider, this.state.providers[provider]);

@@ -6,6 +6,7 @@ import {
   handleProviderReauthRequiredImpl,
   persistRefreshedProviderTokensImpl,
 } from './stateAndSecurityMethods.ts';
+import { inspectProviderRemoteStateImpl } from './authMethods.ts';
 import {
   ONEDRIVE_REAUTH_REQUIRED_MARKER,
   isProviderReadyForSync,
@@ -163,4 +164,35 @@ test('handleProviderReauthRequired ignores non-OneDrive providers and unrelated 
     false,
   );
   assert.ok(manager.state.providers.onedrive.tokens);
+});
+
+test('inspectProviderRemoteState clears OneDrive tokens on a reauth-required download error', async () => {
+  const { manager, saved } = createManager();
+  // Provide the manager surface inspectProviderRemoteState touches.
+  Object.assign(manager, {
+    handleProviderReauthRequired(provider: string, error: unknown) {
+      return handleProviderReauthRequiredImpl.call(manager, provider as never, error);
+    },
+    createSyncedFileSignature: async () => null,
+    loadSyncAnchor: () => null,
+  });
+
+  const adapter = {
+    resourceId: 'file-1',
+    download: async () => {
+      throw new Error(
+        `Download failed: ${ONEDRIVE_REAUTH_REQUIRED_MARKER}: OneDrive session expired, please reconnect.`,
+      );
+    },
+  };
+
+  const result = await inspectProviderRemoteStateImpl.call(manager, 'onedrive', adapter as never);
+  await Promise.resolve();
+
+  // The inspection reports an error (so callers fail closed)...
+  assert.ok(result.error);
+  // ...and the dead credentials were cleared so the provider is no longer ready.
+  assert.equal(manager.state.providers.onedrive.tokens, undefined);
+  assert.equal(isProviderReadyForSync(manager.state.providers.onedrive), false);
+  assert.equal(saved.length, 1);
 });

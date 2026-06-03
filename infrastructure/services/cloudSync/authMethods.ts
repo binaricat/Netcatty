@@ -495,6 +495,12 @@ export async function inspectProviderRemoteStateImpl(this: any,
         remoteFile,
       };
     } catch (error) {
+      // A dead OneDrive refresh token surfaces here during sync preflight,
+      // syncAll preflight, and startup inspection. Clear the stale credentials
+      // so the provider drops to a reconnect state instead of being retried.
+      if (typeof this.handleProviderReauthRequired === 'function') {
+        this.handleProviderReauthRequired(provider, error);
+      }
       return {
         remoteChanged: false,
         remoteFile: null,
