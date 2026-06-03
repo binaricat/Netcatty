@@ -414,9 +414,10 @@ test("closeSession ends a Mosh stats companion connection", async (t) => {
   h.spawns[0].emitExit({ exitCode: 0, signal: 0 });
 
   // Simulate a lazily-opened companion ssh2 connection on the live session.
+  // It lives on moshStatsConn (separate from session.conn) per #1198.
   const session = h.sessions.get("mosh-test-session");
   let ended = false;
-  session.conn = { end() { ended = true; } };
+  session.moshStatsConn = { end() { ended = true; } };
 
   h.bridge.closeSession(h.event, { sessionId: "mosh-test-session" });
   assert.equal(ended, true);

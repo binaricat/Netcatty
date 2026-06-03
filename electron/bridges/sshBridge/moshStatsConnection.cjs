@@ -256,10 +256,21 @@ function createMoshStatsConnectionApi(ctx) {
     /**
      * Ensure a Mosh session has a usable stats companion connection.
      *
-     * Returns the ssh2 Client on success (also assigned to `session.conn`),
-     * or null when one could not be established. Safe to call repeatedly:
-     * concurrent calls share a single in-flight attempt, and a permanent
-     * failure is cached so later polls don't reconnect on every tick.
+     * Returns the ssh2 Client on success (also stored on
+     * `session.moshStatsConn`), or null when one could not be established.
+     *
+     * The companion is stored ONLY on `session.moshStatsConn`, deliberately
+     * NOT on `session.conn`: other bridges treat `session.conn` as the
+     * session's primary interactive SSH connection (getSessionPwd assumes its
+     * exec channel is a sibling of the interactive shell; SFTP / MCP exec run
+     * over it). A Mosh session's interactive shell lives on the UDP
+     * mosh-client, not on this background stats connection, so exposing it as
+     * `session.conn` would make those paths return bogus results or run over
+     * the wrong connection. Only getServerStats reads `session.moshStatsConn`.
+     *
+     * Safe to call repeatedly: concurrent calls share a single in-flight
+     * attempt, and a permanent failure is cached so later polls don't
+     * reconnect on every tick.
      *
      * @param {object} session - the shared session record
      * @param {string} sessionId - the session's key in the shared sessions map
@@ -268,9 +279,8 @@ function createMoshStatsConnectionApi(ctx) {
      */
     function ensureMoshStatsConnection(session, sessionId, webContents) {
       if (!session) return Promise.resolve(null);
-      // Already connected (either a real SSH session or a previously
-      // established companion).
-      if (session.conn) return Promise.resolve(session.conn);
+      // A previously established companion is reused.
+      if (session.moshStatsConn) return Promise.resolve(session.moshStatsConn);
       // A prior attempt permanently failed — don't keep retrying every poll.
       if (session.moshStatsConnFailed) return Promise.resolve(null);
       // Reuse an in-flight attempt so two near-simultaneous polls don't open
@@ -367,7 +377,8 @@ function createMoshStatsConnectionApi(ctx) {
             finish(null);
             return;
           }
-          session.conn = conn;
+          // Stored only on moshStatsConn — never on session.conn (see the
+          // ensureMoshStatsConnection docstring for why).
           session.moshStatsConn = conn;
           finish(conn);
         });
@@ -376,7 +387,6 @@ function createMoshStatsConnectionApi(ctx) {
           log("[Mosh] stats companion connection error:", err?.message || String(err));
           // If this fired after we already adopted the connection, drop the
           // stale handle so the next poll can rebuild a fresh one.
-          if (session.conn === conn) session.conn = null;
           if (session.moshStatsConn === conn) session.moshStatsConn = null;
           // Auth rejection won't change with the same stored credentials, so
           // stop retrying. Everything else may be transient.
@@ -384,7 +394,6 @@ function createMoshStatsConnectionApi(ctx) {
         });
 
         conn.on("close", () => {
-          if (session.conn === conn) session.conn = null;
           if (session.moshStatsConn === conn) session.moshStatsConn = null;
           // If the socket closed mid-handshake without ever emitting "ready"
           // or "error", settle the attempt here so the awaiting getServerStats

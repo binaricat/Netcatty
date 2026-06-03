@@ -605,8 +605,9 @@ function createMoshSessionApi(ctx) {
           return;
         }
         // Tear down the host-info stats companion ssh2 connection (issue
-        // #1198) if one was opened — it outlives the mosh-client PTY otherwise.
-        try { session.conn?.end(); } catch { /* ignore */ }
+        // #1198) if one was opened — it lives on moshStatsConn and outlives
+        // the mosh-client PTY otherwise.
+        try { session.moshStatsConn?.end(); } catch { /* ignore */ }
         flush();
         sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
         const contents = electronModule.webContents.fromId(session.webContentsId);

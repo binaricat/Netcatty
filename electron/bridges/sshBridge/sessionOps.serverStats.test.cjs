@@ -60,15 +60,18 @@ test("getServerStats opens a Mosh stats companion connection when session.conn i
       ensureCalls += 1;
       assert.equal(s, session);
       assert.equal(id, "sid");
-      // Simulate a successful companion connection.
-      s.conn = fakeConn(LINUX_STATS);
-      return s.conn;
+      // Simulate a successful companion connection. The real helper stores it
+      // on moshStatsConn (NOT conn) so it stays invisible to other bridges.
+      s.moshStatsConn = fakeConn(LINUX_STATS);
+      return s.moshStatsConn;
     },
   });
 
   const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
 
   assert.equal(ensureCalls, 1);
+  // session.conn must remain unset — only moshStatsConn carries the companion.
+  assert.equal(session.conn, undefined);
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
   assert.equal(result.stats.cpuCores, 4);

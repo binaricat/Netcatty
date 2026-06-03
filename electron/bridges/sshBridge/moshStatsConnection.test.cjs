@@ -70,10 +70,10 @@ function makeApi(overrides = {}) {
   return { api, sessions, logs };
 }
 
-test("returns existing session.conn without opening a new connection", async () => {
+test("reuses an already-established companion (moshStatsConn) without reconnecting", async () => {
   const existing = { exec() {} };
   const { api } = makeApi();
-  const session = { conn: existing, moshStatsAuth: { hostname: "h", password: "p" } };
+  const session = { moshStatsConn: existing, moshStatsAuth: { hostname: "h", password: "p" } };
 
   const result = await api.ensureMoshStatsConnection(session, "sid");
 
@@ -134,8 +134,10 @@ test("connects with a stored password and adopts the connection on ready", async
   const result = await pending;
 
   assert.equal(result, client);
-  assert.equal(session.conn, client);
+  // Stored ONLY on moshStatsConn, never on session.conn (keeps the companion
+  // invisible to getSessionPwd / SFTP / MCP exec).
   assert.equal(session.moshStatsConn, client);
+  assert.equal(session.conn, undefined);
 });
 
 test("uses a parseable private key and passphrase, not password fallback only", async () => {
@@ -570,6 +572,7 @@ test("a connection that becomes ready after the session closed is discarded", as
   assert.equal(result, null);
   assert.equal(FakeSSHClient.instances[0].ended, true);
   assert.equal(session.conn, undefined);
+  assert.equal(session.moshStatsConn, undefined);
 });
 
 test("honors host algorithm settings via buildAlgorithms", async () => {
