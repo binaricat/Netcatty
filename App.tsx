@@ -509,7 +509,12 @@ function App({ settings }: { settings: SettingsState }) {
   }, [handleSyncNow]);
 
   // Update check hook - checks for new versions on startup
-  const { updateState, dismissUpdate, installUpdate } = useUpdateCheck();
+  const { updateState, dismissUpdate, installUpdate } = useUpdateCheck({
+    // Install blocked because an editor has unsaved changes (#1215). The main
+    // process broadcasts this; show an actionable toast telling the user to save
+    // and click "Restart Now" again.
+    onNeedsSave: () => toast.warning(t('update.needsSave.message'), t('update.needsSave.title')),
+  });
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();

@@ -222,6 +222,8 @@ export const zhCNCoreMessages: Messages = {
   'update.restartNow': '立即重启',
   'update.downloadFailed.title': '更新失败',
   'update.downloadFailed.message': '下载更新失败，可前往 GitHub 手动下载。',
+  'update.needsSave.title': '有未保存内容',
+  'update.needsSave.message': '请先保存已打开的编辑器，然后再次点击「立即重启」以安装更新。',
   'update.openReleases': '打开 Releases',
   'update.remindLater': '稍后提醒',
   'update.skipVersion': '跳过此版本',

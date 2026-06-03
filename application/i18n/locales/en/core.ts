@@ -238,6 +238,8 @@ export const enCoreMessages: Messages = {
   'update.restartNow': 'Restart Now',
   'update.downloadFailed.title': 'Update Failed',
   'update.downloadFailed.message': 'Failed to download update. You can download it manually.',
+  'update.needsSave.title': 'Unsaved Changes',
+  'update.needsSave.message': 'Save your open editors first, then click Restart Now again to install the update.',
   'update.openReleases': 'Open Releases',
   'update.remindLater': 'Remind Later',
   'update.skipVersion': 'Skip This Version',

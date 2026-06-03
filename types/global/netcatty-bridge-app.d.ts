@@ -29,6 +29,8 @@ declare global {
     onUpdateNotAvailable?(cb: () => void): () => void;
     onUpdateDownloaded?(cb: () => void): () => void;
     onUpdateError?(cb: (payload: { error: string }) => void): () => void;
+    // Fired when an install was requested but blocked by unsaved editors (#1215).
+    onUpdateNeedsSave?(cb: () => void): () => void;
 
     // Global Toggle Hotkey (Quake Mode)
     registerGlobalHotkey?(hotkey: string): Promise<{ success: boolean; enabled?: boolean; error?: string; accelerator?: string }>;

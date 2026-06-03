@@ -238,6 +238,8 @@ export const ruCoreMessages: Messages = {
   'update.restartNow': 'Перезапустить сейчас',
   'update.downloadFailed.title': 'Ошибка обновления',
   'update.downloadFailed.message': 'Не удалось скачать обновление. Вы можете скачать его вручную.',
+  'update.needsSave.title': 'Несохранённые изменения',
+  'update.needsSave.message': 'Сначала сохраните открытые редакторы, затем снова нажмите «Перезапустить сейчас», чтобы установить обновление.',
   'update.openReleases': 'Открыть релизы',
   'update.remindLater': 'Напомнить позже',
   'update.skipVersion': 'Пропустить эту версию',

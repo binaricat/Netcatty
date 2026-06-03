@@ -13,6 +13,7 @@ import { useUpdateCheck } from "../application/state/useUpdateCheck";
 import { useAIState } from "../application/state/useAIState";
 import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
 import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
+import { toast } from "./ui/toast";
 import SettingsApplicationTab from "./SettingsApplicationTab";
 import SettingsAppearanceTab from "./settings/tabs/SettingsAppearanceTab";
 import SettingsFileAssociationsTab from "./settings/tabs/SettingsFileAssociationsTab";
@@ -164,7 +165,12 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
     const { t } = useI18n();
     const { notifyRendererReady, closeSettingsWindow } = useWindowControls();
-    const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({ autoUpdateEnabled: settings.autoUpdateEnabled });
+    const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({
+        autoUpdateEnabled: settings.autoUpdateEnabled,
+        // Install blocked by unsaved editors in the main window — surface a toast
+        // here so a click from the Settings window isn't a silent no-op (#1215).
+        onNeedsSave: () => toast.warning(t('update.needsSave.message'), t('update.needsSave.title')),
+    });
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
 

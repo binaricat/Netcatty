@@ -744,6 +744,10 @@ function createPreloadApi(ctx) {
     updateErrorListeners.add(cb);
     return () => updateErrorListeners.delete(cb);
   },
+  onUpdateNeedsSave: (cb) => {
+    updateNeedsSaveListeners.add(cb);
+    return () => updateNeedsSaveListeners.delete(cb);
+  },
 
   // ── AI Bridge ──
   aiSyncProviders: async (providers) => {

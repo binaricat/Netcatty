@@ -53,12 +53,19 @@ export interface UseUpdateCheckResult {
  * - Respects dismissed version to avoid nagging
  * - Provides manual check capability
  */
-export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUpdateCheckResult {
+export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; onNeedsSave?: () => void }): UseUpdateCheckResult {
   // Accept auto-update toggle from the caller (e.g. useSettingsState) so it
   // reacts immediately in the same window. Falls back to reading localStorage
   // when no caller provides the value (e.g. in non-settings contexts).
   const autoUpdateEnabled = options?.autoUpdateEnabled ??
     (localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'false');
+
+  // Latest "install blocked by unsaved editors" callback (#1215). Kept in a ref
+  // so the listener effect (empty deps) always calls the current one without
+  // re-subscribing on every render. The consuming component shows the toast;
+  // this hook only owns the bridge subscription (toasts live in the view layer).
+  const onNeedsSaveRef = useRef(options?.onNeedsSave);
+  onNeedsSaveRef.current = options?.onNeedsSave;
 
   const [updateState, setUpdateState] = useState<UpdateState>({
     isChecking: false,
@@ -252,12 +259,22 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean }): UseUp
       }));
     });
 
+    // Install was requested but blocked by unsaved editors (#1215). The main
+    // process broadcasts this to every window so whichever one the user clicked
+    // "Restart Now" from gets feedback. Delegate to the caller's handler (which
+    // shows the toast) — registered here because bridge subscriptions belong in
+    // the state layer, not in components.
+    const cleanupNeedsSave = bridge?.onUpdateNeedsSave?.(() => {
+      onNeedsSaveRef.current?.();
+    });
+
     return () => {
       cleanupNotAvailable?.();
       cleanupAvailable?.();
       cleanupProgress?.();
       cleanupDownloaded?.();
       cleanupError?.();
+      cleanupNeedsSave?.();
     };
   }, []);
 

@@ -29,6 +29,7 @@ const updateDownloadedListeners = new Set();
 const updateAvailableListeners = new Set();
 const updateNotAvailableListeners = new Set();
 const updateErrorListeners = new Set();
+const updateNeedsSaveListeners = new Set();
 
 function cleanupTransferListeners(transferId) {
   transferProgressListeners.delete(transferId);
@@ -400,6 +401,17 @@ ipcRenderer.on("netcatty:update:error", (_event, payload) => {
   });
 });
 
+// Update can't install yet because there are unsaved editors (#1215).
+ipcRenderer.on("netcatty:update:needs-save", () => {
+  updateNeedsSaveListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch (err) {
+      console.error("Update needs-save callback failed", err);
+    }
+  });
+});
+
 // Transfer progress events
 ipcRenderer.on("netcatty:transfer:progress", (_event, payload) => {
   const cb = transferProgressListeners.get(payload.transferId);
@@ -623,6 +635,7 @@ const api = createPreloadApi({
   updateAvailableListeners,
   updateNotAvailableListeners,
   updateErrorListeners,
+  updateNeedsSaveListeners,
   uploadProgressListeners,
   uploadCompleteListeners,
   uploadErrorListeners,
