@@ -386,6 +386,7 @@ const sessionEncodings = new Map();
 // Per-session stateful iconv decoders (keyed by sessionId, value: { stdout, stderr })
 const sessionDecoders = new Map();
 const iconv = require("iconv-lite");
+const { encodeTerminalInput } = require("./terminalEncoding.cjs");
 
 function getSessionDecoder(sessionId, stream) {
   let decoders = sessionDecoders.get(sessionId);
@@ -786,7 +787,7 @@ const startSessionApi = createStartSessionApi({
   fs, path, os, net, crypto, Buffer, process, console, setTimeout, clearTimeout,
   createProxySocket, attachX11Forwarding, createPtyOutputBuffer, sessionLogStreamManager,
   trackSessionIdlePrompt, looksLikeIdleAutoLogout, createZmodemSentry, enableSshNoDelay, enableTcpNoDelay,
-  iconv, getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders,
+  iconv, getSessionDecoder, resetSessionDecoders, sessionEncodings, sessionDecoders, encodeTerminalInput,
   connectThroughChain, getAvailableAgentSocket, getCachedAuthMethod, setCachedAuthMethod, clearCachedAuthMethod,
   attachSshDebugLogger, logSshAlgorithms, resolveLangFromCharset, safeSend, zmodemOverwritePending,
   shouldLogSshDebugMessage, log, createSshDiagnosticLogger,

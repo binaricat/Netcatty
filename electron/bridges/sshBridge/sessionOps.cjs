@@ -896,6 +896,11 @@ function createSessionOpsApi(ctx) {
         return { ok: false, encoding: enc };
       }
       sessionEncodings.set(sessionId, enc);
+      // Mirror onto the session record so the terminal input path
+      // (terminalBridge.writeToSession) encodes keystrokes with the same
+      // charset the output decoder now uses — keeping input/output symmetric
+      // on non-UTF-8 devices (issue #1216).
+      session.encoding = enc;
       // Reset stateful decoders so new data uses the updated encoding
       resetSessionDecoders(sessionId);
       return { ok: true, encoding: enc };

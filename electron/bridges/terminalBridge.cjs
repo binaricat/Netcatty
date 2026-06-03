@@ -28,26 +28,13 @@ const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
+const { normalizeTerminalEncoding, encodeTerminalInput } = require("./terminalEncoding.cjs");
 
 const execFileAsync = promisify(execFile);
 
 // Shared references
 let sessions = null;
 let electronModule = null;
-
-// Normalize user-facing charset names into an iconv-lite encoding identifier.
-// iconv-lite accepts a wide range of aliases directly ("utf-8", "gbk", etc.),
-// so mostly this just lowercases + collapses non-alphanumerics and maps a few
-// obvious GB* variants to gb18030 which is the superset we ship the encoding
-// switcher with. Anything iconv doesn't recognize falls back to utf-8.
-function normalizeTerminalEncoding(charset) {
-  if (!charset) return 'utf-8';
-  const raw = String(charset).trim().toLowerCase();
-  const normalized = raw.replace(/[^a-z0-9]/g, '');
-  if (['utf8', 'utf-8'].includes(normalized)) return 'utf-8';
-  if (normalized === 'gb18030' || normalized === 'gbk' || normalized === 'gb2312') return 'gb18030';
-  return iconv.encodingExists(raw) ? raw : 'utf-8';
-}
 
 const DEFAULT_UTF8_LOCALE = "en_US.UTF-8";
 const LOGIN_SHELLS = new Set(["bash", "zsh", "fish", "ksh"]);
@@ -679,26 +666,35 @@ function writeToSession(event, payload) {
       session.autoLogin?.handleUserInput();
     }
 
+    // Encode keystrokes with the SAME charset the output path decodes with so
+    // input and output stay symmetric on non-UTF-8 devices (issue #1216).
+    // session.encoding is the normalized iconv identifier; it is only set on
+    // sessions whose output is iconv-decoded (SSH / telnet / serial). Mosh and
+    // local PTY leave it unset, so encodeTerminalInput returns the original
+    // UTF-8 string for them. For UTF-8 it also returns the string unchanged, so
+    // the transport's native string serialization keeps handling that case.
+    const outgoing = encodeTerminalInput(payload.data, session.encoding);
+
     if (session.stream) {
-      session.stream.write(payload.data);
+      session.stream.write(outgoing);
     } else if (session.proc) {
-      session.proc.write(payload.data);
+      session.proc.write(outgoing);
     } else if (session.socket) {
       // Telnet only: any 0xFF byte going out the wire must be doubled, or
       // the peer will treat it as the start of an IAC command sequence and
       // eat the next byte (RFC 854 §"Data Stream"). UTF-8 keyboard input
       // never produces 0xFF, but paste of binary content and some legacy
       // encodings do. Cheap no-op when there is no 0xFF.
-      let outgoing = payload.data;
+      let wireData = outgoing;
       if (session.type === 'telnet-native' && session.telnetProtocolActive) {
-        if (typeof outgoing === 'string') {
-          outgoing = Buffer.from(outgoing, 'utf8');
+        if (typeof wireData === 'string') {
+          wireData = Buffer.from(wireData, 'utf8');
         }
-        outgoing = telnetProtocol.escapeIacForWire(outgoing);
+        wireData = telnetProtocol.escapeIacForWire(wireData);
       }
-      session.socket.write(outgoing);
+      session.socket.write(wireData);
     } else if (session.serialPort) {
-      session.serialPort.write(payload.data);
+      session.serialPort.write(outgoing);
     }
   } catch (err) {
     if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') {
@@ -989,6 +985,7 @@ module.exports = {
   startSerialSession,
   listSerialPorts,
   writeToSession,
+  setSessionEncoding,
   resizeSession,
   setSessionFlowPaused,
   closeSession,

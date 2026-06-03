@@ -218,15 +218,27 @@ function createStartSessionApi(ctx) {
         }
       });
 
-      // Pre-seed encoding from host charset if it's a GB variant
-      if (options.charset && /^gb/i.test(String(options.charset).trim())) {
+      // Pre-seed encoding from host charset if it's a GB variant. Seed BOTH the
+      // output decoder (sessionEncodings) and the terminal input encoder
+      // (session.encoding, read by terminalBridge.writeToSession) so they agree
+      // from the first byte — otherwise a GB18030 host decoded output as GB18030
+      // while encoding keystrokes as UTF-8 until the user re-picked the encoding
+      // (issue #1216). The gate matches the renderer's two-value encoding state
+      // (Terminal.tsx) so behavior for other/arbitrary charsets is unchanged:
+      // the renderer pushes the effective encoding via setEncoding on attach,
+      // and that handler keeps both halves in sync.
+      const gbCharset = options.charset && /^gb/i.test(String(options.charset).trim());
+      if (gbCharset) {
         sessionEncodings.set(sessionId, "gb18030");
+        session.encoding = "gb18030";
       }
 
-      // Run startup command if specified
+      // Run startup command if specified. Encode it with the same charset the
+      // interactive input path uses (issue #1216) so a startup command with
+      // non-ASCII characters reaches a GB18030 host correctly too.
       if (options.startupCommand) {
         setTimeout(() => {
-          stream.write(`${options.startupCommand}\n`);
+          stream.write(encodeTerminalInput(`${options.startupCommand}\n`, session.encoding));
         }, 300);
       }
 
