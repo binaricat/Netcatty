@@ -40,8 +40,12 @@ test("formatShellArgs returns empty string for empty array", () => {
   assert.equal(formatShellArgs([]), "");
 });
 
-test("formatShellArgs double-quotes tokens containing whitespace", () => {
-  assert.equal(formatShellArgs(["--msg", "hello world"]), '--msg "hello world"');
+test("formatShellArgs single-quotes tokens containing whitespace", () => {
+  assert.equal(formatShellArgs(["--msg", "hello world"]), "--msg 'hello world'");
+});
+
+test("formatShellArgs keeps Windows backslash paths intact (no escaping)", () => {
+  assert.equal(formatShellArgs(["--rcfile", "C:\\Program Files\\rc"]), "--rcfile 'C:\\Program Files\\rc'");
 });
 
 test("parse and format round-trip", () => {
@@ -52,6 +56,8 @@ test("parse and format round-trip", () => {
     ["--rcfile", "C:\\Program Files\\rc"],
     ["-c", 'echo "hello world"'],
     ["--msg", "it's fine"],
+    ["-c", `echo "it's ok"`],
+    ["a'b", 'c"d'],
   ];
   for (const args of cases) {
     assert.deepEqual(parseShellArgs(formatShellArgs(args)), args);
@@ -60,4 +66,9 @@ test("parse and format round-trip", () => {
 
 test("formatShellArgs uses single quotes for tokens containing double quotes", () => {
   assert.equal(formatShellArgs(['echo "x"']), `'echo "x"'`);
+});
+
+test("formatShellArgs escapes tokens containing both quote types", () => {
+  // Single quote present → can't single-quote; double-quote wrap escaping the "
+  assert.equal(formatShellArgs([`it's "x"`]), `"it's \\"x\\""`);
 });
