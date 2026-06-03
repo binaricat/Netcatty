@@ -8,10 +8,10 @@
  *   injected netcatty MCP server (config.mcp_servers).
  * - thread.id is the resumable session id; codex.resumeThread(id) continues it.
  *
- * 🔬 SMOKE-CALIBRATE [codex-path]: verify the exact constructor field for the
- *   binary path override; we set codexPathOverride AND env.PATH for safety.
- * 🔬 SMOKE-CALIBRATE [codex-items]: verify item.* field names for
- *   command_execution / mcp_tool_call against real output.
+ * Constructor/event field names are calibrated against @openai/codex-sdk's type
+ * defs (CodexOptions.codexPathOverride; AgentMessageItem / CommandExecutionItem /
+ * McpToolCallItem). `env` is also passed so the binary resolves on PATH. Live
+ * smoke confirms end-to-end behavior.
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 
@@ -46,6 +46,24 @@ function buildCodexTurnOptions({ cwd, model }) {
   return turn;
 }
 
+/**
+ * Extract a display string from a Codex mcp_tool_call item.
+ * Calibrated against @openai/codex-sdk McpToolCallItem: successful calls carry
+ * `result.content` as an MCP ContentBlock[] (text blocks); failures carry
+ * `error.message`.
+ */
+function extractMcpResultText(item) {
+  if (item.error && item.error.message) return String(item.error.message);
+  const content = item.result && item.result.content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (b && typeof b.text === "string" ? b.text : (b == null ? "" : JSON.stringify(b))))
+      .join("");
+  }
+  if (item.result != null) return JSON.stringify(item.result);
+  return "";
+}
+
 /** Translate one Codex ThreadEvent into emitter calls. */
 function translateCodexEvent(event, emitter) {
   if (!event || typeof event !== "object") return;
@@ -66,21 +84,20 @@ function translateCodexEvent(event, emitter) {
       if (item.text) emitter.text(item.text);
       return;
     case "command_execution": {
-      // 🔬 SMOKE-CALIBRATE [codex-items]: confirm command/output field names.
-      const cmd = item.command || item.parsed_cmd || "";
-      emitter.toolCall("shell", { command: cmd }, item.id);
-      if (item.aggregated_output || item.output) {
-        emitter.toolResult(item.id, item.aggregated_output || item.output, "shell");
+      // Calibrated against @openai/codex-sdk CommandExecutionItem (command +
+      // aggregated_output).
+      emitter.toolCall("shell", { command: item.command || "" }, item.id);
+      if (item.aggregated_output) {
+        emitter.toolResult(item.id, item.aggregated_output, "shell");
       }
       return;
     }
     case "mcp_tool_call": {
-      // 🔬 SMOKE-CALIBRATE [codex-items]: confirm server/tool/arguments/result names.
-      const toolName = item.tool || item.name || "mcp_tool";
-      emitter.toolCall(toolName, item.arguments || item.input || {}, item.id);
-      const result = item.result ?? item.output;
-      const out = typeof result === "string" ? result : JSON.stringify(result ?? "");
-      emitter.toolResult(item.id, out, toolName);
+      // Calibrated against @openai/codex-sdk McpToolCallItem (tool + arguments;
+      // result.content is an MCP ContentBlock[], errors carry .message).
+      const toolName = item.tool || "mcp_tool";
+      emitter.toolCall(toolName, item.arguments || {}, item.id);
+      emitter.toolResult(item.id, extractMcpResultText(item), toolName);
       return;
     }
     default:

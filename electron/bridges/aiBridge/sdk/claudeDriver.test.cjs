@@ -80,6 +80,8 @@ test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio
     }],
   });
   assert.equal(opts.permissionMode, "bypassPermissions");
+  // required companion to bypassPermissions (SDK rejects the bypass without it)
+  assert.equal(opts.allowDangerouslySkipPermissions, true);
   assert.equal(opts.includePartialMessages, true);
   assert.equal(opts.pathToClaudeCodeExecutable, "/abs/claude");
   assert.equal(opts.abortController, ac);

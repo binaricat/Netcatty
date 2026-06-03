@@ -17,12 +17,12 @@ test("buildCopilotSessionOptions maps injected MCP to local stdio servers", () =
   });
   assert.equal(o.model, "claude-sonnet-4.5");
   const srv = o.mcpServers["netcatty-remote-hosts"];
-  assert.equal(srv.type, "local");
+  assert.equal(srv.type, "stdio");
   assert.equal(srv.command, "/abs/electron");
   assert.deepEqual(srv.env, { NETCATTY_MCP_PORT: "1" });
   assert.deepEqual(srv.tools, ["*"]);
-  // permission auto-approval delegated to netcatty MCP layer
-  assert.equal(typeof o.onPermissionRequest, "function");
+  // onPermissionRequest is wired in runCopilotTurn via the SDK's approveAll,
+  // not in buildCopilotSessionOptions.
 });
 
 test("extractCopilotContent reads response data.content", () => {

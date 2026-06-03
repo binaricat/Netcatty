@@ -45,6 +45,10 @@ function buildClaudeQueryOptions({
     cwd,
     includePartialMessages: true,
     permissionMode: "bypassPermissions",
+    // Required companion to permissionMode:'bypassPermissions' (the SDK rejects
+    // the bypass without it). Safe here: the agent's only side-effect tools are
+    // the injected netcatty MCP tools, which enforce approval/scope themselves.
+    allowDangerouslySkipPermissions: true,
     disallowedTools: [...DISALLOWED_TOOLS],
     mcpServers: toSdkMcpServers(injectedMcpServers),
     env,

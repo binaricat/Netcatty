@@ -23,7 +23,7 @@ test("agent_message item -> text event", () => {
   assert.deepEqual(events, [{ k: "text", t: "answer" }]);
 });
 
-test("mcp_tool_call item -> toolCall + toolResult events", () => {
+test("mcp_tool_call item -> toolCall + toolResult events (extracts content text)", () => {
   const { events, emitter } = collector();
   translateCodexEvent(
     {
@@ -31,14 +31,33 @@ test("mcp_tool_call item -> toolCall + toolResult events", () => {
       item: {
         type: "mcp_tool_call", id: "i-1",
         server: "netcatty-remote-hosts", tool: "terminal_execute",
-        arguments: { command: "ls" }, result: "files",
+        arguments: { command: "ls" },
+        result: { content: [{ type: "text", text: "files" }] },
+        status: "completed",
       },
     },
     emitter,
   );
   assert.deepEqual(events.map((e) => e.k), ["toolCall", "toolResult"]);
   assert.equal(events[0].id, "i-1");
+  assert.equal(events[0].n, "terminal_execute");
   assert.equal(events[1].o, "files");
+});
+
+test("mcp_tool_call failure -> toolResult carries the error message", () => {
+  const { events, emitter } = collector();
+  translateCodexEvent(
+    {
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call", id: "i-2",
+        server: "netcatty-remote-hosts", tool: "terminal_execute",
+        arguments: {}, error: { message: "denied by observer" }, status: "failed",
+      },
+    },
+    emitter,
+  );
+  assert.equal(events[1].o, "denied by observer");
 });
 
 test("turn.failed -> error event", () => {
