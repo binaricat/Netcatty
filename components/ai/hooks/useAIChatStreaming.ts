@@ -28,7 +28,6 @@ import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemP
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
-import { runExternalAgentTurn } from '../../../infrastructure/ai/externalAgentAdapter';
 import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
 import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
@@ -634,23 +633,14 @@ export function useAIChatStreaming({
         userSkillsContext,
       );
     } else {
-      // Fallback: spawn as raw process
-      await runExternalAgentTurn(
-        agentConfig,
-        userSkillsContext ? `${userSkillsContext}\n\nUser request:\n${trimmed}` : trimmed,
-        {
-          onTextDelta: (text: string) => {
-            updateLastMessage(sessionId, msg => ({ ...msg, content: msg.content + text }));
-          },
-          onError: (error: string) => {
-            reportStreamError(sessionId, abortController.signal, error);
-            setStreamingForScope(sessionId, false);
-          },
-          onDone: () => {},
-        },
-        bridge as unknown as Parameters<typeof runExternalAgentTurn>[3],
+      // Managed agents always route through the SDK path above (acpCommand
+      // carries the backend key). A missing backend is a configuration error.
+      reportStreamError(
+        sessionId,
         abortController.signal,
+        'This agent has no SDK backend configured. Re-discover it in Settings -> AI.',
       );
+      setStreamingForScope(sessionId, false);
     }
   }, [
     addMessageToSession, updateLastMessage, setStreamingForScope, reportStreamError,
