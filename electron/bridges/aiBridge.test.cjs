@@ -16,99 +16,7 @@ function createIpcMainStub() {
   };
 }
 
-function createEmptyStreamResult() {
-  return {
-    fullStream: {
-      getReader() {
-        return {
-          async read() {
-            return { done: true, value: undefined };
-          },
-          releaseLock() {},
-        };
-      },
-    },
-  };
-}
-
-function writeFakeCodexAcpUsage(filePath) {
-  if (process.platform === "win32") {
-    fs.writeFileSync(
-      filePath,
-      "@echo off\r\necho error: unexpected argument '--version' found\r\necho.\r\necho Usage: codex-acp [OPTIONS]\r\nexit /b 2\r\n",
-      "utf8",
-    );
-    return;
-  }
-  fs.writeFileSync(
-    filePath,
-    "#!/bin/sh\necho \"error: unexpected argument '--version' found\"\necho\necho 'Usage: codex-acp [OPTIONS]'\nexit 2\n",
-    "utf8",
-  );
-  fs.chmodSync(filePath, 0o755);
-}
-
-function writeFakeCodexAcpLoaderError(filePath) {
-  if (process.platform === "win32") {
-    fs.writeFileSync(
-      filePath,
-      "@echo off\r\necho codex-acp: error while loading shared libraries: libssl.so: cannot open shared object file\r\nexit /b 127\r\n",
-      "utf8",
-    );
-    return;
-  }
-  fs.writeFileSync(
-    filePath,
-    "#!/bin/sh\necho 'codex-acp: error while loading shared libraries: libssl.so: cannot open shared object file'\nexit 127\n",
-    "utf8",
-  );
-  fs.chmodSync(filePath, 0o755);
-}
-
-function writeFakeBrokenClaudeCli(filePath) {
-  if (process.platform === "win32") {
-    fs.writeFileSync(
-      filePath,
-      "@echo off\r\necho file:///opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js:95\r\nexit /b 1\r\n",
-      "utf8",
-    );
-    return;
-  }
-  fs.writeFileSync(
-    filePath,
-    "#!/bin/sh\necho 'file:///opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js:95'\nexit 1\n",
-    "utf8",
-  );
-  fs.chmodSync(filePath, 0o755);
-}
-
-function writeFakeClaudeVersion(filePath, version = "2.1.145 (Claude Code)") {
-  if (process.platform === "win32") {
-    fs.writeFileSync(filePath, `@echo off\r\necho ${version}\r\n`, "utf8");
-    return;
-  }
-  fs.writeFileSync(filePath, `#!/bin/sh\necho '${version}'\n`, "utf8");
-  fs.chmodSync(filePath, 0o755);
-}
-
 function loadBridgeWithMocks(options = {}) {
-  const streamCalls = [];
-  const safeSendCalls = [];
-  let providerCreationCount = 0;
-  const providerCreationArgs = [];
-
-  const fallbackProvider = {
-    tools: {},
-    languageModel() {
-      return { id: "fake-model" };
-    },
-    async initSession() {},
-    getSessionId() {
-      return "fresh-session";
-    },
-    cleanup() {},
-  };
-
   const mocks = {
     "./mcpServerBridge.cjs": {
       init() {},
@@ -159,27 +67,17 @@ function loadBridgeWithMocks(options = {}) {
         typeof options.resolveCliFromPath === "function"
           ? options.resolveCliFromPath(...args)
           : null,
-      resolveClaudeAcpBinaryPath: (...args) =>
-        typeof options.resolveClaudeAcpBinaryPath === "function"
-          ? options.resolveClaudeAcpBinaryPath(...args)
-          : null,
       getShellEnv: async () => ({}),
       invalidateShellEnvCache() {},
-      serializeStreamChunk: (chunk) => chunk,
       toUnpackedAsarPath: (value) => value,
     },
     "./ai/codexHelpers.cjs": {
       codexLoginSessions: new Map(),
-      resolveCodexAcpBinaryPath: (...args) =>
-        typeof options.resolveCodexAcpBinaryPath === "function"
-          ? options.resolveCodexAcpBinaryPath(...args)
-          : null,
       appendCodexLoginOutput() {},
       toCodexLoginSessionResponse: () => ({}),
       getActiveCodexLoginSession: () => null,
       normalizeCodexIntegrationState: () => ({}),
       readCodexCustomProviderConfig: () => null,
-      getCodexAuthOverride: () => ({}),
       getCodexCustomConfigPreflightError: () => null,
       extractCodexError: (err) => ({ message: err?.message || String(err) }),
       isCodexAuthError: () => false,
@@ -192,15 +90,21 @@ function loadBridgeWithMocks(options = {}) {
       getCodexValidationCache: () => null,
       setCodexValidationCache() {},
     },
+    "./aiBridge/agentAuthProbes.cjs": {
+      probeClaudeAuth: (...args) =>
+        typeof options.probeClaudeAuth === "function" ? options.probeClaudeAuth(...args) : { authenticated: false, authSource: null },
+      probeCopilotAuth: (...args) =>
+        typeof options.probeCopilotAuth === "function" ? options.probeCopilotAuth(...args) : { authenticated: false, authSource: null },
+      probeCodexAuth: (...args) =>
+        typeof options.probeCodexAuth === "function" ? options.probeCodexAuth(...args) : { authenticated: false, authSource: null },
+    },
     "./ai/ptyExec.cjs": {
       execViaPty: async () => {
         throw new Error("execViaPty should not be called in this test");
       },
     },
     "./ipcUtils.cjs": {
-      safeSend(sender, channel, payload) {
-        safeSendCalls.push({ sender, channel, payload });
-      },
+      safeSend() {},
     },
     "./windowManager.cjs": {
       getMainWindow() {
@@ -211,45 +115,6 @@ function loadBridgeWithMocks(options = {}) {
       },
       getSettingsWindow() {
         return null;
-      },
-    },
-    "@mcpc-tech/acp-ai-provider": {
-      createACPProvider(args) {
-        providerCreationCount += 1;
-        providerCreationArgs.push(args);
-        if (typeof options.createACPProvider === "function") {
-          return options.createACPProvider({ args, providerCreationCount, fallbackProvider });
-        }
-        if (providerCreationCount === 1) {
-          return {
-            tools: {},
-            languageModel() {
-              return { id: "fake-model" };
-            },
-            async initSession() {
-              throw new Error("Resource not found: session not found");
-            },
-            getSessionId() {
-              return "stale-session";
-            },
-            cleanup() {},
-          };
-        }
-        return fallbackProvider;
-      },
-    },
-    ai: {
-      stepCountIs: () => Symbol("stopWhen"),
-      streamText(args) {
-        const { messages } = args;
-        streamCalls.push(messages);
-        if (typeof options.streamText === "function") {
-          return options.streamText({ ...args, streamCalls });
-        }
-        if (streamCalls.length === 1) {
-          throw new Error("transport failed before replayed turn completed");
-        }
-        return createEmptyStreamResult();
       },
     },
   };
@@ -268,9 +133,6 @@ function loadBridgeWithMocks(options = {}) {
     const bridge = require("./aiBridge.cjs");
     return {
       bridge,
-      streamCalls,
-      safeSendCalls,
-      providerCreationArgs,
       restore() {
         try {
           bridge.cleanup();
@@ -287,280 +149,38 @@ function loadBridgeWithMocks(options = {}) {
   }
 }
 
-test("discovers bundled Codex ACP fallback when --version prints usage", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpUsage(codexAcpPath);
+test("discover returns the 3-layer contract for an installed, authenticated agent", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-discover-contract-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const claudePath = path.join(tempDir, process.platform === "win32" ? "claude.cmd" : "claude");
+  fs.writeFileSync(
+    claudePath,
+    process.platform === "win32" ? "@echo off\r\necho 1.2.3 (Claude Code)\r\n" : "#!/bin/sh\necho '1.2.3 (Claude Code)'\n",
+    { mode: 0o755 },
+  );
 
   const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
+    resolveCliFromPath: (cmd) => (cmd === "claude" ? claudePath : null),
+    isPlausibleCliVersionOutput: () => true,
+    probeClaudeAuth: () => ({ authenticated: true, authSource: "env" }),
   });
   const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
   bridge.registerHandlers(ipcMain);
 
   try {
-    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
-    assert.equal(typeof discoverHandler, "function");
-
-    const agents = await discoverHandler({ sender: { id: 1 } });
-
+    const discover = ipcMain.handlers.get("netcatty:ai:agents:discover");
+    assert.equal(typeof discover, "function");
+    const agents = await discover({ sender: { id: 1 } });
     assert.equal(agents.length, 1);
-    assert.equal(agents[0].command, "codex");
-    assert.equal(agents[0].path, codexAcpPath);
-    assert.equal(agents[0].version, "Bundled ACP");
+    assert.equal(agents[0].command, "claude");
+    assert.equal(agents[0].sdkBackend, "claude");
+    assert.equal(agents[0].binPath, claudePath);
+    assert.equal(agents[0].path, claudePath);
+    assert.equal(agents[0].installed, true);
     assert.equal(agents[0].available, true);
-  } finally {
-    restore();
-  }
-});
-test("discovers bundled Codex ACP fallback when PATH Codex shim is broken", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-broken-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  if (process.platform === "win32") {
-    fs.writeFileSync(codexPath, "@echo off\r\necho TypeError: Cannot read properties of undefined\r\n", "utf8");
-    writeFakeCodexAcpUsage(codexAcpPath);
-  } else {
-    fs.writeFileSync(codexPath, "#!/bin/sh\necho 'TypeError: Cannot read properties of undefined'\n", "utf8");
-    fs.chmodSync(codexPath, 0o755);
-    writeFakeCodexAcpUsage(codexAcpPath);
-  }
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCliFromPath: (command) => (command === "codex" ? codexPath : null),
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
-    assert.equal(typeof discoverHandler, "function");
-
-    const agents = await discoverHandler({ sender: { id: 1 } });
-
-    assert.equal(agents.length, 1);
-    assert.equal(agents[0].command, "codex");
-    assert.equal(agents[0].path, codexAcpPath);
-    assert.equal(agents[0].version, "Bundled ACP");
-    assert.equal(agents[0].available, true);
-  } finally {
-    restore();
-  }
-});
-
-test("discovers bundled Codex ACP fallback when PATH Codex exits nonzero", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-exit-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  if (process.platform === "win32") {
-    fs.writeFileSync(codexPath, "@echo off\r\necho codex-cli 1.0.0\r\nexit /b 1\r\n", "utf8");
-    writeFakeCodexAcpUsage(codexAcpPath);
-  } else {
-    fs.writeFileSync(codexPath, "#!/bin/sh\necho 'codex-cli 1.0.0'\nexit 1\n", "utf8");
-    fs.chmodSync(codexPath, 0o755);
-    writeFakeCodexAcpUsage(codexAcpPath);
-  }
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: (value) => String(value).startsWith("codex-cli"),
-    resolveCliFromPath: (command) => (command === "codex" ? codexPath : null),
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
-    assert.equal(typeof discoverHandler, "function");
-
-    const agents = await discoverHandler({ sender: { id: 1 } });
-
-    assert.equal(agents.length, 1);
-    assert.equal(agents[0].command, "codex");
-    assert.equal(agents[0].path, codexAcpPath);
-    assert.equal(agents[0].version, "Bundled ACP");
-    assert.equal(agents[0].available, true);
-  } finally {
-    restore();
-  }
-});
-
-test("does not discover bundled Codex ACP fallback when the fallback cannot run", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-bad-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  fs.mkdirSync(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
-    assert.equal(typeof discoverHandler, "function");
-
-    const agents = await discoverHandler({ sender: { id: 1 } });
-
-    assert.equal(agents.length, 0);
-  } finally {
-    restore();
-  }
-});
-
-test("does not discover bundled Codex ACP fallback when the fallback prints a loader error", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-loader-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpLoaderError(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const discoverHandler = ipcMain.handlers.get("netcatty:ai:agents:discover");
-    assert.equal(typeof discoverHandler, "function");
-
-    const agents = await discoverHandler({ sender: { id: 1 } });
-
-    assert.equal(agents.length, 0);
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli accepts bundled Codex ACP fallback when --version prints usage", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-resolve-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpUsage(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler({ sender: { id: 1 } }, { command: "codex", customPath: "" });
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: "Bundled ACP",
-      available: true,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli accepts stored bundled Codex ACP path", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-stored-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpUsage(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    normalizeCliPathForPlatform: () => codexAcpPath,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler(
-      { sender: { id: 1 } },
-      { command: "codex", customPath: codexAcpPath },
-    );
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: "Bundled ACP",
-      available: true,
-    });
+    assert.equal(agents[0].authenticated, true);
+    assert.equal(agents[0].authSource, "env");
   } finally {
     restore();
   }
@@ -682,219 +302,6 @@ test("resolve-cli probes Windows Claude exe paths with spaces", { skip: process.
       path: claudePath,
       version: process.version,
       available: true,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli falls back to bundled Codex ACP when a stored path is stale", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-stale-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpUsage(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    normalizeCliPathForPlatform: () => null,
-    resolveCliFromPath: () => null,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler(
-      { sender: { id: 1 } },
-      { command: "codex", customPath: "/stale/bin/codex" },
-    );
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: "Bundled ACP",
-      available: true,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli falls back to bundled Codex ACP when PATH Codex shim is broken", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-resolve-broken-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  if (process.platform === "win32") {
-    fs.writeFileSync(codexPath, "@echo off\r\necho TypeError: Cannot read properties of undefined\r\n", "utf8");
-    writeFakeCodexAcpUsage(codexAcpPath);
-  } else {
-    fs.writeFileSync(codexPath, "#!/bin/sh\necho 'TypeError: Cannot read properties of undefined'\n", "utf8");
-    fs.chmodSync(codexPath, 0o755);
-    writeFakeCodexAcpUsage(codexAcpPath);
-  }
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCliFromPath: (command) => (command === "codex" ? codexPath : null),
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler({ sender: { id: 1 } }, { command: "codex", customPath: "" });
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: "Bundled ACP",
-      available: true,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli falls back to bundled Codex ACP when PATH Codex exits nonzero", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-resolve-exit-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  if (process.platform === "win32") {
-    fs.writeFileSync(codexPath, "@echo off\r\necho codex-cli 1.0.0\r\nexit /b 1\r\n", "utf8");
-    writeFakeCodexAcpUsage(codexAcpPath);
-  } else {
-    fs.writeFileSync(codexPath, "#!/bin/sh\necho 'codex-cli 1.0.0'\nexit 1\n", "utf8");
-    fs.chmodSync(codexPath, 0o755);
-    writeFakeCodexAcpUsage(codexAcpPath);
-  }
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: (value) => String(value).startsWith("codex-cli"),
-    resolveCliFromPath: (command) => (command === "codex" ? codexPath : null),
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler({ sender: { id: 1 } }, { command: "codex", customPath: "" });
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: "Bundled ACP",
-      available: true,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli rejects bundled Codex ACP fallback when the fallback cannot run", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-resolve-bad-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  fs.mkdirSync(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler({ sender: { id: 1 } }, { command: "codex", customPath: "" });
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: null,
-      available: false,
-    });
-  } finally {
-    restore();
-  }
-});
-
-test("resolve-cli rejects bundled Codex ACP fallback when the fallback prints a loader error", async (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-acp-resolve-loader-"));
-  t.after(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  const codexAcpPath = path.join(tempDir, process.platform === "win32" ? "codex-acp.cmd" : "codex-acp");
-  writeFakeCodexAcpLoaderError(codexAcpPath);
-
-  const { bridge, restore } = loadBridgeWithMocks({
-    isPlausibleCliVersionOutput: () => false,
-    resolveCodexAcpBinaryPath: () => codexAcpPath,
-  });
-  const ipcMain = createIpcMainStub();
-
-  bridge.init({
-    sessions: new Map(),
-    sftpClients: new Map(),
-    electronModule: { app: { getPath: () => process.cwd() } },
-  });
-  bridge.registerHandlers(ipcMain);
-
-  try {
-    const resolveHandler = ipcMain.handlers.get("netcatty:ai:resolve-cli");
-    assert.equal(typeof resolveHandler, "function");
-
-    const result = await resolveHandler({ sender: { id: 1 } }, { command: "codex", customPath: "" });
-
-    assert.deepEqual(result, {
-      path: codexAcpPath,
-      version: null,
-      available: false,
     });
   } finally {
     restore();
