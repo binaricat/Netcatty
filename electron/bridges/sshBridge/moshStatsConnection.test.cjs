@@ -60,6 +60,11 @@ function makeApi(overrides = {}) {
     expandIdentityFilePath: overrides.expandIdentityFilePath || ((p) => p),
     isAutoFillablePasswordChallenge:
       overrides.isAutoFillablePasswordChallenge || (() => false),
+    hostKeyVerifier: overrides.hostKeyVerifier || {
+      // Default: classify everything as trusted so password tests connect.
+      describeHostKey: () => ({ keyType: "ssh-ed25519", fingerprint: "fp" }),
+      classifyHostKey: () => ({ status: "trusted" }),
+    },
     log: (...args) => logs.push(args),
   });
   return { api, sessions, logs };
@@ -288,6 +293,82 @@ test("does not enable keyboard-interactive when there is no password", async () 
   await tick();
   const client = FakeSSHClient.instances[0];
   assert.notEqual(client.connectOpts.tryKeyboard, true);
+});
+
+test("password auth attaches a host-key verifier; key/agent auth does not", async () => {
+  // Password present -> verifier attached.
+  {
+    const { api, sessions } = makeApi();
+    const session = { moshStatsAuth: { hostname: "h", username: "u", password: "p" } };
+    sessions.set("sid", session);
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    assert.equal(typeof FakeSSHClient.instances[0].connectOpts.hostVerifier, "function");
+  }
+  // Key only -> no verifier (public-key auth discloses no reusable secret).
+  {
+    const { api, sessions } = makeApi();
+    const session = {
+      moshStatsAuth: {
+        hostname: "h",
+        username: "u",
+        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n-----END OPENSSH PRIVATE KEY-----",
+      },
+    };
+    sessions.set("sid", session);
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    assert.equal(FakeSSHClient.instances[0].connectOpts.hostVerifier, undefined);
+  }
+  // Agent only -> no verifier.
+  {
+    const { api, sessions } = makeApi({ getSshAgentSocket: () => "/tmp/agent.sock" });
+    const session = { moshStatsAuth: { hostname: "h", username: "u", agentForwarding: true } };
+    sessions.set("sid", session);
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    assert.equal(FakeSSHClient.instances[0].connectOpts.hostVerifier, undefined);
+  }
+});
+
+test("the password host-key verifier accepts only keys trusted in known-hosts", async () => {
+  const hostKeyVerifier = require("../hostKeyVerifier.cjs");
+  // Build a known-hosts record that matches a specific fingerprint.
+  const rawKey = require("node:crypto").randomBytes(32);
+  const { keyType, fingerprint } = hostKeyVerifier.describeHostKey(rawKey);
+  const knownHosts = [
+    { id: "k1", hostname: "trusted.example.com", port: 22, keyType, fingerprint, publicKey: "" },
+  ];
+
+  // Trusted host: verifier accepts.
+  {
+    const { api, sessions } = makeApi({ hostKeyVerifier });
+    const session = {
+      moshStatsAuth: { hostname: "trusted.example.com", port: 22, username: "u", password: "p", knownHosts },
+    };
+    sessions.set("sid", session);
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    const verify = FakeSSHClient.instances[0].connectOpts.hostVerifier;
+    let accepted = null;
+    verify(rawKey, (ok) => { accepted = ok; });
+    assert.equal(accepted, true);
+  }
+
+  // Unknown host (no matching record): verifier rejects, password not sent.
+  {
+    const { api, sessions } = makeApi({ hostKeyVerifier });
+    const session = {
+      moshStatsAuth: { hostname: "other.example.com", port: 22, username: "u", password: "p", knownHosts },
+    };
+    sessions.set("sid", session);
+    api.ensureMoshStatsConnection(session, "sid");
+    await tick();
+    const verify = FakeSSHClient.instances[0].connectOpts.hostVerifier;
+    let accepted = null;
+    verify(rawKey, (ok) => { accepted = ok; });
+    assert.equal(accepted, false);
+  }
 });
 
 test("inline credentials take precedence over ssh-agent", async () => {

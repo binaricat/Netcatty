@@ -971,7 +971,8 @@ const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnectio
 const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
   get sessions() { return sessions; },
   SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
-  readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge, log,
+  readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
+  hostKeyVerifier, log,
 });
 
 const { createSessionOpsApi } = require("./sshBridge/sessionOps.cjs");

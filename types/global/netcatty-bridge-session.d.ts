@@ -35,6 +35,9 @@ declare global {
       legacyAlgorithms?: boolean;
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
+      // Known hosts, used to verify the host key before the stats companion
+      // connection (issue #1198) sends a saved password.
+      knownHosts?: import("../../domain/models").KnownHost[];
       cols?: number;
       rows?: number;
       charset?: string;

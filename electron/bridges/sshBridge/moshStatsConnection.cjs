@@ -23,11 +23,21 @@
  *     the failure so it does not hammer the host on every stats poll. Mosh
  *     keeps working; only the stats bar stays empty (graceful degradation).
  *
- * Host-key verification is intentionally skipped here, mirroring the
- * existing one-off `execCommand` path: the user already established trust in
- * this host through the Mosh handshake's system-`ssh` (which consults the
- * real known_hosts), so re-prompting on a background stats connection would
- * be confusing and redundant.
+ * Security — host-key handling:
+ *   - When the companion authenticates with a *password* (plain or via
+ *     keyboard-interactive), the plaintext secret is sent to the server, so
+ *     the companion MUST verify the host key first. It does so silently and
+ *     non-interactively against Netcatty's known-hosts store: it proceeds
+ *     only when the live key is already "trusted", and otherwise aborts
+ *     without ever offering the password and without prompting (the user
+ *     drives host-key trust through the real interactive session, not a
+ *     background stats poll). This prevents leaking a saved password to a
+ *     spoofed / MITM host whose key Netcatty has not vetted.
+ *   - Public-key / ssh-agent auth proves possession via a signature and
+ *     never discloses a reusable secret to the server, so — like the
+ *     existing one-off `execCommand` path — it does not gate on host-key
+ *     verification. (The handshake already vetted the host via system ssh's
+ *     known_hosts.)
  */
 function createMoshStatsConnectionApi(ctx) {
   with (ctx) {
@@ -70,6 +80,30 @@ function createMoshStatsConnectionApi(ctx) {
         if (key) return key;
       }
       return null;
+    }
+
+    // A non-interactive ssh2 hostVerifier that accepts ONLY a host key
+    // already trusted in Netcatty's known-hosts store. Unknown / changed keys
+    // are rejected outright — no user prompt — so a background stats poll can
+    // never disclose a password to an unvetted host, and never pops a
+    // host-key dialog of its own.
+    function createTrustedOnlyHostVerifier({ hostname, port, knownHosts }) {
+      return (rawKey, callback) => {
+        try {
+          const keyInfo = hostKeyVerifier.describeHostKey(rawKey);
+          const decision = hostKeyVerifier.classifyHostKey({
+            knownHosts: Array.isArray(knownHosts) ? knownHosts : [],
+            hostname,
+            port,
+            keyType: keyInfo.keyType,
+            fingerprint: keyInfo.fingerprint,
+          });
+          callback(decision.status === "trusted");
+        } catch (err) {
+          log("[Mosh] stats companion host-key check failed:", err?.message || String(err));
+          callback(false);
+        }
+      };
     }
 
     async function buildStatsConnectOpts(auth) {
@@ -143,6 +177,19 @@ function createMoshStatsConnectionApi(ctx) {
         if (agentSocket) {
           connectOpts.agent = agentSocket;
         }
+      }
+
+      // Sending a plaintext password (directly or via keyboard-interactive)
+      // to an unverified host would disclose it to a possible MITM. Gate
+      // password auth behind a silent, trusted-only host-key check against
+      // Netcatty's known-hosts store. Public-key / agent auth never reveals a
+      // reusable secret, so it is not gated (see the module header).
+      if (connectOpts.password) {
+        connectOpts.hostVerifier = createTrustedOnlyHostVerifier({
+          hostname: connectOpts.host,
+          port: connectOpts.port,
+          knownHosts: auth.knownHosts,
+        });
       }
 
       const hasAnyAuth = Boolean(

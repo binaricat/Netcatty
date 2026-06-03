@@ -719,6 +719,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         legacyAlgorithms: ctx.host.legacyAlgorithms,
         skipEcdsaHostKey: ctx.host.skipEcdsaHostKey,
         algorithmOverrides: ctx.host.algorithms,
+        // Lets the stats companion verify the host key before sending a saved
+        // password (#1198), so it never discloses it to an unvetted host.
+        knownHosts: ctx.knownHosts,
         cols: term.cols,
         rows: term.rows,
         charset: ctx.host.charset,

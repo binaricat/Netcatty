@@ -566,6 +566,10 @@ function createMoshSessionApi(ctx) {
         legacyAlgorithms: options.legacyAlgorithms,
         skipEcdsaHostKey: options.skipEcdsaHostKey,
         algorithmOverrides: options.algorithmOverrides,
+        // Used to verify the host key before the companion sends a saved
+        // password (see moshStatsConnection.cjs). Public-key / agent auth
+        // does not depend on this.
+        knownHosts: options.knownHosts,
       };
     
       if (process.platform !== "win32") {
