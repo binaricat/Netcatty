@@ -52,19 +52,21 @@ export function useAgentDiscovery(
         );
         if (!match) return ea;
 
-        // Check if args, ACP config, or Claude's resolved system path differ
+        // Check if args, SDK backend, or Claude's resolved system path differ
         const currentArgs = JSON.stringify(ea.args || []);
         const newArgs = JSON.stringify(match.args);
-        const acpChanged = ea.acpCommand !== match.acpCommand
-          || JSON.stringify(ea.acpArgs || []) !== JSON.stringify(match.acpArgs || []);
+        const backend = match.sdkBackend ?? match.command;
+        const acpChanged = ea.acpCommand !== backend
+          || JSON.stringify(ea.acpArgs || []) !== JSON.stringify([]);
+        const matchPath = match.binPath || match.path;
         const env = match.command === 'claude'
-          ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: match.path }
+          ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: matchPath }
           : ea.env;
         const envChanged = match.command === 'claude'
-          && ea.env?.CLAUDE_CODE_EXECUTABLE !== match.path;
+          && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath;
         if (currentArgs !== newArgs || acpChanged || envChanged) {
           changed = true;
-          return { ...ea, args: match.args, acpCommand: match.acpCommand, acpArgs: match.acpArgs, ...(env ? { env } : {}) };
+          return { ...ea, args: match.args, acpCommand: backend, acpArgs: [], ...(env ? { env } : {}) };
         }
         return ea;
       });
@@ -82,16 +84,20 @@ export function useAgentDiscovery(
   // Build ExternalAgentConfig from a discovered agent
   const enableAgent = useCallback(
     (agent: DiscoveredAgent): ExternalAgentConfig => {
+      const backend = agent.sdkBackend ?? agent.command;
       return {
         id: `discovered_${agent.command}`,
         name: agent.name,
-        command: agent.path || agent.command,
+        command: agent.binPath || agent.path || agent.command,
         args: agent.args,
         icon: agent.icon,
         enabled: true,
-        acpCommand: agent.acpCommand,
-        acpArgs: agent.acpArgs,
-        ...(agent.command === 'claude' ? { env: { CLAUDE_CODE_EXECUTABLE: agent.path } } : {}),
+        // acpCommand carries the SDK backend key (claude|codex|copilot).
+        acpCommand: backend,
+        acpArgs: [],
+        ...(agent.command === 'claude'
+          ? { env: { CLAUDE_CODE_EXECUTABLE: agent.binPath || agent.path || '' } }
+          : {}),
       };
     },
     [],

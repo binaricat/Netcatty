@@ -224,9 +224,16 @@ export interface DiscoveredAgent {
   path: string;
   version: string;
   available: boolean;
-  /** ACP command if agent supports ACP protocol */
+  /** ACP command if agent supports ACP protocol (legacy; superseded by sdkBackend) */
   acpCommand?: string;
   acpArgs?: string[];
+  /** SDK backend key (claude|codex|copilot) — the post-migration routing value. */
+  sdkBackend?: 'claude' | 'codex' | 'copilot';
+  /** Absolute resolved CLI path (preferred over `path`). */
+  binPath?: string;
+  installed?: boolean;
+  authenticated?: boolean;
+  authSource?: string | null;
 }
 
 // Web Search types
