@@ -1,0 +1,182 @@
+"use strict";
+
+/**
+ * Claude backend driver — wraps @anthropic-ai/claude-agent-sdk query().
+ *
+ * - Spawns the user's system `claude` binary via an ABSOLUTE pathToClaudeCodeExecutable
+ *   (SDK existsSync-checks it; PATH is not resolved — issue #205).
+ * - Repairs ~/.claude.json before spawn (ensureClaudeConfig).
+ * - Bypasses the SDK's built-in permission system and BLOCKS built-in
+ *   side-effect tools so the agent can only act through the injected netcatty
+ *   MCP server (approval/scope/blocklist enforced there).
+ * - Translates SDK messages into the canonical renderer event protocol.
+ */
+const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { ensureClaudeConfig } = require("./claudeConfig.cjs");
+
+// Built-in tools to block. Side-effect tools (so the agent must use netcatty
+// MCP) + tools needing UI we don't expose. Read-only built-ins are harmless
+// but we keep the agent on MCP for consistency; add/remove during smoke.
+const DISALLOWED_TOOLS = [
+  "Bash", "Edit", "Write", "NotebookEdit", "MultiEdit",
+  "WebFetch", "WebSearch",
+  "EnterPlanMode", "ExitPlanMode", "AskUserQuestion", "Skill",
+];
+
+/** Convert neutral injectMcp configs into the SDK's keyed mcpServers map. */
+function toSdkMcpServers(injectedMcpServers) {
+  const map = {};
+  for (const cfg of injectedMcpServers || []) {
+    if (!cfg || !cfg.name) continue;
+    map[cfg.name] = {
+      type: "stdio",
+      command: cfg.command,
+      args: cfg.args || [],
+      env: mcpEnvPairsToObject(cfg.env),
+    };
+  }
+  return map;
+}
+
+function buildClaudeQueryOptions({
+  cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers,
+}) {
+  const options = {
+    cwd,
+    includePartialMessages: true,
+    permissionMode: "bypassPermissions",
+    disallowedTools: [...DISALLOWED_TOOLS],
+    mcpServers: toSdkMcpServers(injectedMcpServers),
+    env,
+    abortController,
+  };
+  if (model) options.model = model;
+  // ABSOLUTE path only (SDK does not resolve PATH). undefined => SDK auto-discovery.
+  if (pathToClaudeCodeExecutable) {
+    options.pathToClaudeCodeExecutable = pathToClaudeCodeExecutable;
+  }
+  return options;
+}
+
+/**
+ * Translate one SDK message into emitter calls.
+ * NOTE: with includePartialMessages, streamed text arrives via stream_event;
+ * the consolidated assistant TEXT block is skipped to avoid duplication, but
+ * assistant TOOL_USE blocks are the authoritative source for tool calls.
+ */
+function translateClaudeMessage(message, emitter) {
+  if (!message || typeof message !== "object") return;
+  const type = message.type;
+
+  if (type === "system" && message.subtype === "init" && message.session_id) {
+    emitter.sessionId(message.session_id);
+    return;
+  }
+
+  if (type === "stream_event" && message.event) {
+    const ev = message.event;
+    if (ev.type === "content_block_delta" && ev.delta) {
+      if (ev.delta.type === "text_delta" && ev.delta.text) {
+        emitter.text(ev.delta.text);
+      } else if (ev.delta.type === "thinking_delta" && ev.delta.thinking) {
+        emitter.reasoning(ev.delta.thinking);
+      }
+    }
+    return;
+  }
+
+  if (type === "assistant" && message.message && Array.isArray(message.message.content)) {
+    for (const block of message.message.content) {
+      if (block?.type === "tool_use") {
+        emitter.toolCall(block.name, block.input || {}, block.id);
+      }
+      // text blocks intentionally skipped (already streamed via stream_event)
+    }
+    return;
+  }
+
+  if (type === "user" && message.message && Array.isArray(message.message.content)) {
+    for (const block of message.message.content) {
+      if (block?.type === "tool_result") {
+        const out = typeof block.content === "string"
+          ? block.content
+          : JSON.stringify(block.content);
+        emitter.toolResult(block.tool_use_id, out, undefined);
+      }
+    }
+    return;
+  }
+  // 'result' carries final usage/cost — handled by the run loop, no per-event emit.
+}
+
+/** Classify a spawn failure. SDK wraps spawn ENOENT as a message string. */
+function classifyClaudeSpawnError(error) {
+  const code = error && error.code;
+  const msg = String((error && error.message) || error || "");
+  const isSpawnEnoent =
+    code === "ENOENT" ||
+    /native binary not found/i.test(msg) ||
+    /ENOENT/i.test(msg);
+  return { isSpawnEnoent, message: msg };
+}
+
+/**
+ * Run a Claude turn. Streams events via `emitter`, resolves with { sessionId }.
+ * @param {object} args
+ * @param {string} args.prompt
+ * @param {object} args.options  result of buildClaudeQueryOptions
+ * @param {object} args.emitter  createStreamEmitter(...)
+ * @param {Function} [args.queryFn] inject @anthropic-ai/claude-agent-sdk query (for tests)
+ */
+async function runClaudeTurn({ prompt, options, emitter, queryFn }) {
+  ensureClaudeConfig();
+  const query = queryFn || (await import("@anthropic-ai/claude-agent-sdk")).query;
+
+  let sessionId = null;
+  let hasContent = false;
+  try {
+    const stream = query({ prompt, options });
+    for await (const message of stream) {
+      if (options.abortController?.signal?.aborted) break;
+      if (message?.session_id && message.session_id !== sessionId) {
+        sessionId = message.session_id;
+      }
+      if (
+        message?.type === "stream_event" ||
+        (message?.type === "assistant" && Array.isArray(message?.message?.content) && message.message.content.length > 0)
+      ) {
+        hasContent = true;
+      }
+      translateClaudeMessage(message, emitter);
+    }
+    if (!hasContent && !options.abortController?.signal?.aborted) {
+      emitter.emitError(
+        "Claude returned an empty response. Run `claude` in a terminal to log in, " +
+        "or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN.",
+      );
+      return { sessionId };
+    }
+    emitter.emitDone();
+    return { sessionId };
+  } catch (error) {
+    const classified = classifyClaudeSpawnError(error);
+    if (classified.isSpawnEnoent) {
+      emitter.emitError(
+        `Claude Code binary not found or not runnable (${options.pathToClaudeCodeExecutable || "auto-discovery"}). ` +
+        "Install with `npm i -g @anthropic-ai/claude-code` and ensure it's on PATH.",
+      );
+    } else {
+      emitter.emitError(classified.message || "Claude turn failed");
+    }
+    return { sessionId };
+  }
+}
+
+module.exports = {
+  buildClaudeQueryOptions,
+  translateClaudeMessage,
+  classifyClaudeSpawnError,
+  runClaudeTurn,
+  DISALLOWED_TOOLS,
+  toSdkMcpServers,
+};

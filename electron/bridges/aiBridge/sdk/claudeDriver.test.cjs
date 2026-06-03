@@ -1,0 +1,103 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError } = require("./claudeDriver.cjs");
+
+function collector() {
+  const events = [];
+  const emitter = {
+    text: (t) => events.push({ k: "text", t }),
+    reasoning: (d) => events.push({ k: "reasoning", d }),
+    reasoningEnd: () => events.push({ k: "reasoningEnd" }),
+    toolCall: (name, args, id) => events.push({ k: "toolCall", name, args, id }),
+    toolResult: (id, out, name) => events.push({ k: "toolResult", id, out, name }),
+    status: (m) => events.push({ k: "status", m }),
+    sessionId: (s) => events.push({ k: "sessionId", s }),
+  };
+  return { events, emitter };
+}
+
+test("init system message -> sessionId event", () => {
+  const { events, emitter } = collector();
+  translateClaudeMessage({ type: "system", subtype: "init", session_id: "sess-1" }, emitter);
+  assert.deepEqual(events, [{ k: "sessionId", s: "sess-1" }]);
+});
+
+test("stream_event text_delta -> text event", () => {
+  const { events, emitter } = collector();
+  translateClaudeMessage(
+    { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "hello" } } },
+    emitter,
+  );
+  assert.deepEqual(events, [{ k: "text", t: "hello" }]);
+});
+
+test("assistant tool_use block -> toolCall event", () => {
+  const { events, emitter } = collector();
+  translateClaudeMessage(
+    {
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id: "tu-1", name: "mcp__netcatty-remote-hosts__terminal_execute", input: { command: "ls" } }] },
+    },
+    emitter,
+  );
+  assert.deepEqual(events, [
+    { k: "toolCall", name: "mcp__netcatty-remote-hosts__terminal_execute", args: { command: "ls" }, id: "tu-1" },
+  ]);
+});
+
+test("assistant text block (non-partial) is NOT double-emitted when partials enabled", () => {
+  // With includePartialMessages, text arrives via stream_event; the assistant
+  // message text block is the consolidated copy and must be skipped to avoid dupes.
+  const { events, emitter } = collector();
+  translateClaudeMessage(
+    { type: "assistant", message: { content: [{ type: "text", text: "consolidated" }] } },
+    emitter,
+  );
+  assert.deepEqual(events, []);
+});
+
+test("user tool_result block -> toolResult event", () => {
+  const { events, emitter } = collector();
+  translateClaudeMessage(
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", content: "output text" }] } },
+    emitter,
+  );
+  assert.deepEqual(events, [{ k: "toolResult", id: "tu-1", out: "output text", name: undefined }]);
+});
+
+test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio, abort", () => {
+  const ac = new AbortController();
+  const opts = buildClaudeQueryOptions({
+    cwd: "/tmp",
+    model: "claude-opus-4-6",
+    env: { PATH: "/usr/bin" },
+    pathToClaudeCodeExecutable: "/abs/claude",
+    abortController: ac,
+    injectedMcpServers: [{
+      name: "netcatty-remote-hosts", type: "stdio",
+      command: "/abs/electron", args: ["/abs/server.cjs"],
+      env: [{ name: "NETCATTY_MCP_PORT", value: "1" }],
+    }],
+  });
+  assert.equal(opts.permissionMode, "bypassPermissions");
+  assert.equal(opts.includePartialMessages, true);
+  assert.equal(opts.pathToClaudeCodeExecutable, "/abs/claude");
+  assert.equal(opts.abortController, ac);
+  // built-in side-effect + UI tools blocked
+  for (const t of ["Bash", "Edit", "Write", "EnterPlanMode", "ExitPlanMode", "AskUserQuestion", "Skill"]) {
+    assert.ok(opts.disallowedTools.includes(t), `expected ${t} disallowed`);
+  }
+  // netcatty MCP wired as keyed stdio with env object (not pair array)
+  assert.equal(opts.mcpServers["netcatty-remote-hosts"].type, "stdio");
+  assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
+});
+
+test("classifyClaudeSpawnError detects ENOENT 'native binary not found'", () => {
+  const r = classifyClaudeSpawnError(new Error("Claude Code native binary not found at /abs/claude"));
+  assert.equal(r.isSpawnEnoent, true);
+});
+
+test("classifyClaudeSpawnError detects code:ENOENT", () => {
+  const e = new Error("spawn failed"); e.code = "ENOENT"; e.syscall = "spawn";
+  assert.equal(classifyClaudeSpawnError(e).isSpawnEnoent, true);
+});
