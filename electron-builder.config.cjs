@@ -43,25 +43,22 @@ module.exports = {
         'skills/**/*',
         'public/**/*',
         'node_modules/**/*',
-        // @anthropic-ai/claude-agent-sdk@0.3.x bundles the native Claude Code
-        // CLI (~211MB per arch) as optional sibling packages. Netcatty is
-        // designed around the user's own Claude Code install — the wrapper
-        // honors `CLAUDE_CODE_EXECUTABLE` (set by useAgentDiscovery.ts) and
-        // only falls back to the bundled binary if that env var is empty.
-        // Excluding the sibling packages from the build keeps the installer
-        // ~150MB smaller and preserves the "bring your own Claude" design.
-        '!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*'
+        // ── Exclude per-platform native agent binaries (~100s of MB each). ──
+        // Netcatty is "bring your own CLI": each SDK is pointed at the user's
+        // system-installed CLI via an absolute path override (claude
+        // pathToClaudeCodeExecutable / codex codexPathOverride / copilot cliPath).
+        // Only the SDKs' JS is bundled; the heavy per-arch binaries are dropped.
+        '!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*',
+        '!node_modules/@anthropic-ai/claude-code-*/**/*',
+        '!node_modules/@openai/codex-*/**/*',
+        '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*'
     ],
     asarUnpack: [
         'node_modules/node-pty/**/*',
         'node_modules/ssh2/**/*',
         'node_modules/cpu-features/**/*',
         'node_modules/@vscode/windows-process-tree/**/*',
-        'node_modules/@agentclientprotocol/claude-agent-acp/**/*',
-        'node_modules/@agentclientprotocol/sdk/**/*',
         'node_modules/@anthropic-ai/claude-agent-sdk/**/*',
-        'node_modules/@zed-industries/codex-acp/**/*',
-        'node_modules/@zed-industries/codex-acp-*/**/*',
         'node_modules/@modelcontextprotocol/sdk/**/*',
         'lib/**/*.cjs',
         'lib/**/*.json',
