@@ -497,6 +497,12 @@ function createPreloadApi(ctx) {
       chainProgressListeners.delete(id);
     };
   },
+  onConnectionReuseFallback: (cb) => {
+    connectionReuseFallbackListeners.add(cb);
+    return () => {
+      connectionReuseFallbackListeners.delete(cb);
+    };
+  },
   // SFTP connection progress listener (auth method logs)
   onSftpConnectionProgress: (cb) => {
     sftpConnectionProgressListeners.add(cb);

@@ -59,6 +59,10 @@ function makeSender() {
   };
 }
 
+function getConnectionReuseFallbackEvents(sender) {
+  return sender.sent.filter((m) => m.channel === "netcatty:connection-reuse:fallback");
+}
+
 // A fake ssh2 shell channel.
 function makeStream() {
   const stream = new EventEmitter();
@@ -181,6 +185,7 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
   // A 'connected' progress event was emitted for the renderer.
   const progress = sender.sent.filter((m) => m.channel === "netcatty:chain:progress");
   assert.ok(progress.some((m) => m.payload.status === "connected"));
+  assert.equal(getConnectionReuseFallbackEvents(sender).length, 0, "successful reuse should not emit fallback");
 });
 
 test("closing the reused channel keeps the source connection alive", async (t) => {
@@ -319,15 +324,20 @@ test("synchronous shell failure releases the ref and falls back to fresh", async
   sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
+  const sender = makeSender();
   await assert.rejects(
     () => start(
-      { sender: makeSender() },
+      { sender },
       { sessionId: "copy", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
     ),
   );
   // The up-front ref hold must be released so the source's count isn't leaked.
   assert.equal(connRef.count, 1, "ref count restored after synchronous shell failure");
   assert.equal(getClientConstructCount(), 1, "should fall back to a fresh connection");
+  assert.deepEqual(
+    getConnectionReuseFallbackEvents(sender).map((m) => m.payload),
+    [{ sessionId: "copy", sourceSessionId: "source" }],
+  );
 });
 
 test("falls back to a fresh connection when the source is gone", async (t) => {
@@ -338,9 +348,10 @@ test("falls back to a fresh connection when the source is gone", async (t) => {
   // sourceSessionId points at a session that doesn't exist -> fresh connect.
   // The mocked client emits an error on connect, so the start call rejects;
   // the important assertion is that a fresh connection was attempted.
+  const sender = makeSender();
   await assert.rejects(
     () => start(
-      { sender: makeSender() },
+      { sender },
       {
         sessionId: "copy",
         hostname: "10.0.0.1",
@@ -350,4 +361,8 @@ test("falls back to a fresh connection when the source is gone", async (t) => {
     ),
   );
   assert.equal(getClientConstructCount(), 1, "should attempt one fresh connection");
+  assert.deepEqual(
+    getConnectionReuseFallbackEvents(sender).map((m) => m.payload),
+    [{ sessionId: "copy", sourceSessionId: "missing-source" }],
+  );
 });

@@ -378,9 +378,18 @@ function createStartSessionApi(ctx) {
 
     async function startSSHSession(event, options) {
       const sessionId = options.sessionId || randomUUID();
+      const sender = event.sender;
       const log = createSshDiagnosticLogger(
         !!options.sshDebugLogEnabled || process.env.NETCATTY_SSH_DEBUG === "1",
       );
+      const sendConnectionReuseFallback = () => {
+        if (!sender.isDestroyed()) {
+          sender.send("netcatty:connection-reuse:fallback", {
+            sessionId,
+            sourceSessionId: options.sourceSessionId,
+          });
+        }
+      };
 
       // Connection reuse (issue #1204): when a tab is duplicated we try to open
       // a new shell channel on the source tab's already-authenticated
@@ -408,6 +417,7 @@ function createStartSessionApi(ctx) {
               sourceSessionId: options.sourceSessionId,
               error: reuseErr?.message,
             });
+            sendConnectionReuseFallback();
             // Fall through to establish a fresh connection.
           }
         } else {
@@ -415,12 +425,12 @@ function createStartSessionApi(ctx) {
             sessionId,
             sourceSessionId: options.sourceSessionId,
           });
+          sendConnectionReuseFallback();
         }
       }
 
       const cols = options.cols || 80;
       const rows = options.rows || 24;
-      const sender = event.sender;
 
       const sendProgress = (hop, total, label, status, error) => {
         if (!sender.isDestroyed()) {

@@ -59,6 +59,9 @@ export type TerminalBackendApi = {
   onChainProgress: (
     cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void,
   ) => (() => void) | undefined;
+  onConnectionReuseFallback?: (
+    cb: (sessionId: string, sourceSessionId?: string) => void,
+  ) => (() => void) | undefined;
   writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
   /** Pause/resume the source stream for output back-pressure (optional). */
@@ -93,7 +96,7 @@ export type TerminalSessionStartersContext = {
   resolvedChainHosts: Host[];
   sessionId: string;
   // Source session id to reuse an authenticated SSH connection from when this
-  // tab is a "Copy Tab" duplicate (issue #1204).
+  // terminal was created from an existing SSH session.
   reuseConnectionFromSessionId?: string;
   startupCommand?: string;
   noAutoRun?: boolean;

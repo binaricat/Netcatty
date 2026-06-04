@@ -445,7 +445,7 @@ export const useSftpExternalOperations = (
         notify.error(err instanceof Error ? err.message : String(err), "SFTP");
       }
     },
-    [downloadToTemp, getActivePane],
+    [downloadToTemp, getActivePane, updateExternalUpload],
   );
 
   // Create upload callbacks that translate to TransferTask updates

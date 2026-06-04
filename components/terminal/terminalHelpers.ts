@@ -85,9 +85,9 @@ export interface TerminalProps {
   sessionId: string;
   startupCommand?: string;
   noAutoRun?: boolean;
-  // When this tab was created via "Copy Tab" on a connected SSH session, the id
-  // of the source session whose authenticated connection should be reused for a
-  // new shell channel — skipping a second MFA prompt (issue #1204).
+  // When this tab was created from a connected SSH session, the id of the
+  // source session whose authenticated connection should be reused for a new
+  // shell channel — skipping a second MFA prompt (issue #1204).
   reuseConnectionFromSessionId?: string;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
@@ -142,6 +142,41 @@ export function formatNetSpeed(bytesPerSec: number): string {
   } else {
     return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)}G/s`;
   }
+}
+
+export function shouldShowTerminalConnectionDialog({
+  status,
+  isLocalConnection,
+  isSerialConnection,
+  isDisconnectedDialogDismissed,
+  hideConnectingDialogForConnectionReuse,
+}: {
+  status: TerminalSession["status"];
+  isLocalConnection: boolean;
+  isSerialConnection: boolean;
+  isDisconnectedDialogDismissed: boolean;
+  hideConnectingDialogForConnectionReuse?: boolean;
+}): boolean {
+  return status !== "connected"
+    && !(!!hideConnectingDialogForConnectionReuse && status === "connecting")
+    && !((isLocalConnection || isSerialConnection) && status === "connecting")
+    && !(status === "disconnected" && isDisconnectedDialogDismissed);
+}
+
+export function shouldHideConnectingDialogForConnectionReuse({
+  reuseConnectionFromSessionId,
+  host,
+  connectionReuseFellBack,
+}: {
+  reuseConnectionFromSessionId?: string;
+  host: Host;
+  connectionReuseFellBack: boolean;
+}): boolean {
+  return !!reuseConnectionFromSessionId
+    && !connectionReuseFellBack
+    && !host.x11Forwarding
+    && !host.moshEnabled
+    && !host.etEnabled;
 }
 
 type XTermWithPrivateRenderService = XTerm & {

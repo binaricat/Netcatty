@@ -73,6 +73,8 @@ import {
   forceSyncRenderAfterResize,
   formatNetSpeed,
   MAX_CONNECTION_LOG_DATA_CHARS,
+  shouldHideConnectingDialogForConnectionReuse,
+  shouldShowTerminalConnectionDialog,
   type TerminalProps,
 } from "./terminal/terminalHelpers";
 
@@ -231,6 +233,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const [progressValue, setProgressValue] = useState(15);
   const [hasSelection, setHasSelection] = useState(false);
   const [isDisconnectedDialogDismissed, setIsDisconnectedDialogDismissed] = useState(false);
+  const [connectionReuseFellBack, setConnectionReuseFellBack] = useState(false);
 
   const statusRef = useRef<TerminalSession["status"]>(status);
   statusRef.current = status;
@@ -641,6 +644,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   });
   sessionStartersRef.current = sessionStarters;
 
+  useEffect(() => {
+    setConnectionReuseFellBack(false);
+    if (!reuseConnectionFromSessionId) return undefined;
+
+    return terminalBackend.onConnectionReuseFallback?.((fallbackSessionId) => {
+      if (fallbackSessionId === sessionId) {
+        setConnectionReuseFellBack(true);
+      }
+    });
+  }, [reuseConnectionFromSessionId, sessionId, terminalBackend]);
+
   const safeFit = (options?: { force?: boolean; requireVisible?: boolean }) => {
     const fitAddon = fitAddonRef.current;
     if (!fitAddon) return;
@@ -887,6 +901,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     terminalDataCapturedRef.current = false;
     hasRunStartupCommandRef.current = false;
     setIsDisconnectedDialogDismissed(false);
+    setConnectionReuseFellBack(false);
     setStatus("connecting");
     setError(null);
     setProgressLogs(["Retrying secure channel..."]);
@@ -940,9 +955,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     });
   };
 
-  const shouldShowConnectionDialog = status !== "connected"
-    && !((isLocalConnection || isSerialConnection) && status === "connecting")
-    && !(status === "disconnected" && isDisconnectedDialogDismissed);
+  const shouldShowConnectionDialog = shouldShowTerminalConnectionDialog({
+    status,
+    isLocalConnection,
+    isSerialConnection,
+    isDisconnectedDialogDismissed,
+    hideConnectingDialogForConnectionReuse: shouldHideConnectingDialogForConnectionReuse({
+      reuseConnectionFromSessionId,
+      host,
+      connectionReuseFellBack,
+    }),
+  });
 
   const {
     handleDragEnter,

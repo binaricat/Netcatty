@@ -152,6 +152,10 @@ declare global {
     // Callback receives: (sessionId: string, currentHop: number, totalHops: number, hostLabel: string, status: string, error?: string)
     onChainProgress?(cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void): () => void;
 
+    // Fired when a requested SSH connection reuse cannot be honored and the
+    // session falls back to a regular fresh connection.
+    onConnectionReuseFallback?(cb: (sessionId: string, sourceSessionId?: string) => void): () => void;
+
     // SFTP connection progress listener (auth method logs)
     onSftpConnectionProgress?(cb: (sessionId: string, label: string, status: string, detail?: string) => void): () => void;
 

@@ -338,11 +338,11 @@ export interface TerminalSession {
   localShellArgs?: string[]; // Shell args for local terminals (from discovery)
   localShellName?: string;   // Display name for local shell (e.g., "Zsh", "Ubuntu (WSL)")
   localShellIcon?: string;   // Icon identifier for local shell (e.g., "zsh", "ubuntu")
-  // For tabs created via "Copy Tab" on an SSH session: the id of the source
-  // session whose already-authenticated connection should be reused so the
-  // duplicate does not trigger a second MFA prompt (issue #1204). The bridge
-  // reuses the source connection when it is still live, otherwise it falls back
-  // to a fresh connection — so this also applies on reconnect: a reconnect
-  // reuses the source again if still connected, else dials fresh.
+  // For sessions created from an existing SSH session: the id of the source
+  // session whose already-authenticated connection should be reused so the new
+  // shell channel does not trigger a second MFA prompt (issue #1204). The
+  // bridge reuses the source connection when it is still live, otherwise it
+  // falls back to a fresh connection — so this also applies on reconnect: a
+  // reconnect reuses the source again if still connected, else dials fresh.
   reuseConnectionFromSessionId?: string;
 }

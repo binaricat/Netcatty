@@ -10,6 +10,7 @@ const transferCompleteListeners = new Map();
 const transferErrorListeners = new Map();
 const transferCancelledListeners = new Map();
 const chainProgressListeners = new Map();
+const connectionReuseFallbackListeners = new Set();
 const zmodemListeners = new Map();
 const zmodemOverwriteListeners = new Map(); // sessionId -> Set<cb>
 const sftpConnectionProgressListeners = new Set();
@@ -210,6 +211,16 @@ ipcRenderer.on("netcatty:chain:progress", (_event, payload) => {
       cb(sessionId, hop, total, label, status, error);
     } catch (err) {
       console.error("Chain progress callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:connection-reuse:fallback", (_event, payload) => {
+  connectionReuseFallbackListeners.forEach((cb) => {
+    try {
+      cb(payload.sessionId, payload.sourceSessionId);
+    } catch (err) {
+      console.error("Connection reuse fallback callback failed", err);
     }
   });
 });
@@ -616,6 +627,7 @@ const api = createPreloadApi({
   transferErrorListeners,
   transferCancelledListeners,
   chainProgressListeners,
+  connectionReuseFallbackListeners,
   zmodemListeners,
   zmodemOverwriteListeners,
   sftpConnectionProgressListeners,
