@@ -3,8 +3,13 @@ const assert = require("node:assert/strict");
 const { buildInjectedMcpServers } = require("./injectMcp.cjs");
 
 function fakeMcpBridge() {
+  let hostStartCount = 0;
   return {
-    getOrCreateHost: async () => 54321,
+    get hostStartCount() { return hostStartCount; },
+    getOrCreateHost: async () => {
+      hostStartCount += 1;
+      return 54321;
+    },
     getScopedSessionIds: (chatId) => (chatId === "chat-1" ? ["s1", "s2"] : []),
     buildMcpServerConfig: (port, ids, chatId) => ({
       name: "netcatty-remote-hosts",
@@ -33,13 +38,15 @@ test("mcp mode returns netcatty MCP stdio config", async () => {
   assert.equal(portPair.value, "54321");
 });
 
-test("non-mcp mode returns empty (skills uses the CLI instead)", async () => {
+test("skills mode starts the CLI host and returns no injected MCP config", async () => {
+  const bridge = fakeMcpBridge();
   const res = await buildInjectedMcpServers({
-    mcpServerBridge: fakeMcpBridge(),
+    mcpServerBridge: bridge,
     chatSessionId: "chat-1",
     toolIntegrationMode: "skills",
   });
   assert.deepEqual(res, []);
+  assert.equal(bridge.hostStartCount, 1);
 });
 
 test("getOrCreateHost failure degrades to empty, not throw", async () => {
