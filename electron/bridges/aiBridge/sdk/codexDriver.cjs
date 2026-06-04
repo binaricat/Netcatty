@@ -39,6 +39,9 @@ function buildCodexConstructorOptions({ codexPath, env, apiKey, injectedMcpServe
   return options;
 }
 
+// codex-sdk reasoning-effort levels.
+const CODEX_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+
 function buildCodexThreadOptions({ cwd, model }) {
   // model + sandboxMode + workingDirectory belong to ThreadOptions (startThread).
   // runStreamed's TurnOptions only accepts { outputSchema, signal }, so passing
@@ -46,7 +49,20 @@ function buildCodexThreadOptions({ cwd, model }) {
   // the read-only sandbox.
   const opts = { sandboxMode: "read-only", skipGitRepoCheck: true };
   if (cwd) opts.workingDirectory = cwd;
-  if (model) opts.model = model;
+  if (model) {
+    // The renderer encodes codex reasoning effort as "<modelId>/<effort>"
+    // (e.g. "gpt-5.5/high"). codex-sdk wants them as separate ThreadOptions.
+    // Only split when the trailing segment is a real effort — custom/OpenRouter
+    // model ids may legitimately contain "/".
+    const slash = model.lastIndexOf("/");
+    const effort = slash > 0 ? model.slice(slash + 1) : "";
+    if (slash > 0 && CODEX_REASONING_EFFORTS.has(effort)) {
+      opts.model = model.slice(0, slash);
+      opts.modelReasoningEffort = effort;
+    } else {
+      opts.model = model;
+    }
+  }
   return opts;
 }
 

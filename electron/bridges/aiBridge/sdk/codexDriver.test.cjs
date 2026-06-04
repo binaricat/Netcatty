@@ -92,9 +92,20 @@ test("buildCodexConstructorOptions sets path override + env + mcp config table",
 test("buildCodexThreadOptions puts model + read-only sandbox in ThreadOptions", () => {
   // codex-sdk: model/sandboxMode/workingDirectory are ThreadOptions (startThread),
   // not runStreamed TurnOptions.
-  const t = buildCodexThreadOptions({ cwd: "/tmp", model: "gpt-5.1-codex" });
+  const t = buildCodexThreadOptions({ cwd: "/tmp", model: "gpt-5.5" });
   assert.equal(t.sandboxMode, "read-only");
   assert.equal(t.workingDirectory, "/tmp");
-  assert.equal(t.model, "gpt-5.1-codex");
+  assert.equal(t.model, "gpt-5.5");
+  assert.equal(t.modelReasoningEffort, undefined);
   assert.equal(t.skipGitRepoCheck, true);
+});
+
+test("buildCodexThreadOptions splits <model>/<effort> into model + modelReasoningEffort", () => {
+  const t = buildCodexThreadOptions({ model: "gpt-5.5/high" });
+  assert.equal(t.model, "gpt-5.5");
+  assert.equal(t.modelReasoningEffort, "high");
+  // a trailing segment that isn't a valid effort (custom/OpenRouter id) is kept whole
+  const c = buildCodexThreadOptions({ model: "openrouter/some-model" });
+  assert.equal(c.model, "openrouter/some-model");
+  assert.equal(c.modelReasoningEffort, undefined);
 });

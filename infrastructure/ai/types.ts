@@ -325,14 +325,17 @@ export const CLAUDE_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'haiku', name: 'Haiku 4.5', description: 'Fastest' },
 ];
 
+// Curated codex model list (codex-sdk has no enumeration API). Mirrors the
+// craft agent's `openai-codex` set. The codex driver splits "<id>/<effort>"
+// into model + modelReasoningEffort, so thinkingLevels work via codex-sdk.
 export const CODEX_MODEL_PRESETS: AgentModelPreset[] = [
-  { id: 'gpt-5.4', name: 'GPT 5.4', description: 'Latest', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
-  { id: 'gpt-5.3-codex', name: 'Codex 5.3', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
-  { id: 'gpt-5.2-codex', name: 'Codex 5.2', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
-  { id: 'gpt-5.1-codex-max', name: 'Codex 5.1 Max', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
-  { id: 'gpt-5.1-codex-mini', name: 'Codex 5.1 Mini', description: 'Fast', thinkingLevels: ['medium', 'high'] },
-  { id: 'o3', name: 'o3', description: 'Reasoning' },
+  { id: 'gpt-5.5', name: 'GPT-5.5', description: 'Latest', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.2', name: 'GPT-5.2', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.1', name: 'GPT-5.1', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5', name: 'GPT-5', thinkingLevels: ['low', 'medium', 'high', 'xhigh'] },
   { id: 'o4-mini', name: 'o4-mini', description: 'Fast reasoning' },
+  { id: 'o3', name: 'o3', description: 'Reasoning' },
+  { id: 'gpt-4o', name: 'GPT-4o' },
 ];
 
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
