@@ -1,9 +1,10 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { logger } from "../../lib/logger";
 import { useRenderTracker } from "../../lib/useRenderTracker";
 import { cn } from "../../lib/utils";
 import { SftpPaneDialogs } from "./SftpPaneDialogs";
+import { SftpClipboardUploadDialog } from "./SftpClipboardUploadDialog";
 import { SftpPaneEmptyState } from "./SftpPaneEmptyState";
 import { SftpPaneFileList } from "./SftpPaneFileList";
 import { SftpPaneToolbar } from "./SftpPaneToolbar";
@@ -32,6 +33,7 @@ import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
 import { useSftpHostViewMode } from "./hooks/useSftpHostViewMode";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
 import { sftpTreeSelectionStore } from "./hooks/useSftpTreeSelectionStore";
+import { sftpClipboardUploadStore } from "./clipboardUpload";
 
 interface TreeReloadRequest {
   token: number;
@@ -113,6 +115,17 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     if (viewMode === 'tree' && !treeEverMounted) setTreeEverMounted(true);
   }, [viewMode, treeEverMounted]);
   const filterInputRef = useRef<HTMLInputElement>(null);
+  const clipboardUploadRequestSnapshot = useSyncExternalStore(
+    sftpClipboardUploadStore.subscribe,
+    sftpClipboardUploadStore.getSnapshot,
+    sftpClipboardUploadStore.getSnapshot,
+  );
+  const clipboardUploadRequest =
+    clipboardUploadRequestSnapshot?.scopeId === dialogActionScopeId
+    && clipboardUploadRequestSnapshot.side === side
+    && isActive
+      ? clipboardUploadRequestSnapshot
+      : null;
 
   const requestTreeReload = useCallback((paths?: string[], full = false) => {
     setTreeReloadRequest((prev) => ({
@@ -646,6 +659,16 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         setHostSearch={setHostSearch}
         onConnect={callbacks.onConnect}
         onDisconnect={callbacks.onDisconnect}
+      />
+
+      <SftpClipboardUploadDialog
+        request={clipboardUploadRequest}
+        currentPath={pane.connection?.currentPath}
+        onUploaded={(targetPath) => {
+          if (targetPath && targetPath !== pane.connection?.currentPath) {
+            requestTreeReload([targetPath]);
+          }
+        }}
       />
     </div>
   );

@@ -31,6 +31,12 @@ import type { UploadBridge, UploadCallbacks, UploadConfig, UploadResult } from "
 const formatUploadError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const getDropEntrySize = (entry: DropEntry): number => entry.file?.size ?? entry.size ?? 0;
+const getDropEntryLocalPath = (entry: DropEntry): string | undefined =>
+  entry.localPath ?? (entry.file as (File & { path?: string }) | null | undefined)?.path;
+const isUploadableFileEntry = (entry: DropEntry): boolean =>
+  !entry.isDirectory && (!!entry.file || !!getDropEntryLocalPath(entry));
+
 export interface UploadScanningTask {
   taskId: string;
   complete: () => void;
@@ -407,7 +413,7 @@ async function uploadEntries(
         continue;
       }
 
-      const newSize = groupEntries.reduce((sum, entry) => sum + (entry.file?.size ?? 0), 0);
+      const newSize = groupEntries.reduce((sum, entry) => sum + getDropEntrySize(entry), 0);
       const action = await resolveConflict({
         fileName: rootName,
         targetPath: rootTargetPath,
@@ -589,7 +595,7 @@ async function uploadEntries(
     standaloneTransferId: string,
     fileTotalBytes: number,
   ): Promise<{ cancelled?: boolean; error?: string }> => {
-    const localFilePath = (entry.file as File & { path?: string }).path;
+    const localFilePath = getDropEntryLocalPath(entry);
 
     // Progress callback factory for both stream and memory paths
     const makeOnProgress = () => {
@@ -653,7 +659,10 @@ async function uploadEntries(
           return { error: streamResult.error };
         }
     } else {
-        const arrayBuffer = await entry.file!.arrayBuffer();
+        if (!entry.file) {
+          return { error: "No local file data available" };
+        }
+        const arrayBuffer = await entry.file.arrayBuffer();
 
         if (isLocal) {
           if (!bridge.writeLocalFile) throw new Error("writeLocalFile not available");
@@ -700,7 +709,7 @@ async function uploadEntries(
   };
 
   // Filter to only file entries (directories are pre-created above)
-  const fileEntries = sortedEntries.filter(e => !e.isDirectory && e.file);
+  const fileEntries = sortedEntries.filter(isUploadableFileEntry);
 
   // Create standalone task entries upfront so they're visible immediately.
   // Bundled child tasks are created lazily when upload actually starts, so
@@ -718,7 +727,7 @@ async function uploadEntries(
           displayName: entry.relativePath,
           isDirectory: false,
           progressMode: 'bytes',
-          totalBytes: entry.file!.size,
+          totalBytes: getDropEntrySize(entry),
           transferredBytes: 0,
           speed: 0,
           fileCount: 1,
@@ -739,7 +748,7 @@ async function uploadEntries(
         isDirectory: false,
         progressMode: 'bytes',
         parentTaskId: bundleTaskId,
-        totalBytes: entry.file!.size,
+        totalBytes: getDropEntrySize(entry),
         transferredBytes: 0,
         speed: 0,
         fileCount: 1,
@@ -774,7 +783,7 @@ async function uploadEntries(
         const bundleTaskId = getBundleTaskId(entry);
         const bundledChildTaskId = bundleTaskId ? createBundledChildTask(entry, bundleTaskId) : "";
         const standaloneTransferId = standaloneTaskIds.get(entry.relativePath) || "";
-        const fileTotalBytes = entry.file!.size;
+        const fileTotalBytes = getDropEntrySize(entry);
 
         try {
           const uploadResult = await uploadSingleFile(

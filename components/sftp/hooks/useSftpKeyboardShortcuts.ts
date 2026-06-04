@@ -9,6 +9,7 @@ import { useCallback, useEffect } from "react";
 import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
 import { getParentPath, joinPath } from "../../../application/state/sftp/utils";
+import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
 import { sftpFocusStore } from "./useSftpFocusedPane";
 import { sftpDialogActionStore } from "./useSftpDialogAction";
@@ -19,6 +20,11 @@ import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 import type { SftpFileEntry } from "../../../types";
 import { toast } from "../../ui/toast";
+import {
+  createDropEntriesFromClipboardFiles,
+  resolveSftpClipboardUploadTarget,
+  sftpClipboardUploadStore,
+} from "../clipboardUpload";
 
 // SFTP action names that we handle
 const SFTP_ACTIONS = new Set([
@@ -373,7 +379,49 @@ export const useSftpKeyboardShortcuts = ({
         case "sftpPaste": {
           // Paste files from clipboard
           const clipboard = sftpClipboardStore.get();
-          if (!clipboard || clipboard.files.length === 0) return;
+          if (!clipboard || clipboard.files.length === 0) {
+            const bridge = netcattyBridge.get();
+            const localClipboardFiles = await bridge?.readClipboardFiles?.();
+            if (!localClipboardFiles || localClipboardFiles.length === 0) return;
+
+            const selectedFiles = Array.from(pane.selectedFiles) as string[];
+            const targetPath = resolveSftpClipboardUploadTarget({
+              currentPath: pane.connection.currentPath,
+              selectedFileNames: selectedFiles,
+              files: pane.files as SftpFileEntry[],
+              treeSelection: treeActionSelection,
+            });
+            const entries = createDropEntriesFromClipboardFiles(localClipboardFiles);
+
+            sftpClipboardUploadStore.trigger({
+              scopeId: dialogActionScopeId,
+              side: focusedSide,
+              targetPath,
+              files: localClipboardFiles,
+              onConfirm: async () => {
+                try {
+                  const results = await sftp.uploadExternalEntries(focusedSide, entries, { targetPath });
+                  if (results.some((result) => result.cancelled)) {
+                    toast.info("Upload cancelled.", "SFTP");
+                    return;
+                  }
+
+                  const successCount = results.filter((result) => result.success).length;
+                  const failedFiles = results.filter((result) => !result.success && !result.cancelled);
+                  if (successCount > 0) {
+                    toast.success(`Uploaded ${successCount} item${successCount === 1 ? "" : "s"}.`, "SFTP");
+                  }
+                  failedFiles.forEach((failed) => {
+                    const errorMsg = failed.error ? ` - ${failed.error}` : "";
+                    toast.error(`Upload failed: ${failed.fileName}${errorMsg}`, "SFTP");
+                  });
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Upload failed.", "SFTP");
+                }
+              },
+            });
+            return;
+          }
 
           // Use startTransfer to paste files from source to current pane
           // Allow paste when source and target are different connections, even on the same side

@@ -433,6 +433,8 @@ export function getSupportedLanguages(): { id: string; name: string }[] {
  */
 export interface DropEntry {
   file: File | null;  // null for directory entries
+  localPath?: string;
+  size?: number;
   relativePath: string;  // Path relative to the root of the drop (e.g., "folder/subfolder/file.txt")
   isDirectory: boolean;
 }

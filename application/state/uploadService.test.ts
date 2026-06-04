@@ -139,6 +139,55 @@ test("uploads picked folder files with their relative directory structure", asyn
   ]);
 });
 
+test("uploads path-backed clipboard files through stream transfer", async () => {
+  const transfers: Array<{ sourcePath: string; targetPath: string; totalBytes?: number }> = [];
+  const taskTotals: number[] = [];
+
+  const results = await uploadEntriesDirect(
+    [
+      {
+        file: null,
+        localPath: "/Users/me/Desktop/report.txt",
+        relativePath: "report.txt",
+        isDirectory: false,
+        size: 42,
+      },
+    ],
+    {
+      targetPath: "/target",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        startStreamTransfer: async (payload) => {
+          transfers.push({
+            sourcePath: payload.sourcePath,
+            targetPath: payload.targetPath,
+            totalBytes: payload.totalBytes,
+          });
+          return { transferId: payload.transferId };
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+      callbacks: {
+        onTaskCreated: (task) => taskTotals.push(task.totalBytes),
+      },
+    },
+  );
+
+  assert.deepEqual(taskTotals, [42]);
+  assert.deepEqual(transfers, [
+    {
+      sourcePath: "/Users/me/Desktop/report.txt",
+      targetPath: "/target/report.txt",
+      totalBytes: 42,
+    },
+  ]);
+  assert.deepEqual(results, [
+    { fileName: "report.txt", success: true },
+  ]);
+});
+
 test("reports empty directory creation failures", async () => {
   const madeDirs: string[] = [];
 

@@ -2,6 +2,7 @@
 
 let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
+const { readClipboardFiles } = require("../bridges/clipboardFiles.cjs");
 
 function createBridgeRegistrar(context) {
   const {
@@ -400,6 +401,10 @@ function createBridgeRegistrar(context) {
       } catch {
         return "";
       }
+    });
+
+    ipcMain.handle("netcatty:clipboard:readFiles", async () => {
+      return readClipboardFiles({ clipboard, fsImpl: fs, pathImpl: path });
     });
   
     // Select an application from system file picker
