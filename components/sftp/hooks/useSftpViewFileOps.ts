@@ -254,9 +254,9 @@ export const useSftpViewFileOps = ({
       if (!pane.connection) return;
 
       const resolvedFullPath = fullPath ?? sftpRef.current.joinPath(pane.connection.currentPath, file.name);
-      void sftpRef.current.openWithSystemDefault(side, resolvedFullPath, file.name);
+      void sftpRef.current.openWithSystemDefault(side, resolvedFullPath, file.name, { enableWatch: autoSyncRef.current });
     },
-    [sftpRef],
+    [sftpRef, autoSyncRef],
   );
 
   const onOpenFileWithSystemDefaultLeft = useCallback(

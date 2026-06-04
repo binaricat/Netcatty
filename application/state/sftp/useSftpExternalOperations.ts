@@ -389,7 +389,12 @@ export const useSftpExternalOperations = (
   );
 
   const openWithSystemDefault = useCallback(
-    async (side: "left" | "right", remotePath: string, fileName: string): Promise<void> => {
+    async (
+      side: "left" | "right",
+      remotePath: string,
+      fileName: string,
+      options?: { enableWatch?: boolean }
+    ): Promise<void> => {
       try {
         const pane = getActivePane(side);
         if (!pane?.connection) {
@@ -401,15 +406,32 @@ export const useSftpExternalOperations = (
           throw new Error("System default opening not supported");
         }
 
-        const localPath = pane.connection.isLocal
-          ? remotePath
-          : (await downloadToTemp(side, remotePath, fileName)).localTempPath;
+        const bridgeMethods = bridge;
 
-        if (!localPath) return;
+        const { localTempPath, sftpId, externalTransferId } = pane.connection.isLocal
+          ? { localTempPath: remotePath, sftpId: "", externalTransferId: undefined }
+          : await downloadToTemp(side, remotePath, fileName);
 
-        const result = await bridge.openWithSystemDefault(localPath);
+        if (!localTempPath) return;
+
+        const result = await bridgeMethods.openWithSystemDefault(localTempPath);
         if (!result.success) {
           throw new Error(result.error || "Failed to open file");
+        }
+
+        // Start file watch for remote SFTP auto-sync (mirrors downloadToTempAndOpen behavior)
+        if (options?.enableWatch && !pane.connection.isLocal && bridgeMethods.startFileWatch) {
+          try {
+            await bridgeMethods.startFileWatch(
+              localTempPath,
+              remotePath,
+              sftpId,
+              pane.filenameEncoding,
+            );
+            activeFileWatchCountRef.current += 1;
+          } catch (err) {
+            console.warn("[SFTP] Failed to start file watch for default app open:", err);
+          }
         }
       } catch (err) {
         notify.error(err instanceof Error ? err.message : String(err), "SFTP");
