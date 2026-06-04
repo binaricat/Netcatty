@@ -15,6 +15,8 @@ export const ClaudeCodeCard: React.FC<{
   onRecheckPath: () => void;
   configDir: string;
   onConfigDirChange: (value: string) => void;
+  settingsPath: string;
+  onSettingsPathChange: (value: string) => void;
   envText: string;
   onEnvTextChange: (value: string) => void;
 }> = ({
@@ -25,6 +27,8 @@ export const ClaudeCodeCard: React.FC<{
   onRecheckPath,
   configDir,
   onConfigDirChange,
+  settingsPath,
+  onSettingsPathChange,
   envText,
   onEnvTextChange,
 }) => {
@@ -33,7 +37,7 @@ export const ClaudeCodeCard: React.FC<{
   // Collapsed by default; auto-expand when the user already has config so it
   // isn't hidden. Local UI state — not persisted.
   const [configOpen, setConfigOpen] = useState(
-    () => Boolean(configDir.trim() || envText.trim()),
+    () => Boolean(configDir.trim() || settingsPath.trim() || envText.trim()),
   );
 
   // The env editor keeps the raw text the user types. Persisting parses it into
@@ -139,6 +143,18 @@ export const ClaudeCodeCard: React.FC<{
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.configDir.hint')}</p>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="claude-settings" className="text-xs text-muted-foreground">{t('ai.claude.settings')}</label>
+              <input
+                id="claude-settings"
+                type="text"
+                value={settingsPath}
+                onChange={(e) => onSettingsPathChange(e.target.value)}
+                placeholder={t('ai.claude.settings.placeholder')}
+                className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p className="text-[11px] text-muted-foreground leading-4">{t('ai.claude.settings.hint')}</p>
             </div>
             <div className="space-y-1.5">
               <label htmlFor="claude-env-vars" className="text-xs text-muted-foreground">{t('ai.claude.envVars')}</label>

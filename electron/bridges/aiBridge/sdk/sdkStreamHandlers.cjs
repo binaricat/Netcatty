@@ -71,9 +71,16 @@ function registerSdkStreamHandlers(ctx) {
             toolIntegrationMode: effectiveMode,
           });
 
+          // NETCATTY_CLAUDE_SETTINGS is a netcatty marker carrying the claude SDK
+          // `settings` option (a settings.json path / inline JSON), NOT a real env
+          // var — pull it out so it isn't handed to the agent process as env.
+          const normalizedAgentEnv = normalizeAgentEnv(requestedAgentEnv);
+          const claudeSettings = normalizedAgentEnv.NETCATTY_CLAUDE_SETTINGS;
+          delete normalizedAgentEnv.NETCATTY_CLAUDE_SETTINGS;
+
           const env = buildSdkAgentEnv({
             shellEnv,
-            requestedAgentEnv: normalizeAgentEnv(requestedAgentEnv),
+            requestedAgentEnv: normalizedAgentEnv,
             withCliDiscoveryEnv,
             normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForAcp,
           });
@@ -99,6 +106,7 @@ function registerSdkStreamHandlers(ctx) {
             env,
             binPath,
             injectedMcpServers,
+            claudeSettings,
             emitter,
             signal: abortController.signal,
             abortController,

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError, mapClaudeModels } = require("./claudeDriver.cjs");
+const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError, mapClaudeModels, parseClaudeSettings } = require("./claudeDriver.cjs");
 
 function collector() {
   const events = [];
@@ -115,4 +115,20 @@ test("mapClaudeModels maps {value,displayName,description} -> {id,name,descripti
     { id: "claude-sonnet-4-6", name: "Sonnet 4.6", description: undefined },
   ]);
   assert.deepEqual(mapClaudeModels(null), []);
+});
+
+test("parseClaudeSettings: path string, inline JSON object, empty, and bad JSON", () => {
+  assert.equal(parseClaudeSettings("/path/to/settings.json"), "/path/to/settings.json");
+  assert.deepEqual(parseClaudeSettings('{"model":"sonnet"}'), { model: "sonnet" });
+  assert.deepEqual(parseClaudeSettings({ model: "opus" }), { model: "opus" });
+  assert.equal(parseClaudeSettings(""), undefined);
+  assert.equal(parseClaudeSettings(null), undefined);
+  assert.equal(parseClaudeSettings("{bad json"), "{bad json"); // invalid JSON -> treated as a path
+});
+
+test("buildClaudeQueryOptions wires settings (additive to CLAUDE_CONFIG_DIR) and omits when absent", () => {
+  const withS = buildClaudeQueryOptions({ env: {}, settings: "/abs/settings.json" });
+  assert.equal(withS.settings, "/abs/settings.json");
+  const without = buildClaudeQueryOptions({ env: {} });
+  assert.equal("settings" in without, false);
 });

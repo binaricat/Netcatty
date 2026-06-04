@@ -38,8 +38,26 @@ function toSdkMcpServers(injectedMcpServers) {
   return map;
 }
 
+/**
+ * Normalize the user-supplied claude `settings` value: a settings.json path
+ * (string) or inline JSON ("{...}" -> object). Returns undefined when empty.
+ * This is INDEPENDENT of CLAUDE_CONFIG_DIR (which supplies credentials + the
+ * base settings layer) — `settings` is an additional override the SDK merges on
+ * top, so the two coexist.
+ */
+function parseClaudeSettings(settings) {
+  if (settings == null) return undefined;
+  if (typeof settings === "object") return settings;
+  const str = String(settings).trim();
+  if (!str) return undefined;
+  if (str.startsWith("{")) {
+    try { return JSON.parse(str); } catch { return str; }
+  }
+  return str;
+}
+
 function buildClaudeQueryOptions({
-  cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers,
+  cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings,
 }) {
   const options = {
     cwd,
@@ -59,6 +77,9 @@ function buildClaudeQueryOptions({
   if (pathToClaudeCodeExecutable) {
     options.pathToClaudeCodeExecutable = pathToClaudeCodeExecutable;
   }
+  // Optional settings.json path / inline object — additive to CLAUDE_CONFIG_DIR.
+  const parsedSettings = parseClaudeSettings(settings);
+  if (parsedSettings !== undefined) options.settings = parsedSettings;
   return options;
 }
 
@@ -219,6 +240,7 @@ async function listClaudeModels({ pathToClaudeCodeExecutable, env, queryFn }) {
 
 module.exports = {
   buildClaudeQueryOptions,
+  parseClaudeSettings,
   translateClaudeMessage,
   classifyClaudeSpawnError,
   runClaudeTurn,

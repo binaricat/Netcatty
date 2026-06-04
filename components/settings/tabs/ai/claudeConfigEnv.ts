@@ -7,7 +7,12 @@
  */
 
 const CONFIG_DIR_KEY = "CLAUDE_CONFIG_DIR";
-const MANAGED_KEYS = new Set(["CLAUDE_CODE_EXECUTABLE", CONFIG_DIR_KEY]);
+// netcatty marker carrying the claude SDK `settings` option (a settings.json
+// path or inline JSON). Extracted in the main process and passed to the SDK as
+// `options.settings`; never sent to the agent as a real env var. Additive to —
+// and independent of — CLAUDE_CONFIG_DIR.
+const SETTINGS_KEY = "NETCATTY_CLAUDE_SETTINGS";
+const MANAGED_KEYS = new Set(["CLAUDE_CODE_EXECUTABLE", CONFIG_DIR_KEY, SETTINGS_KEY]);
 
 export function parseEnvLines(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -31,20 +36,22 @@ export function serializeEnvLines(env: Record<string, string>): string {
 
 export function splitClaudeEnv(
   env: Record<string, string> | undefined,
-): { configDir: string; envText: string } {
-  if (!env) return { configDir: "", envText: "" };
+): { configDir: string; settingsPath: string; envText: string } {
+  if (!env) return { configDir: "", settingsPath: "", envText: "" };
   const configDir = env[CONFIG_DIR_KEY] ?? "";
+  const settingsPath = env[SETTINGS_KEY] ?? "";
   const rest: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (MANAGED_KEYS.has(k)) continue;
     rest[k] = v;
   }
-  return { configDir, envText: serializeEnvLines(rest) };
+  return { configDir, settingsPath, envText: serializeEnvLines(rest) };
 }
 
 export function buildClaudeEnv(
   prevEnv: Record<string, string> | undefined,
   configDir: string,
+  settingsPath: string,
   envText: string,
 ): Record<string, string> | undefined {
   const next: Record<string, string> = {};
@@ -55,8 +62,11 @@ export function buildClaudeEnv(
   const trimmedDir = String(configDir || "").trim();
   if (trimmedDir) next[CONFIG_DIR_KEY] = trimmedDir;
 
+  const trimmedSettings = String(settingsPath || "").trim();
+  if (trimmedSettings) next[SETTINGS_KEY] = trimmedSettings;
+
   // Drop managed keys if a user typed them into the free-text editor — the
-  // config-dir field and path discovery own CLAUDE_CONFIG_DIR / CLAUDE_CODE_EXECUTABLE.
+  // dedicated fields and path discovery own these keys.
   const parsed = parseEnvLines(envText);
   for (const key of MANAGED_KEYS) delete parsed[key];
   Object.assign(next, parsed);

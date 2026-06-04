@@ -23,6 +23,7 @@ const DRIVER_REGISTRY = {
         pathToClaudeCodeExecutable: ctx.binPath,
         abortController: ctx.abortController,
         injectedMcpServers: ctx.injectedMcpServers,
+        settings: ctx.claudeSettings,
       });
       return claude.runClaudeTurn({ prompt: ctx.prompt, options, emitter: ctx.emitter });
     },

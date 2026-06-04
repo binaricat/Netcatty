@@ -131,17 +131,18 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     () => externalAgents.find((a) => a.id === "discovered_claude")?.env,
     [externalAgents],
   );
-  const { configDir: claudeConfigDir, envText: claudeEnvText } = useMemo(
-    () => splitClaudeEnv(claudeManagedEnv),
-    [claudeManagedEnv],
-  );
+  const {
+    configDir: claudeConfigDir,
+    settingsPath: claudeSettingsPath,
+    envText: claudeEnvText,
+  } = useMemo(() => splitClaudeEnv(claudeManagedEnv), [claudeManagedEnv]);
 
   const updateClaudeEnv = useCallback(
-    (nextConfigDir: string, nextEnvText: string) => {
+    (nextConfigDir: string, nextSettingsPath: string, nextEnvText: string) => {
       setExternalAgents((prev) =>
         prev.map((a) =>
           a.id === "discovered_claude"
-            ? { ...a, env: buildClaudeEnv(a.env, nextConfigDir, nextEnvText) }
+            ? { ...a, env: buildClaudeEnv(a.env, nextConfigDir, nextSettingsPath, nextEnvText) }
             : a,
         ),
       );
@@ -567,9 +568,11 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               onCustomPathChange={setClaudeCustomPath}
               onRecheckPath={() => void handleCheckCustomPath("claude")}
               configDir={claudeConfigDir}
-              onConfigDirChange={(v) => updateClaudeEnv(v, claudeEnvText)}
+              onConfigDirChange={(v) => updateClaudeEnv(v, claudeSettingsPath, claudeEnvText)}
+              settingsPath={claudeSettingsPath}
+              onSettingsPathChange={(v) => updateClaudeEnv(claudeConfigDir, v, claudeEnvText)}
               envText={claudeEnvText}
-              onEnvTextChange={(v) => updateClaudeEnv(claudeConfigDir, v)}
+              onEnvTextChange={(v) => updateClaudeEnv(claudeConfigDir, claudeSettingsPath, v)}
             />
           </div>
 
