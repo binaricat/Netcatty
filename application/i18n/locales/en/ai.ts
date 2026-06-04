@@ -49,7 +49,7 @@ export const enAiMessages: Messages = {
   // AI Codex
   'ai.codex': 'Codex',
   'ai.codex.title': 'Codex CLI',
-  'ai.codex.description': 'Uses codex + codex-acp for ACP protocol streaming. Login with ChatGPT here, or enable an OpenAI-compatible provider API key and custom endpoint in Settings.',
+  'ai.codex.description': 'Connect OpenAI Codex. Sign in with ChatGPT here, or enable an OpenAI-compatible provider API key and custom endpoint in Settings.',
   'ai.codex.detecting': 'Detecting...',
   'ai.codex.notFound': 'Not found',
   'ai.codex.awaitingLogin': 'Awaiting login',
@@ -93,7 +93,7 @@ export const enAiMessages: Messages = {
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
-  'ai.copilot.description': 'Uses GitHub Copilot CLI via ACP over stdio (`copilot --acp --stdio`). Once detected, it can be selected as an external coding agent.',
+  'ai.copilot.description': 'Uses the GitHub Copilot CLI. Once detected, it can be selected as an external coding agent.',
   'ai.copilot.detecting': 'Detecting...',
   'ai.copilot.detected': 'Detected',
   'ai.copilot.notFound': 'Not found',
@@ -108,7 +108,7 @@ export const enAiMessages: Messages = {
   'ai.defaultAgent.catty': 'Catty (Built-in)',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
-  'ai.toolAccess.description': 'Choose how external ACP agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
+  'ai.toolAccess.description': 'Choose how external agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
   'ai.userSkills.title': 'User Skills',
@@ -201,21 +201,21 @@ export const enAiMessages: Messages = {
   // AI Safety Settings
   'ai.safety.title': 'Safety',
   'ai.safety.permissionMode': 'Permission Mode',
-  'ai.safety.permissionMode.description': 'Controls how the AI interacts with your terminals. Observer mode blocks all write operations through Netcatty, enforced for both built-in and ACP agents. Confirm mode is advisory for ACP agents (they control their own tool approval flow).',
+  'ai.safety.permissionMode.description': 'Controls how the AI interacts with your terminals. Observer mode blocks all write operations through Netcatty, enforced for both built-in and external agents. Confirm mode is advisory for external agents (they control their own tool approval flow).',
   'ai.safety.permissionMode.observer': 'Observer - Read only, no actions',
   'ai.safety.permissionMode.confirm': 'Confirm - Ask before actions',
   'ai.safety.permissionMode.autonomous': 'Autonomous - Execute freely',
   'ai.safety.commandTimeout': 'Command Timeout',
-  'ai.safety.commandTimeout.description': 'Maximum seconds a command can run before being terminated. Applies to both built-in and ACP agents.',
+  'ai.safety.commandTimeout.description': 'Maximum seconds a command can run before being terminated. Applies to both built-in and external agents.',
   'ai.safety.commandTimeout.unit': 'sec',
   'ai.safety.maxIterations': 'Max Iterations',
-  'ai.safety.maxIterations.description': 'Maximum number of AI tool-use loops to prevent runaway execution. ACP agents may have their own internal iteration limits that take precedence.',
+  'ai.safety.maxIterations.description': 'Maximum number of AI tool-use loops to prevent runaway execution. External agents may have their own internal iteration limits that take precedence.',
   'ai.safety.blocklist': 'Command Blocklist',
-  'ai.safety.blocklist.description': 'Regex patterns to block dangerous commands. Applies to both built-in and ACP agents through Netcatty execution.',
+  'ai.safety.blocklist.description': 'Regex patterns to block dangerous commands. Applies to both built-in and external agents through Netcatty execution.',
   'ai.safety.blocklist.placeholder': 'Regex pattern...',
   'ai.safety.blocklist.reset': 'Reset to defaults',
   'ai.safety.blocklist.add': 'Add pattern',
-  'ai.safety.note': 'Command Blocklist, Command Timeout, and Observer mode are enforced at the MCP Server level, applying to all agent types. Confirm mode and Max Iterations are fully enforced for the built-in agent; ACP agents may have their own internal controls for these settings.',
+  'ai.safety.note': 'Command Blocklist, Command Timeout, and Observer mode are enforced at the MCP Server level, applying to all agent types. Confirm mode and Max Iterations are fully enforced for the built-in agent; external agents may have their own internal controls for these settings.',
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Add Terminal',

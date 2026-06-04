@@ -49,7 +49,7 @@ export const ruAiMessages: Messages = {
   // AI Codex
   'ai.codex': 'Codex',
   'ai.codex.title': 'Codex CLI',
-  'ai.codex.description': 'Использует codex + codex-acp для потоковой передачи по протоколу ACP. Здесь можно войти через ChatGPT или включить API-ключ OpenAI-совместимого провайдера и пользовательский endpoint в настройках.',
+  'ai.codex.description': 'Подключение OpenAI Codex. Здесь можно войти через ChatGPT или включить API-ключ OpenAI-совместимого провайдера и пользовательский endpoint в настройках.',
   'ai.codex.detecting': 'Обнаружение...',
   'ai.codex.notFound': 'Не найден',
   'ai.codex.awaitingLogin': 'Ожидание входа',
@@ -93,7 +93,7 @@ export const ruAiMessages: Messages = {
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
-  'ai.copilot.description': 'Использует GitHub Copilot CLI через ACP по stdio (`copilot --acp --stdio`). После обнаружения может быть выбран как внешний агент для программирования.',
+  'ai.copilot.description': 'Использует GitHub Copilot CLI. После обнаружения может быть выбран как внешний агент для программирования.',
   'ai.copilot.detecting': 'Обнаружение...',
   'ai.copilot.detected': 'Обнаружен',
   'ai.copilot.notFound': 'Не найден',
@@ -108,7 +108,7 @@ export const ruAiMessages: Messages = {
   'ai.defaultAgent.catty': 'Catty (встроенный)',
   'ai.toolAccess.title': 'Доступ к инструментам',
   'ai.toolAccess.mode': 'Режим доступа Netcatty',
-  'ai.toolAccess.description': 'Выберите, как внешние ACP-агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',
+  'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
   'ai.userSkills.title': 'Пользовательские skills',
@@ -201,21 +201,21 @@ export const ruAiMessages: Messages = {
   // AI Safety Settings
   'ai.safety.title': 'Безопасность',
   'ai.safety.permissionMode': 'Режим разрешений',
-  'ai.safety.permissionMode.description': 'Управляет тем, как AI взаимодействует с вашими терминалами. Режим наблюдателя блокирует все операции записи через Netcatty и применяется как к встроенным, так и к ACP-агентам. Режим подтверждения носит рекомендательный характер для ACP-агентов (они управляют собственным потоком одобрения инструментов).',
+  'ai.safety.permissionMode.description': 'Управляет тем, как AI взаимодействует с вашими терминалами. Режим наблюдателя блокирует все операции записи через Netcatty и применяется как к встроенным, так и к внешним агентам. Режим подтверждения носит рекомендательный характер для внешних агентов (они управляют собственным потоком одобрения инструментов).',
   'ai.safety.permissionMode.observer': 'Наблюдатель — только чтение, без действий',
   'ai.safety.permissionMode.confirm': 'Подтверждение — спрашивать перед действиями',
   'ai.safety.permissionMode.autonomous': 'Автономный — выполнять свободно',
   'ai.safety.commandTimeout': 'Тайм-аут команды',
-  'ai.safety.commandTimeout.description': 'Максимальное число секунд, которое команда может выполняться до принудительного завершения. Применяется как к встроенным, так и к ACP-агентам.',
+  'ai.safety.commandTimeout.description': 'Максимальное число секунд, которое команда может выполняться до принудительного завершения. Применяется как к встроенным, так и к внешним агентам.',
   'ai.safety.commandTimeout.unit': 'с',
   'ai.safety.maxIterations': 'Макс. число итераций',
-  'ai.safety.maxIterations.description': 'Максимальное число циклов использования инструментов AI, чтобы предотвратить бесконтрольное выполнение. У ACP-агентов могут быть собственные внутренние лимиты итераций, имеющие приоритет.',
+  'ai.safety.maxIterations.description': 'Максимальное число циклов использования инструментов AI, чтобы предотвратить бесконтрольное выполнение. У внешних агентов могут быть собственные внутренние лимиты итераций, имеющие приоритет.',
   'ai.safety.blocklist': 'Чёрный список команд',
-  'ai.safety.blocklist.description': 'Regex-шаблоны для блокировки опасных команд. Применяется как к встроенным, так и к ACP-агентам через механизм выполнения Netcatty.',
+  'ai.safety.blocklist.description': 'Regex-шаблоны для блокировки опасных команд. Применяется как к встроенным, так и к внешним агентам через механизм выполнения Netcatty.',
   'ai.safety.blocklist.placeholder': 'Regex-шаблон...',
   'ai.safety.blocklist.reset': 'Сбросить по умолчанию',
   'ai.safety.blocklist.add': 'Добавить шаблон',
-  'ai.safety.note': 'Чёрный список команд, тайм-аут команд и режим наблюдателя применяются на уровне MCP Server ко всем типам агентов. Режим подтверждения и максимальное число итераций полностью применяются к встроенному агенту; у ACP-агентов могут быть свои внутренние механизмы управления этими настройками.',
+  'ai.safety.note': 'Чёрный список команд, тайм-аут команд и режим наблюдателя применяются на уровне MCP Server ко всем типам агентов. Режим подтверждения и максимальное число итераций полностью применяются к встроенному агенту; у внешних агентов могут быть свои внутренние механизмы управления этими настройками.',
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Добавить терминал',

@@ -49,7 +49,7 @@ export const zhCNAiMessages: Messages = {
   // AI Codex
   'ai.codex': 'Codex',
   'ai.codex.title': 'Codex CLI',
-  'ai.codex.description': '使用 codex + codex-acp 进行 ACP 协议流式传输。可以在这里连接 ChatGPT，也可以在设置里启用兼容 OpenAI 的 API Key 和自定义接口地址。',
+  'ai.codex.description': '接入 OpenAI Codex。可以在这里登录 ChatGPT，也可以在设置里启用兼容 OpenAI 的 API Key 和自定义接口地址。',
   'ai.codex.detecting': '检测中...',
   'ai.codex.notFound': '未找到',
   'ai.codex.awaitingLogin': '等待登录',
@@ -93,7 +93,7 @@ export const zhCNAiMessages: Messages = {
 
   // AI GitHub Copilot CLI
   'ai.copilot.title': 'GitHub Copilot CLI',
-  'ai.copilot.description': '通过 ACP over stdio（`copilot --acp --stdio`）接入 GitHub Copilot CLI。检测到后即可作为外部编程 Agent 使用。',
+  'ai.copilot.description': '接入 GitHub Copilot CLI。检测到后即可作为外部编程 Agent 使用。',
   'ai.copilot.detecting': '检测中...',
   'ai.copilot.detected': '已检测到',
   'ai.copilot.notFound': '未找到',
@@ -108,7 +108,7 @@ export const zhCNAiMessages: Messages = {
   'ai.defaultAgent.catty': 'Catty（内置）',
   'ai.toolAccess.title': '工具接入',
   'ai.toolAccess.mode': 'Netcatty 接入模式',
-  'ai.toolAccess.description': '选择外部 ACP Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
+  'ai.toolAccess.description': '选择外部 Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
   'ai.userSkills.title': '用户 Skills',
@@ -201,21 +201,21 @@ export const zhCNAiMessages: Messages = {
   // AI Safety Settings
   'ai.safety.title': '安全',
   'ai.safety.permissionMode': '权限模式',
-  'ai.safety.permissionMode.description': '控制 AI 与终端的交互方式。观察者模式会通过 Netcatty 阻止所有写操作，对内置和 ACP Agent 均生效。确认模式对 ACP Agent 仅为建议性（ACP Agent 有自己的工具审批流程）。',
+  'ai.safety.permissionMode.description': '控制 AI 与终端的交互方式。观察者模式会通过 Netcatty 阻止所有写操作，对内置和外部 Agent 均生效。确认模式对外部 Agent 仅为建议性（外部 Agent 有自己的工具审批流程）。',
   'ai.safety.permissionMode.observer': '观察者 - 只读，禁止操作',
   'ai.safety.permissionMode.confirm': '确认 - 操作前询问',
   'ai.safety.permissionMode.autonomous': '自主 - 自由执行',
   'ai.safety.commandTimeout': '命令超时',
-  'ai.safety.commandTimeout.description': '命令执行的最大秒数，超时将被终止。对内置和 ACP Agent 均生效。',
+  'ai.safety.commandTimeout.description': '命令执行的最大秒数，超时将被终止。对内置和外部 Agent 均生效。',
   'ai.safety.commandTimeout.unit': '秒',
   'ai.safety.maxIterations': '最大迭代次数',
-  'ai.safety.maxIterations.description': '防止 AI 失控执行的最大工具调用循环次数。ACP Agent 可能有自己的内部迭代限制，以其为准。',
+  'ai.safety.maxIterations.description': '防止 AI 失控执行的最大工具调用循环次数。外部 Agent 可能有自己的内部迭代限制，以其为准。',
   'ai.safety.blocklist': '命令黑名单',
-  'ai.safety.blocklist.description': '用于拦截危险命令的正则表达式。通过 Netcatty 执行层对内置和 ACP Agent 均生效。',
+  'ai.safety.blocklist.description': '用于拦截危险命令的正则表达式。通过 Netcatty 执行层对内置和外部 Agent 均生效。',
   'ai.safety.blocklist.placeholder': '正则表达式...',
   'ai.safety.blocklist.reset': '恢复默认',
   'ai.safety.blocklist.add': '添加规则',
-  'ai.safety.note': '命令黑名单、命令超时和观察者模式通过 MCP Server 层强制执行，对所有 Agent 类型生效。确认模式和最大迭代次数对内置 Agent 完全强制执行；ACP Agent 可能有自己的内部控制。',
+  'ai.safety.note': '命令黑名单、命令超时和观察者模式通过 MCP Server 层强制执行，对所有 Agent 类型生效。确认模式和最大迭代次数对内置 Agent 完全强制执行；外部 Agent 可能有自己的内部控制。',
 
   // 统一终端工作区和顶部标签的 tooltip 文案 (issue #954)
   'terminal.layer.addTerminal': '添加终端',
