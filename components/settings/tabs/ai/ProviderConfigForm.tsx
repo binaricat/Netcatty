@@ -76,6 +76,7 @@ export const ProviderConfigForm: React.FC<{
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [iconError, setIconError] = useState<string | null>(null);
   const [contextWindowError, setContextWindowError] = useState<string | null>(null);
+  const [apiKeySourceVersion, setApiKeySourceVersion] = useState(0);
 
   const preset = PROVIDER_PRESETS[provider.providerId];
   const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
@@ -83,13 +84,13 @@ export const ProviderConfigForm: React.FC<{
     providerId: provider.providerId,
     baseURL: form.baseURL || preset?.defaultBaseURL || "",
     modelsEndpoint: preset?.modelsEndpoint ?? "",
-    apiKey: form.apiKey,
+    apiKeySourceVersion,
     style: resolvedStyle,
     skipTLSVerify: form.skipTLSVerify,
   }), [
     provider.providerId,
     form.baseURL,
-    form.apiKey,
+    apiKeySourceVersion,
     form.skipTLSVerify,
     preset?.defaultBaseURL,
     preset?.modelsEndpoint,
@@ -120,7 +121,6 @@ export const ProviderConfigForm: React.FC<{
   }, [provider.apiKey]);
 
   useEffect(() => {
-    if (provider.apiKey && !form.apiKey) return;
     if (modelMetadataSourceKeyRef.current == null) {
       modelMetadataSourceKeyRef.current = modelMetadataSourceKey;
       return;
@@ -131,7 +131,7 @@ export const ProviderConfigForm: React.FC<{
     setForm((prev) => Object.keys(prev.modelContextWindows).length > 0
       ? { ...prev, modelContextWindows: {} }
       : prev);
-  }, [form.apiKey, modelMetadataSourceKey, provider.apiKey]);
+  }, [modelMetadataSourceKey]);
 
   const [advancedParamRaw, setAdvancedParamRaw] = useState<Record<string, string>>({});
   const handleAdvancedParam = useCallback((key: keyof ProviderAdvancedParams, raw: string) => {
@@ -173,6 +173,11 @@ export const ProviderConfigForm: React.FC<{
   const handleResetIcon = useCallback(() => {
     setIconError(null);
     setForm((prev) => ({ ...prev, iconId: "", iconDataUrl: "" }));
+  }, []);
+
+  const handleApiKeyChange = useCallback((value: string) => {
+    setApiKeySourceVersion((version) => version + 1);
+    setForm((prev) => ({ ...prev, apiKey: value }));
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -355,7 +360,7 @@ export const ProviderConfigForm: React.FC<{
             <input
               type={showApiKey ? "text" : "password"}
               value={isDecrypting ? "" : form.apiKey}
-              onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
               placeholder={isDecrypting ? t('ai.providers.apiKey.decrypting') : t('ai.providers.apiKey.placeholder')}
               disabled={isDecrypting}
               className="w-full h-8 rounded-md border border-input bg-background px-3 pr-9 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
