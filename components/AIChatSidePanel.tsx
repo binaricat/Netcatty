@@ -12,7 +12,7 @@ import type {
 } from '../infrastructure/ai/types';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import { getAgentModelPresets } from '../infrastructure/ai/types';
-import { matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import { getExternalAgentSdkBackend, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
   getReadyUserSkillOptions,
@@ -37,7 +37,7 @@ import {
   getNetcattyBridge,
   type DefaultTargetSessionHint,
 } from './ai/hooks/useAIChatStreaming';
-import { buildAcpHistoryMessagesForBridge } from './ai/acpHistory';
+import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
 import { clearAllPendingApprovals } from '../infrastructure/ai/shared/approvalGate';
 import { useConversationExport } from './ai/hooks/useConversationExport';
@@ -480,16 +480,16 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
   agentModelMapRef.current = agentModelMap;
 
   useEffect(() => {
-    if (!currentAgentConfig?.acpCommand) return;
+    const sdkBackend = getExternalAgentSdkBackend(currentAgentConfig);
+    if (!sdkBackend) return;
     if (!isCopilotExternalAgent && !isClaudeManagedAgent && !isCodexManagedAgent) return;
 
     const bridge = getNetcattyBridge();
-    if (!bridge?.aiAcpListModels) return;
+    if (!bridge?.aiSdkAgentListModels) return;
 
     let cancelled = false;
-    void bridge.aiAcpListModels(
-      currentAgentConfig.acpCommand,
-      currentAgentConfig.acpArgs || [],
+    void bridge.aiSdkAgentListModels(
+      sdkBackend,
       undefined,
       undefined,
       `models_${currentAgentId}`,
@@ -515,7 +515,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
       }
     }).catch((err) => {
       if (!cancelled) {
-        console.warn('[AIChatSidePanel] Failed to load ACP agent models:', err);
+        console.warn('[AIChatSidePanel] Failed to load SDK agent models:', err);
       }
     });
 
@@ -744,7 +744,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
           await sendToExternalAgent(sessionId, trimmed, agentConfig, abortController, attachments, {
             existingSessionId: existingExternalSessionId,
             updateExternalSessionId: updateSessionExternalSessionId,
-            historyMessages: buildAcpHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
+            historyMessages: buildExternalAgentHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
             terminalSessions,
             defaultTargetSession,
             providers,
@@ -811,7 +811,7 @@ const AIChatSidePanelInner: React.FC<AIChatSidePanelProps> = ({
     clearAllPendingApprovals(activeSessionId);
     const bridge = getNetcattyBridge();
     bridge?.aiCattyCancelExec?.(activeSessionId);
-    bridge?.aiAcpCancel?.('', activeSessionId);
+    bridge?.aiSdkAgentCancel?.('', activeSessionId);
   }, [activeSessionId, setStreamingForScope, updateLastMessage, abortControllersRef]);
 
   const handleSelectSession = useCallback(

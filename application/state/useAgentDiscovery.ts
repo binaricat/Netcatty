@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DiscoveredAgent, ExternalAgentConfig } from '../../infrastructure/ai/types';
+import { getExternalAgentSdkBackend } from '../../infrastructure/ai/managedAgents';
 
 interface NetcattyBridge {
   aiDiscoverAgents(): Promise<DiscoveredAgent[]>;
@@ -56,7 +57,8 @@ export function useAgentDiscovery(
         const currentArgs = JSON.stringify(ea.args || []);
         const newArgs = JSON.stringify(match.args);
         const backend = match.sdkBackend ?? match.command;
-        const acpChanged = ea.acpCommand !== backend
+        const backendChanged = getExternalAgentSdkBackend(ea) !== backend
+          || Boolean(ea.acpCommand)
           || JSON.stringify(ea.acpArgs || []) !== JSON.stringify([]);
         const matchPath = match.binPath || match.path;
         const env = match.command === 'claude'
@@ -64,9 +66,10 @@ export function useAgentDiscovery(
           : ea.env;
         const envChanged = match.command === 'claude'
           && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath;
-        if (currentArgs !== newArgs || acpChanged || envChanged) {
+        if (currentArgs !== newArgs || backendChanged || envChanged) {
           changed = true;
-          return { ...ea, args: match.args, acpCommand: backend, acpArgs: [], ...(env ? { env } : {}) };
+          const { acpCommand: _legacyCommand, acpArgs: _legacyArgs, ...rest } = ea;
+          return { ...rest, args: match.args, sdkBackend: backend, ...(env ? { env } : {}) };
         }
         return ea;
       });
@@ -92,9 +95,7 @@ export function useAgentDiscovery(
         args: agent.args,
         icon: agent.icon,
         enabled: true,
-        // acpCommand carries the SDK backend key (claude|codex|copilot).
-        acpCommand: backend,
-        acpArgs: [],
+        sdkBackend: backend,
         ...(agent.command === 'claude'
           ? { env: { CLAUDE_CODE_EXECUTABLE: agent.binPath || agent.path || '' } }
           : {}),

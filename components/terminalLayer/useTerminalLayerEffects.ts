@@ -309,7 +309,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       }
     }, [previewTargetSessionId, themePreview, visibleFocusedThemeId]);
   
-  // Keep MCP/ACP approval IPC listener alive for the entire terminal lifecycle.
+  // Keep MCP/SDK-agent approval IPC listener alive for the entire terminal lifecycle.
     // Must live here (TerminalLayer), not inside the AI panel subtree, so closing
     // or hiding the panel never tears down approval handling mid-execution.
     useEffect(() => {

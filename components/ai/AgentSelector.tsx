@@ -10,6 +10,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
+  getExternalAgentSdkBackend,
   isSettingsManagedDiscoveredAgent,
   matchesManagedAgentConfig,
 } from '../../infrastructure/ai/managedAgents';
@@ -131,7 +132,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
   const enabledExternalAgents = useMemo(
     () =>
       externalAgents
-        .filter((agent) => agent.enabled && Boolean(agent.acpCommand))
+        .filter((agent) => agent.enabled && Boolean(getExternalAgentSdkBackend(agent)))
         .map(
           (agent): AgentInfo => ({
             id: agent.id,

@@ -224,7 +224,7 @@ function readCodexCustomProviderConfig(shellEnv) {
   const activeModel = typeof parsed.model === "string" ? parsed.model.trim() : "";
 
   // Hash the actual auth material (either the hardcoded api_key or the
-  // resolved env_key value) so the ACP provider fingerprint changes when
+  // resolved env_key value) so the SDK backend fingerprint changes when
   // the user rotates their key — without ever returning the raw value
   // across the IPC boundary.
   const authMaterial = hardcodedApiKey || envKeyValue;

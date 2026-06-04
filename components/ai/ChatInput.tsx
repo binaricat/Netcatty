@@ -92,7 +92,7 @@ interface ChatInputProps {
   /**
    * Provider→model two-level picker payload. When provided, replaces the
    * single-list model dropdown with a provider-aware picker. Used for the
-   * Catty Agent only — external ACP agents (Claude/Codex) keep the
+   * Catty Agent only — external SDK agents (Claude/Codex) keep the
    * `modelPresets` dropdown because their provider is wired inside the CLI.
    */
   providerSwitcher?: ProviderSwitcherConfig;
@@ -390,7 +390,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const selectedBaseModelId = selectedPreset?.id;
   // Provider switcher mode (Catty Agent): two-column popover, chip carries
   // the provider's icon + name + model name. Falls back to the existing
-  // single-list model dropdown for ACP agents.
+  // single-list model dropdown for external SDK agents.
   const hasProviderSwitcher = !!providerSwitcher && providerSwitcher.providers.length > 0;
   // Resolve to the actually-bound provider only — no `?? providers[0]`
   // fallback, since a provider that isn't really bound will still hit the

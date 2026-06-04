@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
 
-type AcpHistoryMessage = { role: "user" | "assistant"; content: string };
-type RawHistoryMessage = AcpHistoryMessage & { sourceId: string };
+type ExternalAgentHistoryMessage = { role: "user" | "assistant"; content: string };
+type RawHistoryMessage = ExternalAgentHistoryMessage & { sourceId: string };
 type DurableUserLine = {
   line: string;
   messageIndex: number;
@@ -10,7 +10,7 @@ type DurableUserLine = {
 
 const MAX_RECENT_RAW_MESSAGES = 6;
 const MAX_MESSAGES_TO_SCAN = 20;
-// Bound the scan by user turns, not raw message count: a tool-heavy ACP
+// Bound the scan by user turns, not raw message count: a tool-heavy external agent
 // chat can produce 5+ messages per logical turn (user + assistant +
 // several tool_results + follow-up assistant), so a plain
 // message-count cap ages out early constraints much sooner than intended.
@@ -238,7 +238,7 @@ function toRawHistoryMessage(
     // per message, ~2000). Without this, follow-up turns after stale-session
     // recovery would only see the 500-char compact summary in
     // summarizeToolMessage, losing the actual bytes the user might reference
-    // ("use that output", "what did cat show?"). ACP only supports user/
+    // ("use that output", "what did cat show?"). external agent replay only supports user/
     // assistant roles, so we flatten to "assistant" — the tool results were
     // produced during the assistant's turn.
     //
@@ -270,7 +270,7 @@ function buildCompactContext(
   durableScanStart: number,
   recentRawSourceIds: Set<string>,
   toolCallIndex: Map<string, ToolCallInfo>,
-): AcpHistoryMessage[] {
+): ExternalAgentHistoryMessage[] {
   const scanned = messages.slice(-MAX_MESSAGES_TO_SCAN);
   const summaryLines: string[] = [];
   const durableUserCandidates: DurableUserLine[] = [];
@@ -354,7 +354,7 @@ function buildCompactContext(
 
   const contentLines = [
     "[Compact prior Netcatty UI context]",
-    "The external ACP agent may already have its own persisted session context. Use this compact Netcatty UI context only as fallback/background, and prefer the current user request when there is any conflict.",
+    "The external SDK agent may already have its own persisted session context. Use this compact Netcatty UI context only as fallback/background, and prefer the current user request when there is any conflict.",
   ];
   if (durableUserLines.length) {
     contentLines.push("Earlier user requests that may still apply:");
@@ -395,7 +395,7 @@ function computeDurableScanStart(messages: ChatMessage[]): number {
   return 0;
 }
 
-export function buildAcpHistoryMessages(messages: ChatMessage[]): AcpHistoryMessage[] {
+export function buildExternalAgentHistoryMessages(messages: ChatMessage[]): ExternalAgentHistoryMessage[] {
   // Compute the scan start once, then do all subsequent work over the
   // already-sliced tail. This avoids O(N) walks over the whole transcript
   // on every send — previously buildToolCallIndex + the flatMap-to-take-
@@ -427,12 +427,12 @@ export function buildAcpHistoryMessages(messages: ChatMessage[]): AcpHistoryMess
   return [...compactContext, ...recentRaw];
 }
 
-export function buildAcpHistoryMessagesForBridge(
+export function buildExternalAgentHistoryMessagesForBridge(
   messages: ChatMessage[],
   _existingSessionId?: string | null,
-): AcpHistoryMessage[] | undefined {
+): ExternalAgentHistoryMessage[] | undefined {
   // The main process bridge only consumes this payload during stale-session
   // fallback replay, so keep it available even when a session id exists.
-  const historyMessages = buildAcpHistoryMessages(messages);
+  const historyMessages = buildExternalAgentHistoryMessages(messages);
   return historyMessages.length ? historyMessages : undefined;
 }

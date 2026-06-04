@@ -12,7 +12,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
  *
  * Different tool surfaces hand us different shapes:
  *   - Netcatty's own `terminal_execute` MCP tool → `{command: "<string>"}`
- *   - Codex `local_shell` (ACP)                 → `{command: ["zsh","-lc","<full>"]}`
+ *   - Codex `local_shell`                      → `{command: ["zsh","-lc","<full>"]}`
  *   - Codex command_execution (SDK)             → `{command: "/bin/zsh -lc '<full>'"}`
  *   - Claude `Bash`                             → `{command: "<string>"}`
  *

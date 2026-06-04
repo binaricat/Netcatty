@@ -94,15 +94,15 @@ export interface PanelBridge extends NetcattyBridge {
   aiSyncProviders?: (providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>) => Promise<{ ok: boolean }>;
   aiSyncWebSearch?: (apiHost: string | null, apiKey: string | null) => Promise<{ ok: boolean }>;
   aiMcpUpdateSessions?: (sessions: TerminalSessionInfo[], chatSessionId?: string) => Promise<unknown>;
-  aiAcpListModels?: (
-    acpCommand: string,
-    acpArgs?: string[],
+  aiSdkAgentListModels?: (
+    sdkBackend: string,
     cwd?: string,
     providerId?: string,
     chatSessionId?: string,
     agentEnv?: Record<string, string>,
   ) => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
-  aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
+  aiSdkAgentCancel?: (requestId: string, chatSessionId?: string) => Promise<{ ok: boolean; error?: string }>;
+  aiSdkAgentCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
   aiUserSkillsGetStatus?: () => Promise<{
     ok: boolean;
     skills?: Array<{

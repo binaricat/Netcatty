@@ -3,7 +3,7 @@
 /**
  * Claude Code auth/config detection helpers (main process).
  *
- * claude-agent-acp authenticates from env (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN)
+ * Claude SDK launches can authenticate from env (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN)
  * or from credentials stored under CLAUDE_CONFIG_DIR (default ~/.claude). We use
  * this to turn opaque "-32603 Internal error" failures into an actionable message
  * when no auth is configured. NOTE: macOS may store credentials in the Keychain

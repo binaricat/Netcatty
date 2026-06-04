@@ -69,7 +69,7 @@ const BACKGROUND_JOB_RETENTION_MS = 10 * 60 * 1000;
 const MAX_BACKGROUND_JOB_OUTPUT_CHARS = 256 * 1024;
 let activeSftpOpSeq = 0;
 
-// ── Approval gate (for confirm mode with ACP/MCP agents) ──
+// ── Approval gate (for confirm mode with SDK/MCP agents) ──
 let getMainWindowFn = null; // () => BrowserWindow | null
 const pendingApprovals = new Map(); // approvalId → { resolve, chatSessionId }
 let approvalIdCounter = 0;
@@ -84,7 +84,7 @@ function setMainWindowGetter(fn) {
  * Sends an IPC event and returns a Promise<boolean> that resolves
  * when the user approves/rejects in the UI, or auto-denies after timeout.
  */
-// External ACP agents (for example Codex) may give up on MCP tool calls after
+// External SDK agents (for example Codex) may give up on MCP tool calls after
 // about 120 seconds; see openai/codex#6127 ("timed out awaiting tools/call
 // after 120s"). Keep the Netcatty-side approval window below that with a small
 // buffer so a stale approval cannot still be accepted after the agent has
@@ -102,7 +102,7 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
     }
     const approvalId = `mcp_approval_${++approvalIdCounter}_${Date.now()}`;
 
-    // Auto-deny after timeout so ACP/MCP tool calls don't hang indefinitely
+    // Auto-deny after timeout so SDK/MCP tool calls don't hang indefinitely
     const timerId = setTimeout(() => {
       if (pendingApprovals.has(approvalId)) {
         pendingApprovals.delete(approvalId);
@@ -840,11 +840,11 @@ async function dispatch(method, params) {
     };
   }
 
-  // netcatty/jobStop must remain callable after ACP cancel so users can stop
-  // a long-running terminal_start job (which intentionally survives ACP Stop)
+  // netcatty/jobStop must remain callable after SDK agent cancel so users can stop
+  // a long-running terminal_start job (which intentionally survives SDK Stop)
   // even from a chat session whose write methods are otherwise blocked.
   if (WRITE_METHODS.has(method) && method !== "netcatty/jobStop" && isChatSessionCancelled(params?.chatSessionId)) {
-    return { ok: false, error: "Operation cancelled: the ACP session was stopped." };
+    return { ok: false, error: "Operation cancelled: the SDK agent session was stopped." };
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the

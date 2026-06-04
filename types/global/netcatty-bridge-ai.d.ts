@@ -22,9 +22,10 @@ declare global {
       installed?: boolean;
       authenticated?: boolean;
       authSource?: string | null;
+      sdkBackend?: string;
+      /** @deprecated Legacy persisted field from the pre-SDK migration. */
       acpCommand?: string;
       acpArgs?: string[];
-      sdkBackend?: 'claude' | 'codex' | 'copilot';
     }>>;
     aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean }): Promise<{
       state: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
@@ -142,13 +143,13 @@ declare global {
       context?: string;
       error?: string;
     }>;
-    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
-    aiAcpListModels?(acpCommand: string, acpArgs?: string[], cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
-    aiAcpCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
-    aiAcpCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
-    onAiAcpEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;
-    onAiAcpDone?(requestId: string, cb: () => void): () => void;
-    onAiAcpError?(requestId: string, cb: (error: string) => void): () => void;
+    aiSdkAgentStream?(requestId: string, chatSessionId: string, sdkBackend: string, prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
+    aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
+    aiSdkAgentCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
+    aiSdkAgentCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
+    onAiSdkAgentEvent?(requestId: string, cb: (event: Record<string, unknown>) => void): () => void;
+    onAiSdkAgentDone?(requestId: string, cb: () => void): () => void;
+    onAiSdkAgentError?(requestId: string, cb: (error: string) => void): () => void;
     onAiStreamData?(requestId: string, cb: (data: string) => void): () => void;
     onAiStreamEnd?(requestId: string, cb: () => void): () => void;
     onAiStreamError?(requestId: string, cb: (error: string) => void): () => void;

@@ -1,12 +1,12 @@
 /**
- * ACP Agent Adapter
+ * SDK Agent Adapter
  *
- * Bridges external agents that support the Agent Client Protocol (ACP)
- * through IPC. The main process runs `createACPProvider` + `streamText`,
- * and forwards stream events to the renderer via IPC.
+ * Bridges managed external agents through IPC. The main process runs the
+ * official SDK drivers and forwards stream events to the renderer.
  */
 
 import type { AIToolIntegrationMode, ExternalAgentConfig } from './types';
+import { getExternalAgentSdkBackend } from './managedAgents';
 
 export interface DefaultTargetSessionHint {
   sessionId: string;
@@ -21,7 +21,7 @@ export interface DefaultTargetSessionHint {
   source: 'scope-target' | 'only-connected-in-scope';
 }
 
-export interface AcpAgentCallbacks {
+export interface SdkAgentCallbacks {
   onSessionId?: (sessionId: string) => void;
   onTextDelta: (text: string) => void;
   onThinkingDelta: (text: string) => void;
@@ -33,12 +33,11 @@ export interface AcpAgentCallbacks {
   onDone: () => void;
 }
 
-interface AcpBridge {
-  aiAcpStream(
+interface SdkAgentBridge {
+  aiSdkAgentStream(
     requestId: string,
     chatSessionId: string,
-    acpCommand: string,
-    acpArgs: string[],
+    sdkBackend: string,
     prompt: string,
     cwd?: string,
     providerId?: string,
@@ -51,10 +50,10 @@ interface AcpBridge {
     userSkillsContext?: string,
     agentEnv?: Record<string, string>,
   ): Promise<{ ok: boolean; error?: unknown }>;
-  aiAcpCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
-  onAiAcpEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
-  onAiAcpDone(requestId: string, cb: () => void): () => void;
-  onAiAcpError(requestId: string, cb: (error: unknown) => void): () => void;
+  aiSdkAgentCancel(requestId: string, chatSessionId?: string): Promise<{ ok: boolean }>;
+  onAiSdkAgentEvent(requestId: string, cb: (event: StreamEvent) => void): () => void;
+  onAiSdkAgentDone(requestId: string, cb: () => void): () => void;
+  onAiSdkAgentError(requestId: string, cb: (error: unknown) => void): () => void;
 }
 
 interface StreamEvent {
@@ -63,8 +62,8 @@ interface StreamEvent {
 }
 
 /**
- * Run an ACP agent turn.
- * Sends the prompt to the main process which runs streamText() with the ACP provider.
+ * Run one managed SDK agent turn.
+ * Sends the prompt to the main process and listens for streamed events.
  * Stream events are forwarded back via IPC.
  */
 export interface FileAttachment {
@@ -92,7 +91,7 @@ function safeJsonStringify(value: unknown): string | null {
   }
 }
 
-function formatAcpErrorValue(error: unknown, seen = new WeakSet<object>()): string {
+function formatSdkAgentErrorValue(error: unknown, seen = new WeakSet<object>()): string {
   if (error == null) return '';
   if (typeof error === 'string') return error;
   if (typeof error === 'number' || typeof error === 'boolean') return String(error);
@@ -116,7 +115,7 @@ function formatAcpErrorValue(error: unknown, seen = new WeakSet<object>()): stri
   ];
 
   for (const candidate of candidates) {
-    const message = formatAcpErrorValue(candidate, seen).trim();
+    const message = formatSdkAgentErrorValue(candidate, seen).trim();
     if (message && message !== '{}') {
       return message;
     }
@@ -125,17 +124,17 @@ function formatAcpErrorValue(error: unknown, seen = new WeakSet<object>()): stri
   return safeJsonStringify(error) || String(error);
 }
 
-export function formatAcpErrorForDisplay(error: unknown): string {
-  return formatAcpErrorValue(error).trim() || 'Unknown error';
+export function formatSdkAgentErrorForDisplay(error: unknown): string {
+  return formatSdkAgentErrorValue(error).trim() || 'Unknown error';
 }
 
-export async function runAcpAgentTurn(
+export async function runSdkAgentTurn(
   bridge: Record<string, (...args: unknown[]) => unknown>,
   requestId: string,
   chatSessionId: string,
   config: ExternalAgentConfig,
   prompt: string,
-  callbacks: AcpAgentCallbacks,
+  callbacks: SdkAgentCallbacks,
   signal?: AbortSignal,
   providerId?: string,
   model?: string,
@@ -146,9 +145,10 @@ export async function runAcpAgentTurn(
   defaultTargetSession?: DefaultTargetSessionHint,
   userSkillsContext?: string,
 ): Promise<void> {
-  const acpBridge = bridge as unknown as AcpBridge;
+  const sdkBridge = bridge as unknown as SdkAgentBridge;
+  const sdkBackend = getExternalAgentSdkBackend(config);
 
-  if (!config.acpCommand) {
+  if (!sdkBackend) {
     callbacks.onError('Agent has no SDK backend configured');
     return;
   }
@@ -168,7 +168,7 @@ export async function runAcpAgentTurn(
   };
 
   // Set up event listeners before starting stream
-  const unsubEvent = acpBridge.onAiAcpEvent(requestId, (event: StreamEvent) => {
+  const unsubEvent = sdkBridge.onAiSdkAgentEvent(requestId, (event: StreamEvent) => {
     const streamFailed = handleStreamEvent(event, callbacks);
     if (streamFailed) {
       settle();
@@ -176,16 +176,16 @@ export async function runAcpAgentTurn(
   });
   cleanupFns.push(unsubEvent);
 
-  const unsubDone = acpBridge.onAiAcpDone(requestId, () => {
+  const unsubDone = sdkBridge.onAiSdkAgentDone(requestId, () => {
     settle(() => {
       callbacks.onDone();
     });
   });
   cleanupFns.push(unsubDone);
 
-  const unsubError = acpBridge.onAiAcpError(requestId, (error: unknown) => {
+  const unsubError = sdkBridge.onAiSdkAgentError(requestId, (error: unknown) => {
     settle(() => {
-      callbacks.onError(formatAcpErrorForDisplay(error));
+      callbacks.onError(formatSdkAgentErrorForDisplay(error));
     });
   });
   cleanupFns.push(unsubError);
@@ -200,18 +200,17 @@ export async function runAcpAgentTurn(
       if (!settle()) {
         return;
       }
-      acpBridge.aiAcpCancel(requestId, chatSessionId).catch(() => {});
+      sdkBridge.aiSdkAgentCancel(requestId, chatSessionId).catch(() => {});
     };
     signal.addEventListener('abort', onAbort, { once: true });
     cleanupFns.push(() => signal.removeEventListener('abort', onAbort));
   }
 
-  // Start the ACP stream in the main process
-  void acpBridge.aiAcpStream(
+  // Start the SDK stream in the main process
+  void sdkBridge.aiSdkAgentStream(
     requestId,
     chatSessionId,
-    config.acpCommand,
-    config.acpArgs || [],
+    sdkBackend,
     prompt,
     undefined, // cwd
     providerId,
@@ -228,14 +227,14 @@ export async function runAcpAgentTurn(
       settle(() => {
         callbacks.onError(
           result.error == null
-            ? 'Failed to start ACP stream'
-            : formatAcpErrorForDisplay(result.error),
+            ? 'Failed to start SDK agent stream'
+            : formatSdkAgentErrorForDisplay(result.error),
         );
       });
     }
   }).catch((err: unknown) => {
     settle(() => {
-      callbacks.onError(formatAcpErrorForDisplay(err));
+      callbacks.onError(formatSdkAgentErrorForDisplay(err));
     });
   }).finally(() => {
     if (settled) {
@@ -258,7 +257,7 @@ function cleanup(fns: (() => void)[]) {
  * Handle a single stream event from the AI SDK fullStream.
  * Events come from `streamText().fullStream` in the main process.
  */
-function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks): boolean {
+function handleStreamEvent(event: StreamEvent, callbacks: SdkAgentCallbacks): boolean {
   switch (event.type) {
     case 'text-delta': {
       const text = (event.textDelta as string) || (event.delta as string) || '';
@@ -312,7 +311,7 @@ function handleStreamEvent(event: StreamEvent, callbacks: AcpAgentCallbacks): bo
       return false;
     }
     case 'error': {
-      callbacks.onError(formatAcpErrorForDisplay(event.error));
+      callbacks.onError(formatSdkAgentErrorForDisplay(event.error));
       return true;
     }
     // step-start, step-finish, etc. — ignore silently

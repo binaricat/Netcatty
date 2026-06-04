@@ -8,28 +8,28 @@ function recordingSend() {
   return { calls, safeSend };
 }
 
-test("emitEvent sends on netcatty:ai:acp:event with requestId+event", () => {
+test("emitEvent sends on netcatty:ai:sdk-agent:event with requestId+event", () => {
   const { calls, safeSend } = recordingSend();
   const e = createStreamEmitter({ safeSend, sender: {}, requestId: "req-1" });
   e.emitEvent({ type: "text-delta", textDelta: "hi" });
   assert.deepEqual(calls[0], {
-    channel: "netcatty:ai:acp:event",
+    channel: "netcatty:ai:sdk-agent:event",
     payload: { requestId: "req-1", event: { type: "text-delta", textDelta: "hi" } },
   });
 });
 
-test("emitDone sends on netcatty:ai:acp:done", () => {
+test("emitDone sends on netcatty:ai:sdk-agent:done", () => {
   const { calls, safeSend } = recordingSend();
   const e = createStreamEmitter({ safeSend, sender: {}, requestId: "req-2" });
   e.emitDone();
-  assert.deepEqual(calls[0], { channel: "netcatty:ai:acp:done", payload: { requestId: "req-2" } });
+  assert.deepEqual(calls[0], { channel: "netcatty:ai:sdk-agent:done", payload: { requestId: "req-2" } });
 });
 
-test("emitError sends on netcatty:ai:acp:error with message", () => {
+test("emitError sends on netcatty:ai:sdk-agent:error with message", () => {
   const { calls, safeSend } = recordingSend();
   const e = createStreamEmitter({ safeSend, sender: {}, requestId: "req-3" });
   e.emitError("boom");
-  assert.deepEqual(calls[0], { channel: "netcatty:ai:acp:error", payload: { requestId: "req-3", error: "boom" } });
+  assert.deepEqual(calls[0], { channel: "netcatty:ai:sdk-agent:error", payload: { requestId: "req-3", error: "boom" } });
 });
 
 test("convenience helpers emit the canonical event shapes", () => {

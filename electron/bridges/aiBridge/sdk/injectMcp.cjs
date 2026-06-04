@@ -3,7 +3,7 @@
 /**
  * Build the netcatty-mcp-server config to inject into an SDK agent as an
  * EXTERNAL MCP server. Reuses mcpServerBridge.buildMcpServerConfig (unchanged)
- * so the approval/scope/blocklist layer is identical to the ACP era.
+ * so the approval/scope/blocklist layer is identical across integrations.
  *
  * Returns an array of netcatty MCP server configs (0 or 1 entry):
  *   { name, type:'stdio', command, args, env:[{name,value}, ...] }

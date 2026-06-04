@@ -65,7 +65,7 @@ test("pruneInactiveScopedTransientState removes closed workspace and terminal sc
   });
 });
 
-test("pruneInactiveScopedSessions preserves restorable terminal ACP ids across reconnects", () => {
+test("pruneInactiveScopedSessions preserves restorable terminal external session ids across reconnects", () => {
   const sessions = [
     createSession("terminal-restorable", {
       type: "terminal",
@@ -131,7 +131,7 @@ test("pruneInactiveScopedSessions treats sessions displayed elsewhere as in-use,
   // terminal-restorable's original scope (terminal-closed-A) is gone, but
   // the user resumed it into terminal-open-B from history. The session's
   // externalSessionId must be preserved and it must not appear in the
-  // orphaned list, otherwise the active chat loses ACP continuity.
+  // orphaned list, otherwise the active chat loses external agent continuity.
   const resumedElsewhere = createSession("terminal-restorable", {
     type: "terminal",
     targetId: "terminal-closed-A",

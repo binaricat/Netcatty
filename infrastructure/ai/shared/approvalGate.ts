@@ -5,7 +5,7 @@
  * a Promise that resolves when the user approves/rejects from the UI, or after
  * a timeout (default 5 minutes) to prevent indefinite hangs.
  *
- * Also supports MCP/ACP tool calls from the Electron main process:
+ * Also supports MCP/SDK-agent tool calls from the Electron main process:
  * the main process sends an IPC approval request, and we route it
  * through the same listener/UI system. MCP approvals are stored in
  * the same pendingApprovals map so they survive ChatMessageList
@@ -185,7 +185,7 @@ export function clearAllPendingApprovals(chatSessionId?: string): void {
 }
 
 /**
- * Set up a bridge to receive MCP/ACP approval requests from the Electron main process.
+ * Set up a bridge to receive MCP/SDK-agent approval requests from the Electron main process.
  * Subscribes to IPC events and stores them in the same pendingApprovals map,
  * so the same ToolCall UI handles both SDK and MCP approvals, and approvals
  * survive ChatMessageList unmount/remount cycles via replayPendingApprovals().

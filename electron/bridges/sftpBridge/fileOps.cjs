@@ -477,7 +477,7 @@ function createFileOpsApi(ctx) {
           if (shouldUseFastDirectoryDelete) {
             // Keep the SSH rm -rf fast path only for ordinary UI SFTP sessions.
             // Session-backed / stop-sensitive flows must stay on the abort-aware
-            // recursive SFTP path so ACP Stop and command timeouts can interrupt
+            // recursive SFTP path so SDK agent Stop and command timeouts can interrupt
             // large directory deletes promptly.
             const sshClient = client.client;
             if (sshClient && typeof sshClient.exec === 'function') {

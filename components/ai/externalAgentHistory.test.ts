@@ -3,9 +3,9 @@ import test from "node:test";
 
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
 import {
-  buildAcpHistoryMessages,
-  buildAcpHistoryMessagesForBridge,
-} from "./acpHistory.ts";
+  buildExternalAgentHistoryMessages,
+  buildExternalAgentHistoryMessagesForBridge,
+} from "./externalAgentHistory.ts";
 
 function message(
   id: string,
@@ -22,14 +22,14 @@ function message(
   };
 }
 
-test("buildAcpHistoryMessages compacts older ACP context and keeps only recent raw turns", () => {
+test("buildExternalAgentHistoryMessages compacts older external agent context and keeps only recent raw turns", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "我希望最小改动，不要添加很多 test"),
     message("a1", "assistant", "已按最小改动处理"),
     message("u2", "user", "MCP 不允许使用，Windows 上不要假设 pwsh.exe"),
     message("a2", "assistant", "PR #738 已创建，commit 4181a2c"),
     message("u3", "user", "帮我上网查查优化方案，每轮都带历史太慢了"),
-    message("a3", "assistant", "建议 ACP history compaction"),
+    message("a3", "assistant", "建议 SDK agent history compaction"),
     message("tool1", "tool", "", {
       toolResults: [
         {
@@ -47,7 +47,7 @@ test("buildAcpHistoryMessages compacts older ACP context and keeps only recent r
     message("a6", "assistant", "还没提交"),
   ];
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Compact prior Netcatty UI context/);
@@ -64,17 +64,17 @@ test("buildAcpHistoryMessages compacts older ACP context and keeps only recent r
   assert.ok(result.every((entry) => entry.content.length <= 3000));
 });
 
-test("buildAcpHistoryMessagesForBridge keeps fallback history available for stale ACP session recovery", () => {
+test("buildExternalAgentHistoryMessagesForBridge keeps fallback history available for stale SDK agent session recovery", () => {
   const messages = [message("u1", "user", "继续处理这个历史压缩问题")];
 
-  assert.equal(buildAcpHistoryMessagesForBridge([], "acp-session-1"), undefined);
+  assert.equal(buildExternalAgentHistoryMessagesForBridge([], "sdk-session-1"), undefined);
   assert.deepEqual(
-    buildAcpHistoryMessagesForBridge(messages, "acp-session-1"),
-    buildAcpHistoryMessages(messages),
+    buildExternalAgentHistoryMessagesForBridge(messages, "sdk-session-1"),
+    buildExternalAgentHistoryMessages(messages),
   );
 });
 
-test("buildAcpHistoryMessages preserves older substantive user instructions outside the recent raw window", () => {
+test("buildExternalAgentHistoryMessages preserves older substantive user instructions outside the recent raw window", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "Keep this incremental and do not refactor unrelated files."),
     message("a1", "assistant", "Understood."),
@@ -87,7 +87,7 @@ test("buildAcpHistoryMessages preserves older substantive user instructions outs
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Keep this incremental and do not refactor unrelated files\./);
@@ -104,7 +104,7 @@ test("buildAcpHistoryMessages preserves older substantive user instructions outs
   );
 });
 
-test("buildAcpHistoryMessages preserves short important user constraints outside the recent raw window", () => {
+test("buildExternalAgentHistoryMessages preserves short important user constraints outside the recent raw window", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "不要提交"),
     message("a1", "assistant", "收到"),
@@ -117,13 +117,13 @@ test("buildAcpHistoryMessages preserves short important user constraints outside
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /不要提交/);
 });
 
-test("buildAcpHistoryMessages does not treat pr inside ordinary words as important", () => {
+test("buildExternalAgentHistoryMessages does not treat pr inside ordinary words as important", () => {
   // Original intent: `\bpr\b` in IMPORTANT_PATTERNS must NOT match 'pr'
   // inside ordinary English words like 'approach' / 'improve' / 'prepare'.
   // Those words land at priority=1 (kept only as space allows) while the
@@ -152,13 +152,13 @@ test("buildAcpHistoryMessages does not treat pr inside ordinary words as importa
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /不要提交/);
 });
 
-test("buildAcpHistoryMessages prioritizes later durable instructions over older filler prompts", () => {
+test("buildExternalAgentHistoryMessages prioritizes later durable instructions over older filler prompts", () => {
   const messages: ChatMessage[] = [];
 
   for (let index = 1; index <= 12; index += 1) {
@@ -188,13 +188,13 @@ test("buildAcpHistoryMessages prioritizes later durable instructions over older 
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Keep the existing layout and copy wording unchanged\./);
 });
 
-test("buildAcpHistoryMessages preserves older substantive assistant context that later user prompts can reference", () => {
+test("buildExternalAgentHistoryMessages preserves older substantive assistant context that later user prompts can reference", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "Please propose a migration plan for the sidebar state."),
     message(
@@ -213,13 +213,13 @@ test("buildAcpHistoryMessages preserves older substantive assistant context that
 
   messages.push(message("u14", "user", "Apply step 2 of your plan now."));
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Move the derived view state into that hook\./);
 });
 
-test("buildAcpHistoryMessages preserves short non-trivial user constraints that miss the IMPORTANT regex", () => {
+test("buildExternalAgentHistoryMessages preserves short non-trivial user constraints that miss the IMPORTANT regex", () => {
   // Regression: short load-bearing instructions like "Use ssh2" / "中文输出"
   // would previously be dropped by a blanket length<10 heuristic, even
   // though they don't match any TRIVIAL pattern.
@@ -239,14 +239,14 @@ test("buildAcpHistoryMessages preserves short non-trivial user constraints that 
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Use ssh2/);
   assert.match(result[0].content, /中文输出/);
 });
 
-test("buildAcpHistoryMessages still drops one-word filler user messages", () => {
+test("buildExternalAgentHistoryMessages still drops one-word filler user messages", () => {
   // Sanity: removing the length<10 heuristic must not cause "ok" / "继续" /
   // "thanks" filler to leak into the compact section.
   const messages: ChatMessage[] = [
@@ -263,7 +263,7 @@ test("buildAcpHistoryMessages still drops one-word filler user messages", () => 
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   // u1 / u2 fall outside the recent raw window. The compact context, if it
   // exists, must not surface these trivial turns as durable user requests.
@@ -273,7 +273,7 @@ test("buildAcpHistoryMessages still drops one-word filler user messages", () => 
   }
 });
 
-test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the raw budget) for follow-up references", () => {
+test("buildExternalAgentHistoryMessages preserves recent tool results verbatim (up to the raw budget) for follow-up references", () => {
   // Regression: tool results used to only reach fallback replay via the
   // 500-char compact summary. If the user's last interaction produced a
   // large tool output (cat/rg/fetched file), any "use that output"-style
@@ -293,7 +293,7 @@ test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the 
     message("u2", "user", "use that output"),
   ];
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // Raw-window tool result carries both the [from ...] provenance label
@@ -309,7 +309,7 @@ test("buildAcpHistoryMessages preserves recent tool results verbatim (up to the 
   );
 });
 
-test("buildAcpHistoryMessages inlines tool_call name+args so tool_result is interpretable without the preceding assistant turn", () => {
+test("buildExternalAgentHistoryMessages inlines tool_call name+args so tool_result is interpretable without the preceding assistant turn", () => {
   // Regression: if the raw window starts mid-tool-interaction, the
   // preceding assistant tool_call message may be outside the 6-item
   // slice. Without the call's name/args inline on the result line, the
@@ -334,7 +334,7 @@ test("buildAcpHistoryMessages inlines tool_call name+args so tool_result is inte
     message("u3", "user", "now do the same for /etc/resolv.conf"),
   ];
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // The tool_result line must carry the originating tool_call's name and
@@ -344,7 +344,7 @@ test("buildAcpHistoryMessages inlines tool_call name+args so tool_result is inte
   assert.match(flat, /cat \/etc\/hosts/);
 });
 
-test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) work per send on long chats", () => {
+test("buildExternalAgentHistoryMessages bounds the durable-candidate scan to avoid O(N) work per send on long chats", () => {
   // Regression target: codex review flagged that the compaction path
   // scanned messages.entries() over the full transcript. Build a very
   // long chat (>> MAX_DURABLE_SCAN_TURNS user turns) and verify that
@@ -373,7 +373,7 @@ test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) wo
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // Recent priority-2 constraint is kept.
@@ -382,7 +382,7 @@ test("buildAcpHistoryMessages bounds the durable-candidate scan to avoid O(N) wo
   assert.doesNotMatch(flat, /old-marker-xyz/);
 });
 
-test("buildAcpHistoryMessages preserves an early constraint in a tool-heavy chat where message count balloons past the raw-count limit", () => {
+test("buildExternalAgentHistoryMessages preserves an early constraint in a tool-heavy chat where message count balloons past the raw-count limit", () => {
   // Regression: the previous bound was MAX_DURABLE_SCAN_MESSAGES=200 on
   // the raw message array. In a tool-heavy chat, each user turn can
   // expand to 5+ messages (user + assistant w/ toolCalls + N tool
@@ -423,7 +423,7 @@ test("buildAcpHistoryMessages preserves an early constraint in a tool-heavy chat
   // Sanity: the message count is over 200 even though user turns are 30.
   assert.ok(messages.length > 200, `setup: expected > 200 messages, got ${messages.length}`);
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // Under the old raw-count bound, the early constraint would age out;
@@ -431,7 +431,7 @@ test("buildAcpHistoryMessages preserves an early constraint in a tool-heavy chat
   assert.match(flat, /EARLY_CONSTRAINT_MARKER/);
 });
 
-test("buildAcpHistoryMessages preserves short non-trivial assistant decisions that miss the keyword heuristic", () => {
+test("buildExternalAgentHistoryMessages preserves short non-trivial assistant decisions that miss the keyword heuristic", () => {
   // Regression: isSubstantiveAssistantMessage previously required length
   // >= 40 OR a small English keyword match OR a numbered list. Short
   // load-bearing replies like "Use ssh2" / "rebase instead" / "中文输出"
@@ -456,7 +456,7 @@ test("buildAcpHistoryMessages preserves short non-trivial assistant decisions th
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   assert.match(flat, /Use ssh2/);
@@ -464,7 +464,7 @@ test("buildAcpHistoryMessages preserves short non-trivial assistant decisions th
   assert.match(flat, /rebase instead/);
 });
 
-test("buildAcpHistoryMessages still drops trivial assistant filler like 'ack' / 'ok' / '明白'", () => {
+test("buildExternalAgentHistoryMessages still drops trivial assistant filler like 'ack' / 'ok' / '明白'", () => {
   // Sanity: removing the length/keyword gate must not let assistant
   // filler leak into the compact durable-assistant section.
   const messages: ChatMessage[] = [
@@ -483,7 +483,7 @@ test("buildAcpHistoryMessages still drops trivial assistant filler like 'ack' / 
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   assert.doesNotMatch(flat, /Assistant context: ack\b/);
@@ -491,7 +491,7 @@ test("buildAcpHistoryMessages still drops trivial assistant filler like 'ack' / 
   assert.doesNotMatch(flat, /Assistant context: 明白/);
 });
 
-test("buildAcpHistoryMessages inlines tool_call context on OLDER summarized tool results", () => {
+test("buildExternalAgentHistoryMessages inlines tool_call context on OLDER summarized tool results", () => {
   // Regression: the raw-window fix covered the last 6 items, but once
   // a tool result fell into the compact section (summarizeToolMessage
   // path) the `[from <name>(<args>)]` provenance label was absent.
@@ -530,7 +530,7 @@ test("buildAcpHistoryMessages inlines tool_call context on OLDER summarized tool
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // Both older tool results must now carry provenance labels so a
@@ -539,7 +539,7 @@ test("buildAcpHistoryMessages inlines tool_call context on OLDER summarized tool
   assert.match(flat, /Tool result \[from terminal_exec.*?cat \/etc\/resolv\.conf/);
 });
 
-test("buildAcpHistoryMessages does not duplicate recent raw turns into the compact summary section", () => {
+test("buildExternalAgentHistoryMessages does not duplicate recent raw turns into the compact summary section", () => {
   // Regression: the scanned loop (last 20) overlaps with recentRaw (last 6).
   // Without skipping raw-window items, the same last-6 turns would be
   // summarized in the compact section AND appended verbatim in the raw
@@ -570,7 +570,7 @@ test("buildAcpHistoryMessages does not duplicate recent raw turns into the compa
     message("u-rec2", "user", "now push"),
   );
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   const compact = result.find((m) => m.content.includes("[Compact prior Netcatty UI context]"));
   assert.ok(compact, "expected a compact context message");
@@ -587,7 +587,7 @@ test("buildAcpHistoryMessages does not duplicate recent raw turns into the compa
   assert.match(rawFlat, /RAW_TOOL_MARKER/);
 });
 
-test("buildAcpHistoryMessages resolves tool_call provenance correctly when tool ids are reused across turns", () => {
+test("buildExternalAgentHistoryMessages resolves tool_call provenance correctly when tool ids are reused across turns", () => {
   // Regression: keying toolCallIndex by raw toolCall.id alone let a later
   // assistant tool_call with the same id overwrite the older one. An
   // older tool_result in the replay history would then be annotated
@@ -622,7 +622,7 @@ test("buildAcpHistoryMessages resolves tool_call provenance correctly when tool 
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
   // Each tool_result must be annotated with ITS OWN preceding call's
@@ -638,7 +638,7 @@ test("buildAcpHistoryMessages resolves tool_call provenance correctly when tool 
   assert.ok(resolvMatch, "resolv result must be labeled with cat /etc/resolv.conf");
 });
 
-test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
+test("buildExternalAgentHistoryMessages preserves assistant-only compact context", () => {
   const messages: ChatMessage[] = [
     message("u1", "user", "ok"),
     message(
@@ -655,7 +655,7 @@ test("buildAcpHistoryMessages preserves assistant-only compact context", () => {
     );
   }
 
-  const result = buildAcpHistoryMessages(messages);
+  const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
   assert.match(result[0].content, /Move parser setup into a dedicated hook\./);

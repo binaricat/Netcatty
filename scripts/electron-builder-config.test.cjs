@@ -35,7 +35,7 @@ test("build.files excludes per-platform agent binaries", () => {
   }
 });
 
-test("asarUnpack no longer references removed ACP packages", () => {
+test("asarUnpack no longer references removed legacy agent packages", () => {
   const unpack = config.asarUnpack.join("\n");
   for (const stale of [
     "@agentclientprotocol/claude-agent-acp",

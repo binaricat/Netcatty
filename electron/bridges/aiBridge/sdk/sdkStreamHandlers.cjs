@@ -22,7 +22,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Map the renderer-supplied backend value (acpCommand field) to a registry key. */
+/** Map the renderer-supplied backend value to a registry key. */
 function resolveBackendKey(value) {
   const key = String(value || "").trim();
   return VALID_BACKENDS.has(key) ? key : null;
@@ -114,19 +114,19 @@ function registerSdkStreamHandlers(ctx) {
     const sdkSessionIds = new Map(); // chatSessionId -> last sessionId
 
     ipcMain.handle(
-      "netcatty:ai:acp:stream",
+      "netcatty:ai:sdk-agent:stream",
       async (event, payload) => {
         if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
         const {
-          requestId, chatSessionId, acpCommand, prompt, cwd,
+          requestId, chatSessionId, sdkBackend, prompt, cwd,
           model, existingSessionId, toolIntegrationMode,
           defaultTargetSession, userSkillsContext, agentEnv: requestedAgentEnv,
         } = payload;
 
-        const backendKey = resolveBackendKey(acpCommand);
+        const backendKey = resolveBackendKey(sdkBackend);
         if (!backendKey) {
-          safeSend(event.sender, "netcatty:ai:acp:error", {
-            requestId, error: `Unknown SDK backend: ${acpCommand}`,
+          safeSend(event.sender, "netcatty:ai:sdk-agent:error", {
+            requestId, error: `Unknown SDK backend: ${sdkBackend}`,
           });
           return { ok: false, error: "Unknown SDK backend" };
         }
@@ -160,7 +160,7 @@ function registerSdkStreamHandlers(ctx) {
             shellEnv,
             requestedAgentEnv: normalizedAgentEnv,
             withCliDiscoveryEnv,
-            normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForAcp,
+            normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForSdk,
           });
 
           // Resolve absolute CLI path for the backend (claude needs absolute).
@@ -217,11 +217,11 @@ function registerSdkStreamHandlers(ctx) {
       },
     );
 
-    ipcMain.handle("netcatty:ai:acp:list-models", async (event, payload) => {
+    ipcMain.handle("netcatty:ai:sdk-agent:list-models", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
-      const { acpCommand, agentEnv: requestedAgentEnv } = payload || {};
-      const backendKey = resolveBackendKey(acpCommand);
-      if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${acpCommand}` };
+      const { sdkBackend, agentEnv: requestedAgentEnv } = payload || {};
+      const backendKey = resolveBackendKey(sdkBackend);
+      if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${sdkBackend}` };
 
       // claude/copilot enumerate models via the SDK; codex has no catalog (its
       // driver returns []), so the renderer falls back to curated presets.
@@ -240,7 +240,7 @@ function registerSdkStreamHandlers(ctx) {
           shellEnv,
           requestedAgentEnv: normalizeAgentEnv(requestedAgentEnv),
           withCliDiscoveryEnv,
-          normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForAcp,
+          normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForSdk,
         });
         const raw = await withTimeout(driver.listModels({ binPath, env }), MODEL_LIST_TIMEOUT_MS);
         const models = Array.isArray(raw) ? raw.filter((m) => m && m.id) : [];
@@ -253,7 +253,7 @@ function registerSdkStreamHandlers(ctx) {
       }
     });
 
-    ipcMain.handle("netcatty:ai:acp:cancel", async (event, { requestId, chatSessionId }) => {
+    ipcMain.handle("netcatty:ai:sdk-agent:cancel", async (event, { requestId, chatSessionId }) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       const effectiveChatSessionId = chatSessionId || sdkRequestSessions.get(requestId);
       mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
@@ -269,7 +269,7 @@ function registerSdkStreamHandlers(ctx) {
       return { ok: false, error: "Stream not found" };
     });
 
-    ipcMain.handle("netcatty:ai:acp:cleanup", async (event, { chatSessionId }) => {
+    ipcMain.handle("netcatty:ai:sdk-agent:cleanup", async (event, { chatSessionId }) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);

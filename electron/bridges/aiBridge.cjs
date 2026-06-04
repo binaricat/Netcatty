@@ -30,7 +30,7 @@ const {
   stripAnsi,
   normalizeCliPathForPlatform,
   prepareCommandForSpawn,
-  normalizeClaudeCodeExecutableEnvForAcp,
+  normalizeClaudeCodeExecutableEnvForSdk,
   resolveCliFromPath,
   isPlausibleCliVersionOutput,
   getShellEnv,
@@ -80,7 +80,7 @@ function normalizeToolIntegrationMode(mode) {
 }
 
 function setToolIntegrationMode(mode) {
-  // Tool access mode is selected per ACP request. The TCP bridge host is shared
+  // Tool access mode is selected per SDK agent request. The TCP bridge host is shared
   // by both MCP and Skills + CLI, so changing the setting must not tear down
   // unrelated in-flight sessions, approvals, or background jobs.
   return normalizeToolIntegrationMode(mode);
@@ -635,7 +635,7 @@ function createHandlerContext(ipcMain) {
     stripAnsi,
     normalizeCliPathForPlatform,
     prepareCommandForSpawn,
-    normalizeClaudeCodeExecutableEnvForAcp,
+    normalizeClaudeCodeExecutableEnvForSdk,
     resolveCliFromPath,
     probeClaudeAuth,
     probeCopilotAuth,

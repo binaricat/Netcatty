@@ -46,12 +46,17 @@ export function buildManagedAgentState(
   }
 
   const existingManaged = managedAgents.find((agent) => agent.id === managedId);
+  const {
+    acpCommand: _legacyCommand,
+    acpArgs: _legacyArgs,
+    ...existingManagedWithoutLegacy
+  } = existingManaged ?? {};
   const defaults = AGENT_DEFAULTS[agentKey];
   const managedEnv = agentKey === "claude"
     ? { ...(existingManaged?.env ?? {}), CLAUDE_CODE_EXECUTABLE: pathInfo.path }
     : existingManaged?.env;
   const nextManagedAgent: ExternalAgentConfig = {
-    ...existingManaged,
+    ...existingManagedWithoutLegacy,
     ...defaults,
     id: managedId,
     command: pathInfo.path,

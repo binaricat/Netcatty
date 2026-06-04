@@ -113,22 +113,19 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     name: "Codex CLI",
     args: ["exec", "--full-auto", "--json", "{prompt}"],
     icon: "openai",
-    acpCommand: "codex",
-    acpArgs: [],
+    sdkBackend: "codex",
   },
   claude: {
     name: "Claude Code",
     args: ["-p", "--output-format", "text", "{prompt}"],
     icon: "claude",
-    acpCommand: "claude",
-    acpArgs: [],
+    sdkBackend: "claude",
   },
   copilot: {
     name: "GitHub Copilot CLI",
     args: ["-p", "{prompt}"],
     icon: "copilot",
-    acpCommand: "copilot",
-    acpArgs: [],
+    sdkBackend: "copilot",
   },
 };
 

@@ -9,14 +9,14 @@ const agents: ExternalAgentConfig[] = [
     id: 'enabled-agent',
     name: 'Enabled Agent',
     command: '/usr/local/bin/enabled-agent',
-    acpCommand: 'codex',
+    sdkBackend: 'codex',
     enabled: true,
   },
   {
     id: 'disabled-agent',
     name: 'Disabled Agent',
     command: '/usr/local/bin/disabled-agent',
-    acpCommand: 'codex',
+    sdkBackend: 'codex',
     enabled: false,
   },
   {

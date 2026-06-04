@@ -44,7 +44,7 @@ test('netcatty-tool-cli env -> list sessions', () => {
   assert.equal(extractDisplayCommand({ command: 'netcatty-tool-cli env' }), 'netcatty: list sessions');
 });
 
-test('ACP array shell-wrap shape still unwraps (regression)', () => {
+test('array shell-wrap shape still unwraps (regression)', () => {
   assert.equal(
     extractDisplayCommand({ command: ['zsh', '-lc', 'ls -la /tmp'] }),
     'ls -la /tmp',

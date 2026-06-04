@@ -1,4 +1,5 @@
 import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
+import { getExternalAgentSdkBackend } from '../infrastructure/ai/managedAgents';
 
 export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
   if (preset.thinkingLevels?.length) {
@@ -18,7 +19,7 @@ export function isCopilotAgentConfig(agent?: ExternalAgentConfig): boolean {
     agent.name,
     agent.icon,
     agent.command,
-    agent.acpCommand,
+    getExternalAgentSdkBackend(agent),
   ]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .map((value) => value.split('/').pop()?.toLowerCase() ?? value.toLowerCase());

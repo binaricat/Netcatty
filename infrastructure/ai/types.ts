@@ -66,7 +66,7 @@ export interface ChatMessageAttachment {
   base64Data: string;
   mediaType: string;
   filename?: string;
-  filePath?: string;    // original filesystem path (for ACP agents to read directly)
+  filePath?: string;    // original filesystem path, when available
 }
 
 export interface UploadedFile {
@@ -200,8 +200,7 @@ export interface AgentInfo {
   available: boolean;
 }
 
-// External agent config. `acpCommand` is retained as the persisted routing
-// field; managed agents store SDK backend keys here (claude|codex|copilot).
+// External agent config. Managed agents route through official SDK backends.
 export interface ExternalAgentConfig {
   id: string;
   name: string;
@@ -210,8 +209,11 @@ export interface ExternalAgentConfig {
   env?: Record<string, string>;
   icon?: string;
   enabled: boolean;
-  /** SDK backend key for managed agents (legacy field name kept for storage compatibility). */
+  /** SDK backend key for managed agents (claude|codex|copilot). */
+  sdkBackend?: string;
+  /** @deprecated Legacy persisted field from the pre-SDK migration. Read only for compatibility. */
   acpCommand?: string;
+  /** @deprecated Legacy persisted field from the pre-SDK migration. */
   acpArgs?: string[];
 }
 
@@ -225,7 +227,7 @@ export interface DiscoveredAgent {
   path: string;
   version: string;
   available: boolean;
-  /** ACP command if agent supports ACP protocol (legacy; superseded by sdkBackend) */
+  /** @deprecated Legacy discovery field from the pre-SDK migration. */
   acpCommand?: string;
   acpArgs?: string[];
   /** SDK backend key (claude|codex|copilot) — the post-migration routing value. */

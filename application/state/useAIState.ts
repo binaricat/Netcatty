@@ -46,7 +46,7 @@ import {
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
   bumpDraftMutationVersion,
   bumpDraftUploadGeneration,
-  cleanupAcpSessions,
+  cleanupSdkAgentSessions,
   cleanupOrphanedAISessions,
   getAIBridge,
   getDraftUploadGeneration,
@@ -321,7 +321,7 @@ export function useAIState() {
   const setCommandBlocklist = useCallback((value: string[]) => {
     setCommandBlocklistRaw(value);
     localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, value);
-    // Sync to MCP Server bridge so ACP agents also respect the blocklist
+    // Sync to MCP Server bridge so SDK agents also respect the blocklist
     const bridge = getAIBridge();
     bridge?.aiMcpSetCommandBlocklist?.(value);
   }, []);
@@ -337,7 +337,7 @@ export function useAIState() {
   const setMaxIterations = useCallback((value: number) => {
     setMaxIterationsRaw(value);
     localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, value);
-    // Sync to MCP Server bridge (used by ACP agent path)
+    // Sync to MCP Server bridge (used by SDK agent path)
     const bridge = getAIBridge();
     bridge?.aiMcpSetMaxIterations?.(value);
   }, []);
@@ -571,7 +571,7 @@ export function useAIState() {
   }, [defaultAgentId, persistSessions, setActiveSessionId]);
 
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
-    cleanupAcpSessions([sessionId]);
+    cleanupSdkAgentSessions([sessionId]);
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
@@ -600,7 +600,7 @@ export function useAIState() {
     const removedSessionIds = sessionsRef.current
       .filter(s => s.scope.type === scopeType && s.scope.targetId === targetId)
       .map(s => s.id);
-    cleanupAcpSessions(removedSessionIds);
+    cleanupSdkAgentSessions(removedSessionIds);
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;

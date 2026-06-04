@@ -157,7 +157,7 @@ function createExecHandlerApi(ctx) {
           timeoutMs: commandTimeoutMs,
           trackForCancellation: activePtyExecs,
           // Pass chatSessionId so cancelPtyExecsForSession can interrupt this
-          // exec channel when the originating ACP run is stopped.
+          // exec channel when the originating SDK agent run is stopped.
           chatSessionId: params?.chatSessionId,
         }));
       }
@@ -214,7 +214,7 @@ function createExecHandlerApi(ctx) {
       try {
         handle = startPtyJob(ptyStream, command, {
           // Intentionally do NOT register in activePtyExecs: terminal_start jobs
-          // are designed to survive ACP "Stop" so the model can stop polling
+          // are designed to survive SDK agent "Stop" so the model can stop polling
           // without aborting a long-running build/scan/log stream. The job is
           // managed via terminal_stop and the per-session execution lock.
           timeoutMs,

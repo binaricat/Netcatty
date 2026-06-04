@@ -23,7 +23,7 @@ import { emitAIStateChanged } from './aiStateEvents';
 
 /** Typed accessor for the Electron IPC bridge exposed on `window.netcatty`. */
 export interface AIBridge {
-  aiAcpCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
+  aiSdkAgentCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
   aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
   aiMcpSetToolIntegrationMode?: (mode: AIToolIntegrationMode) => Promise<unknown> | unknown;
   aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
@@ -42,11 +42,11 @@ export const AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE = 'netcatty:ai-panel-view-by-s
 export type DraftsByScope = Partial<Record<string, AIDraft>>;
 export type PanelViewByScope = Partial<Record<string, AIPanelView>>;
 
-export function cleanupAcpSessions(sessionIds: string[]) {
+export function cleanupSdkAgentSessions(sessionIds: string[]) {
   const bridge = getAIBridge();
-  if (!bridge?.aiAcpCleanup || sessionIds.length === 0) return;
+  if (!bridge?.aiSdkAgentCleanup || sessionIds.length === 0) return;
   for (const sessionId of sessionIds) {
-    void bridge.aiAcpCleanup(sessionId).catch(() => {});
+    void bridge.aiSdkAgentCleanup(sessionId).catch(() => {});
   }
 }
 
@@ -86,7 +86,7 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   );
 
   if (nextSessionCleanup.orphanedSessionIds.length > 0) {
-    cleanupAcpSessions(nextSessionCleanup.orphanedSessionIds);
+    cleanupSdkAgentSessions(nextSessionCleanup.orphanedSessionIds);
   }
 
   if (nextSessionCleanup.sessions !== currentSessions) {

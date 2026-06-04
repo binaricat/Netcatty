@@ -55,9 +55,9 @@ function loadBridgeWithMocks(options = {}) {
         typeof options.prepareCommandForSpawn === "function"
           ? options.prepareCommandForSpawn(...args)
           : prepareCommandForSpawn(...args),
-      normalizeClaudeCodeExecutableEnvForAcp: (env) =>
-        typeof options.normalizeClaudeCodeExecutableEnvForAcp === "function"
-          ? options.normalizeClaudeCodeExecutableEnvForAcp(env)
+      normalizeClaudeCodeExecutableEnvForSdk: (env) =>
+        typeof options.normalizeClaudeCodeExecutableEnvForSdk === "function"
+          ? options.normalizeClaudeCodeExecutableEnvForSdk(env)
           : env,
       isPlausibleCliVersionOutput: (value) =>
         typeof options.isPlausibleCliVersionOutput === "function"

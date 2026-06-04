@@ -1,9 +1,9 @@
 /**
  * Netcatty MCP Server (stdio transport)
  *
- * Spawned by codex-acp (or other ACP agents) as a child process.
+ * Spawned by managed SDK agents as a child process.
  * Communicates with the Netcatty main process via TCP (JSON-RPC over newline-delimited JSON).
- * Exposes Netcatty terminal tools so ACP agents can operate on scoped sessions.
+ * Exposes Netcatty terminal tools so external agents can operate on scoped sessions.
  */
 "use strict";
 

@@ -3,7 +3,7 @@
  *
  * Handles:
  * - Catty agent streaming via Vercel AI SDK `streamText`
- * - External agent streaming (ACP and raw process)
+ * - External agent streaming through official SDK backends
  * - Text-delta batching via requestAnimationFrame
  * - Abort controller management
  * - Stream state tracking (per-session)
@@ -28,7 +28,8 @@ import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemP
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
-import { runAcpAgentTurn } from '../../../infrastructure/ai/acpAgentAdapter';
+import { getExternalAgentSdkBackend } from '../../../infrastructure/ai/managedAgents';
+import { runSdkAgentTurn } from '../../../infrastructure/ai/sdkAgentAdapter';
 import { classifyError } from '../../../infrastructure/ai/errorClassifier';
 import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
 import {
@@ -122,7 +123,7 @@ export interface UseAIChatStreamingReturn {
     context: SendToCattyContext,
     attachments?: ChatMessageAttachment[],
   ) => Promise<void>;
-  /** Send a message to an external agent (ACP or raw process). */
+  /** Send a message to an external SDK agent. */
   sendToExternalAgent: (
     sessionId: string,
     trimmed: string,
@@ -531,8 +532,9 @@ export function useAIChatStreaming({
       context.selectedUserSkillSlugs,
     );
 
-    if (agentConfig.acpCommand && bridge) {
-      const requestId = `acp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const sdkBackend = getExternalAgentSdkBackend(agentConfig);
+    if (sdkBackend && bridge) {
+      const requestId = `sdk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
       // Push terminal session metadata to MCP bridge
       if (bridge?.aiMcpUpdateSessions) {
@@ -551,7 +553,7 @@ export function useAIChatStreaming({
         }
       };
 
-      await runAcpAgentTurn(
+      await runSdkAgentTurn(
         bridge,
         requestId,
         sessionId,
@@ -593,7 +595,7 @@ export function useAIChatStreaming({
               if (msg.role !== 'assistant' || msg.executionStatus !== 'running') return msg;
               // Only patch tool call name if the existing name is missing/generic
               // (don't overwrite a good name from onToolCall with a wrapper name from tool-result)
-              const updatedToolCalls = toolName && !toolName.includes('acp_provider_agent_dynamic_tool') && msg.toolCalls
+              const updatedToolCalls = toolName && !toolName.includes('sdk_agent_dynamic_tool') && msg.toolCalls
                 ? msg.toolCalls.map(tc => tc.id === toolCallId && !tc.name ? { ...tc, name: toolName } : tc)
                 : msg.toolCalls;
               return { ...msg, toolCalls: updatedToolCalls, executionStatus: 'completed', statusText: undefined };
@@ -620,7 +622,7 @@ export function useAIChatStreaming({
           onDone: () => {},
         },
         abortController.signal,
-        // Managed ACP agents (codex, claude) must resolve auth from their own
+        // Managed SDK agents (codex, claude) must resolve auth from their own
         // CLI config/login state, so we deliberately pass no providerId here.
         // See issue #705 for Codex; same reasoning for Claude.
         undefined,
@@ -633,8 +635,7 @@ export function useAIChatStreaming({
         userSkillsContext,
       );
     } else {
-      // Managed agents always route through the SDK path above (acpCommand
-      // carries the backend key). A missing backend is a configuration error.
+      // Managed agents always route through the SDK path above.
       reportStreamError(
         sessionId,
         abortController.signal,

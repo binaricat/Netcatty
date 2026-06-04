@@ -217,7 +217,7 @@ function prepareCommandForSpawn(command, args) {
   };
 }
 
-function resolveClaudeCodeExecutableForAcp(claudeExecutablePath, platform = process.platform) {
+function resolveClaudeCodeExecutableForSdk(claudeExecutablePath, platform = process.platform) {
   const normalized = String(claudeExecutablePath || "").trim();
   if (!normalized) return null;
   if (platform !== "win32") return normalized;
@@ -254,9 +254,9 @@ function resolveClaudeCodeExecutableForAcp(claudeExecutablePath, platform = proc
   return normalized;
 }
 
-function normalizeClaudeCodeExecutableEnvForAcp(env, platform = process.platform) {
+function normalizeClaudeCodeExecutableEnvForSdk(env, platform = process.platform) {
   if (!env?.CLAUDE_CODE_EXECUTABLE) return env;
-  const resolved = resolveClaudeCodeExecutableForAcp(env.CLAUDE_CODE_EXECUTABLE, platform);
+  const resolved = resolveClaudeCodeExecutableForSdk(env.CLAUDE_CODE_EXECUTABLE, platform);
   if (!resolved || resolved === env.CLAUDE_CODE_EXECUTABLE) return env;
   return {
     ...env,
@@ -438,8 +438,8 @@ module.exports = {
   quoteWindowsShellArg,
   buildWindowsShellCommandLine,
   prepareCommandForSpawn,
-  resolveClaudeCodeExecutableForAcp,
-  normalizeClaudeCodeExecutableEnvForAcp,
+  resolveClaudeCodeExecutableForSdk,
+  normalizeClaudeCodeExecutableEnvForSdk,
   resolveCliFromPath,
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,

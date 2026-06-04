@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { formatAcpErrorForDisplay, runAcpAgentTurn } from './acpAgentAdapter';
-import type { AcpAgentCallbacks } from './acpAgentAdapter';
+import { formatSdkAgentErrorForDisplay, runSdkAgentTurn } from './sdkAgentAdapter';
+import type { SdkAgentCallbacks } from './sdkAgentAdapter';
 import type { ExternalAgentConfig } from './types';
 
-function createCallbacks(errors: string[]): AcpAgentCallbacks {
+function createCallbacks(errors: string[]): SdkAgentCallbacks {
   return {
     onTextDelta: () => {},
     onThinkingDelta: () => {},
@@ -17,18 +17,17 @@ function createCallbacks(errors: string[]): AcpAgentCallbacks {
   };
 }
 
-const acpConfig: ExternalAgentConfig = {
+const sdkConfig: ExternalAgentConfig = {
   id: 'agent',
   name: 'Agent',
   command: 'agent',
   enabled: true,
-  acpCommand: 'agent-acp',
-  acpArgs: [],
+  sdkBackend: 'codex',
 };
 
-test('formatAcpErrorForDisplay preserves nested ACP error messages', () => {
+test('formatSdkAgentErrorForDisplay preserves nested SDK agent error messages', () => {
   assert.equal(
-    formatAcpErrorForDisplay({
+    formatSdkAgentErrorForDisplay({
       error: {
         code: 'invalid_model',
         message: 'Model is not available',
@@ -38,27 +37,27 @@ test('formatAcpErrorForDisplay preserves nested ACP error messages', () => {
   );
 });
 
-test('formatAcpErrorForDisplay stringifies unknown objects instead of [object Object]', () => {
+test('formatSdkAgentErrorForDisplay stringifies unknown objects instead of [object Object]', () => {
   assert.equal(
-    formatAcpErrorForDisplay({ status: 502, detail: 'Proxy failed' }),
+    formatSdkAgentErrorForDisplay({ status: 502, detail: 'Proxy failed' }),
     '{"status":502,"detail":"Proxy failed"}',
   );
 });
 
-test('formatAcpErrorForDisplay handles circular errors', () => {
+test('formatSdkAgentErrorForDisplay handles circular errors', () => {
   const error: Record<string, unknown> = { status: 500 };
   error.self = error;
 
   assert.equal(
-    formatAcpErrorForDisplay(error),
+    formatSdkAgentErrorForDisplay(error),
     '{"status":500,"self":"[Circular]"}',
   );
 });
 
-test('runAcpAgentTurn formats structured startup errors', async () => {
+test('runSdkAgentTurn formats structured startup errors', async () => {
   const errors: string[] = [];
   const bridge: Record<string, (...args: unknown[]) => unknown> = {
-    aiAcpStream: async () => ({
+    aiSdkAgentStream: async () => ({
       ok: false,
       error: {
         error: {
@@ -67,17 +66,17 @@ test('runAcpAgentTurn formats structured startup errors', async () => {
         },
       },
     }),
-    aiAcpCancel: async () => ({ ok: true }),
-    onAiAcpEvent: () => () => {},
-    onAiAcpDone: () => () => {},
-    onAiAcpError: () => () => {},
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: () => () => {},
+    onAiSdkAgentError: () => () => {},
   };
 
-  await runAcpAgentTurn(
+  await runSdkAgentTurn(
     bridge,
     'request-1',
     'chat-1',
-    acpConfig,
+    sdkConfig,
     'hello',
     createCallbacks(errors),
   );
@@ -85,30 +84,30 @@ test('runAcpAgentTurn formats structured startup errors', async () => {
   assert.deepEqual(errors, ['Model is not available']);
 });
 
-test('runAcpAgentTurn forwards configured ACP environment', async () => {
+test('runSdkAgentTurn forwards configured SDK agent environment', async () => {
   let streamArgs: unknown[] = [];
   let done: (() => void) | null = null;
   const bridge: Record<string, (...args: unknown[]) => unknown> = {
-    aiAcpStream: async (...args: unknown[]) => {
+    aiSdkAgentStream: async (...args: unknown[]) => {
       streamArgs = args;
       queueMicrotask(() => done?.());
       return { ok: true };
     },
-    aiAcpCancel: async () => ({ ok: true }),
-    onAiAcpEvent: () => () => {},
-    onAiAcpDone: (_requestId: unknown, cb: unknown) => {
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
       done = cb as () => void;
       return () => {};
     },
-    onAiAcpError: () => () => {},
+    onAiSdkAgentError: () => () => {},
   };
 
-  await runAcpAgentTurn(
+  await runSdkAgentTurn(
     bridge,
     'request-env',
     'chat-env',
     {
-      ...acpConfig,
+      ...sdkConfig,
       env: { CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude' },
     },
     'hello',
@@ -118,13 +117,14 @@ test('runAcpAgentTurn forwards configured ACP environment', async () => {
   assert.deepEqual(streamArgs.at(-1), {
     CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude',
   });
+  assert.equal(streamArgs[2], 'codex');
 });
 
-test('runAcpAgentTurn formats structured async error events', async () => {
+test('runSdkAgentTurn formats structured async error events', async () => {
   const errors: string[] = [];
   let onError: ((error: unknown) => void) | null = null;
   const bridge: Record<string, (...args: unknown[]) => unknown> = {
-    aiAcpStream: async () => {
+    aiSdkAgentStream: async () => {
       queueMicrotask(() => {
         onError?.({
           data: {
@@ -136,20 +136,20 @@ test('runAcpAgentTurn formats structured async error events', async () => {
       });
       return { ok: true };
     },
-    aiAcpCancel: async () => ({ ok: true }),
-    onAiAcpEvent: () => () => {},
-    onAiAcpDone: () => () => {},
-    onAiAcpError: (_requestId: unknown, cb: unknown) => {
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: () => () => {},
+    onAiSdkAgentError: (_requestId: unknown, cb: unknown) => {
       onError = cb as (error: unknown) => void;
       return () => {};
     },
   };
 
-  await runAcpAgentTurn(
+  await runSdkAgentTurn(
     bridge,
     'request-2',
     'chat-1',
-    acpConfig,
+    sdkConfig,
     'hello',
     createCallbacks(errors),
   );
@@ -157,11 +157,11 @@ test('runAcpAgentTurn formats structured async error events', async () => {
   assert.deepEqual(errors, ['Proxy failed']);
 });
 
-test('runAcpAgentTurn formats structured stream error events', async () => {
+test('runSdkAgentTurn formats structured stream error events', async () => {
   const errors: string[] = [];
   let onEvent: ((event: unknown) => void) | null = null;
   const bridge: Record<string, (...args: unknown[]) => unknown> = {
-    aiAcpStream: async () => {
+    aiSdkAgentStream: async () => {
       queueMicrotask(() => {
         onEvent?.({
           type: 'error',
@@ -174,20 +174,20 @@ test('runAcpAgentTurn formats structured stream error events', async () => {
       });
       return { ok: true };
     },
-    aiAcpCancel: async () => ({ ok: true }),
-    onAiAcpEvent: (_requestId: unknown, cb: unknown) => {
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: (_requestId: unknown, cb: unknown) => {
       onEvent = cb as (event: unknown) => void;
       return () => {};
     },
-    onAiAcpDone: () => () => {},
-    onAiAcpError: () => () => {},
+    onAiSdkAgentDone: () => () => {},
+    onAiSdkAgentError: () => () => {},
   };
 
-  await runAcpAgentTurn(
+  await runSdkAgentTurn(
     bridge,
     'request-3',
     'chat-1',
-    acpConfig,
+    sdkConfig,
     'hello',
     createCallbacks(errors),
   );

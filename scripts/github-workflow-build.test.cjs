@@ -8,7 +8,7 @@ const buildWorkflow = fs.readFileSync(
   "utf8",
 );
 
-test("build workflow no longer installs removed ACP agent binaries", () => {
+test("build workflow no longer installs removed legacy agent binaries", () => {
   for (const stale of [
     "@agentclientprotocol/claude-agent-acp",
     "@agentclientprotocol/sdk",
@@ -18,7 +18,7 @@ test("build workflow no longer installs removed ACP agent binaries", () => {
     assert.equal(
       buildWorkflow.includes(stale),
       false,
-      `build workflow must not reference removed ACP package: ${stale}`,
+      `build workflow must not reference removed legacy package: ${stale}`,
     );
   }
 });
