@@ -24,6 +24,7 @@ import { TabsContent } from "../../ui/tabs";
 import { Button } from "../../ui/button";
 import { Select, SettingRow } from "../settings-ui";
 import { AgentIconBadge } from "../../ai/AgentIconBadge";
+import { canSendWithAgent } from "../../ai/agentSendEligibility";
 
 import type {
   AgentPathInfo,
@@ -277,9 +278,15 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const agentOptions = useMemo(() => [
     { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
     ...externalAgents
-      .filter((a) => a.enabled)
+      .filter((a) => canSendWithAgent(a.id, externalAgents))
       .map((a) => ({ value: a.id, label: a.name, icon: <AgentIconBadge agent={a} size="xs" variant="plain" /> })),
   ], [externalAgents, t]);
+
+  useEffect(() => {
+    if (!agentOptions.some((option) => option.value === defaultAgentId)) {
+      setDefaultAgentId("catty");
+    }
+  }, [agentOptions, defaultAgentId, setDefaultAgentId]);
 
   const refreshCodexIntegration = useCallback(async (opts?: { refreshShellEnv?: boolean }) => {
     const bridge = getBridge();

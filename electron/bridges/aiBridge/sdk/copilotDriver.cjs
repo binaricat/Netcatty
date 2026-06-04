@@ -11,9 +11,9 @@
  *   (bring-your-own-CLI), so we MUST point `connection` at the user's system
  *   `copilot` binary via RuntimeConnection.forStdio({ path }) — otherwise the SDK
  *   falls back to the (absent) bundled runtime in the shipped app.
- * - Side effects route through the injected netcatty MCP server (stdio). Approval
- *   is enforced inside netcatty MCP, so the SDK-level permission handler is the
- *   SDK's `approveAll` (the real gate is netcatty MCP's approval IPC).
+ * - Side effects route through the injected netcatty MCP server (stdio). The
+ *   SDK-level permission handler rejects local Copilot tools and allows only
+ *   MCP requests; netcatty MCP then enforces approval/scope/blocklist.
  *
  * 🔬 SMOKE-CALIBRATE [copilot-stream]: sendAndWait returns only the final
  *   assistant text. A follow-up can subscribe via session.on(handler) to stream
@@ -55,6 +55,16 @@ function buildCopilotSessionOptions({ model, injectedMcpServers }) {
   };
   if (model) options.model = model;
   return options;
+}
+
+function approveNetcattyMcpOnly(request) {
+  if (request?.kind === "mcp" && request?.toolName) {
+    return { kind: "approve-once" };
+  }
+  return {
+    kind: "reject",
+    feedback: "Only Netcatty MCP tools are allowed from this integration.",
+  };
 }
 
 function extractCopilotContent(response) {
@@ -126,7 +136,7 @@ function translateCopilotEvent(event, emitter, state) {
  */
 async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
   const sdk = sdkModule || (await import("@github/copilot-sdk"));
-  const { CopilotClient, RuntimeConnection, approveAll } = sdk;
+  const { CopilotClient, RuntimeConnection } = sdk;
 
   // Assemble the real CopilotClient options: point at the user's system CLI
   // (the bundled runtime is excluded from packaging) and authenticate as the
@@ -143,8 +153,8 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSes
     client = new CopilotClient(realClientOptions);
     const sessionConfig = {
       ...sessionOptions,
-      // Auto-approve at the SDK boundary; netcatty MCP performs the real gating.
-      onPermissionRequest: approveAll,
+      // Allow only MCP calls; netcatty MCP performs scope/approval/blocklist checks.
+      onPermissionRequest: approveNetcattyMcpOnly,
     };
     // Resume the prior conversation so context carries ACROSS turns (incl. after
     // a Stop). Always (re)apply sessionConfig so the FRESH netcatty MCP server
@@ -176,13 +186,33 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSes
     if (typeof session.on === "function") {
       unsubscribe = session.on((ev) => translateCopilotEvent(ev, emitter, state));
     }
+    let abortRequested = false;
+    let removeAbortListener = () => {};
+    if (signal) {
+      const onAbort = () => {
+        abortRequested = true;
+        if (typeof session.abort === "function") {
+          void session.abort().catch(() => {});
+        }
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+      }
+    }
     let final;
     try {
       final = await session.sendAndWait({ prompt, streamDeltas: true });
     } finally {
       try { unsubscribe(); } catch { /* best effort */ }
+      removeAbortListener();
     }
     if (state.reasoningOpen) emitter.reasoningEnd();
+    if (abortRequested || signal?.aborted) {
+      return { sessionId };
+    }
 
     // Fallback: if nothing streamed (older runtime / streamDeltas unsupported),
     // emit the final consolidated text so the turn isn't silent.
@@ -199,6 +229,9 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSes
     emitter.emitDone();
     return { sessionId };
   } catch (error) {
+    if (signal?.aborted) {
+      return { sessionId };
+    }
     const code = error && error.code;
     const msg = String((error && error.message) || error || "");
     if (code === "ENOENT" || /ENOENT/i.test(msg)) {
@@ -248,6 +281,7 @@ async function listCopilotModels({ cliPath, sdkModule }) {
 module.exports = {
   buildCopilotClientOptions,
   buildCopilotSessionOptions,
+  approveNetcattyMcpOnly,
   toCopilotMcpServers,
   extractCopilotContent,
   extractCopilotResultText,

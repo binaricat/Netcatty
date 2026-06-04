@@ -113,14 +113,14 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     name: "Codex CLI",
     args: ["exec", "--full-auto", "--json", "{prompt}"],
     icon: "openai",
-    acpCommand: "codex-acp",
+    acpCommand: "codex",
     acpArgs: [],
   },
   claude: {
     name: "Claude Code",
     args: ["-p", "--output-format", "text", "{prompt}"],
     icon: "claude",
-    acpCommand: "claude-agent-acp",
+    acpCommand: "claude",
     acpArgs: [],
   },
   copilot: {
@@ -128,7 +128,7 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     args: ["-p", "{prompt}"],
     icon: "copilot",
     acpCommand: "copilot",
-    acpArgs: ["--acp", "--stdio"],
+    acpArgs: [],
   },
 };
 

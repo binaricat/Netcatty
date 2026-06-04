@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
+const { approveNetcattyMcpOnly, buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
 
 function collector() {
   const events = [];
@@ -54,6 +54,21 @@ test("buildCopilotSessionOptions maps injected MCP to local stdio servers", () =
   assert.deepEqual(srv.tools, ["*"]);
   // onPermissionRequest is wired in runCopilotTurn via the SDK's approveAll,
   // not in buildCopilotSessionOptions.
+});
+
+test("approveNetcattyMcpOnly approves MCP permission requests and rejects local tools", () => {
+  assert.deepEqual(
+    approveNetcattyMcpOnly({ kind: "mcp", toolName: "terminal_execute" }),
+    { kind: "approve-once" },
+  );
+  assert.deepEqual(
+    approveNetcattyMcpOnly({ kind: "shell", fullCommandText: "rm -rf /tmp/x" }),
+    { kind: "reject", feedback: "Only Netcatty MCP tools are allowed from this integration." },
+  );
+  assert.deepEqual(
+    approveNetcattyMcpOnly({ kind: "read", fileName: "/etc/passwd" }),
+    { kind: "reject", feedback: "Only Netcatty MCP tools are allowed from this integration." },
+  );
 });
 
 test("extractCopilotContent reads response data.content", () => {
@@ -154,4 +169,43 @@ test("runCopilotTurn streams tool calls + deltas via session.on (no final-text d
   assert.ok(events.some((e) => e.k === "toolCall" && e.id === "t1"), "tool card streamed");
   assert.ok(events.some((e) => e.k === "toolResult" && e.o === "ok"), "tool result streamed");
   assert.equal(result.sessionId, "sess-x");
+});
+
+test("runCopilotTurn aborts the active Copilot session when the signal aborts", async () => {
+  const { events, emitter } = collector();
+  const controller = new AbortController();
+  let abortCalled = false;
+  const sdkModule = {
+    RuntimeConnection: { forStdio: () => ({}) },
+    approveAll: () => {},
+    CopilotClient: class {
+      async createSession() {
+        return {
+          sessionId: "sess-abort",
+          on() { return () => {}; },
+          async sendAndWait() {
+            controller.abort();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            return { data: { content: "late text" } };
+          },
+          async abort() { abortCalled = true; },
+        };
+      }
+      async stop() {}
+    },
+  };
+
+  const result = await runCopilotTurn({
+    prompt: "stop me",
+    clientOptions: {},
+    sessionOptions: {},
+    emitter,
+    signal: controller.signal,
+    sdkModule,
+  });
+
+  assert.equal(abortCalled, true);
+  assert.equal(result.sessionId, "sess-abort");
+  assert.equal(events.some((event) => event.k === "text" && event.t === "late text"), false);
+  assert.equal(events.some((event) => event.k === "done"), false);
 });

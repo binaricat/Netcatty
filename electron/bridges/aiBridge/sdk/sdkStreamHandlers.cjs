@@ -28,6 +28,76 @@ function resolveBackendKey(value) {
   return VALID_BACKENDS.has(key) ? key : null;
 }
 
+function normalizeHistoryMessages(historyMessages) {
+  if (!Array.isArray(historyMessages)) return [];
+  return historyMessages
+    .filter((msg) => msg && (msg.role === "user" || msg.role === "assistant"))
+    .map((msg) => ({
+      role: msg.role,
+      content: String(msg.content || "").trim(),
+    }))
+    .filter((msg) => msg.content.length > 0);
+}
+
+function defaultWriteAttachmentToTemp(attachment) {
+  if (attachment?.filePath) return attachment.filePath;
+  if (!attachment?.base64Data) return null;
+  const fs = require("node:fs");
+  const tempDirBridge = require("../../tempDirBridge.cjs");
+  const fallbackName = `ai-attachment-${Date.now()}`;
+  const target = tempDirBridge.getTempFilePath(attachment.filename || fallbackName);
+  fs.writeFileSync(target, Buffer.from(attachment.base64Data, "base64"));
+  return target;
+}
+
+function buildSdkTurnPrompt({
+  prompt,
+  historyMessages,
+  replayHistory,
+  attachments,
+  writeAttachmentToTemp = defaultWriteAttachmentToTemp,
+}) {
+  const sections = [];
+  const history = replayHistory ? normalizeHistoryMessages(historyMessages) : [];
+  if (history.length > 0) {
+    sections.push(
+      [
+        "[Conversation context replay: the agent SDK may be starting from a fresh local session, so use these prior turns as context and answer only the latest user request.]",
+        ...history.map((msg) => `${msg.role === "assistant" ? "ASSISTANT" : "USER"}: ${msg.content}`),
+      ].join("\n"),
+    );
+  }
+
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    const hints = [];
+    for (const attachment of attachments) {
+      if (!attachment || !attachment.base64Data || !attachment.mediaType) continue;
+      try {
+        const localPath = writeAttachmentToTemp(attachment);
+        if (localPath) {
+          const name = attachment.filename || "attachment";
+          hints.push(`- "${name}" (${attachment.mediaType}) is saved on the local machine at: ${localPath}`);
+        }
+      } catch (err) {
+        console.error("[SDK Agent] Failed to stage attachment:", err?.message || err);
+      }
+    }
+    if (hints.length > 0) {
+      sections.push(
+        [
+          "[Attached files: these paths are local to the machine running Netcatty, not remote hosts. Inspect them locally if needed.]",
+          ...hints,
+        ].join("\n"),
+      );
+    }
+  }
+
+  const trimmedPrompt = String(prompt || "");
+  return sections.length > 0
+    ? `${sections.join("\n\n")}\n\n${trimmedPrompt}`
+    : trimmedPrompt;
+}
+
 function registerSdkStreamHandlers(ctx) {
   with (ctx) {
     // chatSessionId -> { sessionId } for resume; controller per requestId.
@@ -88,15 +158,22 @@ function registerSdkStreamHandlers(ctx) {
           // Resolve absolute CLI path for the backend (claude needs absolute).
           const binPath = resolveCliFromPath(backendKey, shellEnv) || undefined;
 
+          const hasInMemorySession = sdkSessionIds.has(chatSessionId);
+          const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
+          const turnPrompt = buildSdkTurnPrompt({
+            prompt,
+            historyMessages: payload?.historyMessages,
+            replayHistory: !hasInMemorySession,
+            attachments: payload?.images,
+          });
+
           const contextualPrompt = buildExternalAgentContextualPrompt({
             mode: effectiveMode,
-            prompt,
+            prompt: turnPrompt,
             chatSessionId,
             defaultTargetSession,
             userSkillsContext,
           });
-
-          const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
 
           const driver = getDriver(backendKey);
           const result = await driver.runTurn({
@@ -195,4 +272,9 @@ function registerSdkStreamHandlers(ctx) {
   }
 }
 
-module.exports = { registerSdkStreamHandlers, resolveBackendKey };
+module.exports = {
+  registerSdkStreamHandlers,
+  resolveBackendKey,
+  normalizeHistoryMessages,
+  buildSdkTurnPrompt,
+};

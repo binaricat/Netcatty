@@ -78,9 +78,29 @@ test('buildManagedAgentState stores the system Claude executable for ACP runs', 
 
   assert.equal(state.agents.length, 1);
   assert.equal(state.agents[0].command, '/opt/homebrew/bin/claude');
+  assert.equal(state.agents[0].acpCommand, 'claude');
   assert.deepEqual(state.agents[0].env, {
     CLAUDE_CODE_EXECUTABLE: '/opt/homebrew/bin/claude',
   });
+});
+
+test('buildManagedAgentState stores SDK backend keys for discovered managed agents', () => {
+  const codexState = buildManagedAgentState(
+    [],
+    'catty',
+    'codex',
+    { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
+  );
+  const copilotState = buildManagedAgentState(
+    [],
+    'catty',
+    'copilot',
+    { path: '/opt/homebrew/bin/copilot', version: '1.0.0', available: true },
+  );
+
+  assert.equal(codexState.agents[0].acpCommand, 'codex');
+  assert.equal(copilotState.agents[0].acpCommand, 'copilot');
+  assert.deepEqual(copilotState.agents[0].acpArgs, []);
 });
 
 test('buildManagedAgentState does not remove user-created matching agents', () => {

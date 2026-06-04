@@ -23,9 +23,23 @@ test("filters dangerous env keys from requestedAgentEnv", () => {
   assert.equal(env.SAFE, "ok");
 });
 
+test("filters dangerous env keys from shellEnv", () => {
+  const env = buildSdkAgentEnv({
+    shellEnv: { PATH: "/usr/bin", NODE_OPTIONS: "--require /evil.js", BASH_FUNC_x: "() { :; }", SAFE: "ok" },
+    requestedAgentEnv: {},
+  });
+  assert.equal(env.PATH, "/usr/bin");
+  assert.equal(env.NODE_OPTIONS, undefined);
+  assert.equal(env.BASH_FUNC_x, undefined);
+  assert.equal(env.SAFE, "ok");
+});
+
 test("isDangerousEnvKey flags blocklist and BASH_FUNC_ prefix", () => {
   assert.equal(isDangerousEnvKey("DYLD_INSERT_LIBRARIES"), true);
+  assert.equal(isDangerousEnvKey("dyld_insert_libraries"), true);
+  assert.equal(isDangerousEnvKey("node_options"), true);
   assert.equal(isDangerousEnvKey("BASH_FUNC_x%%"), true);
+  assert.equal(isDangerousEnvKey("bash_func_x%%"), true);
   assert.equal(isDangerousEnvKey("PATH"), false);
 });
 

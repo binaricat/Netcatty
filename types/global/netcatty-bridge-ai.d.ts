@@ -5,7 +5,7 @@ declare global {
     aiSyncProviders?(providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>): Promise<{ ok: boolean }>;
     aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string }>;
     aiChatCancel?(requestId: string): Promise<boolean>;
-    aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string): Promise<{ ok: boolean; status: number; data: string; error?: string }>;
+    aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean): Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
@@ -16,10 +16,15 @@ declare global {
       description: string;
       args: string[];
       path: string;
+      binPath?: string;
       version: string;
       available: boolean;
+      installed?: boolean;
+      authenticated?: boolean;
+      authSource?: string | null;
       acpCommand?: string;
       acpArgs?: string[];
+      sdkBackend?: 'claude' | 'codex' | 'copilot';
     }>>;
     aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean }): Promise<{
       state: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
@@ -137,7 +142,7 @@ declare global {
       context?: string;
       error?: string;
     }>;
-    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
+    aiAcpStream?(requestId: string, chatSessionId: string, acpCommand: string, acpArgs: string[], prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
     aiAcpListModels?(acpCommand: string, acpArgs?: string[], cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[] }>; currentModelId?: string | null; error?: string }>;
     aiAcpCancel?(requestId: string, chatSessionId?: string): Promise<{ ok: boolean; error?: string }>;
     aiAcpCleanup?(chatSessionId: string): Promise<{ ok: boolean }>;
@@ -146,6 +151,7 @@ declare global {
     onAiAcpError?(requestId: string, cb: (error: string) => void): () => void;
     onAiStreamData?(requestId: string, cb: (data: string) => void): () => void;
     onAiStreamEnd?(requestId: string, cb: () => void): () => void;
+    onAiStreamError?(requestId: string, cb: (error: string) => void): () => void;
     onAiAgentStdout?(agentId: string, cb: (data: string) => void): () => void;
     onAiAgentStderr?(agentId: string, cb: (data: string) => void): () => void;
     onAiAgentExit?(agentId: string, cb: (code: number | null) => void): () => void;

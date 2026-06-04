@@ -131,7 +131,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
   const enabledExternalAgents = useMemo(
     () =>
       externalAgents
-        .filter((agent) => agent.enabled)
+        .filter((agent) => agent.enabled && Boolean(agent.acpCommand))
         .map(
           (agent): AgentInfo => ({
             id: agent.id,

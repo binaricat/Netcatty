@@ -14,28 +14,26 @@
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const { ensureClaudeConfig } = require("./claudeConfig.cjs");
 
-// Built-in tools that need interactive UI netcatty doesn't provide — they would
+// Built-in tools that need interactive UI netcatty doesn't provide - they would
 // hang the turn waiting for a response, so they are blocked in BOTH modes.
 const UI_DISALLOWED_TOOLS = ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"];
 
-// Built-in side-effect / skill tools — blocked ONLY in MCP mode so the agent
-// acts exclusively through the injected netcatty MCP server. In Skills + CLI mode
-// the agent MUST drive its own shell (Bash) to run the netcatty CLI, so these
-// are allowed there; the CLI still routes remote-host actions through netcatty's
-// approval layer, and local access mirrors codex's Skills+CLI behavior.
-const MCP_MODE_DISALLOWED_TOOLS = [
-  "Bash", "Edit", "Write", "NotebookEdit", "MultiEdit", "WebFetch", "WebSearch", "Skill",
-];
+// Whitelist Claude built-ins instead of trying to track every local-capable
+// built-in tool the CLI may add over time. MCP tools remain available through
+// mcpServers; this only controls Claude Code's own local-machine tools.
+const MCP_MODE_TOOLS = [];
+const SKILLS_MODE_TOOLS = ["Bash", "Skill"];
 
 /**
- * Resolve disallowedTools for the active tool-integration mode.
- * - "skills": only the UI-coupled blocks (so Bash + the netcatty CLI work).
- * - "mcp" (default): the side-effect set too, forcing the agent onto netcatty MCP.
+ * Resolve built-in tools for the active tool-integration mode.
+ * - "skills": only Bash + Skill so the Netcatty CLI skill can run.
+ * - "mcp" (default): no Claude built-in local tools, forcing remote actions
+ *   through netcatty MCP.
  */
-function claudeDisallowedTools(toolIntegrationMode) {
+function claudeBuiltinTools(toolIntegrationMode) {
   return toolIntegrationMode === "skills"
-    ? [...UI_DISALLOWED_TOOLS]
-    : [...MCP_MODE_DISALLOWED_TOOLS, ...UI_DISALLOWED_TOOLS];
+    ? [...SKILLS_MODE_TOOLS]
+    : [...MCP_MODE_TOOLS];
 }
 
 /** Convert neutral injectMcp configs into the SDK's keyed mcpServers map. */
@@ -80,11 +78,12 @@ function buildClaudeQueryOptions({
     includePartialMessages: true,
     permissionMode: "bypassPermissions",
     // Required companion to permissionMode:'bypassPermissions' (the SDK rejects
-    // the bypass without it). Safe here: side-effects route through either the
-    // injected netcatty MCP tools (mcp mode) or the netcatty CLI (skills mode),
-    // both of which enforce approval/scope.
+    // the bypass without it). Netcatty blocks Claude's direct local read/write
+    // tools and routes remote-session actions through MCP or Skills+CLI, where
+    // Netcatty enforces approval/scope.
     allowDangerouslySkipPermissions: true,
-    disallowedTools: claudeDisallowedTools(toolIntegrationMode),
+    tools: claudeBuiltinTools(toolIntegrationMode),
+    disallowedTools: [...UI_DISALLOWED_TOOLS],
     mcpServers: toSdkMcpServers(injectedMcpServers),
     env,
     abortController,
@@ -268,8 +267,9 @@ module.exports = {
   runClaudeTurn,
   listClaudeModels,
   mapClaudeModels,
-  claudeDisallowedTools,
+  claudeBuiltinTools,
   UI_DISALLOWED_TOOLS,
-  MCP_MODE_DISALLOWED_TOOLS,
+  MCP_MODE_TOOLS,
+  SKILLS_MODE_TOOLS,
   toSdkMcpServers,
 };

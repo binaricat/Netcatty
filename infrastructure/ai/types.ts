@@ -200,7 +200,8 @@ export interface AgentInfo {
   available: boolean;
 }
 
-// External Agent (ACP) config
+// External agent config. `acpCommand` is retained as the persisted routing
+// field; managed agents store SDK backend keys here (claude|codex|copilot).
 export interface ExternalAgentConfig {
   id: string;
   name: string;
@@ -209,7 +210,7 @@ export interface ExternalAgentConfig {
   env?: Record<string, string>;
   icon?: string;
   enabled: boolean;
-  /** ACP command (e.g. 'codex-acp', 'claude-agent-acp', 'gemini --experimental-acp') */
+  /** SDK backend key for managed agents (legacy field name kept for storage compatibility). */
   acpCommand?: string;
   acpArgs?: string[];
 }

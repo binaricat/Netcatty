@@ -65,7 +65,7 @@ test("user tool_result block -> toolResult event", () => {
   assert.deepEqual(events, [{ k: "toolResult", id: "tu-1", out: "output text", name: undefined }]);
 });
 
-test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio, abort", () => {
+test("buildClaudeQueryOptions sets bypassPermissions, built-in tools, mcp stdio, abort", () => {
   const ac = new AbortController();
   const opts = buildClaudeQueryOptions({
     cwd: "/tmp",
@@ -85,8 +85,9 @@ test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio
   assert.equal(opts.includePartialMessages, true);
   assert.equal(opts.pathToClaudeCodeExecutable, "/abs/claude");
   assert.equal(opts.abortController, ac);
-  // built-in side-effect + UI tools blocked
-  for (const t of ["Bash", "Edit", "Write", "EnterPlanMode", "ExitPlanMode", "AskUserQuestion", "Skill"]) {
+  // MCP mode disables Claude Code built-ins entirely; injected MCP tools remain wired below.
+  assert.deepEqual(opts.tools, []);
+  for (const t of ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]) {
     assert.ok(opts.disallowedTools.includes(t), `expected ${t} disallowed`);
   }
   // netcatty MCP wired as keyed stdio with env object (not pair array)
@@ -94,19 +95,21 @@ test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio
   assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
 });
 
-test("disallowedTools are mode-aware: Skills+CLI allows Bash/CLI, MCP blocks it", () => {
+test("built-in tools are mode-aware: Skills+CLI allows only Bash/Skill, MCP blocks all built-ins", () => {
   const skills = buildClaudeQueryOptions({ env: {}, toolIntegrationMode: "skills" });
-  // Bash + file/web tools allowed so the agent can drive the netcatty CLI
-  for (const t of ["Bash", "Edit", "Write", "WebFetch", "Skill"]) {
-    assert.ok(!skills.disallowedTools.includes(t), `expected ${t} ALLOWED in skills mode`);
+  // Bash + Skill are the only Claude Code built-ins exposed so the agent can
+  // drive the netcatty CLI skill without direct file/search/web/local tools.
+  assert.deepEqual(skills.tools, ["Bash", "Skill"]);
+  for (const t of ["Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "Agent", "REPL", "Workflow"]) {
+    assert.ok(!skills.tools.includes(t), `expected ${t} absent from skills mode tool whitelist`);
   }
-  // UI-coupled tools still blocked in BOTH modes (they would hang the turn)
+  // UI-coupled tools still blocked in BOTH modes as defense-in-depth.
   for (const t of ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]) {
     assert.ok(skills.disallowedTools.includes(t), `expected ${t} blocked in skills mode`);
   }
-  // mcp mode (and the undefined default) still block the side-effect set
-  assert.ok(buildClaudeQueryOptions({ env: {}, toolIntegrationMode: "mcp" }).disallowedTools.includes("Bash"));
-  assert.ok(buildClaudeQueryOptions({ env: {} }).disallowedTools.includes("Bash"));
+  // MCP mode (and the undefined default) disables all Claude Code built-ins.
+  assert.deepEqual(buildClaudeQueryOptions({ env: {}, toolIntegrationMode: "mcp" }).tools, []);
+  assert.deepEqual(buildClaudeQueryOptions({ env: {} }).tools, []);
 });
 
 test("classifyClaudeSpawnError detects ENOENT 'native binary not found'", () => {

@@ -20,7 +20,8 @@ const DANGEROUS_ENV_KEYS = new Set([
 ]);
 
 function isDangerousEnvKey(key) {
-  return DANGEROUS_ENV_KEYS.has(key) || String(key).startsWith("BASH_FUNC_");
+  const normalized = String(key || "").toUpperCase();
+  return DANGEROUS_ENV_KEYS.has(normalized) || normalized.startsWith("BASH_FUNC_");
 }
 
 /**
@@ -41,6 +42,15 @@ function buildSdkAgentEnv({
   withCliDiscoveryEnv,
   normalizeClaudeCodeExecutableEnv,
 }) {
+  const filteredShellEnv = {};
+  if (shellEnv && typeof shellEnv === "object") {
+    for (const [k, v] of Object.entries(shellEnv)) {
+      if (typeof v === "string" && !isDangerousEnvKey(k)) {
+        filteredShellEnv[k] = v;
+      }
+    }
+  }
+
   const filteredRequested = {};
   if (requestedAgentEnv && typeof requestedAgentEnv === "object") {
     for (const [k, v] of Object.entries(requestedAgentEnv)) {
@@ -50,7 +60,7 @@ function buildSdkAgentEnv({
     }
   }
 
-  let env = { ...shellEnv, ...filteredRequested };
+  let env = { ...filteredShellEnv, ...filteredRequested };
   if (typeof withCliDiscoveryEnv === "function") {
     env = withCliDiscoveryEnv(env);
   }

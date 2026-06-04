@@ -4,7 +4,7 @@ export function findEnabledExternalAgent(
   agents: ExternalAgentConfig[],
   agentId: string,
 ): ExternalAgentConfig | undefined {
-  return agents.find((agent) => agent.id === agentId && agent.enabled);
+  return agents.find((agent) => agent.id === agentId && agent.enabled && Boolean(agent.acpCommand));
 }
 
 export function canSendWithAgent(
