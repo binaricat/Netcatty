@@ -56,6 +56,7 @@ function buildSdkTurnPrompt({
   replayHistory,
   attachments,
   writeAttachmentToTemp = defaultWriteAttachmentToTemp,
+  onStagedAttachment,
 }) {
   const sections = [];
   const history = replayHistory ? normalizeHistoryMessages(historyMessages) : [];
@@ -77,6 +78,12 @@ function buildSdkTurnPrompt({
         if (localPath) {
           const name = attachment.filename || "attachment";
           hints.push(`- "${name}" (${attachment.mediaType}) is saved on the local machine at: ${localPath}`);
+          onStagedAttachment?.({
+            filename: name,
+            mediaType: attachment.mediaType,
+            filePath: localPath,
+            base64Data: attachment.base64Data || "",
+          });
         }
       } catch (err) {
         console.error("[SDK Agent] Failed to stage attachment:", err?.message || err);
@@ -86,6 +93,7 @@ function buildSdkTurnPrompt({
       sections.push(
         [
           "[Attached files: these paths are local to the machine running Netcatty, not remote hosts. Inspect them locally if needed.]",
+          "[If local filesystem tools are unavailable, use Netcatty's list_attachments and read_attachment MCP tools to inspect these user-supplied files.]",
           ...hints,
         ].join("\n"),
       );
@@ -160,12 +168,15 @@ function registerSdkStreamHandlers(ctx) {
 
           const hasInMemorySession = sdkSessionIds.has(chatSessionId);
           const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
+          const stagedAttachments = [];
           const turnPrompt = buildSdkTurnPrompt({
             prompt,
             historyMessages: payload?.historyMessages,
             replayHistory: !hasInMemorySession,
             attachments: payload?.images,
+            onStagedAttachment: (attachment) => stagedAttachments.push(attachment),
           });
+          mcpServerBridge.updateAttachmentMetadata?.(stagedAttachments, chatSessionId);
 
           const contextualPrompt = buildExternalAgentContextualPrompt({
             mode: effectiveMode,

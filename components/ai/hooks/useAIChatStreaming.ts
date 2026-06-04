@@ -128,7 +128,7 @@ export interface UseAIChatStreamingReturn {
     trimmed: string,
     agentConfig: ExternalAgentConfig,
     abortController: AbortController,
-    attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string }>,
+    attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>,
     context: SendToExternalContext,
   ) => Promise<void>;
   /** Report a streaming error to the chat. */
@@ -521,7 +521,7 @@ export function useAIChatStreaming({
     trimmed: string,
     agentConfig: ExternalAgentConfig,
     abortController: AbortController,
-    attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string }>,
+    attachedImages: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>,
     context: SendToExternalContext,
   ) => {
     const bridge = getNetcattyBridge();

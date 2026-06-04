@@ -68,6 +68,7 @@ function createConfigAndCleanupApi(ctx) {
     async function cleanupScopedMetadata(chatSessionId) {
       if (chatSessionId) {
         scopedMetadata.delete(chatSessionId);
+        scopedAttachments.delete(chatSessionId);
         cancelledChatSessions.delete(chatSessionId);
         cancelBackgroundJobsForSession(chatSessionId);
         // Resolve any in-flight approval requests so dispatch()'s finally block
