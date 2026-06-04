@@ -41,11 +41,9 @@
     "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/google": "^3.0.43",
     "@ai-sdk/openai": "^3.0.41",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.161",
     "@aws-sdk/client-s3": "^3.956.0",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
-    "@github/copilot-sdk": "1.0.0",
     "@google/genai": "1.33.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
@@ -113,6 +111,8 @@
     "wait-on": "^9.0.3"
   },
   "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.161",
+    "@github/copilot-sdk": "1.0.0",
     "@vscode/windows-process-tree": "^0.7.0"
   },
   "overrides": {

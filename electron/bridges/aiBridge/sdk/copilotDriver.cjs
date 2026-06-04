@@ -291,7 +291,11 @@ function mapCopilotModels(models) {
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
 async function listCopilotModels({ cliPath, sdkModule }) {
-  const sdk = sdkModule || (await import("@github/copilot-sdk"));
+  let resolvedModule = sdkModule;
+  if (!resolvedModule) {
+    try { resolvedModule = await import("@github/copilot-sdk"); } catch { return []; }
+  }
+  const sdk = resolvedModule;
   const { CopilotClient, RuntimeConnection } = sdk;
   const clientOptions = { useLoggedInUser: true };
   if (cliPath && RuntimeConnection?.forStdio) {

@@ -249,7 +249,7 @@ function registerSdkStreamHandlers(ctx) {
         return { ok: true, currentModelId: null, models };
       } catch (err) {
         // Degrade to [] so the renderer keeps its curated presets (never empty).
-        console.error(`[sdk] list-models(${backendKey}) failed: ${err?.message || err}`);
+        console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
         return { ok: true, currentModelId: null, models: [] };
       }
     });
