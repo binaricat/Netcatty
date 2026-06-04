@@ -627,7 +627,7 @@ async function uploadEntries(
       };
     };
 
-    if (localFilePath && bridge.startStreamTransfer && sftpId && !isLocal) {
+    if (localFilePath && bridge.startStreamTransfer && (!isLocal ? !!sftpId : true)) {
         const onProgress = makeOnProgress();
         const fileTransferId = crypto.randomUUID();
         controller?.addActiveTransfer(fileTransferId);
@@ -640,8 +640,8 @@ async function uploadEntries(
               sourcePath: localFilePath,
               targetPath: entryTargetPath,
               sourceType: 'local',
-              targetType: 'sftp',
-              targetSftpId: sftpId,
+              targetType: isLocal ? 'local' : 'sftp',
+              targetSftpId: isLocal ? undefined : sftpId,
               totalBytes: fileTotalBytes,
             },
             onProgress,

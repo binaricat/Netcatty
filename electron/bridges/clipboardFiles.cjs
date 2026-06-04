@@ -2,6 +2,10 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+const { fileURLToPath } = require("node:url");
+
+const HDROP_FORMATS = ["CF_HDROP", "FileDrop"];
+const URI_LIST_FORMATS = ["text/uri-list", "text/x-moz-url"];
 
 function decodeWindowsFileNameW(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return [];
@@ -21,10 +25,23 @@ function decodeWindowsFileName(buffer) {
     .filter(Boolean);
 }
 
-function decodeFileUri(value) {
+function decodeWindowsHDrop(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 20) return [];
+  const filesOffset = buffer.readUInt32LE(0);
+  if (filesOffset <= 0 || filesOffset >= buffer.length) return [];
+  const isWide = buffer.readUInt32LE(16) !== 0;
+  const payload = buffer.subarray(filesOffset);
+  const text = payload.toString(isWide ? "utf16le" : "utf8");
+  return text
+    .split("\0")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function decodeFileUri(value, { windows = process.platform === "win32" } = {}) {
   if (!value.startsWith("file://")) return value;
   try {
-    return decodeURIComponent(new URL(value).pathname);
+    return fileURLToPath(value, { windows });
   } catch {
     return value;
   }
@@ -68,8 +85,8 @@ function parseClipboardTextFilePaths(text, options = {}) {
   const candidates = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .map(decodeFileUri);
+    .filter((line) => line && !line.startsWith("#") && line.startsWith("file://"))
+    .map((line) => decodeFileUri(line, options));
   return collectExistingFiles(candidates, options);
 }
 
@@ -86,6 +103,14 @@ function readClipboardFiles({
       ? clipboard.availableFormats()
       : [];
 
+    if (typeof clipboard.readBuffer === "function") {
+      for (const format of HDROP_FORMATS) {
+        if (!formats.includes(format)) continue;
+        const files = collectExistingFiles(decodeWindowsHDrop(clipboard.readBuffer(format)), options);
+        if (files.length > 0) return files;
+      }
+    }
+
     if (formats.includes("FileNameW") && typeof clipboard.readBuffer === "function") {
       const files = collectExistingFiles(decodeWindowsFileNameW(clipboard.readBuffer("FileNameW")), options);
       if (files.length > 0) return files;
@@ -96,7 +121,10 @@ function readClipboardFiles({
       if (files.length > 0) return files;
     }
 
-    if (typeof clipboard.readText === "function") {
+    if (
+      typeof clipboard.readText === "function" &&
+      formats.some((format) => URI_LIST_FORMATS.includes(format))
+    ) {
       return parseClipboardTextFilePaths(clipboard.readText(), options);
     }
   } catch {
@@ -107,6 +135,7 @@ function readClipboardFiles({
 }
 
 module.exports = {
+  decodeWindowsHDrop,
   decodeWindowsFileNameW,
   parseClipboardTextFilePaths,
   readClipboardFiles,

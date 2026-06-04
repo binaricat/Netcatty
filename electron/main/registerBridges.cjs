@@ -403,6 +403,16 @@ function createBridgeRegistrar(context) {
       }
     });
 
+    ipcMain.handle("netcatty:clipboard:writeText", async (_event, text) => {
+      try {
+        if (typeof clipboard?.writeText !== "function") return false;
+        clipboard.writeText(typeof text === "string" ? text : "");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
     ipcMain.handle("netcatty:clipboard:readFiles", async () => {
       return readClipboardFiles({ clipboard, fsImpl: fs, pathImpl: path });
     });

@@ -1,5 +1,6 @@
 import type { SftpFileEntry } from "../../types";
 import type { DropEntry } from "../../lib/sftpFileUtils";
+import type { KeyBinding } from "../../domain/models";
 import { joinPath } from "../../application/state/sftp/utils";
 import { isNavigableDirectory } from "./utils";
 
@@ -20,6 +21,12 @@ export interface ResolveSftpClipboardUploadTargetParams {
   currentPath: string;
   selectedFileNames: string[];
   files: SftpFileEntry[];
+  treeSelection: SftpClipboardUploadTreeSelection[];
+}
+
+export interface GetSftpClipboardSystemTextPathsParams {
+  currentPath: string;
+  selectedFileNames: string[];
   treeSelection: SftpClipboardUploadTreeSelection[];
 }
 
@@ -45,6 +52,18 @@ export function resolveSftpClipboardUploadTarget({
   return currentPath;
 }
 
+export function getSftpClipboardSystemTextPaths({
+  currentPath,
+  selectedFileNames,
+  treeSelection,
+}: GetSftpClipboardSystemTextPathsParams): string[] {
+  if (treeSelection.length > 0) {
+    return treeSelection.map((entry) => entry.path);
+  }
+
+  return selectedFileNames.map((name) => joinPath(currentPath, name));
+}
+
 export function createDropEntriesFromClipboardFiles(files: ClipboardLocalFile[]): DropEntry[] {
   return files.map((file) => ({
     file: null,
@@ -55,11 +74,35 @@ export function createDropEntriesFromClipboardFiles(files: ClipboardLocalFile[])
   }));
 }
 
+export function getSupportedClipboardUploadFiles(files: ClipboardLocalFile[]): ClipboardLocalFile[] {
+  return files.filter((file) => !file.isDirectory);
+}
+
 export function shouldLetNativePasteEventHandleSftpPaste(
   action: string,
-  hasInternalClipboardFiles: boolean,
+  key: string | undefined,
 ): boolean {
-  return action === "sftpPaste" && !hasInternalClipboardFiles;
+  if (action !== "sftpPaste" || !key) return false;
+  const normalized = key.toLowerCase().replace(/\s+/g, "");
+  return [
+    "ctrl+v",
+    "⌘+v",
+    "cmd+v",
+    "command+v",
+  ].includes(normalized);
+}
+
+export function isSftpNativeClipboardPasteEnabled(
+  hotkeyScheme: "disabled" | "mac" | "pc",
+  keyBindings: KeyBinding[],
+): boolean {
+  if (hotkeyScheme === "disabled") return false;
+  const pasteBinding = keyBindings.find((binding) => (
+    binding.category === "sftp" && binding.action === "sftpPaste"
+  ));
+  if (!pasteBinding) return false;
+  const key = hotkeyScheme === "mac" ? pasteBinding.mac : pasteBinding.pc;
+  return shouldLetNativePasteEventHandleSftpPaste("sftpPaste", key);
 }
 
 export interface SftpClipboardUploadRequest {

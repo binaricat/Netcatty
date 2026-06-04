@@ -188,6 +188,52 @@ test("uploads path-backed clipboard files through stream transfer", async () => 
   ]);
 });
 
+test("copies path-backed clipboard files into local panes through stream transfer", async () => {
+  const transfers: Array<{ sourcePath: string; targetPath: string; targetType: string; totalBytes?: number }> = [];
+
+  const results = await uploadEntriesDirect(
+    [
+      {
+        file: null,
+        localPath: "/Users/me/Desktop/report.txt",
+        relativePath: "report.txt",
+        isDirectory: false,
+        size: 42,
+      },
+    ],
+    {
+      targetPath: "/target",
+      sftpId: null,
+      isLocal: true,
+      bridge: {
+        mkdirLocal: async () => {},
+        startStreamTransfer: async (payload) => {
+          transfers.push({
+            sourcePath: payload.sourcePath,
+            targetPath: payload.targetPath,
+            targetType: payload.targetType,
+            totalBytes: payload.totalBytes,
+          });
+          return { transferId: payload.transferId };
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+    },
+  );
+
+  assert.deepEqual(transfers, [
+    {
+      sourcePath: "/Users/me/Desktop/report.txt",
+      targetPath: "/target/report.txt",
+      targetType: "local",
+      totalBytes: 42,
+    },
+  ]);
+  assert.deepEqual(results, [
+    { fileName: "report.txt", success: true },
+  ]);
+});
+
 test("reports empty directory creation failures", async () => {
   const madeDirs: string[] = [];
 
