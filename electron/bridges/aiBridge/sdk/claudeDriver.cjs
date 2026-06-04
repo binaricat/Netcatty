@@ -275,9 +275,12 @@ function mapClaudeModels(models) {
  */
 async function listClaudeModels({ pathToClaudeCodeExecutable, env, queryFn }) {
   ensureClaudeConfig();
-  let sdk;
-  try { sdk = await import("@anthropic-ai/claude-agent-sdk"); } catch { return []; }
-  const query = queryFn || sdk.query;
+  let query = queryFn;
+  if (!query) {
+    let sdk;
+    try { sdk = await import("@anthropic-ai/claude-agent-sdk"); } catch { return []; }
+    query = sdk.query;
+  }
   const abortController = new AbortController();
   // Idle streaming input: keeps the session open (init handshake completes)
   // without sending a turn, so supportedModels() resolves; then we abort.
