@@ -94,6 +94,9 @@ test("buildCodexThreadOptions puts model + read-only sandbox in ThreadOptions", 
   // not runStreamed TurnOptions.
   const t = buildCodexThreadOptions({ cwd: "/tmp", model: "gpt-5.5" });
   assert.equal(t.sandboxMode, "read-only");
+  // codex auto-approval (analog of claude bypassPermissions / copilot approveAll);
+  // delegates all gating to the netcatty MCP server. Maps to approval_policy="never".
+  assert.equal(t.approvalPolicy, "never");
   assert.equal(t.workingDirectory, "/tmp");
   assert.equal(t.model, "gpt-5.5");
   assert.equal(t.modelReasoningEffort, undefined);

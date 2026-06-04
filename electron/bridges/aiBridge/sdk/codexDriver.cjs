@@ -47,7 +47,18 @@ function buildCodexThreadOptions({ cwd, model }) {
   // runStreamed's TurnOptions only accepts { outputSchema, signal }, so passing
   // them there (the previous behavior) silently dropped both model selection and
   // the read-only sandbox.
-  const opts = { sandboxMode: "read-only", skipGitRepoCheck: true };
+  //
+  // approvalPolicy:"never" is codex's analog of claude's permissionMode
+  // "bypassPermissions" and copilot's approveAll: the migration delegates ALL
+  // gating to the injected netcatty MCP server (approval/scope/blocklist). It
+  // maps to `--config approval_policy="never"`. Without it, non-interactive
+  // `codex exec` has no channel to satisfy an approval request, so netcatty MCP
+  // tool calls (e.g. get_environment) stall and the model reports them as
+  // "cancelled". This is independent of the sandbox: codex spawns MCP servers as
+  // session infrastructure OUTSIDE the per-command sandbox, so read-only does not
+  // block the server's loopback callback to the main process — it only blocks
+  // codex's own local writes (side effects must go through the netcatty server).
+  const opts = { sandboxMode: "read-only", approvalPolicy: "never", skipGitRepoCheck: true };
   if (cwd) opts.workingDirectory = cwd;
   if (model) {
     // The renderer encodes codex reasoning effort as "<modelId>/<effort>"
