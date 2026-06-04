@@ -3,6 +3,7 @@ import type { ProviderConfig } from "./types";
 
 const DEFAULT_COMPACTION_RATIO = 0.85;
 const TOKEN_CHARS = 4;
+const REDACTED_PAYLOAD_PREVIEW_CHARS = 80;
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 export const DEFAULT_PROTECT_RECENT_MESSAGES = 10;
@@ -203,7 +204,108 @@ function endsWithToolCall(message: ModelMessage | undefined): boolean {
 
 function formatMessageContent(content: ModelMessage["content"]): string {
   if (typeof content === "string") return content;
-  return JSON.stringify(content, null, 2);
+  return JSON.stringify(sanitizeContentForCompaction(content), null, 2);
+}
+
+function sanitizeContentForCompaction(content: Exclude<ModelMessage["content"], string>): unknown {
+  if (!Array.isArray(content)) return sanitizeUnknownForCompaction(content);
+  return content.map((part) => sanitizeContentPartForCompaction(part));
+}
+
+function sanitizeContentPartForCompaction(part: unknown): unknown {
+  if (!isRecord(part)) return sanitizeUnknownForCompaction(part);
+
+  if (part.type === "image") {
+    const sanitized = sanitizeRecordForCompaction(part);
+    return {
+      ...sanitized,
+      image: describeRedactedPayload(part.image, {
+        label: "image",
+        mediaType: typeof part.mediaType === "string" ? part.mediaType : undefined,
+      }),
+    };
+  }
+
+  if (part.type === "file") {
+    const sanitized = sanitizeRecordForCompaction(part);
+    return {
+      ...sanitized,
+      data: describeRedactedPayload(part.data, {
+        label: "file",
+        mediaType: typeof part.mediaType === "string" ? part.mediaType : undefined,
+        filename: typeof part.filename === "string" ? part.filename : undefined,
+      }),
+    };
+  }
+
+  return sanitizeUnknownForCompaction(part);
+}
+
+function sanitizeRecordForCompaction(value: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    sanitized[entryKey] = sanitizeUnknownForCompaction(entryValue, entryKey);
+  }
+  return sanitized;
+}
+
+function sanitizeUnknownForCompaction(value: unknown, key?: string): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") {
+    if (key === "base64Data" || key === "dataUrl" || key === "file_data") {
+      return describeRedactedPayload(value, { label: key });
+    }
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (value instanceof URL) return value.toString();
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return describeRedactedPayload(value, { label: key ?? "binary" });
+  }
+  if (Array.isArray(value)) return value.map((part) => sanitizeUnknownForCompaction(part));
+  if (isRecord(value)) return sanitizeRecordForCompaction(value);
+  return String(value);
+}
+
+function describeRedactedPayload(
+  value: unknown,
+  {
+    label,
+    filename,
+    mediaType,
+  }: {
+    label: string;
+    filename?: string;
+    mediaType?: string;
+  },
+): string {
+  const details = [
+    filename ? `filename=${filename}` : undefined,
+    mediaType ? `mediaType=${mediaType}` : undefined,
+    describePayloadSize(value),
+    typeof value === "string" ? describeStringPreview(value) : undefined,
+  ].filter(Boolean);
+
+  return `[redacted ${label} payload${details.length ? `: ${details.join(", ")}` : ""}]`;
+}
+
+function describePayloadSize(value: unknown): string {
+  if (typeof value === "string") return `${value.length} chars`;
+  if (value instanceof ArrayBuffer) return `${value.byteLength} bytes`;
+  if (ArrayBuffer.isView(value)) return `${value.byteLength} bytes`;
+  if (value instanceof URL) return "url";
+  return typeof value;
+}
+
+function describeStringPreview(value: string): string | undefined {
+  if (!value.startsWith("data:")) return undefined;
+  const commaIndex = value.indexOf(",");
+  const header = commaIndex >= 0 ? value.slice(0, commaIndex) : value.slice(0, REDACTED_PAYLOAD_PREVIEW_CHARS);
+  return `source=${header.slice(0, REDACTED_PAYLOAD_PREVIEW_CHARS)}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function escapeXml(value: string): string {

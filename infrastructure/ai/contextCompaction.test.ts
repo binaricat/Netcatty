@@ -175,6 +175,66 @@ test("prepareContextCompaction summarizes older tool results instead of dropping
   assert.match(result.messages[0]?.content as string, /81% full/);
 });
 
+test("formatMessagesForCompaction redacts image and file payloads", () => {
+  const imagePayload = "iVBORw0KGgo".repeat(200);
+  const filePayload = "JVBERi0xLjQK".repeat(200);
+  const formatted = formatMessagesForCompaction([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Please inspect these attachments." },
+        {
+          type: "image",
+          image: imagePayload,
+          mediaType: "image/png",
+        },
+        {
+          type: "file",
+          data: filePayload,
+          filename: "report.pdf",
+          mediaType: "application/pdf",
+        },
+      ],
+    },
+  ]);
+
+  assert.match(formatted, /Please inspect these attachments/);
+  assert.match(formatted, /redacted image payload/);
+  assert.match(formatted, /mediaType=image\/png/);
+  assert.match(formatted, /redacted file payload/);
+  assert.match(formatted, /filename=report\.pdf/);
+  assert.doesNotMatch(formatted, new RegExp(imagePayload.slice(0, 40)));
+  assert.doesNotMatch(formatted, new RegExp(filePayload.slice(0, 40)));
+});
+
+test("formatMessagesForCompaction keeps non-attachment data fields", () => {
+  const formatted = formatMessagesForCompaction([
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "read_json",
+          output: {
+            type: "json",
+            value: {
+              data: {
+                host: "prod-1",
+                status: "healthy",
+              },
+            },
+          },
+        },
+      ],
+    },
+  ]);
+
+  assert.match(formatted, /prod-1/);
+  assert.match(formatted, /healthy/);
+  assert.doesNotMatch(formatted, /redacted data payload/);
+});
+
 test("estimateModelMessagesTokens counts multimodal and tool content", () => {
   const tokens = estimateModelMessagesTokens([
     { role: "user", content: [{ type: "text", text: "hello world" }] },
@@ -198,10 +258,6 @@ test("resolveContextWindow prefers manual override, then fetched model metadata,
   assert.equal(
     resolveContextWindow({
       provider: {
-        id: "p1",
-        providerId: "openrouter",
-        name: "OpenRouter",
-        enabled: true,
         contextWindow: 262144,
         modelContextWindows: { "qwen/test": 131072 },
       },
@@ -214,10 +270,6 @@ test("resolveContextWindow prefers manual override, then fetched model metadata,
   assert.equal(
     resolveContextWindow({
       provider: {
-        id: "p1",
-        providerId: "openrouter",
-        name: "OpenRouter",
-        enabled: true,
         modelContextWindows: { "qwen/test": 131072 },
       },
       modelId: "qwen/test",
@@ -228,12 +280,7 @@ test("resolveContextWindow prefers manual override, then fetched model metadata,
 
   assert.equal(
     resolveContextWindow({
-      provider: {
-        id: "p1",
-        providerId: "custom",
-        name: "Custom",
-        enabled: true,
-      },
+      provider: {},
       modelId: "unknown",
       defaultContextWindow: 128000,
     }),
