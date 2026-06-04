@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X } from "lucide-react";
 import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
@@ -79,6 +79,23 @@ export const ProviderConfigForm: React.FC<{
 
   const preset = PROVIDER_PRESETS[provider.providerId];
   const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
+  const modelMetadataSourceKey = useMemo(() => JSON.stringify({
+    providerId: provider.providerId,
+    baseURL: form.baseURL || preset?.defaultBaseURL || "",
+    modelsEndpoint: preset?.modelsEndpoint ?? "",
+    apiKey: form.apiKey,
+    style: resolvedStyle,
+    skipTLSVerify: form.skipTLSVerify,
+  }), [
+    provider.providerId,
+    form.baseURL,
+    form.apiKey,
+    form.skipTLSVerify,
+    preset?.defaultBaseURL,
+    preset?.modelsEndpoint,
+    resolvedStyle,
+  ]);
+  const modelMetadataSourceKeyRef = useRef<string | null>(null);
   const previewProvider: Pick<ProviderConfig, "providerId" | "name" | "iconId" | "iconDataUrl"> = {
     providerId: provider.providerId,
     name: form.name,
@@ -101,6 +118,20 @@ export const ProviderConfigForm: React.FC<{
         .finally(() => setIsDecrypting(false));
     }
   }, [provider.apiKey]);
+
+  useEffect(() => {
+    if (provider.apiKey && !form.apiKey) return;
+    if (modelMetadataSourceKeyRef.current == null) {
+      modelMetadataSourceKeyRef.current = modelMetadataSourceKey;
+      return;
+    }
+    if (modelMetadataSourceKeyRef.current === modelMetadataSourceKey) return;
+
+    modelMetadataSourceKeyRef.current = modelMetadataSourceKey;
+    setForm((prev) => Object.keys(prev.modelContextWindows).length > 0
+      ? { ...prev, modelContextWindows: {} }
+      : prev);
+  }, [form.apiKey, modelMetadataSourceKey, provider.apiKey]);
 
   const [advancedParamRaw, setAdvancedParamRaw] = useState<Record<string, string>>({});
   const handleAdvancedParam = useCallback((key: keyof ProviderAdvancedParams, raw: string) => {
@@ -156,6 +187,11 @@ export const ProviderConfigForm: React.FC<{
     const trimmedName = form.name.trim();
     const defaultName = PROVIDER_PRESETS[provider.providerId]?.name ?? "";
     const rawContextWindow = form.contextWindow.trim();
+    const rawContextWindowNumber = Number(rawContextWindow);
+    if (rawContextWindow && (!Number.isInteger(rawContextWindowNumber) || rawContextWindowNumber <= 0)) {
+      setContextWindowError(t("ai.providers.contextWindow.error"));
+      return;
+    }
     const manualContextWindow = rawContextWindow ? sanitizeContextWindow(rawContextWindow) : undefined;
     if (rawContextWindow && manualContextWindow == null) {
       setContextWindowError(t("ai.providers.contextWindow.error"));

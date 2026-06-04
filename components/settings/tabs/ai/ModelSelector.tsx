@@ -76,6 +76,7 @@ export const ModelSelector: React.FC<{
       const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey);
       const result = await bridge.aiFetch(url, "GET", headers, undefined, undefined, undefined, undefined, skipTLSVerify);
       if (!result.ok) {
+        if (discoveryKeyRef.current !== requestKey) return;
         setError(`Failed to fetch models (${result.error || "unknown error"})`);
         return;
       }

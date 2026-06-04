@@ -942,11 +942,11 @@ export function useAIChatStreaming({
         modelId: activeModelId,
         defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
       });
-      const requestReserveTokens = estimateUnknownTokens({
+      const outputReserveTokens = Math.min(4096, Math.ceil(contextWindow * 0.05));
+      const requestReserveTokens = outputReserveTokens + estimateUnknownTokens({
         systemPrompt,
         toolNames: Object.keys(tools),
         openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
-        outputReserve: Math.min(4096, Math.ceil(contextWindow * 0.05)),
       });
 
       let messagesForStream = sdkMessages;
@@ -982,7 +982,6 @@ export function useAIChatStreaming({
       messagesForStream = pruneMessages({
         messages: messagesForStream,
         reasoning: 'all',
-        toolCalls: 'before-last-4-messages',
         emptyMessages: 'remove',
       });
       continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
