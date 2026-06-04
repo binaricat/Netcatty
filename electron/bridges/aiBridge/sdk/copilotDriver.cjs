@@ -71,6 +71,33 @@ function extractCopilotContent(response) {
   return (response && response.data && response.data.content) || "";
 }
 
+function buildCopilotMessageOptions({ prompt, attachments, streamDeltas = true }) {
+  const options = { prompt: String(prompt || ""), streamDeltas };
+  const nativeAttachments = [];
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (!attachment) continue;
+    const displayName = attachment.filename || undefined;
+    if (attachment.base64Data && attachment.mediaType) {
+      nativeAttachments.push({
+        type: "blob",
+        data: attachment.base64Data,
+        mimeType: attachment.mediaType,
+        displayName,
+      });
+      continue;
+    }
+    if (attachment.filePath) {
+      nativeAttachments.push({
+        type: "file",
+        path: attachment.filePath,
+        displayName,
+      });
+    }
+  }
+  if (nativeAttachments.length > 0) options.attachments = nativeAttachments;
+  return options;
+}
+
 /** Extract a display string from a tool.execution_complete event's data. */
 function extractCopilotResultText(data) {
   if (!data) return "";
@@ -128,13 +155,14 @@ function translateCopilotEvent(event, emitter, state) {
  * Run a Copilot turn (保底同步形态 via sendAndWait).
  * @param {object} args
  * @param {string} args.prompt
+ * @param {Array<object>} [args.attachments]
  * @param {object} args.clientOptions   buildCopilotClientOptions(...) (neutral: {cliPath, gitHubToken})
  * @param {object} args.sessionOptions  buildCopilotSessionOptions(...) ({model, mcpServers})
  * @param {object} args.emitter
  * @param {AbortSignal} [args.signal]
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
-async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
+async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
   const sdk = sdkModule || (await import("@github/copilot-sdk"));
   const { CopilotClient, RuntimeConnection } = sdk;
 
@@ -204,7 +232,7 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSes
     }
     let final;
     try {
-      final = await session.sendAndWait({ prompt, streamDeltas: true });
+      final = await session.sendAndWait(buildCopilotMessageOptions({ prompt, attachments, streamDeltas: true }));
     } finally {
       try { unsubscribe(); } catch { /* best effort */ }
       removeAbortListener();
@@ -281,6 +309,7 @@ async function listCopilotModels({ cliPath, sdkModule }) {
 module.exports = {
   buildCopilotClientOptions,
   buildCopilotSessionOptions,
+  buildCopilotMessageOptions,
   approveNetcattyMcpOnly,
   toCopilotMcpServers,
   extractCopilotContent,

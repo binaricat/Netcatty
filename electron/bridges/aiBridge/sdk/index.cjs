@@ -6,7 +6,7 @@
  * the neutral context and streams events through ctx.emitter.
  *
  * ctx shape (built by sdkStreamHandlers.cjs):
- *   { prompt, cwd, model, env, binPath, injectedMcpServers, emitter,
+ *   { prompt, attachments, cwd, model, env, binPath, injectedMcpServers, emitter,
  *     signal, resumeSessionId, apiKey, baseUrl }
  */
 const claude = require("./claudeDriver.cjs");
@@ -27,7 +27,7 @@ const DRIVER_REGISTRY = {
         resume: ctx.resumeSessionId,
         toolIntegrationMode: ctx.toolIntegrationMode,
       });
-      return claude.runClaudeTurn({ prompt: ctx.prompt, options, emitter: ctx.emitter });
+      return claude.runClaudeTurn({ prompt: ctx.prompt, attachments: ctx.attachments, options, emitter: ctx.emitter });
     },
     async listModels(ctx) {
       return claude.listClaudeModels({ pathToClaudeCodeExecutable: ctx.binPath, env: ctx.env });
@@ -45,6 +45,7 @@ const DRIVER_REGISTRY = {
       const threadOptions = codex.buildCodexThreadOptions({ cwd: ctx.cwd, model: ctx.model });
       return codex.runCodexTurn({
         prompt: ctx.prompt,
+        attachments: ctx.attachments,
         constructorOptions,
         threadOptions,
         resumeThreadId: ctx.resumeSessionId,
@@ -64,6 +65,7 @@ const DRIVER_REGISTRY = {
       });
       return copilot.runCopilotTurn({
         prompt: ctx.prompt,
+        attachments: ctx.attachments,
         clientOptions,
         sessionOptions,
         resumeSessionId: ctx.resumeSessionId,

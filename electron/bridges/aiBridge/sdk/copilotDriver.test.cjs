@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { approveNetcattyMcpOnly, buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
+const { approveNetcattyMcpOnly, buildCopilotClientOptions, buildCopilotSessionOptions, buildCopilotMessageOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
 
 function collector() {
   const events = [];
@@ -75,6 +75,22 @@ test("extractCopilotContent reads response data.content", () => {
   assert.equal(extractCopilotContent({ data: { content: "hi" } }), "hi");
   assert.equal(extractCopilotContent(null), "");
   assert.equal(extractCopilotContent({ data: {} }), "");
+});
+
+test("buildCopilotMessageOptions sends pasted images/files as native attachments", () => {
+  const opts = buildCopilotMessageOptions({
+    prompt: "inspect these",
+    attachments: [
+      { filename: "shot.png", mediaType: "image/png", filePath: "/tmp/shot.png", base64Data: "abc" },
+      { filename: "note.txt", mediaType: "text/plain", filePath: "/tmp/note.txt" },
+    ],
+  });
+  assert.equal(opts.prompt, "inspect these");
+  assert.equal(opts.streamDeltas, true);
+  assert.deepEqual(opts.attachments, [
+    { type: "blob", data: "abc", mimeType: "image/png", displayName: "shot.png" },
+    { type: "file", path: "/tmp/note.txt", displayName: "note.txt" },
+  ]);
 });
 
 test("mapCopilotModels maps {id,name} and drops entries without id", () => {
@@ -162,8 +178,18 @@ test("runCopilotTurn streams tool calls + deltas via session.on (no final-text d
       async stop() {}
     },
   };
-  const result = await runCopilotTurn({ prompt: "go", clientOptions: {}, sessionOptions: {}, emitter, sdkModule });
+  const result = await runCopilotTurn({
+    prompt: "go",
+    attachments: [{ filename: "shot.png", mediaType: "image/png", filePath: "/tmp/shot.png", base64Data: "abc" }],
+    clientOptions: {},
+    sessionOptions: {},
+    emitter,
+    sdkModule,
+  });
   assert.equal(captured.opts.streamDeltas, true, "requested delta streaming");
+  assert.deepEqual(captured.opts.attachments, [
+    { type: "blob", data: "abc", mimeType: "image/png", displayName: "shot.png" },
+  ]);
   // streamed deltas shown, NOT the duplicated final consolidated text
   assert.deepEqual(events.filter((e) => e.k === "text"), [{ k: "text", t: "hi " }, { k: "text", t: "there" }]);
   assert.ok(events.some((e) => e.k === "toolCall" && e.id === "t1"), "tool card streamed");

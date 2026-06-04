@@ -23,6 +23,15 @@ const UI_DISALLOWED_TOOLS = ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]
 // mcpServers; this only controls Claude Code's own local-machine tools.
 const MCP_MODE_TOOLS = [];
 const SKILLS_MODE_TOOLS = ["Bash", "Skill"];
+const CLAUDE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+function isClaudeImageAttachment(attachment) {
+  return Boolean(
+    attachment &&
+    CLAUDE_IMAGE_MEDIA_TYPES.has(String(attachment.mediaType || "").toLowerCase()) &&
+    attachment.base64Data,
+  );
+}
 
 /**
  * Resolve built-in tools for the active tool-integration mode.
@@ -166,22 +175,51 @@ function classifyClaudeSpawnError(error) {
   return { isSpawnEnoent, message: msg };
 }
 
+function buildClaudePromptInput(prompt, attachments) {
+  const imageAttachments = Array.isArray(attachments)
+    ? attachments.filter(isClaudeImageAttachment)
+    : [];
+  if (imageAttachments.length === 0) return String(prompt || "");
+
+  const content = [{ type: "text", text: String(prompt || "") }];
+  for (const attachment of imageAttachments) {
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: String(attachment.mediaType).toLowerCase(),
+        data: attachment.base64Data,
+      },
+    });
+  }
+
+  return (async function* claudePromptInput() {
+    yield {
+      type: "user",
+      message: { role: "user", content },
+      parent_tool_use_id: null,
+    };
+  }());
+}
+
 /**
  * Run a Claude turn. Streams events via `emitter`, resolves with { sessionId }.
  * @param {object} args
  * @param {string} args.prompt
+ * @param {Array<object>} [args.attachments]
  * @param {object} args.options  result of buildClaudeQueryOptions
  * @param {object} args.emitter  createStreamEmitter(...)
  * @param {Function} [args.queryFn] inject @anthropic-ai/claude-agent-sdk query (for tests)
  */
-async function runClaudeTurn({ prompt, options, emitter, queryFn }) {
+async function runClaudeTurn({ prompt, attachments, options, emitter, queryFn }) {
   ensureClaudeConfig();
   const query = queryFn || (await import("@anthropic-ai/claude-agent-sdk")).query;
+  const promptInput = buildClaudePromptInput(prompt, attachments);
 
   let sessionId = null;
   let hasContent = false;
   try {
-    const stream = query({ prompt, options });
+    const stream = query({ prompt: promptInput, options });
     for await (const message of stream) {
       if (options.abortController?.signal?.aborted) break;
       if (message?.session_id && message.session_id !== sessionId) {
@@ -264,6 +302,7 @@ module.exports = {
   parseClaudeSettings,
   translateClaudeMessage,
   classifyClaudeSpawnError,
+  buildClaudePromptInput,
   runClaudeTurn,
   listClaudeModels,
   mapClaudeModels,

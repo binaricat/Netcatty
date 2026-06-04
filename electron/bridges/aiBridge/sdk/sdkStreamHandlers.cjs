@@ -200,6 +200,7 @@ function registerSdkStreamHandlers(ctx) {
             signal: abortController.signal,
             abortController,
             resumeSessionId,
+            attachments: stagedAttachments,
           });
 
           // Persist any new session id for resume on the next turn.

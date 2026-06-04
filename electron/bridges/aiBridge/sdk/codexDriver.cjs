@@ -15,6 +15,30 @@
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 
+function isImageAttachment(attachment) {
+  return Boolean(
+    attachment &&
+    typeof attachment.filePath === "string" &&
+    attachment.filePath.length > 0 &&
+    String(attachment.mediaType || "").toLowerCase().startsWith("image/"),
+  );
+}
+
+function buildCodexPromptInput(prompt, attachments) {
+  const imageAttachments = Array.isArray(attachments)
+    ? attachments.filter(isImageAttachment)
+    : [];
+  if (imageAttachments.length === 0) return String(prompt || "");
+
+  return [
+    { type: "text", text: String(prompt || "") },
+    ...imageAttachments.map((attachment) => ({
+      type: "local_image",
+      path: attachment.filePath,
+    })),
+  ];
+}
+
 function toCodexMcpConfig(injectedMcpServers) {
   const mcp_servers = {};
   for (const cfg of injectedMcpServers || []) {
@@ -172,6 +196,7 @@ function translateCodexEvent(event, emitter, state) {
  * Run a Codex turn.
  * @param {object} args
  * @param {string} args.prompt
+ * @param {Array<object>} [args.attachments]
  * @param {object} args.constructorOptions  buildCodexConstructorOptions(...)
  * @param {object} args.threadOptions       buildCodexThreadOptions(...) — model / sandboxMode / workingDirectory
  * @param {string} [args.resumeThreadId]
@@ -180,9 +205,10 @@ function translateCodexEvent(event, emitter, state) {
  * @param {Function} [args.CodexCtor]       inject Codex class (for tests)
  */
 async function runCodexTurn({
-  prompt, constructorOptions, threadOptions, resumeThreadId, emitter, signal, CodexCtor,
+  prompt, attachments, constructorOptions, threadOptions, resumeThreadId, emitter, signal, CodexCtor,
 }) {
   const Codex = CodexCtor || (await import("@openai/codex-sdk")).Codex;
+  const promptInput = buildCodexPromptInput(prompt, attachments);
   let threadId = null;
   try {
     const codex = new Codex(constructorOptions);
@@ -191,7 +217,7 @@ async function runCodexTurn({
       ? codex.resumeThread(resumeThreadId, threadOptions)
       : codex.startThread(threadOptions);
 
-    const { events } = await thread.runStreamed(prompt, signal ? { signal } : undefined);
+    const { events } = await thread.runStreamed(promptInput, signal ? { signal } : undefined);
     let hasContent = false;
     const state = { reasoningOpen: false };
     for await (const event of events) {
@@ -240,6 +266,7 @@ async function runCodexTurn({
 module.exports = {
   buildCodexConstructorOptions,
   buildCodexThreadOptions,
+  buildCodexPromptInput,
   translateCodexEvent,
   runCodexTurn,
   toCodexMcpConfig,

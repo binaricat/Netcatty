@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateCodexEvent, buildCodexConstructorOptions, buildCodexThreadOptions, runCodexTurn } = require("./codexDriver.cjs");
+const { translateCodexEvent, buildCodexConstructorOptions, buildCodexThreadOptions, buildCodexPromptInput, runCodexTurn } = require("./codexDriver.cjs");
 
 function collector() {
   const events = [];
@@ -15,6 +15,7 @@ function collector() {
       status: (m) => events.push({ k: "status", m }),
       sessionId: (s) => events.push({ k: "sessionId", s }),
       emitError: (e) => events.push({ k: "error", e }),
+      emitDone: () => events.push({ k: "done" }),
     },
   };
 }
@@ -124,6 +125,50 @@ test("runCodexTurn captures+emits the thread id early so an aborted turn still r
   });
   assert.deepEqual(events.filter((e) => e.k === "sessionId"), [{ k: "sessionId", s: "thr-abc" }]);
   assert.equal(result.threadId, "thr-abc");
+});
+
+test("buildCodexPromptInput sends image attachments as native local_image inputs", () => {
+  const input = buildCodexPromptInput("describe this", [
+    { filename: "shot.png", mediaType: "image/png", filePath: "/tmp/shot.png", base64Data: "abc" },
+    { filename: "note.txt", mediaType: "text/plain", filePath: "/tmp/note.txt", base64Data: "def" },
+  ]);
+  assert.deepEqual(input, [
+    { type: "text", text: "describe this" },
+    { type: "local_image", path: "/tmp/shot.png" },
+  ]);
+});
+
+test("runCodexTurn passes native image input to the SDK", async () => {
+  const { emitter } = collector();
+  let capturedInput = null;
+  class FakeCodex {
+    startThread() {
+      return {
+        id: "thr-img",
+        async runStreamed(input) {
+          capturedInput = input;
+          return {
+            events: (async function* () {
+              yield { type: "thread.started", thread_id: "thr-img" };
+              yield { type: "item.completed", item: { type: "agent_message", text: "ok" } };
+            })(),
+          };
+        },
+      };
+    }
+  }
+  await runCodexTurn({
+    prompt: "what is in this image",
+    attachments: [{ mediaType: "image/png", filePath: "/tmp/a.png", base64Data: "abc" }],
+    constructorOptions: {},
+    threadOptions: {},
+    emitter,
+    CodexCtor: FakeCodex,
+  });
+  assert.deepEqual(capturedInput, [
+    { type: "text", text: "what is in this image" },
+    { type: "local_image", path: "/tmp/a.png" },
+  ]);
 });
 
 test("buildCodexConstructorOptions sets path override + env + mcp config table", () => {

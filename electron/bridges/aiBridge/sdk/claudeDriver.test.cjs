@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError, mapClaudeModels, parseClaudeSettings } = require("./claudeDriver.cjs");
+const { translateClaudeMessage, buildClaudeQueryOptions, buildClaudePromptInput, classifyClaudeSpawnError, mapClaudeModels, parseClaudeSettings } = require("./claudeDriver.cjs");
 
 function collector() {
   const events = [];
@@ -155,4 +155,31 @@ test("buildClaudeQueryOptions wires resume so context carries across turns; omit
   // Without options.resume the SDK starts a fresh session every turn (amnesia).
   assert.equal(buildClaudeQueryOptions({ env: {}, resume: "sess-1" }).resume, "sess-1");
   assert.equal("resume" in buildClaudeQueryOptions({ env: {} }), false);
+});
+
+test("buildClaudePromptInput sends supported images as native image blocks", async () => {
+  const input = buildClaudePromptInput("describe this", [
+    { filename: "shot.png", mediaType: "image/png", filePath: "/tmp/shot.png", base64Data: "abc" },
+    { filename: "bad.svg", mediaType: "image/svg+xml", filePath: "/tmp/bad.svg", base64Data: "def" },
+  ]);
+  const messages = [];
+  for await (const message of input) messages.push(message);
+  assert.deepEqual(messages, [{
+    type: "user",
+    message: {
+      role: "user",
+      content: [
+        { type: "text", text: "describe this" },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+      ],
+    },
+    parent_tool_use_id: null,
+  }]);
+});
+
+test("buildClaudePromptInput keeps plain text when there are no supported images", () => {
+  assert.equal(
+    buildClaudePromptInput("hello", [{ filename: "note.txt", mediaType: "text/plain", base64Data: "abc" }]),
+    "hello",
+  );
 });
