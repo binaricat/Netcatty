@@ -61,6 +61,59 @@ function extractCopilotContent(response) {
   return (response && response.data && response.data.content) || "";
 }
 
+/** Extract a display string from a tool.execution_complete event's data. */
+function extractCopilotResultText(data) {
+  if (!data) return "";
+  if (data.error && data.error.message) return String(data.error.message);
+  const result = data.result;
+  if (result == null) return "";
+  if (typeof result === "string") return result;
+  const content = result.content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (b && typeof b.text === "string" ? b.text : (b == null ? "" : JSON.stringify(b))))
+      .join("");
+  }
+  return typeof result === "object" ? JSON.stringify(result) : String(result);
+}
+
+/**
+ * Translate one copilot SessionEvent into emitter calls — gives copilot the same
+ * live tool-card + thinking-panel UX as codex/claude (it previously showed only
+ * the final text). `state` ({ reasoningOpen, streamedText }) threads the thinking
+ * block and records whether any delta streamed, so runCopilotTurn can fall back
+ * to the final consolidated message when the runtime emits no deltas.
+ * Event shapes calibrated against @github/copilot-sdk generated session-events.
+ */
+function translateCopilotEvent(event, emitter, state) {
+  if (!event || typeof event !== "object") return;
+  const st = state || {};
+  const data = event.data || {};
+  const closeReasoning = () => {
+    if (st.reasoningOpen) { emitter.reasoningEnd(); st.reasoningOpen = false; }
+  };
+  switch (event.type) {
+    case "assistant.reasoning_delta":
+      if (data.deltaContent) { emitter.reasoning(data.deltaContent); st.reasoningOpen = true; }
+      return;
+    case "assistant.message_delta":
+      if (data.deltaContent) { closeReasoning(); emitter.text(data.deltaContent); st.streamedText = true; }
+      return;
+    case "tool.execution_start":
+      closeReasoning();
+      emitter.toolCall(data.toolName || data.mcpToolName || "tool", data.arguments || {}, data.toolCallId);
+      return;
+    case "tool.execution_complete":
+      emitter.toolResult(data.toolCallId, extractCopilotResultText(data), undefined);
+      return;
+    default:
+      // assistant.message (final consolidated text) is intentionally ignored —
+      // text arrives via message_delta (or the runCopilotTurn fallback). Other
+      // events (turn start/end, usage, state changes) have no UI mapping.
+      return;
+  }
+}
+
 /**
  * Run a Copilot turn (保底同步形态 via sendAndWait).
  * @param {object} args
@@ -113,14 +166,35 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSes
     sessionId = session.sessionId || sessionId;
     if (sessionId) emitter.sessionId(sessionId);
     if (signal?.aborted) return { sessionId };
-    const response = await session.sendAndWait({ prompt });
-    const content = extractCopilotContent(response);
-    if (content) emitter.text(content);
-    if (!content && !signal?.aborted) {
-      emitter.emitError(
-        "Copilot returned an empty response. Run `copilot` once to log in, or `gh auth login`.",
-      );
-      return { sessionId };
+
+    // Stream tool calls + text/reasoning deltas in real time (parity with
+    // codex/claude — copilot previously showed only the final text). on() gets
+    // every SessionEvent; streamDeltas enables assistant.message_delta /
+    // assistant.reasoning_delta; tool.execution_* events arrive regardless.
+    const state = { reasoningOpen: false, streamedText: false };
+    let unsubscribe = () => {};
+    if (typeof session.on === "function") {
+      unsubscribe = session.on((ev) => translateCopilotEvent(ev, emitter, state));
+    }
+    let final;
+    try {
+      final = await session.sendAndWait({ prompt, streamDeltas: true });
+    } finally {
+      try { unsubscribe(); } catch { /* best effort */ }
+    }
+    if (state.reasoningOpen) emitter.reasoningEnd();
+
+    // Fallback: if nothing streamed (older runtime / streamDeltas unsupported),
+    // emit the final consolidated text so the turn isn't silent.
+    if (!state.streamedText) {
+      const content = extractCopilotContent(final);
+      if (content) emitter.text(content);
+      if (!content && !signal?.aborted) {
+        emitter.emitError(
+          "Copilot returned an empty response. Run `copilot` once to log in, or `gh auth login`.",
+        );
+        return { sessionId };
+      }
     }
     emitter.emitDone();
     return { sessionId };
@@ -176,6 +250,8 @@ module.exports = {
   buildCopilotSessionOptions,
   toCopilotMcpServers,
   extractCopilotContent,
+  extractCopilotResultText,
+  translateCopilotEvent,
   runCopilotTurn,
   listCopilotModels,
   mapCopilotModels,
