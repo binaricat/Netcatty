@@ -13,7 +13,12 @@ import { useI18n } from '../../application/i18n/I18nProvider';
  * Different tool surfaces hand us different shapes:
  *   - Netcatty's own `terminal_execute` MCP tool → `{command: "<string>"}`
  *   - Codex `local_shell` (ACP)                 → `{command: ["zsh","-lc","<full>"]}`
- *   - Claude `Bash` (ACP)                       → `{command: "<string>"}`
+ *   - Codex command_execution (SDK)             → `{command: "/bin/zsh -lc '<full>'"}`
+ *   - Claude `Bash`                             → `{command: "<string>"}`
+ *
+ * The SDK form is a STRING that wraps the real command in `<shell> -lc '<full>'`,
+ * so we unwrap that wrapper too (the array branch already did the equivalent) —
+ * otherwise the outer shell quotes leak into the title.
  *
  * And under the "Skill + CLI" integration, the agent's shell tool wraps a
  * call to our internal `netcatty-tool-cli` binary, so the real intent is one
@@ -25,7 +30,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
  * cares about (the remote command), not Codex's wrapper title which is
  * just the local path to the CLI binary.
  */
-function extractDisplayCommand(args: Record<string, unknown> | undefined): string | null {
+export function extractDisplayCommand(args: Record<string, unknown> | undefined): string | null {
   if (!args) return null;
   const raw = (args as { command?: unknown }).command;
 
@@ -44,6 +49,15 @@ function extractDisplayCommand(args: Record<string, unknown> | undefined): strin
   } else {
     return null;
   }
+
+  // Unwrap a STRING shell wrapper, e.g. Codex SDK's `/bin/zsh -lc '<full>'`.
+  // The array branch above already extracts the inner command; the string form
+  // (codex command_execution) does not, so strip `<shell> -l?c <quote>…<quote>`
+  // here. Without this the outer quote leaks into the netcatty-cli title below.
+  const strWrap = cmdString.match(
+    /^(?:\S*\/)?(?:sh|bash|zsh|fish|ash|dash)\s+-l?c\s+(['"])([\s\S]*)\1\s*$/,
+  );
+  if (strWrap) cmdString = strWrap[2];
 
   // Netcatty CLI wrapper extraction.
   const cliIdx = cmdString.indexOf('netcatty-tool-cli');
