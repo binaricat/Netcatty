@@ -243,6 +243,23 @@ body {
   left: 3px !important;
 }
 
+/* Keep focused IME helper text from making the terminal content drift sideways. */
+.xterm,
+.xterm .xterm-screen,
+.xterm .xterm-viewport,
+.xterm .xterm-scrollable-element {
+  overflow-x: hidden !important;
+}
+
+@supports (overflow: clip) {
+  .xterm,
+  .xterm .xterm-screen,
+  .xterm .xterm-viewport,
+  .xterm .xterm-scrollable-element {
+    overflow-x: clip !important;
+  }
+}
+
 @keyframes shimmer {
   0% {
     transform: translateX(-100%);
