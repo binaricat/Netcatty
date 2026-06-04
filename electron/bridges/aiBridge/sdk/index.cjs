@@ -24,6 +24,7 @@ const DRIVER_REGISTRY = {
         abortController: ctx.abortController,
         injectedMcpServers: ctx.injectedMcpServers,
         settings: ctx.claudeSettings,
+        resume: ctx.resumeSessionId,
       });
       return claude.runClaudeTurn({ prompt: ctx.prompt, options, emitter: ctx.emitter });
     },
@@ -64,6 +65,7 @@ const DRIVER_REGISTRY = {
         prompt: ctx.prompt,
         clientOptions,
         sessionOptions,
+        resumeSessionId: ctx.resumeSessionId,
         emitter: ctx.emitter,
         signal: ctx.signal,
       });

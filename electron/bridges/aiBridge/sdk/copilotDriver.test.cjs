@@ -1,6 +1,33 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels } = require("./copilotDriver.cjs");
+const { buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels, runCopilotTurn } = require("./copilotDriver.cjs");
+
+function collector() {
+  const events = [];
+  return {
+    events,
+    emitter: {
+      text: (t) => events.push({ k: "text", t }),
+      sessionId: (s) => events.push({ k: "sessionId", s }),
+      emitError: (e) => events.push({ k: "error", e }),
+      emitDone: () => events.push({ k: "done" }),
+    },
+  };
+}
+
+/** Minimal @github/copilot-sdk mock; records create vs resume + returns a session. */
+function makeSdk(captured) {
+  const makeSession = (sessionId) => ({
+    sessionId,
+    async sendAndWait({ prompt }) { captured.prompt = prompt; return { data: { content: "reply:" + sessionId } }; },
+  });
+  class CopilotClient {
+    async createSession(cfg) { captured.created = cfg; return makeSession("sess-new"); }
+    async resumeSession(id, cfg) { captured.resumed = { id, cfg }; return makeSession(id); }
+    async stop() {}
+  }
+  return { CopilotClient, RuntimeConnection: { forStdio: () => ({}) }, approveAll: () => {} };
+}
 
 test("buildCopilotClientOptions pins cliPath", () => {
   const o = buildCopilotClientOptions({ cliPath: "/abs/copilot" });
@@ -42,4 +69,32 @@ test("mapCopilotModels maps {id,name} and drops entries without id", () => {
     { id: "gpt-5", name: "gpt-5" },
   ]);
   assert.deepEqual(mapCopilotModels(undefined), []);
+});
+
+test("runCopilotTurn (fresh) creates a session, emits its id early, returns it for resume", async () => {
+  const { events, emitter } = collector();
+  const captured = {};
+  const result = await runCopilotTurn({
+    prompt: "hi", clientOptions: { cliPath: "/c" }, sessionOptions: { model: "m" },
+    emitter, sdkModule: makeSdk(captured),
+  });
+  assert.ok(captured.created, "used createSession when there's no resume id");
+  assert.equal(captured.created.model, "m");
+  assert.deepEqual(events.filter((e) => e.k === "sessionId"), [{ k: "sessionId", s: "sess-new" }]);
+  assert.equal(result.sessionId, "sess-new");
+});
+
+test("runCopilotTurn resumes the prior session (carry context) and re-applies fresh config", async () => {
+  const { events, emitter } = collector();
+  const captured = {};
+  const result = await runCopilotTurn({
+    prompt: "what did we say", clientOptions: {}, sessionOptions: { model: "m" },
+    resumeSessionId: "sess-existing", emitter, sdkModule: makeSdk(captured),
+  });
+  assert.equal(captured.resumed.id, "sess-existing", "used resumeSession, not createSession");
+  assert.equal(captured.created, undefined);
+  // fresh netcatty MCP/session config re-applied on resume (not the stale one)
+  assert.equal(captured.resumed.cfg.model, "m");
+  assert.equal(result.sessionId, "sess-existing");
+  assert.ok(events.some((e) => e.k === "sessionId" && e.s === "sess-existing"));
 });

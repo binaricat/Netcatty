@@ -195,13 +195,25 @@ async function runCodexTurn({
     let hasContent = false;
     const state = { reasoningOpen: false };
     for await (const event of events) {
+      // Capture + emit the resumable thread id as EARLY as possible — it exists
+      // the moment `thread.started` arrives (the first event). Emitting it only at
+      // the END of the turn (the old behavior) meant a mid-turn Stop never
+      // persisted it, so the NEXT turn opened a fresh thread and the whole session
+      // lost its memory. Verified: codex resume survives an aborted turn, so
+      // preserving the id is enough to keep context across a Stop.
+      if (!threadId) {
+        const tid = thread.id || (event && event.type === "thread.started" ? event.thread_id : null);
+        if (tid) { threadId = tid; emitter.sessionId(threadId); }
+      }
       if (signal?.aborted) break;
       if (event?.type === "item.completed") hasContent = true;
       translateCodexEvent(event, emitter, state);
     }
     if (state.reasoningOpen) emitter.reasoningEnd();
-    threadId = thread.id || resumeThreadId || null;
-    if (threadId) emitter.sessionId(threadId);
+    if (!threadId) {
+      threadId = thread.id || resumeThreadId || null;
+      if (threadId) emitter.sessionId(threadId);
+    }
     if (!hasContent && !signal?.aborted) {
       emitter.emitError(
         "Codex returned an empty response. Reconnect Codex in Settings -> AI (codex login), " +

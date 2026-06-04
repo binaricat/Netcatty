@@ -57,7 +57,7 @@ function parseClaudeSettings(settings) {
 }
 
 function buildClaudeQueryOptions({
-  cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings,
+  cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings, resume,
 }) {
   const options = {
     cwd,
@@ -73,6 +73,11 @@ function buildClaudeQueryOptions({
     abortController,
   };
   if (model) options.model = model;
+  // Resume the prior session so context carries ACROSS turns. Without this the
+  // SDK starts a fresh session every turn (full amnesia). The session id is
+  // emitted on system-init (before any turn work), so a mid-turn Stop can't lose
+  // it and the next turn resumes correctly. undefined => fresh session.
+  if (resume) options.resume = resume;
   // ABSOLUTE path only (SDK does not resolve PATH). undefined => SDK auto-discovery.
   if (pathToClaudeCodeExecutable) {
     options.pathToClaudeCodeExecutable = pathToClaudeCodeExecutable;

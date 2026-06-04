@@ -71,7 +71,7 @@ function extractCopilotContent(response) {
  * @param {AbortSignal} [args.signal]
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
-async function runCopilotTurn({ prompt, clientOptions, sessionOptions, emitter, signal, sdkModule }) {
+async function runCopilotTurn({ prompt, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
   const sdk = sdkModule || (await import("@github/copilot-sdk"));
   const { CopilotClient, RuntimeConnection, approveAll } = sdk;
 
@@ -85,14 +85,34 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, emitter, 
   if (clientOptions?.gitHubToken) realClientOptions.gitHubToken = clientOptions.gitHubToken;
 
   let client = null;
+  let sessionId = resumeSessionId || null;
   try {
     client = new CopilotClient(realClientOptions);
-    const session = await client.createSession({
+    const sessionConfig = {
       ...sessionOptions,
       // Auto-approve at the SDK boundary; netcatty MCP performs the real gating.
       onPermissionRequest: approveAll,
-    });
-    if (signal?.aborted) return {};
+    };
+    // Resume the prior conversation so context carries ACROSS turns (incl. after
+    // a Stop). Always (re)apply sessionConfig so the FRESH netcatty MCP server
+    // config — its current port/token/chat-session id — is used, not the stale
+    // one from the resumed session. Fall back to a fresh session if there's no id
+    // yet or the resume fails (session expired/deleted).
+    let session;
+    if (resumeSessionId && typeof client.resumeSession === "function") {
+      try {
+        session = await client.resumeSession(resumeSessionId, sessionConfig);
+      } catch {
+        session = await client.createSession(sessionConfig);
+      }
+    } else {
+      session = await client.createSession(sessionConfig);
+    }
+    // Emit the resumable session id IMMEDIATELY — before the blocking sendAndWait
+    // — so a mid-turn Stop can't lose it; the next turn resumes this conversation.
+    sessionId = session.sessionId || sessionId;
+    if (sessionId) emitter.sessionId(sessionId);
+    if (signal?.aborted) return { sessionId };
     const response = await session.sendAndWait({ prompt });
     const content = extractCopilotContent(response);
     if (content) emitter.text(content);
@@ -100,10 +120,10 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, emitter, 
       emitter.emitError(
         "Copilot returned an empty response. Run `copilot` once to log in, or `gh auth login`.",
       );
-      return {};
+      return { sessionId };
     }
     emitter.emitDone();
-    return {};
+    return { sessionId };
   } catch (error) {
     const code = error && error.code;
     const msg = String((error && error.message) || error || "");
@@ -114,7 +134,7 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, emitter, 
     } else {
       emitter.emitError(msg || "Copilot turn failed");
     }
-    return {};
+    return { sessionId };
   } finally {
     try { await client?.stop?.(); } catch { /* best effort */ }
   }

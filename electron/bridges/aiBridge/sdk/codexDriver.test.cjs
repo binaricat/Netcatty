@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateCodexEvent, buildCodexConstructorOptions, buildCodexThreadOptions } = require("./codexDriver.cjs");
+const { translateCodexEvent, buildCodexConstructorOptions, buildCodexThreadOptions, runCodexTurn } = require("./codexDriver.cjs");
 
 function collector() {
   const events = [];
@@ -95,6 +95,35 @@ test("turn.completed is a no-op event-wise", () => {
   const { events, emitter } = collector();
   translateCodexEvent({ type: "turn.completed", usage: {} }, emitter);
   assert.deepEqual(events, []);
+});
+
+test("runCodexTurn captures+emits the thread id early so an aborted turn still resumes", async () => {
+  // Simulate a Stop that kills the stream mid-turn: thread.started arrives, then
+  // the event stream throws. The id must already be emitted (renderer) and
+  // returned (handler) so the NEXT turn resumes this thread instead of starting
+  // fresh (which is what made the whole session lose its memory after a Stop).
+  const { events, emitter } = collector();
+  class FakeCodex {
+    startThread() {
+      return {
+        id: "thr-abc",
+        async runStreamed() {
+          return {
+            events: (async function* () {
+              yield { type: "thread.started", thread_id: "thr-abc" };
+              throw new Error("stream aborted mid-turn");
+            })(),
+          };
+        },
+      };
+    }
+    resumeThread() { return this.startThread(); }
+  }
+  const result = await runCodexTurn({
+    prompt: "hi", constructorOptions: {}, threadOptions: {}, emitter, CodexCtor: FakeCodex,
+  });
+  assert.deepEqual(events.filter((e) => e.k === "sessionId"), [{ k: "sessionId", s: "thr-abc" }]);
+  assert.equal(result.threadId, "thr-abc");
 });
 
 test("buildCodexConstructorOptions sets path override + env + mcp config table", () => {

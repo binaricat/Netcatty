@@ -132,3 +132,9 @@ test("buildClaudeQueryOptions wires settings (additive to CLAUDE_CONFIG_DIR) and
   const without = buildClaudeQueryOptions({ env: {} });
   assert.equal("settings" in without, false);
 });
+
+test("buildClaudeQueryOptions wires resume so context carries across turns; omits when absent", () => {
+  // Without options.resume the SDK starts a fresh session every turn (amnesia).
+  assert.equal(buildClaudeQueryOptions({ env: {}, resume: "sess-1" }).resume, "sess-1");
+  assert.equal("resume" in buildClaudeQueryOptions({ env: {} }), false);
+});
