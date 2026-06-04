@@ -5,7 +5,9 @@ import type { ModelMessage } from "ai";
 import {
   buildCompactedMessages,
   estimateModelMessagesTokens,
+  estimateUnknownTokens,
   findSafeCompactionSplitIndex,
+  formatMessagesForCompaction,
   prepareContextCompaction,
   resolveContextWindow,
   shouldCompactContext,
@@ -103,6 +105,74 @@ test("prepareContextCompaction summarizes old messages and returns compacted con
   assert.equal(result.didCompact, true);
   assert.equal(result.summary, "Summary of old messages.");
   assert.deepEqual(result.messages.slice(-2), messages.slice(-2));
+});
+
+test("prepareContextCompaction includes reserved request tokens in the compaction check", async () => {
+  const messages: ModelMessage[] = [
+    { role: "user", content: "short prompt" },
+    { role: "assistant", content: "short answer" },
+    { role: "user", content: "recent question" },
+  ];
+
+  const result = await prepareContextCompaction({
+    messages,
+    contextWindow: 40,
+    reservedTokens: estimateUnknownTokens("large system prompt ".repeat(20)),
+    protectRecentMessages: 1,
+    summarize: async (messagesToSummarize) => {
+      assert.deepEqual(messagesToSummarize, messages.slice(0, 2));
+      return "System prompt forced compaction.";
+    },
+  });
+
+  assert.equal(result.didCompact, true);
+  assert.equal(result.summary, "System prompt forced compaction.");
+});
+
+test("prepareContextCompaction summarizes older tool results instead of dropping them first", async () => {
+  const messages: ModelMessage[] = [
+    { role: "user", content: "check disk usage" },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "call-1",
+          toolName: "run_command",
+          input: { command: "df -h" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "run_command",
+          output: { type: "text", value: "/dev/disk1 81% full" },
+        },
+      ],
+    },
+    { role: "assistant", content: "Disk is 81% full." },
+    { role: "user", content: "old follow-up ".repeat(80) },
+    { role: "assistant", content: "old answer ".repeat(80) },
+    { role: "user", content: "recent question" },
+    { role: "assistant", content: "recent answer" },
+  ];
+
+  const result = await prepareContextCompaction({
+    messages,
+    contextWindow: 120,
+    protectRecentMessages: 2,
+    summarize: async (messagesToSummarize) => {
+      assert.match(formatMessagesForCompaction(messagesToSummarize), /81% full/);
+      return "Earlier disk check showed /dev/disk1 was 81% full.";
+    },
+  });
+
+  assert.equal(result.didCompact, true);
+  assert.match(result.messages[0]?.content as string, /81% full/);
 });
 
 test("estimateModelMessagesTokens counts multimodal and tool content", () => {

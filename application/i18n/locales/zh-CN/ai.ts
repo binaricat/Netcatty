@@ -37,6 +37,7 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.contextWindow': '上下文窗口',
   'ai.providers.contextWindow.placeholder': '例如 128000',
   'ai.providers.contextWindow.help': '留空时优先使用模型列表返回的值；如果没有，Netcatty 会使用安全默认值。',
+  'ai.providers.contextWindow.error': '请输入正整数，或留空。',
   'ai.providers.refreshModels': '刷新模型列表',
   'ai.providers.searchModel': '搜索或输入模型 ID...',
   'ai.providers.filterModels': '筛选模型...',

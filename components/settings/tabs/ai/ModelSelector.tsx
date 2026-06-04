@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import type { AIProviderId, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { resolveProviderStyle } from "../../../../infrastructure/ai/types";
@@ -41,11 +41,28 @@ export const ModelSelector: React.FC<{
   // Ollama runs locally without auth; all other providers need an API key to list models
   const needsApiKey = providerId !== "ollama";
   const canFetch = !!effectiveModelsEndpoint && (!needsApiKey || !!apiKey);
+  const discoveryKey = JSON.stringify({
+    baseURL,
+    effectiveModelsEndpoint,
+    apiKey,
+    resolvedStyle,
+    skipTLSVerify,
+  });
+  const discoveryKeyRef = useRef(discoveryKey);
+
+  useEffect(() => {
+    discoveryKeyRef.current = discoveryKey;
+    setModels([]);
+    setHasFetched(false);
+    setError(null);
+    setIsLoading(false);
+  }, [discoveryKey]);
 
   const fetchModels = useCallback(async () => {
     if (!effectiveModelsEndpoint) return;
     const bridge = getFetchBridge();
     if (!bridge?.aiFetch) return;
+    const requestKey = discoveryKey;
 
     setIsLoading(true);
     setError(null);
@@ -65,14 +82,16 @@ export const ModelSelector: React.FC<{
       const parsed = JSON.parse(result.data);
       const list = parseFetchedModels(parsed);
       list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+      if (discoveryKeyRef.current !== requestKey) return;
       setModels(list);
       setHasFetched(true);
     } catch (err) {
+      if (discoveryKeyRef.current !== requestKey) return;
       setError(err instanceof Error ? err.message : "Failed to parse response");
     } finally {
-      setIsLoading(false);
+      if (discoveryKeyRef.current === requestKey) setIsLoading(false);
     }
-  }, [baseURL, effectiveModelsEndpoint, apiKey, resolvedStyle, skipTLSVerify]);
+  }, [baseURL, effectiveModelsEndpoint, apiKey, resolvedStyle, skipTLSVerify, discoveryKey]);
 
   // Auto-fetch when dropdown first opens
   useEffect(() => {

@@ -37,6 +37,7 @@ export const enAiMessages: Messages = {
   'ai.providers.contextWindow': 'Context window',
   'ai.providers.contextWindow.placeholder': 'e.g. 128000',
   'ai.providers.contextWindow.help': 'Leave blank to use the model list value when available, otherwise Netcatty uses a safe default.',
+  'ai.providers.contextWindow.error': 'Enter a positive whole number, or leave it blank.',
   'ai.providers.refreshModels': 'Refresh models',
   'ai.providers.searchModel': 'Search or type model ID...',
   'ai.providers.filterModels': 'Filter models...',

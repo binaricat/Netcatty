@@ -75,6 +75,7 @@ export const ProviderConfigForm: React.FC<{
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [iconError, setIconError] = useState<string | null>(null);
+  const [contextWindowError, setContextWindowError] = useState<string | null>(null);
 
   const preset = PROVIDER_PRESETS[provider.providerId];
   const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
@@ -154,9 +155,13 @@ export const ProviderConfigForm: React.FC<{
 
     const trimmedName = form.name.trim();
     const defaultName = PROVIDER_PRESETS[provider.providerId]?.name ?? "";
-    const manualContextWindow = form.contextWindow.trim()
-      ? sanitizeContextWindow(form.contextWindow)
-      : undefined;
+    const rawContextWindow = form.contextWindow.trim();
+    const manualContextWindow = rawContextWindow ? sanitizeContextWindow(rawContextWindow) : undefined;
+    if (rawContextWindow && manualContextWindow == null) {
+      setContextWindowError(t("ai.providers.contextWindow.error"));
+      return;
+    }
+    setContextWindowError(null);
 
     const updates: Partial<ProviderConfig> = {
       name: trimmedName || defaultName,
@@ -179,7 +184,7 @@ export const ProviderConfigForm: React.FC<{
     }
 
     onSave(updates);
-  }, [form, onSave, provider.providerId]);
+  }, [form, onSave, provider.providerId, t]);
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/40 pt-3">
@@ -371,14 +376,21 @@ export const ProviderConfigForm: React.FC<{
           min={1}
           step={1}
           value={form.contextWindow}
-          onChange={(e) => setForm((prev) => ({ ...prev, contextWindow: e.target.value }))}
+          onChange={(e) => {
+            setContextWindowError(null);
+            setForm((prev) => ({ ...prev, contextWindow: e.target.value }));
+          }}
           placeholder={
             form.defaultModel && form.modelContextWindows[form.defaultModel]
               ? String(form.modelContextWindows[form.defaultModel])
               : t('ai.providers.contextWindow.placeholder')
           }
-          className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn(
+            "w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            contextWindowError && "border-destructive focus-visible:ring-destructive",
+          )}
         />
+        {contextWindowError && <p className="text-[11px] text-destructive">{contextWindowError}</p>}
         <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.contextWindow.help')}</p>
       </div>
 

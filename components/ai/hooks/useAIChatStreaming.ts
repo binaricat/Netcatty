@@ -30,6 +30,7 @@ import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
   formatMessagesForCompaction,
+  estimateUnknownTokens,
   keepRecentContextMessages,
   prepareContextCompaction,
   resolveContextWindow,
@@ -48,6 +49,7 @@ import {
   mergeProviderContinuation,
   normalizeProviderContinuationOptions,
   withProviderContinuationSource,
+  type OpenAIChatAssistantFields,
   type ProviderContinuation,
 } from '../../../infrastructure/ai/providerContinuation';
 
@@ -76,6 +78,11 @@ export type { DefaultTargetSessionHint } from './aiChatStreamingSupport';
 const sharedStreamingSessionIds = new Set<string>();
 const sharedAbortControllers = new Map<string, AbortController>();
 const streamingSubscribers = new Set<() => void>();
+const OPENAI_CHAT_ASSISTANT_FIELDS = Symbol('netcatty.openAIChatAssistantFields');
+
+type ModelMessageWithOpenAIChatFields = ModelMessage & {
+  [OPENAI_CHAT_ASSISTANT_FIELDS]?: OpenAIChatAssistantFields;
+};
 
 function emitStreamingStoreChange(): void {
   streamingSubscribers.forEach(listener => {
@@ -85,6 +92,45 @@ function emitStreamingStoreChange(): void {
       console.error('[AIChatStreaming] Failed to notify streaming subscriber:', err);
     }
   });
+}
+
+function rememberOpenAIChatAssistantFields(
+  message: ModelMessage,
+  fields: OpenAIChatAssistantFields | undefined,
+  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
+): void {
+  fieldsByMessage.set(message, fields);
+  (message as ModelMessageWithOpenAIChatFields)[OPENAI_CHAT_ASSISTANT_FIELDS] = fields;
+}
+
+function getRememberedOpenAIChatAssistantFields(
+  message: ModelMessage,
+  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
+): OpenAIChatAssistantFields | undefined {
+  if (fieldsByMessage.has(message)) return fieldsByMessage.get(message);
+  return (message as ModelMessageWithOpenAIChatFields)[OPENAI_CHAT_ASSISTANT_FIELDS];
+}
+
+function modelMessageHasToolCall(message: ModelMessage): boolean {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return false;
+  return message.content.some((part) => part && typeof part === 'object' && (part as { type?: string }).type === 'tool-call');
+}
+
+function collectOpenAIChatAssistantFieldsForMessages(
+  messages: ModelMessage[],
+  fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>,
+): Array<OpenAIChatAssistantFields | undefined> {
+  const fields: Array<OpenAIChatAssistantFields | undefined> = [];
+  let previousMessageWasTool = false;
+  for (const message of messages) {
+    const needsContinuationFields = message.role === 'assistant'
+      && (modelMessageHasToolCall(message) || previousMessageWasTool);
+    if (needsContinuationFields) {
+      fields.push(getRememberedOpenAIChatAssistantFields(message, fieldsByMessage));
+    }
+    previousMessageWasTool = message.role === 'tool';
+  }
+  return fields;
 }
 
 // -------------------------------------------------------------------
@@ -747,6 +793,7 @@ export function useAIChatStreaming({
       };
 
       const sdkMessages: Array<ModelMessage> = [];
+      const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
       let previousHistoryMessageWasToolResult = false;
       for (const m of allMessages) {
         const currentMessageFollowsToolResult = previousHistoryMessageWasToolResult;
@@ -811,9 +858,10 @@ export function useAIChatStreaming({
             }
             // If all tool calls were orphaned, just include the text content
             if (contentParts.length > 0) {
-              sdkMessages.push({ role: 'assistant', content: toAssistantModelContent(contentParts) });
+              const message: ModelMessage = { role: 'assistant', content: toAssistantModelContent(contentParts) };
+              sdkMessages.push(message);
               if (resolvedCalls.length > 0) {
-                continuationContext.openAIChatAssistantFields.push(openAIChatAssistantFields);
+                rememberOpenAIChatAssistantFields(message, openAIChatAssistantFields, openAIChatAssistantFieldsByMessage);
               }
             }
           } else if (m.content) {
@@ -831,12 +879,13 @@ export function useAIChatStreaming({
               text: m.content,
               ...(activeContinuation?.textProviderOptions ? { providerOptions: activeContinuation.textProviderOptions } : {}),
             });
-            sdkMessages.push({
+            const message: ModelMessage = {
               role: 'assistant',
               content: toAssistantModelContent(contentParts),
-            });
+            };
+            sdkMessages.push(message);
             if (currentMessageFollowsToolResult) {
-              continuationContext.openAIChatAssistantFields.push(openAIChatAssistantFields);
+              rememberOpenAIChatAssistantFields(message, openAIChatAssistantFields, openAIChatAssistantFieldsByMessage);
             }
           }
         } else if (m.role === 'tool' && m.toolResults?.length) {
@@ -888,22 +937,24 @@ export function useAIChatStreaming({
         return;
       }
 
-      const prunedMessages = pruneMessages({
-        messages: sdkMessages,
-        reasoning: 'all',
-        toolCalls: 'before-last-4-messages',
-        emptyMessages: 'remove',
+      const contextWindow = resolveContextWindow({
+        provider: context.activeProvider,
+        modelId: activeModelId,
+        defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
+      });
+      const requestReserveTokens = estimateUnknownTokens({
+        systemPrompt,
+        toolNames: Object.keys(tools),
+        openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
+        outputReserve: Math.min(4096, Math.ceil(contextWindow * 0.05)),
       });
 
-      let messagesForStream = prunedMessages;
+      let messagesForStream = sdkMessages;
       try {
         const compacted = await prepareContextCompaction({
-          messages: prunedMessages,
-          contextWindow: resolveContextWindow({
-            provider: context.activeProvider,
-            modelId: activeModelId,
-            defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
-          }),
+          messages: sdkMessages,
+          contextWindow,
+          reservedTokens: requestReserveTokens,
           protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
           summarize: async (messagesToSummarize) => {
             updateLastMessage(sessionId, msg => ({ ...msg, statusText: 'Compacting earlier context...' }));
@@ -923,9 +974,21 @@ export function useAIChatStreaming({
         });
         messagesForStream = compacted.messages;
       } catch (err) {
+        if (abortController.signal.aborted) throw err;
         console.warn('[Catty] Context compaction failed; falling back to recent messages only:', err);
-        messagesForStream = keepRecentContextMessages(prunedMessages, DEFAULT_PROTECT_RECENT_MESSAGES);
+        messagesForStream = keepRecentContextMessages(sdkMessages, DEFAULT_PROTECT_RECENT_MESSAGES);
       }
+
+      messagesForStream = pruneMessages({
+        messages: messagesForStream,
+        reasoning: 'all',
+        toolCalls: 'before-last-4-messages',
+        emptyMessages: 'remove',
+      });
+      continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
+        messagesForStream,
+        openAIChatAssistantFieldsByMessage,
+      );
 
       await processCattyStream(
         sessionId,

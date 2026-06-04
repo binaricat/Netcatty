@@ -27,6 +27,7 @@ export interface ShouldCompactContextInput {
 export interface PrepareContextCompactionInput {
   messages: ModelMessage[];
   contextWindow?: number;
+  reservedTokens?: number;
   thresholdRatio?: number;
   protectRecentMessages?: number;
   summarize: (messagesToSummarize: ModelMessage[]) => Promise<string>;
@@ -80,6 +81,10 @@ export function estimateModelMessagesTokens(messages: ModelMessage[]): number {
   return Math.ceil(chars / TOKEN_CHARS);
 }
 
+export function estimateUnknownTokens(value: unknown): number {
+  return Math.ceil(estimateUnknownChars(value) / TOKEN_CHARS);
+}
+
 export function findSafeCompactionSplitIndex(
   messages: ModelMessage[],
   protectRecentMessages = DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -120,11 +125,12 @@ export function buildCompactedMessages({
 export async function prepareContextCompaction({
   messages,
   contextWindow = DEFAULT_CONTEXT_WINDOW_TOKENS,
+  reservedTokens = 0,
   thresholdRatio,
   protectRecentMessages = DEFAULT_PROTECT_RECENT_MESSAGES,
   summarize,
 }: PrepareContextCompactionInput): Promise<PrepareContextCompactionResult> {
-  const promptTokens = estimateModelMessagesTokens(messages);
+  const promptTokens = estimateModelMessagesTokens(messages) + Math.max(0, Math.ceil(reservedTokens));
   if (!shouldCompactContext({ promptTokens, contextWindow, thresholdRatio })) {
     return { messages, didCompact: false };
   }

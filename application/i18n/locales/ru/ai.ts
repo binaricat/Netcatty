@@ -37,6 +37,7 @@ export const ruAiMessages: Messages = {
   'ai.providers.contextWindow': 'Контекстное окно',
   'ai.providers.contextWindow.placeholder': 'например, 128000',
   'ai.providers.contextWindow.help': 'Оставьте пустым, чтобы использовать значение из списка моделей, если оно доступно; иначе Netcatty применит безопасное значение по умолчанию.',
+  'ai.providers.contextWindow.error': 'Введите положительное целое число или оставьте поле пустым.',
   'ai.providers.refreshModels': 'Обновить модели',
   'ai.providers.searchModel': 'Искать или ввести ID модели...',
   'ai.providers.filterModels': 'Фильтровать модели...',
