@@ -5,6 +5,7 @@ declare global {
     // File opener helpers (for "Open With" feature)
     selectApplication?(): Promise<{ path: string; name: string } | null>;
     openWithApplication?(filePath: string, appPath: string): Promise<boolean>;
+    openWithSystemDefault?(filePath: string): Promise<{ success: boolean; error?: string }>;
     downloadSftpToTemp?(sftpId: string, remotePath: string, fileName: string, encoding?: SftpFilenameEncoding): Promise<string>;
     downloadSftpToTempWithProgress?(
       sftpId: string,

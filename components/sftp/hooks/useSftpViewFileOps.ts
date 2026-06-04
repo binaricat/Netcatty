@@ -248,6 +248,26 @@ export const useSftpViewFileOps = ({
     [handleOpenFileForSide],
   );
 
+  const handleOpenFileWithSystemDefaultForSide = useCallback(
+    (side: "left" | "right", file: SftpFileEntry, fullPath?: string) => {
+      const pane = side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+      if (!pane.connection) return;
+
+      const resolvedFullPath = fullPath ?? sftpRef.current.joinPath(pane.connection.currentPath, file.name);
+      void sftpRef.current.openWithSystemDefault(side, resolvedFullPath, file.name);
+    },
+    [sftpRef],
+  );
+
+  const onOpenFileWithSystemDefaultLeft = useCallback(
+    (file: SftpFileEntry, fullPath?: string) => handleOpenFileWithSystemDefaultForSide("left", file, fullPath),
+    [handleOpenFileWithSystemDefaultForSide],
+  );
+  const onOpenFileWithSystemDefaultRight = useCallback(
+    (file: SftpFileEntry, fullPath?: string) => handleOpenFileWithSystemDefaultForSide("right", file, fullPath),
+    [handleOpenFileWithSystemDefaultForSide],
+  );
+
   const handleOpenFileWithForSide = useCallback(
     (side: "left" | "right", file: SftpFileEntry, fullPath?: string) => {
       const pane = side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
@@ -883,6 +903,8 @@ export const useSftpViewFileOps = ({
     onEditFileRight,
     onOpenFileLeft,
     onOpenFileRight,
+    onOpenFileWithSystemDefaultLeft,
+    onOpenFileWithSystemDefaultRight,
     onOpenFileWithLeft,
     onOpenFileWithRight,
     onDownloadFileLeft,

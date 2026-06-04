@@ -92,6 +92,8 @@ export interface UseSftpViewFileOpsResult {
   onEditFileRight: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileLeft: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileRight: (file: SftpFileEntry, fullPath?: string) => void;
+  onOpenFileWithSystemDefaultLeft: (file: SftpFileEntry, fullPath?: string) => void;
+  onOpenFileWithSystemDefaultRight: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWithLeft: (file: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWithRight: (file: SftpFileEntry, fullPath?: string) => void;
   onDownloadFileLeft: (file: SftpFileEntry, fullPath?: string) => void;
@@ -105,4 +107,3 @@ export interface UseSftpViewFileOpsResult {
   onUploadExternalFolderLeft: (targetPath?: string) => Promise<void>;
   onUploadExternalFolderRight: (targetPath?: string) => Promise<void>;
 }
-

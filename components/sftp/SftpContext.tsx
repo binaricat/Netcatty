@@ -50,6 +50,7 @@ export interface SftpPaneCallbacks {
     // File operations
     onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
     onOpenFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+    onOpenFileWithSystemDefault?: (entry: SftpFileEntry, fullPath?: string) => void;
     onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;  // Always show opener dialog
     onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
     onDownloadFiles?: (entries: SftpFileEntry[]) => void;  // Batch download — picks one target directory for remote panes

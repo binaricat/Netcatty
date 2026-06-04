@@ -559,6 +559,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:selectApplication"),
   openWithApplication: (filePath, appPath) =>
     ipcRenderer.invoke("netcatty:openWithApplication", { filePath, appPath }),
+  openWithSystemDefault: (filePath) =>
+    ipcRenderer.invoke("netcatty:openWithSystemDefault", { filePath }),
   downloadSftpToTemp: (sftpId, remotePath, fileName, encoding) =>
     ipcRenderer.invoke("netcatty:sftp:downloadToTemp", { sftpId, remotePath, fileName, encoding }),
   downloadSftpToTempWithProgress: (sftpId, remotePath, fileName, encoding, transferId, onProgress, onComplete, onError, onCancelled) => {

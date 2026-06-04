@@ -36,6 +36,7 @@ export interface SftpExternalOperationsResult {
     appPath: string,
     options?: { enableWatch?: boolean }
   ) => Promise<{ localTempPath: string; watchId?: string }>;
+  openWithSystemDefault: (side: "left" | "right", remotePath: string, fileName: string) => Promise<void>;
   activeFileWatchCountRef: React.MutableRefObject<number>;
   uploadExternalFiles: (
     side: "left" | "right",
@@ -62,4 +63,3 @@ export interface SftpExternalOperationsResult {
   uploadConflicts: FileConflict[];
   resolveUploadConflict: (conflictId: string, action: FileConflictAction, applyToAll?: boolean) => void;
 }
-

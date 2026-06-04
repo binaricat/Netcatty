@@ -510,6 +510,21 @@ function createBridgeRegistrar(context) {
         throw err;
       }
     });
+
+    // Open a file with the system default application
+    ipcMain.handle("netcatty:openWithSystemDefault", async (_event, { filePath }) => {
+      const { shell } = require("electron");
+
+      try {
+        const error = await shell.openPath(filePath);
+        if (error) {
+          return { success: false, error };
+        }
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
   
     // Show save file dialog and return selected path
     ipcMain.handle("netcatty:showSaveDialog", async (_event, { defaultPath, filters }) => {

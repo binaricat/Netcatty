@@ -304,6 +304,7 @@ export const useSftpState = (
     writeTextFile,
     writeTextFileByConnection,
     downloadToTempAndOpen,
+    openWithSystemDefault,
     uploadExternalFiles,
     uploadExternalFileList,
     uploadExternalFolderPath,
@@ -383,6 +384,7 @@ export const useSftpState = (
     writeTextFile,
     writeTextFileByConnection,
     downloadToTempAndOpen,
+    openWithSystemDefault,
     uploadExternalFiles,
     uploadExternalFileList,
     uploadExternalFolderPath,
@@ -440,6 +442,7 @@ export const useSftpState = (
     writeTextFile,
     writeTextFileByConnection,
     downloadToTempAndOpen,
+    openWithSystemDefault,
     uploadExternalFiles,
     uploadExternalFileList,
     uploadExternalFolderPath,
@@ -507,6 +510,8 @@ export const useSftpState = (
     writeTextFileByConnection: (...args: Parameters<typeof writeTextFileByConnection>) =>
       methodsRef.current.writeTextFileByConnection(...args),
     downloadToTempAndOpen: (...args: Parameters<typeof downloadToTempAndOpen>) => methodsRef.current.downloadToTempAndOpen(...args),
+    openWithSystemDefault: (...args: Parameters<typeof openWithSystemDefault>) =>
+      methodsRef.current.openWithSystemDefault(...args),
     uploadExternalFiles: (...args: Parameters<typeof uploadExternalFiles>) => methodsRef.current.uploadExternalFiles(...args),
     uploadExternalFileList: (...args: Parameters<typeof uploadExternalFileList>) =>
       methodsRef.current.uploadExternalFileList(...args),

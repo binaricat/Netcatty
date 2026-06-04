@@ -310,6 +310,7 @@ export const ruVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Копировать путь к файлу',
+  'sftp.context.openWithDefault': 'Открыть в системном приложении',
   'sftp.context.openWith': 'Открыть с помощью...',
   'sftp.context.edit': 'Редактировать',
   'sftp.context.preview': 'Предпросмотр',

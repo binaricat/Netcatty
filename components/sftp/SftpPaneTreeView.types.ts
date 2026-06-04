@@ -20,6 +20,7 @@ export interface SftpPaneTreeViewProps {
   openDeleteConfirm: (targets: string[]) => void;
   onCopyToOtherPane: (files: SftpTransferSource[]) => void;
   onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
+  onOpenFileWithSystemDefault?: (entry: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;

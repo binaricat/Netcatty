@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
+import { AppWindow, ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -14,7 +14,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
-    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithRef,
+    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
     onEditFileRef, onDownloadFileRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
@@ -60,6 +60,11 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         {isDir && (
           <ContextMenuItem onClick={() => onNavigateToRef.current(entryPath)}>
             <ArrowRight size={14} className="mr-2" />{tRef.current('sftp.context.navigateTo')}
+          </ContextMenuItem>
+        )}
+        {!isDir && onOpenFileWithSystemDefaultRef.current && (
+          <ContextMenuItem onClick={() => onOpenFileWithSystemDefaultRef.current?.(entry, entryPath)}>
+            <AppWindow size={14} className="mr-2" />{tRef.current('sftp.context.openWithDefault')}
           </ContextMenuItem>
         )}
         {!isDir && onOpenFileWithRef.current && (
@@ -173,6 +178,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     onEditFileRef,
     onEditPermissionsRef,
     onNavigateToRef,
+    onOpenFileWithSystemDefaultRef,
     onOpenFileWithRef,
     openDeleteConfirmRef,
     openNewFileDialogRef,
