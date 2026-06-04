@@ -416,6 +416,14 @@ export const useSftpExternalOperations = (
 
         const result = await bridgeMethods.openWithSystemDefault(localTempPath);
         if (!result.success) {
+          if (externalTransferId) {
+            updateExternalUpload?.(externalTransferId, {
+              status: "failed" as TransferStatus,
+              endTime: Date.now(),
+              error: result.error || "Failed to open file",
+              speed: 0,
+            });
+          }
           throw new Error(result.error || "Failed to open file");
         }
 
