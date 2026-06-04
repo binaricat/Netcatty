@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createDropEntriesFromClipboardFiles,
   resolveSftpClipboardUploadTarget,
+  shouldLetNativePasteEventHandleSftpPaste,
   type ClipboardLocalFile,
 } from "./sftp/clipboardUpload.ts";
 import type { SftpFileEntry } from "../types";
@@ -77,4 +78,10 @@ test("clipboard files become path-backed upload entries", () => {
       size: 42,
     },
   ]);
+});
+
+test("SFTP paste keydown lets the native paste event handle OS clipboard files", () => {
+  assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpPaste", false), true);
+  assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpPaste", true), false);
+  assert.equal(shouldLetNativePasteEventHandleSftpPaste("sftpCopy", false), false);
 });

@@ -55,6 +55,13 @@ export function createDropEntriesFromClipboardFiles(files: ClipboardLocalFile[])
   }));
 }
 
+export function shouldLetNativePasteEventHandleSftpPaste(
+  action: string,
+  hasInternalClipboardFiles: boolean,
+): boolean {
+  return action === "sftpPaste" && !hasInternalClipboardFiles;
+}
+
 export interface SftpClipboardUploadRequest {
   scopeId: string;
   side: "left" | "right";
