@@ -31,7 +31,16 @@ function toCodexMcpConfig(injectedMcpServers) {
 function buildCodexConstructorOptions({ codexPath, env, apiKey, injectedMcpServers, baseUrl }) {
   const options = {
     env,
-    config: { mcp_servers: toCodexMcpConfig(injectedMcpServers) },
+    config: {
+      mcp_servers: toCodexMcpConfig(injectedMcpServers),
+      // Force codex to emit reasoning SUMMARY items in the JSON stream. The
+      // default ("auto") emits nothing in non-interactive `codex exec` (measured:
+      // 0 summaries across runs), so the thinking panel went empty after the SDK
+      // migration. "concise" restores visible step-by-step reasoning reliably
+      // (measured: a summary on every reasoning turn) at the right altitude for a
+      // terminal assistant — "detailed" is richer but noisier and less reliable.
+      model_reasoning_summary: "concise",
+    },
   };
   if (codexPath) options.codexPathOverride = codexPath; // 🔬 SMOKE-CALIBRATE [codex-path]
   if (apiKey) options.apiKey = apiKey;
@@ -48,17 +57,23 @@ function buildCodexThreadOptions({ cwd, model }) {
   // them there (the previous behavior) silently dropped both model selection and
   // the read-only sandbox.
   //
-  // approvalPolicy:"never" is codex's analog of claude's permissionMode
-  // "bypassPermissions" and copilot's approveAll: the migration delegates ALL
-  // gating to the injected netcatty MCP server (approval/scope/blocklist). It
-  // maps to `--config approval_policy="never"`. Without it, non-interactive
-  // `codex exec` has no channel to satisfy an approval request, so netcatty MCP
-  // tool calls (e.g. get_environment) stall and the model reports them as
-  // "cancelled". This is independent of the sandbox: codex spawns MCP servers as
-  // session infrastructure OUTSIDE the per-command sandbox, so read-only does not
-  // block the server's loopback callback to the main process — it only blocks
-  // codex's own local writes (side effects must go through the netcatty server).
-  const opts = { sandboxMode: "read-only", approvalPolicy: "never", skipGitRepoCheck: true };
+  // Non-interactive `codex exec` CANCELS every MCP tool call ("user cancelled
+  // MCP tool call", failing in 0ns before the server is even invoked) unless
+  // approvals are fully bypassed. Empirically (tested across all sandbox ×
+  // approval combos) the ONLY combo that lets injected netcatty MCP tools run is
+  // sandbox "danger-full-access" + approvalPolicy "never" — i.e. codex's
+  // `--dangerously-bypass-approvals-and-sandbox`. read-only and workspace-write
+  // both cancel under every approval policy, because codex wants an interactive
+  // approver for MCP calls and exec has no channel to answer one.
+  //
+  // Safe for netcatty's model: the REAL guardrails (approval prompts, command
+  // blocklist, observer/confirm permission modes, session scope) are enforced by
+  // the injected netcatty MCP server on every remote-host action — NOT by codex's
+  // local sandbox. claude blocks its built-in side-effect tools via
+  // disallowedTools and copilot is MCP-only; codex-sdk exposes no tool-disable
+  // switch, so the sandbox is the only lever and it has to be fully open for the
+  // MCP path to work at all.
+  const opts = { sandboxMode: "danger-full-access", approvalPolicy: "never", skipGitRepoCheck: true };
   if (cwd) opts.workingDirectory = cwd;
   if (model) {
     // The renderer encodes codex reasoning effort as "<modelId>/<effort>"
@@ -95,23 +110,40 @@ function extractMcpResultText(item) {
   return "";
 }
 
-/** Translate one Codex ThreadEvent into emitter calls. */
-function translateCodexEvent(event, emitter) {
+/**
+ * Translate one Codex ThreadEvent into emitter calls.
+ * `state` ({ reasoningOpen }) is threaded across events so reasoning summary
+ * items render as a single collapsible thinking panel that closes when the first
+ * non-reasoning content (assistant message / tool call) arrives.
+ */
+function translateCodexEvent(event, emitter, state) {
   if (!event || typeof event !== "object") return;
+  const st = state || {};
+  const closeReasoning = () => {
+    if (st.reasoningOpen) { emitter.reasoningEnd(); st.reasoningOpen = false; }
+  };
 
   if (event.type === "turn.failed") {
+    closeReasoning();
     emitter.emitError(event.error?.message || "Codex turn failed");
     return;
   }
   if (event.type !== "item.completed" || !event.item) return;
 
   const item = event.item;
+
+  // Reasoning summary items feed the thinking panel (reasoning-delta). codex
+  // emits them as complete items; keep the block open so consecutive summaries
+  // concatenate, and close it below as soon as real content follows.
+  if (item.type === "reasoning") {
+    if (item.text) { emitter.reasoning(item.text); st.reasoningOpen = true; }
+    return;
+  }
+
+  closeReasoning();
+
   switch (item.type) {
     case "agent_message":
-      if (item.text) emitter.text(item.text);
-      return;
-    case "reasoning":
-      // 🔬 SMOKE-CALIBRATE [codex-items]: confirm reasoning item field (text/summary).
       if (item.text) emitter.text(item.text);
       return;
     case "command_execution": {
@@ -161,11 +193,13 @@ async function runCodexTurn({
 
     const { events } = await thread.runStreamed(prompt, signal ? { signal } : undefined);
     let hasContent = false;
+    const state = { reasoningOpen: false };
     for await (const event of events) {
       if (signal?.aborted) break;
       if (event?.type === "item.completed") hasContent = true;
-      translateCodexEvent(event, emitter);
+      translateCodexEvent(event, emitter, state);
     }
+    if (state.reasoningOpen) emitter.reasoningEnd();
     threadId = thread.id || resumeThreadId || null;
     if (threadId) emitter.sessionId(threadId);
     if (!hasContent && !signal?.aborted) {

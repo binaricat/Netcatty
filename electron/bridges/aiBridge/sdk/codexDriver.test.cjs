@@ -8,6 +8,8 @@ function collector() {
     events,
     emitter: {
       text: (t) => events.push({ k: "text", t }),
+      reasoning: (d) => events.push({ k: "reasoning", d }),
+      reasoningEnd: () => events.push({ k: "reasoningEnd" }),
       toolCall: (n, a, id) => events.push({ k: "toolCall", n, a, id }),
       toolResult: (id, o, n) => events.push({ k: "toolResult", id, o, n }),
       status: (m) => events.push({ k: "status", m }),
@@ -21,6 +23,29 @@ test("agent_message item -> text event", () => {
   const { events, emitter } = collector();
   translateCodexEvent({ type: "item.completed", item: { type: "agent_message", text: "answer" } }, emitter);
   assert.deepEqual(events, [{ k: "text", t: "answer" }]);
+});
+
+test("reasoning item -> reasoning event (thinking panel), not plain text", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false };
+  translateCodexEvent({ type: "item.completed", item: { type: "reasoning", text: "**Plan**" } }, emitter, state);
+  assert.deepEqual(events, [{ k: "reasoning", d: "**Plan**" }]);
+  assert.equal(state.reasoningOpen, true);
+});
+
+test("reasoning then agent_message -> reasoning, reasoningEnd, text (block closes on content)", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false };
+  translateCodexEvent({ type: "item.completed", item: { type: "reasoning", text: "step 1" } }, emitter, state);
+  translateCodexEvent({ type: "item.completed", item: { type: "reasoning", text: "step 2" } }, emitter, state);
+  translateCodexEvent({ type: "item.completed", item: { type: "agent_message", text: "done" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "reasoning", d: "step 1" },
+    { k: "reasoning", d: "step 2" },
+    { k: "reasoningEnd" },
+    { k: "text", t: "done" },
+  ]);
+  assert.equal(state.reasoningOpen, false);
 });
 
 test("mcp_tool_call item -> toolCall + toolResult events (extracts content text)", () => {
@@ -87,15 +112,18 @@ test("buildCodexConstructorOptions sets path override + env + mcp config table",
   assert.deepEqual(opts.config.mcp_servers["netcatty-remote-hosts"], {
     command: "/abs/electron", args: ["/abs/server.cjs"], env: { NETCATTY_MCP_PORT: "1" },
   });
+  // request visible reasoning summaries (default "auto" emits none in exec mode)
+  assert.equal(opts.config.model_reasoning_summary, "concise");
 });
 
-test("buildCodexThreadOptions puts model + read-only sandbox in ThreadOptions", () => {
+test("buildCodexThreadOptions enables MCP via danger-full-access + approvalPolicy never", () => {
   // codex-sdk: model/sandboxMode/workingDirectory are ThreadOptions (startThread),
-  // not runStreamed TurnOptions.
+  // not runStreamed TurnOptions. Non-interactive `codex exec` cancels MCP tool
+  // calls under read-only/workspace-write (any approval policy); only the full
+  // bypass (danger-full-access + never) lets injected netcatty MCP tools run.
+  // Real guardrails live in the netcatty MCP server, not codex's local sandbox.
   const t = buildCodexThreadOptions({ cwd: "/tmp", model: "gpt-5.5" });
-  assert.equal(t.sandboxMode, "read-only");
-  // codex auto-approval (analog of claude bypassPermissions / copilot approveAll);
-  // delegates all gating to the netcatty MCP server. Maps to approval_policy="never".
+  assert.equal(t.sandboxMode, "danger-full-access");
   assert.equal(t.approvalPolicy, "never");
   assert.equal(t.workingDirectory, "/tmp");
   assert.equal(t.model, "gpt-5.5");
