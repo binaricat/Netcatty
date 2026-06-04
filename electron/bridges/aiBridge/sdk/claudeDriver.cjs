@@ -14,14 +14,29 @@
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const { ensureClaudeConfig } = require("./claudeConfig.cjs");
 
-// Built-in tools to block. Side-effect tools (so the agent must use netcatty
-// MCP) + tools needing UI we don't expose. Read-only built-ins are harmless
-// but we keep the agent on MCP for consistency; add/remove during smoke.
-const DISALLOWED_TOOLS = [
-  "Bash", "Edit", "Write", "NotebookEdit", "MultiEdit",
-  "WebFetch", "WebSearch",
-  "EnterPlanMode", "ExitPlanMode", "AskUserQuestion", "Skill",
+// Built-in tools that need interactive UI netcatty doesn't provide — they would
+// hang the turn waiting for a response, so they are blocked in BOTH modes.
+const UI_DISALLOWED_TOOLS = ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"];
+
+// Built-in side-effect / skill tools — blocked ONLY in MCP mode so the agent
+// acts exclusively through the injected netcatty MCP server. In Skills + CLI mode
+// the agent MUST drive its own shell (Bash) to run the netcatty CLI, so these
+// are allowed there; the CLI still routes remote-host actions through netcatty's
+// approval layer, and local access mirrors codex's Skills+CLI behavior.
+const MCP_MODE_DISALLOWED_TOOLS = [
+  "Bash", "Edit", "Write", "NotebookEdit", "MultiEdit", "WebFetch", "WebSearch", "Skill",
 ];
+
+/**
+ * Resolve disallowedTools for the active tool-integration mode.
+ * - "skills": only the UI-coupled blocks (so Bash + the netcatty CLI work).
+ * - "mcp" (default): the side-effect set too, forcing the agent onto netcatty MCP.
+ */
+function claudeDisallowedTools(toolIntegrationMode) {
+  return toolIntegrationMode === "skills"
+    ? [...UI_DISALLOWED_TOOLS]
+    : [...MCP_MODE_DISALLOWED_TOOLS, ...UI_DISALLOWED_TOOLS];
+}
 
 /** Convert neutral injectMcp configs into the SDK's keyed mcpServers map. */
 function toSdkMcpServers(injectedMcpServers) {
@@ -58,16 +73,18 @@ function parseClaudeSettings(settings) {
 
 function buildClaudeQueryOptions({
   cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings, resume,
+  toolIntegrationMode,
 }) {
   const options = {
     cwd,
     includePartialMessages: true,
     permissionMode: "bypassPermissions",
     // Required companion to permissionMode:'bypassPermissions' (the SDK rejects
-    // the bypass without it). Safe here: the agent's only side-effect tools are
-    // the injected netcatty MCP tools, which enforce approval/scope themselves.
+    // the bypass without it). Safe here: side-effects route through either the
+    // injected netcatty MCP tools (mcp mode) or the netcatty CLI (skills mode),
+    // both of which enforce approval/scope.
     allowDangerouslySkipPermissions: true,
-    disallowedTools: [...DISALLOWED_TOOLS],
+    disallowedTools: claudeDisallowedTools(toolIntegrationMode),
     mcpServers: toSdkMcpServers(injectedMcpServers),
     env,
     abortController,
@@ -251,6 +268,8 @@ module.exports = {
   runClaudeTurn,
   listClaudeModels,
   mapClaudeModels,
-  DISALLOWED_TOOLS,
+  claudeDisallowedTools,
+  UI_DISALLOWED_TOOLS,
+  MCP_MODE_DISALLOWED_TOOLS,
   toSdkMcpServers,
 };

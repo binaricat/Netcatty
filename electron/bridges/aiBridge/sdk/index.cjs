@@ -25,6 +25,7 @@ const DRIVER_REGISTRY = {
         injectedMcpServers: ctx.injectedMcpServers,
         settings: ctx.claudeSettings,
         resume: ctx.resumeSessionId,
+        toolIntegrationMode: ctx.toolIntegrationMode,
       });
       return claude.runClaudeTurn({ prompt: ctx.prompt, options, emitter: ctx.emitter });
     },

@@ -94,6 +94,21 @@ test("buildClaudeQueryOptions sets bypassPermissions, disallowedTools, mcp stdio
   assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
 });
 
+test("disallowedTools are mode-aware: Skills+CLI allows Bash/CLI, MCP blocks it", () => {
+  const skills = buildClaudeQueryOptions({ env: {}, toolIntegrationMode: "skills" });
+  // Bash + file/web tools allowed so the agent can drive the netcatty CLI
+  for (const t of ["Bash", "Edit", "Write", "WebFetch", "Skill"]) {
+    assert.ok(!skills.disallowedTools.includes(t), `expected ${t} ALLOWED in skills mode`);
+  }
+  // UI-coupled tools still blocked in BOTH modes (they would hang the turn)
+  for (const t of ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]) {
+    assert.ok(skills.disallowedTools.includes(t), `expected ${t} blocked in skills mode`);
+  }
+  // mcp mode (and the undefined default) still block the side-effect set
+  assert.ok(buildClaudeQueryOptions({ env: {}, toolIntegrationMode: "mcp" }).disallowedTools.includes("Bash"));
+  assert.ok(buildClaudeQueryOptions({ env: {} }).disallowedTools.includes("Bash"));
+});
+
 test("classifyClaudeSpawnError detects ENOENT 'native binary not found'", () => {
   const r = classifyClaudeSpawnError(new Error("Claude Code native binary not found at /abs/claude"));
   assert.equal(r.isSpawnEnoent, true);

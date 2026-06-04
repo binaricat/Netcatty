@@ -107,6 +107,7 @@ function registerSdkStreamHandlers(ctx) {
             binPath,
             injectedMcpServers,
             claudeSettings,
+            toolIntegrationMode: effectiveMode,
             emitter,
             signal: abortController.signal,
             abortController,
