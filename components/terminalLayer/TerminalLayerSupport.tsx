@@ -569,6 +569,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   isResizing,
   isComposeBarOpen,
   sessionLog,
+  sshDebugLogEnabled,
   onHotkeyAction,
   onTerminalFontSizeChange,
   onOpenSftp,
