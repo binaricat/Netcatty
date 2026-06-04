@@ -134,6 +134,47 @@ function extractMcpResultText(item) {
   return "";
 }
 
+function ensureStateSet(state, key) {
+  if (!state[key]) state[key] = new Set();
+  return state[key];
+}
+
+function ensureStateMap(state, key) {
+  if (!state[key]) state[key] = new Map();
+  return state[key];
+}
+
+function emitCodexReasoning(item, emitter, state) {
+  if (!item || typeof item.text !== "string" || !item.text) return;
+  const textById = ensureStateMap(state, "reasoningTextById");
+  const itemId = item.id || "__default_reasoning";
+  const previous = textById.get(itemId) || "";
+  const delta = item.text.startsWith(previous) ? item.text.slice(previous.length) : item.text;
+  textById.set(itemId, item.text);
+  if (delta) {
+    emitter.reasoning(delta);
+    state.reasoningOpen = true;
+  }
+}
+
+function emitCodexToolCallOnce(item, emitter, state, toolName, args) {
+  if (!item || !item.id) return false;
+  const emittedToolCalls = ensureStateSet(state, "emittedToolCalls");
+  if (emittedToolCalls.has(item.id)) return false;
+  emittedToolCalls.add(item.id);
+  emitter.toolCall(toolName, args || {}, item.id);
+  return true;
+}
+
+function emitCodexToolResultOnce(item, emitter, state, output, toolName) {
+  if (!item || !item.id) return false;
+  const emittedToolResults = ensureStateSet(state, "emittedToolResults");
+  if (emittedToolResults.has(item.id)) return false;
+  emittedToolResults.add(item.id);
+  emitter.toolResult(item.id, output || "", toolName);
+  return true;
+}
+
 /**
  * Translate one Codex ThreadEvent into emitter calls.
  * `state` ({ reasoningOpen }) is threaded across events so reasoning summary
@@ -152,15 +193,14 @@ function translateCodexEvent(event, emitter, state) {
     emitter.emitError(event.error?.message || "Codex turn failed");
     return;
   }
-  if (event.type !== "item.completed" || !event.item) return;
+  if (!["item.started", "item.updated", "item.completed"].includes(event.type) || !event.item) return;
 
   const item = event.item;
 
-  // Reasoning summary items feed the thinking panel (reasoning-delta). codex
-  // emits them as complete items; keep the block open so consecutive summaries
-  // concatenate, and close it below as soon as real content follows.
+  // Reasoning summary items feed the thinking panel. Codex may update the same
+  // item with cumulative text before completion, so emit only the new suffix.
   if (item.type === "reasoning") {
-    if (item.text) { emitter.reasoning(item.text); st.reasoningOpen = true; }
+    emitCodexReasoning(item, emitter, st);
     return;
   }
 
@@ -168,14 +208,14 @@ function translateCodexEvent(event, emitter, state) {
 
   switch (item.type) {
     case "agent_message":
-      if (item.text) emitter.text(item.text);
+      if (event.type === "item.completed" && item.text) emitter.text(item.text);
       return;
     case "command_execution": {
       // Calibrated against @openai/codex-sdk CommandExecutionItem (command +
       // aggregated_output).
-      emitter.toolCall("shell", { command: item.command || "" }, item.id);
-      if (item.aggregated_output) {
-        emitter.toolResult(item.id, item.aggregated_output, "shell");
+      emitCodexToolCallOnce(item, emitter, st, "shell", { command: item.command || "" });
+      if (event.type === "item.completed" && item.aggregated_output) {
+        emitCodexToolResultOnce(item, emitter, st, item.aggregated_output, "shell");
       }
       return;
     }
@@ -183,8 +223,10 @@ function translateCodexEvent(event, emitter, state) {
       // Calibrated against @openai/codex-sdk McpToolCallItem (tool + arguments;
       // result.content is an MCP ContentBlock[], errors carry .message).
       const toolName = item.tool || "mcp_tool";
-      emitter.toolCall(toolName, item.arguments || {}, item.id);
-      emitter.toolResult(item.id, extractMcpResultText(item), toolName);
+      emitCodexToolCallOnce(item, emitter, st, toolName, item.arguments || {});
+      if (event.type === "item.completed") {
+        emitCodexToolResultOnce(item, emitter, st, extractMcpResultText(item), toolName);
+      }
       return;
     }
     default:

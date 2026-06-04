@@ -49,6 +49,22 @@ test("reasoning then agent_message -> reasoning, reasoningEnd, text (block close
   assert.equal(state.reasoningOpen, false);
 });
 
+test("reasoning item updates stream only new thinking text", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false };
+  const item = { id: "r-1", type: "reasoning" };
+  translateCodexEvent({ type: "item.started", item: { ...item, text: "step 1" } }, emitter, state);
+  translateCodexEvent({ type: "item.updated", item: { ...item, text: "step 1\nstep 2" } }, emitter, state);
+  translateCodexEvent({ type: "item.completed", item: { ...item, text: "step 1\nstep 2" } }, emitter, state);
+  translateCodexEvent({ type: "item.completed", item: { type: "agent_message", text: "done" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "reasoning", d: "step 1" },
+    { k: "reasoning", d: "\nstep 2" },
+    { k: "reasoningEnd" },
+    { k: "text", t: "done" },
+  ]);
+});
+
 test("mcp_tool_call item -> toolCall + toolResult events (extracts content text)", () => {
   const { events, emitter } = collector();
   translateCodexEvent(
@@ -68,6 +84,53 @@ test("mcp_tool_call item -> toolCall + toolResult events (extracts content text)
   assert.equal(events[0].id, "i-1");
   assert.equal(events[0].n, "terminal_execute");
   assert.equal(events[1].o, "files");
+});
+
+test("mcp_tool_call streams start early and completes without duplicate tool cards", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false };
+  const item = {
+    type: "mcp_tool_call", id: "i-live",
+    server: "netcatty-remote-hosts", tool: "terminal_execute",
+    arguments: { command: "uptime" },
+  };
+  translateCodexEvent({ type: "item.started", item: { ...item, status: "in_progress" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "toolCall", n: "terminal_execute", a: { command: "uptime" }, id: "i-live" },
+  ]);
+  translateCodexEvent({ type: "item.updated", item: { ...item, status: "in_progress" } }, emitter, state);
+  translateCodexEvent(
+    {
+      type: "item.completed",
+      item: {
+        ...item,
+        result: { content: [{ type: "text", text: "up 1 day" }] },
+        status: "completed",
+      },
+    },
+    emitter,
+    state,
+  );
+  assert.deepEqual(events, [
+    { k: "toolCall", n: "terminal_execute", a: { command: "uptime" }, id: "i-live" },
+    { k: "toolResult", id: "i-live", o: "up 1 day", n: "terminal_execute" },
+  ]);
+});
+
+test("command_execution streams start early and completes without duplicate tool cards", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false };
+  const item = { type: "command_execution", id: "cmd-live", command: "pwd" };
+  translateCodexEvent({ type: "item.started", item: { ...item, status: "in_progress", aggregated_output: "" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "toolCall", n: "shell", a: { command: "pwd" }, id: "cmd-live" },
+  ]);
+  translateCodexEvent({ type: "item.updated", item: { ...item, status: "in_progress", aggregated_output: "/tmp" } }, emitter, state);
+  translateCodexEvent({ type: "item.completed", item: { ...item, status: "completed", aggregated_output: "/tmp\n" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "toolCall", n: "shell", a: { command: "pwd" }, id: "cmd-live" },
+    { k: "toolResult", id: "cmd-live", o: "/tmp\n", n: "shell" },
+  ]);
 });
 
 test("mcp_tool_call failure -> toolResult carries the error message", () => {
