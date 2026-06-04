@@ -38,9 +38,11 @@ export function useDiscoveredShells(): DiscoveredShell[] {
  * The value can be a discovered shell id (e.g., "wsl-ubuntu", "pwsh")
  * or a custom path/command (e.g., "/usr/local/bin/fish" or "fish").
  * `customArgs` are the user-configured launch args (e.g. ["--login", "-i"] for
- * msys2 bash) and only apply to a custom path — discovered shells carry their
- * own args. Returns { command, args } or null when discovery hasn't loaded yet
- * and the value might be a shell ID that can't be resolved yet.
+ * msys2 bash). When present, they take precedence over discovered shell defaults
+ * so custom commands like "bash" or "fish" can collide with discovered IDs
+ * without losing the user's explicit args. Returns { command, args } or null
+ * when discovery hasn't loaded yet and the value might be a shell ID that can't
+ * be resolved yet.
  */
 export function resolveShellSetting(
   localShell: string,
@@ -50,10 +52,11 @@ export function resolveShellSetting(
   if (!localShell) return null;
 
   // Try to match as a discovered shell id. Discovered shells provide their own
-  // args (e.g. WSL "-d Ubuntu"), so custom args are intentionally ignored here.
+  // args (e.g. WSL "-d Ubuntu"), unless the user explicitly configured custom
+  // args for a command/path that happens to share the same value as an ID.
   const shell = discoveredShells.find(s => s.id === localShell);
   if (shell) {
-    return { command: shell.command, args: shell.args };
+    return { command: shell.command, args: customArgs?.length ? customArgs : shell.args };
   }
 
   // No ID match — treat as a custom shell path/command and pass through.

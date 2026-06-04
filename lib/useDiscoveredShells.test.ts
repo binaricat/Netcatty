@@ -29,8 +29,14 @@ test("resolveShellSetting omits args when no custom args are given", () => {
   assert.equal(resolved?.args, undefined);
 });
 
-test("resolveShellSetting ignores custom args when value matches a discovered shell", () => {
-  const resolved = resolveShellSetting("git-bash", DISCOVERED, ["--should-be-ignored"]);
+test("resolveShellSetting uses discovered shell args when value matches and no custom args are given", () => {
+  const resolved = resolveShellSetting("git-bash", DISCOVERED);
   assert.equal(resolved?.command, "C:\\Git\\bin\\bash.exe");
   assert.deepEqual(resolved?.args, ["--login", "-i"]);
+});
+
+test("resolveShellSetting prefers explicit custom args when value collides with a discovered shell id", () => {
+  const resolved = resolveShellSetting("git-bash", DISCOVERED, ["--private"]);
+  assert.equal(resolved?.command, "C:\\Git\\bin\\bash.exe");
+  assert.deepEqual(resolved?.args, ["--private"]);
 });
