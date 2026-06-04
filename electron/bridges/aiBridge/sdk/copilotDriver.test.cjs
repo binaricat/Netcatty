@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent } = require("./copilotDriver.cjs");
+const { buildCopilotClientOptions, buildCopilotSessionOptions, extractCopilotContent, mapCopilotModels } = require("./copilotDriver.cjs");
 
 test("buildCopilotClientOptions pins cliPath", () => {
   const o = buildCopilotClientOptions({ cliPath: "/abs/copilot" });
@@ -29,4 +29,17 @@ test("extractCopilotContent reads response data.content", () => {
   assert.equal(extractCopilotContent({ data: { content: "hi" } }), "hi");
   assert.equal(extractCopilotContent(null), "");
   assert.equal(extractCopilotContent({ data: {} }), "");
+});
+
+test("mapCopilotModels maps {id,name} and drops entries without id", () => {
+  const out = mapCopilotModels([
+    { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
+    { id: "gpt-5" },
+    { name: "no id -> dropped" },
+  ]);
+  assert.deepEqual(out, [
+    { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
+    { id: "gpt-5", name: "gpt-5" },
+  ]);
+  assert.deepEqual(mapCopilotModels(undefined), []);
 });

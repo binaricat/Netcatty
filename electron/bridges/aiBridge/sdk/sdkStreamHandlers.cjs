@@ -7,6 +7,21 @@ const { createStreamEmitter } = require("./emit.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
+// Pre-flight model catalog cache. claude/copilot enumerate models via the SDK
+// (supportedModels / listModels); spawning the CLI is ~1-2s, so cache per backend
+// and always degrade to [] on error/timeout (the renderer keeps its presets).
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const MODEL_LIST_TIMEOUT_MS = 10000;
+const sdkModelCache = new Map();
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`list-models timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Map the renderer-supplied backend value (acpCommand field) to a registry key. */
 function resolveBackendKey(value) {
   const key = String(value || "").trim();
@@ -105,16 +120,40 @@ function registerSdkStreamHandlers(ctx) {
       },
     );
 
-    ipcMain.handle("netcatty:ai:acp:list-models", async (event, { acpCommand }) => {
+    ipcMain.handle("netcatty:ai:acp:list-models", async (event, payload) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
+      const { acpCommand, agentEnv: requestedAgentEnv } = payload || {};
       const backendKey = resolveBackendKey(acpCommand);
       if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${acpCommand}` };
-      // SDK backends don't expose a uniform pre-flight model catalog like ACP
-      // sessionInfo.configOptions did. The UI selects from its own per-backend
-      // model list (managedAgents) and passes `model` through to the SDK.
-      // Returning empty keeps the UI's existing "use configured model" path.
-      // 🔬 SMOKE-CALIBRATE: if a backend can cheaply enumerate models, wire it here.
-      return { ok: true, currentModelId: null, models: [] };
+
+      // claude/copilot enumerate models via the SDK; codex has no catalog (its
+      // driver returns []), so the renderer falls back to curated presets.
+      const cached = sdkModelCache.get(backendKey);
+      if (cached && Date.now() - cached.at < MODEL_CACHE_TTL_MS) {
+        return { ok: true, currentModelId: null, models: cached.models };
+      }
+      try {
+        const driver = getDriver(backendKey);
+        if (typeof driver.listModels !== "function") {
+          return { ok: true, currentModelId: null, models: [] };
+        }
+        const shellEnv = await getShellEnv();
+        const binPath = resolveCliFromPath(backendKey, shellEnv) || undefined;
+        const env = buildSdkAgentEnv({
+          shellEnv,
+          requestedAgentEnv: normalizeAgentEnv(requestedAgentEnv),
+          withCliDiscoveryEnv,
+          normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForAcp,
+        });
+        const raw = await withTimeout(driver.listModels({ binPath, env }), MODEL_LIST_TIMEOUT_MS);
+        const models = Array.isArray(raw) ? raw.filter((m) => m && m.id) : [];
+        sdkModelCache.set(backendKey, { at: Date.now(), models });
+        return { ok: true, currentModelId: null, models };
+      } catch (err) {
+        // Degrade to [] so the renderer keeps its curated presets (never empty).
+        console.error(`[sdk] list-models(${backendKey}) failed: ${err?.message || err}`);
+        return { ok: true, currentModelId: null, models: [] };
+      }
     });
 
     ipcMain.handle("netcatty:ai:acp:cancel", async (event, { requestId, chatSessionId }) => {

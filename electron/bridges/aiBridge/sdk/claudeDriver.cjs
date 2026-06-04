@@ -176,11 +176,54 @@ async function runClaudeTurn({ prompt, options, emitter, queryFn }) {
   }
 }
 
+/** Map claude-agent-sdk ModelInfo[] -> renderer preset shape {id,name,description}. */
+function mapClaudeModels(models) {
+  if (!Array.isArray(models)) return [];
+  return models
+    .filter((m) => m && m.value)
+    .map((m) => ({ id: m.value, name: m.displayName || m.value, description: m.description }));
+}
+
+/**
+ * Fetch available Claude models via the SDK control channel. Opens a streaming
+ * (idle) session so no turn is billed, asks supportedModels(), then tears down.
+ * Returns [] on failure (the caller falls back to the UI's curated presets).
+ * @param {object} args
+ * @param {string} [args.pathToClaudeCodeExecutable]
+ * @param {object} [args.env]
+ * @param {Function} [args.queryFn] inject query() for tests
+ */
+async function listClaudeModels({ pathToClaudeCodeExecutable, env, queryFn }) {
+  ensureClaudeConfig();
+  const query = queryFn || (await import("@anthropic-ai/claude-agent-sdk")).query;
+  const abortController = new AbortController();
+  // Idle streaming input: keeps the session open (init handshake completes)
+  // without sending a turn, so supportedModels() resolves; then we abort.
+  async function* idleInput() {
+    await new Promise((resolve) => {
+      if (abortController.signal.aborted) return resolve();
+      abortController.signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+  }
+  const q = query({
+    prompt: idleInput(),
+    options: { pathToClaudeCodeExecutable, env, abortController, includePartialMessages: false },
+  });
+  try {
+    return mapClaudeModels(await q.supportedModels());
+  } finally {
+    abortController.abort();
+    try { await q.return?.(undefined); } catch { /* best effort */ }
+  }
+}
+
 module.exports = {
   buildClaudeQueryOptions,
   translateClaudeMessage,
   classifyClaudeSpawnError,
   runClaudeTurn,
+  listClaudeModels,
+  mapClaudeModels,
   DISALLOWED_TOOLS,
   toSdkMcpServers,
 };

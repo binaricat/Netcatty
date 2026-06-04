@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateCodexEvent, buildCodexConstructorOptions, buildCodexTurnOptions } = require("./codexDriver.cjs");
+const { translateCodexEvent, buildCodexConstructorOptions, buildCodexThreadOptions } = require("./codexDriver.cjs");
 
 function collector() {
   const events = [];
@@ -89,9 +89,12 @@ test("buildCodexConstructorOptions sets path override + env + mcp config table",
   });
 });
 
-test("buildCodexTurnOptions enforces read-only sandbox", () => {
-  const t = buildCodexTurnOptions({ cwd: "/tmp", model: "gpt-5.1-codex" });
-  assert.equal(t.sandbox, "read-only");
-  assert.equal(t.cwd, "/tmp");
+test("buildCodexThreadOptions puts model + read-only sandbox in ThreadOptions", () => {
+  // codex-sdk: model/sandboxMode/workingDirectory are ThreadOptions (startThread),
+  // not runStreamed TurnOptions.
+  const t = buildCodexThreadOptions({ cwd: "/tmp", model: "gpt-5.1-codex" });
+  assert.equal(t.sandboxMode, "read-only");
+  assert.equal(t.workingDirectory, "/tmp");
   assert.equal(t.model, "gpt-5.1-codex");
+  assert.equal(t.skipGitRepoCheck, true);
 });

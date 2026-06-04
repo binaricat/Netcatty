@@ -16,3 +16,10 @@ test("getDriver returns a driver with runTurn", () => {
 test("getDriver throws on unknown backend", () => {
   assert.throws(() => getDriver("gemini"), /No SDK driver registered for backend: gemini/);
 });
+
+test("claude/copilot/codex drivers expose listModels; codex returns [] (no catalog)", async () => {
+  for (const key of ["claude", "codex", "copilot"]) {
+    assert.equal(typeof getDriver(key).listModels, "function", `${key} must expose listModels`);
+  }
+  assert.deepEqual(await getDriver("codex").listModels({}), []);
+});

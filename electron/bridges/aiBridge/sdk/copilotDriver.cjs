@@ -120,10 +120,43 @@ async function runCopilotTurn({ prompt, clientOptions, sessionOptions, emitter, 
   }
 }
 
+/** Map copilot-sdk ModelInfo[] -> renderer preset shape {id,name}. */
+function mapCopilotModels(models) {
+  if (!Array.isArray(models)) return [];
+  return models
+    .filter((m) => m && m.id)
+    .map((m) => ({ id: m.id, name: m.name || m.id }));
+}
+
+/**
+ * Fetch available Copilot models via client.start() + client.listModels().
+ * Returns [] on failure (the caller falls back to the UI's curated presets).
+ * @param {object} args
+ * @param {string} [args.cliPath]
+ * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
+ */
+async function listCopilotModels({ cliPath, sdkModule }) {
+  const sdk = sdkModule || (await import("@github/copilot-sdk"));
+  const { CopilotClient, RuntimeConnection } = sdk;
+  const clientOptions = { useLoggedInUser: true };
+  if (cliPath && RuntimeConnection?.forStdio) {
+    clientOptions.connection = RuntimeConnection.forStdio({ path: cliPath });
+  }
+  const client = new CopilotClient(clientOptions);
+  try {
+    await client.start();
+    return mapCopilotModels(await client.listModels());
+  } finally {
+    try { await client.stop(); } catch { /* best effort */ }
+  }
+}
+
 module.exports = {
   buildCopilotClientOptions,
   buildCopilotSessionOptions,
   toCopilotMcpServers,
   extractCopilotContent,
   runCopilotTurn,
+  listCopilotModels,
+  mapCopilotModels,
 };

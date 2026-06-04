@@ -26,6 +26,9 @@ const DRIVER_REGISTRY = {
       });
       return claude.runClaudeTurn({ prompt: ctx.prompt, options, emitter: ctx.emitter });
     },
+    async listModels(ctx) {
+      return claude.listClaudeModels({ pathToClaudeCodeExecutable: ctx.binPath, env: ctx.env });
+    },
   },
   codex: {
     async runTurn(ctx) {
@@ -36,17 +39,18 @@ const DRIVER_REGISTRY = {
         baseUrl: ctx.baseUrl,
         injectedMcpServers: ctx.injectedMcpServers,
       });
-      const turnOptions = codex.buildCodexTurnOptions({ cwd: ctx.cwd, model: ctx.model });
+      const threadOptions = codex.buildCodexThreadOptions({ cwd: ctx.cwd, model: ctx.model });
       return codex.runCodexTurn({
         prompt: ctx.prompt,
         constructorOptions,
-        turnOptions,
-        threadOptions: { workingDirectory: ctx.cwd, skipGitRepoCheck: true },
+        threadOptions,
         resumeThreadId: ctx.resumeSessionId,
         emitter: ctx.emitter,
         signal: ctx.signal,
       });
     },
+    // codex-sdk exposes no model catalog; the UI falls back to curated presets.
+    async listModels() { return []; },
   },
   copilot: {
     async runTurn(ctx) {
@@ -62,6 +66,9 @@ const DRIVER_REGISTRY = {
         emitter: ctx.emitter,
         signal: ctx.signal,
       });
+    },
+    async listModels(ctx) {
+      return copilot.listCopilotModels({ cliPath: ctx.binPath });
     },
   },
 };

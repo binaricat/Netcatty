@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError } = require("./claudeDriver.cjs");
+const { translateClaudeMessage, buildClaudeQueryOptions, classifyClaudeSpawnError, mapClaudeModels } = require("./claudeDriver.cjs");
 
 function collector() {
   const events = [];
@@ -102,4 +102,17 @@ test("classifyClaudeSpawnError detects ENOENT 'native binary not found'", () => 
 test("classifyClaudeSpawnError detects code:ENOENT", () => {
   const e = new Error("spawn failed"); e.code = "ENOENT"; e.syscall = "spawn";
   assert.equal(classifyClaudeSpawnError(e).isSpawnEnoent, true);
+});
+
+test("mapClaudeModels maps {value,displayName,description} -> {id,name,description} and drops value-less", () => {
+  const out = mapClaudeModels([
+    { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "Recommended" },
+    { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6" },
+    { displayName: "no value -> dropped" },
+  ]);
+  assert.deepEqual(out, [
+    { id: "claude-opus-4-6", name: "Opus 4.6", description: "Recommended" },
+    { id: "claude-sonnet-4-6", name: "Sonnet 4.6", description: undefined },
+  ]);
+  assert.deepEqual(mapClaudeModels(null), []);
 });

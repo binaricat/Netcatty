@@ -39,11 +39,15 @@ function buildCodexConstructorOptions({ codexPath, env, apiKey, injectedMcpServe
   return options;
 }
 
-function buildCodexTurnOptions({ cwd, model }) {
-  const turn = { sandbox: "read-only" };
-  if (cwd) turn.cwd = cwd;
-  if (model) turn.model = model;
-  return turn;
+function buildCodexThreadOptions({ cwd, model }) {
+  // model + sandboxMode + workingDirectory belong to ThreadOptions (startThread).
+  // runStreamed's TurnOptions only accepts { outputSchema, signal }, so passing
+  // them there (the previous behavior) silently dropped both model selection and
+  // the read-only sandbox.
+  const opts = { sandboxMode: "read-only", skipGitRepoCheck: true };
+  if (cwd) opts.workingDirectory = cwd;
+  if (model) opts.model = model;
+  return opts;
 }
 
 /**
@@ -110,25 +114,25 @@ function translateCodexEvent(event, emitter) {
  * @param {object} args
  * @param {string} args.prompt
  * @param {object} args.constructorOptions  buildCodexConstructorOptions(...)
- * @param {object} args.turnOptions         buildCodexTurnOptions(...)
- * @param {object} args.threadOptions       { workingDirectory, skipGitRepoCheck }
+ * @param {object} args.threadOptions       buildCodexThreadOptions(...) — model / sandboxMode / workingDirectory
  * @param {string} [args.resumeThreadId]
  * @param {object} args.emitter
  * @param {AbortSignal} [args.signal]
  * @param {Function} [args.CodexCtor]       inject Codex class (for tests)
  */
 async function runCodexTurn({
-  prompt, constructorOptions, turnOptions, threadOptions, resumeThreadId, emitter, signal, CodexCtor,
+  prompt, constructorOptions, threadOptions, resumeThreadId, emitter, signal, CodexCtor,
 }) {
   const Codex = CodexCtor || (await import("@openai/codex-sdk")).Codex;
   let threadId = null;
   try {
     const codex = new Codex(constructorOptions);
+    // ThreadOptions (model + read-only sandbox + cwd) must be applied on resume too.
     const thread = resumeThreadId
-      ? codex.resumeThread(resumeThreadId)
+      ? codex.resumeThread(resumeThreadId, threadOptions)
       : codex.startThread(threadOptions);
 
-    const { events } = await thread.runStreamed(prompt, turnOptions);
+    const { events } = await thread.runStreamed(prompt, signal ? { signal } : undefined);
     let hasContent = false;
     for await (const event of events) {
       if (signal?.aborted) break;
@@ -162,7 +166,7 @@ async function runCodexTurn({
 
 module.exports = {
   buildCodexConstructorOptions,
-  buildCodexTurnOptions,
+  buildCodexThreadOptions,
   translateCodexEvent,
   runCodexTurn,
   toCodexMcpConfig,
