@@ -100,6 +100,7 @@ export type CreateXTermRuntimeContext = {
   container: HTMLDivElement;
   host: Host;
   fontFamilyId: string;
+  resolvedFontFamily: string;
   fontSize: number;
   terminalTheme: TerminalTheme;
   terminalSettingsRef: RefObject<TerminalSettings | undefined>;
@@ -225,7 +226,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const hostFontId = resolveHostTerminalFontFamilyId(ctx.host, ctx.fontFamilyId) || "menlo";
   // Use fontStore for font lookup - guarantees non-empty result
   const fontObj = fontStore.getFontById(hostFontId);
-  const fontFamily = fontObj.family;
+  const fontFamily = ctx.resolvedFontFamily || fontObj.family;
 
   const effectiveFontSize = resolveHostTerminalFontSize(ctx.host, ctx.fontSize);
 

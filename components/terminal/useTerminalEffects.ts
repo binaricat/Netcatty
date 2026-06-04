@@ -178,6 +178,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           container: containerRef.current,
           host,
           fontFamilyId,
+          resolvedFontFamily,
           fontSize,
           terminalTheme: effectiveTheme,
           terminalSettingsRef,
