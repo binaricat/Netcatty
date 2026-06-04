@@ -4,7 +4,7 @@
  * Copilot backend driver — wraps @github/copilot-sdk.
  *
  * new CopilotClient({ connection: RuntimeConnection.forStdio({ path }), useLoggedInUser })
- *   .createSession({ model, onPermissionRequest: approveAll, mcpServers })
+ *   .createSession({ model, streaming, onPermissionRequest: approveAll, mcpServers })
  *   .sendAndWait({ prompt }) -> response.data.content
  *
  * - The bundled copilot runtime (@github/copilot) is excluded from packaging
@@ -52,6 +52,11 @@ function buildCopilotSessionOptions({ model, injectedMcpServers }) {
   // onPermissionRequest is wired in runCopilotTurn (it needs the SDK's approveAll).
   const options = {
     mcpServers: toCopilotMcpServers(injectedMcpServers),
+    // Copilot SDK enables assistant.message_delta / assistant.reasoning_delta
+    // from SessionConfig.streaming, not from MessageOptions. Without this the
+    // renderer only receives final assistant.message and the thinking panel never
+    // has live reasoning to render.
+    streaming: true,
   };
   if (model) options.model = model;
   return options;
@@ -71,8 +76,8 @@ function extractCopilotContent(response) {
   return (response && response.data && response.data.content) || "";
 }
 
-function buildCopilotMessageOptions({ prompt, attachments, streamDeltas = true }) {
-  const options = { prompt: String(prompt || ""), streamDeltas };
+function buildCopilotMessageOptions({ prompt, attachments }) {
+  const options = { prompt: String(prompt || "") };
   const nativeAttachments = [];
   for (const attachment of Array.isArray(attachments) ? attachments : []) {
     if (!attachment) continue;
@@ -117,9 +122,9 @@ function extractCopilotResultText(data) {
 /**
  * Translate one copilot SessionEvent into emitter calls — gives copilot the same
  * live tool-card + thinking-panel UX as codex/claude (it previously showed only
- * the final text). `state` ({ reasoningOpen, streamedText }) threads the thinking
- * block and records whether any delta streamed, so runCopilotTurn can fall back
- * to the final consolidated message when the runtime emits no deltas.
+ * the final text). `state` ({ reasoningOpen, streamedText, streamedReasoning })
+ * threads the thinking block and records whether any delta streamed, so
+ * runCopilotTurn can fall back to final consolidated events when needed.
  * Event shapes calibrated against @github/copilot-sdk generated session-events.
  */
 function translateCopilotEvent(event, emitter, state) {
@@ -131,7 +136,18 @@ function translateCopilotEvent(event, emitter, state) {
   };
   switch (event.type) {
     case "assistant.reasoning_delta":
-      if (data.deltaContent) { emitter.reasoning(data.deltaContent); st.reasoningOpen = true; }
+      if (data.deltaContent) {
+        emitter.reasoning(data.deltaContent);
+        st.reasoningOpen = true;
+        st.streamedReasoning = true;
+      }
+      return;
+    case "assistant.reasoning":
+      if (data.content && !st.streamedReasoning) {
+        emitter.reasoning(data.content);
+        st.reasoningOpen = true;
+        closeReasoning();
+      }
       return;
     case "assistant.message_delta":
       if (data.deltaContent) { closeReasoning(); emitter.text(data.deltaContent); st.streamedText = true; }
@@ -181,6 +197,7 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
     client = new CopilotClient(realClientOptions);
     const sessionConfig = {
       ...sessionOptions,
+      streaming: true,
       // Allow only MCP calls; netcatty MCP performs scope/approval/blocklist checks.
       onPermissionRequest: approveNetcattyMcpOnly,
     };
@@ -207,9 +224,9 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
 
     // Stream tool calls + text/reasoning deltas in real time (parity with
     // codex/claude — copilot previously showed only the final text). on() gets
-    // every SessionEvent; streamDeltas enables assistant.message_delta /
-    // assistant.reasoning_delta; tool.execution_* events arrive regardless.
-    const state = { reasoningOpen: false, streamedText: false };
+    // every SessionEvent; SessionConfig.streaming enables assistant.message_delta
+    // / assistant.reasoning_delta; tool.execution_* events arrive regardless.
+    const state = { reasoningOpen: false, streamedText: false, streamedReasoning: false };
     let unsubscribe = () => {};
     if (typeof session.on === "function") {
       unsubscribe = session.on((ev) => translateCopilotEvent(ev, emitter, state));
@@ -232,7 +249,7 @@ async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptio
     }
     let final;
     try {
-      final = await session.sendAndWait(buildCopilotMessageOptions({ prompt, attachments, streamDeltas: true }));
+      final = await session.sendAndWait(buildCopilotMessageOptions({ prompt, attachments }));
     } finally {
       try { unsubscribe(); } catch { /* best effort */ }
       removeAbortListener();

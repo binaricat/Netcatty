@@ -47,6 +47,7 @@ test("buildCopilotSessionOptions maps injected MCP to local stdio servers", () =
     }],
   });
   assert.equal(o.model, "claude-sonnet-4.5");
+  assert.equal(o.streaming, true);
   const srv = o.mcpServers["netcatty-remote-hosts"];
   assert.equal(srv.type, "stdio");
   assert.equal(srv.command, "/abs/electron");
@@ -86,7 +87,7 @@ test("buildCopilotMessageOptions sends pasted images/files as native attachments
     ],
   });
   assert.equal(opts.prompt, "inspect these");
-  assert.equal(opts.streamDeltas, true);
+  assert.equal("streamDeltas" in opts, false);
   assert.deepEqual(opts.attachments, [
     { type: "blob", data: "abc", mimeType: "image/png", displayName: "shot.png" },
     { type: "file", path: "/tmp/note.txt", displayName: "note.txt" },
@@ -151,6 +152,30 @@ test("translateCopilotEvent: deltas -> text/reasoning, tool start/complete -> to
   assert.equal(state.streamedText, true);
 });
 
+test("translateCopilotEvent: final reasoning is shown when no reasoning deltas streamed", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false, streamedText: false, streamedReasoning: false };
+  translateCopilotEvent({ type: "assistant.reasoning", data: { content: "complete thinking" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "reasoning", d: "complete thinking" },
+    { k: "reasoningEnd" },
+  ]);
+  assert.equal(state.reasoningOpen, false);
+});
+
+test("translateCopilotEvent: final reasoning is ignored after streamed reasoning deltas", () => {
+  const { events, emitter } = collector();
+  const state = { reasoningOpen: false, streamedText: false, streamedReasoning: false };
+  translateCopilotEvent({ type: "assistant.reasoning_delta", data: { deltaContent: "thinking" } }, emitter, state);
+  translateCopilotEvent({ type: "assistant.reasoning", data: { content: "thinking" } }, emitter, state);
+  translateCopilotEvent({ type: "assistant.message_delta", data: { deltaContent: "hello" } }, emitter, state);
+  assert.deepEqual(events, [
+    { k: "reasoning", d: "thinking" },
+    { k: "reasoningEnd" },
+    { k: "text", t: "hello" },
+  ]);
+});
+
 test("runCopilotTurn streams tool calls + deltas via session.on (no final-text dup)", async () => {
   const { events, emitter } = collector();
   const captured = {};
@@ -186,7 +211,8 @@ test("runCopilotTurn streams tool calls + deltas via session.on (no final-text d
     emitter,
     sdkModule,
   });
-  assert.equal(captured.opts.streamDeltas, true, "requested delta streaming");
+  assert.equal(captured.created.streaming, true, "requested session streaming");
+  assert.equal("streamDeltas" in captured.opts, false, "does not send unsupported message streaming flag");
   assert.deepEqual(captured.opts.attachments, [
     { type: "blob", data: "abc", mimeType: "image/png", displayName: "shot.png" },
   ]);
