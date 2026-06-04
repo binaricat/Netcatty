@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { streamText, stepCountIs, type ModelMessage } from 'ai';
+import { generateText, pruneMessages, streamText, stepCountIs, type ModelMessage } from 'ai';
 import type {
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -25,6 +25,15 @@ import type {
 } from '../../../infrastructure/ai/types';
 import { isWebSearchReady } from '../../../infrastructure/ai/types';
 import { buildSystemPrompt } from '../../../infrastructure/ai/cattyAgent/systemPrompt';
+import {
+  CONTEXT_COMPACTION_SYSTEM_PROMPT,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  DEFAULT_PROTECT_RECENT_MESSAGES,
+  formatMessagesForCompaction,
+  keepRecentContextMessages,
+  prepareContextCompaction,
+  resolveContextWindow,
+} from '../../../infrastructure/ai/contextCompaction';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
@@ -879,12 +888,51 @@ export function useAIChatStreaming({
         return;
       }
 
+      const prunedMessages = pruneMessages({
+        messages: sdkMessages,
+        reasoning: 'all',
+        toolCalls: 'before-last-4-messages',
+        emptyMessages: 'remove',
+      });
+
+      let messagesForStream = prunedMessages;
+      try {
+        const compacted = await prepareContextCompaction({
+          messages: prunedMessages,
+          contextWindow: resolveContextWindow({
+            provider: context.activeProvider,
+            modelId: activeModelId,
+            defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
+          }),
+          protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
+          summarize: async (messagesToSummarize) => {
+            updateLastMessage(sessionId, msg => ({ ...msg, statusText: 'Compacting earlier context...' }));
+            const result = await generateText({
+              model,
+              system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+              messages: [{
+                role: 'user',
+                content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(messagesToSummarize)}`,
+              }],
+              abortSignal: abortController.signal,
+              maxOutputTokens: 1600,
+              temperature: 0,
+            });
+            return result.text;
+          },
+        });
+        messagesForStream = compacted.messages;
+      } catch (err) {
+        console.warn('[Catty] Context compaction failed; falling back to recent messages only:', err);
+        messagesForStream = keepRecentContextMessages(prunedMessages, DEFAULT_PROTECT_RECENT_MESSAGES);
+      }
+
       await processCattyStream(
         sessionId,
         model,
         systemPrompt,
         tools,
-        sdkMessages,
+        messagesForStream,
         abortController.signal,
         assistantMsgId,
         context.activeProvider?.advancedParams,

@@ -78,6 +78,8 @@ export interface ProviderFormState {
   apiKey: string;
   baseURL: string;
   defaultModel: string;
+  contextWindow: string;
+  modelContextWindows: Record<string, number>;
   skipTLSVerify: boolean;
   advancedParams: ProviderAdvancedParams;
   style: ProviderStyle | "";  // "" means inherit-from-providerId
@@ -88,6 +90,7 @@ export interface ProviderFormState {
 export interface FetchedModel {
   id: string;
   name?: string;
+  contextWindow?: number;
 }
 
 export interface FetchBridge {

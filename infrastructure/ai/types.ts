@@ -36,6 +36,10 @@ export interface ProviderConfig {
   customHeaders?: Record<string, string>;
   enabled: boolean;
   skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)
+  /** User override for the model context window, in tokens. Wins over discovered model metadata. */
+  contextWindow?: number;
+  /** Context windows discovered from provider model-list metadata, keyed by model id. */
+  modelContextWindows?: Record<string, number>;
   advancedParams?: ProviderAdvancedParams;
 }
 

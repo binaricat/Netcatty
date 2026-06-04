@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X } from "lucide-react";
 import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
+import { sanitizeContextWindow } from "../../../../infrastructure/ai/contextCompaction";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
@@ -10,6 +11,7 @@ import type { BuiltinProviderIcon } from "./types";
 import { BUILTIN_PROVIDER_ICONS } from "./types";
 import type { ProviderFormState } from "./types";
 import { ModelSelector } from "./ModelSelector";
+import { mergeModelContextWindow } from "./modelMetadata";
 import { ProviderIconBadge } from "./ProviderIconBadge";
 
 const ICON_PIXEL_SIZE = 64;
@@ -60,6 +62,8 @@ export const ProviderConfigForm: React.FC<{
     apiKey: "",
     baseURL: provider.baseURL ?? PROVIDER_PRESETS[provider.providerId]?.defaultBaseURL ?? "",
     defaultModel: provider.defaultModel ?? "",
+    contextWindow: provider.contextWindow != null ? String(provider.contextWindow) : "",
+    modelContextWindows: provider.modelContextWindows ?? {},
     skipTLSVerify: provider.skipTLSVerify ?? false,
     advancedParams: provider.advancedParams ?? {},
     style: provider.style ?? "",
@@ -150,11 +154,16 @@ export const ProviderConfigForm: React.FC<{
 
     const trimmedName = form.name.trim();
     const defaultName = PROVIDER_PRESETS[provider.providerId]?.name ?? "";
+    const manualContextWindow = form.contextWindow.trim()
+      ? sanitizeContextWindow(form.contextWindow)
+      : undefined;
 
     const updates: Partial<ProviderConfig> = {
       name: trimmedName || defaultName,
       baseURL: form.baseURL || undefined,
       defaultModel: form.defaultModel || undefined,
+      contextWindow: manualContextWindow,
+      modelContextWindows: Object.keys(form.modelContextWindows).length > 0 ? form.modelContextWindows : undefined,
       skipTLSVerify: form.skipTLSVerify || undefined,
       advancedParams: Object.keys(cleanedParams).length > 0 ? cleanedParams : undefined,
       style: form.style || undefined,
@@ -339,6 +348,12 @@ export const ProviderConfigForm: React.FC<{
         <ModelSelector
           value={form.defaultModel}
           onChange={(val) => setForm((prev) => ({ ...prev, defaultModel: val }))}
+          onModelMetadata={(model) => {
+            setForm((prev) => ({
+              ...prev,
+              modelContextWindows: mergeModelContextWindow(prev.modelContextWindows, model.id, model.contextWindow) ?? prev.modelContextWindows,
+            }));
+          }}
           baseURL={form.baseURL || preset?.defaultBaseURL || ""}
           modelsEndpoint={preset?.modelsEndpoint}
           apiKey={form.apiKey}
@@ -346,6 +361,25 @@ export const ProviderConfigForm: React.FC<{
           style={resolvedStyle}
           skipTLSVerify={form.skipTLSVerify}
         />
+      </div>
+
+      {/* Context window */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.contextWindow')}</label>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={form.contextWindow}
+          onChange={(e) => setForm((prev) => ({ ...prev, contextWindow: e.target.value }))}
+          placeholder={
+            form.defaultModel && form.modelContextWindows[form.defaultModel]
+              ? String(form.modelContextWindows[form.defaultModel])
+              : t('ai.providers.contextWindow.placeholder')
+          }
+          className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.contextWindow.help')}</p>
       </div>
 
       {/* Skip TLS Verification */}

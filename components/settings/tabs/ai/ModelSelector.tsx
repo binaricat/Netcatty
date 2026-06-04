@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { cn } from "../../../../lib/utils";
 import type { FetchedModel } from "./types";
 import { getFetchBridge } from "./types";
+import { parseFetchedModels } from "./modelMetadata";
 
 export const ModelSelector: React.FC<{
   value: string;
@@ -21,7 +22,8 @@ export const ModelSelector: React.FC<{
   /** Optional protocol-family override; falls back to `providerId` via {@link resolveProviderStyle}. */
   style?: ProviderStyle;
   skipTLSVerify?: boolean;
-}> = ({ value, onChange, baseURL, modelsEndpoint, placeholder, apiKey, providerId, style, skipTLSVerify }) => {
+  onModelMetadata?: (model: FetchedModel) => void;
+}> = ({ value, onChange, baseURL, modelsEndpoint, placeholder, apiKey, providerId, style, skipTLSVerify, onModelMetadata }) => {
   const { t } = useI18n();
   const [models, setModels] = useState<FetchedModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -61,10 +63,7 @@ export const ModelSelector: React.FC<{
         return;
       }
       const parsed = JSON.parse(result.data);
-      const list: FetchedModel[] = (parsed.data || parsed.models || []).map((m: { id: string; name?: string }) => ({
-        id: m.id,
-        name: m.name,
-      }));
+      const list = parseFetchedModels(parsed);
       list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
       setModels(list);
       setHasFetched(true);
@@ -163,6 +162,7 @@ export const ModelSelector: React.FC<{
                   onMouseDown={(e) => {
                     e.preventDefault();
                     onChange(m.id);
+                    onModelMetadata?.(m);
                     setIsOpen(false);
                   }}
                   className={cn(
