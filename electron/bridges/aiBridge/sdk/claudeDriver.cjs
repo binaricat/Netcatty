@@ -213,7 +213,12 @@ function buildClaudePromptInput(prompt, attachments) {
  */
 async function runClaudeTurn({ prompt, attachments, options, emitter, queryFn }) {
   ensureClaudeConfig();
-  const query = queryFn || (await import("@anthropic-ai/claude-agent-sdk")).query;
+  let query = queryFn;
+  if (!query) {
+    let sdk;
+    try { sdk = await import("@anthropic-ai/claude-agent-sdk"); } catch { emitter.emitError("Claude Agent SDK not installed. Run: npm install @anthropic-ai/claude-agent-sdk"); return { sessionId: null }; }
+    query = sdk.query;
+  }
   const promptInput = buildClaudePromptInput(prompt, attachments);
 
   let sessionId = null;

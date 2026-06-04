@@ -163,7 +163,11 @@ function translateCopilotEvent(event, emitter, state) {
  * @param {object} [args.sdkModule] inject the @github/copilot-sdk module (for tests)
  */
 async function runCopilotTurn({ prompt, attachments, clientOptions, sessionOptions, resumeSessionId, emitter, signal, sdkModule }) {
-  const sdk = sdkModule || (await import("@github/copilot-sdk"));
+  let resolvedModule = sdkModule;
+  if (!resolvedModule) {
+    try { resolvedModule = await import("@github/copilot-sdk"); } catch { emitter.emitError("GitHub Copilot SDK not installed. Run: npm install @github/copilot-sdk"); return { sessionId: null }; }
+  }
+  const sdk = resolvedModule;
   const { CopilotClient, RuntimeConnection } = sdk;
 
   // Assemble the real CopilotClient options: point at the user's system CLI
