@@ -666,6 +666,22 @@ main();
           sshEnv: sshEnvironment?.env || {},
           sshOptions: sshEnvironment?.sshOptions || [],
           sshUserHost: sshEnvironment?.userHost || "",
+          etStatsAuth: {
+            hostname: options.hostname,
+            port: options.port || 22,
+            username: options.username,
+            password: options.password,
+            privateKey: options.privateKey,
+            passphrase: options.passphrase,
+            certificate: options.certificate,
+            keyId: options.keyId,
+            identityFilePaths: options.identityFilePaths,
+            legacyAlgorithms: options.legacyAlgorithms,
+            skipEcdsaHostKey: options.skipEcdsaHostKey,
+            algorithmOverrides: options.algorithmOverrides,
+            knownHosts: options.knownHosts,
+            hasJumpHost: Array.isArray(options.jumpHosts) && options.jumpHosts.length > 0,
+          },
           flushPendingData: null,
           lastIdlePrompt: "",
           lastIdlePromptAt: 0,
@@ -725,6 +741,7 @@ main();
 
         proc.onExit((evt) => {
           flushEt();
+          try { session.etStatsConn?.end(); } catch { /* ignore */ }
           cleanupSessionExternalAuthArtifacts(session);
           sessionLogStreamManager.stopStream(sessionId);
           sessions.delete(sessionId);

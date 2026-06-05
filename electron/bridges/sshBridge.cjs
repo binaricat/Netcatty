@@ -990,7 +990,7 @@ const { isHostKeyTrustedBySystem } = createSystemKnownHostsApi({
 });
 
 const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
-const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
+const { ensureMoshStatsConnection, ensureEtStatsConnection } = createMoshStatsConnectionApi({
   get sessions() { return sessions; },
   SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
   readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
@@ -1003,7 +1003,7 @@ const sessionOpsApi = createSessionOpsApi({
   get electronModule() { return electronModule; },
   fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
   getSessionDecoder, resetSessionDecoders, sessionEncodings, resolveLangFromCharset, safeSend,
-  quoteShellArg, log, ensureMoshStatsConnection,
+  quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
   execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
   getServerStats: undefined,
 });

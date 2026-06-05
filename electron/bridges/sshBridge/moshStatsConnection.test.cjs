@@ -147,6 +147,47 @@ test("connects with a stored password and adopts the connection on ready", async
   assert.equal(session.conn, undefined);
 });
 
+test("ET stats companion uses ET-specific session fields", async () => {
+  const { api, sessions } = makeApi();
+  const session = { etStatsAuth: { hostname: "example.com", port: 2222, username: "alice", password: "secret" } };
+  sessions.set("sid", session);
+
+  const pending = api.ensureEtStatsConnection(session, "sid");
+  await tick();
+  assert.equal(FakeSSHClient.instances.length, 1);
+  const client = FakeSSHClient.instances[0];
+  assert.equal(client.connectOpts.host, "example.com");
+  assert.equal(client.connectOpts.port, 2222);
+  assert.equal(client.connectOpts.username, "alice");
+  assert.equal(client.connectOpts.password, "secret");
+
+  client.emitReady();
+  const result = await pending;
+
+  assert.equal(result, client);
+  assert.equal(session.etStatsConn, client);
+  assert.equal(session.moshStatsConn, undefined);
+  assert.equal(session.conn, undefined);
+});
+
+test("ET stats companion caches permanent failures on ET-specific fields", async () => {
+  const { api, sessions } = makeApi();
+  const session = { etStatsAuth: { hostname: "h", username: "u", password: "p" } };
+  sessions.set("sid", session);
+
+  const p1 = api.ensureEtStatsConnection(session, "sid");
+  await tick();
+  const authErr = new Error("All configured authentication methods failed");
+  authErr.level = "client-authentication";
+  FakeSSHClient.instances[0].emitError(authErr);
+  assert.equal(await p1, null);
+  assert.equal(session.etStatsConnFailed, true);
+
+  const r2 = await api.ensureEtStatsConnection(session, "sid");
+  assert.equal(r2, null);
+  assert.equal(FakeSSHClient.instances.length, 1);
+});
+
 test("uses a parseable private key and passphrase, not password fallback only", async () => {
   const { api, sessions } = makeApi();
   const session = {

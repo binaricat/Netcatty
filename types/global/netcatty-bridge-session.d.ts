@@ -58,6 +58,9 @@ declare global {
       port?: number;
       etPort?: number;
       legacyAlgorithms?: boolean;
+      skipEcdsaHostKey?: boolean;
+      algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
+      knownHosts?: import("../../domain/models").KnownHost[];
       jumpHosts?: NetcattyJumpHost[];
       agentForwarding?: boolean;
       cols?: number;

@@ -497,23 +497,79 @@ function createSessionOpsApi(ctx) {
         return { success: false, error: 'Session not found or not connected' };
       }
 
-      if (session.type === "et") {
-        return { success: false, error: "Server stats are not supported for EternalTerminal sessions" };
+      const isEtSession = session.type === "et";
+      const etUsesExecFallback = isEtSession && session.etStatsAuth?.hasJumpHost;
+
+      function createBufferedExecStream(stdout = "", stderr = "") {
+        const stream = {
+          stderr: {
+            on(eventName, handler) {
+              if (eventName === "data" && stderr) {
+                setTimeout(() => handler(Buffer.from(stderr)), 0);
+              }
+              return this;
+            },
+          },
+          on(eventName, handler) {
+            if (eventName === "data" && stdout) {
+              setTimeout(() => handler(Buffer.from(stdout)), 0);
+            }
+            if (eventName === "close") {
+              setTimeout(() => handler(0), 0);
+            }
+            return this;
+          },
+          close() {},
+          destroy() {},
+        };
+        return stream;
       }
 
-      // Mosh sessions run over UDP via a local mosh-client PTY and have no
+      function createEtStatsExecConn(etSession) {
+        return {
+          exec(command, cb) {
+            execOnEtSession(etSession, command, 4500)
+              .then((result) => {
+                if (!result?.success) {
+                  cb(new Error(result?.error || result?.stderr || "ET stats command failed"));
+                  return;
+                }
+                cb(null, createBufferedExecStream(result.stdout || "", result.stderr || ""));
+              })
+              .catch((err) => {
+                cb(err instanceof Error ? err : new Error(String(err)));
+              });
+          },
+        };
+      }
+
+      // Mosh and direct ET sessions run through external PTYs and have no
       // ssh2 connection of their own. Lazily open a best-effort companion SSH
-      // connection (reusing the handshake credentials) so the host-info bar
-      // works for Mosh too (issue #1198). The companion lives on
-      // session.moshStatsConn — deliberately NOT session.conn — so it stays
-      // invisible to other bridges (getSessionPwd / SFTP / MCP exec) that key
-      // off session.conn as the interactive connection. This is a no-op for
-      // real SSH sessions, which already carry session.conn.
-      if (!session.conn && !session.moshStatsConn && typeof ensureMoshStatsConnection === 'function') {
-        await ensureMoshStatsConnection(session, sessionId, event?.sender);
+      // connection (reusing credentials) so the host-info bar can use the same
+      // stats parser as normal SSH. The companion lives on protocol-specific
+      // fields — never session.conn — so other bridges do not mistake it for
+      // the interactive connection. ET sessions with a jump host use the
+      // already-prepared OpenSSH environment via execOnEtSession instead.
+      if (!session.conn && !session.moshStatsConn && !session.etStatsConn) {
+        if (session.type === 'mosh' && typeof ensureMoshStatsConnection === 'function') {
+          await ensureMoshStatsConnection(session, sessionId, event?.sender);
+        } else if (
+          isEtSession &&
+          !etUsesExecFallback &&
+          !session.etStatsConnFailed &&
+          typeof ensureEtStatsConnection === 'function'
+        ) {
+          await ensureEtStatsConnection(session, sessionId, event?.sender);
+        }
       }
 
-      const conn = session.conn || session.moshStatsConn;
+      const canExecEtStats =
+        isEtSession &&
+        typeof execOnEtSession === "function" &&
+        !!session.sshUserHost &&
+        !session.externalAuthArtifactsCleaned;
+      const conn = session.conn || session.moshStatsConn || session.etStatsConn ||
+        (canExecEtStats ? createEtStatsExecConn(session) : null);
       if (!conn) {
         // A Mosh session can be marked "connected" (and start polling) from
         // the SSH bootstrap's visible output before swapToMoshClient stores

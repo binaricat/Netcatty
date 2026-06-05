@@ -254,3 +254,38 @@ test("startEt connects directly when no jump host is configured", async () => {
   assert.ok(captured);
   assert.equal(captured.jumpHosts, undefined);
 });
+
+test("startEt forwards known hosts and algorithm options for stats companion parity", async () => {
+  let captured: Record<string, unknown> | null = null;
+  const knownHosts = [{
+    id: "kh-1",
+    hostname: "target.example.test",
+    port: 22,
+    keyType: "ssh-ed25519",
+    fingerprint: "SHA256:trusted",
+    publicKey: "",
+    discoveredAt: 1,
+  }];
+  const algorithms = { cipher: ["aes128-cbc"] };
+  const backend = makeBackend((options) => { captured = options; });
+  const ctx = {
+    ...makeCtx(
+      {
+        legacyAlgorithms: true,
+        skipEcdsaHostKey: true,
+        algorithms,
+      },
+      [],
+      backend,
+    ),
+    knownHosts,
+  };
+
+  await createTerminalSessionStarters(ctx as never).startEt(term as never);
+
+  assert.ok(captured);
+  assert.equal(captured.knownHosts, knownHosts);
+  assert.equal(captured.legacyAlgorithms, true);
+  assert.equal(captured.skipEcdsaHostKey, true);
+  assert.equal(captured.algorithmOverrides, algorithms);
+});
