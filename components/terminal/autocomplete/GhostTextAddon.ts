@@ -50,6 +50,8 @@ function stringCellWidth(s: string): number {
 export class GhostTextAddon implements IDisposable {
   private term: XTerm | null = null;
   private ghostElement: HTMLSpanElement | null = null;
+  private hintElement: HTMLSpanElement | null = null;
+  private hintActive = false;
   private containerElement: HTMLDivElement | null = null;
   private currentSuggestion: string = "";
   private currentInput: string = "";
@@ -104,6 +106,23 @@ export class GhostTextAddon implements IDisposable {
 
     this.containerElement.appendChild(this.ghostElement);
 
+    // Read-only inline hint (e.g. sudo "press Enter to paste password"). Shown
+    // independently of autocomplete suggestions and never accepted as input.
+    this.hintElement = document.createElement("span");
+    this.hintElement.className = "xterm-inline-hint";
+    Object.assign(this.hintElement.style, {
+      position: "absolute",
+      opacity: "0.4",
+      pointerEvents: "none",
+      whiteSpace: "pre",
+      fontFamily: "inherit",
+      fontSize: "inherit",
+      lineHeight: "inherit",
+      color: "inherit",
+      display: "none",
+    });
+    this.containerElement.appendChild(this.hintElement);
+
     const screenEl = termElement.querySelector(".xterm-screen");
     if (screenEl) {
       screenEl.appendChild(this.containerElement);
@@ -113,6 +132,7 @@ export class GhostTextAddon implements IDisposable {
 
     this.disposables.push(
       term.onRender(() => {
+        if (this.hintActive) this.updateHintPosition();
         if (!this.isVisible()) return;
         // Fail-safe: if the device echoed input we didn't track (some bastion
         // hosts / network OS, #1013), hide rather than draw the ghost over
@@ -137,6 +157,7 @@ export class GhostTextAddon implements IDisposable {
         this.lastLeft = -1;
         this.lastTop = -1;
         if (this.isVisible()) this.updatePosition();
+        if (this.hintActive) this.updateHintPosition();
       }),
     );
   }
@@ -183,6 +204,40 @@ export class GhostTextAddon implements IDisposable {
     this.currentSuggestion = "";
     this.currentInput = "";
     this.anchorInputLength = 0;
+  }
+
+  /** Show a read-only inline hint at the cursor (e.g. a sudo password prompt
+   *  hint). Independent of autocomplete suggestions; never accepted as input. */
+  showHint(text: string): void {
+    if (this.disposed || !this.hintElement || !this.term) return;
+    this.hintActive = true;
+    this.hintElement.textContent = text;
+    this.hintElement.style.display = "block";
+    this.hintElement.style.fontSize = `${this.term.options.fontSize}px`;
+    this.hintElement.style.fontFamily = this.term.options.fontFamily || "inherit";
+    this.updateHintPosition();
+  }
+
+  hideHint(): void {
+    this.hintActive = false;
+    if (this.hintElement) {
+      this.hintElement.style.display = "none";
+      this.hintElement.textContent = "";
+    }
+  }
+
+  isHintActive(): boolean {
+    return this.hintActive;
+  }
+
+  private updateHintPosition(): void {
+    if (!this.term || !this.hintElement) return;
+    const dims = getXTermCellDimensions(this.term);
+    const buf = this.term.buffer.active;
+    this.hintElement.style.left = `${buf.cursorX * dims.width}px`;
+    this.hintElement.style.top = `${buf.cursorY * dims.height}px`;
+    this.hintElement.style.lineHeight = `${dims.height}px`;
+    this.hintElement.style.height = `${dims.height}px`;
   }
 
   /**
@@ -379,6 +434,7 @@ export class GhostTextAddon implements IDisposable {
     this.containerElement?.remove();
     this.containerElement = null;
     this.ghostElement = null;
+    this.hintElement = null;
     this.term = null;
   }
 }

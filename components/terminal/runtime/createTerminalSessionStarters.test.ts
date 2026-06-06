@@ -192,7 +192,6 @@ test("startSSH enables sudo autofill only with the host saved password", async (
       hostname: "target.example.test",
       username: "alice",
       password: "saved-secret",
-      terminalSudoAutoFill: true,
     },
     terminalBackend,
     sudoAutofillPassword: "saved-secret",
@@ -200,6 +199,7 @@ test("startSSH enables sudo autofill only with the host saved password", async (
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
   onData?.(armSudoPrompt(ctx.sudoAutofillRef.current));
+  ctx.sudoAutofillRef.current?.confirmFill();
 
   assert.deepEqual(sent, ["saved-secret\n"]);
 });
@@ -235,7 +235,6 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
       label: "Target",
       hostname: "target.example.test",
       username: "alice",
-      terminalSudoAutoFill: true,
     },
     pendingAuthRef: {
       current: {
@@ -286,7 +285,6 @@ test("startSSH prefers latest sudo autofill password state over pending saved au
       label: "Target",
       hostname: "target.example.test",
       username: "alice",
-      terminalSudoAutoFill: true,
     },
     pendingAuthRef: {
       current: {
@@ -297,7 +295,6 @@ test("startSSH prefers latest sudo autofill password state over pending saved au
       },
     },
     terminalBackend,
-    sudoAutofillEnabledRef: { current: true },
     sudoAutofillPasswordRef: { current: undefined },
   });
 
@@ -340,7 +337,6 @@ test("startSSH does not use merged group default passwords for sudo autofill", a
       hostname: "target.example.test",
       username: "alice",
       password: "group-default-secret",
-      terminalSudoAutoFill: true,
     },
     terminalBackend,
   });
@@ -383,7 +379,6 @@ test("startSSH uses the provided sudo autofill password", async () => {
       label: "Target",
       hostname: "target.example.test",
       username: "alice",
-      terminalSudoAutoFill: true,
     },
     terminalBackend,
     sudoAutofillPassword: "host-secret",
@@ -391,52 +386,9 @@ test("startSSH uses the provided sudo autofill password", async () => {
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
   onData?.(armSudoPrompt(ctx.sudoAutofillRef.current));
+  ctx.sudoAutofillRef.current?.confirmFill();
 
   assert.deepEqual(sent, ["host-secret\n"]);
-});
-
-test("startSSH leaves sudo autofill disabled when the host switch is off", async () => {
-  let onData: ((data: string) => void) | null = null;
-  const sent: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: (_id: string, cb: (data: string) => void) => {
-      onData = cb;
-      return noop;
-    },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
-  const ctx = createStarterContext({
-    host: {
-      id: "host-1",
-      label: "Target",
-      hostname: "target.example.test",
-      username: "alice",
-      password: "saved-secret",
-      terminalSudoAutoFill: false,
-    },
-    terminalBackend,
-  });
-
-  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
-  onData?.("[sudo] password for alice: ");
-
-  assert.deepEqual(sent, []);
 });
 
 test("startSerial captures direct connected banner in terminal log data", async () => {

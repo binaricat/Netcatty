@@ -133,6 +133,8 @@ export interface TerminalAutocompleteHandle {
   repositionPopup: () => void;
   closePopup: () => void;
   dispose: () => void;
+  showSudoHint: (text: string) => void;
+  hideSudoHint: () => void;
 }
 
 export { getCommandToRecordOnEnter } from "./terminalAutocompletePrompt";
@@ -910,6 +912,13 @@ export function useTerminalAutocomplete(
     ghostAddonRef.current = null;
   }, []);
 
+  const showSudoHint = useCallback((text: string) => {
+    ghostAddonRef.current?.showHint(text);
+  }, []);
+  const hideSudoHint = useCallback(() => {
+    ghostAddonRef.current?.hideHint();
+  }, []);
+
   useEffect(() => {
     return () => { dispose(); };
   }, [dispose]);
@@ -923,5 +932,7 @@ export function useTerminalAutocomplete(
     repositionPopup,
     closePopup,
     dispose,
+    showSudoHint,
+    hideSudoHint,
   };
 }

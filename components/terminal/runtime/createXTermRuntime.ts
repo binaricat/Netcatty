@@ -618,6 +618,23 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return true;
     }
 
+    // Sudo password hint: while a hint is pending, Enter confirms (paste the
+    // saved password + submit); any other visible key dismisses it so the user
+    // can type the password manually. Checked before autocomplete so Enter
+    // pastes the password instead of submitting an empty line.
+    const sudoAutofill = ctx.sudoAutofillRef?.current;
+    if (sudoAutofill?.isPromptPending()) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sudoAutofill.confirmFill();
+        return false;
+      }
+      if (e.key === "Escape" || e.key === "Backspace" || e.key.length === 1) {
+        sudoAutofill.cancelHint();
+        // fall through: let the keystroke be handled normally
+      }
+    }
+
     // Autocomplete key handler (must be checked before other handlers)
     if (ctx.onAutocompleteKeyEvent) {
       const consumed = ctx.onAutocompleteKeyEvent(e);

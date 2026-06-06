@@ -45,10 +45,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
   };
 
   const resolveSavedSudoAutofillPassword = (): string | undefined => {
-    const isSudoAutofillEnabled = ctx.sudoAutofillEnabledRef
-      ? ctx.sudoAutofillEnabledRef.current
-      : ctx.host.terminalSudoAutoFill;
-    if (!isSudoAutofillEnabled) return undefined;
     if (ctx.sudoAutofillPasswordRef) {
       return sanitizeCredentialValue(ctx.sudoAutofillPasswordRef.current);
     }

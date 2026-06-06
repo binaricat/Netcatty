@@ -103,9 +103,10 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
   assert.ok(writes[1].endsWith("] \x1b[22;39mfresh"));
 });
 
-test("attachSessionToTerminal auto-fills sudo password prompts when configured", () => {
+test("attachSessionToTerminal hints for sudo password prompts and fills on confirm", () => {
   const { term, writes } = createFakeTerm();
   const sent: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const hints: boolean[] = [];
   let onData: ((data: string) => void) | null = null;
   const sudoAutofillRef = { current: null };
   const ctx = {
@@ -120,6 +121,7 @@ test("attachSessionToTerminal auto-fills sudo password prompts when configured",
     serializeAddonRef: { current: null },
     pendingAuthRef: { current: null },
     sudoAutofillRef,
+    onSudoHint: (active: boolean) => hints.push(active),
     terminalBackend: {
       onSessionData: (_id: string, cb: (data: string) => void) => {
         onData = cb;
@@ -142,9 +144,16 @@ test("attachSessionToTerminal auto-fills sudo password prompts when configured",
   onData?.("sudo whoami\r\n");
   onData?.("[sudo] password for alice: ");
 
-  assert.deepEqual(sent, [{ id: "session-1", data: "secret\n", automated: true }]);
+  // Confirm-to-fill model: detecting the prompt raises a hint but never sends
+  // the password on its own.
+  assert.deepEqual(hints, [true]);
+  assert.deepEqual(sent, []);
   assert.equal(writes[0], "sudo whoami\r\n");
   assert.equal(writes[1], "[sudo] password for alice: ");
+
+  // The password is only written once the user confirms (presses Enter).
+  sudoAutofillRef.current?.confirmFill();
+  assert.deepEqual(sent, [{ id: "session-1", data: "secret\n", automated: true }]);
 });
 
 test("attachSessionToTerminal does not auto-fill unarmed sudo-looking output", () => {

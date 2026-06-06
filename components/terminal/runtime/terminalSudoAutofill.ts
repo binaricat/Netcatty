@@ -8,21 +8,14 @@ const OSC_PATTERN = new RegExp(
   "g",
 );
 // SGR conceal (parameter 8) hides the text it wraps. Refuse to treat concealed
-// output as a real prompt so a remote can't disguise a fake prompt and harvest
-// the autofilled password.
+// output as a real prompt so a remote can't disguise a fake prompt and trick the
+// user into revealing the password.
 const CONCEAL_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[(?:[0-9]+;)*8(?:;[0-9]+)*m`);
-// An explicit sudo prompt carries the sudo-specific "[sudo]" tag, so it is safe
-// to fill even if sudo's creds were warm and other output followed. The
-// "password for <user>" phrasing alone is NOT sudo-specific (psql emits
-// "Password for user alice:", for one), so we require the tag.
-const EXPLICIT_SUDO_PROMPT_PATTERN =
-  /(?:^|[\r\n])[^\r\n]*?\[sudo\][^\r\n]*?(?:password|密\s*码|口\s*令)[^\r\n:：]*[:：]\s*$/i;
-// A bare prompt is a line that on its own is just "Password:" / "密码:". PAM
-// emits this on some distros, so we accept it inside the arm window. We reject
-// PREFIXED prompts like "Enter password:" (mysql -p) or "user@host's password:"
-// (ssh): those belong to programs sudo launches, and filling them would leak the
-// sudo password to that program.
-const BARE_PASSWORD_PATTERN = /^\s*(?:password|密\s*码|口\s*令)\s*[:：]\s*$/i;
+// A line that ends in a colon and mentions password/密码/口令. Intentionally
+// broad: filling requires the user to confirm (press Enter), so over-matching
+// only shows a dismissable hint and never leaks a password to a child program.
+const SUDO_PROMPT_PATTERN =
+  /(?:^|[\r\n])[^\r\n]*?(?:\bpassword\b|密\s*码|口\s*令)[^\r\n:：]*[:：]\s*$/i;
 const SUDO_COMMAND_PATTERN = /^\s*(?:builtin\s+|command\s+)?sudo(?:\s|$)/;
 
 export const stripTerminalControlSequences = (data: string): string =>
@@ -30,10 +23,7 @@ export const stripTerminalControlSequences = (data: string): string =>
 
 export const isSudoPasswordPrompt = (data: string): boolean => {
   if (CONCEAL_PATTERN.test(data)) return false;
-  const text = stripTerminalControlSequences(data);
-  if (EXPLICIT_SUDO_PROMPT_PATTERN.test(text)) return true;
-  const lastLine = text.split(/[\r\n]/).pop() ?? text;
-  return BARE_PASSWORD_PATTERN.test(lastLine);
+  return SUDO_PROMPT_PATTERN.test(stripTerminalControlSequences(data));
 };
 
 export const shouldArmSudoPasswordAutofill = (command: string): boolean =>
@@ -42,6 +32,9 @@ export const shouldArmSudoPasswordAutofill = (command: string): boolean =>
 export type SudoPasswordAutofill = {
   armForCommand: (command: string) => void;
   handleOutput: (data: string) => string;
+  confirmFill: () => void;
+  cancelHint: () => void;
+  isPromptPending: () => boolean;
   updatePassword: (password?: string) => void;
 };
 
@@ -93,33 +86,43 @@ export const prepareSudoAutofillInput = (
   return data;
 };
 
+// Confirm-to-fill model: when a sudo command is armed and a password prompt is
+// seen, we DON'T send the password — we raise a hint (onHint(true)) so the UI can
+// offer "press Enter to paste". The password is only written when the user
+// confirms via confirmFill(). This makes over-broad detection safe: a misfire
+// just shows a dismissable hint instead of leaking the password.
 export const createSudoPasswordAutofill = (_options: {
   password?: string;
   write: (data: string) => void;
+  onHint?: (active: boolean) => void;
   now?: () => number;
 }): SudoPasswordAutofill => {
   const options = {
     now: () => Date.now(),
+    onHint: () => {},
     ..._options,
   };
   let password = options.password ?? "";
   const armWindowMs = 10_000;
   let tail = "";
   let armedUntil = Number.NEGATIVE_INFINITY;
+  let pending = false;
 
   const disarm = () => {
     armedUntil = Number.NEGATIVE_INFINITY;
     tail = "";
+    if (pending) {
+      pending = false;
+      options.onHint(false);
+    }
   };
 
   return {
     armForCommand: (command: string) => {
-      // Any non-sudo command (or no saved password) clears a pending arm, so a
-      // later command's own "Password:" prompt is never mistaken for sudo's.
-      if (!password || !shouldArmSudoPasswordAutofill(command)) {
-        disarm();
-        return;
-      }
+      // Clear any prior arm/hint first: a non-sudo command must not leave a
+      // stale hint that a later prompt could satisfy.
+      disarm();
+      if (!password || !shouldArmSudoPasswordAutofill(command)) return;
       armedUntil = options.now() + armWindowMs;
       tail = "";
     },
@@ -129,14 +132,25 @@ export const createSudoPasswordAutofill = (_options: {
         disarm();
         return data;
       }
+      if (pending) return data;
       tail = `${tail}${data}`.slice(-1024);
       const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
       if (isSudoPasswordPrompt(lastLine)) {
-        options.write(`${password}\n`);
-        disarm();
+        pending = true;
+        options.onHint(true);
       }
       return data;
     },
+    confirmFill: () => {
+      if (!pending) return;
+      options.write(`${password}\n`);
+      disarm();
+    },
+    cancelHint: () => {
+      if (!pending) return;
+      disarm();
+    },
+    isPromptPending: () => pending,
     updatePassword: (nextPassword?: string) => {
       password = nextPassword ?? "";
       if (!password) disarm();

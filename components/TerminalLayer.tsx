@@ -67,7 +67,6 @@ import {
 } from './terminalLayer/TerminalLayerSupport';
 
 const resolveHostSudoAutofillPassword = (host: Host): string | undefined => {
-  if (!host.terminalSudoAutoFill) return undefined;
   if (host.savePassword === false) return undefined;
   return sanitizeCredentialValue(host.password) || undefined;
 };

@@ -7,36 +7,27 @@ import {
   shouldArmSudoPasswordAutofill,
 } from "./terminalSudoAutofill";
 
-// --- isSudoPasswordPrompt ---
+// --- isSudoPasswordPrompt: relaxed — any password/密码/口令 line ending in a
+// colon. Over-matching is safe now because filling requires explicit confirm. ---
 
-test("isSudoPasswordPrompt detects the standard sudo password prompt", () => {
+test("isSudoPasswordPrompt detects sudo and PAM prompts", () => {
   assert.equal(isSudoPasswordPrompt("[sudo] password for alice: "), true);
-});
-
-test("isSudoPasswordPrompt detects a bare Password prompt", () => {
   assert.equal(isSudoPasswordPrompt("Password: "), true);
+  assert.equal(isSudoPasswordPrompt("password for alice: "), true);
+  assert.equal(isSudoPasswordPrompt("[sudo: [sudo] password for alice: ] Password: "), true);
 });
 
-test("isSudoPasswordPrompt detects localized sudo prompts", () => {
+test("isSudoPasswordPrompt detects localized prompts", () => {
   assert.equal(isSudoPasswordPrompt("[sudo] alice 的密码："), true);
   assert.equal(isSudoPasswordPrompt("密码："), true);
-});
-
-test("isSudoPasswordPrompt rejects sub-command password prompts", () => {
-  // sudo runs these; if sudo creds are cached it stays silent and the child
-  // asks for its OWN password. Filling the sudo password here would leak it.
-  assert.equal(isSudoPasswordPrompt("Enter password: "), false); // mysql -p
-  assert.equal(isSudoPasswordPrompt("alice@host's password: "), false); // ssh
-  assert.equal(isSudoPasswordPrompt("MySQL root password: "), false);
-  assert.equal(isSudoPasswordPrompt("Password for user alice: "), false); // psql/libpq
-  assert.equal(isSudoPasswordPrompt("password for alice: "), false); // no [sudo] tag
+  assert.equal(isSudoPasswordPrompt("请输入密码: "), true);
 });
 
 test("isSudoPasswordPrompt detects color-wrapped prompts", () => {
   assert.equal(isSudoPasswordPrompt("\x1b[32m[sudo] password for alice: \x1b[0m"), true);
 });
 
-test("isSudoPasswordPrompt ignores ordinary output mentioning password", () => {
+test("isSudoPasswordPrompt ignores ordinary output", () => {
   assert.equal(isSudoPasswordPrompt("try sudo if the password is required\n"), false);
   assert.equal(isSudoPasswordPrompt("the password was changed\n"), false);
   assert.equal(isSudoPasswordPrompt("sudo: command not found\n"), false);
@@ -46,222 +37,122 @@ test("isSudoPasswordPrompt refuses concealed prompt text", () => {
   assert.equal(isSudoPasswordPrompt("\x1b[8m[sudo] password for alice: \x1b[0m"), false);
 });
 
-test("isSudoPasswordPrompt detects the Ubuntu PAM-style prompt from #1281", () => {
-  // The trailing bare "Password:" is what PAM emits on Ubuntu; the leading
-  // "[sudo: ...]" wrapper was an artifact of the old -p injection.
-  assert.equal(isSudoPasswordPrompt("[sudo: [sudo] password for alice: ] Password: "), true);
-  assert.equal(isSudoPasswordPrompt("Password:"), true);
-});
+// --- arm + hint (confirm-to-fill) ---
 
-// --- arming + autofill ---
-
-test("sudo autofill ignores sudo-looking output until a sudo command is submitted", () => {
+const make = (password = "secret") => {
   const writes: string[] = [];
+  const hints: boolean[] = [];
   const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
+    password,
+    write: (d) => writes.push(d),
+    onHint: (active) => hints.push(active),
   });
+  return { autofill, writes, hints };
+};
 
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, []);
-});
-
-test("sudo autofill sends the password once after a submitted sudo command", () => {
-  const writes: string[] = [];
-  let now = 1_000;
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    now: () => now,
-    write: (data) => writes.push(data),
-  });
-
-  autofill.armForCommand("sudo -i");
-  autofill.handleOutput("[sudo] password for alice: ");
-  now += 500;
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, ["secret\n"]);
-});
-
-test("sudo autofill fills a bare Password prompt within the arm window", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  autofill.armForCommand("sudo apt update");
-  autofill.handleOutput("Password: ");
-
-  assert.deepEqual(writes, ["secret\n"]);
-});
-
-test("sudo autofill fills the Ubuntu PAM-style prompt from #1281", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  autofill.armForCommand("sudo -i");
-  autofill.handleOutput("[sudo: [sudo] password for alice: ] Password: ");
-
-  assert.deepEqual(writes, ["secret\n"]);
-});
-
-test("sudo autofill does not leak the password to sub-command prompts", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  // sudo creds warm: sudo stays silent, mysql asks for its own password.
-  autofill.armForCommand("sudo mysql -p");
-  autofill.handleOutput("Enter password: ");
-  assert.deepEqual(writes, []);
-
-  autofill.armForCommand("sudo ssh user@host");
-  autofill.handleOutput("user@host's password: ");
-  assert.deepEqual(writes, []);
-
-  autofill.armForCommand("sudo psql -h db -U alice");
-  autofill.handleOutput("Password for user alice: ");
-  assert.deepEqual(writes, []);
-});
-
-test("sudo autofill disarms when a later non-sudo command is submitted", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  // sudo did not prompt (cached creds / noninteractive); a later non-sudo
-  // command must clear the pending arm so its own Password: isn't filled.
-  autofill.armForCommand("sudo -n true");
-  autofill.armForCommand("mysql -p");
-  autofill.handleOutput("Password: ");
-
-  assert.deepEqual(writes, []);
-});
-
-test("sudo autofill keeps the prompt text in the output while filling", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
+test("shows a hint (not a fill) when a sudo prompt appears", () => {
+  const { autofill, writes, hints } = make();
   autofill.armForCommand("sudo whoami");
-
   assert.equal(
     autofill.handleOutput("[sudo] password for alice: "),
     "[sudo] password for alice: ",
   );
-  assert.deepEqual(writes, ["secret\n"]);
+  assert.deepEqual(hints, [true]);
+  assert.deepEqual(writes, []);
+  assert.equal(autofill.isPromptPending(), true);
 });
 
-test("sudo autofill passes ordinary output through unchanged without filling", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
+test("confirmFill writes the password and clears the hint", () => {
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  autofill.confirmFill();
+  assert.deepEqual(writes, ["secret\n"]);
+  assert.deepEqual(hints, [true, false]);
+  assert.equal(autofill.isPromptPending(), false);
+});
 
-  autofill.armForCommand("sudo apt update");
+test("cancelHint clears the hint without filling", () => {
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  autofill.cancelHint();
+  assert.deepEqual(writes, []);
+  assert.deepEqual(hints, [true, false]);
+  assert.equal(autofill.isPromptPending(), false);
+});
 
-  assert.equal(autofill.handleOutput("Reading package lists...\r\n"), "Reading package lists...\r\n");
+test("confirmFill does nothing when no prompt is pending", () => {
+  const { autofill, writes } = make();
+  autofill.confirmFill();
   assert.deepEqual(writes, []);
 });
 
-test("sudo autofill handles prompts split across chunks", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
+test("no hint until a sudo command is submitted", () => {
+  const { autofill, hints } = make();
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(hints, []);
+});
 
+test("no hint without a saved password", () => {
+  const { autofill, hints } = make("");
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(hints, []);
+});
+
+test("hint fires once across chunked prompt output", () => {
+  const { autofill, hints } = make();
   autofill.armForCommand("sudo apt update");
   autofill.handleOutput("[sudo] password ");
   autofill.handleOutput("for alice: ");
-
-  assert.deepEqual(writes, ["secret\n"]);
+  assert.deepEqual(hints, [true]);
 });
 
-test("sudo autofill stays armed through ordinary output before the prompt", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  autofill.armForCommand("sudo whoami");
-  autofill.handleOutput("sudo: a first-time notice\r\n");
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, ["secret\n"]);
+test("relaxed detection still only hints, never auto-fills child prompts", () => {
+  // sudo creds warm -> mysql asks for its own password. We may hint, but we
+  // must not send anything without an explicit confirm.
+  const { autofill, hints, writes } = make();
+  autofill.armForCommand("sudo mysql -p");
+  autofill.handleOutput("Enter password: ");
+  assert.deepEqual(hints, [true]);
+  assert.deepEqual(writes, []);
 });
 
-test("sudo autofill fills again for a second sudo command", () => {
+test("a later non-sudo command disarms the pending hint", () => {
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("sudo -n true");
+  autofill.handleOutput("Password: ");
+  assert.deepEqual(hints, [true]);
+  autofill.armForCommand("mysql -p"); // non-sudo command clears the arm
+  assert.deepEqual(hints, [true, false]);
+  autofill.confirmFill();
+  assert.deepEqual(writes, []);
+});
+
+test("an expired arm shows no hint", () => {
   const writes: string[] = [];
+  const hints: boolean[] = [];
   let now = 1_000;
   const autofill = createSudoPasswordAutofill({
     password: "secret",
     now: () => now,
-    write: (data) => writes.push(data),
+    write: (d) => writes.push(d),
+    onHint: (a) => hints.push(a),
   });
-
-  autofill.armForCommand("sudo first");
-  autofill.handleOutput("[sudo] password for alice: ");
-  now += 1_000;
-  autofill.armForCommand("sudo second");
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, ["secret\n", "secret\n"]);
-});
-
-test("sudo autofill ignores expired sudo command arms", () => {
-  const writes: string[] = [];
-  let now = 1_000;
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    now: () => now,
-    write: (data) => writes.push(data),
-  });
-
   autofill.armForCommand("sudo whoami");
   now += 31_000;
   autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, []);
+  assert.deepEqual(hints, []);
 });
 
-test("sudo autofill does not arm for non-sudo commands", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "secret",
-    write: (data) => writes.push(data),
-  });
-
-  autofill.armForCommand("echo '[sudo] password for alice:'");
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, []);
-});
-
-test("sudo autofill does nothing without a saved password", () => {
-  const writes: string[] = [];
-  const autofill = createSudoPasswordAutofill({
-    password: "",
-    write: (data) => writes.push(data),
-  });
-
+test("handleOutput passes data through unchanged", () => {
+  const { autofill } = make();
   autofill.armForCommand("sudo whoami");
-  autofill.handleOutput("[sudo] password for alice: ");
-
-  assert.deepEqual(writes, []);
+  assert.equal(
+    autofill.handleOutput("Reading package lists...\r\n"),
+    "Reading package lists...\r\n",
+  );
 });
 
 test("getSingleBracketedPasteLine extracts single-line bracketed paste content", () => {

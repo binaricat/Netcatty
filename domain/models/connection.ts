@@ -140,7 +140,6 @@ export interface Host {
   serialConfig?: SerialConfig;
   // SFTP specific configuration
   sftpSudo?: boolean; // Use sudo for SFTP operations (requires password)
-  terminalSudoAutoFill?: boolean; // Auto-fill sudo password prompts in terminal output
   sftpEncoding?: SftpFilenameEncoding; // Filename encoding for SFTP operations
   sftpBookmarks?: SftpBookmark[]; // Bookmarked SFTP paths for quick navigation
   // Managed source: if this host is managed by an external file (e.g., ~/.ssh/config)

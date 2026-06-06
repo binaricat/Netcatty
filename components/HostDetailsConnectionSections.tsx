@@ -1,7 +1,6 @@
 import React from "react";
 import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRound, MapPin, Plus, Shield, Trash2, User, X } from "lucide-react";
 import type { Host } from "../types";
-import { sanitizeCredentialValue } from "../domain/credentials";
 import { cn } from "../lib/utils";
 import { DistroAvatar } from "./DistroAvatar";
 import { Button } from "./ui/button";
@@ -47,10 +46,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   effectiveFormDistro,
   getDistroOptionLabel,
 }) => {
-  const terminalSudoAutoFillPassword = sanitizeCredentialValue(
-    form.savePassword === false ? undefined : form.password,
-  );
-
   return (
   <>
         <HostDetailsSection
@@ -330,21 +325,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
                   onCheckedChange={(val) => update("savePassword" as keyof Host, val)}
                 />
               </div>
-            )}
-
-            <HostDetailsSettingRow
-              label={t("hostDetails.terminal.sudoAutoFill")}
-              hint={t("hostDetails.terminal.sudoAutoFill.desc")}
-            >
-              <Switch
-                checked={form.terminalSudoAutoFill || false}
-                onCheckedChange={(val) => update("terminalSudoAutoFill", val)}
-              />
-            </HostDetailsSettingRow>
-            {form.terminalSudoAutoFill && !terminalSudoAutoFillPassword && (
-              <p className="text-xs text-amber-500">
-                {t("hostDetails.terminal.sudoAutoFill.passwordWarning")}
-              </p>
             )}
 
             {/* Local key file paths display */}

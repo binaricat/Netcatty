@@ -34,6 +34,8 @@ interface TerminalAutocompleteProps {
   inputRef: HandlerRef<(data: string) => void>;
   repositionRef: HandlerRef<() => void>;
   closeRef: HandlerRef<() => void>;
+  sudoHintRef: HandlerRef<(active: boolean) => void>;
+  sudoHintText: string;
 }
 
 /**
@@ -67,6 +69,8 @@ export function TerminalAutocomplete({
   inputRef,
   repositionRef,
   closeRef,
+  sudoHintRef,
+  sudoHintText,
 }: TerminalAutocompleteProps) {
   const autocomplete = useTerminalAutocomplete({
     termRef,
@@ -88,6 +92,10 @@ export function TerminalAutocomplete({
   inputRef.current = autocomplete.handleInput;
   repositionRef.current = autocomplete.repositionPopup;
   closeRef.current = autocomplete.closePopup;
+  sudoHintRef.current = (active: boolean) => {
+    if (active) autocomplete.showSudoHint(sudoHintText);
+    else autocomplete.hideSudoHint();
+  };
 
   const { state } = autocomplete;
   if (!visible || !state.popupVisible || state.suggestions.length === 0) {

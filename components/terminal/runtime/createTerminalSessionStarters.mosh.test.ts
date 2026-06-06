@@ -48,7 +48,6 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
       hostname: "target.example.test",
       username: "alice",
       password: "saved-secret",
-      terminalSudoAutoFill: true,
     },
     keys: [],
     identities: [],
@@ -86,6 +85,7 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
 
   await createTerminalSessionStarters(ctx as never).startMosh(term as never);
   onData?.(armSudoPrompt(sudoAutofillRef.current));
+  sudoAutofillRef.current?.confirmFill();
 
   assert.deepEqual(sent, ["saved-secret\n"]);
 });
