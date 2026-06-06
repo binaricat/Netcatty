@@ -743,34 +743,32 @@ if (!gotLock) {
     }
 
     const { ipcMain: _ipcMain } = electronModule;
-    // Target the main window explicitly. Falling back to
-    // BrowserWindow.getAllWindows()[0] could pick the tray panel or settings
-    // window, whose renderers don't listen for app:query-dirty-editors and
-    // would force the 5s timeout fallback to run on every quit.
-    const win = getWindowManager().getMainWindow();
-    // No main window, or it's hidden (tray-panel "Quit" path) — there's no
-    // visible UI to surface a "save first" toast on, so skip the round-trip
-    // and quit directly. The renderer's dirty-editor check exists to warn the
-    // user; if they can't see the warning, it's just dead 5-second wait.
-    //
-    // A minimized window is *not* hidden: the user has a taskbar/Dock entry
-    // and can restore in one click, so we still want to gate the quit on the
-    // dirty-editor check there. Some platforms report isVisible()=false on a
-    // minimized window (see globalShortcutBridge.cjs:478), so check both.
-    const isReachableByUser =
-      win && !win.isDestroyed?.() &&
-      (win.isVisible?.() || win.isMinimized?.());
-    if (!isReachableByUser) {
+    // Target all visible/recoverable main windows explicitly. Falling back to
+    // BrowserWindow.getAllWindows() could pick tray/settings windows whose
+    // renderers don't listen for app:query-dirty-editors and would force the
+    // timeout fallback on every quit.
+    const mainWindows = typeof getWindowManager().getMainWindows === "function"
+      ? getWindowManager().getMainWindows()
+      : [getWindowManager().getMainWindow()].filter(Boolean);
+
+    // No reachable main window (tray-panel "Quit" path) — there's no visible
+    // UI to surface a "save first" toast on, so skip the round-trip and quit
+    // directly. A minimized window is still reachable via taskbar/Dock.
+    const reachableMainWindows = mainWindows.filter((candidate) => (
+      candidate && !candidate.isDestroyed?.() &&
+      (candidate.isVisible?.() || candidate.isMinimized?.())
+    ));
+    if (reachableMainWindows.length === 0) {
       commitQuit();
       return;
     }
 
     // The renderer needs to be alive for the IPC roundtrip to make sense.
-    // A crashed renderer would silently drop the message and we'd wait
-    // 5 s for nothing — skip straight to quit (we can't ask the user
-    // anyway, the UI is gone).
-    const wc = win.webContents;
-    if (!wc || wc.isDestroyed?.() || wc.isCrashed?.()) {
+    // Crashed/dead renderers are skipped; there is no usable UI to warn from.
+    const queryableWebContents = reachableMainWindows
+      .map((candidate) => candidate.webContents)
+      .filter((wc) => wc && !wc.isDestroyed?.() && !wc.isCrashed?.());
+    if (queryableWebContents.length === 0) {
       commitQuit();
       return;
     }
@@ -783,9 +781,12 @@ if (!gotLock) {
     // through queryDirtyEditors so the request/reply/timeout handling stays in
     // one place. It fails open (resolves false) on timeout / dead renderer, so
     // a hung renderer can never strand the quit.
-    queryDirtyEditors(wc, QUIT_GUARD_TIMEOUT_MS, { ipcMain: _ipcMain })
-      .then((hasDirty) => {
+    Promise.all(
+      queryableWebContents.map((wc) => queryDirtyEditors(wc, QUIT_GUARD_TIMEOUT_MS, { ipcMain: _ipcMain })),
+    )
+      .then((dirtyResults) => {
         quitGuardChannelBusy = false;
+        const hasDirty = dirtyResults.some(Boolean);
         if (!hasDirty) {
           commitQuit();
           return;

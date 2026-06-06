@@ -4,11 +4,13 @@ const assert = require("node:assert/strict");
 const {
   buildAppMenu,
   isWindowUsable,
+  registerMainWindow,
   registerWindowHandlers,
   resolveSettingsWindowBounds,
   restoreWindowInputFocus,
   requestWindowCommandClose,
   shouldCloseWindowFromInput,
+  unregisterMainWindow,
 } = require("./windowManager.cjs");
 const { createMainWindowApi } = require("./windowManager/mainWindow.cjs");
 
@@ -205,6 +207,53 @@ test("buildAppMenu closes a non-app window directly when Cmd+W is invoked", () =
   });
 
   assert.deepEqual(calls, ["close"]);
+});
+
+test("buildAppMenu sends Cmd+W to any registered main window renderer", () => {
+  let capturedTemplate = null;
+  const Menu = {
+    buildFromTemplate(template) {
+      capturedTemplate = template;
+      return { template };
+    },
+  };
+
+  const calls = [];
+  const firstMainWindow = {
+    isDestroyed() { return false; },
+    on() {},
+    webContents: {
+      isDestroyed() { return false; },
+      send(channel) {
+        calls.push(`first:${channel}`);
+      },
+    },
+  };
+  const secondMainWindow = {
+    isDestroyed() { return false; },
+    on() {},
+    webContents: {
+      isDestroyed() { return false; },
+      send(channel) {
+        calls.push(`second:${channel}`);
+      },
+    },
+  };
+
+  registerMainWindow(firstMainWindow);
+  registerMainWindow(secondMainWindow);
+  try {
+    buildAppMenu(Menu, { name: "Netcatty" }, true);
+    const windowMenu = capturedTemplate.find((item) => item.label === "Window");
+    const closeItem = windowMenu.submenu.find((item) => item.accelerator === "CommandOrControl+W");
+
+    closeItem.click(null, firstMainWindow);
+
+    assert.deepEqual(calls, ["first:netcatty:window:command-close"]);
+  } finally {
+    unregisterMainWindow(firstMainWindow);
+    unregisterMainWindow(secondMainWindow);
+  }
 });
 
 test("requestWindowCommandClose sends command-close to renderer-capable windows", () => {
@@ -457,6 +506,119 @@ test("createWindow registers each main window as an independent app window", asy
 
   first.close();
   assert.deepEqual(unregistered, [first]);
+});
+
+test("each main window close saves its own state", async () => {
+  const closeHandlers = [];
+  const savedStates = [];
+
+  class BrowserWindowStub {
+    constructor() {
+      this.webContents = {
+        id: closeHandlers.length + 1,
+        on() {},
+        once() {},
+        isDestroyed() {
+          return false;
+        },
+        isCrashed() {
+          return false;
+        },
+        setIgnoreMenuShortcuts() {},
+        setWindowOpenHandler() {},
+        openDevTools() {},
+      };
+    }
+
+    on(channel, handler) {
+      if (channel === "close") closeHandlers.push(handler);
+    }
+    once() {}
+    isDestroyed() { return false; }
+    isMaximized() { return false; }
+    isFullScreen() { return false; }
+    getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
+    setBackgroundColor() {}
+    async loadURL() {}
+    close() {}
+  }
+
+  const api = createMainWindowApi({
+    mainWindow: null,
+    electronApp: null,
+    currentTheme: "light",
+    isQuitting: false,
+    pendingWindowStateWrite: null,
+    queuedWindowState: null,
+    windowStateCloseRequested: false,
+    DEFAULT_WINDOW_WIDTH: 1400,
+    DEFAULT_WINDOW_HEIGHT: 900,
+    MIN_WINDOW_WIDTH: 1100,
+    MIN_WINDOW_HEIGHT: 640,
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    THEME_COLORS: { light: { background: "#fff" } },
+    unhealthyWebContentsIds: new Set(),
+    rendererReadySeenByWebContentsId: new Set(),
+    __dirname,
+    URL,
+    require,
+    console,
+    setTimeout,
+    clearTimeout,
+    getGlobalShortcutBridge() {
+      return { handleWindowClose: () => false };
+    },
+    debugLog() {},
+    resolveFrontendBackgroundColor() { return null; },
+    loadWindowState() { return null; },
+    getDevRendererBaseUrl(url) { return url; },
+    getWindowBoundsState(win) {
+      return { windowId: win.webContents.id };
+    },
+    queueWindowStateSave() {},
+    saveWindowStateSync(state) {
+      savedStates.push(state);
+    },
+    setupDeferredShow() {},
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    createAppWindowOpenHandler() { return {}; },
+    attachOAuthLoadingOverlay() {},
+    registerWindowHandlers() {},
+    requestWindowCommandClose() {
+      return true;
+    },
+    shouldCloseWindowFromInput,
+    registerMainWindow() {},
+    unregisterMainWindow() {},
+    closeSettingsWindow() {},
+    hideSettingsWindow() {},
+  });
+
+  const electronModule = {
+    BrowserWindow: BrowserWindowStub,
+    nativeTheme: {},
+    app: {},
+    screen: {},
+    shell: {},
+    ipcMain: {},
+  };
+  const options = {
+    preload: "/tmp/preload.cjs",
+    devServerUrl: "http://localhost:5173",
+    isDev: true,
+    appIcon: null,
+    isMac: true,
+    electronDir: __dirname,
+  };
+
+  await api.createWindow(electronModule, options);
+  await api.createWindow(electronModule, options);
+
+  assert.equal(closeHandlers.length, 2);
+  closeHandlers[0]({});
+  closeHandlers[1]({});
+
+  assert.deepEqual(savedStates, [{ windowId: 1 }, { windowId: 2 }]);
 });
 
 test("window IPC handlers target the sender owner window", async () => {

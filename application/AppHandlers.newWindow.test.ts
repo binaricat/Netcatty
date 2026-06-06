@@ -70,3 +70,55 @@ test("copySessionToNewWindowWithCurrentShellImpl does nothing when the source se
 
   assert.equal(called, false);
 });
+
+test("copySessionToNewWindowWithCurrentShellImpl shows an error when Electron cannot open the window", async () => {
+  const errors: string[] = [];
+
+  const result = await copySessionToNewWindowWithCurrentShellImpl(
+    () => ({
+      classifyLocalShellType: () => "zsh",
+      discoveredShells: [],
+      netcattyBridge: {
+        get: () => ({
+          openSessionInNewWindow: async () => ({ success: false }),
+        }),
+      },
+      resolveShellSetting: () => ({ command: "/bin/zsh" }),
+      sessions: [sourceSession()],
+      terminalSettings: { localShell: "system-default" },
+      t: (key: string) => key === "tabs.copyTabToNewWindowFailed" ? "Could not open" : key,
+      toast: {
+        error: (message: string) => errors.push(message),
+      },
+    }),
+    "session-1",
+  );
+
+  assert.equal(result, false);
+  assert.deepEqual(errors, ["Could not open"]);
+});
+
+test("copySessionToNewWindowWithCurrentShellImpl shows an error when the bridge is unavailable", async () => {
+  const errors: string[] = [];
+
+  const result = await copySessionToNewWindowWithCurrentShellImpl(
+    () => ({
+      classifyLocalShellType: () => "zsh",
+      discoveredShells: [],
+      netcattyBridge: {
+        get: () => ({}),
+      },
+      resolveShellSetting: () => ({ command: "/bin/zsh" }),
+      sessions: [sourceSession()],
+      terminalSettings: { localShell: "system-default" },
+      t: (key: string) => key === "tabs.copyTabToNewWindowFailed" ? "Could not open" : key,
+      toast: {
+        error: (message: string) => errors.push(message),
+      },
+    }),
+    "session-1",
+  );
+
+  assert.equal(result, false);
+  assert.deepEqual(errors, ["Could not open"]);
+});

@@ -72,6 +72,11 @@ initializeFonts();
 initializeUIFonts();
 
 type SettingsState = ReturnType<typeof useSettingsState>;
+type OpenSessionInNewWindowPayload = {
+  title?: string;
+  sourceSession?: TerminalSession;
+  localShellType?: TerminalSession['shellType'];
+};
 
 const IS_DEV = import.meta.env.DEV;
 const HOTKEY_DEBUG =
@@ -100,6 +105,7 @@ function App({ settings }: { settings: SettingsState }) {
   const [keyboardInteractiveQueue, setKeyboardInteractiveQueue] = useState<KeyboardInteractiveRequest[]>([]);
   // Passphrase request queue for encrypted SSH keys
   const [passphraseQueue, setPassphraseQueue] = useState<PassphraseRequest[]>([]);
+  const [pendingNewWindowSession, setPendingNewWindowSession] = useState<OpenSessionInNewWindowPayload | null>(null);
 
   const {
     theme,
@@ -346,21 +352,34 @@ function App({ settings }: { settings: SettingsState }) {
     restoreOriginalTheme: reapplyCurrentTheme,
   });
 
+  const editorTabFileNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const tab of editorTabs) counts.set(tab.fileName, (counts.get(tab.fileName) ?? 0) + 1);
+    return counts;
+  }, [editorTabs]);
+
   const activeWindowTitle = useMemo(() => {
     if (activeTabId === 'vault') return 'Vaults';
     if (activeTabId === 'sftp') return 'SFTP';
     if (isEditorTabId(activeTabId)) {
       const editorTab = editorTabs.find((tab) => tab.id === fromEditorTabId(activeTabId));
-      return editorTab?.fileName || 'Editor';
+      if (!editorTab) return 'Editor';
+      const suffix = (editorTabFileNameCounts.get(editorTab.fileName) ?? 0) > 1
+        ? ` · ${editorTab.remotePath.split('/').slice(-2, -1)[0] || '/'}`
+        : '';
+      return `${editorTab.fileName}${suffix}`;
     }
     const workspace = workspaceById.get(activeTabId);
     if (workspace) return workspace.title;
     const session = sessionById.get(activeTabId);
     if (session) return session.hostLabel;
     const logView = logViews.find((item) => item.id === activeTabId);
-    if (logView) return `${t('tabs.logPrefix')} ${logView.log.hostLabel || logView.log.hostname || t('tabs.logLocal')}`;
+    if (logView) {
+      const isLocal = logView.log.protocol === 'local' || !logView.log.hostname;
+      return `${t('tabs.logPrefix')} ${isLocal ? t('tabs.logLocal') : logView.log.hostname}`;
+    }
     return 'Netcatty';
-  }, [activeTabId, editorTabs, logViews, sessionById, t, workspaceById]);
+  }, [activeTabId, editorTabFileNameCounts, editorTabs, logViews, sessionById, t, workspaceById]);
 
   useEffect(() => {
     void netcattyBridge.get()?.setWindowTitle?.(activeWindowTitle);
@@ -371,14 +390,17 @@ function App({ settings }: { settings: SettingsState }) {
     if (!bridge?.onOpenSessionInNewWindow) return undefined;
     return bridge.onOpenSessionInNewWindow((payload) => {
       if (!payload?.sourceSession) return;
-      createSessionFromCloneSource(payload.sourceSession, {
-        localShellType: payload.localShellType,
-      });
-      if (payload.title) {
-        void bridge.setWindowTitle?.(payload.title);
-      }
+      setPendingNewWindowSession(payload);
     });
-  }, [createSessionFromCloneSource]);
+  }, []);
+
+  useEffect(() => {
+    if (!isVaultInitialized || !pendingNewWindowSession?.sourceSession) return;
+    createSessionFromCloneSource(pendingNewWindowSession.sourceSession, {
+      localShellType: pendingNewWindowSession.localShellType,
+    });
+    setPendingNewWindowSession(null);
+  }, [createSessionFromCloneSource, isVaultInitialized, pendingNewWindowSession]);
 
   // Get port forwarding rules and import function
   const { rules: portForwardingRules, importRules: importPortForwardingRules, startTunnel, stopTunnel } = usePortForwardingState();
@@ -750,7 +772,7 @@ function App({ settings }: { settings: SettingsState }) {
 
   const copySessionWithCurrentShell = useCallback((sessionId: string) => { return copySessionWithCurrentShellImpl(() => ({ classifyLocalShellType, copySession, discoveredShells, resolveShellSetting, sessionId, terminalSettings }), sessionId); }, [copySession, terminalSettings, discoveredShells]);
 
-  const copySessionToNewWindowWithCurrentShell = useCallback((sessionId: string) => { return copySessionToNewWindowWithCurrentShellImpl(() => ({ classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings }), sessionId); }, [sessions, terminalSettings, discoveredShells]);
+  const copySessionToNewWindowWithCurrentShell = useCallback((sessionId: string) => { return copySessionToNewWindowWithCurrentShellImpl(() => ({ classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings, t, toast }), sessionId); }, [sessions, terminalSettings, discoveredShells, t]);
 
   const closeTabKeyStr = useMemo(() => {
     if (hotkeyScheme === 'disabled') return null;

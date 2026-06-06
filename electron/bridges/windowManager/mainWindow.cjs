@@ -177,6 +177,7 @@ function createMainWindowApi(ctx) {
       // Track window bounds for saving (use last non-maximized/non-fullscreen bounds)
       let lastNormalBounds = null;
       let saveStateTimer = null;
+      let thisWindowCloseRequested = false;
     
       const updateNormalBounds = () => {
         if (!win.isDestroyed() && !win.isMaximized() && !win.isFullScreen()) {
@@ -222,10 +223,10 @@ function createMainWindowApi(ctx) {
           return;
         }
     
-        if (windowStateCloseRequested) {
+        if (thisWindowCloseRequested) {
           return;
         }
-        windowStateCloseRequested = true;
+        thisWindowCloseRequested = true;
         if (saveStateTimer) clearTimeout(saveStateTimer);
         const state = getWindowBoundsState(win, lastNormalBounds);
         if (pendingWindowStateWrite) {

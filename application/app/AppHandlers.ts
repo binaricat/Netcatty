@@ -320,14 +320,17 @@ export function copySessionWithCurrentShellImpl(getCtx: AppContextGetter, sessio
 }
 
 export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string) {
-  const { classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings } = getCtx();
+  const { classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings, t, toast } = getCtx();
 {
     const sourceSession = sessions.find((session: { id: string }) => session.id === sessionId);
     if (!sourceSession) return false;
 
     const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
     const bridge = netcattyBridge.get();
-    if (!bridge?.openSessionInNewWindow) return false;
+    if (!bridge?.openSessionInNewWindow) {
+      toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
+      return false;
+    }
 
     const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
     const result = await bridge.openSessionInNewWindow({
@@ -335,7 +338,9 @@ export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppCont
       sourceSession,
       localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
     });
-    return result?.success === true;
+    const success = result?.success === true;
+    if (!success) toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
+    return success;
   }
 }
 
