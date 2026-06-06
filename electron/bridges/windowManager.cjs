@@ -28,6 +28,8 @@ const THEME_COLORS = {
 
 // State
 let mainWindow = null;
+const mainWindows = new Set();
+let lastFocusedMainWindow = null;
 let settingsWindow = null;
 let currentTheme = "light";
 let currentLanguage = "en";
@@ -268,7 +270,62 @@ function getWindowForIpcEvent(event) {
   } catch {
     // ignore
   }
-  return mainWindow;
+  return getMainWindow();
+}
+
+function pruneMainWindows() {
+  for (const win of Array.from(mainWindows)) {
+    if (!win || win.isDestroyed?.()) {
+      mainWindows.delete(win);
+      if (lastFocusedMainWindow === win) lastFocusedMainWindow = null;
+      if (mainWindow === win) mainWindow = null;
+    }
+  }
+}
+
+function getMainWindowList() {
+  pruneMainWindows();
+  return Array.from(mainWindows).filter((win) => isWindowUsable(win));
+}
+
+function rememberMainWindow(win) {
+  if (!win || win.isDestroyed?.()) return;
+  lastFocusedMainWindow = win;
+  mainWindow = win;
+}
+
+function registerMainWindow(win) {
+  if (!win || win.isDestroyed?.()) return;
+  mainWindows.add(win);
+  rememberMainWindow(win);
+  try {
+    win.on("focus", () => rememberMainWindow(win));
+  } catch {
+    // ignore
+  }
+}
+
+function unregisterMainWindow(win) {
+  if (!win) return;
+  mainWindows.delete(win);
+  if (lastFocusedMainWindow === win) lastFocusedMainWindow = null;
+  if (mainWindow === win) mainWindow = null;
+  const fallback = getMainWindowList().at(-1) || null;
+  if (fallback) rememberMainWindow(fallback);
+}
+
+function forEachMainWindow(callback) {
+  for (const win of getMainWindowList()) {
+    try {
+      callback(win);
+    } catch {
+      // ignore per-window broadcast failures
+    }
+  }
+}
+
+function getMainWindowCount() {
+  return getMainWindowList().length;
 }
 
 function closeBrowserWindow(win) {
@@ -295,9 +352,7 @@ function requestWindowCommandClose(win) {
 
 function broadcastLanguageChanged() {
   try {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents?.send?.("netcatty:languageChanged", currentLanguage);
-    }
+    forEachMainWindow((win) => win.webContents?.send?.("netcatty:languageChanged", currentLanguage));
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.webContents?.send?.("netcatty:languageChanged", currentLanguage);
     }
@@ -718,6 +773,9 @@ const mainWindowApi = createMainWindowApi({
   registerWindowHandlers,
   requestWindowCommandClose,
   shouldCloseWindowFromInput,
+  registerMainWindow,
+  unregisterMainWindow,
+  getMainWindowCount,
   closeSettingsWindow: (...args) => closeSettingsWindow(...args),
   hideSettingsWindow: (...args) => hideSettingsWindow(...args),
 });
@@ -841,6 +899,18 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     return restoreWindowInputFocus(win);
   });
 
+  ipcMain.handle("netcatty:window:setTitle", (event, title) => {
+    const win = getWindowForIpcEvent(event);
+    if (!win || win.isDestroyed()) return false;
+    const value = typeof title === "string" ? title.trim() : "";
+    try {
+      win.setTitle(value || "Netcatty");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
   ipcMain.handle("netcatty:setTheme", (_event, theme) => {
     currentTheme = theme;
     nativeTheme.themeSource = theme;
@@ -848,9 +918,7 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
       ? (nativeTheme?.shouldUseDarkColors ? "dark" : "light")
       : theme;
     const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setBackgroundColor(themeConfig.background);
-    }
+    forEachMainWindow((win) => win.setBackgroundColor(themeConfig.background));
     // Also update settings window if open
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.setBackgroundColor(themeConfig.background);
@@ -861,9 +929,7 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.handle("netcatty:setBackgroundColor", (_event, color) => {
     const normalized = normalizeBackgroundColor(color);
     if (!normalized) return false;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setBackgroundColor(normalized);
-    }
+    forEachMainWindow((win) => win.setBackgroundColor(normalized));
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.setBackgroundColor(normalized);
     }
@@ -913,9 +979,11 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     // Notify all windows except the sender
     // Check both isDestroyed() and webContents.isDestroyed() to handle HMR refresh
     try {
-      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed() && mainWindow.webContents.id !== senderId) {
-        mainWindow.webContents.send("netcatty:settings:changed", payload);
-      }
+      forEachMainWindow((win) => {
+        if (!win.webContents.isDestroyed() && win.webContents.id !== senderId) {
+          win.webContents.send("netcatty:settings:changed", payload);
+        }
+      });
       if (settingsWindow && !settingsWindow.isDestroyed() && !settingsWindow.webContents.isDestroyed() && settingsWindow.webContents.id !== senderId) {
         settingsWindow.webContents.send("netcatty:settings:changed", payload);
       }
@@ -1018,7 +1086,14 @@ function buildAppMenu(Menu, app, isMac, language = currentLanguage) {
  * Get the main window instance
  */
 function getMainWindow() {
-  return mainWindow;
+  const candidates = getMainWindowList();
+  if (lastFocusedMainWindow && candidates.includes(lastFocusedMainWindow)) {
+    return lastFocusedMainWindow;
+  }
+  if (mainWindow && candidates.includes(mainWindow)) {
+    return mainWindow;
+  }
+  return candidates.at(-1) || null;
 }
 
 /**
@@ -1035,6 +1110,8 @@ module.exports = {
   prewarmSettingsWindow,
   buildAppMenu,
   getMainWindow,
+  getMainWindows: getMainWindowList,
+  getMainWindowCount,
   getSettingsWindow,
   isWindowUsable,
   registerWindowHandlers,

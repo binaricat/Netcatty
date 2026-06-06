@@ -510,6 +510,7 @@ export const ruTerminalMessages: Messages = {
   'tabs.logPrefix': 'Журнал:',
   'tabs.logLocal': 'Локальный',
   'tabs.copyTab': 'Копировать вкладку',
+  'tabs.copyTabToNewWindow': 'Копировать вкладку в новое окно',
   'tabs.closeOthers': 'Закрыть остальные',
   'tabs.closeToRight': 'Закрыть вкладки справа',
   'tabs.closeAll': 'Закрыть все',

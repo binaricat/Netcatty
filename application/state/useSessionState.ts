@@ -820,6 +820,25 @@ export const useSessionState = () => {
     });
   }, [orphanSessions, workspaces, logViews, setActiveTabId]);
 
+  const createSessionFromCloneSource = useCallback((sourceSession: TerminalSession, options?: {
+    localShellType?: TerminalSession['shellType'];
+  }) => {
+    const newSessionId = crypto.randomUUID();
+    const newSession = createCopiedTerminalSessionClone(sourceSession, {
+      id: newSessionId,
+      localShellType: options?.localShellType,
+    });
+    delete newSession.workspaceId;
+
+    setSessions(prevSessions => {
+      if (prevSessions.some(session => session.id === newSessionId)) return prevSessions;
+      return [...prevSessions, newSession];
+    });
+    setTabOrder(prevTabOrder => [...prevTabOrder, newSessionId]);
+    setActiveTabId(newSessionId);
+    return newSessionId;
+  }, [setActiveTabId]);
+
   // Toggle broadcast mode for a workspace
   const toggleBroadcast = useCallback((workspaceId: string) => {
     setBroadcastWorkspaceIds(prev => {
@@ -946,5 +965,6 @@ export const useSessionState = () => {
     closeLogView,
     // Copy session
     copySession,
+    createSessionFromCloneSource,
   };
 };

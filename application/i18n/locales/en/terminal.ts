@@ -495,6 +495,7 @@ export const enTerminalMessages: Messages = {
   'tabs.logPrefix': 'Log:',
   'tabs.logLocal': 'Local',
   'tabs.copyTab': 'Copy Tab',
+  'tabs.copyTabToNewWindow': 'Copy Tab to New Window',
   'tabs.closeOthers': 'Close Others',
   'tabs.closeToRight': 'Close Tabs to the Right',
   'tabs.closeAll': 'Close All',

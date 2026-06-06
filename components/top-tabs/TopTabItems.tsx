@@ -396,6 +396,7 @@ interface SessionTopTabProps {
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onRenameSession: (sessionId: string) => void;
   onCopySession: (sessionId: string) => void;
+  onCopySessionToNewWindow: (sessionId: string) => void;
   renderBulkCloseItems: RenderBulkCloseItems;
   t: TranslateFn;
 }
@@ -417,6 +418,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   onCloseSession,
   onRenameSession,
   onCopySession,
+  onCopySessionToNewWindow,
   renderBulkCloseItems,
   t,
 }) => {
@@ -500,6 +502,9 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onCopySession(session.id)}>
           {t('tabs.copyTab')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onCopySessionToNewWindow(session.id)}>
+          {t('tabs.copyTabToNewWindow')}
         </ContextMenuItem>
         <ContextMenuItem className="text-destructive" onClick={() => onCloseSession(session.id)}>
           {t('common.close')}

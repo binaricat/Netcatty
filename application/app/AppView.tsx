@@ -33,7 +33,7 @@ type AppViewContext = Record<string, any>;
 export function AppView({ ctx }: { ctx: AppViewContext }) {
   const {
     accentMode, activeTabId, activeTerminalTheme, addShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
-    clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, copySessionWithCurrentShell,
+    clearAndRemoveSource, clearAndRemoveSources, clearUnsavedConnectionLogs, closeLogView, closeSession, closeTabsBatch, closeWorkspace, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell,
     connectionLogs, convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts, customAccent,
     customGroups, currentTerminalTheme, deleteConnectionLog, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme, groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDeleteHost,
@@ -121,6 +121,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onCloseSession={closeSession}
         onRenameSession={startSessionRename}
         onCopySession={copySessionWithCurrentShell}
+        onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
         onRenameWorkspace={startWorkspaceRename}
         onCloseWorkspace={closeWorkspace}
         onCloseLogView={closeLogView}

@@ -12,6 +12,17 @@ declare global {
     windowIsMaximized?(): Promise<boolean>;
     windowIsFullscreen?(): Promise<boolean>;
     windowFocus?(): Promise<boolean>;
+    setWindowTitle?(title: string): Promise<boolean>;
+    openSessionInNewWindow?(payload: {
+      title: string;
+      sourceSession: import("../../domain/models").TerminalSession;
+      localShellType?: import("../../domain/models").TerminalSession['shellType'];
+    }): Promise<{ success: boolean; error?: string }>;
+    onOpenSessionInNewWindow?(cb: (payload: {
+      title: string;
+      sourceSession: import("../../domain/models").TerminalSession;
+      localShellType?: import("../../domain/models").TerminalSession['shellType'];
+    }) => void): () => void;
     onWindowCommandCloseRequested?(cb: () => void): () => void;
     onWindowFullScreenChanged?(cb: (isFullscreen: boolean) => void): () => void;
 

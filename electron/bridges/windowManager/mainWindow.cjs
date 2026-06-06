@@ -72,7 +72,11 @@ function createMainWindowApi(ctx) {
         },
       });
     
-      mainWindow = win;
+      if (typeof registerMainWindow === "function") {
+        registerMainWindow(win);
+      } else {
+        mainWindow = win;
+      }
     
       // Clear reference when the main window is destroyed
       win.on('closed', () => {
@@ -84,7 +88,11 @@ function createMainWindowApi(ctx) {
         } catch {
           // ignore
         }
-        if (mainWindow === win) mainWindow = null;
+        if (typeof unregisterMainWindow === "function") {
+          unregisterMainWindow(win);
+        } else if (mainWindow === win) {
+          mainWindow = null;
+        }
       });
     
       // Log renderer crashes for diagnostics (skip normal clean exits)
@@ -204,7 +212,8 @@ function createMainWindowApi(ctx) {
       // Save state when window is about to close
       win.on("close", (event) => {
         // Check if close-to-tray is enabled
-        if (!isQuitting && getGlobalShortcutBridge().handleWindowClose(event, win)) {
+        const trackedMainWindowCount = typeof getMainWindowCount === "function" ? getMainWindowCount() : 1;
+        if (trackedMainWindowCount <= 1 && !isQuitting && getGlobalShortcutBridge().handleWindowClose(event, win)) {
           // Window was hidden to tray - save state before returning
           if (saveStateTimer) clearTimeout(saveStateTimer);
           const state = getWindowBoundsState(win, lastNormalBounds);

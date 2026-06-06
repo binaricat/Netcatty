@@ -41,6 +41,7 @@ interface TopTabsProps {
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onRenameSession: (sessionId: string) => void;
   onCopySession: (sessionId: string) => void;
+  onCopySessionToNewWindow: (sessionId: string) => void;
   onRenameWorkspace: (workspaceId: string) => void;
   onCloseWorkspace: (workspaceId: string) => void;
   onCloseLogView: (logViewId: string) => void;
@@ -73,6 +74,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onCloseSession,
   onRenameSession,
   onCopySession,
+  onCopySessionToNewWindow,
   onRenameWorkspace,
   onCloseWorkspace,
   onCloseLogView,
@@ -407,6 +409,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onCloseSession={onCloseSession}
             onRenameSession={onRenameSession}
             onCopySession={onCopySession}
+            onCopySessionToNewWindow={onCopySessionToNewWindow}
             renderBulkCloseItems={renderBulkCloseItems}
             t={t}
           />

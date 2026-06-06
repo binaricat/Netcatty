@@ -299,6 +299,48 @@ function createBridgeRegistrar(context) {
         return false;
       }
     });
+
+    ipcMain.handle("netcatty:window:openSession", async (_event, payload) => {
+      try {
+        if (!payload || typeof payload !== "object" || !payload.sourceSession) {
+          return { success: false, error: "Invalid session payload" };
+        }
+        const title = typeof payload.title === "string" && payload.title.trim()
+          ? payload.title.trim()
+          : "Netcatty";
+        const win = await getWindowManager().createWindow(electronModule, {
+          preload,
+          devServerUrl: effectiveDevServerUrl,
+          isDev,
+          appIcon,
+          isMac,
+          electronDir,
+          onRegisterBridge: registerBridges,
+        });
+        try {
+          win.setTitle(title);
+        } catch {
+          // ignore
+        }
+        try {
+          await getWindowManager().waitForRendererReady(win, { timeoutMs: 8000 });
+        } catch (err) {
+          console.warn("[Main] New session window did not report ready before payload send:", err?.message || err);
+        }
+        if (win.isDestroyed?.() || win.webContents?.isDestroyed?.()) {
+          return { success: false, error: "Window closed before session could open" };
+        }
+        win.webContents.send("netcatty:window:openSession", {
+          title,
+          sourceSession: payload.sourceSession,
+          localShellType: payload.localShellType,
+        });
+        return { success: true };
+      } catch (err) {
+        console.error("[Main] Failed to open session in new window:", err);
+        return { success: false, error: err?.message || "Failed to open new window" };
+      }
+    });
   
     // Cloud sync master password (stored in-memory + persisted via safeStorage)
     ipcMain.handle("netcatty:cloudSync:session:setPassword", async (_event, password) => {

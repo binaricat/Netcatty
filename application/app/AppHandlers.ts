@@ -319,6 +319,26 @@ export function copySessionWithCurrentShellImpl(getCtx: AppContextGetter, sessio
   }
 }
 
+export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppContextGetter, sessionId: string) {
+  const { classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings } = getCtx();
+{
+    const sourceSession = sessions.find((session: { id: string }) => session.id === sessionId);
+    if (!sourceSession) return false;
+
+    const resolved = resolveShellSetting(terminalSettings.localShell, discoveredShells);
+    const bridge = netcattyBridge.get();
+    if (!bridge?.openSessionInNewWindow) return false;
+
+    const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const result = await bridge.openSessionInNewWindow({
+      title: sourceSession.hostLabel,
+      sourceSession,
+      localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
+    });
+    return result?.success === true;
+  }
+}
+
 export async function confirmIfBusyLocalTerminalImpl(getCtx: AppContextGetter, sessionIds: string[]) {
   const { netcattyBridge, sessions, t } = getCtx();
 {

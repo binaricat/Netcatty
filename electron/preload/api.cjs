@@ -354,6 +354,13 @@ function createPreloadApi(ctx) {
   windowIsMaximized: () => ipcRenderer.invoke("netcatty:window:isMaximized"),
   windowIsFullscreen: () => ipcRenderer.invoke("netcatty:window:isFullscreen"),
   windowFocus: () => ipcRenderer.invoke("netcatty:window:focus"),
+  setWindowTitle: (title) => ipcRenderer.invoke("netcatty:window:setTitle", title),
+  openSessionInNewWindow: (payload) => ipcRenderer.invoke("netcatty:window:openSession", payload),
+  onOpenSessionInNewWindow: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:window:openSession", handler);
+    return () => ipcRenderer.removeListener("netcatty:window:openSession", handler);
+  },
   onWindowCommandCloseRequested: (cb) => {
     const handler = () => cb();
     ipcRenderer.on("netcatty:window:command-close", handler);

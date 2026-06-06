@@ -342,7 +342,124 @@ test("main window asks renderer to close tabs from macOS Command+W before-input-
   assert.equal(commandCloseRequests.length, 1);
 });
 
-test("window focus IPC handler focuses the sender owner window", async () => {
+test("createWindow registers each main window as an independent app window", async () => {
+  const registered = [];
+  const unregistered = [];
+
+  class BrowserWindowStub {
+    constructor() {
+      this.webContents = {
+        id: registered.length + 1,
+        on() {},
+        once() {},
+        isDestroyed() {
+          return false;
+        },
+        isCrashed() {
+          return false;
+        },
+        setIgnoreMenuShortcuts() {},
+        setWindowOpenHandler() {},
+        openDevTools() {},
+      };
+    }
+
+    on(channel, handler) {
+      if (channel === "closed") this._closedHandler = handler;
+    }
+    once() {}
+    isDestroyed() { return false; }
+    isMaximized() { return false; }
+    isFullScreen() { return false; }
+    getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
+    setBackgroundColor() {}
+    async loadURL() {}
+    close() {
+      this._closedHandler?.();
+    }
+  }
+
+  const api = createMainWindowApi({
+    mainWindow: null,
+    electronApp: null,
+    currentTheme: "light",
+    isQuitting: false,
+    pendingWindowStateWrite: null,
+    queuedWindowState: null,
+    windowStateCloseRequested: false,
+    DEFAULT_WINDOW_WIDTH: 1400,
+    DEFAULT_WINDOW_HEIGHT: 900,
+    MIN_WINDOW_WIDTH: 1100,
+    MIN_WINDOW_HEIGHT: 640,
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    THEME_COLORS: { light: { background: "#fff" } },
+    unhealthyWebContentsIds: new Set(),
+    rendererReadySeenByWebContentsId: new Set(),
+    __dirname,
+    URL,
+    require,
+    console,
+    setTimeout,
+    clearTimeout,
+    getGlobalShortcutBridge() {
+      return { handleWindowClose: () => false };
+    },
+    debugLog() {},
+    resolveFrontendBackgroundColor() { return null; },
+    loadWindowState() { return null; },
+    getDevRendererBaseUrl(url) { return url; },
+    getWindowBoundsState() { return null; },
+    queueWindowStateSave() {},
+    saveWindowStateSync() {},
+    setupDeferredShow() {},
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    createAppWindowOpenHandler() { return {}; },
+    attachOAuthLoadingOverlay() {},
+    registerWindowHandlers() {},
+    requestWindowCommandClose() {
+      return true;
+    },
+    shouldCloseWindowFromInput,
+    registerMainWindow(win) {
+      registered.push(win);
+    },
+    unregisterMainWindow(win) {
+      unregistered.push(win);
+    },
+    closeSettingsWindow() {},
+    hideSettingsWindow() {},
+  });
+
+  const electronModule = {
+    BrowserWindow: BrowserWindowStub,
+    nativeTheme: {},
+    app: {},
+    screen: {},
+    shell: {},
+    ipcMain: {},
+  };
+  const options = {
+    preload: "/tmp/preload.cjs",
+    devServerUrl: "http://localhost:5173",
+    isDev: true,
+    appIcon: null,
+    isMac: true,
+    electronDir: __dirname,
+  };
+
+  const first = await api.createWindow(electronModule, options);
+  const second = await api.createWindow(electronModule, options);
+
+  assert.equal(registered.length, 2);
+  assert.equal(registered[0], first);
+  assert.equal(registered[1], second);
+  assert.notEqual(first, second);
+
+  first.close();
+  assert.deepEqual(unregistered, [first]);
+});
+
+test("window IPC handlers target the sender owner window", async () => {
   const handlers = new Map();
   const ipcMain = {
     handle(channel, handler) {
@@ -353,9 +470,13 @@ test("window focus IPC handler focuses the sender owner window", async () => {
     },
   };
   const calls = [];
+  const titles = [];
   const win = {
     isDestroyed() {
       return false;
+    },
+    setTitle(title) {
+      titles.push(title);
     },
     focus() {
       calls.push("focus");
@@ -384,6 +505,17 @@ test("window focus IPC handler focuses the sender owner window", async () => {
 
   assert.equal(result, true);
   assert.deepEqual(calls, ["focus", "webContents.focus"]);
+  const titleResult = await handlers.get("netcatty:window:setTitle")({
+    sender: {
+      id: 202,
+      getOwnerBrowserWindow() {
+        return win;
+      },
+    },
+  }, "Prod SSH");
+
+  assert.equal(titleResult, true);
+  assert.deepEqual(titles, ["Prod SSH"]);
 });
 
 test("resolveSettingsWindowBounds centers settings on the requesting window display", () => {
