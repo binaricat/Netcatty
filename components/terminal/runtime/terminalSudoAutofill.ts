@@ -11,12 +11,17 @@ const OSC_PATTERN = new RegExp(
 // output as a real prompt so a remote can't disguise a fake prompt and harvest
 // the autofilled password.
 const CONCEAL_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[(?:[0-9]+;)*8(?:;[0-9]+)*m`);
-// A line that ends in a colon and mentions a password/密码/口令. We intentionally
-// do NOT require the word "sudo" on the line: PAM-driven distros (Ubuntu/Debian)
-// print a bare "Password:" that sudo's own prompt never reaches. Misfires are
-// bounded by the arm window — autofill only runs right after a sudo command.
-const SUDO_PROMPT_PATTERN =
-  /(?:^|[\r\n])[^\r\n]*?(?:\bpassword\b|密\s*码|口\s*令)[^\r\n:：]*[:：]\s*$/i;
+// An explicit sudo prompt carries a sudo-specific signal: the "[sudo]" tag or
+// the "password for <user>" phrasing. No other tool prompts this way, so it is
+// safe to fill even if sudo's creds were warm and other output followed.
+const EXPLICIT_SUDO_PROMPT_PATTERN =
+  /(?:^|[\r\n])[^\r\n]*?(?:\[sudo\][^\r\n]*?(?:password|密\s*码|口\s*令)|password\s+for\s+\S[^\r\n:：]*)[^\r\n:：]*[:：]\s*$/i;
+// A bare prompt is a line that on its own is just "Password:" / "密码:". PAM
+// emits this on some distros, so we accept it inside the arm window. We reject
+// PREFIXED prompts like "Enter password:" (mysql -p) or "user@host's password:"
+// (ssh): those belong to programs sudo launches, and filling them would leak the
+// sudo password to that program.
+const BARE_PASSWORD_PATTERN = /^\s*(?:password|密\s*码|口\s*令)\s*[:：]\s*$/i;
 const SUDO_COMMAND_PATTERN = /^\s*(?:builtin\s+|command\s+)?sudo(?:\s|$)/;
 
 export const stripTerminalControlSequences = (data: string): string =>
@@ -24,7 +29,10 @@ export const stripTerminalControlSequences = (data: string): string =>
 
 export const isSudoPasswordPrompt = (data: string): boolean => {
   if (CONCEAL_PATTERN.test(data)) return false;
-  return SUDO_PROMPT_PATTERN.test(stripTerminalControlSequences(data));
+  const text = stripTerminalControlSequences(data);
+  if (EXPLICIT_SUDO_PROMPT_PATTERN.test(text)) return true;
+  const lastLine = text.split(/[\r\n]/).pop() ?? text;
+  return BARE_PASSWORD_PATTERN.test(lastLine);
 };
 
 export const shouldArmSudoPasswordAutofill = (command: string): boolean =>

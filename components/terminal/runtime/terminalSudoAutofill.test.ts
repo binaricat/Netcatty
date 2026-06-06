@@ -18,9 +18,17 @@ test("isSudoPasswordPrompt detects a bare Password prompt", () => {
   assert.equal(isSudoPasswordPrompt("password for alice: "), true);
 });
 
-test("isSudoPasswordPrompt detects localized password prompts", () => {
+test("isSudoPasswordPrompt detects localized sudo prompts", () => {
   assert.equal(isSudoPasswordPrompt("[sudo] alice 的密码："), true);
-  assert.equal(isSudoPasswordPrompt("请输入密码: "), true);
+  assert.equal(isSudoPasswordPrompt("密码："), true);
+});
+
+test("isSudoPasswordPrompt rejects sub-command password prompts", () => {
+  // sudo runs these; if sudo creds are cached it stays silent and the child
+  // asks for its OWN password. Filling the sudo password here would leak it.
+  assert.equal(isSudoPasswordPrompt("Enter password: "), false); // mysql -p
+  assert.equal(isSudoPasswordPrompt("alice@host's password: "), false); // ssh
+  assert.equal(isSudoPasswordPrompt("MySQL root password: "), false);
 });
 
 test("isSudoPasswordPrompt detects color-wrapped prompts", () => {
@@ -99,6 +107,23 @@ test("sudo autofill fills the Ubuntu PAM-style prompt from #1281", () => {
   autofill.handleOutput("[sudo: [sudo] password for alice: ] Password: ");
 
   assert.deepEqual(writes, ["secret\n"]);
+});
+
+test("sudo autofill does not leak the password to sub-command prompts", () => {
+  const writes: string[] = [];
+  const autofill = createSudoPasswordAutofill({
+    password: "secret",
+    write: (data) => writes.push(data),
+  });
+
+  // sudo creds warm: sudo stays silent, mysql asks for its own password.
+  autofill.armForCommand("sudo mysql -p");
+  autofill.handleOutput("Enter password: ");
+  assert.deepEqual(writes, []);
+
+  autofill.armForCommand("sudo ssh user@host");
+  autofill.handleOutput("user@host's password: ");
+  assert.deepEqual(writes, []);
 });
 
 test("sudo autofill keeps the prompt text in the output while filling", () => {
