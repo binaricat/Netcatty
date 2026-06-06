@@ -297,7 +297,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (!pastedCommand || !shouldRecordShellHistory(pastedCommand[1], termRef.current)) {
       return data;
     }
-    return prepareSudoAutofillInput(data, null, sudoAutofillRef.current);
+    prepareSudoAutofillInput(data, null, sudoAutofillRef.current);
+    return data;
   }, []);
 
   // Terminal autocomplete — onAcceptText writes directly to session (no CustomEvent)

@@ -804,11 +804,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       const recordedCommand = recordTerminalCommandExecution(ctx.commandBufferRef.current, ctx, term);
       handledSubmittedInput = true;
       if (!willBroadcastInput) {
-        dataToWrite = prepareSudoAutofillInput(
-          data,
-          recordedCommand,
-          ctx.sudoAutofillRef?.current,
-        );
+        prepareSudoAutofillInput(data, recordedCommand, ctx.sudoAutofillRef?.current);
       }
     } else if (ctx.statusRef.current === "connected" && !willBroadcastInput) {
       const pastedCommand = getSinglePastedCommand(data);
@@ -820,13 +816,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         );
         handledSubmittedInput = true;
         if (recordedCommand) {
-          const submittedCommand = `${recordedCommand}${pastedCommand.lineEnding}`;
-          const preparedInput = prepareSudoAutofillInput(
-            submittedCommand,
+          prepareSudoAutofillInput(
+            `${recordedCommand}${pastedCommand.lineEnding}`,
             null,
             ctx.sudoAutofillRef?.current,
           );
-          dataToWrite = preparedInput === submittedCommand ? data : preparedInput;
         }
       }
     }

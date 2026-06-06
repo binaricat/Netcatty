@@ -11,15 +11,12 @@ import { pasteTextIntoTerminal } from "./terminalUserPaste";
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwAAAA";
 
-const prepareSudoPrompt = (
-  autofill: { prepareCommand: (command: string) => string | null } | null,
+const armSudoPrompt = (
+  autofill: { armForCommand: (command: string) => void } | null,
   command = "sudo whoami",
 ): string => {
-  const prepared = autofill?.prepareCommand(command);
-  assert.ok(prepared);
-  const prompt = prepared.match(/\s-p '([^']*)'/)?.[1];
-  assert.ok(prompt);
-  return prompt.replace("%p", "alice");
+  autofill?.armForCommand(command);
+  return "[sudo] password for alice: ";
 };
 
 const createTermStub = () => ({
@@ -202,7 +199,7 @@ test("startSSH enables sudo autofill only with the host saved password", async (
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  onData?.(prepareSudoPrompt(ctx.sudoAutofillRef.current));
+  onData?.(armSudoPrompt(ctx.sudoAutofillRef.current));
 
   assert.deepEqual(sent, ["saved-secret\n"]);
 });
@@ -252,7 +249,7 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  assert.equal(ctx.sudoAutofillRef.current?.prepareCommand("sudo whoami"), null);
+  ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
   onData?.("[sudo] password for alice: ");
 
   assert.deepEqual(sent, []);
@@ -305,7 +302,7 @@ test("startSSH prefers latest sudo autofill password state over pending saved au
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  assert.equal(ctx.sudoAutofillRef.current?.prepareCommand("sudo whoami"), null);
+  ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
   onData?.("[sudo] password for alice: ");
 
   assert.deepEqual(sent, []);
@@ -349,7 +346,7 @@ test("startSSH does not use merged group default passwords for sudo autofill", a
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  assert.equal(ctx.sudoAutofillRef.current?.prepareCommand("sudo whoami"), null);
+  ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
   onData?.("[sudo] password for alice: ");
 
   assert.deepEqual(sent, []);
@@ -393,7 +390,7 @@ test("startSSH uses the provided sudo autofill password", async () => {
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  onData?.(prepareSudoPrompt(ctx.sudoAutofillRef.current));
+  onData?.(armSudoPrompt(ctx.sudoAutofillRef.current));
 
   assert.deepEqual(sent, ["host-secret\n"]);
 });
@@ -436,7 +433,7 @@ test("startSSH leaves sudo autofill disabled when the host switch is off", async
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
-  assert.equal(ctx.sudoAutofillRef.current?.prepareCommand("sudo whoami"), null);
+  ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
   onData?.("[sudo] password for alice: ");
 
   assert.deepEqual(sent, []);

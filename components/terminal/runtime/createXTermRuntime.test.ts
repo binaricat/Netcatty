@@ -8,9 +8,6 @@ import {
 import { recordTerminalCommandExecution } from "./terminalCommandExecution";
 import { createPromptLineBreakState } from "./promptLineBreak";
 
-const TEST_MARKER = "__NETCATTY_SUDO_test__";
-const TEST_PREPARED_SUDO_WHOAMI = `sudo -p '[sudo] password for %p: ${TEST_MARKER}' whoami`;
-
 function createFakeTerm(lineText = "$ echo ok", cursorX = lineText.length) {
   return {
     buffer: {
@@ -55,36 +52,33 @@ function createWrappedFakeTerm(rows: string[], cursorY: number, cursorX: number,
   };
 }
 
-test("sudo autofill input preparation rewrites submitted sudo commands for the remote side", () => {
+test("sudo autofill input preparation arms on a submitted sudo command without altering input", () => {
+  const writes: string[] = [];
   const autofill = createSudoPasswordAutofill({
     password: "secret",
-    createPromptMarker: () => TEST_MARKER,
-    write: () => {},
+    write: (data) => writes.push(data),
   });
 
-  assert.equal(
-    prepareSudoAutofillInput("\r", "sudo whoami", autofill),
-    `\x15${TEST_PREPARED_SUDO_WHOAMI}\r`,
-  );
+  assert.equal(prepareSudoAutofillInput("\r", "sudo whoami", autofill), "\r");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, ["secret\n"]);
 });
 
-test("sudo autofill input preparation rewrites single-line pasted sudo commands", () => {
+test("sudo autofill input preparation arms on a single-line pasted sudo command", () => {
+  const writes: string[] = [];
   const autofill = createSudoPasswordAutofill({
     password: "secret",
-    createPromptMarker: () => TEST_MARKER,
-    write: () => {},
+    write: (data) => writes.push(data),
   });
 
-  assert.equal(
-    prepareSudoAutofillInput("sudo whoami\n", null, autofill),
-    `\x15${TEST_PREPARED_SUDO_WHOAMI}\n`,
-  );
+  assert.equal(prepareSudoAutofillInput("sudo whoami\n", null, autofill), "sudo whoami\n");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, ["secret\n"]);
 });
 
 test("sudo autofill input preparation preserves bracketed pasted sudo commands", () => {
   const autofill = createSudoPasswordAutofill({
     password: "secret",
-    createPromptMarker: () => TEST_MARKER,
     write: () => {},
   });
 

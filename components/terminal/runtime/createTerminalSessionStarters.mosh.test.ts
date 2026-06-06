@@ -8,14 +8,11 @@ import {
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwAAAA";
 
-const prepareSudoPrompt = (
-  autofill: { prepareCommand: (command: string) => string | null } | null,
+const armSudoPrompt = (
+  autofill: { armForCommand: (command: string) => void } | null,
 ): string => {
-  const prepared = autofill?.prepareCommand("sudo whoami");
-  assert.ok(prepared);
-  const prompt = prepared.match(/\s-p '([^']*)'/)?.[1];
-  assert.ok(prompt);
-  return prompt.replace("%p", "alice");
+  autofill?.armForCommand("sudo whoami");
+  return "[sudo] password for alice: ";
 };
 
 test("startMosh enables sudo autofill with the host saved password", async () => {
@@ -88,7 +85,7 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
   };
 
   await createTerminalSessionStarters(ctx as never).startMosh(term as never);
-  onData?.(prepareSudoPrompt(sudoAutofillRef.current));
+  onData?.(armSudoPrompt(sudoAutofillRef.current));
 
   assert.deepEqual(sent, ["saved-secret\n"]);
 });
