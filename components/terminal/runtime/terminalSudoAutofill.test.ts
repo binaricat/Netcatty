@@ -131,6 +131,22 @@ test("sudo autofill does not leak the password to sub-command prompts", () => {
   assert.deepEqual(writes, []);
 });
 
+test("sudo autofill disarms when a later non-sudo command is submitted", () => {
+  const writes: string[] = [];
+  const autofill = createSudoPasswordAutofill({
+    password: "secret",
+    write: (data) => writes.push(data),
+  });
+
+  // sudo did not prompt (cached creds / noninteractive); a later non-sudo
+  // command must clear the pending arm so its own Password: isn't filled.
+  autofill.armForCommand("sudo -n true");
+  autofill.armForCommand("mysql -p");
+  autofill.handleOutput("Password: ");
+
+  assert.deepEqual(writes, []);
+});
+
 test("sudo autofill keeps the prompt text in the output while filling", () => {
   const writes: string[] = [];
   const autofill = createSudoPasswordAutofill({

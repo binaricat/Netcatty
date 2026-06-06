@@ -114,7 +114,12 @@ export const createSudoPasswordAutofill = (_options: {
 
   return {
     armForCommand: (command: string) => {
-      if (!password || !shouldArmSudoPasswordAutofill(command)) return;
+      // Any non-sudo command (or no saved password) clears a pending arm, so a
+      // later command's own "Password:" prompt is never mistaken for sudo's.
+      if (!password || !shouldArmSudoPasswordAutofill(command)) {
+        disarm();
+        return;
+      }
       armedUntil = options.now() + armWindowMs;
       tail = "";
     },
