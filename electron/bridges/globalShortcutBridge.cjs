@@ -623,10 +623,21 @@ function createTray() {
     // Build and set initial context menu
     updateTrayMenu();
 
-    // Click on tray icon toggles tray panel
-    tray.on("click", () => {
-      toggleTrayPanel();
-    });
+    // Click on tray icon behaviors depending on platform conventions
+    if (process.platform === "win32") {
+      // Windows: Left-click opens/focuses main window, Right-click toggles custom tray panel
+      tray.on("click", () => {
+        openMainWindow();
+      });
+      tray.on("right-click", () => {
+        toggleTrayPanel();
+      });
+    } else {
+      // macOS/Linux: Click toggles custom tray panel
+      tray.on("click", () => {
+        toggleTrayPanel();
+      });
+    }
 
     console.log("[GlobalShortcut] System tray created");
   } catch (err) {
@@ -928,4 +939,5 @@ module.exports = {
   handleWindowClose,
   clearPendingFullscreenHide,
   cleanup,
+  getTray: () => tray,
 };

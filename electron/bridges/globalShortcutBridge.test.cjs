@@ -491,3 +491,27 @@ test("handleWindowClose stays in close-to-tray mode even if hide fails", async (
     assert.equal(win.visible, true);
   });
 });
+
+test("tray icon event registration is platform-dependent", async () => {
+  // Test win32 platform
+  await withPlatform("win32", async () => {
+    const bridge = loadBridge();
+    const { electronModule } = await enableCloseToTray(bridge);
+    const trayInstance = bridge.getTray();
+    assert.ok(trayInstance, "Tray instance should be created");
+    assert.ok(trayInstance.handlers.has("click"), "win32 tray should have click handler");
+    assert.ok(trayInstance.handlers.has("right-click"), "win32 tray should have right-click handler");
+    bridge.cleanup();
+  });
+
+  // Test other platform (darwin)
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const { electronModule } = await enableCloseToTray(bridge);
+    const trayInstance = bridge.getTray();
+    assert.ok(trayInstance, "Tray instance should be created");
+    assert.ok(trayInstance.handlers.has("click"), "darwin tray should have click handler");
+    assert.ok(!trayInstance.handlers.has("right-click"), "darwin tray should not have right-click handler");
+    bridge.cleanup();
+  });
+});
