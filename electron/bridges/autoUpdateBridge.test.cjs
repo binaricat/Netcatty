@@ -158,6 +158,50 @@ function makeWindowManagerWithMainWindow() {
         },
       };
     },
+    getMainWindows() {
+      return [this.getMainWindow()];
+    },
+  };
+}
+
+function makeWindowManagerWithMainWindows(count) {
+  const windows = Array.from({ length: count }, (_unused, index) => {
+    const sentChannels = [];
+    const webContents = {
+      id: index + 1,
+      sentChannels,
+      send(channel) {
+        sentChannels.push(channel);
+      },
+      isDestroyed() {
+        return false;
+      },
+      isCrashed() {
+        return false;
+      },
+    };
+    return {
+      webContents,
+      isDestroyed() {
+        return false;
+      },
+    };
+  });
+  return {
+    calls: [],
+    windows,
+    setQuittingForUpdate(value) {
+      this.calls.push(value);
+    },
+    isQuittingForUpdate() {
+      return this.calls[this.calls.length - 1] === true;
+    },
+    getMainWindow() {
+      return windows[0] || null;
+    },
+    getMainWindows() {
+      return windows;
+    },
   };
 }
 
@@ -391,6 +435,49 @@ test("install handler aborts and notifies when the renderer reports dirty editor
       // - the dirty check ran first, against the main window's webContents
       assert.equal(order[0], "queryDirtyEditors");
       assert.equal(queriedWebContents, fakeWindowManager.webContents);
+    },
+  );
+});
+
+test("install handler checks every main window before installing", async () => {
+  const order = [];
+  const autoUpdater = {
+    autoDownload: true,
+    autoInstallOnAppQuit: false,
+    logger: undefined,
+    on() {},
+    quitAndInstall() {
+      order.push("quitAndInstall");
+    },
+  };
+  const fakeWindowManager = makeWindowManagerWithMainWindows(2);
+  const queriedWebContents = [];
+  const fakeDirtyEditorGuard = {
+    queryDirtyEditors(webContents) {
+      order.push(`queryDirtyEditors:${webContents.id}`);
+      queriedWebContents.push(webContents);
+      return Promise.resolve(webContents.id === 2);
+    },
+  };
+  const win = makeBroadcastWindow();
+
+  await withMocks(
+    {
+      autoUpdater,
+      windowManager: fakeWindowManager,
+      dirtyEditorGuard: fakeDirtyEditorGuard,
+      browserWindows: [win],
+    },
+    async ({ bridge, fakeGlobalShortcut }) => {
+      const ipcMain = makeIpcMain();
+      bridge.registerHandlers(ipcMain);
+      await ipcMain.invoke("netcatty:update:install");
+
+      assert.deepEqual(queriedWebContents, fakeWindowManager.windows.map((window) => window.webContents));
+      assert.equal(order.includes("quitAndInstall"), false);
+      assert.deepEqual(fakeWindowManager.calls, []);
+      assert.equal(fakeGlobalShortcut.cleanupCount, 0);
+      assert.equal(win.sentChannels.includes("netcatty:update:needs-save"), true);
     },
   );
 });

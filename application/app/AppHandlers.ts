@@ -333,14 +333,19 @@ export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppCont
     }
 
     const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-    const result = await bridge.openSessionInNewWindow({
-      title: sourceSession.hostLabel,
-      sourceSession,
-      localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
-    });
-    const success = result?.success === true;
-    if (!success) toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
-    return success;
+    try {
+      const result = await bridge.openSessionInNewWindow({
+        title: sourceSession.hostLabel,
+        sourceSession,
+        localShellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, userAgent),
+      });
+      const success = result?.success === true;
+      if (!success) toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
+      return success;
+    } catch {
+      toast?.error?.(t?.('tabs.copyTabToNewWindowFailed') ?? 'Failed to open tab in a new window');
+      return false;
+    }
   }
 }
 

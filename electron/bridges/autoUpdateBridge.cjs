@@ -237,23 +237,24 @@ function setQuittingForUpdate(enabled) {
 }
 
 /**
- * The webContents of the main window, or null if there's no usable main window
- * to talk to. Used by the install handler to (a) ask the renderer about unsaved
- * editors before committing to a quit, and (b) tell it to surface a "save
- * first" notice. Targets the main window specifically (not getAllWindows()[0])
- * so we never query the tray panel / settings window, whose renderers don't
- * participate in the dirty-editor protocol.
+ * The webContents for usable main windows. Used by the install handler to ask
+ * every renderer that can own editor tabs about unsaved work before committing
+ * to a quit. Targets registered main windows specifically (not
+ * getAllWindows()[0]) so we never query tray/settings windows, whose renderers
+ * don't participate in the dirty-editor protocol.
  */
-function getMainWebContents() {
+function getMainWebContentsList() {
   try {
     const windowManager = require("./windowManager.cjs");
-    const win = windowManager.getMainWindow?.();
-    if (!win || win.isDestroyed?.()) return null;
-    const wc = win.webContents;
-    if (!wc || wc.isDestroyed?.() || wc.isCrashed?.()) return null;
-    return wc;
+    const windows = typeof windowManager.getMainWindows === "function"
+      ? windowManager.getMainWindows()
+      : [windowManager.getMainWindow?.()].filter(Boolean);
+    return windows
+      .filter((win) => win && !win.isDestroyed?.())
+      .map((win) => win.webContents)
+      .filter((wc) => wc && !wc.isDestroyed?.() && !wc.isCrashed?.());
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -485,15 +486,18 @@ function registerHandlers(ipcMain) {
     // false, so it commits the quit and silently drops unsaved SFTP edits.
     //
     // So we ask the renderer here, while the window and renderer are still
-    // alive. If there's unsaved work, abort the install (don't touch the
-    // quitting flags, don't quitAndInstall) and tell the renderer to prompt the
-    // user to save; they can click "Restart Now" again afterwards. If the main
-    // window isn't reachable (no window / crashed renderer) there's no user to
-    // ask, so we install directly — matching the before-quit fail-open path.
-    const mainWc = getMainWebContents();
-    if (mainWc) {
-      const hasDirty = await queryDirtyEditorsSafe(mainWc, ipcMain);
-      if (hasDirty) {
+    // alive. If there's unsaved work in any main window, abort the install
+    // (don't touch the quitting flags, don't quitAndInstall) and tell the
+    // renderer to prompt the user to save; they can click "Restart Now" again
+    // afterwards. If no main window is reachable (no window / crashed
+    // renderer) there's no user to ask, so we install directly — matching the
+    // before-quit fail-open path.
+    const mainWebContents = getMainWebContentsList();
+    if (mainWebContents.length > 0) {
+      const dirtyResults = await Promise.all(
+        mainWebContents.map((webContents) => queryDirtyEditorsSafe(webContents, ipcMain)),
+      );
+      if (dirtyResults.some(Boolean)) {
         // Broadcast so the notice reaches whichever window the user clicked
         // from (main or Settings), not just the main window we queried.
         notifyNeedsSave();

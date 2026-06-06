@@ -662,6 +662,8 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.logViews === next.logViews &&
     prev.draggingSessionId === next.draggingSessionId &&
     prev.isMacClient === next.isMacClient &&
+    prev.onCopySession === next.onCopySession &&
+    prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
     prev.onOpenSettings === next.onOpenSettings &&
     prev.onSyncNow === next.onSyncNow &&
     prev.onToggleTheme === next.onToggleTheme &&
