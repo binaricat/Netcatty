@@ -9,6 +9,7 @@ const {
   resolveSettingsWindowBounds,
   restoreWindowInputFocus,
   requestWindowCommandClose,
+  sendWhenRendererReady,
   shouldCloseWindowFromInput,
   unregisterMainWindow,
 } = require("./windowManager.cjs");
@@ -706,4 +707,86 @@ test("resolveSettingsWindowBounds centers settings on the requesting window disp
     }),
     { x: 2150, y: 90 },
   );
+});
+
+function createSendableWindowStub({ destroyed = false, webContentsDestroyed = false } = {}) {
+  const sent = [];
+  return {
+    sent,
+    win: {
+      isDestroyed() {
+        return destroyed;
+      },
+      webContents: {
+        id: 7,
+        isDestroyed() {
+          return webContentsDestroyed;
+        },
+        send(channel, payload) {
+          sent.push({ channel, payload });
+        },
+      },
+    },
+  };
+}
+
+test("sendWhenRendererReady delivers the payload once the renderer reports ready", async () => {
+  const { win, sent } = createSendableWindowStub();
+  const waited = [];
+
+  const result = await sendWhenRendererReady(
+    win,
+    "netcatty:window:openSession",
+    { title: "Prod" },
+    {
+      timeoutMs: 8000,
+      waitForReady: async (target, opts) => {
+        waited.push({ target, opts });
+      },
+    },
+  );
+
+  assert.deepEqual(result, { success: true });
+  assert.equal(waited.length, 1);
+  assert.equal(waited[0].target, win);
+  assert.deepEqual(waited[0].opts, { timeoutMs: 8000 });
+  assert.deepEqual(sent, [
+    { channel: "netcatty:window:openSession", payload: { title: "Prod" } },
+  ]);
+});
+
+test("sendWhenRendererReady reports failure without sending when readiness times out", async () => {
+  const { win, sent } = createSendableWindowStub();
+
+  const result = await sendWhenRendererReady(
+    win,
+    "netcatty:window:openSession",
+    { title: "Prod" },
+    {
+      timeoutMs: 5,
+      waitForReady: async () => {
+        throw new Error("Renderer did not report ready before timeout.");
+      },
+    },
+  );
+
+  assert.equal(result.success, false);
+  assert.equal(sent.length, 0);
+});
+
+test("sendWhenRendererReady reports failure without sending when the window is gone after readiness", async () => {
+  const { win, sent } = createSendableWindowStub({ destroyed: true });
+
+  const result = await sendWhenRendererReady(
+    win,
+    "netcatty:window:openSession",
+    { title: "Prod" },
+    {
+      timeoutMs: 8000,
+      waitForReady: async () => {},
+    },
+  );
+
+  assert.equal(result.success, false);
+  assert.equal(sent.length, 0);
 });

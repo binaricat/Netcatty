@@ -322,19 +322,23 @@ function createBridgeRegistrar(context) {
         } catch {
           // ignore
         }
-        try {
-          await getWindowManager().waitForRendererReady(win, { timeoutMs: 8000 });
-        } catch (err) {
-          console.warn("[Main] New session window did not report ready before payload send:", err?.message || err);
+        const delivery = await getWindowManager().sendWhenRendererReady(
+          win,
+          "netcatty:window:openSession",
+          {
+            title,
+            sourceSession: payload.sourceSession,
+            localShellType: payload.localShellType,
+          },
+          { timeoutMs: 8000 },
+        );
+        if (!delivery.success) {
+          console.warn(
+            "[Main] New session window could not receive the duplicated tab:",
+            delivery.reason || delivery.error,
+          );
+          return { success: false, error: delivery.error || "Failed to open new window" };
         }
-        if (win.isDestroyed?.() || win.webContents?.isDestroyed?.()) {
-          return { success: false, error: "Window closed before session could open" };
-        }
-        win.webContents.send("netcatty:window:openSession", {
-          title,
-          sourceSession: payload.sourceSession,
-          localShellType: payload.localShellType,
-        });
         return { success: true };
       } catch (err) {
         console.error("[Main] Failed to open session in new window:", err);

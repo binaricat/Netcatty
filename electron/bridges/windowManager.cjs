@@ -734,6 +734,33 @@ function waitForRendererReady(win, { timeoutMs = 15000 } = {}) {
 }
 
 /**
+ * Wait for a freshly created window's renderer to report ready, then deliver an
+ * IPC message to it. The renderer only registers its IPC listeners (and reports
+ * ready) after React mounts, and Electron does not queue messages for listeners
+ * that do not exist yet. So if readiness times out we must NOT send — the
+ * message would be silently dropped, leaving the window blank while the caller
+ * still saw "success". Returning a failure here lets the caller surface the
+ * existing error path instead.
+ */
+async function sendWhenRendererReady(win, channel, payload, options = {}) {
+  const { timeoutMs = 8000, waitForReady = waitForRendererReady } = options;
+  try {
+    await waitForReady(win, { timeoutMs });
+  } catch (err) {
+    return {
+      success: false,
+      error: "New window did not become ready in time",
+      reason: err?.message || String(err),
+    };
+  }
+  if (win?.isDestroyed?.() || win?.webContents?.isDestroyed?.()) {
+    return { success: false, error: "Window closed before message could be delivered" };
+  }
+  win.webContents.send(channel, payload);
+  return { success: true };
+}
+
+/**
  * Create the main application window
  */
 const { createMainWindowApi } = require("./windowManager/mainWindow.cjs");
@@ -1129,6 +1156,7 @@ module.exports = {
   shouldCloseWindowFromInput,
   WINDOW_COMMAND_CLOSE_CHANNEL,
   waitForRendererReady,
+  sendWhenRendererReady,
   setIsQuitting,
   getIsQuitting,
   setQuittingForUpdate,
