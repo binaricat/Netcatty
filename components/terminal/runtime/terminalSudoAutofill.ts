@@ -11,11 +11,12 @@ const OSC_PATTERN = new RegExp(
 // output as a real prompt so a remote can't disguise a fake prompt and harvest
 // the autofilled password.
 const CONCEAL_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[(?:[0-9]+;)*8(?:;[0-9]+)*m`);
-// An explicit sudo prompt carries a sudo-specific signal: the "[sudo]" tag or
-// the "password for <user>" phrasing. No other tool prompts this way, so it is
-// safe to fill even if sudo's creds were warm and other output followed.
+// An explicit sudo prompt carries the sudo-specific "[sudo]" tag, so it is safe
+// to fill even if sudo's creds were warm and other output followed. The
+// "password for <user>" phrasing alone is NOT sudo-specific (psql emits
+// "Password for user alice:", for one), so we require the tag.
 const EXPLICIT_SUDO_PROMPT_PATTERN =
-  /(?:^|[\r\n])[^\r\n]*?(?:\[sudo\][^\r\n]*?(?:password|密\s*码|口\s*令)|password\s+for\s+\S[^\r\n:：]*)[^\r\n:：]*[:：]\s*$/i;
+  /(?:^|[\r\n])[^\r\n]*?\[sudo\][^\r\n]*?(?:password|密\s*码|口\s*令)[^\r\n:：]*[:：]\s*$/i;
 // A bare prompt is a line that on its own is just "Password:" / "密码:". PAM
 // emits this on some distros, so we accept it inside the arm window. We reject
 // PREFIXED prompts like "Enter password:" (mysql -p) or "user@host's password:"

@@ -15,7 +15,6 @@ test("isSudoPasswordPrompt detects the standard sudo password prompt", () => {
 
 test("isSudoPasswordPrompt detects a bare Password prompt", () => {
   assert.equal(isSudoPasswordPrompt("Password: "), true);
-  assert.equal(isSudoPasswordPrompt("password for alice: "), true);
 });
 
 test("isSudoPasswordPrompt detects localized sudo prompts", () => {
@@ -29,6 +28,8 @@ test("isSudoPasswordPrompt rejects sub-command password prompts", () => {
   assert.equal(isSudoPasswordPrompt("Enter password: "), false); // mysql -p
   assert.equal(isSudoPasswordPrompt("alice@host's password: "), false); // ssh
   assert.equal(isSudoPasswordPrompt("MySQL root password: "), false);
+  assert.equal(isSudoPasswordPrompt("Password for user alice: "), false); // psql/libpq
+  assert.equal(isSudoPasswordPrompt("password for alice: "), false); // no [sudo] tag
 });
 
 test("isSudoPasswordPrompt detects color-wrapped prompts", () => {
@@ -123,6 +124,10 @@ test("sudo autofill does not leak the password to sub-command prompts", () => {
 
   autofill.armForCommand("sudo ssh user@host");
   autofill.handleOutput("user@host's password: ");
+  assert.deepEqual(writes, []);
+
+  autofill.armForCommand("sudo psql -h db -U alice");
+  autofill.handleOutput("Password for user alice: ");
   assert.deepEqual(writes, []);
 });
 
