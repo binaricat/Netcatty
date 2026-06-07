@@ -2,10 +2,10 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const TAIL_LIMIT = 2048;
 
 const ANSI_PATTERN = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
-const LAST_LOGIN_PATTERN = /(?:^|[\s([])(?:last|previous)\s+login\s*[:>]\s*$/i;
-const USERNAME_PROMPT_PATTERN = /(?:^|[^A-Za-z0-9])(?:user\s*name|username|login|logon|account|userid|user\s*id|user|\u7528\u6237\u540d|\u5e10\u53f7|\u8d26\u53f7|\u767b\u5f55|\u767b\u5165)\s*[:>]\s*$/i;
-const PASSWORD_PROMPT_PATTERN = /(?:^|[^A-Za-z0-9])(?:password|passwd|passcode|passphrase|pass\s*phrase|pin|\u5bc6\u7801|\u53e3\u4ee4)\s*[:>]\s*$/i;
-const CONTINUE_PROMPT_PATTERN = /(?:press|hit)\s+(?:[<\[(]?\s*)?(?:return|enter|any\s+key|space)\b(?:\s*[>\])])?.*(?:continue|get\s+started|start|begin|started)?\.?\s*$/i;
+const LAST_LOGIN_PATTERN = /(?:^|[\s([])(?:last|previous)\s+login\s*[:：>]\s*$/i;
+const USERNAME_PROMPT_PATTERN = /(?:^|[^A-Za-z0-9])(?:user\s*name|username|login|logon|account|userid|user\s*id|user|\u7528\u6237\u540d|\u5e10\u53f7|\u8d26\u53f7|\u767b\u5f55|\u767b\u5165)\s*[:：>]\s*$/i;
+const PASSWORD_PROMPT_PATTERN = /(?:^|[^A-Za-z0-9])(?:password|passwd|passcode|passphrase|pass\s*phrase|pin|\u5bc6\u7801|\u53e3\u4ee4)\s*[:：>]\s*$/i;
+const CONTINUE_PROMPT_PATTERN = /(?:press|hit)\s+(?:[<\[(]?\s*)?(?:return|enter|any\s+key|space)\b(?:\s*[>\]\)])?.*(?:continue|get\s+started|start|begin|started)?\.?\s*$/i;
 const COMMAND_PROMPT_PATTERN = /[$#>]\s*$/;
 
 function stripAnsi(text) {
