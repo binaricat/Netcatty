@@ -133,7 +133,7 @@ export interface TerminalAutocompleteHandle {
   repositionPopup: () => void;
   closePopup: () => void;
   dispose: () => void;
-  showSudoHint: (text: string) => void;
+  showSudoHint: (text: string) => boolean;
   hideSudoHint: () => void;
 }
 
@@ -912,8 +912,11 @@ export function useTerminalAutocomplete(
     ghostAddonRef.current = null;
   }, []);
 
-  const showSudoHint = useCallback((text: string) => {
-    ghostAddonRef.current?.showHint(text);
+  const showSudoHint = useCallback((text: string): boolean => {
+    const addon = ghostAddonRef.current;
+    if (!addon) return false;
+    addon.showHint(text);
+    return addon.isHintActive();
   }, []);
   const hideSudoHint = useCallback(() => {
     ghostAddonRef.current?.hideHint();

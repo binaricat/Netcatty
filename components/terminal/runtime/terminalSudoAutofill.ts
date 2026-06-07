@@ -94,12 +94,14 @@ export const prepareSudoAutofillInput = (
 export const createSudoPasswordAutofill = (_options: {
   password?: string;
   write: (data: string) => void;
-  onHint?: (active: boolean) => void;
+  /** Show/hide the inline hint. Returns whether the hint actually rendered;
+   *  false (e.g. no overlay available) means we must not arm a confirmation. */
+  onHint?: (active: boolean) => boolean;
   now?: () => number;
 }): SudoPasswordAutofill => {
   const options = {
     now: () => Date.now(),
-    onHint: () => {},
+    onHint: () => false,
     ..._options,
   };
   let password = options.password ?? "";
@@ -136,8 +138,14 @@ export const createSudoPasswordAutofill = (_options: {
       tail = `${tail}${data}`.slice(-1024);
       const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
       if (isSudoPasswordPrompt(lastLine)) {
-        pending = true;
-        options.onHint(true);
+        // Only arm a pending confirmation if the hint actually rendered. If the
+        // overlay is unavailable (e.g. autocomplete disabled), don't intercept
+        // Enter — the user would have no visible cue and could leak the password.
+        if (options.onHint(true)) {
+          pending = true;
+        } else {
+          disarm();
+        }
       }
       return data;
     },

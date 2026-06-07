@@ -233,7 +233,7 @@ export const attachSessionToTerminal = (
   const sudoAutofill = createSudoPasswordAutofill({
     password: opts?.sudoAutofillPassword,
     write: (data) => ctx.terminalBackend.writeToSession(id, data, { automated: true }),
-    onHint: (active) => ctx.onSudoHint?.(active),
+    onHint: (active) => ctx.onSudoHint?.(active) ?? false,
   });
   if (ctx.sudoAutofillRef) {
     ctx.sudoAutofillRef.current = sudoAutofill;

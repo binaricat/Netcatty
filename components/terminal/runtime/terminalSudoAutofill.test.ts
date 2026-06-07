@@ -45,7 +45,10 @@ const make = (password = "secret") => {
   const autofill = createSudoPasswordAutofill({
     password,
     write: (d) => writes.push(d),
-    onHint: (active) => hints.push(active),
+    onHint: (active) => {
+      hints.push(active);
+      return true; // hint overlay shown successfully
+    },
   });
   return { autofill, writes, hints };
 };
@@ -84,6 +87,23 @@ test("cancelHint clears the hint without filling", () => {
 
 test("confirmFill does nothing when no prompt is pending", () => {
   const { autofill, writes } = make();
+  autofill.confirmFill();
+  assert.deepEqual(writes, []);
+});
+
+test("does not arm when the hint cannot be shown (overlay unavailable)", () => {
+  // If onHint reports the hint could not render (e.g. autocomplete disabled, no
+  // ghost overlay), we must NOT leave a pending arm — otherwise Enter would
+  // submit the sudo password with no visible confirmation.
+  const writes: string[] = [];
+  const autofill = createSudoPasswordAutofill({
+    password: "secret",
+    write: (d) => writes.push(d),
+    onHint: () => false,
+  });
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.equal(autofill.isPromptPending(), false);
   autofill.confirmFill();
   assert.deepEqual(writes, []);
 });

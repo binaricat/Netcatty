@@ -224,7 +224,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const autocompleteInputRef = useRef<((data: string) => void) | undefined>(undefined);
   const autocompleteRepositionRef = useRef<(() => void) | undefined>(undefined);
   const autocompleteCloseRef = useRef<(() => void) | undefined>(undefined);
-  const sudoHintRef = useRef<((active: boolean) => void) | undefined>(undefined);
+  const sudoHintRef = useRef<((active: boolean) => boolean) | undefined>(undefined);
 
   const terminalBackend = useTerminalBackend();
   const { resizeSession, setSessionEncoding } = terminalBackend;
@@ -643,7 +643,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     pendingAuthRef,
     promptLineBreakStateRef,
     sudoAutofillRef,
-    onSudoHint: (active: boolean) => sudoHintRef.current?.(active),
+    onSudoHint: (active: boolean) => sudoHintRef.current?.(active) ?? false,
     updateStatus,
     setStatus,
     setError,

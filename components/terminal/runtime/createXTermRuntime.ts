@@ -629,9 +629,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         sudoAutofill.confirmFill();
         return false;
       }
-      if (e.key === "Escape" || e.key === "Backspace" || e.key.length === 1) {
+      if (e.key === "Escape" || e.key === "Backspace") {
+        e.preventDefault();
         sudoAutofill.cancelHint();
-        // fall through: let the keystroke be handled normally
+        return false; // dismiss without forwarding the byte to the no-echo prompt
+      }
+      if (e.key.length === 1) {
+        sudoAutofill.cancelHint();
+        // fall through: key becomes the first char of the manually typed password
       }
     }
 

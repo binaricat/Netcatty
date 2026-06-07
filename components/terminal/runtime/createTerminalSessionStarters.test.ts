@@ -28,6 +28,7 @@ const createTermStub = () => ({
 });
 
 const createStarterContext = (overrides: Record<string, unknown> = {}) => ({
+  onSudoHint: () => true,
   host: {
     id: "host-1",
     label: "Target",

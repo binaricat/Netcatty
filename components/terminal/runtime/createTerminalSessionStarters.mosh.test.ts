@@ -56,6 +56,7 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
     terminalSettings: {},
     terminalBackend,
     sudoAutofillPassword: "saved-secret",
+    onSudoHint: () => true,
     sessionRef: { current: null },
     hasConnectedRef: { current: true },
     hasRunStartupCommandRef: { current: false },

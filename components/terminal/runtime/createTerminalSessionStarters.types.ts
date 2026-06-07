@@ -111,7 +111,7 @@ export type TerminalSessionStartersContext = {
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;
   sudoAutofillPasswordRef?: RefObject<string | undefined>;
-  onSudoHint?: (active: boolean) => void;
+  onSudoHint?: (active: boolean) => boolean;
   isVisibleRef?: RefObject<boolean>;
   pendingOutputScrollRef?: RefObject<boolean>;
 

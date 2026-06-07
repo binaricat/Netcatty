@@ -103,6 +103,7 @@ test("startEt enables sudo autofill with the host saved password", async () => {
     }, [], backend),
     sudoAutofillRef,
     sudoAutofillPassword: "saved-secret",
+    onSudoHint: () => true,
   };
 
   await createTerminalSessionStarters(ctx as never).startEt(term as never);
