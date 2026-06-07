@@ -134,10 +134,18 @@ export const createSudoPasswordAutofill = (_options: {
         disarm();
         return data;
       }
-      if (pending) return data;
       tail = `${tail}${data}`.slice(-1024);
       const lastLine = tail.split(/[\r\n]/).pop() ?? tail;
-      if (isSudoPasswordPrompt(lastLine)) {
+      const isPrompt = isSudoPasswordPrompt(lastLine);
+      if (pending) {
+        // The prompt moved on: a new line arrived and the latest line is no
+        // longer a password prompt (sudo timed out / failed / returned to the
+        // shell). Clear the pending hint — otherwise a later Enter would send
+        // the password to whatever is now reading input.
+        if (!isPrompt && /[\r\n]/.test(data)) disarm();
+        return data;
+      }
+      if (isPrompt) {
         // Only arm a pending confirmation if the hint actually rendered. If the
         // overlay is unavailable (e.g. autocomplete disabled), don't intercept
         // Enter — the user would have no visible cue and could leak the password.

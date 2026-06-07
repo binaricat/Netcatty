@@ -150,6 +150,28 @@ test("a later non-sudo command disarms the pending hint", () => {
   assert.deepEqual(writes, []);
 });
 
+test("clears a pending hint when output moves past the prompt", () => {
+  const { autofill, writes, hints } = make();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.equal(autofill.isPromptPending(), true);
+  // user never pressed Enter; sudo times out and returns to the shell
+  autofill.handleOutput("\r\nsudo: timed out reading password\r\nalice@host:~$ ");
+  assert.equal(autofill.isPromptPending(), false);
+  assert.deepEqual(hints, [true, false]); // hint was hidden
+  autofill.confirmFill();
+  assert.deepEqual(writes, []); // a later Enter no longer sends the password
+});
+
+test("keeps the hint pending when sudo re-prompts after a wrong password", () => {
+  const { autofill, hints } = make();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  autofill.handleOutput("\r\nSorry, try again.\r\n[sudo] password for alice: ");
+  assert.equal(autofill.isPromptPending(), true);
+  assert.deepEqual(hints, [true]);
+});
+
 test("an expired arm shows no hint", () => {
   const writes: string[] = [];
   const hints: boolean[] = [];
