@@ -123,6 +123,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const [codexPathInfo, setCodexPathInfo] = useState<AgentPathInfo | null>(null);
   const [codexCustomPath, setCodexCustomPath] = useState("");
   const [isResolvingCodex, setIsResolvingCodex] = useState(false);
+  // Tracks whether the current connected_chatgpt state is the result of a
+  // just-completed `codex login` flow (as opposed to a stale refresh). Used
+  // by the auto-agent-switch effect below.
+  const codexLoginJustCompletedRef = useRef(false);
 
   const [claudePathInfo, setClaudePathInfo] = useState<AgentPathInfo | null>(null);
   const [claudeCustomPath, setClaudeCustomPath] = useState("");
@@ -308,6 +312,27 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     void refreshCodexIntegration();
   }, [refreshCodexIntegration]);
 
+  // When Codex ChatGPT OAuth login completes successfully and the user has no
+  // provider configured for the Catty Agent, auto-switch the default agent to
+  // Codex so they can start using it immediately instead of seeing "no model
+  // selected" in the chat interface.
+  useEffect(() => {
+    if (
+      codexLoginJustCompletedRef.current &&
+      codexIntegration?.state === 'connected_chatgpt' &&
+      defaultAgentId === 'catty' &&
+      providers.length === 0
+    ) {
+      codexLoginJustCompletedRef.current = false;
+      const codexAgentId = externalAgents.find(
+        (a) => a.command === 'codex' || a.id.startsWith('discovered_codex') || a.id === 'codex',
+      )?.id;
+      if (codexAgentId) {
+        setDefaultAgentId(codexAgentId);
+      }
+    }
+  }, [codexIntegration, defaultAgentId, providers.length, externalAgents, setDefaultAgentId]);
+
   useEffect(() => {
     if (!codexLoginSession || codexLoginSession.state !== "running") {
       return;
@@ -326,6 +351,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setCodexLoginSession(result.session);
         if (result.session.state !== "running") {
           if (result.session.state === "success") {
+            codexLoginJustCompletedRef.current = true;
             void refreshCodexIntegration();
           }
         }
