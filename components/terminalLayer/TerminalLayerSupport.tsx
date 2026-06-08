@@ -719,6 +719,8 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   return (
     <div
       data-session-id={session.id}
+      data-section="terminal-split-pane"
+      data-focused={isFocusedPane ? 'true' : undefined}
       className={cn(
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",

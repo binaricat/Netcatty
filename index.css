@@ -450,6 +450,11 @@ body {
   overflow: visible;
 }
 
+/* Focus-mode terminal list sidebar (split view uses terminal-split-pane). */
+[data-section="terminal-workspace-sidebar"] {
+  border-right: var(--terminal-workspace-sidebar-border, none);
+}
+
 /* Dim terminal text in unfocused workspace panes (default) */
 .workspace-pane:not(:focus-within) .xterm-screen {
   opacity: 0.82;

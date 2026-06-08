@@ -223,7 +223,7 @@ export function useTerminalFocusSidebar({
             // (instead of a distinct tinted panel sitting next to it).
             backgroundColor: termBg,
             color: termFg,
-            borderRight: `1px solid ${separator}`,
+            ['--terminal-workspace-sidebar-border' as string]: `1px solid ${separator}`,
           }}
           data-section="terminal-workspace-sidebar"
         >

@@ -31,6 +31,8 @@ export function TerminalLayerView({ ctx }: { ctx: TerminalLayerViewContext }) {
                 "flex-shrink-0 h-full relative z-20",
                 sidePanelPosition === 'right' && "order-last",
               )}
+              data-section="terminal-side-panel-shell"
+              data-side-panel-position={sidePanelPosition}
             >
               {isSidePanelOpenForCurrentTab && (
                 <div
@@ -46,6 +48,8 @@ export function TerminalLayerView({ ctx }: { ctx: TerminalLayerViewContext }) {
                   "h-full flex flex-col overflow-hidden",
                   !isSidePanelOpenForCurrentTab && "pointer-events-none",
                 )}
+                data-section="terminal-side-panel"
+                data-side-panel-tab={isSidePanelOpenForCurrentTab ? (activeSidePanelTab ?? undefined) : undefined}
                 style={{
                     ['--terminal-sidepanel-bg' as never]: resolvedPreviewTheme.colors.background,
                     ['--terminal-sidepanel-fg' as never]: resolvedPreviewTheme.colors.foreground,
@@ -402,6 +406,8 @@ export function TerminalLayerView({ ctx }: { ctx: TerminalLayerViewContext }) {
               <div
                 key={handle.id}
                 className={cn("absolute group", isVertical ? "cursor-ew-resize" : "cursor-ns-resize")}
+                data-section="terminal-split-resizer"
+                data-split-direction={handle.direction}
                 style={{
                   left: `${left}px`,
                   top: `${top}px`,
@@ -431,6 +437,7 @@ export function TerminalLayerView({ ctx }: { ctx: TerminalLayerViewContext }) {
                 }}
               >
                 <div
+                  data-section="terminal-split-resizer-bar"
                   className={cn(
                     "absolute bg-border/70 group-hover:bg-primary/60 transition-colors",
                     isVertical ? "w-px h-full left-1/2 -translate-x-1/2" : "h-px w-full top-1/2 -translate-y-1/2"

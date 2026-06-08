@@ -681,6 +681,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       <div
         ref={panelRootRef}
         className="h-full flex flex-col bg-background overflow-hidden"
+        data-section="terminal-sftp-panel"
         style={isVisible ? undefined : { display: "none" }}
         aria-hidden={!isVisible}
         onClick={handlePaneFocus}
