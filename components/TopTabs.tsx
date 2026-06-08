@@ -591,14 +591,17 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </Tooltip>
         )}
 
-        {/* Fixed right controls */}
-        <div className="flex-shrink-0 flex items-center gap-2 app-drag self-center" style={dragRegionStyle}>
+        {/* Fixed right controls — single row, h-7 to match tab height */}
+        <div
+          className={`flex-shrink-0 flex items-center gap-0.5 app-drag self-end h-7${!isMacClient ? ' mr-2' : ''}`}
+          style={dragRegionStyle}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 app-no-drag"
+                className="h-7 w-7 shrink-0 app-no-drag"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                 onClick={() => window.dispatchEvent(new CustomEvent('netcatty:toggle-ai-panel'))}
               >
@@ -607,13 +610,18 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.aiAssistant')}</TooltipContent>
           </Tooltip>
-          <SyncStatusButton onOpenSettings={onOpenSettings} onSyncNow={onSyncNow} />
+          <SyncStatusButton
+            onOpenSettings={onOpenSettings}
+            onSyncNow={onSyncNow}
+            className="h-7 w-7 shrink-0"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+          />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 app-no-drag"
+                className="h-7 w-7 shrink-0 app-no-drag"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                 onClick={onToggleTheme}
                 disabled={isImmersiveActive && !followAppTerminalTheme}
@@ -623,15 +631,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.toggleTheme')}</TooltipContent>
           </Tooltip>
-        </div>
-        {/* Settings gear button - sits to the left of WindowControls on win/linux, at the right edge on mac */}
-        <div className="self-stretch flex items-center px-2 app-drag" style={dragRegionStyle}>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 app-no-drag"
+                className="h-7 w-7 shrink-0 app-no-drag"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                 onClick={onOpenSettings}
               >
@@ -644,7 +649,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         {/* Custom window controls for Windows/Linux */}
         {!isMacClient && <div className="self-stretch flex items-stretch"><WindowControls /></div>}
         {/* Small drag shim to the right edge (macOS only – on Windows the close button should touch the edge) */}
-        {isMacClient && <div className="w-2 h-9 app-drag flex-shrink-0" />}
+        {isMacClient && <div className="w-2 h-9 app-drag flex-shrink-0 self-end" />}
       </div>
     </div>
   );

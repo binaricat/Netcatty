@@ -107,12 +107,14 @@ interface SyncStatusButtonProps {
     onOpenSettings?: () => void;
     onSyncNow?: () => Promise<void>; // Callback to trigger sync with current data
     className?: string;
+    style?: React.CSSProperties;
 }
 
 export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
     onOpenSettings,
     onSyncNow,
     className,
+    style,
 }) => {
     const { t } = useI18n();
     const [isOpen, setIsOpen] = useState(false);
@@ -177,9 +179,10 @@ export const SyncStatusButton: React.FC<SyncStatusButtonProps> = ({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                "h-8 w-8 relative text-muted-foreground hover:text-foreground app-no-drag",
+                                "h-7 w-7 relative text-muted-foreground hover:text-foreground app-no-drag",
                                 className
                             )}
+                            style={style}
                         >
                             {getButtonIcon()}
 
