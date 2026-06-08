@@ -2,10 +2,10 @@
  * FileOpenerDialog - Dialog for choosing how to open a file
  */
 import { Edit2, FolderOpen } from 'lucide-react';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import type { FileOpenerType, SystemAppInfo } from '../lib/sftpFileUtils';
-import { getFileExtension, isKnownBinaryFile } from '../lib/sftpFileUtils';
+import { getFileExtension, hasFileExtension, isKnownBinaryFile } from '../lib/sftpFileUtils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
@@ -26,13 +26,17 @@ const FileOpenerDialog: React.FC<FileOpenerDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const [isSelectingApp, setIsSelectingApp] = useState(false);
-  const [rememberChoice, setRememberChoice] = useState(true);
+  const [rememberChoice, setRememberChoice] = useState(() => hasFileExtension(fileName));
+
+  useEffect(() => {
+    if (open) {
+      setRememberChoice(hasFileExtension(fileName));
+    }
+  }, [open, fileName]);
 
   const extension = getFileExtension(fileName);
   // Show edit option for files that are not known binary formats
   const canEdit = !isKnownBinaryFile(fileName);
-  // For files without extension, we use 'file' as virtual extension
-  // So we always allow setting default (hasExtension is always true)
   const displayExtension = extension === 'file' ? t('sftp.opener.noExtension') : `.${extension}`;
 
   const handleSelectBuiltIn = useCallback((openerType: FileOpenerType) => {

@@ -189,6 +189,11 @@ export function getFileExtension(fileName: string): string {
   return fileName.slice(lastDot + 1).toLowerCase();
 }
 
+/** True when the filename has a real extension (e.g. `foo.txt`), not a dot-only name like `.git`. */
+export function hasFileExtension(fileName: string): boolean {
+  return fileName.lastIndexOf('.') > 0;
+}
+
 /**
  * Check if a file is a text file based on its extension and name
  */
