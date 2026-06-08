@@ -161,30 +161,19 @@ export const WindowControls: React.FC = memo(() => {
     close();
   };
 
+  const controlStyle = { color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' };
+  const controlClassName =
+    'h-7 w-10 flex items-center justify-center rounded-none hover:bg-foreground/10 transition-colors app-no-drag';
+
   return (
-    <div className="flex items-center app-drag h-full">
-      <button
-        onClick={handleMinimize}
-        className="h-full w-10 flex items-center justify-center hover:bg-foreground/10 transition-all duration-150 app-no-drag"
-        style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-      >
+    <div className="ml-2 flex items-center h-7">
+      <button type="button" className={controlClassName} style={controlStyle} onClick={handleMinimize}>
         <Minus size={16} />
       </button>
-      <button
-        onClick={handleMaximize}
-        className="h-full w-10 flex items-center justify-center hover:bg-foreground/10 transition-all duration-150 app-no-drag"
-        style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
-      >
-        {isMaximized ? (
-          <Copy size={14} />
-        ) : (
-          <Square size={14} />
-        )}
+      <button type="button" className={controlClassName} style={controlStyle} onClick={handleMaximize}>
+        {isMaximized ? <Copy size={14} /> : <Square size={14} />}
       </button>
-      <button
-        onClick={handleClose}
-        className="h-full w-10 flex items-center justify-center text-muted-foreground hover:bg-red-500 hover:text-white transition-all duration-150 app-no-drag"
-      >
+      <button type="button" className={controlClassName} style={controlStyle} onClick={handleClose}>
         <X size={16} />
       </button>
     </div>

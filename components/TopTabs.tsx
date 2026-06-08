@@ -591,9 +591,9 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </Tooltip>
         )}
 
-        {/* Fixed right controls — single row, h-7 to match tab height */}
+        {/* Fixed right controls — utility icons + window controls share one row */}
         <div
-          className={`flex-shrink-0 flex items-center gap-0.5 app-drag self-end h-7${!isMacClient ? ' mr-2' : ''}`}
+          className="flex-shrink-0 flex items-center gap-0.5 app-drag self-end h-7"
           style={dragRegionStyle}
         >
           <Tooltip>
@@ -645,9 +645,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.openSettings')}</TooltipContent>
           </Tooltip>
+          {!isMacClient && <WindowControls />}
         </div>
-        {/* Custom window controls for Windows/Linux */}
-        {!isMacClient && <div className="self-stretch flex items-stretch"><WindowControls /></div>}
         {/* Small drag shim to the right edge (macOS only – on Windows the close button should touch the edge) */}
         {isMacClient && <div className="w-2 h-9 app-drag flex-shrink-0 self-end" />}
       </div>
