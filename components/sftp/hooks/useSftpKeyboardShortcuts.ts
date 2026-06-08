@@ -231,8 +231,16 @@ export const useSftpKeyboardShortcuts = ({
 
           for (const file of uploadFiles) {
             if (file.isDirectory) {
-              const folderResults = await sftp.uploadExternalFolderPath(focusedSide, file.path, targetPath);
-              results.push(...folderResults);
+              try {
+                const folderResults = await sftp.uploadExternalFolderPath(focusedSide, file.path, targetPath);
+                results.push(...folderResults);
+              } catch (error) {
+                results.push({
+                  fileName: file.name,
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
             } else {
               fileEntries.push(
                 entries.find((entry) => entry.localPath === file.path) ?? {
@@ -276,7 +284,7 @@ export const useSftpKeyboardShortcuts = ({
       previewFiles.push({
         path: entry.localPath ?? entry.relativePath,
         name: rootName,
-        isDirectory: entry.isDirectory || entry.relativePath.includes("/"),
+        isDirectory: entry.isDirectory,
         size: entry.size,
       });
     }
@@ -406,7 +414,15 @@ export const useSftpKeyboardShortcuts = ({
       const targetPath = getClipboardUploadTarget(pane);
       const pendingClipboardWrite = pendingSftpSystemClipboardWrite;
       const bridge = netcattyBridge.get();
-      const hasClipboardItems = (e.clipboardData?.items?.length ?? 0) > 0;
+      const dataTransfer = e.clipboardData;
+      const hasClipboardItems = (dataTransfer?.items?.length ?? 0) > 0;
+      // webkitGetAsEntry must be invoked synchronously during the paste event.
+      const dropEntriesPromise = dataTransfer?.items?.length
+        ? extractDropEntries(dataTransfer)
+        : null;
+      const pastedFileSnapshot = dataTransfer?.files?.length
+        ? Array.from(dataTransfer.files).filter((file) => file.name)
+        : [];
 
       if (!hasInternalClipboardFiles && !hasClipboardItems && !bridge?.readClipboardFiles) {
         return;
@@ -419,9 +435,6 @@ export const useSftpKeyboardShortcuts = ({
           return;
         }
 
-        const bridge = netcattyBridge.get();
-        const dataTransfer = e.clipboardData;
-
         if (bridge?.readClipboardFiles) {
           const clipboardFiles = await bridge.readClipboardFiles();
           if (clipboardFiles.length > 0) {
@@ -430,10 +443,25 @@ export const useSftpKeyboardShortcuts = ({
           }
         }
 
-        if (dataTransfer?.items?.length) {
-          const entries = await extractDropEntries(dataTransfer);
+        if (dropEntriesPromise) {
+          const entries = await dropEntriesPromise;
           if (entries.length > 0) {
             triggerDropEntriesClipboardUpload(entries, focusedSide, targetPath);
+            return;
+          }
+        }
+
+        if (pastedFileSnapshot.length > 0) {
+          const pathBackedFiles: ClipboardLocalFile[] = pastedFileSnapshot
+            .map((file) => ({
+              path: bridge?.getPathForFile?.(file) || file.name,
+              name: file.name,
+              isDirectory: false,
+              size: file.size,
+            }))
+            .filter((file) => file.path.includes("/") || file.path.includes("\\"));
+          if (pathBackedFiles.length > 0) {
+            triggerPathBackedClipboardUpload(pathBackedFiles, focusedSide, targetPath);
             return;
           }
         }

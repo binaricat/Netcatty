@@ -81,6 +81,25 @@ test("ignores plain text paths without file uri formats", () => {
   assert.deepEqual(parseClipboardTextFilePaths("/Users/me/a.txt", { fsImpl, pathImpl: require("node:path") }), []);
 });
 
+test("reads macOS public.file-url clipboard paths", () => {
+  const fsImpl = createFs({
+    "/Users/me/folder": "directory",
+  });
+  const clipboard = {
+    availableFormats: () => ["public.file-url"],
+    read: (format) => {
+      if (format === "public.file-url") {
+        return "file:///Users/me/folder";
+      }
+      return "";
+    },
+  };
+
+  assert.deepEqual(readClipboardFiles({ clipboard, fsImpl, pathImpl: require("node:path") }), [
+    { path: "/Users/me/folder", name: "folder", isDirectory: true, size: 0 },
+  ]);
+});
+
 test("reads macOS NSFilenamesPboardType clipboard paths", () => {
   const fsImpl = createFs({
     "/Users/me/folder": "directory",
