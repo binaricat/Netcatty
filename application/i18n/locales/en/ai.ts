@@ -234,6 +234,7 @@ export const enAiMessages: Messages = {
   'topTabs.openQuickSwitcher': 'Open quick switcher',
   'topTabs.moreTabs': 'More tabs',
   'topTabs.aiAssistant': 'AI Assistant',
+  'topTabs.windowOpacity': 'Window opacity',
   'topTabs.toggleTheme': 'Toggle theme',
   'topTabs.openSettings': 'Open Settings',
   'ai.chat.sessionHistory': 'Session history',

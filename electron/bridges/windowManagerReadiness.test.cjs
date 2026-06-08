@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const {
   buildAppMenu,
+  clampWindowOpacity,
+  applyWindowOpacity,
   isWindowUsable,
   registerMainWindow,
   registerWindowHandlers,
@@ -26,6 +28,44 @@ function createWindowStub({ destroyed = false, webContents } = {}) {
     webContents,
   };
 }
+
+test("clampWindowOpacity keeps values within 0.5 and 1", () => {
+  assert.equal(clampWindowOpacity(1), 1);
+  assert.equal(clampWindowOpacity(0.85), 0.85);
+  assert.equal(clampWindowOpacity(0.3), 0.5);
+  assert.equal(clampWindowOpacity(1.5), 1);
+  assert.equal(clampWindowOpacity("bad"), 1);
+});
+
+test("applyWindowOpacity clamps and applies to registered main windows", () => {
+  const opacityCalls = [];
+  const win = {
+    isDestroyed() {
+      return false;
+    },
+    setOpacity(value) {
+      opacityCalls.push(value);
+    },
+    webContents: {
+      id: 901,
+      isDestroyed() {
+        return false;
+      },
+    },
+  };
+  registerMainWindow(win);
+
+  try {
+    assert.equal(applyWindowOpacity(0.85), 0.85);
+    assert.deepEqual(opacityCalls, [0.85]);
+
+    assert.equal(applyWindowOpacity(0.2), 0.5);
+    assert.deepEqual(opacityCalls, [0.85, 0.5]);
+  } finally {
+    unregisterMainWindow(win);
+    applyWindowOpacity(1);
+  }
+});
 
 test("isWindowUsable returns false when webContents is crashed", () => {
   const win = createWindowStub({
@@ -312,6 +352,7 @@ test("main window asks renderer to close tabs from macOS Command+W before-input-
     isFullScreen() { return false; }
     getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
     setBackgroundColor() {}
+    setOpacity() {}
     async loadURL() {}
     close() {}
   }
@@ -358,6 +399,7 @@ test("main window asks renderer to close tabs from macOS Command+W before-input-
       return true;
     },
     shouldCloseWindowFromInput,
+    applyWindowOpacityToWindow() {},
     closeSettingsWindow() {},
     hideSettingsWindow() {},
   });
@@ -423,6 +465,7 @@ test("createWindow registers each main window as an independent app window", asy
     isFullScreen() { return false; }
     getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
     setBackgroundColor() {}
+    setOpacity() {}
     async loadURL() {}
     close() {
       this._closedHandler?.();
@@ -476,6 +519,7 @@ test("createWindow registers each main window as an independent app window", asy
     unregisterMainWindow(win) {
       unregistered.push(win);
     },
+    applyWindowOpacityToWindow() {},
     closeSettingsWindow() {},
     hideSettingsWindow() {},
   });
@@ -540,6 +584,7 @@ test("each main window close saves its own state", async () => {
     isFullScreen() { return false; }
     getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
     setBackgroundColor() {}
+    setOpacity() {}
     async loadURL() {}
     close() {}
   }
@@ -591,6 +636,7 @@ test("each main window close saves its own state", async () => {
     shouldCloseWindowFromInput,
     registerMainWindow() {},
     unregisterMainWindow() {},
+    applyWindowOpacityToWindow() {},
     closeSettingsWindow() {},
     hideSettingsWindow() {},
   });
@@ -679,6 +725,26 @@ test("window IPC handlers target the sender owner window", async () => {
 
   assert.equal(titleResult, true);
   assert.deepEqual(titles, ["Prod SSH"]);
+
+  const opacityCalls = [];
+  registerMainWindow({
+    isDestroyed() {
+      return false;
+    },
+    setOpacity(value) {
+      opacityCalls.push(value);
+    },
+    webContents: {
+      id: 303,
+      isDestroyed() {
+        return false;
+      },
+    },
+  });
+
+  const opacityResult = await handlers.get("netcatty:setWindowOpacity")(null, 0.7);
+  assert.equal(opacityResult, true);
+  assert.deepEqual(opacityCalls, [0.7]);
 });
 
 test("resolveSettingsWindowBounds centers settings on the requesting window display", () => {

@@ -33,6 +33,9 @@ let lastFocusedMainWindow = null;
 let settingsWindow = null;
 let currentTheme = "light";
 let currentLanguage = "en";
+let currentWindowOpacity = 1;
+let cachedNativeTheme = null;
+
 let handlersRegistered = false; // Prevent duplicate IPC handler registration
 let menuDeps = null;
 let electronApp = null; // Reference to Electron app for userData path
@@ -322,6 +325,30 @@ function forEachMainWindow(callback) {
       // ignore per-window broadcast failures
     }
   }
+}
+
+function clampWindowOpacity(opacity) {
+  const value = Number(opacity);
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0.5, value));
+}
+
+function applyWindowOpacityToWindow(win) {
+  if (!win || win.isDestroyed?.()) return;
+  try {
+    win.setOpacity?.(currentWindowOpacity);
+  } catch {
+    // ignore
+  }
+}
+
+function applyWindowOpacity(opacity) {
+  currentWindowOpacity = clampWindowOpacity(opacity);
+  forEachMainWindow(applyWindowOpacityToWindow);
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    applyWindowOpacityToWindow(settingsWindow);
+  }
+  return currentWindowOpacity;
 }
 
 function getMainWindowCount() {
@@ -809,6 +836,7 @@ const mainWindowApi = createMainWindowApi({
   registerMainWindow,
   unregisterMainWindow,
   getMainWindowCount,
+  applyWindowOpacityToWindow,
   closeSettingsWindow: (...args) => closeSettingsWindow(...args),
   hideSettingsWindow: (...args) => hideSettingsWindow(...args),
 });
@@ -852,6 +880,7 @@ const settingsWindowApi = createSettingsWindowApi({
   createAppWindowOpenHandler,
   createExternalOnlyWindowOpenHandler,
   getDevRendererBaseUrl,
+  applyWindowOpacityToWindow,
 });
 const {
   restoreWindowInputFocus,
@@ -874,6 +903,7 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     return;
   }
   handlersRegistered = true;
+  cachedNativeTheme = nativeTheme;
 
   ipcMain.handle("netcatty:window:minimize", (event) => {
     const win = getWindowForIpcEvent(event);
@@ -952,7 +982,6 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
       : theme;
     const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
     forEachMainWindow((win) => win.setBackgroundColor(themeConfig.background));
-    // Also update settings window if open
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.setBackgroundColor(themeConfig.background);
     }
@@ -966,6 +995,11 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.setBackgroundColor(normalized);
     }
+    return true;
+  });
+
+  ipcMain.handle("netcatty:setWindowOpacity", (_event, opacity) => {
+    applyWindowOpacity(opacity);
     return true;
   });
 
@@ -1165,4 +1199,7 @@ module.exports = {
   tryOpenExternalWithFallback,
   resolveSettingsWindowBounds,
   THEME_COLORS,
+  clampWindowOpacity,
+  applyWindowOpacity,
+  applyWindowOpacityToWindow,
 };

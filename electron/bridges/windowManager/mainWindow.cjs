@@ -279,6 +279,8 @@ function createMainWindowApi(ctx) {
       } catch {
         // ignore
       }
+
+      applyWindowOpacityToWindow(win);
     
       // Defer show until renderer is ready; use fallback timeout to avoid keeping window hidden forever.
       // Production gets a shorter timeout since the splash screen provides visual feedback.

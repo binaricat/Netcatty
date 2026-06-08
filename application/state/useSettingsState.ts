@@ -36,6 +36,7 @@ import {
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
+  STORAGE_KEY_WINDOW_OPACITY,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_SHOW_RECENT_HOSTS,
@@ -83,6 +84,8 @@ import {
   DEFAULT_SSH_DEBUG_LOGS_ENABLED,
   DEFAULT_TERMINAL_THEME,
   DEFAULT_THEME,
+  DEFAULT_WINDOW_OPACITY,
+  clampWindowOpacity,
   applyThemeTokens,
   areTerminalSettingsEqual,
   createCustomKeyBindingsSyncOrigin,
@@ -278,6 +281,19 @@ export const useSettingsState = () => {
     if (stored === null) return true; // Default to enabled
     return stored === 'true';
   });
+  const [windowOpacity, setWindowOpacityState] = useState<number>(() => {
+    const stored = readStoredString(STORAGE_KEY_WINDOW_OPACITY);
+    if (stored === null) return DEFAULT_WINDOW_OPACITY;
+    return clampWindowOpacity(stored);
+  });
+  const setWindowOpacity = useCallback((nextValue: SetStateAction<number>) => {
+    setWindowOpacityState((prev) => {
+      const candidate = typeof nextValue === 'function'
+        ? (nextValue as (prevState: number) => number)(prev)
+        : nextValue;
+      return clampWindowOpacity(candidate);
+    });
+  }, []);
   const incomingTerminalSettingsSignatureRef = useRef<string | null>(null);
   const localTerminalSettingsVersionRef = useRef(0);
   const broadcastedLocalTerminalSettingsVersionRef = useRef(0);
@@ -576,6 +592,7 @@ export const useSettingsState = () => {
     applyIncomingCustomKeyBindings,
     setIsHotkeyRecordingState,
     setGlobalHotkeyEnabled,
+    setWindowOpacity,
     setAutoUpdateEnabled,
     setSftpAutoOpenSidebar,
     setSftpDefaultViewMode,
@@ -608,7 +625,7 @@ export const useSettingsState = () => {
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpDefaultViewMode,
     showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
-    globalHotkeyEnabled, autoUpdateEnabled,
+    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
     setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, setCustomAccent,
     setCustomCSS, setUiFontFamilyId, setHotkeyScheme, setUiLanguage,
     setTerminalThemeId, setTerminalThemeDarkId, setTerminalThemeLightId,
@@ -617,7 +634,7 @@ export const useSettingsState = () => {
     setSftpUseCompressedUpload, setSftpAutoOpenSidebar, setSftpDefaultViewMode,
     setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState,
     setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled,
-    setGlobalHotkeyEnabled, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
+    setGlobalHotkeyEnabled, setWindowOpacity, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
   });
 
@@ -815,6 +832,7 @@ export const useSettingsState = () => {
     toggleWindowHotkey,
     globalHotkeyEnabled,
     closeToTray,
+    windowOpacity,
     autoUpdateEnabled,
     persistMountedRef,
     setHotkeyRegistrationError,
@@ -986,6 +1004,8 @@ export const useSettingsState = () => {
     hotkeyRegistrationError,
     globalHotkeyEnabled,
     setGlobalHotkeyEnabled,
+    windowOpacity,
+    setWindowOpacity,
     rehydrateAllFromStorage,
     reapplyCurrentTheme,
     workspaceFocusStyle,

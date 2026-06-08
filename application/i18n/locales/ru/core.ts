@@ -271,7 +271,8 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.language.desc': 'Выберите язык интерфейса',
   'settings.appearance.uiFont': 'Шрифт интерфейса',
   'settings.appearance.uiFont.desc': 'Выберите шрифт для интерфейса приложения',
-
+  'settings.appearance.windowOpacity': 'Прозрачность окна',
+  'settings.appearance.windowOpacity.desc': 'Настройте прозрачность всего окна приложения. При низких значениях текст терминала тоже бледнеет. В некоторых средах Linux это может не поддерживаться.',
   // Settings > Terminal
   'settings.terminal.section.theme': 'Тема терминала',
   'settings.terminal.themeModal.title': 'Выберите тему',

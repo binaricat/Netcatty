@@ -4,6 +4,7 @@ declare global {
   interface NetcattyBridge {
     setTheme?(theme: 'light' | 'dark' | 'system'): Promise<boolean>;
     setBackgroundColor?(color: string): Promise<boolean>;
+    setWindowOpacity?(opacity: number): Promise<boolean>;
     setLanguage?(language: string): Promise<boolean>;
     // Window controls for custom title bar (Windows/Linux)
     windowMinimize?(): Promise<void>;

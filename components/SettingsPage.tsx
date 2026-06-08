@@ -325,6 +325,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             setShowOnlyUngroupedHostsInRoot={settings.setShowOnlyUngroupedHostsInRoot}
                             showSftpTab={settings.showSftpTab}
                             setShowSftpTab={settings.setShowSftpTab}
+                            windowOpacity={settings.windowOpacity}
+                            setWindowOpacity={settings.setWindowOpacity}
                         />
                     )}
 

@@ -12,6 +12,7 @@ import { Button } from './ui/button';
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SyncStatusButton } from './SyncStatusButton';
+import { WindowOpacityButton } from './WindowOpacityButton';
 import {
   ActiveTabAutoScroller,
   EditorTopTab,
@@ -49,6 +50,8 @@ interface TopTabsProps {
   onOpenQuickSwitcher: () => void;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  windowOpacity: number;
+  setWindowOpacity: (opacity: number) => void;
   onSyncNow?: () => Promise<void>;
   isImmersiveActive?: boolean;
   onStartSessionDrag: (sessionId: string) => void;
@@ -82,6 +85,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onOpenQuickSwitcher,
   onToggleTheme,
   onOpenSettings,
+  windowOpacity,
+  setWindowOpacity,
   onSyncNow,
   isImmersiveActive,
   onStartSessionDrag,
@@ -610,6 +615,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             </TooltipTrigger>
             <TooltipContent>{t('topTabs.aiAssistant')}</TooltipContent>
           </Tooltip>
+          <WindowOpacityButton
+            windowOpacity={windowOpacity}
+            setWindowOpacity={setWindowOpacity}
+            className="h-7 w-7 shrink-0"
+            style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+          />
           <SyncStatusButton
             onOpenSettings={onOpenSettings}
             onSyncNow={onSyncNow}
@@ -669,6 +680,8 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.onCopySession === next.onCopySession &&
     prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
     prev.onOpenSettings === next.onOpenSettings &&
+    prev.windowOpacity === next.windowOpacity &&
+    prev.setWindowOpacity === next.setWindowOpacity &&
     prev.onSyncNow === next.onSyncNow &&
     prev.onToggleTheme === next.onToggleTheme &&
     prev.followAppTerminalTheme === next.followAppTerminalTheme &&

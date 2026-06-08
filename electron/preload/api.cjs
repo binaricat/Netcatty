@@ -303,6 +303,9 @@ function createPreloadApi(ctx) {
   setBackgroundColor: async (color) => {
     return ipcRenderer.invoke("netcatty:setBackgroundColor", color);
   },
+  setWindowOpacity: async (opacity) => {
+    return ipcRenderer.invoke("netcatty:setWindowOpacity", opacity);
+  },
   setLanguage: async (language) => {
     return ipcRenderer.invoke("netcatty:setLanguage", language);
   },

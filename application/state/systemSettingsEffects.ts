@@ -4,6 +4,7 @@ import {
   STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
+  STORAGE_KEY_WINDOW_OPACITY,
 } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
@@ -12,6 +13,7 @@ interface UseSystemSettingsEffectsParams {
   toggleWindowHotkey: string;
   globalHotkeyEnabled: boolean;
   closeToTray: boolean;
+  windowOpacity: number;
   autoUpdateEnabled: boolean;
   persistMountedRef: MutableRefObject<boolean>;
   setHotkeyRegistrationError: (error: string | null) => void;
@@ -23,6 +25,7 @@ export function useSystemSettingsEffects({
   toggleWindowHotkey,
   globalHotkeyEnabled,
   closeToTray,
+  windowOpacity,
   autoUpdateEnabled,
   persistMountedRef,
   setHotkeyRegistrationError,
@@ -88,6 +91,17 @@ export function useSystemSettingsEffects({
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_CLOSE_TO_TRAY, closeToTray);
   }, [closeToTray, notifySettingsChanged, persistMountedRef]);
+
+  // Persist and sync window opacity
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    bridge?.setWindowOpacity?.(windowOpacity).catch((err) => {
+      console.warn('[WindowOpacity] Failed to apply window opacity:', err);
+    });
+    localStorageAdapter.writeString(STORAGE_KEY_WINDOW_OPACITY, String(windowOpacity));
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacity);
+  }, [windowOpacity, notifySettingsChanged, persistMountedRef]);
 
   // Hydrate auto-update state from the main-process preference file on mount.
   // This reconciles localStorage (renderer) with auto-update-pref.json (main)

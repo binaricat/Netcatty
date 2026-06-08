@@ -129,6 +129,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onOpenQuickSwitcher={handleOpenQuickSwitcher}
         onToggleTheme={handleToggleTheme}
         onOpenSettings={handleOpenSettings}
+        windowOpacity={settings.windowOpacity}
+        setWindowOpacity={settings.setWindowOpacity}
         onSyncNow={handleSyncNowManual}
         isImmersiveActive={activeTerminalTheme !== null}
         onStartSessionDrag={setDraggingSessionId}

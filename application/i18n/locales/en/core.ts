@@ -271,7 +271,8 @@ export const enCoreMessages: Messages = {
   'settings.appearance.language.desc': 'Choose the UI language',
   'settings.appearance.uiFont': 'Interface Font',
   'settings.appearance.uiFont.desc': 'Choose the font for the application interface',
-
+  'settings.appearance.windowOpacity': 'Window Opacity',
+  'settings.appearance.windowOpacity.desc': 'Adjust the transparency of the entire application window. Lower values also fade terminal text. Some Linux desktop environments may not support this.',
   // Settings > Terminal
   'settings.terminal.section.theme': 'Terminal Theme',
   'settings.terminal.themeModal.title': 'Select Theme',

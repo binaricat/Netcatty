@@ -119,7 +119,7 @@ export const STORAGE_KEY_MANAGED_SOURCES = 'netcatty_managed_sources_v1';
 export const STORAGE_KEY_TOGGLE_WINDOW_HOTKEY = 'netcatty_toggle_window_hotkey_v1';
 export const STORAGE_KEY_CLOSE_TO_TRAY = 'netcatty_close_to_tray_v1';
 export const STORAGE_KEY_GLOBAL_HOTKEY_ENABLED = 'netcatty_global_hotkey_enabled_v1';
-
+export const STORAGE_KEY_WINDOW_OPACITY = 'netcatty_window_opacity_v1';
 // Custom Terminal Themes
 export const STORAGE_KEY_CUSTOM_THEMES = 'netcatty_custom_themes_v1';
 

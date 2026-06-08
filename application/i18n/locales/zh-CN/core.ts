@@ -255,7 +255,8 @@ export const zhCNCoreMessages: Messages = {
   'settings.appearance.language.desc': '选择界面语言',
   'settings.appearance.uiFont': '界面字体',
   'settings.appearance.uiFont.desc': '选择软件界面使用的字体',
-
+  'settings.appearance.windowOpacity': '窗口透明度',
+  'settings.appearance.windowOpacity.desc': '调节整个应用窗口的透明度，方便叠在其他内容上方。较低时终端文字也会变淡；部分 Linux 桌面环境可能不支持。',
   // Context menus / common actions
   'action.newHost': '新建主机',
   'action.newSubfolder': '新建文件夹',

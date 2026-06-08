@@ -33,9 +33,14 @@ import {
   STORAGE_KEY_UI_THEME_DARK,
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
+  STORAGE_KEY_WINDOW_OPACITY,
 } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
-import { isValidUiFontId, migrateIncomingTerminalFontId } from './settingsStateDefaults';
+import {
+  clampWindowOpacity,
+  isValidUiFontId,
+  migrateIncomingTerminalFontId,
+} from './settingsStateDefaults';
 
 interface UseSettingsIpcSyncParams {
   syncAppearanceFromStorage: () => void;
@@ -59,6 +64,7 @@ interface UseSettingsIpcSyncParams {
   applyIncomingCustomKeyBindings: (incoming: { bindings: CustomKeyBindings; version: number; origin: string }) => void;
   setIsHotkeyRecordingState: Dispatch<SetStateAction<boolean>>;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
+  setWindowOpacity: Dispatch<SetStateAction<number>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
@@ -88,6 +94,7 @@ export function useSettingsIpcSync({
   applyIncomingCustomKeyBindings,
   setIsHotkeyRecordingState,
   setGlobalHotkeyEnabled,
+  setWindowOpacity,
   setAutoUpdateEnabled,
   setSftpAutoOpenSidebar,
   setSftpDefaultViewMode,
@@ -191,6 +198,10 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && typeof value === 'boolean') {
         setGlobalHotkeyEnabled((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_WINDOW_OPACITY && (typeof value === 'number' || typeof value === 'string')) {
+        const nextOpacity = clampWindowOpacity(value);
+        setWindowOpacity((prev) => (prev === nextOpacity ? prev : nextOpacity));
+      }
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
@@ -223,6 +234,7 @@ export function useSettingsIpcSync({
     setEditorWordWrapState,
     setFollowAppTerminalThemeState,
     setGlobalHotkeyEnabled,
+    setWindowOpacity,
     setHotkeyScheme,
     setIsHotkeyRecordingState,
     setSessionLogsDir,

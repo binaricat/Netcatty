@@ -233,6 +233,8 @@ function createSettingsWindowApi(ctx) {
       } catch {
         // ignore
       }
+
+      applyWindowOpacityToWindow(win);
     
       // Hide instead of close so the window can be reused instantly.
       // When the app is quitting, allow normal close/destroy.
