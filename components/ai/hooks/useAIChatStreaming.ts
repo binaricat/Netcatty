@@ -35,6 +35,10 @@ import {
   prepareContextCompaction,
   resolveContextWindow,
 } from '../../../infrastructure/ai/contextCompaction';
+import {
+  estimateUtf8Bytes,
+  fitMessagesToRequestPayloadBudget,
+} from '../../../infrastructure/ai/requestPayloadBudget';
 import { createModelFromConfig } from '../../../infrastructure/ai/sdk/providers';
 import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
@@ -965,7 +969,19 @@ export function useAIChatStreaming({
         openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
       });
 
-      let messagesForStream = sdkMessages;
+      const payloadBudgetResult = fitMessagesToRequestPayloadBudget({
+        messages: sdkMessages,
+        reservedBytes: estimateUtf8Bytes({
+          system: systemPrompt,
+          tools: Object.keys(tools),
+        }),
+      });
+      let messagesForStream = payloadBudgetResult.messages;
+      if (payloadBudgetResult.didAdjust) {
+        console.warn(
+          `[Catty] Request payload trimmed to ${payloadBudgetResult.estimatedBytes} bytes to avoid HTTP 413.`,
+        );
+      }
       try {
         const compacted = await prepareContextCompaction({
           messages: sdkMessages,
