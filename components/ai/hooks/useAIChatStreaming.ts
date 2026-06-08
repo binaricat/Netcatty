@@ -969,13 +969,15 @@ export function useAIChatStreaming({
         openAIChatAssistantFields: Array.from(openAIChatAssistantFieldsByMessage.values()),
       });
 
-      const payloadBudgetResult = fitMessagesToRequestPayloadBudget({
-        messages: sdkMessages,
-        reservedBytes: estimateUtf8Bytes({
-          system: systemPrompt,
-          tools: Object.keys(tools),
-        }),
+      const payloadReservedBytes = estimateUtf8Bytes({
+        system: systemPrompt,
+        tools: Object.keys(tools),
       });
+      const applyRequestPayloadBudget = (messages: ModelMessage[]) => fitMessagesToRequestPayloadBudget({
+        messages,
+        reservedBytes: payloadReservedBytes,
+      });
+      const payloadBudgetResult = applyRequestPayloadBudget(sdkMessages);
       let messagesForStream = payloadBudgetResult.messages;
       if (payloadBudgetResult.didAdjust) {
         console.warn(
@@ -984,7 +986,7 @@ export function useAIChatStreaming({
       }
       try {
         const compacted = await prepareContextCompaction({
-          messages: sdkMessages,
+          messages: messagesForStream,
           contextWindow,
           reservedTokens: requestReserveTokens,
           protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -1005,10 +1007,25 @@ export function useAIChatStreaming({
           },
         });
         messagesForStream = compacted.messages;
+        const postCompactionBudget = applyRequestPayloadBudget(messagesForStream);
+        if (postCompactionBudget.didAdjust) {
+          console.warn(
+            `[Catty] Request payload re-trimmed to ${postCompactionBudget.estimatedBytes} bytes after context compaction.`,
+          );
+          messagesForStream = postCompactionBudget.messages;
+        }
       } catch (err) {
         if (abortController.signal.aborted) throw err;
         console.warn('[Catty] Context compaction failed; falling back to recent messages only:', err);
-        messagesForStream = keepRecentContextMessages(sdkMessages, DEFAULT_PROTECT_RECENT_MESSAGES);
+        const fallbackBudget = applyRequestPayloadBudget(
+          keepRecentContextMessages(messagesForStream, DEFAULT_PROTECT_RECENT_MESSAGES),
+        );
+        messagesForStream = fallbackBudget.messages;
+        if (fallbackBudget.didAdjust) {
+          console.warn(
+            `[Catty] Request payload trimmed to ${fallbackBudget.estimatedBytes} bytes after compaction fallback.`,
+          );
+        }
       }
 
       messagesForStream = pruneMessages({

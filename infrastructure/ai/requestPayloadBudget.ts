@@ -183,11 +183,11 @@ export function fitMessagesToRequestPayloadBudget({
     maxMessageTextChars,
   }));
   let estimatedBytes = estimateUtf8Bytes(adjusted);
+  const originalBytes = estimateUtf8Bytes(messages);
+  let didAdjust = estimatedBytes !== originalBytes;
   if (estimatedBytes <= budget) {
-    return { messages: adjusted, didAdjust: false, estimatedBytes };
+    return { messages: adjusted, didAdjust, estimatedBytes };
   }
-
-  let didAdjust = estimatedBytes !== estimateUtf8Bytes(messages);
 
   const toolResultCaps = [
     maxToolResultChars,
@@ -238,6 +238,34 @@ export function fitMessagesToRequestPayloadBudget({
   }));
   estimatedBytes = estimateUtf8Bytes(working);
   didAdjust = true;
+
+  let emergencyProtect = Math.min(protectRecentMessages, working.length);
+  while (estimatedBytes > budget && working.length > 1) {
+    emergencyProtect = Math.max(1, emergencyProtect - 1);
+    const splitAt = findSafeCompactionSplitIndex(working, emergencyProtect);
+    if (splitAt <= 0) {
+      working = working.slice(-1);
+    } else {
+      working = working.slice(splitAt);
+    }
+    working = working.map((message) => truncateModelMessageForPayload(message, {
+      maxToolResultChars: emergencyToolCap,
+      maxMessageTextChars: emergencyTextCap,
+    }));
+    estimatedBytes = estimateUtf8Bytes(working);
+  }
+
+  let finalTextCap = emergencyTextCap;
+  let finalToolCap = emergencyToolCap;
+  while (estimatedBytes > budget && (finalTextCap > 32 || finalToolCap > 32)) {
+    finalTextCap = Math.max(32, Math.floor(finalTextCap * 0.6));
+    finalToolCap = Math.max(32, Math.floor(finalToolCap * 0.6));
+    working = working.map((message) => truncateModelMessageForPayload(message, {
+      maxToolResultChars: finalToolCap,
+      maxMessageTextChars: finalTextCap,
+    }));
+    estimatedBytes = estimateUtf8Bytes(working);
+  }
 
   return { messages: working, didAdjust, estimatedBytes };
 }

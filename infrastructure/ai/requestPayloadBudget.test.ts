@@ -92,3 +92,68 @@ test("estimateUtf8Bytes measures JSON payload size in UTF-8 bytes", () => {
   const bytes = estimateUtf8Bytes({ text: "caf\u00e9" });
   assert.ok(bytes > 8);
 });
+
+test("fitMessagesToRequestPayloadBudget reports didAdjust when initial truncation succeeds", () => {
+  const messages: ModelMessage[] = [
+    { role: "user", content: "run build" },
+    {
+      role: "tool",
+      content: [{
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "terminal_execute",
+        output: { type: "text", value: "X".repeat(200_000) },
+      }],
+    },
+  ];
+
+  const result = fitMessagesToRequestPayloadBudget({
+    messages,
+    maxPayloadBytes: 20_000,
+    reservedBytes: 2_000,
+  });
+
+  assert.equal(result.didAdjust, true);
+  assert.ok(result.estimatedBytes <= 20_000);
+});
+
+test("fitMessagesToRequestPayloadBudget keeps dropping messages after emergency caps when still over budget", () => {
+  const messages: ModelMessage[] = [];
+  for (let turn = 0; turn < 8; turn += 1) {
+    messages.push({ role: "user", content: `question ${turn} ${"Q".repeat(5_000)}` });
+    messages.push({ role: "assistant", content: `answer ${turn} ${"A".repeat(5_000)}` });
+  }
+
+  const result = fitMessagesToRequestPayloadBudget({
+    messages,
+    maxPayloadBytes: 5_000,
+    protectRecentMessages: 8,
+    maxMessageTextChars: 2_000,
+  });
+
+  assert.ok(result.messages.length < messages.length);
+  assert.ok(result.estimatedBytes <= 5_000);
+});
+
+test("fitMessagesToRequestPayloadBudget shrinks a single oversized message for very small budgets", () => {
+  const result = fitMessagesToRequestPayloadBudget({
+    messages: [{ role: "assistant", content: "Z".repeat(1_000_000) }],
+    maxPayloadBytes: 1_000,
+    maxMessageTextChars: 500,
+  });
+
+  assert.equal(result.messages.length, 1);
+  assert.ok(result.estimatedBytes <= 1_000);
+});
+
+test("fitMessagesToRequestPayloadBudget returns empty messages when budget is fully reserved", () => {
+  const result = fitMessagesToRequestPayloadBudget({
+    messages: [{ role: "user", content: "hello" }],
+    maxPayloadBytes: 100,
+    reservedBytes: 200,
+  });
+
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.didAdjust, true);
+  assert.equal(result.estimatedBytes, 0);
+});
