@@ -69,6 +69,7 @@ import {
   prepareSudoAutofillInput,
   type SudoPasswordAutofill,
 } from "./terminalSudoAutofill";
+import { stripTerminalOutputTimestamps } from "./terminalOutputTimestamps";
 import type {
   Host,
   KeyBinding,
@@ -686,7 +687,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           switch (action) {
             case "copy": {
               const selection = term.getSelection();
-              if (selection) navigator.clipboard.writeText(selection);
+              if (selection) {
+                navigator.clipboard.writeText(stripTerminalOutputTimestamps(selection));
+              }
               break;
             }
             case "paste": {

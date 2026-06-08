@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createTerminalOutputTimestampPrefixer,
   formatTerminalOutputTimestamp,
+  stripTerminalOutputTimestamps,
 } from "./terminalOutputTimestamps.ts";
 
 test("formats terminal output timestamps as bracketed local time", () => {
@@ -125,4 +126,36 @@ test("timestamps before a leading tab", () => {
   });
 
   assert.equal(prefixer.append("\tvisible"), "\x1b[2;90m[23:24:25] \x1b[22;39m\tvisible");
+});
+
+test("stripTerminalOutputTimestamps removes timestamp prefixes from each line", () => {
+  assert.equal(
+    stripTerminalOutputTimestamps("[09:08:07] hello"),
+    "hello",
+  );
+  assert.equal(
+    stripTerminalOutputTimestamps("[09:08:07] hello\n[10:11:12] world"),
+    "hello\nworld",
+  );
+});
+
+test("stripTerminalOutputTimestamps preserves non-timestamp lines", () => {
+  assert.equal(
+    stripTerminalOutputTimestamps("hello world"),
+    "hello world",
+  );
+});
+
+test("stripTerminalOutputTimestamps handles mixed content", () => {
+  assert.equal(
+    stripTerminalOutputTimestamps("[09:08:07] line one\nplain line\n[10:11:12] line three"),
+    "line one\nplain line\nline three",
+  );
+});
+
+test("stripTerminalOutputTimestamps does not strip in-line [HH:MM:SS] patterns", () => {
+  assert.equal(
+    stripTerminalOutputTimestamps("output at [09:08:07] and done"),
+    "output at [09:08:07] and done",
+  );
 });

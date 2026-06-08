@@ -14,6 +14,16 @@ export const formatTerminalOutputTimestamp = (date: Date, restoreSequence = ""):
   `\x1b[2;90m[${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}] \x1b[22;39m${restoreSequence}`
 );
 
+/**
+ * Strips timestamp prefixes from terminal output selection text.
+ * Timestamps injected by {@link formatTerminalOutputTimestamp} appear as
+ * `[HH:MM:SS] ` at the start of lines in the buffer, so this regex removes
+ * them from copied text. Only strips at line boundaries so in-line content
+ * that happens to match the pattern is left intact.
+ */
+export const stripTerminalOutputTimestamps = (text: string): string =>
+  text.replace(/^\[\d{2}:\d{2}:\d{2}\] /gm, "");
+
 const isCsiFinalByte = (char: string): boolean => char >= "@" && char <= "~";
 
 const readEscapeSequence = (
