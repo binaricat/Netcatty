@@ -75,7 +75,7 @@ export function createDropEntriesFromClipboardFiles(files: ClipboardLocalFile[])
 }
 
 export function getSupportedClipboardUploadFiles(files: ClipboardLocalFile[]): ClipboardLocalFile[] {
-  return files.filter((file) => !file.isDirectory);
+  return files;
 }
 
 export function shouldLetNativePasteEventHandleSftpPaste(

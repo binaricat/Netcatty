@@ -19,6 +19,7 @@ import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 import type { SftpFileEntry } from "../../../types";
+import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import { toast } from "../../ui/toast";
 import {
   createDropEntriesFromClipboardFiles,
@@ -214,10 +215,6 @@ export const useSftpKeyboardShortcuts = ({
   ) => {
     const sftp = sftpRef.current;
     const uploadFiles = getSupportedClipboardUploadFiles(files);
-    const skippedDirectoryCount = files.length - uploadFiles.length;
-    if (skippedDirectoryCount > 0) {
-      toast.info("Folder paste is not supported yet. Only files will be uploaded.", "SFTP");
-    }
     if (uploadFiles.length === 0) return;
 
     const entries = createDropEntriesFromClipboardFiles(uploadFiles);
@@ -229,7 +226,31 @@ export const useSftpKeyboardShortcuts = ({
       files: uploadFiles,
       onConfirm: async () => {
         try {
-          const results = await sftp.uploadExternalEntries(focusedSide, entries, { targetPath });
+          const results: Awaited<ReturnType<SftpStateApi["uploadExternalEntries"]>> = [];
+          const fileEntries: DropEntry[] = [];
+
+          for (const file of uploadFiles) {
+            if (file.isDirectory) {
+              const folderResults = await sftp.uploadExternalFolderPath(focusedSide, file.path, targetPath);
+              results.push(...folderResults);
+            } else {
+              fileEntries.push(
+                entries.find((entry) => entry.localPath === file.path) ?? {
+                  file: null,
+                  localPath: file.path,
+                  relativePath: file.name,
+                  isDirectory: false,
+                  size: file.size,
+                },
+              );
+            }
+          }
+
+          if (fileEntries.length > 0) {
+            const fileResults = await sftp.uploadExternalEntries(focusedSide, fileEntries, { targetPath });
+            results.push(...fileResults);
+          }
+
           showUploadResults(results);
         } catch (error) {
           toast.error(error instanceof Error ? error.message : "Upload failed.", "SFTP");
@@ -238,28 +259,36 @@ export const useSftpKeyboardShortcuts = ({
     });
   }, [dialogActionScopeId, showUploadResults, sftpRef]);
 
-  const triggerFileListClipboardUpload = useCallback((
-    files: File[],
+  const triggerDropEntriesClipboardUpload = useCallback((
+    entries: DropEntry[],
     focusedSide: "left" | "right",
     targetPath: string,
   ) => {
     const sftp = sftpRef.current;
-    const bridge = netcattyBridge.get();
-    const dialogFiles: ClipboardLocalFile[] = files.map((file) => ({
-      path: bridge?.getPathForFile?.(file) || file.name,
-      name: file.name,
-      isDirectory: false,
-      size: file.size,
-    }));
+    if (entries.length === 0) return;
+
+    const rootNames = new Set<string>();
+    const previewFiles: ClipboardLocalFile[] = [];
+    for (const entry of entries) {
+      const rootName = entry.relativePath.split("/")[0];
+      if (rootNames.has(rootName)) continue;
+      rootNames.add(rootName);
+      previewFiles.push({
+        path: entry.localPath ?? entry.relativePath,
+        name: rootName,
+        isDirectory: entry.isDirectory || entry.relativePath.includes("/"),
+        size: entry.size,
+      });
+    }
 
     sftpClipboardUploadStore.trigger({
       scopeId: dialogActionScopeId,
       side: focusedSide,
       targetPath,
-      files: dialogFiles,
+      files: previewFiles,
       onConfirm: async () => {
         try {
-          const results = await sftp.uploadExternalFileList(focusedSide, files, targetPath);
+          const results = await sftp.uploadExternalEntries(focusedSide, entries, { targetPath });
           showUploadResults(results);
         } catch (error) {
           toast.error(error instanceof Error ? error.message : "Upload failed.", "SFTP");
@@ -369,51 +398,54 @@ export const useSftpKeyboardShortcuts = ({
 
       const target = e.target as HTMLElement;
       if (isEditableShortcutTarget(target) || hasOpenDialog()) return;
-      const hasInternalClipboardFiles = sftpClipboardStore.hasFiles();
 
+      const hasInternalClipboardFiles = sftpClipboardStore.hasFiles();
       const { focusedSide, pane } = getFocusedPane();
       if (!pane?.connection) return;
 
       const targetPath = getClipboardUploadTarget(pane);
       const pendingClipboardWrite = pendingSftpSystemClipboardWrite;
-      if (pendingClipboardWrite && hasInternalClipboardFiles) {
-        e.preventDefault();
-        e.stopPropagation();
-        void pendingClipboardWrite.finally(() => {
-          void pasteInternalSftpClipboard(focusedSide, pane);
-        });
-        return;
-      }
-
-      const pastedFiles = Array.from(e.clipboardData?.files ?? []).filter((file) => file.name);
-      if (pastedFiles.length > 0) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerFileListClipboardUpload(pastedFiles, focusedSide, targetPath);
-        return;
-      }
-
       const bridge = netcattyBridge.get();
-      const clipboardFilesPromise = bridge?.readClipboardFiles?.();
-      if (!clipboardFilesPromise) {
-        if (!hasInternalClipboardFiles) return;
-        e.preventDefault();
-        e.stopPropagation();
-        void pasteInternalSftpClipboard(focusedSide, pane);
+      const hasClipboardItems = (e.clipboardData?.items?.length ?? 0) > 0;
+
+      if (!hasInternalClipboardFiles && !hasClipboardItems && !bridge?.readClipboardFiles) {
         return;
       }
+
+      const runPaste = async () => {
+        if (pendingClipboardWrite && hasInternalClipboardFiles) {
+          await pendingClipboardWrite;
+          await pasteInternalSftpClipboard(focusedSide, pane);
+          return;
+        }
+
+        const bridge = netcattyBridge.get();
+        const dataTransfer = e.clipboardData;
+
+        if (bridge?.readClipboardFiles) {
+          const clipboardFiles = await bridge.readClipboardFiles();
+          if (clipboardFiles.length > 0) {
+            triggerPathBackedClipboardUpload(clipboardFiles, focusedSide, targetPath);
+            return;
+          }
+        }
+
+        if (dataTransfer?.items?.length) {
+          const entries = await extractDropEntries(dataTransfer);
+          if (entries.length > 0) {
+            triggerDropEntriesClipboardUpload(entries, focusedSide, targetPath);
+            return;
+          }
+        }
+
+        if (hasInternalClipboardFiles) {
+          await pasteInternalSftpClipboard(focusedSide, pane);
+        }
+      };
 
       e.preventDefault();
       e.stopPropagation();
-      void clipboardFilesPromise.then((files) => {
-        if (files.length === 0) {
-          if (hasInternalClipboardFiles) {
-            void pasteInternalSftpClipboard(focusedSide, pane);
-          }
-          return;
-        }
-        triggerPathBackedClipboardUpload(files, focusedSide, targetPath);
-      });
+      void runPaste();
     },
     [
       getClipboardUploadTarget,
@@ -422,7 +454,7 @@ export const useSftpKeyboardShortcuts = ({
       isActive,
       keyBindings,
       pasteInternalSftpClipboard,
-      triggerFileListClipboardUpload,
+      triggerDropEntriesClipboardUpload,
       triggerPathBackedClipboardUpload,
     ],
   );

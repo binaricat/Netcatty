@@ -108,15 +108,13 @@ test("clipboard files become path-backed upload entries", () => {
   ]);
 });
 
-test("clipboard upload ignores directories until recursive paste is supported", () => {
+test("clipboard upload keeps directories for recursive folder paste", () => {
   const files: ClipboardLocalFile[] = [
     { path: "/Users/me/Desktop/report.txt", name: "report.txt", isDirectory: false, size: 42 },
     { path: "/Users/me/Desktop/folder", name: "folder", isDirectory: true, size: 0 },
   ];
 
-  assert.deepEqual(getSupportedClipboardUploadFiles(files), [
-    { path: "/Users/me/Desktop/report.txt", name: "report.txt", isDirectory: false, size: 42 },
-  ]);
+  assert.deepEqual(getSupportedClipboardUploadFiles(files), files);
 });
 
 test("SFTP paste keydown lets the native paste event handle OS clipboard files", () => {

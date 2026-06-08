@@ -127,6 +127,23 @@ function readClipboardFiles({
     ) {
       return parseClipboardTextFilePaths(clipboard.readText(), options);
     }
+
+    if (typeof clipboard.read === "function") {
+      for (const format of ["NSFilenamesPboardType", "public.file-url"]) {
+        if (!formats.includes(format)) continue;
+        const raw = clipboard.read(format);
+        if (typeof raw !== "string" || raw.trim().length === 0) continue;
+        if (raw.includes("file://")) {
+          const files = parseClipboardTextFilePaths(raw, options);
+          if (files.length > 0) return files;
+        }
+        const files = collectExistingFiles(
+          raw.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean),
+          options,
+        );
+        if (files.length > 0) return files;
+      }
+    }
   } catch {
     return [];
   }

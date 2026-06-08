@@ -81,6 +81,27 @@ test("ignores plain text paths without file uri formats", () => {
   assert.deepEqual(parseClipboardTextFilePaths("/Users/me/a.txt", { fsImpl, pathImpl: require("node:path") }), []);
 });
 
+test("reads macOS NSFilenamesPboardType clipboard paths", () => {
+  const fsImpl = createFs({
+    "/Users/me/folder": "directory",
+    "/Users/me/a.txt": "file",
+  });
+  const clipboard = {
+    availableFormats: () => ["NSFilenamesPboardType"],
+    read: (format) => {
+      if (format === "NSFilenamesPboardType") {
+        return "/Users/me/folder\n/Users/me/a.txt";
+      }
+      return "";
+    },
+  };
+
+  assert.deepEqual(readClipboardFiles({ clipboard, fsImpl, pathImpl: require("node:path") }), [
+    { path: "/Users/me/folder", name: "folder", isDirectory: true, size: 0 },
+    { path: "/Users/me/a.txt", name: "a.txt", isDirectory: false, size: 42 },
+  ]);
+});
+
 test("reads CF_HDROP before falling back to FileNameW", () => {
   const filesOffset = 20;
   const header = Buffer.alloc(filesOffset);
