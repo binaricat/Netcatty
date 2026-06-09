@@ -1,4 +1,4 @@
-import type { ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
+import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
@@ -63,6 +63,50 @@ function getToolCommand(toolCall?: ToolCall): string | undefined {
   if (typeof args.command === "string") return args.command;
   const serialized = JSON.stringify(args);
   return serialized && serialized !== "{}" ? serialized : undefined;
+}
+
+export function buildHistoricalToolReplayMaps(messages: ChatMessage[]): {
+  resolvedToolCallsByAssistant: Map<ChatMessage, Set<ToolCall>>;
+  toolCallByToolResult: Map<ToolResult, ToolCall>;
+} {
+  const resolvedToolCallsByAssistant = new Map<ChatMessage, Set<ToolCall>>();
+  const toolCallByToolResult = new Map<ToolResult, ToolCall>();
+  const pendingToolCalls: Array<{ message: ChatMessage; toolCall: ToolCall }> = [];
+
+  for (const message of messages) {
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      for (const toolCall of message.toolCalls) {
+        pendingToolCalls.push({ message, toolCall });
+      }
+      continue;
+    }
+
+    if (message.role !== "tool" || !message.toolResults?.length) continue;
+
+    for (const result of message.toolResults) {
+      const pendingIndex = findLastIndex(
+        pendingToolCalls,
+        ({ toolCall }) => toolCall.id === result.toolCallId,
+      );
+      if (pendingIndex < 0) continue;
+
+      const [paired] = pendingToolCalls.splice(pendingIndex, 1);
+      toolCallByToolResult.set(result, paired.toolCall);
+
+      const resolved = resolvedToolCallsByAssistant.get(paired.message) ?? new Set<ToolCall>();
+      resolved.add(paired.toolCall);
+      resolvedToolCallsByAssistant.set(paired.message, resolved);
+    }
+  }
+
+  return { resolvedToolCallsByAssistant, toolCallByToolResult };
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index])) return index;
+  }
+  return -1;
 }
 
 export function buildHistoricalToolResultReplayText(

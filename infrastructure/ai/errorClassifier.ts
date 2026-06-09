@@ -40,7 +40,7 @@ function extractStatusCode(error: unknown, message: string): number | undefined 
     /\bHTTP\s*(4\d{2}|5\d{2})\b/i,
     /\bstatus(?:Code)?\s*[:=]?\s*(4\d{2}|5\d{2})\b/i,
     /\bcode\s*[:=]\s*(4\d{2}|5\d{2})\b/i,
-    /^\s*(4\d{2}|5\d{2})\b/i,
+    /^\s*(4\d{2}|5\d{2})\b(?!\s*ms\b)/i,
   ];
   for (const pattern of statusPatterns) {
     const match = message.match(pattern);

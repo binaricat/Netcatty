@@ -3,9 +3,11 @@ import test from "node:test";
 
 import type { ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types.ts";
 import {
+  buildHistoricalToolReplayMaps,
   buildHistoricalToolResultReplayText,
   buildHistoricalUserReplayContent,
 } from "./cattyHistoryReplay.ts";
+import type { ChatMessage } from "../../infrastructure/ai/types.ts";
 
 test("buildHistoricalUserReplayContent replaces historical image data with a placeholder", () => {
   const attachment: ChatMessageAttachment = {
@@ -87,4 +89,47 @@ test("buildHistoricalToolResultReplayText keeps non-terminal tool results intact
   };
 
   assert.equal(buildHistoricalToolResultReplayText(result, toolCall), "search result summary");
+});
+
+test("buildHistoricalToolReplayMaps pairs reused tool ids with the nearest preceding call", () => {
+  const messages: ChatMessage[] = [
+    {
+      id: "assistant-1",
+      role: "assistant",
+      content: "",
+      timestamp: 1,
+      toolCalls: [{ id: "call1", name: "url_fetch", arguments: { url: "https://example.com" } }],
+    },
+    {
+      id: "tool-1",
+      role: "tool",
+      content: "",
+      timestamp: 2,
+      toolResults: [{ toolCallId: "call1", content: "PAGE" }],
+    },
+    {
+      id: "assistant-2",
+      role: "assistant",
+      content: "",
+      timestamp: 3,
+      toolCalls: [{ id: "call1", name: "terminal_execute", arguments: { command: "cat /tmp/log" } }],
+    },
+    {
+      id: "tool-2",
+      role: "tool",
+      content: "",
+      timestamp: 4,
+      toolResults: [{ toolCallId: "call1", content: "TERMINAL BYTES" }],
+    },
+  ];
+
+  const maps = buildHistoricalToolReplayMaps(messages);
+  const secondResult = messages[3].toolResults?.[0];
+  assert.ok(secondResult);
+  const pairedCall = maps.toolCallByToolResult.get(secondResult);
+
+  assert.equal(pairedCall?.name, "terminal_execute");
+  assert.equal(maps.resolvedToolCallsByAssistant.get(messages[0])?.has(messages[0].toolCalls![0]), true);
+  assert.equal(maps.resolvedToolCallsByAssistant.get(messages[1]), undefined);
+  assert.equal(maps.resolvedToolCallsByAssistant.get(messages[2])?.has(messages[2].toolCalls![0]), true);
 });

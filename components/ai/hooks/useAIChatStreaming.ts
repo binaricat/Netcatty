@@ -51,6 +51,7 @@ import {
   isTerminalSelectionAttachment,
 } from '../../../application/state/terminalSelectionAttachment';
 import {
+  buildHistoricalToolReplayMaps,
   buildHistoricalToolResultReplayText,
   buildHistoricalUserReplayContent,
 } from '../cattyHistoryReplay';
@@ -799,24 +800,7 @@ export function useAIChatStreaming({
       // so the LLM maintains full conversation context
       const allMessages = currentSession?.messages ?? [];
 
-      // Collect all tool call IDs that have a corresponding tool result,
-      // so we can skip orphaned tool calls (e.g. from user stopping mid-execution)
-      const resolvedToolCallIds = new Set<string>();
-      for (const m of allMessages) {
-        if (m.role === 'tool' && m.toolResults) {
-          for (const tr of m.toolResults) resolvedToolCallIds.add(tr.toolCallId);
-        }
-      }
-
-      const findToolCall = (toolCallId: string) => {
-        for (const prev of allMessages) {
-          if (prev.role === 'assistant' && prev.toolCalls) {
-            const tc = prev.toolCalls.find(t => t.id === toolCallId);
-            if (tc) return tc;
-          }
-        }
-        return undefined;
-      };
+      const { resolvedToolCallsByAssistant, toolCallByToolResult } = buildHistoricalToolReplayMaps(allMessages);
 
       const sdkMessages: Array<ModelMessage> = [];
       const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
@@ -844,7 +828,10 @@ export function useAIChatStreaming({
           );
           if (m.toolCalls?.length) {
             // Only include tool calls that have matching results
-            const resolvedCalls = m.toolCalls.filter(tc => resolvedToolCallIds.has(tc.id));
+            const resolvedToolCalls = resolvedToolCallsByAssistant.get(m);
+            const resolvedCalls = resolvedToolCalls
+              ? m.toolCalls.filter(tc => resolvedToolCalls.has(tc))
+              : [];
             const contentParts: AssistantContentPart[] = [];
             if (resolvedCalls.length > 0) {
               for (const part of activeContinuation?.reasoningParts ?? []) {
@@ -909,7 +896,7 @@ export function useAIChatStreaming({
           sdkMessages.push({
             role: 'tool',
             content: m.toolResults.map(tr => {
-              const toolCall = findToolCall(tr.toolCallId);
+              const toolCall = toolCallByToolResult.get(tr);
               return {
                 type: 'tool-result' as const,
                 toolCallId: tr.toolCallId,
