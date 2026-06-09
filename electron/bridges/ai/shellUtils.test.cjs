@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  addCodexExecutableEnvForSdk,
   buildWindowsShellCommandLine,
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
@@ -184,6 +185,24 @@ test("resolveCodexExecutableForSdk maps Windows npm cmd shim to native codex.exe
   }
 });
 
+test("resolveCodexExecutableForSdk maps Windows local npm bin shim to native codex.exe", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-local-shim-"));
+  try {
+    const shimPath = path.join(tmp, "node_modules", ".bin", "codex.cmd");
+    const nativeExe = writeCodexWin32NativeLayout(tmp);
+    fs.mkdirSync(path.dirname(shimPath), { recursive: true });
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\nnode "%~dp0\\..\\@openai\\codex\\bin\\codex.js" %*\r\n',
+      "utf8",
+    );
+
+    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("resolveCodexExecutableForSdk leaves non-Windows Codex paths unchanged", () => {
   assert.equal(
     resolveCodexExecutableForSdk("/usr/local/bin/codex", "darwin"),
@@ -191,7 +210,7 @@ test("resolveCodexExecutableForSdk leaves non-Windows Codex paths unchanged", ()
   );
 });
 
-test("resolveCodexExecutableForSdk keeps Windows cmd shim when native codex.exe is missing", () => {
+test("resolveCodexExecutableForSdk returns null for Windows cmd shim when native codex.exe is missing", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-missing-native-"));
   try {
     const shimPath = path.join(tmp, "codex.cmd");
@@ -201,7 +220,24 @@ test("resolveCodexExecutableForSdk keeps Windows cmd shim when native codex.exe 
       "utf8",
     );
 
-    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), shimPath);
+    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexExecutableForSdk maps Windows PowerShell shim to native codex.exe", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-ps1-shim-"));
+  try {
+    const shimPath = path.join(tmp, "codex.ps1");
+    const nativeExe = writeCodexWin32NativeLayout(tmp);
+    fs.writeFileSync(
+      shimPath,
+      '& "$basedir/node_modules/@openai/codex/bin/codex.js" $args\r\n',
+      "utf8",
+    );
+
+    assert.equal(resolveCodexExecutableForSdk(shimPath, "win32"), nativeExe);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -216,6 +252,21 @@ test("resolveCodexExecutableForSdk maps codex.js entry to native codex.exe", () 
     fs.writeFileSync(codexJs, "", "utf8");
 
     assert.equal(resolveCodexExecutableForSdk(codexJs, "win32"), nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("addCodexExecutableEnvForSdk prepends bundled Codex path dir on Windows", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-env-path-"));
+  try {
+    const nativeExe = writeCodexWin32NativeLayout(tmp);
+    const pathDir = path.join(path.dirname(path.dirname(nativeExe)), "codex-path");
+    fs.mkdirSync(pathDir, { recursive: true });
+
+    const env = addCodexExecutableEnvForSdk({ Path: "C:\\Windows\\System32" }, nativeExe, "win32");
+
+    assert.equal(env.Path, `${pathDir};C:\\Windows\\System32`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -243,11 +294,11 @@ test("getFreshIdlePrompt drops a stale prompt when the live tail has moved on (e
   // Simulates: SSH session entered PowerShell, captured `PS C:\>`, then
   // user `exit`-ed back into a shell with a custom prompt the regex
   // doesn't recognize. lastIdlePrompt is still the old PS line, but the
-  // visible tail now shows the new prompt ù we must NOT keep handing
+  // visible tail now shows the new prompt ‚Äî we must NOT keep handing
   // the stale value to resolveEffectiveShellKind.
   const session = {
     lastIdlePrompt: "PS C:\\Users\\alice>",
-    _promptTrackTail: "PS C:\\Users\\alice>\r\nexit\r\nlogout\r\n? ",
+    _promptTrackTail: "PS C:\\Users\\alice>\r\nexit\r\nlogout\r\n‚ùØ ",
   };
   assert.equal(getFreshIdlePrompt(session), "");
 });
@@ -280,7 +331,7 @@ test("getFreshIdlePrompt returns empty string when the session has no cached pro
 });
 
 test("getFreshIdlePrompt and trackSessionIdlePrompt round-trip through a real PTY-like flow", () => {
-  // (1) Remote PowerShell prompt arrives ù lastIdlePrompt is captured.
+  // (1) Remote PowerShell prompt arrives ‚Äî lastIdlePrompt is captured.
   const session = {};
   trackSessionIdlePrompt(session, "Microsoft Windows...\r\nPS C:\\Users\\alice>");
   assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
@@ -288,7 +339,7 @@ test("getFreshIdlePrompt and trackSessionIdlePrompt round-trip through a real PT
   // (2) User runs `exit` and the shell now shows an unrecognized prompt.
   // trackSessionIdlePrompt does not update lastIdlePrompt (the new shape
   // doesn't match POSIX or PowerShell regexes), so the cache is stale.
-  trackSessionIdlePrompt(session, "\r\nexit\r\nlogout\r\n? ");
+  trackSessionIdlePrompt(session, "\r\nexit\r\nlogout\r\n‚ùØ ");
   assert.equal(session.lastIdlePrompt, "PS C:\\Users\\alice>"); // unchanged
   // The freshness check rescues us: the visible tail no longer ends
   // with the cached PS line, so downstream wrapper selection sees "".
@@ -317,7 +368,7 @@ test("looksLikeIdleAutoLogout sees through ANSI escapes around the banner", () =
 });
 
 test("looksLikeIdleAutoLogout ignores a plain (non-timeout) logout", () => {
-  // A normal login-shell exit prints "logout" ù without the "auto-" prefix ù
+  // A normal login-shell exit prints "logout" ‚Äî without the "auto-" prefix ‚Äî
   // and must still auto-close the tab.
   assert.equal(looksLikeIdleAutoLogout("user@host:~$ logout\r\n"), false);
 });

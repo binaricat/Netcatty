@@ -289,6 +289,62 @@ function resolveCodexNativeExecutableWin32(moduleSearchDirs, arch = process.arch
   return null;
 }
 
+function getCodexNativeSearchDirsForShim(shimDir) {
+  const dirs = [shimDir];
+  const parentDir = path.dirname(shimDir);
+  if (
+    path.basename(shimDir).toLowerCase() === ".bin" &&
+    path.basename(parentDir).toLowerCase() === "node_modules"
+  ) {
+    dirs.push(path.dirname(parentDir));
+  }
+  dirs.push(path.join(shimDir, "node_modules", "@openai", "codex"));
+  return dirs;
+}
+
+function getCodexNativePathDirsWin32(nativeExecutablePath) {
+  const normalized = String(nativeExecutablePath || "").trim();
+  if (!normalized || path.basename(normalized).toLowerCase() !== "codex.exe") {
+    return [];
+  }
+
+  const executableDir = path.dirname(normalized);
+  const packageRoot = path.dirname(executableDir);
+  const dirs = [];
+  if (path.basename(executableDir).toLowerCase() === "bin") {
+    dirs.push(path.join(packageRoot, "codex-path"));
+  } else if (path.basename(executableDir).toLowerCase() === "codex") {
+    dirs.push(path.join(packageRoot, "path"));
+  }
+  return dirs.filter((dir) => existsSync(dir));
+}
+
+function getPathEnvKey(env, platform = process.platform) {
+  if (platform !== "win32") return "PATH";
+  const keys = Object.keys(env || {}).filter((key) => key.toLowerCase() === "path");
+  return keys.includes("Path") ? "Path" : keys.at(-1) || "PATH";
+}
+
+function addCodexExecutableEnvForSdk(env, codexExecutablePath, platform = process.platform) {
+  if (platform !== "win32" || !codexExecutablePath) return env;
+  const pathDirs = getCodexNativePathDirsWin32(codexExecutablePath);
+  if (pathDirs.length === 0) return env;
+
+  const nextEnv = { ...(env || {}) };
+  const pathKey = getPathEnvKey(nextEnv, platform);
+  for (const key of Object.keys(nextEnv)) {
+    if (key.toLowerCase() === "path" && key !== pathKey) {
+      delete nextEnv[key];
+    }
+  }
+  const delimiter = platform === "win32" ? ";" : path.delimiter;
+  const existingEntries = String(nextEnv[pathKey] || "")
+    .split(delimiter)
+    .filter((entry) => entry && !pathDirs.includes(entry));
+  nextEnv[pathKey] = [...pathDirs, ...existingEntries].join(delimiter);
+  return nextEnv;
+}
+
 function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.platform) {
   const normalized = String(codexExecutablePath || "").trim();
   if (!normalized) return null;
@@ -298,10 +354,7 @@ function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.pl
   if (ext === ".exe") return normalized;
 
   const baseDir = path.dirname(normalized);
-  const moduleSearchDirs = [
-    baseDir,
-    path.join(baseDir, "node_modules", "@openai", "codex"),
-  ];
+  const moduleSearchDirs = getCodexNativeSearchDirsForShim(baseDir);
 
   if (ext === ".js" && /[\\/]codex\.js$/i.test(normalized)) {
     const codexPackageRoot = path.dirname(path.dirname(normalized));
@@ -314,7 +367,7 @@ function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.pl
     if (nativeExe) return nativeExe;
   }
 
-  if (ext && ext !== ".cmd" && ext !== ".bat") {
+  if (ext && ext !== ".cmd" && ext !== ".bat" && ext !== ".ps1") {
     return normalized;
   }
 
@@ -340,7 +393,7 @@ function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.pl
     }
   }
 
-  return normalized;
+  return ext === ".cmd" || ext === ".bat" || ext === ".ps1" ? null : normalized;
 }
 
 function resolveSdkBinPath(command, shellEnv, platform = process.platform) {
@@ -533,6 +586,7 @@ module.exports = {
   resolveClaudeCodeExecutableForSdk,
   normalizeClaudeCodeExecutableEnvForSdk,
   resolveCodexExecutableForSdk,
+  addCodexExecutableEnvForSdk,
   resolveSdkBinPath,
   resolveCliFromPath,
   toUnpackedAsarPath,

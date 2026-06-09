@@ -156,7 +156,7 @@ function registerSdkStreamHandlers(ctx) {
           const claudeSettings = normalizedAgentEnv.NETCATTY_CLAUDE_SETTINGS;
           delete normalizedAgentEnv.NETCATTY_CLAUDE_SETTINGS;
 
-          const env = buildSdkAgentEnv({
+          let env = buildSdkAgentEnv({
             shellEnv,
             requestedAgentEnv: normalizedAgentEnv,
             withCliDiscoveryEnv,
@@ -164,9 +164,12 @@ function registerSdkStreamHandlers(ctx) {
           });
 
           // Resolve absolute CLI path for SDK backends. On Windows, rewrite npm
-          // `.cmd` shims to the underlying native/script entry (codex.exe / cli.js)
+          // shell shims to the underlying native/script entry (codex.exe / cli.js)
           // because SDKs spawn without `shell: true` (Node 18+ EINVAL on .cmd).
           const binPath = resolveSdkBinPath(backendKey, shellEnv) || undefined;
+          if (backendKey === "codex") {
+            env = addCodexExecutableEnvForSdk(env, binPath);
+          }
 
           const hasInMemorySession = sdkSessionIds.has(chatSessionId);
           const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
@@ -239,12 +242,15 @@ function registerSdkStreamHandlers(ctx) {
         }
         const shellEnv = await getShellEnv();
         const binPath = resolveSdkBinPath(backendKey, shellEnv) || undefined;
-        const env = buildSdkAgentEnv({
+        let env = buildSdkAgentEnv({
           shellEnv,
           requestedAgentEnv: normalizeAgentEnv(requestedAgentEnv),
           withCliDiscoveryEnv,
           normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForSdk,
         });
+        if (backendKey === "codex") {
+          env = addCodexExecutableEnvForSdk(env, binPath);
+        }
         const raw = await withTimeout(driver.listModels({ binPath, env }), MODEL_LIST_TIMEOUT_MS);
         const models = Array.isArray(raw) ? raw.filter((m) => m && m.id) : [];
         sdkModelCache.set(backendKey, { at: Date.now(), models });
