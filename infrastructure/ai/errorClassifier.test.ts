@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyError, sanitizeErrorMessage } from "./errorClassifier.ts";
+import { classifyError, isRequestTooLargeError, sanitizeErrorMessage } from "./errorClassifier.ts";
 
 // -------------------------------------------------------------------
 // sanitizeErrorMessage — regression guard for pre-existing behavior
@@ -52,6 +52,13 @@ test("classifyError handles 413 via the message when no statusCode field is set"
   const info = classifyError(new Error("AI_APICallError: 413 payload rejected"));
   assert.equal(info.type, "network");
   assert.match(info.message, /Request too large/i);
+});
+
+test("isRequestTooLargeError detects structured and textual 413 errors", () => {
+  assert.equal(isRequestTooLargeError(Object.assign(new Error("blocked"), { statusCode: 413 })), true);
+  assert.equal(isRequestTooLargeError("413 Request Entity Too Large"), true);
+  assert.equal(isRequestTooLargeError(new Error("AI_APICallError: 413 payload rejected")), true);
+  assert.equal(isRequestTooLargeError(Object.assign(new Error("bad gateway"), { statusCode: 502 })), false);
 });
 
 // -------------------------------------------------------------------

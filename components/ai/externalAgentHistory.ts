@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
-import { buildPromptWithTerminalSelectionAttachments } from "../../application/state/terminalSelectionAttachment.ts";
+import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from "./cattyHistoryReplay.ts";
 
 type ExternalAgentHistoryMessage = { role: "user" | "assistant"; content: string };
 type RawHistoryMessage = ExternalAgentHistoryMessage & { sourceId: string };
@@ -62,7 +62,7 @@ function isDurableConstraintText(value: string): boolean {
 
 function getUserHistoryContent(message: ChatMessage): string {
   if (message.role !== "user") return message.content || "";
-  return buildPromptWithTerminalSelectionAttachments(
+  return buildHistoricalUserReplayContent(
     message.content || "",
     message.attachments ?? [],
   );
@@ -127,7 +127,6 @@ function summarizeToolMessage(
   if (!message.toolResults?.length) return [];
   return message.toolResults.map((result) => {
     const prefix = result.isError ? "Tool error" : "Tool result";
-    const content = normalizeWhitespace(result.content || "");
     // Same provenance problem as the raw-window path: once a tool result
     // lands in the compact section (older than the 6-item raw window),
     // its paired assistant tool_call is almost always gone. Without the
@@ -139,7 +138,10 @@ function summarizeToolMessage(
     const callLabel = callInfo
       ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
       : "";
-    return `${prefix}${callLabel} (${result.toolCallId}): ${truncateText(content, MAX_TOOL_SUMMARY_CHARS)}`;
+    const replayContent = buildHistoricalToolResultReplayText(result, callInfo
+      ? { id: result.toolCallId, name: callInfo.name, arguments: callInfo.arguments as Record<string, unknown> }
+      : undefined);
+    return `${prefix}${callLabel} (${result.toolCallId}): ${truncateText(normalizeWhitespace(replayContent), MAX_TOOL_SUMMARY_CHARS)}`;
   });
 }
 
@@ -247,13 +249,11 @@ function toRawHistoryMessage(
   }
 
   if (message.role === "tool" && message.toolResults?.length) {
-    // Keep tool output in the recent raw window (up to MAX_RAW_MESSAGE_CHARS
-    // per message, ~2000). Without this, follow-up turns after stale-session
-    // recovery would only see the 500-char compact summary in
-    // summarizeToolMessage, losing the actual bytes the user might reference
-    // ("use that output", "what did cat show?"). external agent replay only supports user/
-    // assistant roles, so we flatten to "assistant" — the tool results were
-    // produced during the assistant's turn.
+    // Keep recent tool results self-describing while replacing terminal
+    // output with placeholders, so stale-session recovery doesn't replay
+    // bulky command output on every follow-up. External agent replay only
+    // supports user/assistant roles, so we flatten to "assistant" — the
+    // tool results were produced during the assistant's turn.
     //
     // Inline the originating tool_call's name+args. Tool calls and their
     // results live in separate messages; if the last six raw items start
@@ -266,7 +266,10 @@ function toRawHistoryMessage(
       const callLabel = callInfo
         ? ` [from ${callInfo.name}(${truncateText(JSON.stringify(callInfo.arguments ?? {}), MAX_TOOL_CALL_LABEL_CHARS)})]`
         : "";
-      return `${prefix}${callLabel} (${result.toolCallId}): ${result.content || ""}`;
+      const replayContent = buildHistoricalToolResultReplayText(result, callInfo
+        ? { id: result.toolCallId, name: callInfo.name, arguments: callInfo.arguments as Record<string, unknown> }
+        : undefined);
+      return `${prefix}${callLabel} (${result.toolCallId}): ${replayContent}`;
     });
     return [{
       sourceId: message.id,

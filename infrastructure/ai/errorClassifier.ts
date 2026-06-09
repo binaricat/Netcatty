@@ -54,6 +54,12 @@ function extractResponseBody(error: unknown): string | undefined {
   return undefined;
 }
 
+export function isRequestTooLargeError(error: unknown): boolean {
+  const message = extractMessage(error).trim();
+  const statusCode = extractStatusCode(error, message);
+  return statusCode === 413 || /\brequest entity too large\b/i.test(message);
+}
+
 function looksLikeHtml(text: string): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -120,7 +126,7 @@ export function classifyError(error: unknown): ErrorInfo {
 
   const sanitizedRaw = sanitizeErrorMessage(rawMessage);
 
-  if (statusCode === 413 || /\brequest entity too large\b/i.test(rawMessage)) {
+  if (isRequestTooLargeError(error)) {
     return {
       type: 'network',
       message:

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
 
 import {
+  DEFAULT_MAX_REQUEST_PAYLOAD_BYTES,
   compressVerboseText,
   estimateUtf8Bytes,
   fitMessagesToRequestPayloadBudget,
@@ -93,6 +94,20 @@ test("estimateUtf8Bytes measures JSON payload size in UTF-8 bytes", () => {
   assert.ok(bytes > 8);
 });
 
+test("estimateUtf8Bytes works in renderer-like environments without Buffer", () => {
+  const originalBuffer = globalThis.Buffer;
+  try {
+    (globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = undefined;
+    assert.equal(estimateUtf8Bytes({ text: "caf\u00e9" }), new TextEncoder().encode(JSON.stringify({ text: "caf\u00e9" })).byteLength);
+  } finally {
+    (globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = originalBuffer;
+  }
+});
+
+test("default payload budget remains a general gateway guard", () => {
+  assert.equal(DEFAULT_MAX_REQUEST_PAYLOAD_BYTES, 1_500_000);
+});
+
 test("fitMessagesToRequestPayloadBudget reports didAdjust when initial truncation succeeds", () => {
   const messages: ModelMessage[] = [
     { role: "user", content: "run build" },
@@ -156,4 +171,26 @@ test("fitMessagesToRequestPayloadBudget returns empty messages when budget is fu
   assert.deepEqual(result.messages, []);
   assert.equal(result.didAdjust, true);
   assert.equal(result.estimatedBytes, 0);
+});
+
+test("fitMessagesToRequestPayloadBudget omits oversized attachment payloads as a last resort", () => {
+  const result = fitMessagesToRequestPayloadBudget({
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: "please inspect this image" },
+        { type: "image", image: "A".repeat(1_000_000), mediaType: "image/png" },
+      ],
+    }],
+    maxPayloadBytes: 20_000,
+  });
+
+  assert.ok(result.estimatedBytes <= 20_000);
+  assert.equal(result.messages.length, 1);
+  const content = result.messages[0].content;
+  assert.ok(Array.isArray(content));
+  assert.deepEqual(content[1], {
+    type: "text",
+    text: "[image attachment omitted to keep the AI request small: mediaType=image/png, 1000000 chars]",
+  });
 });

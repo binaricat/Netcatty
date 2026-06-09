@@ -75,7 +75,7 @@ test("buildExternalAgentHistoryMessagesForBridge keeps fallback history availabl
   );
 });
 
-test("buildExternalAgentHistoryMessages expands terminal selection attachments", () => {
+test("buildExternalAgentHistoryMessages replaces historical terminal selection attachments with placeholders", () => {
   const terminalSelection = createTerminalSelectionAttachment("docker ps -a\npermission denied");
   assert.ok(terminalSelection);
   const messages: ChatMessage[] = [
@@ -88,9 +88,9 @@ test("buildExternalAgentHistoryMessages expands terminal selection attachments",
 
   assert.equal(result.length, 1);
   assert.equal(result[0].role, "user");
-  assert.match(result[0].content, /\[Terminal selection:/);
+  assert.match(result[0].content, /Historical terminal selection omitted from replay/);
   assert.match(result[0].content, /docker ps -a/);
-  assert.match(result[0].content, /permission denied/);
+  assert.doesNotMatch(result[0].content, /permission denied/);
 });
 
 test("buildExternalAgentHistoryMessages preserves older substantive user instructions outside the recent raw window", () => {
@@ -292,12 +292,9 @@ test("buildExternalAgentHistoryMessages still drops one-word filler user message
   }
 });
 
-test("buildExternalAgentHistoryMessages preserves recent tool results verbatim (up to the raw budget) for follow-up references", () => {
-  // Regression: tool results used to only reach fallback replay via the
-  // 500-char compact summary. If the user's last interaction produced a
-  // large tool output (cat/rg/fetched file), any "use that output"-style
-  // follow-up lost the actual bytes. Now tool messages flow through the
-  // recent raw window at MAX_RAW_MESSAGE_CHARS (2000).
+test("buildExternalAgentHistoryMessages replaces recent terminal tool output with a replay placeholder", () => {
+  // Historical terminal output should remain self-describing without
+  // replaying the actual bytes on every follow-up.
   const bigToolOutput = "DATA ".repeat(300); // ~1500 chars — bigger than summary cap but smaller than raw cap
   const messages: ChatMessage[] = [
     message("u1", "user", "cat /etc/hosts"),
@@ -315,16 +312,15 @@ test("buildExternalAgentHistoryMessages preserves recent tool results verbatim (
   const result = buildExternalAgentHistoryMessages(messages);
   const flat = result.map((m) => m.content).join("\n---\n");
 
-  // Raw-window tool result carries both the [from ...] provenance label
-  // and the actual bytes (not just the 500-char compact summary).
-  assert.match(flat, /Tool result \[from terminal.*?cat \/etc\/hosts.*?\] \(call1\): DATA DATA DATA/);
-  // Confirm we kept enough bytes to exceed the compact-summary cap.
+  assert.match(flat, /Tool result \[from terminal.*?cat \/etc\/hosts.*?\] \(call1\): \[Historical terminal output omitted from replay/);
+  assert.match(flat, /outputChars=1500/);
+  assert.doesNotMatch(flat, /DATA DATA DATA/);
   const toolResultIdx = flat.indexOf("Tool result [from terminal");
   assert.ok(toolResultIdx >= 0, "tool result line must appear in raw window");
   const toolResultChunk = flat.slice(toolResultIdx);
   assert.ok(
-    toolResultChunk.length > 600,
-    `expected tool result chunk to exceed compact cap (~500 chars), got ${toolResultChunk.length}`,
+    toolResultChunk.length < 500,
+    `expected terminal result placeholder to stay compact, got ${toolResultChunk.length}`,
   );
 });
 
@@ -650,8 +646,10 @@ test("buildExternalAgentHistoryMessages resolves tool_call provenance correctly 
   //
   // Extract the two Tool-result lines and match each to its expected
   // args. Use non-greedy .*? — the args JSON can contain parentheses.
-  const hostsMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/hosts[^\]]*?\][^\n]*HOSTS_BYTES/);
-  const resolvMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/resolv\.conf[^\]]*?\][^\n]*RESOLV_BYTES/);
+  const hostsMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/hosts[^\]]*?\][^\n]*Historical terminal output omitted from replay[^\n]*cat \/etc\/hosts/);
+  const resolvMatch = flat.match(/Tool result \[from [^\]]*?cat \/etc\/resolv\.conf[^\]]*?\][^\n]*Historical terminal output omitted from replay[^\n]*cat \/etc\/resolv\.conf/);
+  assert.doesNotMatch(flat, /HOSTS_BYTES/);
+  assert.doesNotMatch(flat, /RESOLV_BYTES/);
 
   assert.ok(hostsMatch, "hosts result must still be labeled with cat /etc/hosts despite later id reuse");
   assert.ok(resolvMatch, "resolv result must be labeled with cat /etc/resolv.conf");

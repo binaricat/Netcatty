@@ -44,12 +44,16 @@ import { createCattyTools } from '../../../infrastructure/ai/sdk/tools';
 import type { ExecutorContext } from '../../../infrastructure/ai/cattyAgent/executor';
 import { getExternalAgentSdkBackend } from '../../../infrastructure/ai/managedAgents';
 import { runSdkAgentTurn } from '../../../infrastructure/ai/sdkAgentAdapter';
-import { classifyError } from '../../../infrastructure/ai/errorClassifier';
+import { classifyError, isRequestTooLargeError } from '../../../infrastructure/ai/errorClassifier';
 import { isSdkStreamStateError } from '../../../infrastructure/ai/shared/streamStateErrors';
 import {
   buildPromptWithTerminalSelectionAttachments,
   isTerminalSelectionAttachment,
 } from '../../../application/state/terminalSelectionAttachment';
+import {
+  buildHistoricalToolResultReplayText,
+  buildHistoricalUserReplayContent,
+} from '../cattyHistoryReplay';
 import {
   extractProviderContinuationFromRawChunk,
   getOpenAIChatAssistantFieldsForHistoryMessage,
@@ -551,6 +555,11 @@ export function useAIChatStreaming({
             console.warn('[Catty] suppressed SDK stream state error:', typedChunk.error);
             break;
           }
+          if (isRequestTooLargeError(typedChunk.error)) {
+            cancelPendingFlush();
+            flushText();
+            throw typedChunk.error;
+          }
           cancelPendingFlush();
           flushText();
           updateMessageById(streamSessionId, activeMsgId, msg => ({
@@ -796,14 +805,14 @@ export function useAIChatStreaming({
         }
       }
 
-      const findToolName = (toolCallId: string): string => {
+      const findToolCall = (toolCallId: string) => {
         for (const prev of allMessages) {
           if (prev.role === 'assistant' && prev.toolCalls) {
             const tc = prev.toolCalls.find(t => t.id === toolCallId);
-            if (tc) return tc.name;
+            if (tc) return tc;
           }
         }
-        return 'unknown';
+        return undefined;
       };
 
       const sdkMessages: Array<ModelMessage> = [];
@@ -812,28 +821,13 @@ export function useAIChatStreaming({
       for (const m of allMessages) {
         const currentMessageFollowsToolResult = previousHistoryMessageWasToolResult;
         if (m.role === 'user') {
-          // Build multimodal content when attachments are present (fallback to legacy `images` field)
+          // Historical attachments are replayed as placeholders so screenshots,
+          // files, and terminal selections do not balloon every follow-up request.
           const messageAttachments = m.attachments ?? m.images;
-          const modelText = messageAttachments?.length
-            ? buildPromptWithTerminalSelectionAttachments(m.content, messageAttachments)
-            : m.content;
-          const modelAttachments = messageAttachments?.filter(
-            (attachment) => !isTerminalSelectionAttachment(attachment),
-          );
-          if (modelAttachments?.length) {
-            const parts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mediaType?: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
-            parts.push({ type: 'text', text: modelText });
-            for (const att of modelAttachments) {
-              if (att.mediaType.startsWith('image/')) {
-                parts.push({ type: 'image', image: att.base64Data, mediaType: att.mediaType });
-              } else {
-                parts.push({ type: 'file', data: att.base64Data, mediaType: att.mediaType, filename: att.filename });
-              }
-            }
-            sdkMessages.push({ role: 'user', content: parts });
-          } else {
-            sdkMessages.push({ role: 'user', content: modelText });
-          }
+          sdkMessages.push({
+            role: 'user',
+            content: buildHistoricalUserReplayContent(m.content, messageAttachments ?? []),
+          });
         } else if (m.role === 'assistant') {
           const activeContinuation = isProviderContinuationForSource(
             m.providerContinuation,
@@ -911,21 +905,31 @@ export function useAIChatStreaming({
         } else if (m.role === 'tool' && m.toolResults?.length) {
           sdkMessages.push({
             role: 'tool',
-            content: m.toolResults.map(tr => ({
-              type: 'tool-result' as const,
-              toolCallId: tr.toolCallId,
-              toolName: findToolName(tr.toolCallId),
-              output: { type: 'text' as const, value: tr.content },
-            })),
+            content: m.toolResults.map(tr => {
+              const toolCall = findToolCall(tr.toolCallId);
+              return {
+                type: 'tool-result' as const,
+                toolCallId: tr.toolCallId,
+                toolName: toolCall?.name ?? 'unknown',
+                output: { type: 'text' as const, value: buildHistoricalToolResultReplayText(tr, toolCall) },
+              };
+            }),
           });
         }
         previousHistoryMessageWasToolResult = m.role === 'tool' && !!m.toolResults?.length;
       }
       // Build the current user message — include attachments as multimodal content
       if (attachments?.length) {
+        const modelText = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
+        const modelAttachments = attachments.filter(
+          (attachment) => !isTerminalSelectionAttachment(attachment),
+        );
+        if (!modelAttachments.length) {
+          sdkMessages.push({ role: 'user', content: modelText });
+        } else {
         const parts: Array<{ type: 'text'; text: string } | { type: 'image'; image: string; mediaType?: string } | { type: 'file'; data: string; mediaType: string; filename?: string }> = [];
-        parts.push({ type: 'text', text: trimmed });
-        for (const att of attachments) {
+        parts.push({ type: 'text', text: modelText });
+        for (const att of modelAttachments) {
           if (att.mediaType.startsWith('image/')) {
             parts.push({ type: 'image', image: att.base64Data, mediaType: att.mediaType });
           } else {
@@ -933,6 +937,7 @@ export function useAIChatStreaming({
           }
         }
         sdkMessages.push({ role: 'user', content: parts });
+        }
       } else {
         sdkMessages.push({ role: 'user', content: trimmed });
       }
@@ -977,6 +982,82 @@ export function useAIChatStreaming({
         messages,
         reservedBytes: payloadReservedBytes,
       });
+      const summarizeForCompaction = async (messagesToSummarize: ModelMessage[]) => {
+        updateLastMessage(sessionId, msg => ({ ...msg, statusText: 'Compacting earlier context...' }));
+        const result = await generateText({
+          model,
+          system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+          messages: [{
+            role: 'user',
+            content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(messagesToSummarize)}`,
+          }],
+          abortSignal: abortController.signal,
+          maxOutputTokens: 1600,
+          temperature: 0,
+        });
+        return result.text;
+      };
+      const prepareMessagesForStream = (messages: ModelMessage[]): ModelMessage[] => {
+        const pruned = pruneMessages({
+          messages,
+          reasoning: 'all',
+          emptyMessages: 'remove',
+        });
+        continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
+          pruned,
+          openAIChatAssistantFieldsByMessage,
+        );
+        return pruned;
+      };
+      const compactAndBudgetMessages = async (
+        messages: ModelMessage[],
+        {
+          force = false,
+          statusText,
+          trimLog,
+          fallbackLog,
+        }: {
+          force?: boolean;
+          statusText?: string;
+          trimLog: string;
+          fallbackLog: string;
+        },
+      ): Promise<ModelMessage[]> => {
+        try {
+          if (statusText) {
+            updateLastMessage(sessionId, msg => ({ ...msg, statusText }));
+          }
+          const compacted = await prepareContextCompaction({
+            messages,
+            contextWindow,
+            reservedTokens: requestReserveTokens,
+            thresholdRatio: force ? 0 : undefined,
+            protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
+            summarize: summarizeForCompaction,
+          });
+          let nextMessages = force && !compacted.didCompact
+            ? keepRecentContextMessages(messages, DEFAULT_PROTECT_RECENT_MESSAGES)
+            : compacted.messages;
+          const budgetResult = applyRequestPayloadBudget(nextMessages);
+          if (budgetResult.didAdjust) {
+            console.warn(`${trimLog} ${budgetResult.estimatedBytes} bytes.`);
+            nextMessages = budgetResult.messages;
+          }
+          return nextMessages;
+        } catch (err) {
+          if (abortController.signal.aborted) throw err;
+          console.warn(fallbackLog, err);
+          const fallbackBudget = applyRequestPayloadBudget(
+            keepRecentContextMessages(messages, DEFAULT_PROTECT_RECENT_MESSAGES),
+          );
+          if (fallbackBudget.didAdjust) {
+            console.warn(
+              `[Catty] Request payload trimmed to ${fallbackBudget.estimatedBytes} bytes after compaction fallback.`,
+            );
+          }
+          return fallbackBudget.messages;
+        }
+      };
       const payloadBudgetResult = applyRequestPayloadBudget(sdkMessages);
       let messagesForStream = payloadBudgetResult.messages;
       if (payloadBudgetResult.didAdjust) {
@@ -984,71 +1065,50 @@ export function useAIChatStreaming({
           `[Catty] Request payload trimmed to ${payloadBudgetResult.estimatedBytes} bytes to avoid HTTP 413.`,
         );
       }
-      try {
-        const compacted = await prepareContextCompaction({
-          messages: messagesForStream,
-          contextWindow,
-          reservedTokens: requestReserveTokens,
-          protectRecentMessages: DEFAULT_PROTECT_RECENT_MESSAGES,
-          summarize: async (messagesToSummarize) => {
-            updateLastMessage(sessionId, msg => ({ ...msg, statusText: 'Compacting earlier context...' }));
-            const result = await generateText({
-              model,
-              system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
-              messages: [{
-                role: 'user',
-                content: `Summarize this earlier conversation context for the next model turn:\n\n${formatMessagesForCompaction(messagesToSummarize)}`,
-              }],
-              abortSignal: abortController.signal,
-              maxOutputTokens: 1600,
-              temperature: 0,
-            });
-            return result.text;
-          },
-        });
-        messagesForStream = compacted.messages;
-        const postCompactionBudget = applyRequestPayloadBudget(messagesForStream);
-        if (postCompactionBudget.didAdjust) {
-          console.warn(
-            `[Catty] Request payload re-trimmed to ${postCompactionBudget.estimatedBytes} bytes after context compaction.`,
-          );
-          messagesForStream = postCompactionBudget.messages;
-        }
-      } catch (err) {
-        if (abortController.signal.aborted) throw err;
-        console.warn('[Catty] Context compaction failed; falling back to recent messages only:', err);
-        const fallbackBudget = applyRequestPayloadBudget(
-          keepRecentContextMessages(messagesForStream, DEFAULT_PROTECT_RECENT_MESSAGES),
-        );
-        messagesForStream = fallbackBudget.messages;
-        if (fallbackBudget.didAdjust) {
-          console.warn(
-            `[Catty] Request payload trimmed to ${fallbackBudget.estimatedBytes} bytes after compaction fallback.`,
-          );
-        }
-      }
-
-      messagesForStream = pruneMessages({
-        messages: messagesForStream,
-        reasoning: 'all',
-        emptyMessages: 'remove',
+      messagesForStream = await compactAndBudgetMessages(messagesForStream, {
+        trimLog: '[Catty] Request payload re-trimmed after context compaction to',
+        fallbackLog: '[Catty] Context compaction failed; falling back to recent messages only:',
       });
-      continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
-        messagesForStream,
-        openAIChatAssistantFieldsByMessage,
-      );
 
-      await processCattyStream(
-        sessionId,
-        model,
-        systemPrompt,
-        tools,
-        messagesForStream,
-        abortController.signal,
-        assistantMsgId,
-        context.activeProvider?.advancedParams,
-        continuationContext,
-      );
+      messagesForStream = prepareMessagesForStream(messagesForStream);
+
+      try {
+        await processCattyStream(
+          sessionId,
+          model,
+          systemPrompt,
+          tools,
+          messagesForStream,
+          abortController.signal,
+          assistantMsgId,
+          context.activeProvider?.advancedParams,
+          continuationContext,
+        );
+      } catch (streamErr) {
+        if (abortController.signal.aborted || !isRequestTooLargeError(streamErr)) {
+          throw streamErr;
+        }
+
+        console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
+        const retryMessages = prepareMessagesForStream(await compactAndBudgetMessages(messagesForStream, {
+          force: true,
+          statusText: 'Request was too large. Compacting context and retrying...',
+          trimLog: '[Catty] Request payload trimmed after forced context compaction to',
+          fallbackLog: '[Catty] Forced context compaction after 413 failed; falling back to recent messages only:',
+        }));
+
+        await processCattyStream(
+          sessionId,
+          model,
+          systemPrompt,
+          tools,
+          retryMessages,
+          abortController.signal,
+          assistantMsgId,
+          context.activeProvider?.advancedParams,
+          continuationContext,
+        );
+      }
     } catch (err) {
       console.error('[Catty] streamText error:', err);
       reportStreamError(sessionId, abortController.signal, err);

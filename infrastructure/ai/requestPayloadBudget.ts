@@ -30,11 +30,24 @@ export interface FitMessagesToRequestPayloadBudgetResult {
 }
 
 export function estimateUtf8Bytes(value: unknown): number {
+  const text = stringifyForByteEstimate(value);
+  return utf8ByteLength(text);
+}
+
+function stringifyForByteEstimate(value: unknown): string {
   try {
-    return Buffer.byteLength(JSON.stringify(value), "utf8");
+    return JSON.stringify(value);
   } catch {
-    return Buffer.byteLength(String(value ?? ""), "utf8");
+    return String(value ?? "");
   }
+}
+
+function utf8ByteLength(value: string | undefined): number {
+  const text = value ?? "";
+  if (typeof Buffer !== "undefined" && typeof Buffer.byteLength === "function") {
+    return Buffer.byteLength(text, "utf8");
+  }
+  return new TextEncoder().encode(text).byteLength;
 }
 
 /**
@@ -103,9 +116,11 @@ export function truncateModelMessageForPayload(
   {
     maxToolResultChars = DEFAULT_MAX_TOOL_RESULT_CHARS,
     maxMessageTextChars = DEFAULT_MAX_MESSAGE_TEXT_CHARS,
+    omitLargeAttachments = false,
   }: {
     maxToolResultChars?: number;
     maxMessageTextChars?: number;
+    omitLargeAttachments?: boolean;
   } = {},
 ): ModelMessage {
   if (typeof message.content === "string") {
@@ -123,6 +138,7 @@ export function truncateModelMessageForPayload(
     content: message.content.map((part) => truncateContentPartForPayload(part, {
       maxToolResultChars,
       maxMessageTextChars,
+      omitLargeAttachments,
     })),
   };
 }
@@ -132,6 +148,7 @@ function truncateContentPartForPayload(
   limits: {
     maxToolResultChars: number;
     maxMessageTextChars: number;
+    omitLargeAttachments: boolean;
   },
 ): unknown {
   if (!part || typeof part !== "object") return part;
@@ -163,7 +180,32 @@ function truncateContentPartForPayload(
     }
   }
 
+  if (limits.omitLargeAttachments && type === "image" && typeof record.image === "string") {
+    return omittedAttachmentTextPart("image", record.image, record);
+  }
+
+  if (limits.omitLargeAttachments && type === "file" && typeof record.data === "string") {
+    return omittedAttachmentTextPart("file", record.data, record);
+  }
+
   return part;
+}
+
+function omittedAttachmentTextPart(
+  label: "image" | "file",
+  payload: string,
+  record: Record<string, unknown>,
+): { type: "text"; text: string } {
+  const details = [
+    typeof record.filename === "string" ? `filename=${record.filename}` : undefined,
+    typeof record.mediaType === "string" ? `mediaType=${record.mediaType}` : undefined,
+    `${payload.length} chars`,
+  ].filter(Boolean).join(", ");
+
+  return {
+    type: "text",
+    text: `[${label} attachment omitted to keep the AI request small: ${details}]`,
+  };
 }
 
 export function fitMessagesToRequestPayloadBudget({
@@ -235,6 +277,7 @@ export function fitMessagesToRequestPayloadBudget({
   working = working.map((message) => truncateModelMessageForPayload(message, {
     maxToolResultChars: emergencyToolCap,
     maxMessageTextChars: emergencyTextCap,
+    omitLargeAttachments: true,
   }));
   estimatedBytes = estimateUtf8Bytes(working);
   didAdjust = true;
@@ -251,6 +294,7 @@ export function fitMessagesToRequestPayloadBudget({
     working = working.map((message) => truncateModelMessageForPayload(message, {
       maxToolResultChars: emergencyToolCap,
       maxMessageTextChars: emergencyTextCap,
+      omitLargeAttachments: true,
     }));
     estimatedBytes = estimateUtf8Bytes(working);
   }
@@ -263,6 +307,7 @@ export function fitMessagesToRequestPayloadBudget({
     working = working.map((message) => truncateModelMessageForPayload(message, {
       maxToolResultChars: finalToolCap,
       maxMessageTextChars: finalTextCap,
+      omitLargeAttachments: true,
     }));
     estimatedBytes = estimateUtf8Bytes(working);
   }
