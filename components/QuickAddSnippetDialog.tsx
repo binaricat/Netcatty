@@ -46,6 +46,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   const [label, setLabel] = useState('');
   const [command, setCommand] = useState('');
   const [packagePath, setPackagePath] = useState('');
+  const [noAutoRun, setNoAutoRun] = useState(false);
   const [editing, setEditing] = useState<Snippet | null>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,6 +59,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
       setLabel('');
       setCommand('');
       setPackagePath('');
+      setNoAutoRun(false);
       setOpen(true);
     };
     window.addEventListener('netcatty:snippets:add', handler);
@@ -75,6 +77,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
       setLabel(snippet.label ?? '');
       setCommand(snippet.command ?? '');
       setPackagePath(snippet.package ?? '');
+      setNoAutoRun(snippet.noAutoRun ?? false);
       setOpen(true);
     };
     window.addEventListener('netcatty:snippets:edit', handler);
@@ -121,6 +124,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
         label: label.trim(),
         command,
         package: trimmedPackage || '',
+        noAutoRun: noAutoRun || undefined,
       });
     } else {
       onCreateSnippet({
@@ -130,10 +134,11 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
         tags: [],
         package: trimmedPackage || '',
         targets: [],
+        noAutoRun: noAutoRun || undefined,
       });
     }
     setOpen(false);
-  }, [canSave, packagePath, packages, onCreatePackage, onCreateSnippet, onUpdateSnippet, editing, label, command]);
+  }, [canSave, packagePath, packages, onCreatePackage, onCreateSnippet, onUpdateSnippet, editing, label, command, noAutoRun]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -199,6 +204,16 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
               createText={t('snippets.field.createPackage')}
             />
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer px-1">
+            <input
+              type="checkbox"
+              checked={noAutoRun}
+              onChange={(e) => setNoAutoRun(e.target.checked)}
+              className="rounded border-input"
+            />
+            <span className="text-xs text-muted-foreground">{t('snippets.field.noAutoRun')}</span>
+          </label>
         </div>
 
         <DialogFooter className="shrink-0">
