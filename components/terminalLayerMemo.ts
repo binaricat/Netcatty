@@ -30,6 +30,7 @@ export const terminalLayerAreEqual = (
   prev.setSftpFollowTerminalCwd === next.setSftpFollowTerminalCwd &&
   prev.editorWordWrap === next.editorWordWrap &&
   prev.sshDebugLogsEnabled === next.sshDebugLogsEnabled &&
+  prev.showHostTreeSidebar === next.showHostTreeSidebar &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
   prev.onHotkeyAction === next.onHotkeyAction &&
   prev.onUpdateHost === next.onUpdateHost &&

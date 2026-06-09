@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { useActiveTabId, useIsSftpActive, useIsTerminalLayerVisible, useIsVaultActive } from '../state/activeTabStore';
+import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { cn } from '../../lib/utils';
 import { ConnectionLog, TerminalTheme } from '../../types';
 import type { LogView as LogViewType } from '../state/logViewState';
@@ -29,14 +30,21 @@ interface LogViewWrapperProps {
   onUpdateLog: (logId: string, updates: Partial<ConnectionLog>) => void;
 }
 
+export function getLogViewWrapperStyle(
+  isVisible: boolean,
+  hostTreeLayoutWidth: number,
+): React.CSSProperties {
+  return isVisible
+    ? { left: hostTreeLayoutWidth }
+    : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1, left: hostTreeLayoutWidth };
+}
+
 export const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, defaultTerminalTheme, defaultFontSize, onClose, onUpdateLog }) => {
   const activeTabId = useActiveTabId();
   const isVisible = activeTabId === logView.id;
+  const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
 
-  // Use same pattern as VaultViewContainer for visibility
-  const containerStyle: React.CSSProperties = isVisible
-    ? {}
-    : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
+  const containerStyle = getLogViewWrapperStyle(isVisible, hostTreeLayoutWidth);
 
   return (
     <div className={cn("absolute inset-0", isVisible ? "z-20" : "")} style={containerStyle}>

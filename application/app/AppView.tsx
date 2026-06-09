@@ -2,7 +2,6 @@
 import React, { Suspense, lazy } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { activeTabStore, toEditorTabId } from '../state/activeTabStore';
-import { useImmersiveActive } from '../state/immersiveStore';
 import { editorTabStore } from '../state/editorTabStore';
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from '../state/editorTabSave';
 import { TopTabs } from '../../components/TopTabs';
@@ -19,7 +18,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { toast } from '../../components/ui/toast';
-import { cn } from '../../lib/utils';
 
 const LazyProtocolSelectDialog = lazy(() => import('../../components/ProtocolSelectDialog'));
 const LazyQuickSwitcher = lazy(() =>
@@ -55,12 +53,6 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
     VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper,
   } = ctx;
-
-  // Immersive flag from store (not ctx) so toggling it doesn't re-render <App>.
-  // Note: we intentionally do NOT subscribe to the active tab id here — editor
-  // tab visibility self-subscribes inside TextEditorTabView — so plain tab
-  // switches don't re-render AppView/App at all.
-  const isImmersive = useImmersiveActive();
 
   return (
     <SnippetExecutionProvider>
@@ -113,7 +105,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         handleRequestCloseEditorTabRef.current = handleRequestCloseEditorTab;
 
         return (
-    <div className={cn("flex flex-col h-screen text-foreground font-sans netcatty-shell", isImmersive && "immersive-transition")} onContextMenu={handleRootContextMenu}>
+    <div className="flex flex-col h-screen text-foreground font-sans netcatty-shell" onContextMenu={handleRootContextMenu}>
       <TopTabs
         theme={resolvedTheme}
         followAppTerminalTheme={followAppTerminalTheme}
@@ -139,11 +131,11 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         windowOpacity={settings.windowOpacity}
         setWindowOpacity={settings.setWindowOpacity}
         onSyncNow={handleSyncNowManual}
-        isImmersiveActive={isImmersive}
         onStartSessionDrag={setDraggingSessionId}
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderTabs}
         showSftpTab={settings.showSftpTab}
+        showHostTreeSidebar={settings.showHostTreeSidebar}
         editorTabs={editorTabs}
         onRequestCloseEditorTab={handleRequestCloseEditorTab}
         hostById={hostById}
@@ -289,6 +281,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           sessionLogsFormat={sessionLogsFormat}
           sessionLogsTimestampsEnabled={sessionLogsTimestampsEnabled}
           sshDebugLogsEnabled={sshDebugLogsEnabled}
+          showHostTreeSidebar={settings.showHostTreeSidebar}
           toggleScriptsSidePanelRef={toggleScriptsSidePanelRef}
           toggleSidePanelRef={toggleSidePanelRef}
         />

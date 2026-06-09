@@ -9,6 +9,7 @@ type HostTreeContext = Record<string, any>;
 function TerminalLayerHostTreeSectionInner({ ctx }: { ctx: HostTreeContext }) {
   return (
     <TerminalHostTreeSidebar
+      enabled={ctx.showHostTreeSidebar !== false}
       hosts={ctx.hosts}
       customGroups={ctx.customGroups}
       resolvedPreviewTheme={ctx.resolvedPreviewTheme}

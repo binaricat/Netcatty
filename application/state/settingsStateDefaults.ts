@@ -63,6 +63,7 @@ export const DEFAULT_SFTP_DEFAULT_VIEW_MODE: 'list' | 'tree' = 'list';
 export const DEFAULT_SHOW_RECENT_HOSTS = true;
 export const DEFAULT_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT = false;
 export const DEFAULT_SHOW_SFTP_TAB = true;
+export const DEFAULT_SHOW_HOST_TREE_SIDEBAR = true;
 
 // Editor defaults
 export const DEFAULT_EDITOR_WORD_WRAP = false;

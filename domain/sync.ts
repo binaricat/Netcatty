@@ -251,6 +251,8 @@ export interface SyncPayload {
     showOnlyUngroupedHostsInRoot?: boolean;
     // Top tabs: show standalone SFTP view tab
     showSftpTab?: boolean;
+    // Terminal/editor tabs: show left host list sidebar
+    showHostTreeSidebar?: boolean;
     // Workspace focus indicator style
     workspaceFocusStyle?: 'dim' | 'border';
     // AI configuration

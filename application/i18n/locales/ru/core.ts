@@ -225,6 +225,8 @@ export const ruCoreMessages: Messages = {
   'settings.vault.showOnlyUngroupedHostsInRootDesc': 'Если включено, в корневом списке хостов будут показаны только хосты без группы. Откройте группу на боковой панели, чтобы увидеть сгруппированные хосты.',
   'settings.vault.showSftpTab': 'Показывать вкладку SFTP',
   'settings.vault.showSftpTabDesc': 'Показывать отдельный SFTP-вид в верхней панели вкладок. Если скрыто, используйте боковую панель SFTP внутри сессии.',
+  'settings.vault.showHostTreeSidebar': 'Показывать боковую панель хостов',
+  'settings.vault.showHostTreeSidebarDesc': 'Показывать список хостов и кнопку в верхней панели для вкладок терминала и редактора.',
 
   // Update notifications
   'update.available.title': 'Доступно обновление',

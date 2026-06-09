@@ -2,6 +2,7 @@ import { Folder, FolderLock, Menu, Moon, MoreHorizontal, Plus, Settings, Sparkle
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fromEditorTabId, isEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
 import type { EditorTab } from '../application/state/editorTabStore';
+import { useImmersiveActive } from '../application/state/immersiveStore';
 import { buildWorkspaceActivityMap } from '../application/state/sessionActivity';
 import { useSessionActivityMap } from '../application/state/sessionActivityStore';
 import {
@@ -34,10 +35,29 @@ import { useTopTabLifecycleAnimations } from './top-tabs/useTopTabLifecycleAnima
 // Helper styles for Electron drag regions (use type assertion to include non-standard WebkitAppRegion)
 const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
 const dragRegionNoSelect = { WebkitAppRegion: 'drag', userSelect: 'none' } as React.CSSProperties;
+const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
 const emptyTabStyle: React.CSSProperties = {};
 
 export function computeHostTreeTabGutter(hostTreeLayoutWidth: number, toggleRight: number): number {
   return Math.max(0, hostTreeLayoutWidth - toggleRight);
+}
+
+export function shouldShowHostTreeToggle({
+  enabled,
+  activeTabId,
+  orderedTabs,
+  sessionIds,
+  workspaceIds,
+}: {
+  enabled: boolean;
+  activeTabId: string;
+  orderedTabs: readonly string[];
+  sessionIds: ReadonlySet<string>;
+  workspaceIds: ReadonlySet<string>;
+}): boolean {
+  if (!enabled) return false;
+  if (activeTabId === 'vault' || activeTabId === 'sftp') return false;
+  return orderedTabs.includes(activeTabId) || isEditorTabId(activeTabId) || sessionIds.has(activeTabId) || workspaceIds.has(activeTabId);
 }
 
 interface TopTabsProps {
@@ -70,6 +90,7 @@ interface TopTabsProps {
   onEndSessionDrag: () => void;
   onReorderTabs: (draggedId: string, targetId: string, position: 'before' | 'after') => void;
   showSftpTab: boolean;
+  showHostTreeSidebar: boolean;
   editorTabs: readonly EditorTab[];
   onRequestCloseEditorTab: (editorTabId: string) => void;
   hostById: Map<string, Host>;
@@ -105,12 +126,15 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onEndSessionDrag,
   onReorderTabs,
   showSftpTab,
+  showHostTreeSidebar,
   editorTabs,
   onRequestCloseEditorTab,
   hostById,
 }) => {
   const { t } = useI18n();
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
+  const immersiveActiveFromStore = useImmersiveActive();
+  const effectiveImmersiveActive = isImmersiveActive ?? immersiveActiveFromStore;
   const sessionActivityMap = useSessionActivityMap();
   const isHostTreeOpen = useTerminalHostTreeOpen();
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
@@ -120,6 +144,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const [hostTreeTogglePop, setHostTreeTogglePop] = useState(false);
   const fixedLeftTabsRef = useRef<HTMLDivElement>(null);
   const hostTreeToggleSlotRef = useRef<HTMLDivElement>(null);
+  const suppressHostTreeToggleClickRef = useRef(false);
   const [hostTreeTabGutter, setHostTreeTabGutter] = useState(0);
 
   // Tab reorder drag state
@@ -225,9 +250,15 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return counts;
   }, [sessions]);
 
-  const hasTerminalOrWorkspaceTabs = sessions.length > 0 || workspaces.length > 0;
-  const isActiveTerminalOrWorkspaceTab = orphanSessionMap.has(activeTabId) || workspaceMap.has(activeTabId);
-  const showHostTreeToggle = hasTerminalOrWorkspaceTabs && isActiveTerminalOrWorkspaceTab;
+  const activeWorkTabCount = orderedTabs.length;
+  const showHostTreeToggle = shouldShowHostTreeToggle({
+    enabled: showHostTreeSidebar,
+    activeTabId,
+    orderedTabs,
+    sessionIds: new Set(orphanSessionMap.keys()),
+    workspaceIds: new Set(workspaceMap.keys()),
+  });
+  const hasHostTreeToggleSurface = showHostTreeSidebar && activeWorkTabCount > 0;
 
   const updateHostTreeTabGutter = useCallback(() => {
     if (!showHostTreeToggle || hostTreeLayoutWidth <= 0) {
@@ -344,6 +375,24 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     if (!tab || !e.currentTarget.contains(tab)) return;
     scrollTopTabIntoComfortView(e.currentTarget, tab, 'smooth');
   }, []);
+
+  const handleHostTreeTogglePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!showHostTreeToggle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    suppressHostTreeToggleClickRef.current = true;
+    toggleHostTree();
+  }, [showHostTreeToggle, toggleHostTree]);
+
+  const handleHostTreeToggleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (suppressHostTreeToggleClickRef.current) {
+      suppressHostTreeToggleClickRef.current = false;
+      return;
+    }
+    if (!showHostTreeToggle) return;
+    toggleHostTree();
+  }, [showHostTreeToggle, toggleHostTree]);
 
   // Pre-compute tab shift styles for all tabs to avoid recalculation during render
   const tabShiftStyles = useMemo(() => {
@@ -621,11 +670,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             }
           }}
         >
-          {hasTerminalOrWorkspaceTabs && (
+          {hasHostTreeToggleSurface && (
             <div
               ref={hostTreeToggleSlotRef}
-              className="top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 self-end"
+              className="top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 self-end app-no-drag"
               data-visible={showHostTreeToggle ? 'true' : 'false'}
+              style={noDragRegionStyle}
             >
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -643,8 +693,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                         ? 'var(--top-tabs-fg, hsl(var(--foreground)))'
                         : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))',
                       pointerEvents: showHostTreeToggle ? 'auto' : 'none',
+                      ...noDragRegionStyle,
                     }}
-                    onClick={toggleHostTree}
+                    onPointerDown={handleHostTreeTogglePointerDown}
+                    onClick={handleHostTreeToggleClick}
                   >
                     <Menu size={14} />
                   </Button>
@@ -770,7 +822,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 className="h-7 w-7 shrink-0 app-no-drag"
                 style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                 onClick={onToggleTheme}
-                disabled={isImmersiveActive && !followAppTerminalTheme}
+                disabled={effectiveImmersiveActive && !followAppTerminalTheme}
               >
                 {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               </Button>
@@ -821,7 +873,8 @@ const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean => {
     prev.onToggleTheme === next.onToggleTheme &&
     prev.followAppTerminalTheme === next.followAppTerminalTheme &&
     prev.isImmersiveActive === next.isImmersiveActive &&
-    prev.showSftpTab === next.showSftpTab
+    prev.showSftpTab === next.showSftpTab &&
+    prev.showHostTreeSidebar === next.showHostTreeSidebar
   );
 };
 

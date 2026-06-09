@@ -32,6 +32,8 @@ export default function SettingsAppearanceTab(props: {
   setShowOnlyUngroupedHostsInRoot: (enabled: boolean) => void;
   showSftpTab: boolean;
   setShowSftpTab: (enabled: boolean) => void;
+  showHostTreeSidebar: boolean;
+  setShowHostTreeSidebar: (enabled: boolean) => void;
   windowOpacity: number;
   setWindowOpacity: (opacity: number) => void;
 }) {
@@ -60,6 +62,8 @@ export default function SettingsAppearanceTab(props: {
     setShowOnlyUngroupedHostsInRoot,
     showSftpTab,
     setShowSftpTab,
+    showHostTreeSidebar,
+    setShowHostTreeSidebar,
     windowOpacity,
     setWindowOpacity,
   } = props;
@@ -351,6 +355,12 @@ export default function SettingsAppearanceTab(props: {
           description={t('settings.vault.showSftpTabDesc')}
         >
           <Toggle checked={showSftpTab} onChange={setShowSftpTab} />
+        </SettingRow>
+        <SettingRow
+          label={t('settings.vault.showHostTreeSidebar')}
+          description={t('settings.vault.showHostTreeSidebarDesc')}
+        >
+          <Toggle checked={showHostTreeSidebar} onChange={setShowHostTreeSidebar} />
         </SettingRow>
       </div>
 

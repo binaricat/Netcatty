@@ -136,6 +136,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sessionLogsFormat,
   sessionLogsTimestampsEnabled,
   sshDebugLogsEnabled,
+  showHostTreeSidebar = true,
   toggleScriptsSidePanelRef,
   toggleSidePanelRef,
 }) => {
@@ -1108,6 +1109,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpInitialLocationForTab,
     setSftpPendingUploadsForTab,
     setupMcpApprovalBridge,
+    showHostTreeSidebar,
     sidePanelOpenTabs,
     sidePanelPosition,
     sidePanelWidth,

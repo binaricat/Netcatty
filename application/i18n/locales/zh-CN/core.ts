@@ -209,6 +209,8 @@ export const zhCNCoreMessages: Messages = {
   'settings.vault.showOnlyUngroupedHostsInRootDesc': '开启后，主机库根目录的主机列表只显示没有分组的主机，已分组主机请从左侧分组进入查看。',
   'settings.vault.showSftpTab': '显示 SFTP 标签页',
   'settings.vault.showSftpTabDesc': '在顶部标签栏显示独立的 SFTP 视图。关闭后可改用会话内左侧的 SFTP 侧栏。',
+  'settings.vault.showHostTreeSidebar': '显示主机列表侧栏',
+  'settings.vault.showHostTreeSidebarDesc': '在终端和编辑器标签页显示主机列表侧栏及顶部开关。',
 
   // Update notifications
   'update.available.title': '发现新版本',

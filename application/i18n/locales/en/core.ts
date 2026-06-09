@@ -225,6 +225,8 @@ export const enCoreMessages: Messages = {
   'settings.vault.showOnlyUngroupedHostsInRootDesc': 'When enabled, the root host list only shows hosts without a group. Open a group from the sidebar to see grouped hosts.',
   'settings.vault.showSftpTab': 'Show SFTP tab',
   'settings.vault.showSftpTabDesc': 'Display the standalone SFTP view in the top tab bar. When hidden, use the in-session SFTP side panel instead.',
+  'settings.vault.showHostTreeSidebar': 'Show host list sidebar',
+  'settings.vault.showHostTreeSidebarDesc': 'Display the host list sidebar and its top-bar toggle on terminal and editor tabs.',
 
   // Update notifications
   'update.available.title': 'Update Available',

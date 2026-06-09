@@ -11,6 +11,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { saveEditorTab } from '../../application/state/editorTabSave';
 import { editorTabStore, useEditorTab, type EditorTabId } from '../../application/state/editorTabStore';
 import { useIsEditorTabActive } from '../../application/state/activeTabStore';
+import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
 import type { HotkeyScheme, KeyBinding } from '../../domain/models';
 import type { Host } from '../../types';
 import { toast } from '../ui/toast';
@@ -27,6 +28,14 @@ export interface TextEditorTabViewProps {
   onRequestClose: (tabId: EditorTabId) => void;
 }
 
+export function getTextEditorTabShellStyle(isVisible: boolean, hostTreeLayoutWidth: number): React.CSSProperties {
+  return {
+    ...(isVisible ? null : { pointerEvents: 'none', visibility: 'hidden' }),
+    zIndex: 20,
+    left: hostTreeLayoutWidth,
+  };
+}
+
 export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   tabId,
   hotkeyScheme,
@@ -39,6 +48,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   // Self-subscribe visibility so switching tabs only re-renders this editor
   // instance, not AppView/App.
   const isVisible = useIsEditorTabActive(tabId);
+  const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
 
   const handleContentChange = useCallback(
     (content: string, viewState: Monaco.editor.ICodeEditorViewState | null) => {
@@ -70,6 +80,10 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
     }
   }, [tabId, t]);
 
+  const handleRequestClose = useCallback(() => {
+    onRequestClose(tabId);
+  }, [onRequestClose, tabId]);
+
   // Tab has been closed — render nothing (parent should remove this instance,
   // but guard here in case of a transient render before unmount).
   if (!tab) return null;
@@ -87,18 +101,17 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
     // all fill their flex-1 parent via `absolute inset-0`. Match that here so
     // an inactive editor tab doesn't collapse to zero height in normal flow,
     // and an active one fills the viewport instead of stacking beneath others.
-    // z-index high enough to stay above the TerminalLayer's inner `z-10` panels
-    // (TerminalLayer root is visibility:hidden when editor tabs are active, but
-    // its children's stacking contexts can still overlap without an explicit z.)
+    // z-index high enough to stay above the terminal workspace while leaving
+    // room for the shared host sidebar when it is open.
     <div
-      style={{ display: isVisible ? undefined : 'none', zIndex: 20 }}
-      className="absolute inset-0 min-h-0 flex flex-col bg-background"
+      style={getTextEditorTabShellStyle(isVisible, hostTreeLayoutWidth)}
+      className="absolute top-0 right-0 bottom-0 min-h-0 flex flex-col bg-background"
     >
       <TextEditorPane
         chrome="tab"
         fileName={`${tab.fileName}${isDirty ? ' *' : ''}`}
         subtitle={subtitle}
-        onRequestClose={() => onRequestClose(tabId)}
+        onRequestClose={handleRequestClose}
         content={tab.content}
         languageId={tab.languageId}
         wordWrap={tab.wordWrap}

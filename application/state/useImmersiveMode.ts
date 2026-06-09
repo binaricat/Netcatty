@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { TerminalTheme } from '../../domain/models';
 import { TERMINAL_THEMES } from '../../infrastructure/config/terminalThemes';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+import { isEditorTabId } from './activeTabStore';
 
 // ---------------------------------------------------------------------------
 // Hex → HSL conversion (returns "H S% L%" without the hsl() wrapper)
@@ -123,6 +124,17 @@ function getImmersiveCss(theme: TerminalTheme): string {
 
 const STYLE_ID = 'netcatty-immersive-override';
 
+export function isImmersiveTerminalTab(activeTabId: string): boolean {
+  return activeTabId !== 'vault'
+    && activeTabId !== 'sftp'
+    && !activeTabId.startsWith('log-')
+    && !isEditorTabId(activeTabId);
+}
+
+export function shouldFadeImmersiveRestoreForTab(activeTabId: string): boolean {
+  return !isEditorTabId(activeTabId);
+}
+
 function applyImmersiveStyle(css: string, isDark: boolean, bg: string) {
   const root = document.documentElement;
   const targetClass = isDark ? 'dark' : 'light';
@@ -165,7 +177,7 @@ export function useImmersiveMode({
   const restoreRef = useRef(restoreOriginalTheme);
   restoreRef.current = restoreOriginalTheme;
 
-  const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !activeTabId.startsWith('log-');
+  const isTerminalTab = isImmersiveTerminalTab(activeTabId);
 
   // APPLY: useLayoutEffect — runs before paint, O(1) Map lookup, single DOM write
   useLayoutEffect(() => {
@@ -185,6 +197,11 @@ export function useImmersiveMode({
     if (!overrideActiveRef.current) return;
     overrideActiveRef.current = false;
     appliedFpRef.current = null;
+    if (!shouldFadeImmersiveRestoreForTab(activeTabId)) {
+      removeImmersiveStyle();
+      restoreOriginalTheme();
+      return;
+    }
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
     const overlay = document.createElement('div');
     overlay.className = 'immersive-fade-overlay';
@@ -198,7 +215,7 @@ export function useImmersiveMode({
     });
     const fallback = setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 400);
     return () => { clearTimeout(fallback); if (overlay.parentNode) overlay.remove(); };
-  }, [isTerminalTab, activeTerminalTheme, restoreOriginalTheme]);
+  }, [activeTabId, isTerminalTab, activeTerminalTheme, restoreOriginalTheme]);
 
   // Cleanup on unmount
   useEffect(() => {

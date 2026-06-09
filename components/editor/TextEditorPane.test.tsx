@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   canPromoteTextEditor,
+  getTextEditorContentStats,
   isTextEditorReadOnly,
   TextEditorPromoteButton,
 } from "./TextEditorPane.tsx";
@@ -42,4 +43,9 @@ test("renders the promote button disabled while a save is running", () => {
 
   assert.match(savingMarkup, /disabled=""/);
   assert.doesNotMatch(idleMarkup, /disabled=""/);
+});
+
+test("counts editor content without allocating line arrays", () => {
+  assert.deepEqual(getTextEditorContentStats(""), { lineCount: 1, charCount: 0 });
+  assert.deepEqual(getTextEditorContentStats("one\ntwo\n"), { lineCount: 3, charCount: 8 });
 });

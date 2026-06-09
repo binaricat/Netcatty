@@ -26,9 +26,6 @@ class TerminalHostTreeStore {
   setIsOpen = (open: boolean) => {
     if (this.isOpen === open) return;
     this.isOpen = open;
-    if (!open) {
-      this.layoutWidth = 0;
-    }
     localStorageAdapter.writeString(
       STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED,
       open ? 'false' : 'true',

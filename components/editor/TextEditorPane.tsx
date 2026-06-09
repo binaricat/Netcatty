@@ -182,11 +182,19 @@ export const isTextEditorReadOnly = ({ saving }: { saving: boolean }): boolean =
 
 export const canPromoteTextEditor = ({ saving }: { saving: boolean }): boolean => !saving;
 
+export function getTextEditorContentStats(content: string): { lineCount: number; charCount: number } {
+  let lineCount = 1;
+  for (let i = 0; i < content.length; i += 1) {
+    if (content.charCodeAt(i) === 10) lineCount += 1;
+  }
+  return { lineCount, charCount: content.length };
+}
+
 export const TextEditorPromoteButton: React.FC<{
   saving: boolean;
   onPromoteToTab: () => void;
   title: string;
-}> = ({ saving, onPromoteToTab, title }) => (
+}> = React.memo(({ saving, onPromoteToTab, title }) => (
   <Tooltip>
     <TooltipTrigger asChild>
       <Button
@@ -201,9 +209,10 @@ export const TextEditorPromoteButton: React.FC<{
     </TooltipTrigger>
     <TooltipContent>{title}</TooltipContent>
   </Tooltip>
-);
+));
+TextEditorPromoteButton.displayName = 'TextEditorPromoteButton';
 
-export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
+const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
   fileName,
   content,
   languageId,
@@ -465,6 +474,8 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
 
   const supportedLanguages = useMemo(() => getSupportedLanguages(), []);
   const monacoLanguage = useMemo(() => languageIdToMonaco(languageId), [languageId]);
+  const languageName = useMemo(() => getLanguageName(languageId), [languageId]);
+  const contentStats = useMemo(() => getTextEditorContentStats(content), [content]);
   const languageOptions = useMemo(
     () => supportedLanguages.map((lang) => ({ value: lang.id, label: lang.name })),
     [supportedLanguages],
@@ -618,14 +629,17 @@ export const TextEditorPane: React.FC<TextEditorPaneProps> = ({
       {/* Footer */}
       <div className="px-4 py-2 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground bg-muted/30 flex-shrink-0">
         <span>
-          {getLanguageName(languageId)}
+          {languageName}
         </span>
         <span>
-          {content.split('\n').length} lines • {content.length} characters
+          {contentStats.lineCount} lines • {contentStats.charCount} characters
         </span>
       </div>
     </div>
   );
 };
+
+export const TextEditorPane = React.memo(TextEditorPaneInner);
+TextEditorPane.displayName = 'TextEditorPane';
 
 export default TextEditorPane;

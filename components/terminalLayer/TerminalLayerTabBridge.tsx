@@ -25,6 +25,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   const sessionHostsMap = s.sessionHostsMap as Map<string, Host>;
   const sftpHostForTab = s.sftpHostForTab as Map<string, Host>;
   const sidePanelOpenTabs = s.sidePanelOpenTabs as Map<string, SidePanelTab>;
+  const showHostTreeSidebar = s.showHostTreeSidebar as boolean | undefined;
 
   const activeWorkspace = useMemo(
     () => (activeTabId ? workspaceById.get(activeTabId) : undefined),
@@ -355,6 +356,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     setEditorWordWrap: s.setEditorWordWrap,
     setIsComposeBarOpen: s.setIsComposeBarOpen,
     setResizing,
+    showHostTreeSidebar,
     setSidePanelPosition: s.setSidePanelPosition,
     setSftpFollowTerminalCwd: s.setSftpFollowTerminalCwd,
     sftpActiveHost,
@@ -420,6 +422,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     resolveAIExecutorContext,
     sessionHostsMap,
     sessions,
+    showHostTreeSidebar,
     sftpActiveHost,
     themeState,
     workspaceById,

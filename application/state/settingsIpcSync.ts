@@ -34,6 +34,7 @@ import {
   STORAGE_KEY_UI_THEME_DARK,
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
+  STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_WINDOW_OPACITY,
 } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
@@ -71,6 +72,7 @@ interface UseSettingsIpcSyncParams {
   setSftpFollowTerminalCwd: Dispatch<SetStateAction<boolean>>;
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
+  setShowHostTreeSidebarState: Dispatch<SetStateAction<boolean>>;
   setSftpTransferConcurrencyState: Dispatch<SetStateAction<number>>;
 }
 
@@ -102,6 +104,7 @@ export function useSettingsIpcSync({
   setSftpFollowTerminalCwd,
   setSftpDefaultViewMode,
   setWorkspaceFocusStyleState,
+  setShowHostTreeSidebarState,
   setSftpTransferConcurrencyState,
 }: UseSettingsIpcSyncParams) {
   // Listen for settings changes from other windows via IPC
@@ -222,6 +225,9 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_WORKSPACE_FOCUS_STYLE && (value === 'dim' || value === 'border')) {
         setWorkspaceFocusStyleState((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR && typeof value === 'boolean') {
+        setShowHostTreeSidebarState((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY && typeof value === 'number') {
         setSftpTransferConcurrencyState((prev) => (prev === value ? prev : value));
       }
@@ -251,6 +257,7 @@ export function useSettingsIpcSync({
     setSftpAutoOpenSidebar,
     setSftpFollowTerminalCwd,
     setSftpDefaultViewMode,
+    setShowHostTreeSidebarState,
     setSftpTransferConcurrencyState,
     setTerminalFontFamilyId,
     setTerminalFontSize,

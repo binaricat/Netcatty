@@ -53,6 +53,7 @@ type HostTreeDropTarget =
   | { kind: 'group'; path: string };
 
 interface TerminalHostTreeSidebarProps {
+  enabled?: boolean;
   hosts: Host[];
   customGroups: string[];
   resolvedPreviewTheme: TerminalTheme;
@@ -71,6 +72,43 @@ type HostTreeTheme = {
   rowDropBg: string;
   folderFg: string;
 };
+
+export function isTerminalHostTreeSidebarVisible(isOpen: boolean, enabled = true): boolean {
+  return enabled && isOpen;
+}
+
+export function getTerminalHostTreeSidebarShellStyle(
+  isVisible: boolean,
+  displayWidth: number,
+  shellTransition: string,
+): React.CSSProperties {
+  return {
+    width: isVisible ? displayWidth : 0,
+    transition: shellTransition,
+    pointerEvents: isVisible ? 'auto' : 'none',
+  };
+}
+
+export function getTerminalHostTreeSidebarPanelStyle({
+  isVisible,
+  displayWidth,
+  panelTransition,
+  theme,
+}: {
+  isVisible: boolean;
+  displayWidth: number;
+  panelTransition: string;
+  theme: HostTreeTheme;
+}): React.CSSProperties {
+  return {
+    width: displayWidth,
+    opacity: isVisible ? 1 : 0,
+    transition: panelTransition,
+    backgroundColor: theme.termBg,
+    color: theme.termFg,
+    borderRight: isVisible ? `1px solid ${theme.separator}` : '1px solid transparent',
+  };
+}
 
 function hostMatchesSearch(host: Host, search: string): boolean {
   const s = search.toLowerCase();
@@ -366,6 +404,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
 HostTreeFlatRowItem.displayName = 'HostTreeFlatRowItem';
 
 const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
+  enabled = true,
   hosts,
   customGroups,
   resolvedPreviewTheme,
@@ -375,6 +414,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
 }) => {
   const { t } = useI18n();
   const isOpen = useTerminalHostTreeOpen();
+  const isVisible = isTerminalHostTreeSidebarVisible(isOpen, enabled);
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [expandedPanel, setExpandedPanel] = useState<HostTreeToolbarPanel>(null);
@@ -458,14 +498,13 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   }, [searchActive, searchTerm, ungroupedHosts]);
 
   const flatRows = useMemo(() => {
-    if (!isOpen) return [];
     return flattenHostGroupTree({
       groupNodes: filteredTree,
       ungroupedHosts: filteredUngrouped,
       expandedPaths,
       searchActive: treeExpandAll,
     });
-  }, [expandedPaths, filteredTree, filteredUngrouped, isOpen, treeExpandAll]);
+  }, [expandedPaths, filteredTree, filteredUngrouped, treeExpandAll]);
 
   const canDrag = Boolean(menuActions) && !searchActive && !tagsActive;
 
@@ -620,7 +659,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     : `opacity ${SIDEBAR_ANIM_MS - 40}ms ease-out, border-color ${SIDEBAR_ANIM_MS}ms ease-out`;
 
   const handleResizeStart = useCallback((event: React.MouseEvent) => {
-    if (!isOpen) return;
+    if (!isVisible) return;
     event.preventDefault();
     setIsResizing(true);
     terminalLayoutSuppressStore.begin();
@@ -655,13 +694,13 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  }, [isOpen, persistSidebarWidth, setSidebarWidth, sidebarWidth]);
+  }, [isVisible, persistSidebarWidth, setSidebarWidth, sidebarWidth]);
 
-  const prevIsOpenRef = useRef(isOpen);
+  const prevIsVisibleRef = useRef(isVisible);
 
   useEffect(() => {
-    if (prevIsOpenRef.current === isOpen) return;
-    prevIsOpenRef.current = isOpen;
+    if (prevIsVisibleRef.current === isVisible) return;
+    prevIsVisibleRef.current = isVisible;
 
     const el = shellRef.current;
     if (!el) return;
@@ -671,6 +710,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     const finish = () => {
       if (ended) return;
       ended = true;
+      if (!isVisible) terminalHostTreeStore.setLayoutWidth(0);
       terminalLayoutSuppressStore.end();
     };
     const onTransitionEnd = (event: TransitionEvent) => {
@@ -684,39 +724,34 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
       window.clearTimeout(timer);
       finish();
     };
-  }, [isOpen]);
+  }, [isVisible]);
 
   const displayWidth = resizePreviewWidth ?? sidebarWidth;
 
   useEffect(() => {
-    terminalHostTreeStore.setLayoutWidth(isOpen ? displayWidth : 0);
-  }, [displayWidth, isOpen]);
+    if (isVisible) terminalHostTreeStore.setLayoutWidth(displayWidth);
+  }, [displayWidth, isVisible]);
 
   return (
     <div
       ref={shellRef}
       className="relative flex-shrink-0 h-full overflow-hidden"
-      style={{
-        width: isOpen ? displayWidth : 0,
-        transition: shellTransition,
-        pointerEvents: isOpen ? 'auto' : 'none',
-      }}
+      style={getTerminalHostTreeSidebarShellStyle(isVisible, displayWidth, shellTransition)}
       data-section="terminal-host-tree-sidebar-shell"
-      data-open={isOpen ? 'true' : 'false'}
+      data-open={isVisible ? 'true' : 'false'}
+      data-enabled={enabled ? 'true' : 'false'}
     >
       <div
         className="relative flex flex-col h-full"
-        style={{
-          width: displayWidth,
-          opacity: isOpen ? 1 : 0,
-          transition: panelTransition,
-          backgroundColor: theme.termBg,
-          color: theme.termFg,
-          borderRight: isOpen ? `1px solid ${theme.separator}` : '1px solid transparent',
-        }}
+        style={getTerminalHostTreeSidebarPanelStyle({
+          isVisible,
+          displayWidth,
+          panelTransition,
+          theme,
+        })}
         data-section="terminal-host-tree-sidebar"
       >
-        {isOpen && (
+        {isVisible && (
           <div
             className="absolute top-0 right-[-3px] h-full w-2 cursor-ew-resize z-30"
             onMouseDown={handleResizeStart}
@@ -776,6 +811,7 @@ export const TerminalHostTreeSidebar = memo(
   TerminalHostTreeSidebarInner,
   (prev, next) => (
     prev.hosts === next.hosts
+    && prev.enabled === next.enabled
     && prev.customGroups === next.customGroups
     && prev.resolvedPreviewTheme === next.resolvedPreviewTheme
     && prev.activeHostId === next.activeHostId

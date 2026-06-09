@@ -143,6 +143,14 @@ test("buildSyncPayload includes AI configuration settings", () => {
   });
 });
 
+test("buildSyncPayload includes host tree sidebar visibility setting", () => {
+  localStorage.setItem(storageKeys.STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR, "false");
+
+  const payload = buildSyncPayload(vault([]));
+
+  assert.equal(payload.settings?.showHostTreeSidebar, false);
+});
+
 test("buildSyncPayload excludes externalAgents (device-local OS-bound config)", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_AGENTS, JSON.stringify([
     { id: "codex", name: "Codex", command: "/opt/homebrew/bin/codex", enabled: true },
@@ -226,6 +234,24 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
+});
+
+test("applySyncPayload restores host tree sidebar visibility setting", async () => {
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: {
+      showHostTreeSidebar: false,
+    },
+    syncedAt: 1,
+  } as SyncPayload;
+
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR), "false");
 });
 
 test("applySyncPayload dispatches a same-window AI-state-changed event so the open chat panel rehydrates", async () => {

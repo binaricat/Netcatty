@@ -110,13 +110,16 @@ export const useIsEditorTabActive = (tabId: string): boolean => {
   return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);
 };
 
+export const isTerminalLayerVisibleTab = (activeTabId: string): boolean => {
+  return activeTabId !== 'vault' && activeTabId !== 'sftp';
+};
+
 // Check if terminal layer should be visible
-// Editor tabs are NOT terminal tabs, so exclude them from the visibility condition.
+// Editor tabs share the terminal work surface so the host sidebar remains usable.
 export const useIsTerminalLayerVisible = (draggingSessionId: string | null) => {
   const getSnapshot = useCallback(() => {
     const activeTabId = activeTabStore.getActiveTabId();
-    const isTerminalTab = activeTabId !== 'vault' && activeTabId !== 'sftp' && !isEditorTabId(activeTabId);
-    return isTerminalTab || !!draggingSessionId;
+    return isTerminalLayerVisibleTab(activeTabId) || !!draggingSessionId;
   }, [draggingSessionId]);
 
   return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);

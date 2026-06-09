@@ -287,7 +287,7 @@ body {
 }
 
 /* Immersive mode: override agent icon badge colors to follow the theme */
-.immersive-transition [data-agent-badge] {
+:root[data-immersive-theme] [data-agent-badge] {
   border-color: hsl(var(--primary) / 0.2) !important;
   background-color: hsl(var(--primary) / 0.1) !important;
 }

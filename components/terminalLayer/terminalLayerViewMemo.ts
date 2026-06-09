@@ -276,7 +276,8 @@ export function terminalLayerWorkspaceCtxEqual(prev: Ctx, next: Ctx): boolean {
 }
 
 export function terminalLayerHostTreePropsEqual(prev: Ctx, next: Ctx): boolean {
-  return eq(prev, next, 'hosts')
+  return eq(prev, next, 'showHostTreeSidebar')
+    && eq(prev, next, 'hosts')
     && eq(prev, next, 'customGroups')
     && eq(prev, next, 'resolvedPreviewTheme')
     && eq(prev, next, 'activeHostIdForSidebar')

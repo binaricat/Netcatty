@@ -35,7 +35,7 @@
     "tool:cli": "node electron/cli/netcatty-tool-cli.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node --test --import tsx electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs scripts/*.test.cjs application/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.tsx components/editor/*.test.tsx components/settings/tabs/ai/*.test.ts components/ai/*.test.ts components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/runtime/*.test.ts domain/*.test.ts infrastructure/ai/*.test.ts infrastructure/config/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts"
+    "test": "node --test --import tsx electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs scripts/*.test.cjs application/*.test.ts application/app/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.ts components/*.test.tsx components/editor/*.test.ts components/editor/*.test.tsx components/terminalLayer/*.test.ts components/settings/tabs/ai/*.test.ts components/ai/*.test.ts components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/runtime/*.test.ts domain/*.test.ts infrastructure/ai/*.test.ts infrastructure/config/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
