@@ -61,6 +61,14 @@ test("isRequestTooLargeError detects structured and textual 413 errors", () => {
   assert.equal(isRequestTooLargeError(Object.assign(new Error("bad gateway"), { statusCode: 502 })), false);
 });
 
+test("isRequestTooLargeError detects 413 hidden in an HTML response body", () => {
+  const err = Object.assign(new Error("Failed to parse provider response"), {
+    responseBody: "<html><body><center><h1>413 Request Entity Too Large</h1></center></body></html>",
+  });
+
+  assert.equal(isRequestTooLargeError(err), true);
+});
+
 // -------------------------------------------------------------------
 // classifyError — 502 / 503 / 504 upstream gateway
 // -------------------------------------------------------------------

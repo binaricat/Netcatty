@@ -15,11 +15,27 @@ import {
 } from '../shared/toolExecutors';
 import { requestApproval } from '../shared/approvalGate';
 import { reserveSessionSlot } from '../shared/sessionExecutionQueue';
+import { truncateTextWithHeadAndTail } from '../requestPayloadBudget';
+
+const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
+const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
 
 /** Unwrap a shared ToolExecResult into the shape expected by Vercel AI SDK tool results. */
 function unwrap<T>(r: ToolExecResult<T>): T | { error: string } {
   if (r.ok === false) return { error: r.error };
   return r.data;
+}
+
+export function fitTerminalExecuteResultForModel(result: {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}): { stdout: string; stderr: string; exitCode: number | null } {
+  return {
+    ...result,
+    stdout: truncateTextWithHeadAndTail(result.stdout, MAX_LIVE_TERMINAL_STDOUT_CHARS),
+    stderr: truncateTextWithHeadAndTail(result.stderr, MAX_LIVE_TERMINAL_STDERR_CHARS),
+  };
 }
 
 /**
@@ -104,7 +120,9 @@ export function createCattyTools(
           };
           abortSignal?.addEventListener('abort', cancelOnAbort, { once: true });
           try {
-            return unwrap(await executeTerminalExecute(deps, { sessionId, command }));
+            const result = await executeTerminalExecute(deps, { sessionId, command });
+            if (result.ok === false) return unwrap(result);
+            return fitTerminalExecuteResultForModel(result.data);
           } finally {
             abortSignal?.removeEventListener('abort', cancelOnAbort);
           }

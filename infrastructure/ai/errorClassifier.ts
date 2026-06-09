@@ -56,8 +56,10 @@ function extractResponseBody(error: unknown): string | undefined {
 
 export function isRequestTooLargeError(error: unknown): boolean {
   const message = extractMessage(error).trim();
-  const statusCode = extractStatusCode(error, message);
-  return statusCode === 413 || /\brequest entity too large\b/i.test(message);
+  const responseBody = extractResponseBody(error) ?? "";
+  const combined = `${message}\n${responseBody}`;
+  const statusCode = extractStatusCode(error, combined);
+  return statusCode === 413 || /\brequest entity too large\b/i.test(combined);
 }
 
 function looksLikeHtml(text: string): boolean {

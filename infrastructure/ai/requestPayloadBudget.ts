@@ -21,6 +21,7 @@ export interface FitMessagesToRequestPayloadBudgetInput {
   maxToolResultChars?: number;
   maxMessageTextChars?: number;
   protectRecentMessages?: number;
+  preserveLatestMessage?: boolean;
 }
 
 export interface FitMessagesToRequestPayloadBudgetResult {
@@ -117,12 +118,16 @@ export function truncateModelMessageForPayload(
     maxToolResultChars = DEFAULT_MAX_TOOL_RESULT_CHARS,
     maxMessageTextChars = DEFAULT_MAX_MESSAGE_TEXT_CHARS,
     omitLargeAttachments = false,
+    preserveContent = false,
   }: {
     maxToolResultChars?: number;
     maxMessageTextChars?: number;
     omitLargeAttachments?: boolean;
+    preserveContent?: boolean;
   } = {},
 ): ModelMessage {
+  if (preserveContent) return message;
+
   if (typeof message.content === "string") {
     const compressed = compressVerboseText(message.content);
     return {
@@ -215,17 +220,27 @@ export function fitMessagesToRequestPayloadBudget({
   maxToolResultChars = DEFAULT_MAX_TOOL_RESULT_CHARS,
   maxMessageTextChars = DEFAULT_MAX_MESSAGE_TEXT_CHARS,
   protectRecentMessages = DEFAULT_PROTECT_RECENT_PAYLOAD_MESSAGES,
+  preserveLatestMessage = true,
 }: FitMessagesToRequestPayloadBudgetInput): FitMessagesToRequestPayloadBudgetResult {
   const budget = Math.max(0, maxPayloadBytes - Math.max(0, reservedBytes));
   if (budget === 0) {
     return { messages: [], didAdjust: messages.length > 0, estimatedBytes: 0 };
   }
-  let adjusted = messages.map((message) => truncateModelMessageForPayload(message, {
+  const originalBytes = estimateUtf8Bytes(messages);
+  if (originalBytes <= budget) {
+    return { messages, didAdjust: false, estimatedBytes: originalBytes };
+  }
+
+  const shouldPreserveMessage = (message: ModelMessage, index: number, list: ModelMessage[]) => (
+    preserveLatestMessage && index === list.length - 1 && message.role === "user"
+  );
+
+  let adjusted = messages.map((message, index) => truncateModelMessageForPayload(message, {
     maxToolResultChars,
     maxMessageTextChars,
+    preserveContent: shouldPreserveMessage(message, index, messages),
   }));
   let estimatedBytes = estimateUtf8Bytes(adjusted);
-  const originalBytes = estimateUtf8Bytes(messages);
   let didAdjust = estimatedBytes !== originalBytes;
   if (estimatedBytes <= budget) {
     return { messages: adjusted, didAdjust, estimatedBytes };
@@ -249,9 +264,10 @@ export function fitMessagesToRequestPayloadBudget({
   ];
 
   for (let i = 1; i < toolResultCaps.length; i += 1) {
-    adjusted = adjusted.map((message) => truncateModelMessageForPayload(message, {
+    adjusted = adjusted.map((message, index) => truncateModelMessageForPayload(message, {
       maxToolResultChars: toolResultCaps[i],
       maxMessageTextChars: messageTextCaps[i],
+      preserveContent: shouldPreserveMessage(message, index, adjusted),
     }));
     estimatedBytes = estimateUtf8Bytes(adjusted);
     didAdjust = true;
@@ -274,10 +290,11 @@ export function fitMessagesToRequestPayloadBudget({
 
   const emergencyToolCap = 600;
   const emergencyTextCap = 1_200;
-  working = working.map((message) => truncateModelMessageForPayload(message, {
+  working = working.map((message, index) => truncateModelMessageForPayload(message, {
     maxToolResultChars: emergencyToolCap,
     maxMessageTextChars: emergencyTextCap,
     omitLargeAttachments: true,
+    preserveContent: shouldPreserveMessage(message, index, working),
   }));
   estimatedBytes = estimateUtf8Bytes(working);
   didAdjust = true;
@@ -291,10 +308,11 @@ export function fitMessagesToRequestPayloadBudget({
     } else {
       working = working.slice(splitAt);
     }
-    working = working.map((message) => truncateModelMessageForPayload(message, {
+    working = working.map((message, index) => truncateModelMessageForPayload(message, {
       maxToolResultChars: emergencyToolCap,
       maxMessageTextChars: emergencyTextCap,
       omitLargeAttachments: true,
+      preserveContent: shouldPreserveMessage(message, index, working),
     }));
     estimatedBytes = estimateUtf8Bytes(working);
   }
@@ -304,10 +322,11 @@ export function fitMessagesToRequestPayloadBudget({
   while (estimatedBytes > budget && (finalTextCap > 32 || finalToolCap > 32)) {
     finalTextCap = Math.max(32, Math.floor(finalTextCap * 0.6));
     finalToolCap = Math.max(32, Math.floor(finalToolCap * 0.6));
-    working = working.map((message) => truncateModelMessageForPayload(message, {
+    working = working.map((message, index) => truncateModelMessageForPayload(message, {
       maxToolResultChars: finalToolCap,
       maxMessageTextChars: finalTextCap,
       omitLargeAttachments: true,
+      preserveContent: shouldPreserveMessage(message, index, working),
     }));
     estimatedBytes = estimateUtf8Bytes(working);
   }

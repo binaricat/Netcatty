@@ -108,6 +108,17 @@ test("default payload budget remains a general gateway guard", () => {
   assert.equal(DEFAULT_MAX_REQUEST_PAYLOAD_BYTES, 1_500_000);
 });
 
+test("fitMessagesToRequestPayloadBudget preserves current long text when the request is under budget", () => {
+  const currentText = "CURRENT ".repeat(4_000);
+  const result = fitMessagesToRequestPayloadBudget({
+    messages: [{ role: "user", content: currentText }],
+    maxPayloadBytes: 100_000,
+  });
+
+  assert.equal(result.didAdjust, false);
+  assert.equal(result.messages[0].content, currentText);
+});
+
 test("fitMessagesToRequestPayloadBudget reports didAdjust when initial truncation succeeds", () => {
   const messages: ModelMessage[] = [
     { role: "user", content: "run build" },
@@ -173,7 +184,7 @@ test("fitMessagesToRequestPayloadBudget returns empty messages when budget is fu
   assert.equal(result.estimatedBytes, 0);
 });
 
-test("fitMessagesToRequestPayloadBudget omits oversized attachment payloads as a last resort", () => {
+test("fitMessagesToRequestPayloadBudget preserves latest message attachment payloads", () => {
   const result = fitMessagesToRequestPayloadBudget({
     messages: [{
       role: "user",
@@ -185,8 +196,30 @@ test("fitMessagesToRequestPayloadBudget omits oversized attachment payloads as a
     maxPayloadBytes: 20_000,
   });
 
-  assert.ok(result.estimatedBytes <= 20_000);
   assert.equal(result.messages.length, 1);
+  const content = result.messages[0].content;
+  assert.ok(Array.isArray(content));
+  assert.deepEqual(content[1], { type: "image", image: "A".repeat(1_000_000), mediaType: "image/png" });
+});
+
+test("fitMessagesToRequestPayloadBudget omits older oversized attachment payloads as a last resort", () => {
+  const result = fitMessagesToRequestPayloadBudget({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "older image" },
+          { type: "image", image: "A".repeat(1_000_000), mediaType: "image/png" },
+        ],
+      },
+      { role: "user", content: "current question" },
+    ],
+    maxPayloadBytes: 20_000,
+    protectRecentMessages: 2,
+  });
+
+  assert.ok(result.estimatedBytes <= 20_000);
+  assert.equal(result.messages.length, 2);
   const content = result.messages[0].content;
   assert.ok(Array.isArray(content));
   assert.deepEqual(content[1], {

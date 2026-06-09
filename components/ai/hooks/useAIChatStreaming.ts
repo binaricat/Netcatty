@@ -342,6 +342,7 @@ export function useAIChatStreaming({
     // Track the current assistant message ID so updates target the correct message
     let activeMsgId = currentAssistantMsgId;
     let lastAddedRole: 'assistant' | 'tool' = 'assistant';
+    let hasRetryUnsafeToolProgress = false;
     const reader = result.fullStream.getReader();
 
     // -- Text-delta batching: accumulate deltas and flush periodically --
@@ -484,6 +485,7 @@ export function useAIChatStreaming({
           cancelPendingFlush();
           flushText();
           const typedChunk = chunk as ToolCallChunk;
+          hasRetryUnsafeToolProgress = true;
           const messageId = ensureAssistantMessage();
           const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
           updateMessageById(streamSessionId, messageId, msg => ({
@@ -509,6 +511,7 @@ export function useAIChatStreaming({
           cancelPendingFlush();
           flushText();
           const typedChunk = chunk as ToolResultChunk;
+          hasRetryUnsafeToolProgress = true;
           // Mark the assistant message's tool execution as completed
           updateMessageById(streamSessionId, activeMsgId, msg =>
             msg.role === 'assistant' && msg.executionStatus === 'running'
@@ -555,7 +558,7 @@ export function useAIChatStreaming({
             console.warn('[Catty] suppressed SDK stream state error:', typedChunk.error);
             break;
           }
-          if (isRequestTooLargeError(typedChunk.error)) {
+          if (isRequestTooLargeError(typedChunk.error) && !hasRetryUnsafeToolProgress) {
             cancelPendingFlush();
             flushText();
             throw typedChunk.error;
@@ -1090,6 +1093,18 @@ export function useAIChatStreaming({
         }
 
         console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
+        updateMessageById(sessionId, assistantMsgId, msg => ({
+          ...msg,
+          content: '',
+          thinking: undefined,
+          thinkingDurationMs: undefined,
+          providerContinuation: undefined,
+          toolCalls: undefined,
+          errorInfo: undefined,
+          executionStatus: undefined,
+          pendingApproval: undefined,
+          statusText: 'Request was too large. Compacting context and retrying...',
+        }));
         const retryMessages = prepareMessagesForStream(await compactAndBudgetMessages(messagesForStream, {
           force: true,
           statusText: 'Request was too large. Compacting context and retrying...',
@@ -1121,7 +1136,7 @@ export function useAIChatStreaming({
     }
   }, [
     processCattyStream, reportStreamError, setStreamingForScope,
-    updateLastMessage,
+    updateLastMessage, updateMessageById,
   ]);
 
   return {

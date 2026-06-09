@@ -35,6 +35,7 @@ function formatAttachmentPlaceholder(
   const label = attachment.mediaType.startsWith("image/") ? "image" : "file";
   const details = [
     attachment.filename ? `filename=${attachment.filename}` : undefined,
+    attachment.filePath ? `path=${attachment.filePath}` : undefined,
     `mediaType=${attachment.mediaType}`,
     describeAttachmentSize(attachment),
   ].filter(Boolean).join(", ");

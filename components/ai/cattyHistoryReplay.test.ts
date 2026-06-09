@@ -22,6 +22,20 @@ test("buildHistoricalUserReplayContent replaces historical image data with a pla
   assert.doesNotMatch(result, /AAAAA/);
 });
 
+test("buildHistoricalUserReplayContent preserves historical file path metadata", () => {
+  const content = buildHistoricalUserReplayContent("inspect this file", [{
+    base64Data: "A".repeat(200),
+    mediaType: "text/plain",
+    filename: "deploy.log",
+    filePath: "/tmp/netcatty/deploy.log",
+  }]);
+
+  assert.match(content, /Historical file attachment omitted from replay/);
+  assert.match(content, /filename=deploy\.log/);
+  assert.match(content, /path=\/tmp\/netcatty\/deploy\.log/);
+  assert.doesNotMatch(content, /AAAAAAAA/);
+});
+
 test("buildHistoricalUserReplayContent replaces historical terminal selections with metadata only", () => {
   const attachment: ChatMessageAttachment = {
     base64Data: "VGhpcyBpcyBhIGxvbmcgdGVybWluYWwgc2VsZWN0aW9u",
