@@ -264,6 +264,98 @@ function normalizeClaudeCodeExecutableEnvForSdk(env, platform = process.platform
   };
 }
 
+const CODEX_WIN32_PLATFORM_PACKAGES = {
+  x64: { triple: "x86_64-pc-windows-msvc", package: "@openai/codex-win32-x64" },
+  arm64: { triple: "aarch64-pc-windows-msvc", package: "@openai/codex-win32-arm64" },
+};
+
+function resolveCodexNativeExecutableWin32(moduleSearchDirs, arch = process.arch) {
+  const archKey = arch === "arm64" ? "arm64" : "x64";
+  const { triple, package: platformPackage } = CODEX_WIN32_PLATFORM_PACKAGES[archKey];
+
+  for (const dir of moduleSearchDirs) {
+    if (!dir) continue;
+    const candidates = [
+      path.join(dir, "node_modules", platformPackage, "vendor", triple, "bin", "codex.exe"),
+      path.join(dir, "node_modules", platformPackage, "vendor", triple, "codex", "codex.exe"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.platform) {
+  const normalized = String(codexExecutablePath || "").trim();
+  if (!normalized) return null;
+  if (platform !== "win32") return normalized;
+
+  const ext = path.extname(normalized).toLowerCase();
+  if (ext === ".exe") return normalized;
+
+  const baseDir = path.dirname(normalized);
+  const moduleSearchDirs = [
+    baseDir,
+    path.join(baseDir, "node_modules", "@openai", "codex"),
+  ];
+
+  if (ext === ".js" && /[\\/]codex\.js$/i.test(normalized)) {
+    const codexPackageRoot = path.dirname(path.dirname(normalized));
+    const globalPrefix = path.resolve(codexPackageRoot, "..", "..", "..");
+    const nativeExe = resolveCodexNativeExecutableWin32([
+      globalPrefix,
+      codexPackageRoot,
+      ...moduleSearchDirs,
+    ]);
+    if (nativeExe) return nativeExe;
+  }
+
+  if (ext && ext !== ".cmd" && ext !== ".bat") {
+    return normalized;
+  }
+
+  const nativeExe = resolveCodexNativeExecutableWin32(moduleSearchDirs);
+  if (nativeExe) return nativeExe;
+
+  const shimCandidates = [normalized];
+  if (!ext) {
+    shimCandidates.push(`${normalized}.cmd`, `${normalized}.bat`);
+  }
+
+  for (const shimPath of shimCandidates) {
+    try {
+      if (!existsSync(shimPath)) continue;
+      const contents = readFileSync(shimPath, "utf8");
+      if (!/@openai[\\/]codex[\\/]bin[\\/]codex\.js/i.test(contents)) {
+        continue;
+      }
+      const resolved = resolveCodexNativeExecutableWin32(moduleSearchDirs);
+      if (resolved) return resolved;
+    } catch {
+      // Fall back to the original executable path below.
+    }
+  }
+
+  return normalized;
+}
+
+function resolveSdkBinPath(command, shellEnv, platform = process.platform) {
+  const raw = resolveCliFromPath(command, shellEnv);
+  if (!raw) return null;
+  if (platform !== "win32") return raw;
+  if (command === "codex") {
+    return resolveCodexExecutableForSdk(raw, platform);
+  }
+  if (command === "claude") {
+    return resolveClaudeCodeExecutableForSdk(raw, platform);
+  }
+  return raw;
+}
+
 function resolveCliFromPath(command, shellEnv) {
   // Validate command: only allow valid binary names (alphanumeric, hyphens, underscores, dots)
   if (!command || !/^[a-zA-Z0-9._-]+$/.test(command)) {
@@ -440,6 +532,8 @@ module.exports = {
   prepareCommandForSpawn,
   resolveClaudeCodeExecutableForSdk,
   normalizeClaudeCodeExecutableEnvForSdk,
+  resolveCodexExecutableForSdk,
+  resolveSdkBinPath,
   resolveCliFromPath,
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,

@@ -163,8 +163,10 @@ function registerSdkStreamHandlers(ctx) {
             normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForSdk,
           });
 
-          // Resolve absolute CLI path for the backend (claude needs absolute).
-          const binPath = resolveCliFromPath(backendKey, shellEnv) || undefined;
+          // Resolve absolute CLI path for SDK backends. On Windows, rewrite npm
+          // `.cmd` shims to the underlying native/script entry (codex.exe / cli.js)
+          // because SDKs spawn without `shell: true` (Node 18+ EINVAL on .cmd).
+          const binPath = resolveSdkBinPath(backendKey, shellEnv) || undefined;
 
           const hasInMemorySession = sdkSessionIds.has(chatSessionId);
           const resumeSessionId = sdkSessionIds.get(chatSessionId) || existingSessionId || undefined;
@@ -236,7 +238,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
         const shellEnv = await getShellEnv();
-        const binPath = resolveCliFromPath(backendKey, shellEnv) || undefined;
+        const binPath = resolveSdkBinPath(backendKey, shellEnv) || undefined;
         const env = buildSdkAgentEnv({
           shellEnv,
           requestedAgentEnv: normalizeAgentEnv(requestedAgentEnv),

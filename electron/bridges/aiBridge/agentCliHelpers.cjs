@@ -101,7 +101,7 @@ function createAgentCliHelpers(ctx) {
     if (cached && now - cached.checkedAt < maxAgeMs) return cached;
 
     const shellEnv = await getShellEnv();
-    const codexPath = resolveCliFromPath("codex", shellEnv);
+    const codexPath = resolveSdkBinPath("codex", shellEnv);
     if (!codexPath) {
       const result = { ok: false, checkedAt: now, error: "codex binary not found", code: "ENOENT" };
       setCodexValidationCache(result);
