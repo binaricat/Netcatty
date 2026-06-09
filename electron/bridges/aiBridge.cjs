@@ -637,7 +637,6 @@ function createHandlerContext(ipcMain) {
     normalizeCliPathForPlatform,
     prepareCommandForSpawn,
     normalizeClaudeCodeExecutableEnvForSdk,
-    resolveCodexExecutableForSdk,
     resolveSdkBinPath,
     resolveCliFromPath,
     probeClaudeAuth,
