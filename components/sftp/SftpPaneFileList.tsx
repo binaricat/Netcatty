@@ -504,6 +504,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       {/* File list header */}
     <div
       className="text-[11px] uppercase tracking-wide text-muted-foreground px-4 py-2 border-b border-border/40 bg-secondary/10 select-none"
+      data-section="terminal-sftp-list-header"
       style={{
         display: "grid",
         gridTemplateColumns: buildSftpColumnTemplate(columnWidths),
@@ -572,6 +573,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       <ContextMenuTrigger asChild>
         <div
           ref={fileListRef}
+          data-section="terminal-sftp-list"
           className={cn(
             "flex-1 min-h-0 overflow-y-auto relative",
             isDragOverPane && "ring-2 ring-primary/30 ring-inset",

@@ -162,6 +162,11 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
       <div
         role="button"
         tabIndex={0}
+        data-section="terminal-host-tree-sidebar-row"
+        data-row-type="host"
+        data-host-id={row.host.id}
+        data-active={isActive ? 'true' : 'false'}
+        data-drag-over={isDragOver ? 'true' : 'false'}
         className={cn(
           'flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm',
         )}
@@ -243,6 +248,11 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
     <div
       role="button"
       tabIndex={0}
+      data-section="terminal-host-tree-sidebar-row"
+      data-row-type="group"
+      data-group-path={node.path}
+      data-expanded={isExpanded ? 'true' : 'false'}
+      data-drag-over={isDragOver ? 'true' : 'false'}
       className={cn(
         'flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm font-medium',
       )}
@@ -733,6 +743,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
 
         <div
           className="flex-1 min-h-0 py-1"
+          data-section="terminal-host-tree-sidebar-content"
           style={dragOverTarget?.kind === 'root' ? { backgroundColor: theme.rowDropBg } : undefined}
           onDragOver={handleRootDragOver}
           onDragLeave={handleRootDragLeave}

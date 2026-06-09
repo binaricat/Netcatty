@@ -447,10 +447,14 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
       {/* Toolbar - always visible when connected */}
-      <div ref={outerRef} className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20">
+      <div
+        ref={outerRef}
+        className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20"
+        data-section="terminal-sftp-toolbar"
+      >
         {/* Editable Breadcrumb with autocomplete */}
         {isEditingPath ? (
-          <div className="relative flex-1">
+          <div className="relative flex-1" data-section="terminal-sftp-path">
             <Input
               ref={pathInputRef}
               value={editingPathValue}
@@ -504,6 +508,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             <TooltipTrigger asChild>
               <div
                 className="flex-1 min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
+                data-section="terminal-sftp-path"
                 onDoubleClick={handlePathDoubleClick}
               >
                 <SftpBreadcrumb
@@ -653,7 +658,10 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
 
       {/* Inline filter bar - appears below toolbar when search is active */}
       {showFilterBar && (
-        <div className="h-8 px-3 flex items-center gap-2 border-b border-border/40 bg-secondary/10">
+        <div
+          className="h-8 px-3 flex items-center gap-2 border-b border-border/40 bg-secondary/10"
+          data-section="terminal-sftp-filter-bar"
+        >
           <div className="relative flex-1">
             <Search
               size={12}

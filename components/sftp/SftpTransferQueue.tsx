@@ -347,6 +347,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
   return (
     <div
       className="border-t border-border/70 bg-secondary/80 supports-[backdrop-filter]:backdrop-blur-sm shrink-0"
+      data-section="terminal-sftp-transfer-queue"
       style={{ height: clampPanelHeight(panelHeight) }}
     >
       <Tooltip>
@@ -361,7 +362,10 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
         <TooltipContent>{t("sftp.transfers.dragToResize")}</TooltipContent>
       </Tooltip>
 
-      <div className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+      <div
+        className="flex items-center justify-between border-b border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground"
+        data-section="terminal-sftp-transfer-queue-header"
+      >
         <span className="font-medium">
           {t("sftp.transfers")}
           {sftp.activeTransfersCount > 0 && (
@@ -388,6 +392,7 @@ export const SftpTransferQueue: React.FC<SftpTransferQueueProps> = ({
       <div
         ref={scrollContainerRef}
         className="overflow-auto"
+        data-section="terminal-sftp-transfer-list"
         style={{ height: `calc(100% - ${HEADER_HEIGHT}px)` }}
         onScroll={handleScroll}
       >

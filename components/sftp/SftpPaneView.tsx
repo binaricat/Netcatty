@@ -478,6 +478,9 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   return (
     <div
       ref={paneContainerRef}
+      data-section="terminal-sftp-pane"
+      data-sftp-pane-side={side}
+      data-sftp-view-mode={viewMode}
       className={cn(
         "absolute inset-0 flex flex-col transition-colors",
         isDragOverPane && "bg-primary/5",
@@ -535,7 +538,10 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       />
 
       {treeEverMounted && (
-        <div className={viewMode === 'tree' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+        <div
+          className={viewMode === 'tree' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}
+          data-section="terminal-sftp-tree"
+        >
           <SftpPaneTreeView
             pane={pane}
             side={side}
@@ -572,56 +578,58 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           />
         </div>
       )}
-      <div className={viewMode === 'list' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-      <SftpPaneFileList
-        t={t}
-        pane={pane}
-        side={side}
-        isPaneFocused={isPaneFocused}
-        columnWidths={columnWidths}
-        sortField={sortField}
-        sortOrder={sortOrder}
-        handleSort={handleSortWithTransition}
-        handleResizeStart={handleResizeStart}
-        fileListRef={fileListRef}
-        handleFileListScroll={handleFileListScroll}
-        shouldVirtualize={shouldVirtualize}
-        totalHeight={totalHeight}
-        sortedDisplayFiles={sortedDisplayFiles}
-        isDragOverPane={isDragOverPane}
-        draggedFiles={draggedFiles}
-        onRefresh={handleRefresh}
-        onNavigateTo={callbacks.onNavigateTo}
-        onClearSelection={callbacks.onClearSelection}
-        setShowNewFolderDialog={setShowNewFolderDialog}
-        setShowNewFileDialog={setShowNewFileDialog}
-        getNextUntitledName={getNextUntitledName}
-        setNewFileName={setNewFileName}
-        setFileNameError={setFileNameError}
-        dragOverEntry={dragOverEntry}
-        handleRowSelect={handleRowSelect}
-        handleRowOpen={handleRowOpen}
-        handleFileDragStart={handleFileDragStart}
-        onDragEnd={onDragEnd}
-        handleEntryDragOver={handleEntryDragOver}
-        handleRowDragLeave={handleRowDragLeave}
-        handleEntryDrop={handleEntryDrop}
-        onCopyToOtherPane={callbacks.onCopyToOtherPane}
-        onMoveEntriesToPath={handleMoveEntriesToPath}
-        onOpenFileWithSystemDefault={callbacks.onOpenFileWithSystemDefault}
-        onOpenFileWith={callbacks.onOpenFileWith}
-        onEditFile={callbacks.onEditFile}
-        onDownloadFile={callbacks.onDownloadFile}
-        onDownloadFiles={callbacks.onDownloadFiles}
-        onEditPermissions={callbacks.onEditPermissions}
-        onUploadExternalFileList={handleUploadExternalFileList}
-        onUploadExternalFolder={handleUploadExternalFolder}
-        isLocal={!!pane.connection?.isLocal}
-        openRenameDialog={openRenameDialog}
-        openDeleteConfirm={openDeleteConfirm}
-        rowHeight={rowHeight}
-        visibleRows={visibleRows}
-      />
+      <div
+        className={viewMode === 'list' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}
+      >
+        <SftpPaneFileList
+          t={t}
+          pane={pane}
+          side={side}
+          isPaneFocused={isPaneFocused}
+          columnWidths={columnWidths}
+          sortField={sortField}
+          sortOrder={sortOrder}
+          handleSort={handleSortWithTransition}
+          handleResizeStart={handleResizeStart}
+          fileListRef={fileListRef}
+          handleFileListScroll={handleFileListScroll}
+          shouldVirtualize={shouldVirtualize}
+          totalHeight={totalHeight}
+          sortedDisplayFiles={sortedDisplayFiles}
+          isDragOverPane={isDragOverPane}
+          draggedFiles={draggedFiles}
+          onRefresh={handleRefresh}
+          onNavigateTo={callbacks.onNavigateTo}
+          onClearSelection={callbacks.onClearSelection}
+          setShowNewFolderDialog={setShowNewFolderDialog}
+          setShowNewFileDialog={setShowNewFileDialog}
+          getNextUntitledName={getNextUntitledName}
+          setNewFileName={setNewFileName}
+          setFileNameError={setFileNameError}
+          dragOverEntry={dragOverEntry}
+          handleRowSelect={handleRowSelect}
+          handleRowOpen={handleRowOpen}
+          handleFileDragStart={handleFileDragStart}
+          onDragEnd={onDragEnd}
+          handleEntryDragOver={handleEntryDragOver}
+          handleRowDragLeave={handleRowDragLeave}
+          handleEntryDrop={handleEntryDrop}
+          onCopyToOtherPane={callbacks.onCopyToOtherPane}
+          onMoveEntriesToPath={handleMoveEntriesToPath}
+          onOpenFileWithSystemDefault={callbacks.onOpenFileWithSystemDefault}
+          onOpenFileWith={callbacks.onOpenFileWith}
+          onEditFile={callbacks.onEditFile}
+          onDownloadFile={callbacks.onDownloadFile}
+          onDownloadFiles={callbacks.onDownloadFiles}
+          onEditPermissions={callbacks.onEditPermissions}
+          onUploadExternalFileList={handleUploadExternalFileList}
+          onUploadExternalFolder={handleUploadExternalFolder}
+          isLocal={!!pane.connection?.isLocal}
+          openRenameDialog={openRenameDialog}
+          openDeleteConfirm={openDeleteConfirm}
+          rowHeight={rowHeight}
+          visibleRows={visibleRows}
+        />
       </div>
 
       <SftpPaneDialogs

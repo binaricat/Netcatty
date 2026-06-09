@@ -165,7 +165,9 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                 : <XCircle size={12} className={task.status === 'failed' ? "text-destructive" : "text-muted-foreground"} />;
 
     const childProgressBar = (
-        <div className="relative h-full overflow-hidden border border-border/60 bg-secondary/70">
+        <div
+            className="relative h-full overflow-hidden border border-border/60 bg-secondary/70"
+        >
             <div
                 className={cn(
                     "h-full relative overflow-hidden",
@@ -287,6 +289,9 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const content = isChild ? (
             <div
                 className="grid h-7 items-stretch border-t border-border/20 bg-background/20 px-3"
+                data-section="terminal-sftp-transfer-row"
+                data-transfer-status={task.status}
+                data-transfer-direction={task.direction}
                 style={{
                     gridTemplateColumns: `24px ${childNameColumnWidth}px 10px minmax(0, 1fr) 24px`,
                 }}
@@ -366,7 +371,12 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         ) : null;
 
         return (
-        <div className="border-t border-border/40 bg-background/60 px-3 py-2.5 supports-[backdrop-filter]:backdrop-blur-sm">
+        <div
+            className="border-t border-border/40 bg-background/60 px-3 py-2.5 supports-[backdrop-filter]:backdrop-blur-sm"
+            data-section="terminal-sftp-transfer-row"
+            data-transfer-status={task.status}
+            data-transfer-direction={task.direction}
+        >
             <div className="flex items-center gap-1">
                 <div className="flex h-5 w-5 items-center justify-center shrink-0 -translate-y-px">
                     {statusIcon}

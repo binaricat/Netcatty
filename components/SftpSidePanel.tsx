@@ -841,7 +841,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
         onClick={handlePaneFocus}
       >
         {showWorkspaceHostHeader && displayHost && (
-          <div className="shrink-0 border-b border-border/50 bg-muted/20 px-3 py-1.5">
+          <div
+            className="shrink-0 border-b border-border/50 bg-muted/20 px-3 py-1.5"
+            data-section="terminal-sftp-host-header"
+          >
             <div className="flex items-center gap-2 min-w-0">
               <DistroAvatar
                 host={displayHost}

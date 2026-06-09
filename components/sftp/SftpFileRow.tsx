@@ -66,8 +66,11 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
     return (
         <div
             data-sftp-row="true"
+            data-section="terminal-sftp-list-row"
             data-entry-name={entry.name}
             data-selected={isSelected ? "true" : "false"}
+            data-entry-type={isNavDir ? "directory" : entry.type}
+            data-drag-over={isDragOver ? "true" : "false"}
             draggable={!isParentDir}
             onDragStart={handleDragStart}
             onDragEnd={onDragEnd}

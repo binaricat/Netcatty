@@ -51,6 +51,12 @@ export const TreeNode = React.memo<TreeNodeProps>(({
 
   return (
     <div
+      data-section="terminal-sftp-tree-row"
+      data-entry-name={entry.name}
+      data-entry-type={isDir ? 'directory' : entry.type}
+      data-selected={isSelected ? 'true' : 'false'}
+      data-expanded={isDir ? (isExpanded ? 'true' : 'false') : undefined}
+      data-drag-over={isDragOver ? 'true' : 'false'}
       className={cn(
         'grid items-center gap-x-1 px-2 cursor-pointer select-none text-sm',
         isSelected

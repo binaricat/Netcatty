@@ -180,6 +180,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
               'absolute top-0 h-full w-2 cursor-ew-resize z-30',
               sidePanelPosition === 'left' ? 'right-[-3px]' : 'left-[-3px]',
             )}
+            data-section="terminal-side-panel-resizer"
             onMouseDown={handleSidePanelResizeStart}
           />
         )}
@@ -190,7 +191,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
             isSidePanelOpenForCurrentTab && sidePanelPosition === 'right' && 'border-l',
             !isSidePanelOpenForCurrentTab && 'pointer-events-none',
           )}
-          data-section="terminal-side-panel"
+          data-section={isSidePanelOpenForCurrentTab ? 'terminal-side-panel' : undefined}
+          data-open={isSidePanelOpenForCurrentTab ? 'true' : 'false'}
           data-side-panel-tab={isSidePanelOpenForCurrentTab ? (activeSidePanelTab ?? undefined) : undefined}
           style={{
             ['--terminal-sidepanel-bg' as never]: resolvedPreviewTheme.colors.background,
@@ -206,6 +208,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
           {isSidePanelOpenForCurrentTab && (
             <div
               className="flex h-9 items-center px-1.5 py-1 flex-shrink-0 gap-1"
+              data-section="terminal-side-panel-tabs"
               style={{
                 borderBottom: '1px solid var(--terminal-sidepanel-border)',
               }}
@@ -343,7 +346,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
               </Tooltip>
             </div>
           )}
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-1 min-h-0 relative" data-section="terminal-side-panel-content">
             {mountedSftpTabIds.map((tabId: string) => {
               const isVisibleSftpPanel = activeTabId === tabId && activeSidePanelTab === 'sftp';
               const storedSftpHost = sftpHostForTab.get(tabId) ?? null;
