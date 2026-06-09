@@ -30,8 +30,8 @@ export const TerminalConnectionLogList: React.FC<TerminalConnectionLogListProps>
     error,
 }) => (
     <div className="rounded-md border border-border/35 bg-background/40">
-        <ScrollArea className="max-h-44 p-2.5">
-            <div className="space-y-1 text-xs text-foreground/90">
+        <ScrollArea className="max-h-44">
+            <div className="space-y-1 p-2.5 pb-4 pr-4 text-xs text-foreground/90">
                 {progressLogs.map((line, idx) => (
                     <div key={idx} className="flex items-start gap-2">
                         <div className="mt-[0.4rem] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-500" />

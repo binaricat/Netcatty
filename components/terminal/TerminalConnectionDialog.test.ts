@@ -133,6 +133,26 @@ test("fills both progress segments for disconnected states", () => {
   assert.equal(fullSegments.length >= 2, true);
 });
 
+test("keeps connection log padding inside the scrollable content", () => {
+  const markup = renderDialog({
+    status: "disconnected",
+    error: "Connection timed out.",
+    showLogs: true,
+    progressProps: {
+      timeLeft: 0,
+      isCancelling: false,
+      progressLogs: Array.from({ length: 12 }, (_, index) => `Log line ${index + 1}`),
+      onCancelConnect: () => {},
+      onCloseSession: () => {},
+      onRetry: () => {},
+    },
+  });
+
+  assert.match(markup, /class="[^"]*max-h-44/);
+  assert.doesNotMatch(markup, /class="[^"]*max-h-44[^"]*p-2\.5/);
+  assert.match(markup, /class="[^"]*p-2\.5[^"]*pb-4[^"]*pr-4/);
+});
+
 test("shows the ET server port (not the SSH port) for an ET host with a custom etPort", () => {
   const markup = renderDialog({
     host: { ...host, etEnabled: true, port: 22, etPort: 9022 },
