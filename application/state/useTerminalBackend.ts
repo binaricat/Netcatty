@@ -170,10 +170,10 @@ export const useTerminalBackend = () => {
     return bridge.listSerialPorts();
   }, []);
 
-  const getSessionPwd = useCallback(async (sessionId: string) => {
+  const getSessionPwd = useCallback(async (sessionId: string, options?: { allowHomeFallback?: boolean }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getSessionPwd) return { success: false, error: 'getSessionPwd unavailable' };
-    return bridge.getSessionPwd(sessionId);
+    return bridge.getSessionPwd(sessionId, options);
   }, []);
 
   const getSessionRemoteInfo = useCallback(async (sessionId: string) => {

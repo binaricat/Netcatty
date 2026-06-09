@@ -59,8 +59,11 @@ function createPreloadApi(ctx) {
   execCommand: async (options) => {
     return ipcRenderer.invoke("netcatty:ssh:exec", options);
   },
-  getSessionPwd: async (sessionId) => {
-    return ipcRenderer.invoke("netcatty:ssh:pwd", { sessionId });
+  getSessionPwd: async (sessionId, options) => {
+    return ipcRenderer.invoke("netcatty:ssh:pwd", {
+      sessionId,
+      allowHomeFallback: options?.allowHomeFallback,
+    });
   },
   getSessionRemoteInfo: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:remoteInfo", { sessionId });

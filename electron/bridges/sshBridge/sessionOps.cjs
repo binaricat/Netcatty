@@ -76,6 +76,7 @@ function createSessionOpsApi(ctx) {
     
     async function getSessionPwd(event, payload) {
       const { sessionId } = payload;
+      const allowHomeFallback = payload?.allowHomeFallback !== false;
       const session = sessions.get(sessionId);
     
       if (!session || !session.conn) {
@@ -98,12 +99,13 @@ function createSessionOpsApi(ctx) {
         //   2. Follows foreground child shells only, which covers bash->fish
         //      without mistaking background shell scripts for the active shell.
         //   3. Reads /proc/<pid>/cwd via readlink.
-        //   4. Falls back to the user's home directory if anything fails.
+        //   4. Falls back to the user's home directory if the caller allows it.
         //
         // `exec` makes sh replace the user's login shell (fish/bash/...)
         // so sh keeps the same PID and $PPID = sshd. Starting another shell
         // without exec would make $PPID point at the intermediate shell instead.
         const posixScript = `SELF=$$
+    ALLOW_FALLBACK=${allowHomeFallback ? "1" : "0"}
     # Find the user's interactive shell on this SSH connection.
     # Prefer the one attached to a controlling tty (the user's shell): probe exec
     # channels like this one have no tty ("?"), and ps output is unsorted, so
@@ -193,11 +195,12 @@ function createSessionOpsApi(ctx) {
       # this unprivileged exec channel cannot read a su'd / sudo'd shell owned by
       # another user. Fall back to the same-uid login shell's cwd before giving up
       # to the home directory (#1065 review).
-      if [ -z "$cwd" ] && [ "$pid" != "$login" ]; then
+      if [ -z "$cwd" ] && [ "$pid" != "$login" ] && [ "$ALLOW_FALLBACK" = "1" ]; then
         cwd=$(readlink /proc/$login/cwd 2>/dev/null)
       fi
       [ -n "$cwd" ] && printf '%s\\n' "$cwd" && exit 0
     fi
+    [ "$ALLOW_FALLBACK" = "1" ] || exit 1
     emit_home() {
       case "$1" in
         /*) printf '%s\\n' "$1"; exit 0 ;;

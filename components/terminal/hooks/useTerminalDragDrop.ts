@@ -3,7 +3,7 @@ import type React from "react";
 import { useRef, useState } from "react";
 
 import { logger } from "../../../lib/logger";
-import { extractDropEntries } from "../../../lib/sftpFileUtils";
+import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import type { Host, TerminalSession } from "../../../types";
 import { toast } from "../../ui/toast";
 import {
@@ -15,7 +15,7 @@ interface UseTerminalDragDropOptions {
   host: Host;
   isLocalConnection: boolean;
   onOpenSftp?: TerminalProps["onOpenSftp"];
-  resolveSftpInitialPath: () => Promise<string | undefined>;
+  resolveSftpInitialPath: (options?: { preferFreshBackend?: boolean }) => Promise<string | undefined>;
   scrollToBottomAfterProgrammaticInput: (data: string) => void;
   sessionId: string;
   sessionRef: React.MutableRefObject<string | null>;
@@ -25,6 +25,59 @@ interface UseTerminalDragDropOptions {
     writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
   };
   termRef: React.MutableRefObject<XTerm | null>;
+}
+
+export async function resolveTerminalDropUploadInitialPath(
+  resolveSftpInitialPath: UseTerminalDragDropOptions["resolveSftpInitialPath"],
+): Promise<string | undefined> {
+  return resolveSftpInitialPath({ preferFreshBackend: true });
+}
+
+export async function handleTerminalDropEntries({
+  dropEntries,
+  host,
+  isLocalConnection,
+  onOpenSftp,
+  resolveSftpInitialPath,
+  scrollToBottomAfterProgrammaticInput,
+  sessionId,
+  sessionRef,
+  terminalBackend,
+  termRef,
+}: Pick<
+  UseTerminalDragDropOptions,
+  | "host"
+  | "isLocalConnection"
+  | "onOpenSftp"
+  | "resolveSftpInitialPath"
+  | "scrollToBottomAfterProgrammaticInput"
+  | "sessionId"
+  | "sessionRef"
+  | "terminalBackend"
+  | "termRef"
+> & {
+  dropEntries: DropEntry[];
+}): Promise<void> {
+  if (dropEntries.length === 0) {
+    return;
+  }
+
+  if (isLocalConnection) {
+    const paths = extractRootPathsFromDropEntries(dropEntries);
+
+    if (paths.length > 0 && termRef.current && sessionRef.current) {
+      const pathsText = paths.join(" ");
+      terminalBackend.writeToSession(sessionRef.current, pathsText);
+      scrollToBottomAfterProgrammaticInput(pathsText);
+      termRef.current.focus();
+    }
+    return;
+  }
+
+  if (onOpenSftp) {
+    const initialPath = await resolveTerminalDropUploadInitialPath(resolveSftpInitialPath);
+    onOpenSftp(host, initialPath, dropEntries, sessionId);
+  }
 }
 
 export function useTerminalDragDrop({
@@ -86,24 +139,18 @@ export function useTerminalDragDrop({
 
     try {
       const dropEntries = await extractDropEntries(e.dataTransfer);
-
-      if (dropEntries.length === 0) {
-        return;
-      }
-
-      if (isLocalConnection) {
-        const paths = extractRootPathsFromDropEntries(dropEntries);
-
-        if (paths.length > 0 && termRef.current && sessionRef.current) {
-          const pathsText = paths.join(" ");
-          terminalBackend.writeToSession(sessionRef.current, pathsText);
-          scrollToBottomAfterProgrammaticInput(pathsText);
-          termRef.current.focus();
-        }
-      } else if (onOpenSftp) {
-        const initialPath = await resolveSftpInitialPath();
-        onOpenSftp(host, initialPath, dropEntries, sessionId);
-      }
+      await handleTerminalDropEntries({
+        dropEntries,
+        host,
+        isLocalConnection,
+        onOpenSftp,
+        resolveSftpInitialPath,
+        scrollToBottomAfterProgrammaticInput,
+        sessionId,
+        sessionRef,
+        terminalBackend,
+        termRef,
+      });
     } catch (error) {
       logger.error("Failed to handle file drop", error);
       toast.error(t("terminal.dragDrop.errorMessage"), t("terminal.dragDrop.errorTitle"));

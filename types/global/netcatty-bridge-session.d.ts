@@ -114,7 +114,10 @@ declare global {
       sessionId?: string;
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;
     /** Get current working directory from an active SSH session */
-    getSessionPwd?(sessionId: string): Promise<{ success: boolean; cwd?: string; error?: string }>;
+    getSessionPwd?(
+      sessionId: string,
+      options?: { allowHomeFallback?: boolean },
+    ): Promise<{ success: boolean; cwd?: string; error?: string }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
      * SSH server identification string (the `software` part of the

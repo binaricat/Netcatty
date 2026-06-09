@@ -413,11 +413,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 8,
   } : undefined;
 
-  const resolveSftpInitialPath = useCallback(async (): Promise<string | undefined> => {
+  const resolveSftpInitialPath = useCallback(async (options?: { preferFreshBackend?: boolean }): Promise<string | undefined> => {
     const cwd = await resolvePreferredTerminalCwd({
       rendererCwd: terminalCwdTracker.getRendererCwd(),
       sessionId: sessionRef.current,
-      getSessionPwd: (id) => terminalBackend.getSessionPwd(id),
+      getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
+      preferFreshBackend: options?.preferFreshBackend,
     });
     return cwd ?? undefined;
   }, [terminalBackend, terminalCwdTracker]);

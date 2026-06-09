@@ -14,8 +14,9 @@ test("resolvePreferredTerminalCwd prefers fresh backend pwd when requested", asy
     rendererCwd: "/srv/app/current",
     sessionId: "session-1",
     preferFreshBackend: true,
-    getSessionPwd: async () => {
+    getSessionPwd: async (_sessionId, options) => {
       backendCalls += 1;
+      assert.deepEqual(options, { allowHomeFallback: false });
       return { success: true, cwd: "/lost+found" };
     },
   });
@@ -38,6 +39,20 @@ test("resolvePreferredTerminalCwd returns the renderer cwd without probing the b
 
   assert.equal(cwd, "/srv/app/current");
   assert.equal(backendCalls, 0);
+});
+
+test("resolvePreferredTerminalCwd falls back to renderer cwd when fresh backend pwd fails", async () => {
+  const cwd = await resolvePreferredTerminalCwd({
+    rendererCwd: "/srv/app/current",
+    sessionId: "session-1",
+    preferFreshBackend: true,
+    getSessionPwd: async (_sessionId, options) => {
+      assert.deepEqual(options, { allowHomeFallback: false });
+      return { success: false, error: "Could not determine cwd" };
+    },
+  });
+
+  assert.equal(cwd, "/srv/app/current");
 });
 
 test("resolvePreferredTerminalCwd falls back to backend pwd when no renderer cwd is known", async () => {
