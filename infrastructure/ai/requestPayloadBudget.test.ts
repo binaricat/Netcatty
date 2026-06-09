@@ -184,7 +184,7 @@ test("fitMessagesToRequestPayloadBudget returns empty messages when budget is fu
   assert.equal(result.estimatedBytes, 0);
 });
 
-test("fitMessagesToRequestPayloadBudget preserves latest message attachment payloads", () => {
+test("fitMessagesToRequestPayloadBudget omits latest attachments only when they are still over budget at the last resort", () => {
   const result = fitMessagesToRequestPayloadBudget({
     messages: [{
       role: "user",
@@ -196,10 +196,14 @@ test("fitMessagesToRequestPayloadBudget preserves latest message attachment payl
     maxPayloadBytes: 20_000,
   });
 
+  assert.ok(result.estimatedBytes <= 20_000);
   assert.equal(result.messages.length, 1);
   const content = result.messages[0].content;
   assert.ok(Array.isArray(content));
-  assert.deepEqual(content[1], { type: "image", image: "A".repeat(1_000_000), mediaType: "image/png" });
+  assert.deepEqual(content[1], {
+    type: "text",
+    text: "[image attachment omitted to keep the AI request small: mediaType=image/png, 1000000 chars]",
+  });
 });
 
 test("fitMessagesToRequestPayloadBudget omits older oversized attachment payloads as a last resort", () => {

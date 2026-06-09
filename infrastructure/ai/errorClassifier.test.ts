@@ -69,6 +69,10 @@ test("isRequestTooLargeError detects 413 hidden in an HTML response body", () =>
   assert.equal(isRequestTooLargeError(err), true);
 });
 
+test("isRequestTooLargeError does not treat timing text as HTTP 413", () => {
+  assert.equal(isRequestTooLargeError("upstream timed out in 413 ms"), false);
+});
+
 // -------------------------------------------------------------------
 // classifyError — 502 / 503 / 504 upstream gateway
 // -------------------------------------------------------------------
@@ -80,6 +84,12 @@ test("classifyError marks 502/503/504 as network+retryable", () => {
     assert.equal(info.retryable, true, `code ${code} should be retryable`);
     assert.match(info.message, new RegExp(String(code)));
   }
+});
+
+test("classifyError does not treat timing text as a gateway status", () => {
+  const info = classifyError("retry after 502 ms");
+
+  assert.equal(info.type, "unknown");
 });
 
 // -------------------------------------------------------------------

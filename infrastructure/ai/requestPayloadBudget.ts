@@ -322,11 +322,11 @@ export function fitMessagesToRequestPayloadBudget({
   while (estimatedBytes > budget && (finalTextCap > 32 || finalToolCap > 32)) {
     finalTextCap = Math.max(32, Math.floor(finalTextCap * 0.6));
     finalToolCap = Math.max(32, Math.floor(finalToolCap * 0.6));
-    working = working.map((message, index) => truncateModelMessageForPayload(message, {
+    working = working.map((message) => truncateModelMessageForPayload(message, {
       maxToolResultChars: finalToolCap,
       maxMessageTextChars: finalTextCap,
       omitLargeAttachments: true,
-      preserveContent: shouldPreserveMessage(message, index, working),
+      preserveContent: false,
     }));
     estimatedBytes = estimateUtf8Bytes(working);
   }
