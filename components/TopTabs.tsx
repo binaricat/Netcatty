@@ -658,6 +658,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {showHostTreeToggle && (
             <div
               className="top-tab-host-tree-gutter flex-shrink-0"
+              data-instant={isHostTreeOpen && hostTreeTogglePop ? 'true' : 'false'}
               style={{ width: hostTreeTabGutter }}
               aria-hidden
             />
