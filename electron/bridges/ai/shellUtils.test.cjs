@@ -10,6 +10,7 @@ const {
   isPlausibleCliVersionOutput,
   looksLikeIdleAutoLogout,
   prepareCommandForSpawn,
+  resolveWindowsShimToNativeExe,
   resolveClaudeCodeExecutableForSdk,
   resolveCodexExecutableForSdk,
   trackSessionIdlePrompt,
@@ -146,6 +147,75 @@ test("resolveClaudeCodeExecutableForSdk keeps Windows cmd shim when Claude Code 
     );
 
     assert.equal(resolveClaudeCodeExecutableForSdk(shimPath, "win32"), shimPath);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutableForSdk maps Windows npm cmd shim to native claude.exe when cli.js is absent", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-claude-native-"));
+  try {
+    const shimPath = path.join(tmp, "claude.cmd");
+    const nativeExe = path.join(tmp, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "", "utf8");
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\n"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n',
+      "utf8",
+    );
+
+    assert.equal(resolveClaudeCodeExecutableForSdk(shimPath, "win32"), nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveWindowsShimToNativeExe resolves npm .cmd shim to native exe", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-shim-native-"));
+  try {
+    const shimPath = path.join(tmp, "claude.cmd");
+    const nativeExe = path.join(tmp, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "", "utf8");
+    // Single backslashes in the .cmd content (%~dp0 expands to the shim dir)
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\n"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n',
+      "utf8",
+    );
+
+    const resolved = resolveWindowsShimToNativeExe(shimPath, "win32");
+    assert.equal(resolved, nativeExe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("prepareCommandForSpawn resolves Windows cmd shim to native exe with shell:false", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-spawn-native-"));
+  try {
+    const shimPath = path.join(tmp, "claude.cmd");
+    const nativeExe = path.join(tmp, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "", "utf8");
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\n"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n',
+      "utf8",
+    );
+
+    const result = prepareCommandForSpawn(shimPath, ["--version"]);
+    if (process.platform === "win32") {
+      assert.deepEqual(result, {
+        command: nativeExe,
+        args: ["--version"],
+        shell: false,
+      });
+    } else {
+      // On non-Windows, resolveWindowsShimToNativeExe is skipped; verify win32 behavior explicitly.
+      assert.equal(resolveWindowsShimToNativeExe(shimPath, "win32"), nativeExe);
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

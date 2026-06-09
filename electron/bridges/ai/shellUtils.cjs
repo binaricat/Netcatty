@@ -204,10 +204,36 @@ function buildWindowsShellCommandLine(command, args) {
   return [command, ...(args || [])].map(quoteWindowsShellArg).join(" ");
 }
 
+function resolveWindowsShimToNativeExe(command, platform = process.platform) {
+  if (platform !== "win32") return null;
+  const normalized = String(command || "").trim();
+  if (!normalized) return null;
+  const ext = path.extname(normalized).toLowerCase();
+  if (ext !== ".cmd" && ext !== ".bat") return null;
+  if (!existsSync(normalized)) return null;
+  try {
+    const contents = readFileSync(normalized, "utf8");
+    const shimDir = path.dirname(normalized);
+    // Match patterns like: "%~dp0\..\node_modules\@anthropic-ai\claude-code\bin\claude.exe" %*
+    // or: "%~dp0\..\@openai\codex\bin\codex.exe"
+    const exeRefs = [...contents.matchAll(/"%~dp0\\([^"]+\.exe)"/gi)];
+    for (const [, relativePath] of exeRefs) {
+      const candidate = path.resolve(shimDir, relativePath.replace(/\\/g, "/"));
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {}
+  return null;
+}
+
 function prepareCommandForSpawn(command, args) {
   const spawnArgs = Array.isArray(args) ? args : [];
   if (!shouldUseShellForCommand(command)) {
     return { command, args: spawnArgs, shell: false };
+  }
+
+  const nativeExePath = resolveWindowsShimToNativeExe(command);
+  if (nativeExePath) {
+    return { command: nativeExePath, args: spawnArgs, shell: false };
   }
 
   return {
@@ -229,6 +255,15 @@ function resolveClaudeCodeExecutableForSdk(claudeExecutablePath, platform = proc
   const packageCliPath = path.join(baseDir, "node_modules", "@anthropic-ai", "claude-code", "cli.js");
   if (existsSync(packageCliPath)) {
     return packageCliPath;
+  }
+
+  // Native binary check: Claude Code >= 2.1.169 ships as native exe with no cli.js
+  const nativeExeCandidates = [
+    path.join(baseDir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+    path.join(baseDir, "..", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+  ];
+  for (const exePath of nativeExeCandidates) {
+    if (existsSync(exePath)) return exePath;
   }
 
   const shimCandidates = [normalized];
@@ -583,6 +618,7 @@ module.exports = {
   quoteWindowsShellArg,
   buildWindowsShellCommandLine,
   prepareCommandForSpawn,
+  resolveWindowsShimToNativeExe,
   resolveClaudeCodeExecutableForSdk,
   normalizeClaudeCodeExecutableEnvForSdk,
   resolveCodexExecutableForSdk,
