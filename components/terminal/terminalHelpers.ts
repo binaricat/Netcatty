@@ -62,6 +62,27 @@ export function extractRootPathsFromDropEntries(dropEntries: DropEntry[]): strin
   return paths;
 }
 
+/**
+ * Extract unique paths from clipboard file entries for local terminal path insertion.
+ * Uses each entry's path directly (directories included). Paths with spaces are quoted.
+ */
+export function extractRootPathsFromClipboardFiles(
+  files: Array<{ path: string; name: string; isDirectory: boolean; size?: number }>,
+): string[] {
+  const paths: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const file of files) {
+    const fullPath = file.path;
+    if (!fullPath || seenPaths.has(fullPath)) continue;
+
+    paths.push(fullPath.includes(" ") ? `"${fullPath}"` : fullPath);
+    seenPaths.add(fullPath);
+  }
+
+  return paths;
+}
+
 export interface TerminalProps {
   host: Host;
   keys: SSHKey[];

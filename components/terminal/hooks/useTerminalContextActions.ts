@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 import { logger } from "../../../lib/logger";
 import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
 import { clearTerminalViewport } from "../clearTerminalViewport";
+import { extractRootPathsFromClipboardFiles } from "../terminalHelpers";
 
 type BroadcastPasteRefs = {
   sourceSessionId: string;
@@ -31,6 +32,8 @@ export const useTerminalContextActions = ({
   scrollOnPasteRef,
   isBroadcastEnabledRef,
   onBroadcastInputRef,
+  isLocalConnection,
+  terminalBackend,
 }: {
   termRef: RefObject<XTerm | null>;
   sourceSessionId: string;
@@ -39,6 +42,10 @@ export const useTerminalContextActions = ({
   scrollOnPasteRef?: RefObject<boolean>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
   onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
+  isLocalConnection: boolean;
+  terminalBackend: {
+    writeToSession: (sessionId: string, data: string, options?: { automated?: boolean }) => void;
+  };
 }) => {
   const broadcastUserPasteData = useCallback((data: string) => {
     return broadcastTerminalPasteData(data, {
@@ -62,6 +69,19 @@ export const useTerminalContextActions = ({
     const term = termRef.current;
     if (!term) return;
     try {
+      const readClipboardFiles = window.netcatty?.readClipboardFiles;
+      if (readClipboardFiles) {
+        const files = await readClipboardFiles();
+        if (files.length > 0 && isLocalConnection && sessionRef.current) {
+          const paths = extractRootPathsFromClipboardFiles(files);
+          if (paths.length > 0) {
+            terminalBackend.writeToSession(sessionRef.current, paths.join(" "));
+            term.focus();
+            return;
+          }
+        }
+      }
+
       const text = await navigator.clipboard.readText();
       if (text && sessionRef.current) {
         pasteTextIntoTerminal(term, text, {
@@ -72,7 +92,14 @@ export const useTerminalContextActions = ({
     } catch (err) {
       logger.warn("Failed to paste from clipboard", err);
     }
-  }, [broadcastUserPasteData, sessionRef, termRef, scrollOnPasteRef]);
+  }, [
+    broadcastUserPasteData,
+    isLocalConnection,
+    sessionRef,
+    termRef,
+    scrollOnPasteRef,
+    terminalBackend,
+  ]);
 
   const onPasteSelection = useCallback(() => {
     const term = termRef.current;

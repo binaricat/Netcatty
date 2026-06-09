@@ -72,6 +72,7 @@ import { useTerminalSearch } from "./terminal/hooks/useTerminalSearch";
 import { useTerminalContextActions } from "./terminal/hooks/useTerminalContextActions";
 import { useTerminalAuthState } from "./terminal/hooks/useTerminalAuthState";
 import { useTerminalDragDrop } from "./terminal/hooks/useTerminalDragDrop";
+import { useTerminalFilePaste } from "./terminal/hooks/useTerminalFilePaste";
 import { TerminalAutocomplete } from "./terminal/TerminalAutocomplete";
 import { createTerminalCwdTracker, resolvePreferredTerminalCwd } from "./terminal/sftpCwd";
 import { useTerminalEffects } from "./terminal/useTerminalEffects";
@@ -848,6 +849,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     scrollOnPasteRef,
     isBroadcastEnabledRef,
     onBroadcastInputRef,
+    isLocalConnection,
+    terminalBackend,
   });
   // Kept fresh on every render so the mouseTracking capture handler at
   // handleContextMenuCapture (which is bound once per sessionId) can
@@ -1051,6 +1054,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     t,
     terminalBackend,
     termRef,
+  });
+
+  useTerminalFilePaste({
+    isLocalConnection,
+    status,
+    termRef,
+    sessionRef,
+    terminalBackend,
+    scrollToBottomAfterProgrammaticInput,
+    containerRef,
   });
 
   const renderControls = useCallback((opts?: { showClose?: boolean }) => (
