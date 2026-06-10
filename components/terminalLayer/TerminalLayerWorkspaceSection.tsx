@@ -69,14 +69,22 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleAddSelectionToAI,
     activeResizers,
     activeWorkspace,
+    composeBarThemeColors,
     findSplitNode,
+    focusedSessionId,
+    handleComposeSend,
+    handleSnippetFromPanel,
+    refocusTerminalSession,
+    setIsComposeBarOpen,
     setResizing,
+    TerminalComposeBar,
     Array,
     cn,
   } = ctx;
 
   return (
-    <div ref={workspaceInnerRef} className="overflow-hidden relative flex-1">
+    <div className="flex-1 min-h-0 flex flex-col">
+    <div ref={workspaceInnerRef} className="flex-1 min-h-0 overflow-hidden relative">
         {draggingSessionId && !isFocusMode && (
           <div
             ref={workspaceOverlayRef}
@@ -218,6 +226,21 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
             </div>
           );
         })}
+    </div>
+
+      {activeWorkspace && isComposeBarOpen && (
+        <TerminalComposeBar
+          onSend={handleComposeSend}
+          onSnippetClick={(snippet) => void handleSnippetFromPanel(snippet)}
+          snippets={snippets}
+          onClose={() => {
+            setIsComposeBarOpen(false);
+            refocusTerminalSession(focusedSessionId);
+          }}
+          isBroadcastEnabled={isBroadcastEnabled?.(activeWorkspace.id)}
+          themeColors={composeBarThemeColors}
+        />
+      )}
     </div>
   );
 }

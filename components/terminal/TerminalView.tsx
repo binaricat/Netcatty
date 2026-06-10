@@ -53,7 +53,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     >
       <div
         className={cn(
-          "relative h-full w-full flex overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]",
+          "relative h-full w-full flex min-h-0 overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]",
           isComposeBarOpen && !inWorkspace && "flex-col"
         )}
         style={terminalPreviewVars}
@@ -200,7 +200,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         </div>
 
         <div
-          className="h-full flex-1 min-w-0 relative overflow-hidden pt-8"
+          className="flex-1 min-h-0 min-w-0 relative overflow-hidden pt-8"
           style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
         >
           <div
