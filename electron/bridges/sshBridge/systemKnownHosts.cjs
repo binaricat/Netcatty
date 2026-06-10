@@ -292,6 +292,7 @@ function createSystemKnownHostsApi(ctx) {
 
   return {
     isHostKeyTrustedBySystem,
+    readSystemKnownHostsContent,
     // Exposed for unit testing.
     parseKnownHostsLine,
     hostFieldMatches,

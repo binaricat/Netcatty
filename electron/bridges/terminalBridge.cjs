@@ -837,8 +837,8 @@ function closeSession(event, payload) {
       // Mosh sessions may also carry a companion ssh2 connection opened
       // lazily for host-info stats (issue #1198). ET can use the same pattern.
       // Close companions here to avoid leaking them.
-      session.moshStatsConn?.end();
-      session.etStatsConn?.end();
+      try { session.moshStatsConn?.end(); } catch { /* ignore */ }
+      try { session.etStatsConn?.end(); } catch { /* ignore */ }
     } else if (session.socket) {
       session.socket.destroy();
     } else if (session.serialPort) {

@@ -33,7 +33,10 @@ function createSessionOpsApi(ctx) {
         if (typeof execOnEtSession !== "function") {
           return { success: false, error: "ET command executor unavailable" };
         }
-        return execOnEtSession(session, "cat /etc/os-release 2>/dev/null || uname -a", 5000);
+        return execOnEtSession(session, "cat /etc/os-release 2>/dev/null || uname -a", 5000, {
+          requireTrustedHost: true,
+          knownHosts: session.etStatsAuth?.knownHosts,
+        });
       }
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
@@ -528,7 +531,10 @@ function createSessionOpsApi(ctx) {
       function createEtStatsExecConn(etSession) {
         return {
           exec(command, cb) {
-            execOnEtSession(etSession, command, 4500)
+            execOnEtSession(etSession, command, 4500, {
+              requireTrustedHost: true,
+              knownHosts: etSession.etStatsAuth?.knownHosts,
+            })
               .then((result) => {
                 if (!result?.success) {
                   cb(new Error(result?.error || result?.stderr || "ET stats command failed"));

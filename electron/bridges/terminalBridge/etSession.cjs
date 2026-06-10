@@ -1,4 +1,7 @@
 /* eslint-disable no-undef */
+const crypto = require("node:crypto");
+const { createSystemKnownHostsApi } = require("../sshBridge/systemKnownHosts.cjs");
+
 //
 // EternalTerminal session backend, factored into the createXxxSessionApi
 // pattern used by moshSession.cjs / telnetSession.cjs. Dependencies arrive
@@ -533,20 +536,120 @@ main();
       return env;
     }
 
+    function formatVaultKnownHostLine(knownHost) {
+      if (!knownHost?.hostname || !knownHost?.keyType) return null;
+      const port = Number.isFinite(knownHost.port) ? Number(knownHost.port) : 22;
+      const hostField = port !== 22 ? `[${knownHost.hostname}]:${port}` : knownHost.hostname;
+      const pubKey = String(knownHost.publicKey || "").trim();
+      const parts = pubKey.split(/\s+/);
+      let keyType = knownHost.keyType;
+      let keyBlob = "";
+      if (parts.length >= 2 && /^ssh-|^ecdsa-|^sk-/.test(parts[0])) {
+        keyType = parts[0];
+        keyBlob = parts[1];
+      } else if (parts.length === 1 && parts[0].length > 0 && !/^SHA256:/i.test(parts[0])) {
+        keyBlob = parts[0];
+      } else {
+        return null;
+      }
+      if (!keyBlob) return null;
+      return `${hostField} ${keyType} ${keyBlob}`;
+    }
+
+    /**
+     * Build a known_hosts file for background ET exec (stats / distro probes).
+     * Merges the user's system known_hosts with any Netcatty-vault entries that
+     * carry a full public key blob, then pins StrictHostKeyChecking=yes on exec
+     * so accept-new cannot auto-trust a host in a non-interactive flow.
+     */
+    function ensureStrictExecKnownHostsFile(session, knownHosts) {
+      if (session.etStrictExecKnownHostsPath) {
+        return session.etStrictExecKnownHostsPath;
+      }
+
+      const { readSystemKnownHostsContent } = createSystemKnownHostsApi({
+        fs, path, os, crypto, log: console,
+      });
+      const chunks = [];
+
+      try {
+        const systemContent = readSystemKnownHostsContent();
+        if (systemContent) chunks.push(systemContent);
+      } catch {
+        // ignore read failures — strict checking fails closed below
+      }
+
+      const configuredKnownHosts = (session.sshOptions || []).find(
+        (opt) => opt.startsWith("UserKnownHostsFile="),
+      );
+      if (configuredKnownHosts) {
+        const configuredPath = configuredKnownHosts.slice("UserKnownHostsFile=".length);
+        try {
+          const configuredContent = fs.readFileSync(configuredPath, "utf8");
+          if (configuredContent) chunks.push(configuredContent);
+        } catch {
+          // ignore missing configured file
+        }
+      }
+
+      const vaultLines = [];
+      if (Array.isArray(knownHosts)) {
+        for (const knownHost of knownHosts) {
+          const line = formatVaultKnownHostLine(knownHost);
+          if (line) vaultLines.push(line);
+        }
+      }
+      if (vaultLines.length > 0) {
+        chunks.push(vaultLines.join("\n"));
+      }
+
+      const artifact = Array.isArray(session.externalAuthArtifacts)
+        ? session.externalAuthArtifacts[0]
+        : null;
+      const sshDir = artifact ? path.dirname(artifact) : tempDirBridge.getTempDir();
+      const strictKhPath = path.join(sshDir, "netcatty-et-strict-known_hosts");
+      writeSecureFile(strictKhPath, chunks.filter(Boolean).join("\n") + (chunks.length ? "\n" : ""), 0o600);
+      session.etStrictExecKnownHostsPath = strictKhPath;
+      if (Array.isArray(session.externalAuthArtifacts)) {
+        session.externalAuthArtifacts.push(strictKhPath);
+      }
+      return strictKhPath;
+    }
+
     /**
      * Execute a remote command on an ET session by spawning a system ssh
      * process. Reuses the SSH environment (keys, config, askpass) already
      * prepared by prepareEtSshEnvironment() for the ET connection.
+     *
+     * @param {object} [execOpts]
+     * @param {boolean} [execOpts.requireTrustedHost] When true, refuse unknown
+     *   host keys (StrictHostKeyChecking=yes) using system + vault known_hosts
+     *   instead of accept-new. Used for background stats/distro probes.
+     * @param {Array} [execOpts.knownHosts] Netcatty vault known hosts to merge
+     *   into the strict known_hosts file (defaults to session.etStatsAuth).
      */
-    function execOnEtSession(session, command, timeoutMs = 5000) {
+    function execOnEtSession(session, command, timeoutMs = 5000, execOpts = {}) {
       if (!session?.sshUserHost || session.externalAuthArtifactsCleaned) {
         return Promise.resolve({ success: false, error: "ET SSH environment not available" });
       }
 
+      const requireTrustedHost = execOpts.requireTrustedHost === true;
+      const knownHosts = execOpts.knownHosts ?? session.etStatsAuth?.knownHosts;
+
       const sshCmd = process.platform === "win32" ? findExecutable("ssh") : "ssh";
-      const args = ["-o", "BatchMode=no", "-o", "StrictHostKeyChecking=accept-new"];
+      const args = ["-o", "BatchMode=no"];
+      if (!requireTrustedHost) {
+        args.push("-o", "StrictHostKeyChecking=accept-new");
+      }
       for (const opt of session.sshOptions) {
+        if (requireTrustedHost && opt.startsWith("StrictHostKeyChecking=")) continue;
+        if (requireTrustedHost && opt.startsWith("UserKnownHostsFile=")) continue;
         args.push("-o", opt);
+      }
+      if (requireTrustedHost) {
+        const strictKhPath = ensureStrictExecKnownHostsFile(session, knownHosts);
+        args.push("-o", `UserKnownHostsFile=${normalizeSshConfigPath(strictKhPath)}`);
+        args.push("-o", "StrictHostKeyChecking=yes");
       }
       args.push(session.sshUserHost, command);
 

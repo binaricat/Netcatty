@@ -431,8 +431,9 @@ function createMoshStatsConnectionApi(ctx) {
             finish(null);
             return;
           }
-          // Stored only on moshStatsConn — never on session.conn (see the
-          // ensureMoshStatsConnection docstring for why).
+          // Stored only on the protocol-specific companion property
+          // (opts.connProp, e.g. moshStatsConn / etStatsConn) — never on
+          // session.conn (see ensureMoshStatsConnection docstring for why).
           session[opts.connProp] = conn;
           finish(conn);
         });
@@ -453,7 +454,8 @@ function createMoshStatsConnectionApi(ctx) {
           if (session[opts.connProp] === conn) session[opts.connProp] = null;
           // If the socket closed mid-handshake without ever emitting "ready"
           // or "error", settle the attempt here so the awaiting getServerStats
-          // call (and session.moshStatsConnPromise) don't hang forever. This
+          // call (and the in-flight promise on opts.promiseProp) don't hang
+          // forever. This
           // is treated as transient — the next poll may retry.
           finish(null);
         });
