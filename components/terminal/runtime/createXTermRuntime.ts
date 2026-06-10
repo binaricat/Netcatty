@@ -28,6 +28,7 @@ import {
   resolveHostTerminalFontSize,
   resolveHostTerminalFontWeight,
 } from "../../../domain/terminalAppearance";
+import { resolveFontWeightBold } from "../../../lib/fontWeightAvailability";
 import { logger } from "../../../lib/logger";
 import { isMacPlatform } from "../../../lib/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
@@ -213,11 +214,8 @@ const csiParamsInclude = (
 
 /**
  * Extract the primary font family from a CSS font-family string that may
- * include fallback fonts.  `document.fonts.check` returns `false` when *any*
- * listed font is still loading, so passing the entire CJK fallback stack
- * causes false negatives during early terminal creation – which in turn makes
- * `fontWeightBold` fall back to the normal weight and renders bold text too
- * thin.
+ * include fallback fonts. Used by autocomplete and other helpers that need
+ * the first face without the CJK / icon fallback stack.
  */
 export const primaryFontFamily = (fontFamily: string): string => {
   // Split on commas that are NOT inside quotes to handle font names like "Foo, Bar"
@@ -278,13 +276,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const keywordHighlightEnabled = settings?.keywordHighlightEnabled ?? false;
   const kittyKeyboardMode = createKittyKeyboardModeState();
 
-  const resolvedFontWeightBold = (() => {
-    if (typeof document === "undefined" || !document.fonts?.check) {
-      return fontWeightBold;
-    }
-    const weightSpec = `${fontWeightBold} ${effectiveFontSize}px ${primaryFontFamily(fontFamily)}`;
-    return document.fonts.check(weightSpec) ? fontWeightBold : fontWeight;
-  })();
+  const resolvedFontWeightBold = resolveFontWeightBold({
+    fontFamilyCss: fontFamily,
+    normalWeight: fontWeight,
+    desiredBoldWeight: fontWeightBold,
+    fontSize: effectiveFontSize,
+  });
 
   const term = new XTerm({
     ...performanceConfig.options,

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
+import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
 
 type TerminalEffectsContext = Record<string, any>;
 
@@ -453,16 +454,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           | 700
           | 800
           | 900;
-        const resolvedFontWeightBold = (() => {
-          const fontFamily = termRef.current?.options.fontFamily || "";
-          if (typeof document === "undefined" || !document.fonts?.check) {
-            return terminalSettings.fontWeightBold;
-          }
-          const weightSpec = `${terminalSettings.fontWeightBold} ${effectiveFontSize}px ${primaryFontFamily(fontFamily)}`;
-          return document.fonts.check(weightSpec)
-            ? terminalSettings.fontWeightBold
-            : effectiveFontWeight;
-        })();
+        const resolvedFontWeightBold = resolveFontWeightBold({
+          fontFamilyCss: termRef.current?.options.fontFamily || "",
+          normalWeight: effectiveFontWeight,
+          desiredBoldWeight: terminalSettings.fontWeightBold,
+          fontSize: effectiveFontSize,
+        });
 
         termRef.current.options.fontWeightBold = resolvedFontWeightBold as
           | 100
@@ -662,23 +659,22 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         }
 
         if (terminalSettings && termRef.current) {
-          const fontFamily = termRef.current.options?.fontFamily || "";
-          if (typeof document !== "undefined" && document.fonts?.check) {
-            const weightSpec = `${terminalSettings.fontWeightBold} ${effectiveFontSize}px ${primaryFontFamily(fontFamily)}`;
-            const resolvedBold = document.fonts.check(weightSpec)
-              ? terminalSettings.fontWeightBold
-              : effectiveFontWeight;
-            termRef.current.options.fontWeightBold = resolvedBold as
-              | 100
-              | 200
-              | 300
-              | 400
-              | 500
-              | 600
-              | 700
-              | 800
-              | 900;
-          }
+          const resolvedBold = resolveFontWeightBold({
+            fontFamilyCss: termRef.current.options?.fontFamily || "",
+            normalWeight: effectiveFontWeight,
+            desiredBoldWeight: terminalSettings.fontWeightBold,
+            fontSize: effectiveFontSize,
+          });
+          termRef.current.options.fontWeightBold = resolvedBold as
+            | 100
+            | 200
+            | 300
+            | 400
+            | 500
+            | 600
+            | 700
+            | 800
+            | 900;
         }
 
         const id = sessionRef.current;

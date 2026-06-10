@@ -22,7 +22,7 @@
 import { splitFontFamilyList } from '../infrastructure/config/cjkFonts';
 
 const KNOWN_BUNDLED_FAMILIES = new Set<string>([
-  'JetBrains Mono',     // @fontsource/jetbrains-mono (regular, 500, 600)
+  'JetBrains Mono',     // @fontsource/jetbrains-mono (400, 500, 600)
   'Sarasa Mono SC',     // public/fonts/SarasaMonoSC-Regular.woff2 (OFL)
 ]);
 
