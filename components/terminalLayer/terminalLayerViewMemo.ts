@@ -126,6 +126,7 @@ const SIDE_PANEL_CTX_KEYS = [
   'historySessionId',
   'remoteHistory',
   'handleHistoryPaste',
+  'handleHistoryRun',
   'handleOpenHistory',
   'HistorySidePanel',
   'History',

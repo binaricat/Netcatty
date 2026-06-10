@@ -99,6 +99,7 @@ export type TerminalLayerStableSnapshot = {
   handleOpenScripts: () => void;
   handleOpenHistory: () => void;
   handleHistoryPaste: (command: string) => void;
+  handleHistoryRun: (command: string) => void;
   handleToggleScriptsSidePanel: () => void;
   handleToggleSidePanel: () => void;
   handleOpenTheme: () => void;

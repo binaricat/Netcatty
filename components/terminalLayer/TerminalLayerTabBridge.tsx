@@ -285,6 +285,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     FolderTree: s.FolderTree,
     followAppTerminalTheme: s.followAppTerminalTheme,
     handleHistoryPaste: s.handleHistoryPaste,
+    handleHistoryRun: s.handleHistoryRun,
     fontSize: s.fontSize,
     getTerminalCwd: s.getTerminalCwd,
     handleAddKnownHost: s.handleAddKnownHost,

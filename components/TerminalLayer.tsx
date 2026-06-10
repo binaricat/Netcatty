@@ -962,6 +962,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     (command: string) => handleSnippetClickForFocusedSession(command, true),
     [handleSnippetClickForFocusedSession],
   );
+  const handleHistoryRun = useCallback(
+    (command: string) => handleSnippetClickForFocusedSession(command, false),
+    [handleSnippetClickForFocusedSession],
+  );
 
   const handleSnippetFromPanel = useCallback(async (snippet: Snippet) => {
     const command = await resolveSnippetCommand(snippet);
@@ -1053,6 +1057,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleCommandSubmitted,
     handleComposeSend,
     handleHistoryPaste,
+    handleHistoryRun,
     handleOpenHistory,
     handleOpenSftp,
     handleOpenScripts,

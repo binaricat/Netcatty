@@ -226,6 +226,7 @@ export const zhCNVaultMessages: Messages = {
   'history.action.refresh': '刷新',
   'history.action.retry': '重试',
   'history.action.paste': '粘贴到终端',
+  'history.action.run': '在终端执行',
   'history.action.saveAsSnippet': '保存为代码片段',
   'terminal.toolbar.library': '库',
   'terminal.toolbar.noSnippets': '暂无代码片段',

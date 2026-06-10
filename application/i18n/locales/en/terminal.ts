@@ -18,6 +18,7 @@ export const enTerminalMessages: Messages = {
   'history.action.refresh': 'Refresh',
   'history.action.retry': 'Retry',
   'history.action.paste': 'Paste to terminal',
+  'history.action.run': 'Run in terminal',
   'history.action.saveAsSnippet': 'Save as snippet',
   'terminal.toolbar.library': 'Library',
   'terminal.toolbar.noSnippets': 'No snippets available',

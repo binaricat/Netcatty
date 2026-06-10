@@ -39,6 +39,7 @@ export const ruTerminalMessages: Messages = {
   'history.action.refresh': 'Обновить',
   'history.action.retry': 'Повторить',
   'history.action.paste': 'Вставить в терминал',
+  'history.action.run': 'Выполнить в терминале',
   'history.action.saveAsSnippet': 'Сохранить как сниппет',
   'terminal.toolbar.library': 'Библиотека',
   'terminal.toolbar.noSnippets': 'Нет доступных сниппетов',

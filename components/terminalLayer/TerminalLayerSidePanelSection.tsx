@@ -85,6 +85,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     getTerminalCwd,
     handleCloseSidePanel,
     handleHistoryPaste,
+    handleHistoryRun,
     handleOpenHistory,
     handleFontFamilyChangeForFocusedSession,
     handleFontFamilyResetForFocusedSession,
@@ -484,6 +485,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   state={remoteHistory.getState(focusedHost?.id)}
                   onFetch={remoteHistory.fetch}
                   onPasteToTerminal={handleHistoryPaste}
+                  onRunInTerminal={handleHistoryRun}
                   isVisible
                 />
               </div>

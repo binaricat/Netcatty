@@ -10,8 +10,9 @@
 
 import {
   Clipboard as ClipboardIcon,
+  FileCode,
+  Play,
   RefreshCw,
-  Save,
   Search,
   Terminal as TerminalIcon,
 } from 'lucide-react';
@@ -31,13 +32,30 @@ export interface HistorySidePanelProps {
   focusedSessionId: string | null;
   state: RemoteHistoryHostState;
   onFetch: (sessionId: string, hostId: string) => void;
+  /** Paste into the terminal without executing (no trailing Enter). */
   onPasteToTerminal: (command: string) => void;
+  /** Write to the terminal and execute (append Enter). */
+  onRunInTerminal: (command: string) => void;
   isVisible?: boolean;
 }
 
 const SUPPORTED_PROTOCOLS = new Set(['ssh', 'mosh', 'et']);
 const HISTORY_ROW_HEIGHT = 36;
-const HISTORY_DETAIL_HEIGHT = 112;
+const DETAIL_PADDING_Y = 12;
+const DETAIL_LINE_HEIGHT = 16;
+const DETAIL_MAX_COMMAND_LINES = 3;
+const DETAIL_TIMESTAMP_HEIGHT = 14;
+const DETAIL_ACTIONS_HEIGHT = 24;
+
+function getDetailRowHeight(entry: RemoteHistoryEntry): number {
+  const lineCount = Math.min(
+    entry.command.split('\n').length,
+    DETAIL_MAX_COMMAND_LINES,
+  );
+  const commandHeight = Math.max(lineCount, 1) * DETAIL_LINE_HEIGHT;
+  const timestampBlock = entry.timestamp ? DETAIL_TIMESTAMP_HEIGHT + 4 : 0;
+  return DETAIL_PADDING_Y + commandHeight + timestampBlock + 4 + DETAIL_ACTIONS_HEIGHT;
+}
 
 type HistoryListRow =
   | { type: 'entry'; entry: RemoteHistoryEntry }
@@ -63,6 +81,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   state,
   onFetch,
   onPasteToTerminal,
+  onRunInTerminal,
   isVisible = true,
 }) => {
   const { t } = useI18n();
@@ -137,13 +156,15 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   }, [filtered]);
 
   const getRowHeight = useCallback(
-    (row: HistoryListRow) => (row.type === 'entry' ? HISTORY_ROW_HEIGHT : HISTORY_DETAIL_HEIGHT),
+    (row: HistoryListRow) =>
+      row.type === 'entry' ? HISTORY_ROW_HEIGHT : getDetailRowHeight(row.entry),
     [],
   );
 
   const labels = useMemo(
     () => ({
       paste: t('history.action.paste'),
+      run: t('history.action.run'),
       save: t('history.action.saveAsSnippet'),
     }),
     [t],
@@ -249,6 +270,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
                   <HistoryDetailStrip
                     entry={row.entry}
                     labels={labels}
+                    onRun={() => onRunInTerminal(row.entry.command)}
                     onPaste={() => onPasteToTerminal(row.entry.command)}
                     onSave={() => handleSaveAsSnippet(row.entry)}
                   />
@@ -260,6 +282,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
                   isSelected={selectedEntryId === row.entry.id}
                   labels={labels}
                   onSelect={() => handleRowClick(row.entry.id)}
+                  onRun={() => onRunInTerminal(row.entry.command)}
                   onPaste={() => onPasteToTerminal(row.entry.command)}
                   onSave={() => handleSaveAsSnippet(row.entry)}
                 />
@@ -281,34 +304,40 @@ const EmptyState: React.FC<{ message: string }> = ({ message }) => (
 
 interface HistoryDetailStripProps {
   entry: RemoteHistoryEntry;
-  labels: { paste: string; save: string };
+  labels: { paste: string; run: string; save: string };
+  onRun: () => void;
   onPaste: () => void;
   onSave: () => void;
 }
 
 const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
-  ({ entry, labels, onPaste, onSave }) => (
+  ({ entry, labels, onRun, onPaste, onSave }) => (
     <div
-      className="h-full border-b border-border/40 bg-muted/20 px-3 py-2"
+      className="border-b border-border/40 bg-muted/20 px-3 py-1.5"
       data-section="history-detail"
     >
       <div
-        className="font-mono text-[11px] leading-snug whitespace-pre-wrap break-words max-h-[4.5rem] overflow-y-auto"
+        className="font-mono text-[11px] leading-4 whitespace-pre-wrap break-words line-clamp-3 overflow-hidden"
         style={{ overflowWrap: 'anywhere' }}
       >
         {entry.command}
       </div>
-      {entry.timestamp && (
-        <div className="text-[10px] text-muted-foreground mt-1">
-          {new Date(entry.timestamp).toLocaleString()}
-        </div>
-      )}
-      <div className="flex items-center gap-1 mt-1.5">
+      <div className="flex items-center gap-1 mt-1 min-h-6">
+        {entry.timestamp ? (
+          <span className="flex-1 min-w-0 text-[10px] text-muted-foreground truncate">
+            {new Date(entry.timestamp).toLocaleString()}
+          </span>
+        ) : (
+          <span className="flex-1" />
+        )}
+        <IconButton title={labels.run} onClick={onRun}>
+          <Play size={12} />
+        </IconButton>
         <IconButton title={labels.paste} onClick={onPaste}>
           <ClipboardIcon size={12} />
         </IconButton>
         <IconButton title={labels.save} onClick={onSave}>
-          <Save size={12} />
+          <FileCode size={12} />
         </IconButton>
       </div>
     </div>
@@ -319,14 +348,15 @@ HistoryDetailStrip.displayName = 'HistoryDetailStrip';
 interface HistoryRowProps {
   entry: RemoteHistoryEntry;
   isSelected: boolean;
-  labels: { paste: string; save: string };
+  labels: { paste: string; run: string; save: string };
   onSelect: () => void;
+  onRun: () => void;
   onPaste: () => void;
   onSave: () => void;
 }
 
 const HistoryRow: React.FC<HistoryRowProps> = memo(
-  ({ entry, isSelected, labels, onSelect, onPaste, onSave }) => {
+  ({ entry, isSelected, labels, onSelect, onRun, onPaste, onSave }) => {
     const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.target !== event.currentTarget) return;
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -361,11 +391,14 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(
           className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100"
           onClick={(event) => event.stopPropagation()}
         >
+          <IconButton title={labels.run} onClick={onRun}>
+            <Play size={12} />
+          </IconButton>
           <IconButton title={labels.paste} onClick={onPaste}>
             <ClipboardIcon size={12} />
           </IconButton>
           <IconButton title={labels.save} onClick={onSave}>
-            <Save size={12} />
+            <FileCode size={12} />
           </IconButton>
         </div>
       </div>
