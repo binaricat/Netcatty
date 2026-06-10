@@ -132,7 +132,11 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       target instanceof HTMLElement &&
       !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
 
-    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape') {
+    const quickSwitchBinding = keyBindings.find((binding) => binding.action === 'quickSwitch');
+    const quickSwitchKeyStr = quickSwitchBinding ? (isMac ? quickSwitchBinding.mac : quickSwitchBinding.pc) : null;
+    const isQuickSwitchHotkey = quickSwitchKeyStr ? matchesKeyBinding(e, quickSwitchKeyStr, isMac) : false;
+
+    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape' && !isQuickSwitchHotkey) {
       return;
     }
 
@@ -436,7 +440,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
 }
 
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {
-  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces } = getCtx();
+  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces } = getCtx();
 {
     // Build complete tab list: vault + (sftp when visible) + sessions/workspaces + editor tabs.
     // Hiding the SFTP tab must also remove it from keyboard cycling so nextTab
@@ -560,6 +564,8 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         }
         break;
       case 'quickSwitch':
+        setIsQuickSwitcherOpen(!isQuickSwitcherOpen);
+        break;
       case 'commandPalette':
         setIsQuickSwitcherOpen(true);
         break;
