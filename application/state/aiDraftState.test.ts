@@ -10,6 +10,7 @@ import {
   ensureDraftForScopeState,
   getDraftMutationVersionState,
   getDraftUploadGenerationState,
+  pruneStaleSessionPanelViews,
   pruneTerminalScopeState,
   pruneTerminalTransientState,
   resolvePanelView,
@@ -87,6 +88,39 @@ test("setSessionView records target session id", () => {
   assert.deepEqual(setSessionView({}, "workspace:abc", "session-123"), {
     "workspace:abc": { mode: "session", sessionId: "session-123" },
   });
+});
+
+test("pruneStaleSessionPanelViews resets session views that no longer exist", () => {
+  const panelViewByScope = {
+    "terminal:1": { mode: "session", sessionId: "deleted-session" },
+    "workspace:2": { mode: "session", sessionId: "session-keep" },
+    "terminal:3": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = pruneStaleSessionPanelViews(
+    panelViewByScope,
+    new Set(["session-keep"]),
+  );
+
+  assert.deepEqual(next, {
+    "terminal:1": { mode: "draft" },
+    "workspace:2": { mode: "session", sessionId: "session-keep" },
+    "terminal:3": { mode: "draft" },
+  });
+});
+
+test("pruneStaleSessionPanelViews returns the original ref when nothing is stale", () => {
+  const panelViewByScope = {
+    "terminal:1": { mode: "session", sessionId: "session-keep" },
+    "terminal:2": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = pruneStaleSessionPanelViews(
+    panelViewByScope,
+    new Set(["session-keep"]),
+  );
+
+  assert.equal(next, panelViewByScope);
 });
 
 test("clearScopeDraftState removes both the draft and current panel view", () => {

@@ -35,6 +35,8 @@ import {
   activateDraftView,
   clearScopeDraftState,
   ensureDraftForScopeState,
+  pruneStaleSessionPanelViews,
+  setDraftView,
   setSessionView,
   updateDraftForScope,
 } from './aiDraftState';
@@ -187,12 +189,22 @@ export function useAIState() {
       }
     }
 
-    if (!changed) return;
+    if (changed) {
+      setLatestAIActiveSessionMapSnapshot(nextActiveSessionIdMap);
+      localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, nextActiveSessionIdMap);
+      setActiveSessionIdMapRaw(nextActiveSessionIdMap);
+      emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
+    }
 
-    setLatestAIActiveSessionMapSnapshot(nextActiveSessionIdMap);
-    localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, nextActiveSessionIdMap);
-    setActiveSessionIdMapRaw(nextActiveSessionIdMap);
-    emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
+    setPanelViewByScopeRaw((prev) => {
+      const next = pruneStaleSessionPanelViews(prev, validSessionIds);
+      if (next === prev) {
+        return prev;
+      }
+      setLatestAIPanelViewByScopeSnapshot(next);
+      emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
+      return next;
+    });
   }, [sessions, activeSessionIdMap]);
 
   const setActiveSessionId = useCallback((scopeKey: string, id: string | null) => {
@@ -592,6 +604,19 @@ export function useAIState() {
           return next;
         }
         return prev;
+      });
+      setPanelViewByScopeRaw((prev) => {
+        const currentPanelView = prev[scopeKey];
+        if (currentPanelView?.mode !== 'session' || currentPanelView.sessionId !== sessionId) {
+          return prev;
+        }
+        const next = setDraftView(prev, scopeKey);
+        if (next === prev) {
+          return prev;
+        }
+        setLatestAIPanelViewByScopeSnapshot(next);
+        emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
+        return next;
       });
     }
   }, [persistSessions]);

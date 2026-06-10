@@ -22,6 +22,7 @@ import {
 import {
   applyDraftEntrySelection,
   applyHistorySessionSelection,
+  panelViewsEqual,
   resolveDisplayedPanelView,
   resolveDisplayedSession,
 } from './ai/aiPanelViewState';
@@ -252,7 +253,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   useEffect(() => {
     if (!isVisible) return;
-    if (!explicitPanelView || normalizedPanelView === explicitPanelView) return;
+    if (!explicitPanelView || panelViewsEqual(normalizedPanelView, explicitPanelView)) return;
     showDraftView(scopeKey);
   }, [isVisible, normalizedPanelView, explicitPanelView, scopeKey, showDraftView]);
 
@@ -890,9 +891,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const handleDeleteSession = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
+      const deletingLastScopedSession =
+        historySessions.length === 1 && historySessions[0]?.id === sessionId;
       deleteSession(sessionId, scopeKey);
+      if (deletingLastScopedSession) {
+        setShowHistory(false);
+        ensureScopeDraft(defaultAgentId);
+      }
     },
-    [deleteSession, scopeKey],
+    [deleteSession, defaultAgentId, ensureScopeDraft, historySessions, scopeKey],
   );
 
   const handleAgentChange = useCallback((agentId: string) => {
