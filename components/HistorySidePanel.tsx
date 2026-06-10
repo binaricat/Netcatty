@@ -3,9 +3,9 @@
  * Reads the remote host's shell history from the focused session and exposes
  * search, paste-to-terminal, and save-as-snippet actions.
  *
- * Uses FixedSizeVirtualList for performance with large history files (up to
+ * Uses VariableSizeVirtualList for performance with large history files (up to
  * 1000 entries). Long commands are truncated in the list; click a row to expand
- * the full text in the detail strip above the list.
+ * the full text inline below that row.
  */
 
 import {
@@ -15,12 +15,15 @@ import {
   Search,
   Terminal as TerminalIcon,
 } from 'lucide-react';
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import type { Host, RemoteHistoryEntry } from '../domain/models';
 import { cn } from '../lib/utils';
 import type { RemoteHistoryHostState } from '../application/state/useRemoteHistoryState';
-import { FixedSizeVirtualList } from './ui/FixedSizeVirtualList';
+import {
+  VariableSizeVirtualList,
+  type VariableSizeVirtualListHandle,
+} from './ui/VariableSizeVirtualList';
 import { Input } from './ui/input';
 
 export interface HistorySidePanelProps {
@@ -34,6 +37,25 @@ export interface HistorySidePanelProps {
 
 const SUPPORTED_PROTOCOLS = new Set(['ssh', 'mosh', 'et']);
 const HISTORY_ROW_HEIGHT = 36;
+const HISTORY_DETAIL_HEIGHT = 112;
+
+type HistoryListRow =
+  | { type: 'entry'; entry: RemoteHistoryEntry }
+  | { type: 'detail'; entry: RemoteHistoryEntry };
+
+function buildHistoryListRows(
+  entries: RemoteHistoryEntry[],
+  selectedEntryId: string | null,
+): HistoryListRow[] {
+  const rows: HistoryListRow[] = [];
+  for (const entry of entries) {
+    rows.push({ type: 'entry', entry });
+    if (selectedEntryId === entry.id) {
+      rows.push({ type: 'detail', entry });
+    }
+  }
+  return rows;
+}
 
 const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   focusedHost,
@@ -46,6 +68,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   const { t } = useI18n();
   const [search, setSearch] = useState('');
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const listRef = useRef<VariableSizeVirtualListHandle>(null);
 
   const protocol = focusedHost?.protocol;
   const isSupportedSession =
@@ -83,8 +106,8 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
     return state.entries.filter((e) => e.command.toLowerCase().includes(q));
   }, [state.entries, search]);
 
-  const selectedEntry = useMemo(
-    () => (selectedEntryId ? filtered.find((e) => e.id === selectedEntryId) ?? null : null),
+  const listRows = useMemo(
+    () => buildHistoryListRows(filtered, selectedEntryId),
     [filtered, selectedEntryId],
   );
 
@@ -97,8 +120,26 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   }, []);
 
   const handleRowClick = useCallback((entryId: string) => {
-    setSelectedEntryId((current) => (current === entryId ? null : entryId));
-  }, []);
+    setSelectedEntryId((current) => {
+      const next = current === entryId ? null : entryId;
+      if (next) {
+        requestAnimationFrame(() => {
+          const detailIndex = buildHistoryListRows(filtered, next).findIndex(
+            (row) => row.type === 'detail' && row.entry.id === next,
+          );
+          if (detailIndex >= 0) {
+            listRef.current?.scrollToIndex(detailIndex, 'auto');
+          }
+        });
+      }
+      return next;
+    });
+  }, [filtered]);
+
+  const getRowHeight = useCallback(
+    (row: HistoryListRow) => (row.type === 'entry' ? HISTORY_ROW_HEIGHT : HISTORY_DETAIL_HEIGHT),
+    [],
+  );
 
   const labels = useMemo(
     () => ({
@@ -152,16 +193,6 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
         </div>
       )}
 
-      {selectedEntry && (
-        <HistoryDetailStrip
-          entry={selectedEntry}
-          labels={labels}
-          onPaste={() => onPasteToTerminal(selectedEntry.command)}
-          onSave={() => handleSaveAsSnippet(selectedEntry)}
-          onClose={() => setSelectedEntryId(null)}
-        />
-      )}
-
       <div className="flex-1 min-h-0">
         {!focusedHost && (
           <EmptyState message={t('history.empty.noSession')} />
@@ -205,21 +236,35 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
           </div>
         )}
 
-        {filtered.length > 0 && (
-          <FixedSizeVirtualList
-            items={filtered}
-            itemHeight={HISTORY_ROW_HEIGHT}
-            getItemKey={(entry) => entry.id}
-            renderItem={(entry) => (
-              <HistoryRow
-                entry={entry}
-                isSelected={selectedEntryId === entry.id}
-                labels={labels}
-                onSelect={() => handleRowClick(entry.id)}
-                onPaste={() => onPasteToTerminal(entry.command)}
-                onSave={() => handleSaveAsSnippet(entry)}
-              />
-            )}
+        {listRows.length > 0 && (
+          <VariableSizeVirtualList
+            ref={listRef}
+            items={listRows}
+            getItemHeight={getRowHeight}
+            getItemKey={(row, index) =>
+              row.type === 'entry' ? row.entry.id : `detail-${row.entry.id}-${index}`}
+            renderItem={(row) => {
+              if (row.type === 'detail') {
+                return (
+                  <HistoryDetailStrip
+                    entry={row.entry}
+                    labels={labels}
+                    onPaste={() => onPasteToTerminal(row.entry.command)}
+                    onSave={() => handleSaveAsSnippet(row.entry)}
+                  />
+                );
+              }
+              return (
+                <HistoryRow
+                  entry={row.entry}
+                  isSelected={selectedEntryId === row.entry.id}
+                  labels={labels}
+                  onSelect={() => handleRowClick(row.entry.id)}
+                  onPaste={() => onPasteToTerminal(row.entry.command)}
+                  onSave={() => handleSaveAsSnippet(row.entry)}
+                />
+              );
+            }}
           />
         )}
       </div>
@@ -239,17 +284,16 @@ interface HistoryDetailStripProps {
   labels: { paste: string; save: string };
   onPaste: () => void;
   onSave: () => void;
-  onClose: () => void;
 }
 
 const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
-  ({ entry, labels, onPaste, onSave, onClose }) => (
+  ({ entry, labels, onPaste, onSave }) => (
     <div
-      className="shrink-0 border-b border-border/40 bg-muted/20 px-3 py-2"
+      className="h-full border-b border-border/40 bg-muted/20 px-3 py-2"
       data-section="history-detail"
     >
       <div
-        className="font-mono text-[11px] leading-snug whitespace-pre-wrap break-words max-h-32 overflow-y-auto"
+        className="font-mono text-[11px] leading-snug whitespace-pre-wrap break-words max-h-[4.5rem] overflow-y-auto"
         style={{ overflowWrap: 'anywhere' }}
       >
         {entry.command}
@@ -266,13 +310,6 @@ const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
         <IconButton title={labels.save} onClick={onSave}>
           <Save size={12} />
         </IconButton>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
-        >
-          ×
-        </button>
       </div>
     </div>
   ),
@@ -311,8 +348,8 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(
         )}
         role="button"
         tabIndex={0}
-        aria-selected={isSelected}
-        title={entry.command}
+        aria-expanded={isSelected}
+        title={isSelected ? undefined : entry.command}
         onClick={onSelect}
         onKeyDown={handleKeyDown}
         onMouseDown={handleMouseDown}
