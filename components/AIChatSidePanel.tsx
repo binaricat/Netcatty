@@ -904,8 +904,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         );
       const deletingLastScopedSession =
         historySessions.length === 1 && historySessions[0]?.id === sessionId;
+      const deletedSessionAgentId =
+        historySessions.find((session) => session.id === sessionId)?.agentId
+        ?? currentAgentId;
 
-      if (streamingSessionIds.has(sessionId)) {
+      if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
         stopStreamingForSession(sessionId);
       }
 
@@ -913,13 +916,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
       if (deletingActiveSession || deletingLastScopedSession) {
         setShowHistory(false);
-        ensureScopeDraft(defaultAgentId);
+        ensureScopeDraft(deletedSessionAgentId);
       }
     },
     [
       activeSessionId,
+      abortControllersRef,
+      currentAgentId,
       deleteSession,
-      defaultAgentId,
       ensureScopeDraft,
       explicitPanelView,
       historySessions,
