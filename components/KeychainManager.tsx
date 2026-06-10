@@ -48,6 +48,7 @@ import {
   VaultHeaderSearch,
   VaultPageHeader,
   vaultHeaderIconButtonClass,
+  vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
 
 // Import utilities and components from keychain module
@@ -678,7 +679,7 @@ echo $3 >> "$FILE"`);
           {/* Keys Section */}
           <div className="space-y-3 p-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-muted-foreground">
+            <h2 className={vaultSectionTitleClass}>
               {t("keychain.section.keys")}
             </h2>
             <span className="text-xs text-muted-foreground">
@@ -743,7 +744,7 @@ echo $3 >> "$FILE"`);
         {activeFilter === "key" && filteredIdentities.length > 0 && (
           <div className="space-y-3 px-3 pb-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-muted-foreground">
+              <h2 className={vaultSectionTitleClass}>
                 {t("keychain.section.identities")}
               </h2>
               <span className="text-xs text-muted-foreground">

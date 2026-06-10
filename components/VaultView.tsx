@@ -88,6 +88,7 @@ import SnippetsManager from "./SnippetsManager";
 import { ImportVaultDialog } from "./vault/ImportVaultDialog";
 import { HostTreeGroupDeleteDialog } from "./host/HostTreeGroupDeleteDialog";
 import { useHostTreeInlineGroupActions } from "./vault/useHostTreeInlineGroupActions";
+import { useHostTreeInlineHostActions } from "./vault/useHostTreeInlineHostActions";
 import { useRegisterVaultHostTreeActions } from "./vault/useRegisterVaultHostTreeActions";
 import { Button } from "./ui/button";
 import { RippleButton } from "./ui/ripple";
@@ -962,9 +963,20 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     t,
   });
 
+  const {
+    startInlineRenameHost,
+    commitInlineHostRename,
+    cancelInlineHostEdit,
+  } = useHostTreeInlineHostActions({
+    hosts,
+    onUpdateHosts,
+    t,
+  });
+
   useRegisterVaultHostTreeActions({
     handleCopyCredentials,
     handleDuplicateHost,
+    startInlineRenameHost,
     onDeleteHost,
     handleUnmanageGroup,
     moveHostToGroup,
@@ -975,6 +987,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     startInlineDeleteGroup,
     commitInlineGroupRename,
     cancelInlineGroupEdit,
+    commitInlineHostRename,
+    cancelInlineHostEdit,
   });
 
   const isHostsSectionActive = currentSection === "hosts";

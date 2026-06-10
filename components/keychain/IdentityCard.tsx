@@ -8,6 +8,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { Identity } from '../../types';
 import { Button } from '../ui/button';
+import { VaultEntityIcon, vaultIdentityIconClass } from '../vault/VaultEntityIcon';
 
 interface IdentityCardProps {
     identity: Identity;
@@ -52,9 +53,10 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({
             onClick={onClick}
         >
             <div className="flex items-center gap-3 h-full">
-                <div className="h-11 w-11 rounded-xl bg-green-500/15 text-green-500 flex items-center justify-center">
-                    <User size={18} />
-                </div>
+                <VaultEntityIcon
+                    className={vaultIdentityIconClass}
+                    icon={<User size={18} />}
+                />
                 <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold truncate">{identity.label || 'Add a label...'}</div>
                     <div className="text-[11px] font-mono text-muted-foreground truncate">

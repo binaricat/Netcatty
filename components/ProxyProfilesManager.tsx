@@ -59,7 +59,14 @@ import {
   VaultPageHeader,
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
+  vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
+import {
+  VaultEntityIcon,
+  vaultProxyCommandIconClass,
+  vaultProxyHttpIconClass,
+  vaultProxySocksIconClass,
+} from "./vault/VaultEntityIcon";
 
 interface ProxyProfilesManagerProps {
   proxyProfiles: ProxyProfile[];
@@ -99,17 +106,17 @@ const proxyProtocolMeta = {
   http: {
     label: "HTTP",
     Icon: Globe,
-    iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    iconClassName: vaultProxyHttpIconClass,
   },
   socks5: {
     label: "SOCKS5",
     Icon: Route,
-    iconClassName: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    iconClassName: vaultProxySocksIconClass,
   },
   command: {
     labelKey: "hostDetails.proxyPanel.command",
     Icon: SquareTerminal,
-    iconClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    iconClassName: vaultProxyCommandIconClass,
   },
 } satisfies Record<ProxyConfig["type"], {
   label?: string;
@@ -163,15 +170,11 @@ const ProxyProfileCard: React.FC<ProxyProfileCardProps> = ({
           onClick={onClick}
         >
           <div className="flex items-center gap-3 h-full">
-            <div
-              className={cn(
-                "h-11 w-11 rounded-xl flex items-center justify-center",
-                protocol.iconClassName,
-              )}
+            <VaultEntityIcon
+              className={protocol.iconClassName}
               title={protocolLabel}
-            >
-              <ProtocolIcon size={18} />
-            </div>
+              icon={<ProtocolIcon size={18} />}
+            />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="text-sm font-semibold truncate">{profile.label}</div>
@@ -397,7 +400,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
         <div className="flex-1 overflow-y-auto">
           <div className="space-y-3 p-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-muted-foreground">
+              <h2 className={vaultSectionTitleClass}>
                 {t("proxyProfiles.section.proxies")}
               </h2>
               <span className="text-xs text-muted-foreground">

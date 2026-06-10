@@ -6,11 +6,14 @@ export interface VaultHostTreeActions {
   onDeleteHost: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
   onCopyCredentials: (host: Host) => void;
+  onRenameHost: (host: Host) => void;
   onNewGroup: (parentPath?: string) => void;
   onRenameGroup: (groupPath: string) => void;
   onDeleteGroup: (groupPath: string) => void;
   commitInlineGroupRename: (name: string) => void;
   cancelInlineGroupEdit: () => void;
+  commitInlineHostRename: (name: string) => void;
+  cancelInlineHostEdit: () => void;
   moveHostToGroup: (hostId: string, groupPath: string | null) => void;
   moveGroup: (sourcePath: string, targetParent: string | null) => void;
   managedGroupPaths?: Set<string>;

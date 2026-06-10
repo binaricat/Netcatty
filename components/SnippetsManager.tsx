@@ -19,7 +19,13 @@ import {
   VaultPageHeader,
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
+  vaultSectionTitleClass,
 } from './vault/VaultPageHeader';
+import {
+  VaultEntityIcon,
+  vaultPrimaryIconClass,
+  vaultSnippetIconClass,
+} from './vault/VaultEntityIcon';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -790,7 +796,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           {displayedPackages.length > 0 && !search.trim() && (
             <>
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-muted-foreground">{t('snippets.section.packages')}</h3>
+                <h3 className={vaultSectionTitleClass}>{t('snippets.section.packages')}</h3>
               </div>
               <div className={cn(
                 viewMode === 'grid'
@@ -823,9 +829,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         onClick={() => setSelectedPackage(pkg.path)}
                       >
                         <div className="flex items-center gap-3 h-full min-w-0">
-                          <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-                            <Package size={18} />
-                          </div>
+                          <VaultEntityIcon
+                            className={vaultPrimaryIconClass}
+                            icon={<Package size={18} />}
+                          />
                           <div className="w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{pkg.name}</div>
                             <div className="text-[11px] text-muted-foreground">{t('snippets.package.count', { count: pkg.count })}</div>
@@ -846,7 +853,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
 
           {displayedSnippets.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-muted-foreground">{t('snippets.section.snippets')}</h3>
+              <h3 className={vaultSectionTitleClass}>{t('snippets.section.snippets')}</h3>
               <div className={cn(
                 viewMode === 'grid'
                   ? "grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
@@ -870,9 +877,10 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                         onClick={() => handleEdit(snippet)}
                       >
                         <div className="flex items-center gap-3 h-full min-w-0">
-                          <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-                            <FileCode size={18} />
-                          </div>
+                          <VaultEntityIcon
+                            className={vaultSnippetIconClass}
+                            icon={<FileCode size={18} />}
+                          />
                           <div className="w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{snippet.label}</div>
                             <Tooltip>

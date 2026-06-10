@@ -30,6 +30,8 @@ export interface ConnectionLog {
   hostname: string; // Target hostname or 'localhost'
   username: string; // SSH username or system username
   protocol: 'ssh' | 'telnet' | 'local' | 'mosh' | 'et' | 'serial';
+  hostOs?: 'linux' | 'windows' | 'macos'; // Snapshot of the connected host OS for log icons
+  hostDistro?: string; // Snapshot of the connected host distro/vendor icon id
   startTime: number; // Connection start timestamp
   endTime?: number; // Connection end timestamp (undefined if still active)
   localUsername: string; // System username of the local user

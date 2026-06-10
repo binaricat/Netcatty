@@ -73,7 +73,7 @@ export const IdentityPanel: React.FC<IdentityPanelProps> = ({
     return (
         <>
             <div className="flex items-center gap-3 mb-4">
-                <div className="h-10 w-10 rounded-lg bg-green-500/15 text-green-500 flex items-center justify-center">
+                <div className="h-10 w-10 rounded-lg bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 flex items-center justify-center">
                     <User size={20} />
                 </div>
                 <Input

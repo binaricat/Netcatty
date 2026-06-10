@@ -76,3 +76,5 @@ export const vaultHeaderSecondaryButtonClass =
   "h-10 px-3 gap-2 bg-foreground/5 text-foreground hover:bg-foreground/10 border-border/40";
 
 export const vaultHeaderIconButtonClass = "h-10 w-10";
+
+export const vaultSectionTitleClass = "text-base font-semibold text-muted-foreground";

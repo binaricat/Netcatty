@@ -68,11 +68,12 @@ export const DISTRO_COLORS: Record<string, string> = {
 };
 
 type DistroAvatarProps = {
-  host: Host;
+  host: Pick<Host, "distro" | "manualDistro" | "distroMode" | "os"> &
+    Partial<Pick<Host, "protocol">>;
   fallback: string;
   className?: string;
   /** xs matches top tab bar icons (h-4 rounded rect) */
-  size?: "xs" | "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "tree" | "log" | "lg";
 };
 
 const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
@@ -91,12 +92,16 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     xs: "h-4 w-4 rounded",
     sm: "h-5 w-5 rounded",
     md: "h-8 w-8 rounded",
-    lg: "h-11 w-11 rounded",
+    tree: "h-8 w-8 rounded-lg",
+    log: "h-9 w-9 rounded-xl",
+    lg: "h-11 w-11 rounded-xl",
   };
   const iconSizes = {
     xs: "h-2.5 w-2.5",
     sm: "h-3 w-3",
     md: "h-4 w-4",
+    tree: "h-4 w-4",
+    log: "h-5 w-5",
     lg: "h-5 w-5",
   };
 
@@ -108,7 +113,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     return (
       <div
         className={cn(
-          "shrink-0 rounded flex items-center justify-center bg-amber-500/15 text-amber-500",
+          "shrink-0 rounded flex items-center justify-center bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950",
           containerClass,
           className,
         )}
@@ -141,7 +146,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
   return (
     <div
       className={cn(
-        "shrink-0 rounded flex items-center justify-center bg-primary/15 text-primary",
+        "shrink-0 rounded flex items-center justify-center bg-primary text-primary-foreground",
         containerClass,
         className,
       )}

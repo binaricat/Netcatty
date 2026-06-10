@@ -1,16 +1,17 @@
 import {
     Bookmark,
     ChevronDown,
+    CircleUserRound,
     Server,
     Terminal,
     Trash2,
     Usb,
-    User,
 } from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { cn } from "../lib/utils";
 import { ConnectionLog, Host } from "../types";
+import { DistroAvatar } from "./DistroAvatar";
 import { ScrollArea } from "./ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -66,6 +67,7 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
     const { t, resolvedLocale } = useI18n();
     const isLocal = log.protocol === "local" || log.hostname === "localhost";
     const isSerial = log.protocol === "serial";
+    const hasPersistedHostIcon = !isLocal && !isSerial && !!log.hostDistro;
 
     return (
         <div
@@ -82,8 +84,8 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
 
             {/* User column */}
             <div className="flex items-center gap-2 w-56 shrink-0">
-                <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                    <User size={14} />
+                <div className="h-9 w-9 rounded-xl bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950 flex items-center justify-center shrink-0">
+                    <CircleUserRound size={18} strokeWidth={2.25} />
                 </div>
                 <div className="min-w-0">
                     <div className="text-sm font-medium truncate">{log.localUsername}</div>
@@ -93,12 +95,28 @@ const LogItem = memo<LogItemProps>(({ log, onToggleSaved, onDelete, onClick }) =
 
             {/* Host column */}
             <div className="flex items-center gap-2 flex-1 min-w-0">
-                <div className={cn(
-                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
-                    isSerial ? "bg-amber-500/10 text-amber-500" : isLocal ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
-                )}>
-                    {isSerial ? <Usb size={14} /> : isLocal ? <Terminal size={14} /> : <Server size={14} />}
-                </div>
+                {hasPersistedHostIcon ? (
+                    <DistroAvatar
+                        host={{
+                            os: log.hostOs ?? "linux",
+                            distro: log.hostDistro,
+                            distroMode: "auto",
+                        }}
+                        fallback={(log.hostOs ?? "linux")[0].toUpperCase()}
+                        size="log"
+                    />
+                ) : (
+                    <div className={cn(
+                        "h-9 w-9 rounded-xl flex items-center justify-center shrink-0",
+                        isSerial
+                            ? "bg-amber-600 text-white dark:bg-amber-400 dark:text-slate-950"
+                            : isLocal
+                                ? "bg-slate-600 text-white dark:bg-slate-300 dark:text-slate-950"
+                                : "bg-primary text-primary-foreground"
+                    )}>
+                        {isSerial ? <Usb size={17} /> : isLocal ? <Terminal size={17} /> : <Server size={17} />}
+                    </div>
+                )}
                 <div className="min-w-0">
                     <div className="text-sm font-medium truncate">{isLocal ? t("logs.localTerminal") : log.hostLabel}</div>
                     <div className="text-xs text-muted-foreground truncate">

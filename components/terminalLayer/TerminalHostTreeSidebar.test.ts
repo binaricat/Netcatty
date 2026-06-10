@@ -13,6 +13,8 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const {
+  applyTerminalHostTreeHostRename,
+  shouldShowTerminalHostHoverCard,
   getTerminalHostTreeInitialLayoutWidth,
   getTerminalHostTreeLayoutTargetWidth,
   getTerminalHostTreeMeasuredLayoutWidth,
@@ -21,6 +23,18 @@ const {
   isTerminalHostTreeSidebarVisible,
 } = await import('./TerminalHostTreeSidebar.tsx');
 const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import('../../application/state/terminalHostTreeAnimation.ts');
+
+const host = {
+  id: 'host-1',
+  label: 'Ubuntu',
+  hostname: '10.2.0.124',
+  username: 'root',
+  port: 22,
+  protocol: 'ssh',
+  tags: [],
+  os: 'linux',
+  createdAt: 1,
+} as const;
 
 test('host tree sidebar is visually hidden when disabled even if it remains open', () => {
   assert.equal(isTerminalHostTreeSidebarVisible(true, false), false);
@@ -104,4 +118,53 @@ test('host tree sidebar clips the panel instead of fading it out while closing',
     panelTransition: 'border-color 220ms ease-out',
     theme,
   }).opacity, 1);
+});
+
+test('host tree host inline rename trims and updates the matching host label', () => {
+  const result = applyTerminalHostTreeHostRename([host], 'host-1', '  web-01  ');
+
+  assert.equal(result.changed, true);
+  assert.equal(result.hosts[0].label, 'web-01');
+});
+
+test('host tree host inline rename rejects empty names without changing hosts', () => {
+  const hosts = [host];
+  const result = applyTerminalHostTreeHostRename(hosts, 'host-1', '   ');
+
+  assert.equal(result.changed, false);
+  assert.equal(result.reason, 'required');
+  assert.equal(result.hosts, hosts);
+});
+
+test('host tree hover card is hidden while the same host is inline editing', () => {
+  assert.equal(shouldShowTerminalHostHoverCard('host-1', null), true);
+  assert.equal(shouldShowTerminalHostHoverCard('host-1', 'host-2'), true);
+  assert.equal(shouldShowTerminalHostHoverCard('host-1', 'host-1'), false);
+});
+
+test('host tree hover card renders markdown notes and keeps host details out of the header subtitle', () => {
+  const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /<MessageResponse/);
+  assert.match(source, /size="sm"/);
+  assert.match(source, /items-center gap-2/);
+  assert.match(source, /className="rounded"/);
+  assert.match(source, /flex h-5 min-w-0 items-center/);
+  assert.match(source, /translate-y-px truncate text-\[15px\] font-semibold leading-none/);
+  assert.match(source, /details\.host/);
+  assert.doesNotMatch(source, /text-muted-foreground">\{host\.hostname\}/);
+  assert.match(source, /host-tree-notes-scroll/);
+  assert.match(source, /overflow-y-auto/);
+  assert.doesNotMatch(source, /details\.lastConnected/);
+});
+
+test('host tree row icons, labels, and protocol badges share centered line boxes', () => {
+  const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /flex h-5 shrink-0 items-center">\s*<DistroAvatar/);
+  assert.match(source, /flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">\{row\.host\.label\}/);
+  assert.match(source, /flex h-5 shrink-0 translate-y-px items-center text-\[10px\] leading-none uppercase/);
+  assert.match(source, /flex h-5 w-4 shrink-0 items-center justify-center/);
+  assert.match(source, /flex h-5 shrink-0 items-center">\s*\{isExpanded/);
+  assert.match(source, /flex h-5 min-w-0 flex-1 translate-y-px items-center truncate leading-none">\{node\.name\}/);
 });

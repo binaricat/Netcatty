@@ -9,6 +9,11 @@ import { cn } from '../../lib/utils';
 import { SSHKey } from '../../types';
 import { Button } from '../ui/button';
 import {
+    VaultEntityIcon,
+    vaultCertificateIconClass,
+    vaultKeyIconClass,
+} from '../vault/VaultEntityIcon';
+import {
 ContextMenu,
 ContextMenuContent,
 ContextMenuItem,
@@ -55,14 +60,12 @@ export const KeyCard: React.FC<KeyCardProps> = ({
                     onClick={onClick}
                 >
                     <div className="flex items-center gap-3 h-full">
-                        <div className={cn(
-                            "h-11 w-11 rounded-xl flex items-center justify-center",
-                            keyItem.certificate
-                              ? "bg-emerald-500/15 text-emerald-500"
-                              : "bg-primary/15 text-primary"
-                        )}>
-                            {getKeyIcon(keyItem)}
-                        </div>
+                        <VaultEntityIcon
+                            className={keyItem.certificate
+                              ? vaultCertificateIconClass
+                              : vaultKeyIconClass}
+                            icon={getKeyIcon(keyItem)}
+                        />
                         <div className="min-w-0 flex-1">
                             <div className="text-sm font-semibold truncate">{keyItem.label}</div>
                             <div className="text-[11px] font-mono text-muted-foreground truncate">

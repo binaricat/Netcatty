@@ -47,6 +47,7 @@ import {
   VaultPageHeader,
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
+  vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
 
 // Import components and utilities from port-forwarding module
@@ -690,9 +691,9 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         </VaultPageHeader>
 
         {/* Rules List */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-y-auto">
           {!hasRules ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <div className="flex h-full flex-col items-center justify-center p-3 text-muted-foreground">
               <div className="h-16 w-16 rounded-2xl bg-secondary/80 flex items-center justify-center mb-4">
                 <Zap size={32} className="opacity-60" />
               </div>
@@ -704,9 +705,9 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 p-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold">{t("pf.title")}</h2>
+                <h2 className={vaultSectionTitleClass}>{t("pf.title")}</h2>
                 <span className="text-xs text-muted-foreground">
                   {t("pf.rulesCount", { count: filteredRules.length })}
                 </span>

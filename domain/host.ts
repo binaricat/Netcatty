@@ -1,6 +1,36 @@
 import { Host, TerminalSettings } from './models';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 
+export type HostLabelRenameResult =
+  | { ok: true; changed: true; hosts: Host[] }
+  | { ok: true; changed: false; reason: 'unchanged' | 'missing'; hosts: Host[] }
+  | { ok: false; changed: false; reason: 'required'; hosts: Host[] };
+
+export function applyHostLabelRename(
+  hosts: Host[],
+  hostId: string,
+  rawLabel: string,
+): HostLabelRenameResult {
+  const nextLabel = rawLabel.trim();
+  if (!nextLabel) {
+    return { ok: false, changed: false, reason: 'required', hosts };
+  }
+
+  let found = false;
+  let changed = false;
+  const nextHosts = hosts.map((host) => {
+    if (host.id !== hostId) return host;
+    found = true;
+    if (host.label === nextLabel) return host;
+    changed = true;
+    return { ...host, label: nextLabel };
+  });
+
+  if (!found) return { ok: true, changed: false, reason: 'missing', hosts };
+  if (!changed) return { ok: true, changed: false, reason: 'unchanged', hosts };
+  return { ok: true, changed: true, hosts: nextHosts };
+}
+
 export const LINUX_DISTRO_OPTIONS = [
   'linux',
   'ubuntu',

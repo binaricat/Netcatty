@@ -10,6 +10,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { ContextMenu,ContextMenuContent,ContextMenuItem,ContextMenuSeparator,ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import { vaultEntityIconClass } from '../vault/VaultEntityIcon';
 import { getStatusColor,getTypeColor } from './utils';
 
 export type ViewMode = 'grid' | 'list';
@@ -60,7 +61,8 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                 >
                     <div className="flex items-center gap-3 h-full">
                         <div className={cn(
-                            "h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold transition-colors",
+                            vaultEntityIconClass,
+                            "text-sm font-bold transition-colors",
                             getTypeColor(rule.type, isActive)
                         )}>
                             {rule.type[0].toUpperCase()}

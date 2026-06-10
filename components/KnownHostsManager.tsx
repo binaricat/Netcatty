@@ -44,6 +44,7 @@ import {
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
 } from "./vault/VaultPageHeader";
+import { VaultEntityIcon, vaultPrimaryIconClass } from "./vault/VaultEntityIcon";
 
 interface KnownHostsManagerProps {
   knownHosts: KnownHost[];
@@ -167,9 +168,10 @@ const HostItem = React.memo<HostItemProps>(
                 </Tooltip>
               </div>
               <div className="flex items-center gap-3 h-full">
-                <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-                  <Server size={18} />
-                </div>
+                <VaultEntityIcon
+                  className={vaultPrimaryIconClass}
+                  icon={<Server size={18} />}
+                />
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-semibold truncate block">
                     {knownHost.hostname}
@@ -205,9 +207,10 @@ const HostItem = React.memo<HostItemProps>(
               converted && "opacity-60",
             )}
           >
-            <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-              <Server size={18} />
-            </div>
+            <VaultEntityIcon
+              className={vaultPrimaryIconClass}
+              icon={<Server size={18} />}
+            />
             <div className="flex-1 min-w-0">
               <span className="text-sm font-semibold truncate block">
                 {knownHost.hostname}

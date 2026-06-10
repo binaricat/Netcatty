@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { HostNotesIndicator } from "../host/HostNotesIndicator";
+import { VaultEntityIcon, vaultPrimaryIconClass } from "./VaultEntityIcon";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -150,7 +151,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         )}
                                       </div>
                                     )}
-                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} />
+                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-sm font-semibold truncate leading-5">
@@ -258,7 +259,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         )}
                                       </div>
                                     )}
-                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} />
+                                    <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-sm font-semibold truncate leading-5">
@@ -391,9 +392,10 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                               }}
                             >
                               <div className="flex items-center gap-3 h-full">
-                                <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center">
-                                  <FolderTree size={20} />
-                                </div>
+                                <VaultEntityIcon
+                                  className={vaultPrimaryIconClass}
+                                  icon={<FolderTree size={20} />}
+                                />
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-semibold truncate flex items-center gap-2">
                                     {node.name}
@@ -579,6 +581,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                           <DistroAvatar
                                             host={safeHost}
                                             fallback={distroBadge.text}
+                                            size="lg"
                                           />
                                           <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                             <div className="flex items-center gap-1.5">
@@ -725,6 +728,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     <DistroAvatar
                                       host={safeHost}
                                       fallback={distroBadge.text}
+                                      size="lg"
                                     />
                                     <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
                                       <div className="flex items-center gap-1.5">

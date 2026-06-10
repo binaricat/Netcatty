@@ -213,8 +213,12 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     </div>
                   )}
                 </div>
-                <div className="mr-3 text-primary/80 group-hover:text-primary transition-colors">
-                  {isExpanded ? <FolderOpen size={18} /> : <Folder size={18} />}
+                <div className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center text-primary transition-colors dark:text-primary">
+                  {isExpanded ? (
+                    <FolderOpen size={21} strokeWidth={2.35} />
+                  ) : (
+                    <Folder size={21} strokeWidth={2.35} />
+                  )}
                 </div>
                 {isInlineEditing && commitRename && cancelRename ? (
                   <HostTreeGroupInlineRenameInput
@@ -414,7 +418,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
           )}
           {!isMultiSelectMode && <div className="mr-2 flex-shrink-0 w-4 h-4" />}
           <div className="mr-3 flex-shrink-0">
-            <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="xs" />
+            <DistroAvatar host={host} fallback={(host.os || "L")[0].toUpperCase()} size="tree" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-medium truncate flex items-center gap-1.5">

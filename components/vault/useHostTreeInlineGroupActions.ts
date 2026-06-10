@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 
 import { hostTreeInlineGroupDeleteStore } from '../../application/state/hostTreeInlineGroupDeleteStore';
 import { hostTreeInlineGroupEditStore } from '../../application/state/hostTreeInlineGroupEditStore';
+import { hostTreeInlineHostEditStore } from '../../application/state/hostTreeInlineHostEditStore';
 import {
   allocateUnnamedGroupPath,
   applyGroupPathRename,
@@ -39,6 +40,7 @@ export function useHostTreeInlineGroupActions({
   t,
 }: UseHostTreeInlineGroupActionsParams) {
   const startInlineNewGroup = useCallback((parentPath?: string) => {
+    hostTreeInlineHostEditStore.clear();
     const parent = parentPath ?? null;
     const { name, path } = allocateUnnamedGroupPath(customGroups, parent, unnamedGroupLabel);
     onUpdateCustomGroups(Array.from(new Set([...customGroups, path])));
@@ -54,6 +56,7 @@ export function useHostTreeInlineGroupActions({
   }, [customGroups, ensurePathExpanded, onUpdateCustomGroups, unnamedGroupLabel]);
 
   const startInlineRenameGroup = useCallback((groupPath: string) => {
+    hostTreeInlineHostEditStore.clear();
     hostTreeInlineGroupEditStore.startEdit({
       groupPath,
       initialName: groupDisplayName(groupPath),

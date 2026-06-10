@@ -2,10 +2,16 @@
 import type React from 'react';
 import type { Host, HostProtocol } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
+import { getEffectiveHostDistro } from '../../domain/host';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
+
+const getLogHostVisualSnapshot = (host: Host) => ({
+  hostOs: host.os,
+  hostDistro: getEffectiveHostDistro(host) || undefined,
+});
 
 export function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
   const { sessions, setActiveTabId, setWorkspaceFocusedSession } = getCtx();
@@ -65,6 +71,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
         hostname: host.hostname,
         username,
         protocol: 'serial',
+        ...getLogHostVisualSnapshot(effectiveHost),
         startTime: Date.now(),
         localUsername: username,
         localHostname: localHost,
@@ -83,6 +90,7 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       hostname: host.hostname,
       username: resolvedAuth.username || 'root',
       protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh' | 'et',
+      ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
       localUsername: username,
       localHostname: localHost,
@@ -708,6 +716,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
         hostname: host.hostname,
         username: username,
         protocol: 'serial',
+        ...getLogHostVisualSnapshot(effectiveHost),
         startTime: Date.now(),
         localUsername: username,
         localHostname: localHost,
@@ -726,6 +735,7 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host) {
       hostname: host.hostname,
       username: resolvedAuth.username || 'root',
       protocol: protocol as 'ssh' | 'telnet' | 'local' | 'mosh' | 'et',
+      ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
       localUsername: username,
       localHostname: localHost,

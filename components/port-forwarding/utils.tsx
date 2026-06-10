@@ -63,9 +63,9 @@ export function getStatusColor(status: string): string {
  */
 export function getTypeColor(type: PortForwardingType, isActive: boolean): string {
   const colors = {
-    local: isActive ? 'bg-blue-500 text-white' : 'bg-blue-500/15 text-blue-500',
-    remote: isActive ? 'bg-orange-500 text-white' : 'bg-orange-500/15 text-orange-500',
-    dynamic: isActive ? 'bg-purple-500 text-white' : 'bg-purple-500/15 text-purple-500',
+    local: isActive ? 'bg-sky-500 text-white' : 'bg-sky-600 text-white dark:bg-sky-400 dark:text-slate-950',
+    remote: isActive ? 'bg-indigo-500 text-white' : 'bg-indigo-600 text-white dark:bg-indigo-400 dark:text-slate-950',
+    dynamic: isActive ? 'bg-violet-500 text-white' : 'bg-violet-600 text-white dark:bg-violet-400 dark:text-slate-950',
   };
   return colors[type];
 }
