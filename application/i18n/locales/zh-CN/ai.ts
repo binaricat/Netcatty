@@ -228,6 +228,7 @@ export const zhCNAiMessages: Messages = {
   'terminal.layer.switchToSplitView': '切换到分屏视图',
   'terminal.layer.sftp': '文件传输',
   'terminal.layer.scripts': '脚本',
+  'terminal.layer.history': '命令历史',
   'terminal.layer.theme': '主题',
   'terminal.layer.aiChat': 'AI 助手',
   'terminal.layer.movePanelLeft': '面板移至左侧',

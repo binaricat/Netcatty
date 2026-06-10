@@ -145,6 +145,16 @@ declare global {
       stderr?: string;
       error?: string;
     }>;
+    /** Read the remote host's shell history file via an exec channel. */
+    readRemoteHistory?(sessionId: string, limit?: number): Promise<{
+      success: boolean;
+      pending?: boolean;
+      error?: string;
+      shell?: string;
+      bash?: string;
+      zsh?: string;
+      fish?: string;
+    }>;
     /** Get server stats (CPU, Memory, Disk, Network) from an active SSH session */
     getServerStats?(sessionId: string): Promise<{
       success: boolean;

@@ -19,7 +19,7 @@ import {
   parseTerminalPaneRenderSnapshot,
 } from '../terminalPaneVisibility';
 
-export type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
+export type SidePanelTab = 'sftp' | 'scripts' | 'history' | 'theme' | 'ai';
 
 export type WorkspaceRect = { x: number; y: number; w: number; h: number };
 
@@ -565,6 +565,7 @@ interface TerminalPaneProps {
   ) => void;
   onTerminalCwdChange: (sessionId: string, cwd: string | null) => void;
   onOpenScripts: () => void;
+  onOpenHistory?: () => void;
   onOpenTheme: () => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
@@ -652,6 +653,7 @@ const terminalPanePropsAreEqual = (
   prev.onOpenSftp === next.onOpenSftp &&
   prev.onTerminalCwdChange === next.onTerminalCwdChange &&
   prev.onOpenScripts === next.onOpenScripts &&
+  prev.onOpenHistory === next.onOpenHistory &&
   prev.onOpenTheme === next.onOpenTheme &&
   prev.onCloseSession === next.onCloseSession &&
   prev.onStatusChange === next.onStatusChange &&
@@ -706,6 +708,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onOpenSftp,
   onTerminalCwdChange,
   onOpenScripts,
+  onOpenHistory,
   onOpenTheme,
   onCloseSession,
   onStatusChange,
@@ -880,6 +883,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onOpenSftp={onOpenSftp}
         onTerminalCwdChange={onTerminalCwdChange}
         onOpenScripts={onOpenScripts}
+        onOpenHistory={onOpenHistory}
         onOpenTheme={onOpenTheme}
         onCloseSession={onCloseSession}
         onStatusChange={onStatusChange}
@@ -944,6 +948,7 @@ interface TerminalPanesHostProps {
   onOpenSftp: TerminalPaneProps['onOpenSftp'];
   onTerminalCwdChange: TerminalPaneProps['onTerminalCwdChange'];
   onOpenScripts: () => void;
+  onOpenHistory?: () => void;
   onOpenTheme: () => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
@@ -1003,6 +1008,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onOpenSftp !== next.onOpenSftp) return false;
   if (prev.onTerminalCwdChange !== next.onTerminalCwdChange) return false;
   if (prev.onOpenScripts !== next.onOpenScripts) return false;
+  if (prev.onOpenHistory !== next.onOpenHistory) return false;
   if (prev.onOpenTheme !== next.onOpenTheme) return false;
   if (prev.onCloseSession !== next.onCloseSession) return false;
   if (prev.onStatusChange !== next.onStatusChange) return false;

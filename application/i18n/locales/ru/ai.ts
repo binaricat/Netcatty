@@ -228,6 +228,7 @@ export const ruAiMessages: Messages = {
   'terminal.layer.switchToSplitView': 'Переключить в режим разделения',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Скрипты',
+  'terminal.layer.history': 'История',
   'terminal.layer.theme': 'Тема',
   'terminal.layer.aiChat': 'AI-чат',
   'terminal.layer.movePanelLeft': 'Переместить панель влево',

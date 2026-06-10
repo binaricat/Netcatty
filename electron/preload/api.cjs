@@ -74,6 +74,9 @@ function createPreloadApi(ctx) {
   getServerStats: async (sessionId) => {
     return ipcRenderer.invoke("netcatty:ssh:stats", { sessionId });
   },
+  readRemoteHistory: async (sessionId, limit) => {
+    return ipcRenderer.invoke("netcatty:ssh:readRemoteHistory", { sessionId, limit });
+  },
   generateKeyPair: async (options) => {
     return ipcRenderer.invoke("netcatty:key:generate", options);
   },

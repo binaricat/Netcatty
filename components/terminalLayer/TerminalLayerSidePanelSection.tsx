@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { FolderTree, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
+import { FolderTree, History, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
 import React, { memo, useCallback, useState } from 'react';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
@@ -37,13 +37,18 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
     mountedSftpTabIds,
     scriptsMountedTabIds,
     themeMountedTabIds,
+    sidePanelOpenTabs,
   } = ctx;
+
+  const anyHistoryOpen = sidePanelOpenTabs instanceof Map
+    && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('history');
 
   if (
     mountedSftpTabIds.length === 0
     && mountedAiTabIds.length === 0
     && scriptsMountedTabIds.length === 0
     && themeMountedTabIds.length === 0
+    && !anyHistoryOpen
   ) {
     return null;
   }
@@ -74,10 +79,13 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     focusedFontSizeOverridden,
     focusedFontWeight,
     focusedFontWeightOverridden,
+    focusedHost,
     focusedThemeOverridden,
     followAppTerminalTheme,
     getTerminalCwd,
     handleCloseSidePanel,
+    handleHistoryPaste,
+    handleOpenHistory,
     handleFontFamilyChangeForFocusedSession,
     handleFontFamilyResetForFocusedSession,
     handleFontSizeChangeForFocusedSession,
@@ -94,6 +102,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleThemeResetForFocusedSession,
     handleToggleSftpFromBar,
     handlePendingUploadHandled,
+    historySessionId,
+    HistorySidePanel,
     hosts,
     hotkeyScheme,
     identities,
@@ -106,6 +116,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     pendingTerminalSelectionForAI,
     previewedOrVisibleThemeId,
     refocusActiveTerminalSession,
+    remoteHistory,
     resolveAIExecutorContext,
     resolvedPreviewTheme,
     ScriptsSidePanel,
@@ -293,6 +304,30 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <Btn
                     variant="ghost"
                     size="icon"
+                    data-tab-id="history"
+                    data-tab-type="sidepanel"
+                    data-state={activeSidePanelTab === 'history' ? 'active' : 'inactive'}
+                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{
+                      backgroundColor: activeSidePanelTab === 'history'
+                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                        : 'transparent',
+                      color: activeSidePanelTab === 'history'
+                        ? 'var(--terminal-sidepanel-fg)'
+                        : 'var(--terminal-sidepanel-muted)',
+                    }}
+                    onClick={handleOpenHistory}
+                  >
+                    <History size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent>{t('terminal.layer.history')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
                     data-tab-id="theme"
                     data-tab-type="sidepanel"
                     data-state={activeSidePanelTab === 'theme' ? 'active' : 'inactive'}
@@ -440,6 +475,19 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                 </div>
               );
             })}
+
+            {activeSidePanelTab === 'history' && (
+              <div className="absolute inset-0 z-10">
+                <HistorySidePanel
+                  focusedHost={focusedHost}
+                  focusedSessionId={historySessionId}
+                  state={remoteHistory.getState(focusedHost?.id)}
+                  onFetch={remoteHistory.fetch}
+                  onPasteToTerminal={handleHistoryPaste}
+                  isVisible
+                />
+              </div>
+            )}
 
             {themeMountedTabIds.map((tabId: string) => {
               const isVisibleThemePanel = activeTabId === tabId && activeSidePanelTab === 'theme';

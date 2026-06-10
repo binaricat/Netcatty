@@ -76,6 +76,142 @@ function createSessionOpsApi(ctx) {
         }
       });
     }
+
+    async function readRemoteHistory(event, payload) {
+      const { sessionId, limit } = payload || {};
+      const session = sessions.get(sessionId);
+      if (!session) {
+        return { success: false, error: 'Session not found' };
+      }
+
+      const safeLimit =
+        Number.isFinite(limit) && limit > 0 && limit <= 10000 ? Math.floor(limit) : 1000;
+      const fishLimit = safeLimit * 3; // fish records span 2-3 lines each
+
+      const SHELL_MARKER = '__NC_SHELL__';
+      const BASH_MARKER = '__NC_BASH__';
+      const ZSH_MARKER = '__NC_ZSH__';
+      const FISH_MARKER = '__NC_FISH__';
+      // Shell parameter expansions kept as literal text so the remote POSIX
+      // shell (not Node or the user's login shell) resolves them; honours
+      // $HISTFILE / $XDG_DATA_HOME overrides.
+      const ZSH_HIST = '${HISTFILE:-$HOME/.zsh_history}';
+      const BASH_HIST = '${HISTFILE:-$HOME/.bash_history}';
+      const FISH_PATH = '${XDG_DATA_HOME:-$HOME/.local/share}/fish/fish_history';
+      const posixScript = [
+        `SH="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -n "$SH" ] || SH="$SHELL"`,
+        `FISH="${FISH_PATH}"; [ -f "$FISH" ] || FISH="$HOME/.config/fish/fish_history"`,
+        `case "$SH" in`,
+        `  *zsh) printf '%s\\n' '${SHELL_MARKER}zsh'; printf '%s\\n' '${ZSH_MARKER}'; tail -n ${safeLimit} "${ZSH_HIST}" 2>/dev/null || true ;;`,
+        `  *bash) printf '%s\\n' '${SHELL_MARKER}bash'; printf '%s\\n' '${BASH_MARKER}'; tail -n ${safeLimit} "${BASH_HIST}" 2>/dev/null || true ;;`,
+        `  *fish) printf '%s\\n' '${SHELL_MARKER}fish'; printf '%s\\n' '${FISH_MARKER}'; tail -n ${fishLimit} "$FISH" 2>/dev/null || true ;;`,
+        `  *) printf '%s\\n' '${SHELL_MARKER}unknown'; printf '%s\\n' '${BASH_MARKER}'; tail -n ${safeLimit} "$HOME/.bash_history" 2>/dev/null || true; printf '%s\\n' '${ZSH_MARKER}'; tail -n ${safeLimit} "$HOME/.zsh_history" 2>/dev/null || true; printf '%s\\n' '${FISH_MARKER}'; tail -n ${fishLimit} "$FISH" 2>/dev/null || true ;;`,
+        `esac`,
+      ].join('\n');
+      // Match getSessionPwd: force POSIX sh so fish/zsh login shells do not
+      // parse the script themselves.
+      const command = `exec sh -c ${quoteShellArg(posixScript)}`;
+
+      const parse = (stdout) => {
+        const text = stdout || '';
+        let shell = 'unknown';
+        const shellIdx = text.indexOf(SHELL_MARKER);
+        if (shellIdx >= 0) {
+          const after = text.slice(shellIdx + SHELL_MARKER.length);
+          shell = (after.split(/\r?\n/, 1)[0] || 'unknown').trim();
+        }
+        const section = (marker) => {
+          const start = text.indexOf(marker);
+          if (start < 0) return '';
+          const from = start + marker.length;
+          // End at the nearest following section marker, if any.
+          const ends = [BASH_MARKER, ZSH_MARKER, FISH_MARKER]
+            .map((m) => text.indexOf(m, from))
+            .filter((i) => i >= 0);
+          const end = ends.length ? Math.min(...ends) : text.length;
+          return text.slice(from, end).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+        };
+        return {
+          shell,
+          bash: section(BASH_MARKER),
+          zsh: section(ZSH_MARKER),
+          fish: section(FISH_MARKER),
+        };
+      };
+
+      // ET session: no ssh2 conn — run through the shared system-ssh executor.
+      if (session.type === 'et') {
+        if (typeof execOnEtSession !== 'function') {
+          return { success: false, error: 'ET command executor unavailable' };
+        }
+        const result = await execOnEtSession(session, command, 8000);
+        if (!result || !result.success) {
+          return {
+            success: false,
+            error: (result && result.error) || 'Failed to read remote history',
+          };
+        }
+        return { success: true, ...parse(result.stdout || '') };
+      }
+
+      // Mosh has no interactive ssh2 conn of its own. Lazily open the same
+      // stats companion getServerStats uses — it lives on session.moshStatsConn,
+      // never session.conn (see moshStatsConnection.cjs). Reading the fixed
+      // history files is connection-agnostic, so the companion is a safe
+      // substitute here (unlike getSessionPwd, which needs the interactive
+      // shell's sibling exec channel).
+      if (
+        !session.conn &&
+        !session.moshStatsConn &&
+        session.type === 'mosh' &&
+        typeof ensureMoshStatsConnection === 'function'
+      ) {
+        await ensureMoshStatsConnection(session, sessionId, event?.sender);
+      }
+
+      const conn = session.conn || session.moshStatsConn;
+      if (!conn) {
+        // A Mosh session can be marked "connected" before the handshake stores
+        // credentials; report pending (mirrors getServerStats) so it isn't a
+        // hard failure during that window.
+        if (session.type === 'mosh' && !session.moshStatsAuth && !session.moshStatsConnFailed) {
+          return { success: false, pending: true, error: 'Mosh handshake in progress' };
+        }
+        return { success: false, error: 'Session not found or not connected' };
+      }
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let activeStream = null;
+        const settle = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
+        const timer = setTimeout(() => {
+          settle({ success: false, error: 'Timeout reading remote history' });
+          try { if (activeStream) activeStream.close(); } catch { /* ignore */ }
+        }, 8000);
+        try {
+          conn.exec(command, (err, stream) => {
+            if (err) {
+              settle({ success: false, error: err.message || String(err) });
+              return;
+            }
+            activeStream = stream;
+            let stdout = '';
+            stream.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+            if (stream.stderr) stream.stderr.on('data', () => { /* swallow */ });
+            stream.on('close', () => {
+              settle({ success: true, ...parse(stdout) });
+            });
+          });
+        } catch (err) {
+          settle({ success: false, error: err?.message || String(err) });
+        }
+      });
+    }
     
     async function getSessionPwd(event, payload) {
       const { sessionId } = payload;
@@ -984,6 +1120,7 @@ function createSessionOpsApi(ctx) {
     return {
       getSessionRemoteInfo,
       getSessionDistroInfo,
+      readRemoteHistory,
       getSessionPwd,
       probeReceiveConflicts,
       removeRemoteFiles,

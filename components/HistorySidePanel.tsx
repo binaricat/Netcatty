@@ -1,0 +1,357 @@
+/**
+ * HistorySidePanel — remote shell history browser for the terminal side panel.
+ * Reads the remote host's shell history from the focused session and exposes
+ * search, paste-to-terminal, and save-as-snippet actions.
+ *
+ * Uses FixedSizeVirtualList for performance with large history files (up to
+ * 1000 entries). Long commands are truncated in the list; click a row to expand
+ * the full text in the detail strip above the list.
+ */
+
+import {
+  Clipboard as ClipboardIcon,
+  RefreshCw,
+  Save,
+  Search,
+  Terminal as TerminalIcon,
+} from 'lucide-react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { useI18n } from '../application/i18n/I18nProvider';
+import type { Host, RemoteHistoryEntry } from '../domain/models';
+import { cn } from '../lib/utils';
+import type { RemoteHistoryHostState } from '../application/state/useRemoteHistoryState';
+import { FixedSizeVirtualList } from './ui/FixedSizeVirtualList';
+import { Input } from './ui/input';
+
+export interface HistorySidePanelProps {
+  focusedHost: Host | null;
+  focusedSessionId: string | null;
+  state: RemoteHistoryHostState;
+  onFetch: (sessionId: string, hostId: string) => void;
+  onPasteToTerminal: (command: string) => void;
+  isVisible?: boolean;
+}
+
+const SUPPORTED_PROTOCOLS = new Set(['ssh', 'mosh', 'et']);
+const HISTORY_ROW_HEIGHT = 36;
+
+const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
+  focusedHost,
+  focusedSessionId,
+  state,
+  onFetch,
+  onPasteToTerminal,
+  isVisible = true,
+}) => {
+  const { t } = useI18n();
+  const [search, setSearch] = useState('');
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+
+  const protocol = focusedHost?.protocol;
+  const isSupportedSession =
+    !!focusedHost && !!focusedSessionId && SUPPORTED_PROTOCOLS.has(String(protocol ?? 'ssh'));
+
+  useEffect(() => {
+    if (!isVisible || !isSupportedSession || !focusedHost || !focusedSessionId) return;
+    if (state.loading) return;
+    if (state.fetchedAt != null || state.error) return;
+    onFetch(focusedSessionId, focusedHost.id);
+  }, [
+    isVisible,
+    isSupportedSession,
+    focusedHost,
+    focusedSessionId,
+    state.loading,
+    state.fetchedAt,
+    state.error,
+    onFetch,
+  ]);
+
+  const handleRefresh = useCallback(() => {
+    if (!focusedHost || !focusedSessionId) return;
+    onFetch(focusedSessionId, focusedHost.id);
+  }, [focusedHost, focusedSessionId, onFetch]);
+
+  useEffect(() => {
+    setSelectedEntryId(null);
+    setSearch('');
+  }, [focusedHost?.id]);
+
+  const filtered = useMemo((): RemoteHistoryEntry[] => {
+    if (!search.trim()) return state.entries;
+    const q = search.toLowerCase();
+    return state.entries.filter((e) => e.command.toLowerCase().includes(q));
+  }, [state.entries, search]);
+
+  const selectedEntry = useMemo(
+    () => (selectedEntryId ? filtered.find((e) => e.id === selectedEntryId) ?? null : null),
+    [filtered, selectedEntryId],
+  );
+
+  const handleSaveAsSnippet = useCallback((entry: RemoteHistoryEntry) => {
+    window.dispatchEvent(
+      new CustomEvent('netcatty:snippets:add', {
+        detail: { command: entry.command },
+      }),
+    );
+  }, []);
+
+  const handleRowClick = useCallback((entryId: string) => {
+    setSelectedEntryId((current) => (current === entryId ? null : entryId));
+  }, []);
+
+  const labels = useMemo(
+    () => ({
+      paste: t('history.action.paste'),
+      save: t('history.action.saveAsSnippet'),
+    }),
+    [t],
+  );
+
+  if (!isVisible) return null;
+
+  return (
+    <div
+      className="h-full flex flex-col bg-background overflow-hidden"
+      data-section="history-panel"
+    >
+      <div className="shrink-0 px-2 py-1.5 border-b border-border/50 flex items-center gap-1.5">
+        <div className="relative flex-1 min-w-0">
+          <Search
+            size={12}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('history.searchPlaceholder')}
+            className="h-7 pl-7 text-xs bg-muted/30 border-none"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={!isSupportedSession || state.loading}
+          title={t('history.action.refresh')}
+          aria-label={t('history.action.refresh')}
+          className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:bg-transparent"
+        >
+          <RefreshCw size={14} className={cn(state.loading && 'animate-spin')} />
+        </button>
+      </div>
+
+      {focusedHost && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border/30 min-h-[28px]">
+          <TerminalIcon size={10} className="shrink-0" />
+          <span className="truncate">{focusedHost.label}</span>
+          {state.fetchedAt && (
+            <span className="ml-auto shrink-0 opacity-70">
+              {t('history.meta.count', { count: state.entries.length })}
+            </span>
+          )}
+        </div>
+      )}
+
+      {selectedEntry && (
+        <HistoryDetailStrip
+          entry={selectedEntry}
+          labels={labels}
+          onPaste={() => onPasteToTerminal(selectedEntry.command)}
+          onSave={() => handleSaveAsSnippet(selectedEntry)}
+          onClose={() => setSelectedEntryId(null)}
+        />
+      )}
+
+      <div className="flex-1 min-h-0">
+        {!focusedHost && (
+          <EmptyState message={t('history.empty.noSession')} />
+        )}
+
+        {focusedHost && !isSupportedSession && (
+          <EmptyState message={t('history.empty.unsupportedProtocol')} />
+        )}
+
+        {focusedHost && isSupportedSession && state.loading && state.entries.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-10 px-4 text-muted-foreground text-center">
+            <RefreshCw size={20} className="opacity-60 mb-2 animate-spin" />
+            <span className="text-xs">{t('history.loading')}</span>
+          </div>
+        )}
+
+        {focusedHost && isSupportedSession && state.error && (
+          <div className="px-3 py-4 text-xs text-center">
+            <div className="text-destructive mb-2">{state.error}</div>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              className="text-primary hover:underline"
+            >
+              {t('history.action.retry')}
+            </button>
+          </div>
+        )}
+
+        {focusedHost &&
+          isSupportedSession &&
+          !state.loading &&
+          !state.error &&
+          state.entries.length === 0 && (
+            <EmptyState message={t('history.empty.noHistory')} />
+          )}
+
+        {filtered.length === 0 && state.entries.length > 0 && (
+          <div className="px-3 py-4 text-xs text-muted-foreground italic text-center">
+            {t('common.noResultsFound')}
+          </div>
+        )}
+
+        {filtered.length > 0 && (
+          <FixedSizeVirtualList
+            items={filtered}
+            itemHeight={HISTORY_ROW_HEIGHT}
+            getItemKey={(entry) => entry.id}
+            renderItem={(entry) => (
+              <HistoryRow
+                entry={entry}
+                isSelected={selectedEntryId === entry.id}
+                labels={labels}
+                onSelect={() => handleRowClick(entry.id)}
+                onPaste={() => onPasteToTerminal(entry.command)}
+                onSave={() => handleSaveAsSnippet(entry)}
+              />
+            )}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+const EmptyState: React.FC<{ message: string }> = ({ message }) => (
+  <div className="flex flex-col items-center justify-center py-10 px-4 text-muted-foreground text-center">
+    <TerminalIcon size={24} className="opacity-40 mb-2" />
+    <span className="text-xs">{message}</span>
+  </div>
+);
+
+interface HistoryDetailStripProps {
+  entry: RemoteHistoryEntry;
+  labels: { paste: string; save: string };
+  onPaste: () => void;
+  onSave: () => void;
+  onClose: () => void;
+}
+
+const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
+  ({ entry, labels, onPaste, onSave, onClose }) => (
+    <div
+      className="shrink-0 border-b border-border/40 bg-muted/20 px-3 py-2"
+      data-section="history-detail"
+    >
+      <div
+        className="font-mono text-[11px] leading-snug whitespace-pre-wrap break-words max-h-32 overflow-y-auto"
+        style={{ overflowWrap: 'anywhere' }}
+      >
+        {entry.command}
+      </div>
+      {entry.timestamp && (
+        <div className="text-[10px] text-muted-foreground mt-1">
+          {new Date(entry.timestamp).toLocaleString()}
+        </div>
+      )}
+      <div className="flex items-center gap-1 mt-1.5">
+        <IconButton title={labels.paste} onClick={onPaste}>
+          <ClipboardIcon size={12} />
+        </IconButton>
+        <IconButton title={labels.save} onClick={onSave}>
+          <Save size={12} />
+        </IconButton>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  ),
+);
+HistoryDetailStrip.displayName = 'HistoryDetailStrip';
+
+interface HistoryRowProps {
+  entry: RemoteHistoryEntry;
+  isSelected: boolean;
+  labels: { paste: string; save: string };
+  onSelect: () => void;
+  onPaste: () => void;
+  onSave: () => void;
+}
+
+const HistoryRow: React.FC<HistoryRowProps> = memo(
+  ({ entry, isSelected, labels, onSelect, onPaste, onSave }) => {
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      onSelect();
+    };
+
+    const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.detail > 1) {
+        event.preventDefault();
+      }
+    };
+
+    return (
+      <div
+        className={cn(
+          'group flex select-none items-center gap-2 px-3 h-full hover:bg-accent/50 transition-colors cursor-pointer',
+          isSelected && 'bg-accent/30',
+        )}
+        role="button"
+        tabIndex={0}
+        aria-selected={isSelected}
+        title={entry.command}
+        onClick={onSelect}
+        onKeyDown={handleKeyDown}
+        onMouseDown={handleMouseDown}
+      >
+        <div className="w-0 flex-1 min-w-0 font-mono text-[11px] truncate whitespace-nowrap">
+          {entry.command}
+        </div>
+        <div
+          className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <IconButton title={labels.paste} onClick={onPaste}>
+            <ClipboardIcon size={12} />
+          </IconButton>
+          <IconButton title={labels.save} onClick={onSave}>
+            <Save size={12} />
+          </IconButton>
+        </div>
+      </div>
+    );
+  },
+);
+HistoryRow.displayName = 'HistoryRow';
+
+const IconButton: React.FC<{
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}> = ({ title, onClick, children }) => (
+  <button
+    type="button"
+    title={title}
+    aria-label={title}
+    onClick={onClick}
+    className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+  >
+    {children}
+  </button>
+);
+
+export const HistorySidePanel = memo(HistorySidePanelInner);
+HistorySidePanel.displayName = 'HistorySidePanel';

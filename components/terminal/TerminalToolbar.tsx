@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, FolderInput, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
+import { Check, ChevronRight, FolderInput, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host } from '../../types';
@@ -17,6 +17,7 @@ export interface TerminalToolbarProps {
     host?: Host;
     onOpenSFTP: () => void;
     onOpenScripts: () => void;
+    onOpenHistory?: () => void;
     onOpenTheme: () => void;
     onUpdateHost?: (host: Host) => void;
     showClose?: boolean;
@@ -37,6 +38,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     host,
     onOpenSFTP,
     onOpenScripts,
+    onOpenHistory,
     onOpenTheme,
     onUpdateHost,
     showClose,
@@ -70,6 +72,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     // decoder we can drive.
     const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && !isEtSession;
     const hidesSftp = isLocalTerminal || isSerialTerminal;
+    const historySupported = !!onOpenHistory && !isLocalTerminal && !isSerialTerminal && host?.protocol !== 'telnet';
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
     const activeButtonStyle: React.CSSProperties = {
@@ -186,6 +189,21 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                             <span className="flex-1 text-left truncate">{t("terminal.toolbar.scripts")}</span>
                         </button>
                     </PopoverClose>
+                    {historySupported && (
+                        <PopoverClose asChild>
+                            <button
+                                type="button"
+                                className={menuItemClass}
+                                disabled={status !== 'connected'}
+                                onClick={onOpenHistory}
+                            >
+                                <History size={12} className="shrink-0" />
+                                <span className="flex-1 text-left truncate">
+                                    {status === 'connected' ? t("terminal.toolbar.history") : t("terminal.toolbar.availableAfterConnect")}
+                                </span>
+                            </button>
+                        </PopoverClose>
+                    )}
                     <PopoverClose asChild>
                         <button type="button" className={menuItemClass} onClick={onOpenTheme}>
                             <Palette size={12} className="shrink-0" />

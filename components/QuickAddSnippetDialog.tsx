@@ -34,6 +34,11 @@ export interface QuickAddSnippetDialogProps {
   onCreatePackage?: (packagePath: string) => void;
 }
 
+export function getQuickAddSnippetInitialCommand(event: Event): string {
+  const detail = (event as CustomEvent<{ command?: unknown }>).detail;
+  return typeof detail?.command === 'string' ? detail.command : '';
+}
+
 export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   snippets,
   packages,
@@ -54,10 +59,10 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   // terminal-side ScriptsSidePanel + button. We reset form state on
   // every open so stale input from a previous cancel does not leak.
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
       setEditing(null);
       setLabel('');
-      setCommand('');
+      setCommand(getQuickAddSnippetInitialCommand(event));
       setPackagePath('');
       setNoAutoRun(false);
       setOpen(true);

@@ -1010,6 +1010,7 @@ const sessionOpsApi = createSessionOpsApi({
 const {
   getSessionRemoteInfo,
   getSessionDistroInfo,
+  readRemoteHistory,
   getSessionPwd,
   probeReceiveConflicts,
   removeRemoteFiles,
@@ -1028,6 +1029,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
   ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);
   ipcMain.handle("netcatty:ssh:distroInfo", getSessionDistroInfo);
+  ipcMain.handle("netcatty:ssh:readRemoteHistory", readRemoteHistory);
   ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
   ipcMain.handle("netcatty:ssh:stats", getServerStats);
   ipcMain.handle("netcatty:key:generate", generateKeyPair);

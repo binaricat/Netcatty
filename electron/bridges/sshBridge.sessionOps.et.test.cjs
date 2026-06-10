@@ -25,6 +25,10 @@ function fakeConn(stdout) {
 const LINUX_STATS =
   "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:|NET:";
 
+function quoteShellArg(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
 function makeApi(session, execOnEtSession, extra = {}) {
   const sessions = new Map([["et-1", session]]);
   return createSessionOpsApi({
@@ -33,6 +37,7 @@ function makeApi(session, execOnEtSession, extra = {}) {
     setTimeout,
     clearTimeout,
     execOnEtSession,
+    quoteShellArg,
     iconv: { encodingExists: () => true },
     sessionEncodings: new Map(),
     resetSessionDecoders: () => {},
@@ -152,4 +157,121 @@ test("getServerStats falls back to execOnEtSession when the direct ET companion 
   assert.equal(execFallbackCalls, 1);
   assert.equal(result.success, true);
   assert.equal(result.stats.memTotal, 8000);
+});
+
+test("readRemoteHistory probes ET sessions and parses the detected shell", async () => {
+  let command = "";
+  const stdout = [
+    "__NC_SHELL__zsh",
+    "__NC_ZSH__",
+    ": 1700000000:0;ls -la",
+    ": 1700000100:0;pwd",
+    "",
+  ].join("\n");
+  const api = makeApi(
+    { type: "et", sshUserHost: "alice@example.test", sshOptions: [], sshEnv: {} },
+    async (_session, cmd) => {
+      command = cmd;
+      return { success: true, stdout, stderr: "" };
+    },
+  );
+
+  const result = await api.readRemoteHistory(null, { sessionId: "et-1", limit: 500 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.shell, "zsh");
+  assert.match(result.zsh, /ls -la/);
+  assert.equal(result.bash, "");
+  assert.equal(result.fish, "");
+  assert.match(command, /^exec sh -c /);
+  assert.doesNotMatch(command, /^SH=/);
+  assert.match(command, /getent passwd/);
+  assert.match(command, /case "\$SH" in/);
+});
+
+test("readRemoteHistory reads ~/.bash_history over an SSH exec channel", async () => {
+  const stdout = ["__NC_SHELL__bash", "__NC_BASH__", "ls -la", "pwd", ""].join("\n");
+  const api = makeApi({ conn: fakeConn(stdout) }, async () => {
+    throw new Error("execOnEtSession should not be used for ssh sessions");
+  });
+
+  const result = await api.readRemoteHistory(null, { sessionId: "et-1" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.shell, "bash");
+  assert.match(result.bash, /ls -la/);
+  assert.match(result.bash, /pwd/);
+  assert.equal(result.zsh, "");
+});
+
+test("readRemoteHistory opens a Mosh stats companion when no conn exists", async () => {
+  const stdout = ["__NC_SHELL__bash", "__NC_BASH__", "make build", "git status", ""].join("\n");
+  const session = { type: "mosh", moshStatsAuth: { hostname: "h", password: "p" } };
+  let ensureCalls = 0;
+  const api = makeApi(
+    session,
+    async () => {
+      throw new Error("execOnEtSession should not be used for mosh sessions");
+    },
+    {
+      ensureMoshStatsConnection: async (s, id) => {
+        ensureCalls += 1;
+        assert.equal(s, session);
+        assert.equal(id, "et-1");
+        s.moshStatsConn = fakeConn(stdout);
+        return s.moshStatsConn;
+      },
+    },
+  );
+
+  const result = await api.readRemoteHistory({ sender: {} }, { sessionId: "et-1" });
+
+  assert.equal(ensureCalls, 1);
+  assert.equal(session.conn, undefined);
+  assert.equal(result.success, true);
+  assert.equal(result.shell, "bash");
+  assert.match(result.bash, /make build/);
+  assert.match(result.bash, /git status/);
+});
+
+test("readRemoteHistory reuses an existing Mosh companion without reconnecting", async () => {
+  const stdout = ["__NC_SHELL__zsh", "__NC_ZSH__", ": 1700000000:0;htop", ""].join("\n");
+  const session = { type: "mosh", moshStatsConn: fakeConn(stdout), moshStatsAuth: { hostname: "h" } };
+  const api = makeApi(
+    session,
+    async () => {
+      throw new Error("execOnEtSession should not be used for mosh sessions");
+    },
+    {
+      ensureMoshStatsConnection: async () => {
+        throw new Error("should not reconnect when a companion already exists");
+      },
+    },
+  );
+
+  const result = await api.readRemoteHistory(null, { sessionId: "et-1" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.shell, "zsh");
+  assert.match(result.zsh, /htop/);
+  assert.equal(session.conn, undefined);
+});
+
+test("readRemoteHistory reports pending while the Mosh handshake is still in progress", async () => {
+  const session = { type: "mosh" };
+  const api = makeApi(
+    session,
+    async () => {
+      throw new Error("execOnEtSession should not be used for mosh sessions");
+    },
+    {
+      ensureMoshStatsConnection: async () => null,
+    },
+  );
+
+  const result = await api.readRemoteHistory(null, { sessionId: "et-1" });
+
+  assert.equal(result.success, false);
+  assert.equal(result.pending, true);
+  assert.equal(session.conn, undefined);
 });

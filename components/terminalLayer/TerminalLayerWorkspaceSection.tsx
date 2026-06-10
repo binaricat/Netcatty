@@ -50,6 +50,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleOpenSftp,
     handleTerminalCwdChange,
     handleOpenScripts,
+    handleOpenHistory,
     handleOpenTheme,
     handleCloseSession,
     handleStatusChange,
@@ -157,6 +158,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onOpenSftp={handleOpenSftp}
           onTerminalCwdChange={handleTerminalCwdChange}
           onOpenScripts={handleOpenScripts}
+          onOpenHistory={handleOpenHistory}
           onOpenTheme={handleOpenTheme}
           onCloseSession={handleCloseSession}
           onStatusChange={handleStatusChange}
