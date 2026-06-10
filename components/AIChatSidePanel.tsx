@@ -860,22 +860,26 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
   ]);
 
-  const handleStop = useCallback(() => {
-    if (!activeSessionId) return;
-    const controller = abortControllersRef.current.get(activeSessionId);
+  const stopStreamingForSession = useCallback((sessionId: string) => {
+    const controller = abortControllersRef.current.get(sessionId);
     controller?.abort();
-    abortControllersRef.current.delete(activeSessionId);
-    setStreamingForScope(activeSessionId, false);
-    updateLastMessage(activeSessionId, msg => ({
+    abortControllersRef.current.delete(sessionId);
+    setStreamingForScope(sessionId, false);
+    updateLastMessage(sessionId, (msg) => ({
       ...msg,
       statusText: '',
       executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
     }));
-    clearAllPendingApprovals(activeSessionId);
+    clearAllPendingApprovals(sessionId);
     const bridge = getNetcattyBridge();
-    bridge?.aiCattyCancelExec?.(activeSessionId);
-    bridge?.aiSdkAgentCancel?.('', activeSessionId);
-  }, [activeSessionId, setStreamingForScope, updateLastMessage, abortControllersRef]);
+    bridge?.aiCattyCancelExec?.(sessionId);
+    bridge?.aiSdkAgentCancel?.('', sessionId);
+  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
+  const handleStop = useCallback(() => {
+    if (!activeSessionId) return;
+    stopStreamingForSession(activeSessionId);
+  }, [activeSessionId, stopStreamingForSession]);
 
   const handleSelectSession = useCallback(
     (sessionId: string) => {
@@ -891,15 +895,39 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const handleDeleteSession = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
+      const deletingActiveSession =
+        activeSessionId === sessionId
+        || persistedSessionId === sessionId
+        || (
+          explicitPanelView?.mode === 'session'
+          && explicitPanelView.sessionId === sessionId
+        );
       const deletingLastScopedSession =
         historySessions.length === 1 && historySessions[0]?.id === sessionId;
+
+      if (streamingSessionIds.has(sessionId)) {
+        stopStreamingForSession(sessionId);
+      }
+
       deleteSession(sessionId, scopeKey);
-      if (deletingLastScopedSession) {
+
+      if (deletingActiveSession || deletingLastScopedSession) {
         setShowHistory(false);
         ensureScopeDraft(defaultAgentId);
       }
     },
-    [deleteSession, defaultAgentId, ensureScopeDraft, historySessions, scopeKey],
+    [
+      activeSessionId,
+      deleteSession,
+      defaultAgentId,
+      ensureScopeDraft,
+      explicitPanelView,
+      historySessions,
+      persistedSessionId,
+      scopeKey,
+      stopStreamingForSession,
+      streamingSessionIds,
+    ],
   );
 
   const handleAgentChange = useCallback((agentId: string) => {
