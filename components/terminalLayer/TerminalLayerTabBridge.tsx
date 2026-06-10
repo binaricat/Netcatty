@@ -133,7 +133,10 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     if (!historySessionId) return null;
     return sessionHostsMap.get(historySessionId) ?? null;
   }, [historySessionId, sessionHostsMap]);
-  const focusedHostHistoryState = s.remoteHistory?.getState(focusedHost?.id ?? null);
+  const focusedHostHistoryState = s.remoteHistory?.getState(
+    focusedHost?.id ?? null,
+    historySessionId,
+  );
 
   const themeState = useTerminalThemePanelState({
     accentMode: s.accentMode,

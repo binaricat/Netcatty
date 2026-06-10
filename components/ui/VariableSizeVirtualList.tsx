@@ -56,6 +56,19 @@ function VariableSizeVirtualListInner<T>(
     const container = containerRef.current;
     if (!container) return;
 
+    const maxScroll = Math.max(0, layout.totalHeight - container.clientHeight);
+    if (container.scrollTop > maxScroll) {
+      container.scrollTop = maxScroll;
+      setScrollTop(maxScroll);
+    } else {
+      setScrollTop(container.scrollTop);
+    }
+  }, [layout.totalHeight, items.length]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
     const updateViewportHeight = () => {
       setViewportHeight(container.clientHeight);
     };

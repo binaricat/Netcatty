@@ -482,7 +482,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                 <HistorySidePanel
                   focusedHost={focusedHost}
                   focusedSessionId={historySessionId}
-                  state={remoteHistory.getState(focusedHost?.id)}
+                  state={remoteHistory.getState(focusedHost?.id, historySessionId)}
                   onFetch={remoteHistory.fetch}
                   onPasteToTerminal={handleHistoryPaste}
                   onRunInTerminal={handleHistoryRun}
