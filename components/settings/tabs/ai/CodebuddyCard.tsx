@@ -4,7 +4,6 @@ import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
 import type { AgentPathInfo } from "./types";
-import { ProviderIconBadge } from "./ProviderIconBadge";
 import { parseEnvLines, serializeEnvLines } from "./codebuddyConfigEnv";
 
 const INTERNET_ENV_OPTIONS = [
@@ -67,17 +66,11 @@ export const CodebuddyCard: React.FC<{
       : "text-amber-500";
 
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+    <div className="rounded-lg border bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <ProviderIconBadge providerId="codebuddy" size="sm" />
-            <span className="text-sm font-medium">{t('ai.codebuddy.title')}</span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 leading-5">
-            {t('ai.codebuddy.description')}
-          </p>
-        </div>
+        <p className="min-w-0 text-xs text-muted-foreground leading-5">
+          {t('ai.codebuddy.description')}
+        </p>
         <div className={cn("text-xs font-medium shrink-0", statusClassName)}>
           {statusText}
         </div>

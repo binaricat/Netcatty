@@ -3,7 +3,7 @@
  *
  * Sub-components live in ./ai/ directory:
  *   - ProviderCard, ProviderConfigForm, AddProviderDropdown
- *   - ModelSelector, ProviderIconBadge
+ *   - ModelSelector
  *   - CodexConnectionCard, ClaudeCodeCard, CodebuddyCard
  *   - SafetySettings
  */
@@ -35,7 +35,6 @@ import {
   getBridge,
   normalizeCodexBridgeError,
 } from "./ai/types";
-import { ProviderIconBadge } from "./ai/ProviderIconBadge";
 import { ProviderCard } from "./ai/ProviderCard";
 import { AddProviderDropdown } from "./ai/AddProviderDropdown";
 import { CodexConnectionCard } from "./ai/CodexConnectionCard";
@@ -614,7 +613,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
           <SettingsSection
             title={t('ai.codex')}
-            leading={<ProviderIconBadge providerId="openai" size="sm" />}
+            leading={<AgentIconBadge agent={{ id: "codex", icon: "openai", name: "Codex CLI" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
             <CodexConnectionCard
               pathInfo={codexPathInfo}
@@ -636,7 +635,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
           <SettingsSection
             title={t('ai.claude.title')}
-            leading={<ProviderIconBadge providerId="claude" size="sm" />}
+            leading={<AgentIconBadge agent={{ id: "claude", icon: "claude", name: "Claude Code" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
             <ClaudeCodeCard
               pathInfo={claudePathInfo}
@@ -655,7 +654,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
           <SettingsSection
             title={t('ai.copilot.title')}
-            leading={<ProviderIconBadge providerId="copilot" size="sm" />}
+            leading={<AgentIconBadge agent={{ id: "copilot", icon: "copilot", name: "GitHub Copilot CLI" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
             <CopilotCliCard
               pathInfo={copilotPathInfo}
@@ -668,7 +667,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
           <SettingsSection
             title={t('ai.cursor.title')}
-            leading={<AgentIconBadge agent={{ id: "cursor", icon: "cursor", name: "Cursor" }} size="xs" variant="plain" />}
+            leading={<AgentIconBadge agent={{ id: "cursor", icon: "cursor", name: "Cursor" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
             <CursorSdkCard
               pathInfo={cursorPathInfo}
@@ -681,7 +680,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
           <SettingsSection
             title={t('ai.codebuddy.title')}
-            leading={<ProviderIconBadge providerId="codebuddy" size="sm" />}
+            leading={<AgentIconBadge agent={{ id: "codebuddy", icon: "codebuddy", name: "CodeBuddy Code" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
             <CodebuddyCard
               pathInfo={codebuddyPathInfo}
@@ -752,20 +751,20 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               </>
             )}
           >
-            <SettingCard padded className="space-y-4">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">
+            <SettingCard padded className="space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground/80 leading-5">
                   {t('ai.userSkills.description')}
                 </p>
                 {userSkillsStatus?.directoryPath ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground/80">
                     {t('ai.userSkills.location')}:{" "}
                     <span className="font-mono">{userSkillsStatus.directoryPath}</span>
                   </p>
                 ) : null}
               </div>
 
-              <div className="text-sm text-muted-foreground">
+              <div className="text-xs text-muted-foreground/80">
                 {isLoadingUserSkills
                   ? t('ai.userSkills.loading')
                   : userSkillsStatus?.ok
@@ -777,25 +776,25 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
               </div>
 
               {userSkillsStatus?.ok && userSkillsStatus.skills && userSkillsStatus.skills.length > 0 ? (
-                <div className="space-y-3">
+                <div className="border-t border-border/60 divide-y divide-border/60">
                   {userSkillsStatus.skills.map((skill) => (
                     <div
                       key={skill.id}
-                      className="rounded-md border border-border/60 bg-background/70 p-3"
+                      className="py-3"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 space-y-1">
-                          <div className="font-medium">{skill.name}</div>
-                          <div className="text-sm text-muted-foreground">{skill.description}</div>
-                          <div className="text-xs text-muted-foreground font-mono break-all">
+                          <div className="text-sm font-medium">{skill.name}</div>
+                          <div className="text-xs text-muted-foreground leading-5">{skill.description}</div>
+                          <div className="text-xs text-muted-foreground/80 font-mono break-all">
                             {skill.directoryName}
                           </div>
                         </div>
                         <span
                           className={
                             skill.status === "ready"
-                              ? "rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600"
-                              : "rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600"
+                              ? "text-xs font-medium text-emerald-500 shrink-0"
+                              : "text-xs font-medium text-amber-500 shrink-0"
                           }
                         >
                           {skill.status === "ready"
@@ -804,7 +803,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                         </span>
                       </div>
                       {skill.warnings.length > 0 ? (
-                        <div className="mt-3 space-y-1 text-sm text-amber-700">
+                        <div className="mt-2 space-y-1 text-xs text-amber-500">
                           {skill.warnings.map((warning, index) => (
                             <div key={`${skill.id}-${index}`} className="flex items-start gap-2">
                               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -817,7 +816,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                   ))}
                 </div>
               ) : userSkillsStatus?.ok ? (
-                <div className="text-sm text-muted-foreground">
+                <div className="border-t border-border/60 pt-3 text-sm text-muted-foreground">
                   {t('ai.userSkills.empty')}
                 </div>
               ) : null}

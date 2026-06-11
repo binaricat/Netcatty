@@ -26,7 +26,7 @@ async function probeCursorSdkAvailability(shellEnv, options = {}) {
     installed: true,
     available: authenticated,
     authenticated,
-    authSource: hasEnvApiKey ? "CURSOR_API_KEY" : hasSettingsApiKey ? "settings" : null,
+    authSource: hasSettingsApiKey ? "settings" : hasEnvApiKey ? "CURSOR_API_KEY" : null,
     version: "Cursor SDK",
   };
 }
@@ -58,8 +58,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     for (const agent of knownAgents) {
       let cursorSdkStatus = null;
       if (agent.command === "cursor") {
-        if (!shellEnv.CURSOR_API_KEY) continue;
-        cursorSdkStatus = await probeCursorSdkAvailability(shellEnv);
+        cursorSdkStatus = await probeCursorSdkAvailability(shellEnv, {
+          apiKeyPresent: Boolean(options?.apiKeyPresent),
+        });
         if (!cursorSdkStatus.available) continue;
       }
 

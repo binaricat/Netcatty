@@ -54,6 +54,7 @@ export const CursorSdkCard: React.FC<{
   const hasStoredApiKey = Boolean(encryptedApiKey);
   const usesEnvApiKey = pathInfo?.authSource === "CURSOR_API_KEY";
   const hasAnyApiKey = hasStoredApiKey || usesEnvApiKey;
+  const canSave = !isSaving && !isDecrypting && (Boolean(apiKeyDraft.trim()) || hasStoredApiKey);
 
   const installStatus = isResolvingPath
     ? t("ai.cursor.detecting")
@@ -114,7 +115,13 @@ export const CursorSdkCard: React.FC<{
                 setSaved(false);
                 setApiKeyDraft(event.target.value);
               }}
-              placeholder={isDecrypting ? t("ai.providers.apiKey.decrypting") : t("ai.cursor.apiKeyPlaceholder")}
+              placeholder={
+                isDecrypting
+                  ? t("ai.providers.apiKey.decrypting")
+                  : usesEnvApiKey && !hasStoredApiKey
+                    ? t("ai.cursor.apiKeyPlaceholder.env")
+                    : t("ai.cursor.apiKeyPlaceholder")
+              }
               disabled={isDecrypting}
               className="w-full h-8 rounded-md border border-input bg-background px-3 pr-9 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
             />
@@ -127,7 +134,7 @@ export const CursorSdkCard: React.FC<{
               {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving || isDecrypting}>
+          <Button variant="outline" size="sm" onClick={handleSave} disabled={!canSave}>
             {saved ? <Check size={14} className="mr-1.5" /> : null}
             {saved ? t("ai.cursor.saved") : t("ai.cursor.saveApiKey")}
           </Button>
@@ -136,6 +143,16 @@ export const CursorSdkCard: React.FC<{
             {t("ai.cursor.check")}
           </Button>
         </div>
+        {usesEnvApiKey && !hasStoredApiKey ? (
+          <p className="text-[11px] text-muted-foreground leading-4">
+            {t("ai.cursor.apiKeyEnvHint")}
+          </p>
+        ) : null}
+        {usesEnvApiKey && hasStoredApiKey ? (
+          <p className="text-[11px] text-muted-foreground leading-4">
+            {t("ai.cursor.apiKeyOverrideHint")}
+          </p>
+        ) : null}
       </div>
     </div>
   );

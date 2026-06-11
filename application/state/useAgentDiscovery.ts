@@ -3,7 +3,7 @@ import type { DiscoveredAgent, ExternalAgentConfig } from '../../infrastructure/
 import { getExternalAgentSdkBackend } from '../../infrastructure/ai/managedAgents';
 
 interface NetcattyBridge {
-  aiDiscoverAgents(options?: { refreshShellEnv?: boolean }): Promise<DiscoveredAgent[]>;
+  aiDiscoverAgents(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<DiscoveredAgent[]>;
 }
 
 function getBridge(): NetcattyBridge | undefined {
@@ -19,20 +19,27 @@ export function useAgentDiscovery(
   const [discoveredAgents, setDiscoveredAgents] = useState<DiscoveredAgent[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
 
+  const cursorApiKeyPresent = externalAgents.some(
+    (agent) => agent.id === "discovered_cursor" && Boolean(agent.apiKey),
+  );
+
   const discover = useCallback(async (discoverOptions?: { refreshShellEnv?: boolean }) => {
     const bridge = getBridge();
     if (!bridge) return;
 
     setIsDiscovering(true);
     try {
-      const agents = await bridge.aiDiscoverAgents(discoverOptions);
+      const agents = await bridge.aiDiscoverAgents({
+        ...discoverOptions,
+        apiKeyPresent: cursorApiKeyPresent,
+      });
       setDiscoveredAgents(agents);
     } catch (err) {
       console.error('Agent discovery failed:', err);
     } finally {
       setIsDiscovering(false);
     }
-  }, []);
+  }, [cursorApiKeyPresent]);
 
   useEffect(() => {
     if (!enabled) return;

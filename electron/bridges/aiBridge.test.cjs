@@ -458,6 +458,30 @@ test("resolve-cli exposes Cursor SDK support when API key is saved in settings",
   }
 });
 
+test("resolve-cli reports settings as Cursor auth source when settings and env keys both exist", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => "/usr/local/bin/cursor",
+    shellEnv: { CURSOR_API_KEY: "env-key" },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "", apiKeyPresent: true },
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.authSource, "settings");
+  } finally {
+    restore();
+  }
+});
+
 test("resolve-cli can refresh shell env before resolving Cursor", async () => {
   let refreshed = false;
   const { bridge, restore } = loadBridgeWithMocks({
@@ -478,6 +502,28 @@ test("resolve-cli can refresh shell env before resolving Cursor", async () => {
 
     assert.equal(refreshed, true);
     assert.equal(result.available, true);
+  } finally {
+    restore();
+  }
+});
+
+test("discover exposes Cursor SDK support when API key is saved in settings", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const discover = ipcMain.handlers.get("netcatty:ai:agents:discover");
+    const agents = await discover({ sender: { id: 1 } }, { apiKeyPresent: true });
+    const cursor = agents.find((agent) => agent.command === "cursor");
+
+    assert.equal(cursor?.path, "cursor");
+    assert.equal(cursor?.available, true);
+    assert.equal(cursor?.authenticated, true);
+    assert.equal(cursor?.authSource, "settings");
   } finally {
     restore();
   }

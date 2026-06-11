@@ -163,13 +163,13 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
         </Button>
       )}
     >
-      <SettingCard padded className="space-y-4">
-        <p className="text-sm text-muted-foreground">
+      <SettingCard padded className="space-y-3">
+        <p className="text-xs text-muted-foreground/80 leading-5">
           {t("ai.quickMessages.description")}
         </p>
 
         {showEditor ? (
-          <div className="rounded-md border border-border/60 bg-background/70 p-4 space-y-3">
+          <div className="rounded-md border border-border/60 bg-background/40 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium">
                 {isCreating ? t("ai.quickMessages.createTitle") : t("ai.quickMessages.editTitle")}
@@ -249,23 +249,23 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
         ) : null}
 
         {sortedMessages.length > 0 ? (
-          <div className="space-y-2">
+          <div className="border-t border-border/60 divide-y divide-border/60">
             {sortedMessages.map((message) => (
               <div
                 key={message.id}
-                className="rounded-md border border-border/60 bg-background/70 p-3"
+                className="py-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-2">
-                      <MessageSquare size={14} className="text-primary/70 shrink-0" />
-                      <span className="font-medium">{message.name}</span>
-                      <span className="text-xs font-mono text-muted-foreground">/{message.slug}</span>
+                      <MessageSquare size={14} className="text-muted-foreground shrink-0" />
+                      <span className="text-sm font-medium">{message.name}</span>
+                      <span className="text-xs font-mono text-muted-foreground/80">/{message.slug}</span>
                     </div>
                     {message.description ? (
-                      <p className="text-sm text-muted-foreground">{message.description}</p>
+                      <p className="text-xs text-muted-foreground leading-5">{message.description}</p>
                     ) : null}
-                    <p className="text-xs text-muted-foreground/80 line-clamp-2 whitespace-pre-wrap">
+                    <p className="text-xs text-muted-foreground/70 line-clamp-2 whitespace-pre-wrap">
                       {message.content}
                     </p>
                   </div>
@@ -273,7 +273,7 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
                       onClick={() => beginEdit(message)}
                       aria-label={t("ai.quickMessages.editTitle")}
                     >
@@ -282,7 +282,7 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-destructive"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       onClick={() => handleDelete(message)}
                       aria-label={t("ai.quickMessages.confirmDelete", { name: message.name })}
                     >
@@ -294,8 +294,7 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
             ))}
           </div>
         ) : !showEditor ? (
-          <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
-            <MessageSquare size={24} className="mx-auto text-muted-foreground mb-2" />
+          <div className="border-t border-border/60 pt-3 text-sm text-muted-foreground">
             <p className="text-sm text-muted-foreground">{t("ai.quickMessages.empty")}</p>
           </div>
         ) : null}
