@@ -435,6 +435,8 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sidePanelOpenTabs,
     snippetPackages: s.snippetPackages,
     snippets: s.snippets,
+    updateSnippetPackages: s.updateSnippetPackages,
+    updateSnippets: s.updateSnippets,
     splitHorizontalHandlersRef: s.splitHorizontalHandlersRef,
     splitVerticalHandlersRef: s.splitVerticalHandlersRef,
     sshDebugLogsEnabled: s.sshDebugLogsEnabled,

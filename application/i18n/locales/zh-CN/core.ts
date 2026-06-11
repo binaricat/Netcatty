@@ -29,6 +29,7 @@ export const zhCNCoreMessages: Messages = {
   'common.right': '右侧',
   'common.more': '更多',
   'common.selectAHost': '选择主机',
+  'sort.manual': '手动顺序',
   'sort.az': 'A-z',
   'sort.za': 'Z-a',
   'sort.newest': '从新到旧',

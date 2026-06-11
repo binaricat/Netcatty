@@ -42,6 +42,7 @@ export const ruCoreMessages: Messages = {
   'common.more': 'Ещё',
   'common.selectAHost': 'Выберите хост',
   'common.selectAHostPlaceholder': 'Выберите хост...',
+  'sort.manual': 'Ручной порядок',
   'sort.az': 'А-Я',
   'sort.za': 'Я-А',
   'sort.newest': 'Сначала новые',

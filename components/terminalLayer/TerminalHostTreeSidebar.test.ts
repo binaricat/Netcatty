@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import type { Host } from '../../types';
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -24,7 +25,7 @@ const {
 } = await import('./TerminalHostTreeSidebar.tsx');
 const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import('../../application/state/terminalHostTreeAnimation.ts');
 
-const host = {
+const host: Host = {
   id: 'host-1',
   label: 'Ubuntu',
   hostname: '10.2.0.124',
@@ -34,7 +35,7 @@ const host = {
   tags: [],
   os: 'linux',
   createdAt: 1,
-} as const;
+};
 
 test('host tree sidebar is visually hidden when disabled even if it remains open', () => {
   assert.equal(isTerminalHostTreeSidebarVisible(true, false), false);

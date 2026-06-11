@@ -6,7 +6,7 @@ import type { LogView } from '../state/logViewState';
 import { scheduleAfterInstantThemeSwitch } from '../state/useActiveChromeTheme';
 import { terminalHostTreeStore } from '../state/terminalHostTreeStore';
 import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
-import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
+import type { GroupConfig, Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import {
   isHostTreeWorkTabSurface,
   resolveWorkTabActiveHostId,
@@ -16,6 +16,7 @@ interface AppHostTreeLayerProps {
   enabled: boolean;
   hosts: Host[];
   customGroups: string[];
+  groupConfigs: GroupConfig[];
   sessions: TerminalSession[];
   workspaces: Workspace[];
   editorTabs: readonly EditorTab[];
@@ -50,6 +51,7 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   enabled,
   hosts,
   customGroups,
+  groupConfigs,
   sessions,
   workspaces,
   editorTabs,
@@ -114,6 +116,7 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
         surfaceVisible={surfaceVisible}
         hosts={hosts}
         customGroups={customGroups}
+        groupConfigs={groupConfigs}
         resolvedPreviewTheme={resolvedPreviewTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}

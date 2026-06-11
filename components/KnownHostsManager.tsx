@@ -22,6 +22,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { useKnownHostsBackend } from "../application/state/useKnownHostsBackend";
 import { useStoredViewMode, ViewMode } from "../application/state/useStoredViewMode";
 import { fingerprintFromPublicKey } from "../domain/knownHosts";
+import { reorderVaultItems, sortByVaultOrder } from "../domain/vaultOrder";
 import { STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE } from "../infrastructure/config/storageKeys";
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
@@ -45,12 +46,14 @@ import {
   vaultHeaderSecondaryButtonClass,
 } from "./vault/VaultPageHeader";
 import { VaultEntityIcon, vaultPrimaryIconClass } from "./vault/VaultEntityIcon";
+import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 interface KnownHostsManagerProps {
   knownHosts: KnownHost[];
   hosts: Host[];
   onSave: (knownHost: KnownHost) => void;
   onUpdate: (knownHost: KnownHost) => void;
+  onReorder: (knownHosts: KnownHost[]) => void;
   onDelete: (id: string) => void;
   onConvertToHost: (knownHost: KnownHost) => void;
   onImportFromFile: (hosts: KnownHost[]) => void;
@@ -115,12 +118,13 @@ interface HostItemProps {
   knownHost: KnownHost;
   converted: boolean;
   viewMode: ViewMode;
+  reorderProps?: React.HTMLAttributes<HTMLDivElement>;
   onDelete: (id: string) => void;
   onConvertToHost: (knownHost: KnownHost) => void;
 }
 
 const HostItem = React.memo<HostItemProps>(
-  ({ knownHost, converted, viewMode, onDelete, onConvertToHost }) => {
+  ({ knownHost, converted, viewMode, reorderProps, onDelete, onConvertToHost }) => {
     const { t } = useI18n();
     // Disabled to reduce log noise - uncomment for debugging
     // console.log('[HostItem] render:', knownHost.hostname);
@@ -129,9 +133,12 @@ const HostItem = React.memo<HostItemProps>(
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div
+              {...reorderProps}
               className={cn(
+                reorderProps && "vault-drop-indicator-row",
                 "group cursor-pointer soft-card elevate rounded-xl h-[68px] px-3 py-2",
                 converted && "opacity-60",
+                reorderProps?.className,
               )}
             >
               {/* Quick action buttons on hover */}
@@ -202,9 +209,12 @@ const HostItem = React.memo<HostItemProps>(
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
+            {...reorderProps}
             className={cn(
+              reorderProps && "vault-drop-indicator-row",
               "group flex items-center gap-3 px-3 py-2 h-14 rounded-lg hover:bg-secondary/60 transition-colors cursor-pointer",
               converted && "opacity-60",
+              reorderProps?.className,
             )}
           >
             <VaultEntityIcon
@@ -263,6 +273,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   hosts,
   onSave: _onSave,
   onUpdate: _onUpdate,
+  onReorder,
   onDelete,
   onConvertToHost,
   onImportFromFile,
@@ -277,9 +288,10 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE,
     "grid",
   );
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [sortMode, setSortMode] = useState<SortMode>("manual");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const hasScannedRef = React.useRef(false);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
   const RENDER_LIMIT = 100; // Limit rendered items for performance
 
   // Define handleScanSystem before useEffect that depends on it
@@ -381,12 +393,14 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           return b.discoveredAt - a.discoveredAt;
         case "oldest":
           return a.discoveredAt - b.discoveredAt;
+        case "manual":
+          return 0;
         default:
           return 0;
       }
     });
 
-    return result;
+    return sortMode === "manual" ? sortByVaultOrder(result) : result;
   }, [knownHosts, deferredSearch, sortMode]);
 
   // Limit rendered items for performance
@@ -461,6 +475,18 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
 
   const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
 
+  const knownHostReorder = useVaultItemReorder({
+    containerRef: listRef,
+    viewMode,
+    dragType: "known-host-id",
+    targetAttribute: "data-known-host-id",
+    disabled: deferredSearch.trim().length > 0,
+    onReorder: (sourceId, targetId, position) => {
+      onReorder(reorderVaultItems(knownHosts, sourceId, targetId, position));
+      setSortMode("manual");
+    },
+  });
+
   // Memoize the rendered list to prevent re-renders
   const renderedItems = useMemo(() => {
     return displayedHosts.map((knownHost) => (
@@ -469,6 +495,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
         knownHost={knownHost}
         converted={convertedMap.get(knownHost.id) || false}
         viewMode={viewMode}
+        reorderProps={knownHostReorder.getItemReorderProps(knownHost.id, `known:${knownHost.id}`)}
         onDelete={handleDelete}
         onConvertToHost={handleConvertToHost}
       />
@@ -479,6 +506,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
     viewMode,
     handleDelete,
     handleConvertToHost,
+    knownHostReorder,
   ]);
 
   return (
@@ -527,6 +555,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           <SortDropdown
             value={sortMode}
             onChange={setSortMode}
+            modes={["manual", "az", "za", "newest", "oldest"]}
             className={vaultHeaderIconButtonClass}
           />
         </div>
@@ -565,12 +594,17 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
       {/* Content */}
       <ScrollArea className="flex-1">
         <div
+          ref={listRef}
           className={cn(
             "p-4",
             viewMode === "grid"
               ? "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3"
               : "flex flex-col gap-0",
           )}
+          onDragOverCapture={knownHostReorder.handleDragOverCapture}
+          onDragOver={knownHostReorder.handleDragOver}
+          onDropCapture={knownHostReorder.handleDropCapture}
+          onDragEndCapture={knownHostReorder.handleDragEndCapture}
         >
           {displayedHosts.length === 0 ? (
             <div

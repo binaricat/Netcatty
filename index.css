@@ -206,6 +206,81 @@
   background-color: hsl(var(--muted-foreground) / 0.36);
 }
 
+.vault-drop-indicator-row {
+  position: relative;
+}
+
+[data-vault-reorder-grid="true"] {
+  will-change: transform;
+  transition-property: opacity, box-shadow, border-color, background-color;
+  transition-duration: 150ms;
+}
+
+[data-vault-reorder-dragging="true"] {
+  opacity: 0.45;
+}
+
+.vault-drop-indicator-row::before,
+.vault-drop-indicator-row::after {
+  content: "";
+  position: absolute;
+  left: var(--vault-drop-indicator-left, 0.5rem);
+  right: var(--vault-drop-indicator-right, 0.5rem);
+  z-index: 30;
+  height: 2px;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 0 1px hsl(var(--background)), 0 0 12px hsl(var(--primary) / 0.36);
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0.96);
+  transition: opacity 90ms ease, transform 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.vault-drop-indicator-row::before {
+  top: -1px;
+}
+
+.vault-drop-indicator-row::after {
+  bottom: -1px;
+}
+
+.vault-drop-indicator-row[data-vault-drop-axis="x"]::before,
+.vault-drop-indicator-row[data-vault-drop-axis="x"]::after {
+  top: var(--vault-drop-indicator-top, 0.5rem);
+  bottom: var(--vault-drop-indicator-bottom, 0.5rem);
+  left: auto;
+  right: auto;
+  width: 2px;
+  height: auto;
+  transform: scaleY(0.96);
+}
+
+.vault-drop-indicator-row[data-vault-drop-axis="x"]::before {
+  left: -1px;
+}
+
+.vault-drop-indicator-row[data-vault-drop-axis="x"]::after {
+  right: -1px;
+}
+
+.vault-drop-indicator-row[data-vault-drop-position="before"]::before,
+.vault-drop-indicator-row[data-vault-drop-position="after"]::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.vault-drop-indicator-row[data-vault-drop-axis="x"][data-vault-drop-position="before"]::before,
+.vault-drop-indicator-row[data-vault-drop-axis="x"][data-vault-drop-position="after"]::after {
+  transform: scaleY(1);
+}
+
+.vault-drop-indicator-row[data-vault-drop-position="inside"] {
+  outline: 1px solid hsl(var(--primary) / 0.55);
+  outline-offset: -1px;
+  background-color: hsl(var(--primary) / 0.08);
+}
+
 @keyframes ripple {
   0% {
     transform: scale(0);

@@ -148,6 +148,8 @@ const SIDE_PANEL_CTX_KEYS = [
   'keys',
   'identities',
   'updateHosts',
+  'updateSnippets',
+  'updateSnippetPackages',
   'sftpDefaultViewMode',
   'sftpInitialLocationForTab',
   'sftpPendingUploadsForTab',

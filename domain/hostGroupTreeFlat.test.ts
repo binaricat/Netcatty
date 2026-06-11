@@ -16,7 +16,7 @@ const host = (id: string, label: string, group?: string): Host => ({
   os: 'linux',
 });
 
-test('flattenHostGroupTree emits group rows before visible children', () => {
+test('flattenHostGroupTree emits group rows before visible children in saved order', () => {
   const { groupTree, ungroupedHosts } = buildHostGroupTree(
     [
       host('1', 'web-1', 'prod/web'),
@@ -36,7 +36,59 @@ test('flattenHostGroupTree emits group rows before visible children', () => {
 
   assert.deepEqual(
     rows.map((row) => (row.kind === 'group' ? `g:${row.node.path}` : `h:${row.host.id}`)),
-    ['g:prod', 'g:prod/db', 'h:2', 'g:prod/web', 'h:1', 'h:3'],
+    ['g:prod', 'g:prod/web', 'h:1', 'g:prod/db', 'h:2', 'h:3'],
+  );
+});
+
+test('flattenHostGroupTree uses saved group order when provided', () => {
+  const { groupTree, ungroupedHosts } = buildHostGroupTree(
+    [
+      host('1', 'web-1', 'prod/web'),
+      host('2', 'db-1', 'prod/db'),
+    ],
+    ['prod/web', 'prod/db'],
+    [
+      { path: 'prod/db', order: 1000 },
+      { path: 'prod/web', order: 2000 },
+    ],
+  );
+
+  const rows = flattenHostGroupTree({
+    groupNodes: groupTree,
+    ungroupedHosts,
+    expandedPaths: new Set(['prod', 'prod/web', 'prod/db']),
+    searchActive: false,
+  });
+
+  assert.deepEqual(
+    rows.map((row) => (row.kind === 'group' ? `g:${row.node.path}` : `h:${row.host.id}`)),
+    ['g:prod', 'g:prod/db', 'h:2', 'g:prod/web', 'h:1'],
+  );
+});
+
+test('flattenHostGroupTree uses saved group order for host-only groups', () => {
+  const { groupTree, ungroupedHosts } = buildHostGroupTree(
+    [
+      host('1', 'web-1', 'prod/web'),
+      host('2', 'db-1', 'prod/db'),
+    ],
+    [],
+    [
+      { path: 'prod/db', order: 1000 },
+      { path: 'prod/web', order: 2000 },
+    ],
+  );
+
+  const rows = flattenHostGroupTree({
+    groupNodes: groupTree,
+    ungroupedHosts,
+    expandedPaths: new Set(['prod', 'prod/web', 'prod/db']),
+    searchActive: false,
+  });
+
+  assert.deepEqual(
+    rows.map((row) => (row.kind === 'group' ? `g:${row.node.path}` : `h:${row.host.id}`)),
+    ['g:prod', 'g:prod/db', 'h:2', 'g:prod/web', 'h:1'],
   );
 });
 

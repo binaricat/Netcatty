@@ -142,6 +142,8 @@ export type TerminalLayerStableSnapshot = {
   onSplitSession: TerminalLayerProps['onSplitSession'];
   isBroadcastEnabled: TerminalLayerProps['isBroadcastEnabled'];
   updateHosts: TerminalLayerProps['updateHosts'];
+  updateSnippets: TerminalLayerProps['updateSnippets'];
+  updateSnippetPackages: TerminalLayerProps['updateSnippetPackages'];
   sftpDefaultViewMode: TerminalLayerProps['sftpDefaultViewMode'];
   sftpDoubleClickBehavior: TerminalLayerProps['sftpDoubleClickBehavior'];
   sftpAutoSync: TerminalLayerProps['sftpAutoSync'];

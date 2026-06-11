@@ -21,6 +21,7 @@ export interface RuleCardProps {
     viewMode: ViewMode;
     isSelected: boolean;
     isPending: boolean;
+    reorderProps?: React.HTMLAttributes<HTMLDivElement>;
     onSelect: () => void;
     onEdit: () => void;
     onDuplicate: () => void;
@@ -35,6 +36,7 @@ export const RuleCard: React.FC<RuleCardProps> = ({
     viewMode,
     isSelected,
     isPending,
+    reorderProps,
     onSelect,
     onEdit,
     onDuplicate,
@@ -50,12 +52,15 @@ export const RuleCard: React.FC<RuleCardProps> = ({
         <ContextMenu>
             <ContextMenuTrigger>
                 <div
+                    {...reorderProps}
                     className={cn(
+                        reorderProps && "vault-drop-indicator-row",
                         "group cursor-pointer",
                         viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
-                        isSelected && "ring-2 ring-primary"
+                        isSelected && "ring-2 ring-primary",
+                        reorderProps?.className,
                     )}
                     onClick={onSelect}
                 >

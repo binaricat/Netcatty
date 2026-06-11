@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import type { Host } from '../../types';
+import type { VaultOrderPosition } from '../../domain/vaultOrder';
 
 export interface VaultHostTreeActions {
   onDeleteHost: (host: Host) => void;
@@ -16,6 +17,8 @@ export interface VaultHostTreeActions {
   cancelInlineHostEdit: () => void;
   moveHostToGroup: (hostId: string, groupPath: string | null) => void;
   moveGroup: (sourcePath: string, targetParent: string | null) => void;
+  reorderHost: (sourceHostId: string, targetHostId: string, position: VaultOrderPosition) => void;
+  reorderGroup: (sourcePath: string, targetPath: string, position: VaultOrderPosition) => boolean;
   managedGroupPaths?: Set<string>;
   onUnmanageGroup?: (groupPath: string) => void;
 }

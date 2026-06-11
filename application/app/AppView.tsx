@@ -146,6 +146,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           enabled={settings.showHostTreeSidebar}
           hosts={hosts}
           customGroups={customGroups}
+          groupConfigs={groupConfigs}
           sessions={sessions}
           workspaces={workspaces}
           editorTabs={editorTabs}
@@ -283,6 +284,8 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
           updateHosts={updateHosts}
+          updateSnippets={updateSnippets}
+          updateSnippetPackages={updateSnippetPackages}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}

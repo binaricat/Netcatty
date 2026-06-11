@@ -9,6 +9,7 @@ export interface KnownHost {
   discoveredAt: number;
   lastSeen?: number;
   convertedToHostId?: string; // If converted to managed host
+  order?: number;
 }
 
 // Shell History - records real commands executed in terminal sessions

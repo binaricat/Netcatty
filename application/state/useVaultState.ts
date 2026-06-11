@@ -37,6 +37,7 @@ import {
 } from "../../infrastructure/config/storageKeys";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import { mergeGlobalHistoryOnAppend } from "../../domain/globalHistory";
+import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
 import {
   decryptGroupConfigs,
   decryptHosts,
@@ -91,6 +92,7 @@ const migrateKey = (key: Partial<SSHKey>): SSHKey => {
       ((key.certificate ? "certificate" : "key") as KeyCategory),
     created: key.created || Date.now(),
     filePath: key.filePath,
+    order: key.order,
   };
 };
 
@@ -174,7 +176,7 @@ export const useVaultState = () => {
   const groupConfigsReadSeq = useRef(0);
 
   const updateHosts = useCallback((data: Host[]) => {
-    const cleaned = data.map(sanitizeHost);
+    const cleaned = normalizeVaultOrder(data.map(sanitizeHost));
     setHosts(cleaned);
     const ver = ++hostsWriteVersion.current;
     return encryptHosts(cleaned).then((enc) => {
@@ -184,9 +186,10 @@ export const useVaultState = () => {
   }, []);
 
   const updateKeys = useCallback((data: SSHKey[]) => {
-    setKeys(data);
+    const cleaned = normalizeVaultOrder(data);
+    setKeys(cleaned);
     const ver = ++keysWriteVersion.current;
-    return encryptKeys(data).then((enc) => {
+    return encryptKeys(cleaned).then((enc) => {
       if (ver === keysWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
     });
@@ -217,8 +220,9 @@ export const useVaultState = () => {
       category: (draft.category || 'key') as KeyCategory,
       created: Date.now(),
       filePath: draft.filePath,
+      order: getNextVaultOrder(keys),
     };
-    const updated = [...keys, newKey];
+    const updated = normalizeVaultOrder([...keys, newKey]);
     setKeys(updated);
     const ver = ++keysWriteVersion.current;
     void encryptKeys(updated).then((enc) => {
@@ -229,26 +233,29 @@ export const useVaultState = () => {
   }, [keys]);
 
   const updateIdentities = useCallback((data: Identity[]) => {
-    setIdentities(data);
+    const cleaned = normalizeVaultOrder(data);
+    setIdentities(cleaned);
     const ver = ++identitiesWriteVersion.current;
-    return encryptIdentities(data).then((enc) => {
+    return encryptIdentities(cleaned).then((enc) => {
       if (ver === identitiesWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_IDENTITIES, enc);
     });
   }, []);
 
   const updateProxyProfiles = useCallback((data: ProxyProfile[]) => {
-    setProxyProfiles(data);
+    const cleaned = normalizeVaultOrder(data);
+    setProxyProfiles(cleaned);
     const ver = ++proxyProfilesWriteVersion.current;
-    return encryptProxyProfiles(data).then((enc) => {
+    return encryptProxyProfiles(cleaned).then((enc) => {
       if (ver === proxyProfilesWriteVersion.current)
         localStorageAdapter.write(STORAGE_KEY_PROXY_PROFILES, enc);
     });
   }, []);
 
   const updateSnippets = useCallback((data: Snippet[]) => {
-    setSnippets(data);
-    localStorageAdapter.write(STORAGE_KEY_SNIPPETS, data);
+    const cleaned = normalizeVaultOrder(data);
+    setSnippets(cleaned);
+    localStorageAdapter.write(STORAGE_KEY_SNIPPETS, cleaned);
   }, []);
 
   const updateSnippetPackages = useCallback((data: string[]) => {
@@ -259,11 +266,39 @@ export const useVaultState = () => {
   const updateCustomGroups = useCallback((data: string[]) => {
     setCustomGroups(data);
     localStorageAdapter.write(STORAGE_KEY_GROUPS, data);
-  }, []);
+
+    const groupOrderByPath = new Map<string, number>(
+      data.map((path, index) => [path, (index + 1) * 1000]),
+    );
+    const existingConfigByPath = new Map<string, GroupConfig>(
+      groupConfigs.map((config) => [config.path, config]),
+    );
+    const orderedConfigs = data.map((path) => {
+      const existing = existingConfigByPath.get(path);
+      const base: GroupConfig = existing ? { ...existing } : { path };
+      return sanitizeGroupConfig({
+        ...base,
+        path,
+        order: groupOrderByPath.get(path),
+      });
+    });
+    const retainedConfigs = groupConfigs.filter((config) => !groupOrderByPath.has(config.path));
+    const cleanedGroupConfigs = normalizeVaultOrder([
+      ...orderedConfigs,
+      ...retainedConfigs.map(sanitizeGroupConfig),
+    ]);
+    setGroupConfigs(cleanedGroupConfigs);
+    const ver = ++groupConfigsWriteVersion.current;
+    void encryptGroupConfigs(cleanedGroupConfigs).then((enc) => {
+      if (ver === groupConfigsWriteVersion.current)
+        localStorageAdapter.write(STORAGE_KEY_GROUP_CONFIGS, enc);
+    });
+  }, [groupConfigs]);
 
   const updateKnownHosts = useCallback((data: KnownHost[]) => {
-    setKnownHosts(data);
-    localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, data);
+    const cleaned = normalizeVaultOrder(data);
+    setKnownHosts(cleaned);
+    localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, cleaned);
   }, []);
 
   const updateManagedSources = useCallback((data: ManagedSource[]) => {
@@ -277,7 +312,7 @@ export const useVaultState = () => {
     // pingfang-sc / comic-sans-ms override from an older client would
     // sit in memory and re-persist with `fontFamilyOverride: true` until
     // the next reload. Mirrors updateHosts → sanitizeHost.
-    const cleaned = data.map(sanitizeGroupConfig);
+    const cleaned = normalizeVaultOrder(data.map(sanitizeGroupConfig));
     setGroupConfigs(cleaned);
     const ver = ++groupConfigsWriteVersion.current;
     return encryptGroupConfigs(cleaned).then((enc) => {
@@ -402,6 +437,7 @@ export const useVaultState = () => {
       group: "",
       tags: [],
       protocol: "ssh",
+      order: getNextVaultOrder(hosts),
     };
 
     // Update the known host to mark it as converted using functional update
@@ -415,7 +451,7 @@ export const useVaultState = () => {
 
     // Add to hosts using functional update
     setHosts((prevHosts) => {
-      const updated = [...prevHosts, sanitizeHost(newHost)];
+      const updated = normalizeVaultOrder([...prevHosts, sanitizeHost(newHost)]);
       const ver = ++hostsWriteVersion.current;
       encryptHosts(updated).then((enc) => {
         if (ver === hostsWriteVersion.current)
@@ -425,7 +461,7 @@ export const useVaultState = () => {
     });
 
     return newHost;
-  }, []);
+  }, [hosts]);
 
   useEffect(() => {
     const init = async () => {
@@ -439,9 +475,11 @@ export const useVaultState = () => {
           const ver = ++hostsWriteVersion.current;
           const decrypted = await decryptHosts(savedHosts);
           if (ver === hostsWriteVersion.current) {
-            const sanitized = migrateHostsFromLegacyLineTimestamps(
-              decrypted.map(sanitizeHost),
-              readLegacyLineTimestampsEnabled(),
+            const sanitized = normalizeVaultOrder(
+              migrateHostsFromLegacyLineTimestamps(
+                decrypted.map(sanitizeHost),
+                readLegacyLineTimestampsEnabled(),
+              ),
             );
             setHosts(sanitized);
             encryptHosts(sanitized).then((enc) => {
@@ -479,8 +517,9 @@ export const useVaultState = () => {
           const keyVer = ++keysWriteVersion.current;
           const decryptedKeys = await decryptKeys(migratedKeys);
           if (keyVer === keysWriteVersion.current) {
-            setKeys(decryptedKeys);
-            encryptKeys(decryptedKeys).then((enc) => {
+            const orderedKeys = normalizeVaultOrder(decryptedKeys);
+            setKeys(orderedKeys);
+            encryptKeys(orderedKeys).then((enc) => {
               if (keyVer === keysWriteVersion.current)
                 localStorageAdapter.write(STORAGE_KEY_KEYS, enc);
             });
@@ -498,8 +537,9 @@ export const useVaultState = () => {
           const idVer = ++identitiesWriteVersion.current;
           const decryptedIds = await decryptIdentities(savedIdentities);
           if (idVer === identitiesWriteVersion.current) {
-            setIdentities(decryptedIds);
-            encryptIdentities(decryptedIds).then((enc) => {
+            const orderedIdentities = normalizeVaultOrder(decryptedIds);
+            setIdentities(orderedIdentities);
+            encryptIdentities(orderedIdentities).then((enc) => {
               if (idVer === identitiesWriteVersion.current)
                 localStorageAdapter.write(STORAGE_KEY_IDENTITIES, enc);
             });
@@ -512,8 +552,9 @@ export const useVaultState = () => {
           const proxyVer = ++proxyProfilesWriteVersion.current;
           const decryptedProfiles = await decryptProxyProfiles(savedProxyProfiles);
           if (proxyVer === proxyProfilesWriteVersion.current) {
-            setProxyProfiles(decryptedProfiles);
-            encryptProxyProfiles(decryptedProfiles).then((enc) => {
+            const orderedProfiles = normalizeVaultOrder(decryptedProfiles);
+            setProxyProfiles(orderedProfiles);
+            encryptProxyProfiles(orderedProfiles).then((enc) => {
               if (proxyVer === proxyProfilesWriteVersion.current)
                 localStorageAdapter.write(STORAGE_KEY_PROXY_PROFILES, enc);
             });
@@ -528,7 +569,11 @@ export const useVaultState = () => {
           STORAGE_KEY_SNIPPET_PACKAGES,
         );
 
-        if (savedSnippets) setSnippets(savedSnippets);
+        if (savedSnippets) {
+          const orderedSnippets = normalizeVaultOrder(savedSnippets);
+          setSnippets(orderedSnippets);
+          localStorageAdapter.write(STORAGE_KEY_SNIPPETS, orderedSnippets);
+        }
         else updateSnippets(INITIAL_SNIPPETS);
 
         if (savedGroups) setCustomGroups(savedGroups);
@@ -545,9 +590,10 @@ export const useVaultState = () => {
         );
         if (savedKnownHosts) {
           const normalized = normalizeKnownHosts(savedKnownHosts);
-          setKnownHosts(normalized);
-          if (normalized !== savedKnownHosts) {
-            localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, normalized);
+          const orderedKnownHosts = normalizeVaultOrder(normalized);
+          setKnownHosts(orderedKnownHosts);
+          if (normalized !== savedKnownHosts || orderedKnownHosts !== normalized) {
+            localStorageAdapter.write(STORAGE_KEY_KNOWN_HOSTS, orderedKnownHosts);
           }
         }
 
@@ -575,7 +621,7 @@ export const useVaultState = () => {
           const gcVer = ++groupConfigsWriteVersion.current;
           const decryptedGC = await decryptGroupConfigs(savedGroupConfigs);
           if (gcVer === groupConfigsWriteVersion.current) {
-            const sanitizedGC = decryptedGC.map(sanitizeGroupConfig);
+            const sanitizedGC = normalizeVaultOrder(decryptedGC.map(sanitizeGroupConfig));
             setGroupConfigs(sanitizedGC);
             encryptGroupConfigs(sanitizedGC).then((enc) => {
               if (gcVer === groupConfigsWriteVersion.current)
@@ -610,7 +656,7 @@ export const useVaultState = () => {
           // Discard if a newer storage event arrived OR a local write occurred
           // during the decrypt (writeVersion would have advanced).
           if (seq === hostsReadSeq.current && writeAtStart === hostsWriteVersion.current)
-            setHosts(dec.map(sanitizeHost));
+            setHosts(normalizeVaultOrder(dec.map(sanitizeHost)));
         });
         return;
       }
@@ -629,7 +675,7 @@ export const useVaultState = () => {
         const writeAtStart = keysWriteVersion.current;
         decryptKeys(migratedKeys).then((dec) => {
           if (seq === keysReadSeq.current && writeAtStart === keysWriteVersion.current)
-            setKeys(dec);
+            setKeys(normalizeVaultOrder(dec));
         });
         return;
       }
@@ -641,7 +687,7 @@ export const useVaultState = () => {
         const writeAtStart = identitiesWriteVersion.current;
         decryptIdentities(next).then((dec) => {
           if (seq === identitiesReadSeq.current && writeAtStart === identitiesWriteVersion.current)
-            setIdentities(dec);
+            setIdentities(normalizeVaultOrder(dec));
         });
         return;
       }
@@ -653,14 +699,14 @@ export const useVaultState = () => {
         const writeAtStart = proxyProfilesWriteVersion.current;
         decryptProxyProfiles(next).then((dec) => {
           if (seq === proxyProfilesReadSeq.current && writeAtStart === proxyProfilesWriteVersion.current)
-            setProxyProfiles(dec);
+            setProxyProfiles(normalizeVaultOrder(dec));
         });
         return;
       }
 
       if (key === STORAGE_KEY_SNIPPETS) {
         const next = safeParse<Snippet[]>(event.newValue) ?? [];
-        setSnippets(next);
+        setSnippets(normalizeVaultOrder(next));
         return;
       }
 
@@ -678,7 +724,7 @@ export const useVaultState = () => {
 
       if (key === STORAGE_KEY_KNOWN_HOSTS) {
         const next = safeParse<KnownHost[]>(event.newValue) ?? [];
-        setKnownHosts(normalizeKnownHosts(next));
+        setKnownHosts(normalizeVaultOrder(normalizeKnownHosts(next)));
         return;
       }
 
@@ -707,7 +753,7 @@ export const useVaultState = () => {
         const writeAtStart = groupConfigsWriteVersion.current;
         decryptGroupConfigs(next).then((dec) => {
           if (seq === groupConfigsReadSeq.current && writeAtStart === groupConfigsWriteVersion.current)
-            setGroupConfigs(dec.map(sanitizeGroupConfig));
+            setGroupConfigs(normalizeVaultOrder(dec.map(sanitizeGroupConfig)));
         });
         return;
       }

@@ -103,22 +103,20 @@ export function useVaultImportHandlers({
   
           if (isManaged && !filePath) {
             // Cannot proceed with managed import without a valid file path
-            toast({
-              title: t("vault.import.sshConfig.noFilePath"),
-              description: t("vault.import.sshConfig.noFilePathDesc"),
-              variant: "destructive",
-            });
+            toast.error(
+              t("vault.import.sshConfig.noFilePathDesc"),
+              t("vault.import.sshConfig.noFilePath"),
+            );
             return;
           }
   
           if (isManaged) {
             const existingSource = managedSources.find(s => s.filePath === filePath);
             if (existingSource) {
-              toast({
-                title: t("vault.import.sshConfig.alreadyManaged"),
-                description: t("vault.import.sshConfig.alreadyManagedDesc", { group: existingSource.groupName }),
-                variant: "destructive",
-              });
+              toast.error(
+                t("vault.import.sshConfig.alreadyManagedDesc", { group: existingSource.groupName }),
+                t("vault.import.sshConfig.alreadyManaged"),
+              );
               return;
             }
           }

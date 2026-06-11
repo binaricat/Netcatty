@@ -42,6 +42,7 @@ export const enCoreMessages: Messages = {
   'common.more': 'More',
   'common.selectAHost': 'Select a host',
   'common.selectAHostPlaceholder': 'Select a host...',
+  'sort.manual': 'Manual order',
   'sort.az': 'A-z',
   'sort.za': 'Z-a',
   'sort.newest': 'Newest to oldest',

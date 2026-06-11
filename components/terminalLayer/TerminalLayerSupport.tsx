@@ -506,6 +506,8 @@ export interface TerminalLayerProps {
   onToggleBroadcast?: (workspaceId: string) => void;
   // SFTP side panel
   updateHosts: (hosts: Host[]) => void;
+  updateSnippets?: (snippets: Snippet[]) => void;
+  updateSnippetPackages?: (packages: string[]) => void;
   sftpDefaultViewMode: 'list' | 'tree';
   sftpDoubleClickBehavior: 'open' | 'transfer';
   sftpAutoSync: boolean;

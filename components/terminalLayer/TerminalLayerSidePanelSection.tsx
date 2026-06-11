@@ -155,6 +155,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     terminalTheme,
     ThemeSidePanel,
     updateHosts,
+    updateSnippetPackages,
+    updateSnippets,
     validAIScopeTargetIds,
   } = ctx;
 
@@ -522,6 +524,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <ScriptsSidePanel
                     snippets={snippets}
                     packages={snippetPackages}
+                    onSnippetsChange={updateSnippets}
+                    onPackagesChange={updateSnippetPackages}
                     onSnippetClick={handleSnippetFromPanel}
                     isVisible={isVisibleScriptsPanel}
                   />

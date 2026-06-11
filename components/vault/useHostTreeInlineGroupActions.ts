@@ -85,7 +85,7 @@ export function useHostTreeInlineGroupActions({
       managedSources,
     });
 
-    if (!result.ok) {
+    if (result.ok === false) {
       if (result.error === 'unchanged') {
         hostTreeInlineGroupEditStore.clear();
         return;

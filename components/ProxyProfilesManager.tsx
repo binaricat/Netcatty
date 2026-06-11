@@ -13,7 +13,7 @@ import {
   SquareTerminal,
   Trash2,
 } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import {
@@ -22,6 +22,7 @@ import {
   isValidProxyPort,
   removeProxyProfileReferences,
 } from "../domain/proxyProfiles";
+import { reorderVaultItems, sortByVaultOrder } from "../domain/vaultOrder";
 import {
   STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE,
 } from "../infrastructure/config/storageKeys";
@@ -67,6 +68,7 @@ import {
   vaultProxyHttpIconClass,
   vaultProxySocksIconClass,
 } from "./vault/VaultEntityIcon";
+import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 interface ProxyProfilesManagerProps {
   proxyProfiles: ProxyProfile[];
@@ -130,6 +132,7 @@ interface ProxyProfileCardProps {
   usageCount: number;
   viewMode: ProxyProfilesViewMode;
   isSelected: boolean;
+  reorderProps?: React.ButtonHTMLAttributes<HTMLButtonElement>;
   onClick: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
@@ -141,6 +144,7 @@ const ProxyProfileCard: React.FC<ProxyProfileCardProps> = ({
   usageCount,
   viewMode,
   isSelected,
+  reorderProps,
   onClick,
   onEdit,
   onDuplicate,
@@ -158,14 +162,17 @@ const ProxyProfileCard: React.FC<ProxyProfileCardProps> = ({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
+          {...reorderProps}
           type="button"
           aria-label={accessibleLabel}
           className={cn(
+            reorderProps && "vault-drop-indicator-row",
             "group w-full text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             viewMode === "grid"
               ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
               : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
             isSelected && "ring-2 ring-primary",
+            reorderProps?.className,
           )}
           onClick={onClick}
         >
@@ -224,6 +231,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
     viewMode === "list" ? "list" : "grid";
   const [draft, setDraft] = useState<ProxyProfile | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProxyProfile | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const usageByProfileId = useMemo(() => {
     const map = new Map<string, number>();
@@ -235,14 +243,25 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
 
   const filteredProfiles = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return proxyProfiles;
-    return proxyProfiles.filter((profile) =>
+    const result = !q ? proxyProfiles : proxyProfiles.filter((profile) =>
       profile.label.toLowerCase().includes(q) ||
       profile.config.host.toLowerCase().includes(q) ||
       (profile.config.command || "").toLowerCase().includes(q) ||
       profile.config.type.toLowerCase().includes(q),
     );
+    return sortByVaultOrder(result);
   }, [proxyProfiles, search]);
+
+  const profileReorder = useVaultItemReorder({
+    containerRef: listRef,
+    viewMode: proxyProfilesViewMode,
+    dragType: "proxy-profile-id",
+    targetAttribute: "data-proxy-profile-id",
+    disabled: search.trim().length > 0,
+    onReorder: (sourceId, targetId, position) => {
+      onUpdateProxyProfiles(reorderVaultItems(proxyProfiles, sourceId, targetId, position));
+    },
+  });
 
   const updateDraftConfig = (field: keyof ProxyConfig, value: string | number) => {
     setDraft((prev) => {
@@ -397,7 +416,14 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
             </div>
         </VaultPageHeader>
 
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto"
+          onDragOverCapture={profileReorder.handleDragOverCapture}
+          onDragOver={profileReorder.handleDragOver}
+          onDropCapture={profileReorder.handleDropCapture}
+          onDragEndCapture={profileReorder.handleDragEndCapture}
+        >
           <div className="space-y-3 p-3">
             <div className="flex items-center justify-between">
               <h2 className={vaultSectionTitleClass}>
@@ -439,6 +465,7 @@ export const ProxyProfilesManager: React.FC<ProxyProfilesManagerProps> = ({
                     usageCount={usageByProfileId.get(profile.id) ?? 0}
                     viewMode={proxyProfilesViewMode}
                     isSelected={draft?.id === profile.id}
+                    reorderProps={profileReorder.getItemReorderProps(profile.id, `proxy:${profile.id}`)}
                     onClick={() => openEdit(profile)}
                     onEdit={() => openEdit(profile)}
                     onDuplicate={() => duplicateProfile(profile)}

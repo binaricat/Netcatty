@@ -6,6 +6,7 @@ import { STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE } from '../infrastructure/config/s
 import { cn, isMacPlatform } from '../lib/utils';
 import { Host, ProxyProfile, ShellHistoryEntry, Snippet, SSHKey } from '../types';
 import { HotkeyScheme, KeyBinding, keyEventToString, ManagedSource, matchesKeyBinding, parseKeyCombo } from '../domain/models';
+import { reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from '../domain/vaultOrder';
 import { Button } from './ui/button';
 import { ComboboxOption } from './ui/combobox';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './ui/context-menu';
@@ -26,6 +27,15 @@ import {
   vaultPrimaryIconClass,
   vaultSnippetIconClass,
 } from './vault/VaultEntityIcon';
+import {
+  clearVaultDropIndicator as clearSnippetDropIndicator,
+  getVaultDropIntent as getPackageDropIntent,
+  getVaultDropPosition as getDropPosition,
+  hasVaultDragType as hasDragType,
+  markVaultDropIndicator as markSnippetDropIndicator,
+  markVaultInsideDropIndicator as markSnippetInsideIndicator,
+  useVaultGridLayoutAnimation,
+} from './vault/vaultReorderDrag';
 
 interface SnippetsManagerProps {
   snippets: Snippet[];
@@ -94,7 +104,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE,
     'grid',
   );
-  const [sortMode, setSortMode] = useState<SortMode>('az');
+  const [sortMode, setSortMode] = useState<SortMode>('manual');
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const lastPreviewReorderRef = useRef<string | null>(null);
+  const draggingSnippetIdRef = useRef<string | null>(null);
+  const draggingPackagePathRef = useRef<string | null>(null);
+  const [draggingSnippetId, setDraggingSnippetId] = useState<string | null>(null);
+  const [draggingPackagePath, setDraggingPackagePath] = useState<string | null>(null);
+  const prepareGridLayoutAnimation = useVaultGridLayoutAnimation(listRef);
 
   const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const historyScrollRef = useRef<HTMLDivElement>(null);
@@ -298,6 +315,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         targets: targetSelection,
         shortkey: editingSnippet.shortkey,
         noAutoRun: editingSnippet.noAutoRun,
+        order: editingSnippet.order,
       });
       setRightPanelMode('none');
     }
@@ -336,6 +354,23 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
   };
 
   const displayedPackages = useMemo(() => {
+    const packageIndexByPath = new Map(packages.map((pkg, index) => [pkg, index]));
+    const getPackageDisplayOrder = (path: string) => {
+      const exactIndex = packageIndexByPath.get(path);
+      if (typeof exactIndex === 'number') return exactIndex;
+      const childIndex = packages.findIndex((pkg) => pkg.startsWith(path + '/'));
+      return childIndex >= 0 ? childIndex : Number.MAX_SAFE_INTEGER;
+    };
+    const sortBySavedPackageOrder = (
+      items: { name: string; path: string; count: number }[],
+    ) => {
+      return [...items].sort((a, b) => {
+        const orderDiff = getPackageDisplayOrder(a.path) - getPackageDisplayOrder(b.path);
+        if (orderDiff !== 0) return orderDiff;
+        return a.name.localeCompare(b.name);
+      });
+    };
+
     if (!selectedPackage) {
       const absolutePaths = packages.filter(p => p.startsWith('/'));
       const relativePaths = packages.filter(p => !p.startsWith('/'));
@@ -373,7 +408,7 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
         results.push({ name: displayName, path, count });
       });
       
-      return results;
+      return sortBySavedPackageOrder(results);
     }
     
     const prefix = selectedPackage + '/';
@@ -381,14 +416,14 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
       .filter((p) => p.startsWith(prefix))
       .map((p) => p.replace(prefix, '').split('/')[0])
       .filter((name): name is string => Boolean(name) && name.length > 0);
-    return Array.from(new Set(children)).map((name) => {
+    return sortBySavedPackageOrder(Array.from(new Set<string>(children)).map((name) => {
       const path = `${selectedPackage}/${name}`;
       const count = snippets.filter((s) => {
         const pkg = s.package || '';
         return pkg === path || pkg.startsWith(path + '/');
       }).length;
       return { name, path, count };
-    });
+    }));
   }, [packages, selectedPackage, snippets]);
 
   const displayedSnippets = useMemo(() => {
@@ -409,12 +444,16 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           return a.label.localeCompare(b.label);
         case 'za':
           return b.label.localeCompare(a.label);
+        case 'manual':
+          return 0;
         default:
           return 0;
       }
     });
-    return result;
+    return sortMode === 'manual' ? sortByVaultOrder(result) : result;
   }, [snippets, selectedPackage, search, sortMode]);
+
+  const isSearchActive = search.trim().length > 0;
 
   const breadcrumb = useMemo(() => {
     if (!selectedPackage) return [];
@@ -590,6 +629,178 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
     if (!sn) return;
     onSave({ ...sn, package: pkg || '' });
   };
+
+  const parentOfPackage = useCallback((path: string) => {
+    const parts = path.split('/').filter(Boolean);
+    const prefix = path.startsWith('/') ? '/' : '';
+    return prefix + parts.slice(0, -1).join('/');
+  }, []);
+
+  const resetSnippetDragState = useCallback(() => {
+    clearSnippetDropIndicator();
+    lastPreviewReorderRef.current = null;
+    draggingSnippetIdRef.current = null;
+    draggingPackagePathRef.current = null;
+    setDraggingSnippetId(null);
+    setDraggingPackagePath(null);
+  }, []);
+
+  const handleReorderDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const target = (event.target as Element | null)?.closest('[data-snippet-id], [data-pkg-path]');
+    if (!(target instanceof HTMLElement)) return;
+
+    const isGrid = viewMode === 'grid';
+    const targetSnippetId = target.getAttribute('data-snippet-id');
+    const targetPackage = target.getAttribute('data-pkg-path');
+    const isDraggingSnippet = Boolean(draggingSnippetIdRef.current) || hasDragType(event.dataTransfer, 'snippet-id');
+    const isDraggingPackage = Boolean(draggingPackagePathRef.current) || hasDragType(event.dataTransfer, 'pkg-path');
+    if (targetSnippetId && isDraggingSnippet) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const sourceSnippetId = draggingSnippetIdRef.current || event.dataTransfer.getData('snippet-id');
+      const position = getDropPosition(target, event.clientX, event.clientY, isGrid);
+      if (isGrid && sourceSnippetId && sourceSnippetId !== targetSnippetId) {
+        const targetSnippet = snippets.find((snippet) => snippet.id === targetSnippetId);
+        const sourceSnippet = snippets.find((snippet) => snippet.id === sourceSnippetId);
+        if (!targetSnippet || !sourceSnippet) return;
+        const previewKey = `${sourceSnippetId}:${targetSnippetId}:${position}`;
+        if (lastPreviewReorderRef.current === previewKey) return;
+        prepareGridLayoutAnimation();
+        lastPreviewReorderRef.current = previewKey;
+        const movedSnippets = snippets.map((snippet) =>
+          snippet.id === sourceSnippetId
+            ? { ...snippet, package: targetSnippet.package || '' }
+            : snippet,
+        );
+        onBulkSave(reorderVaultItems(movedSnippets, sourceSnippetId, targetSnippetId, position));
+        setSortMode('manual');
+        return;
+      }
+      markSnippetDropIndicator(target, position, isGrid ? 'x' : 'y');
+      return;
+    }
+    if (targetPackage && isDraggingSnippet) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      markSnippetInsideIndicator(target);
+      return;
+    }
+    if (targetPackage && isDraggingPackage) {
+      const sourcePackage = draggingPackagePathRef.current || event.dataTransfer.getData('pkg-path');
+      if (
+        sourcePackage &&
+        targetPackage.startsWith(`${sourcePackage}/`)
+      ) {
+        event.dataTransfer.dropEffect = 'none';
+        clearSnippetDropIndicator();
+        return;
+      }
+      const intent = getPackageDropIntent(target, event.clientX, event.clientY, isGrid);
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (intent === 'inside') {
+        markSnippetInsideIndicator(target);
+        return;
+      }
+      if (
+        isGrid &&
+        sourcePackage &&
+        parentOfPackage(sourcePackage) === parentOfPackage(targetPackage)
+      ) {
+        const previewKey = `package:${sourcePackage}:${targetPackage}:${intent}`;
+        if (lastPreviewReorderRef.current !== previewKey) {
+          prepareGridLayoutAnimation();
+          lastPreviewReorderRef.current = previewKey;
+          const sortablePackages = Array.from(new Set([...packages, sourcePackage, targetPackage]));
+          onPackagesChange(reorderVaultStrings(sortablePackages, sourcePackage, targetPackage, intent));
+          setSortMode('manual');
+        }
+        return;
+      }
+      markSnippetDropIndicator(target, intent, isGrid ? 'x' : 'y');
+      return;
+    }
+    event.dataTransfer.dropEffect = 'none';
+    clearSnippetDropIndicator();
+  }, [
+    onBulkSave,
+    onPackagesChange,
+    packages,
+    parentOfPackage,
+    prepareGridLayoutAnimation,
+    snippets,
+    viewMode,
+  ]);
+
+  const handleReorderDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const target = (event.target as Element | null)?.closest('[data-snippet-id], [data-pkg-path]');
+    clearSnippetDropIndicator();
+    if (!(target instanceof HTMLElement)) return;
+    const isGrid = viewMode === 'grid';
+
+    const sourceSnippetId = draggingSnippetIdRef.current || event.dataTransfer.getData('snippet-id');
+    const targetSnippetId = target.getAttribute('data-snippet-id');
+    if (sourceSnippetId && targetSnippetId) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (sourceSnippetId === targetSnippetId) {
+        lastPreviewReorderRef.current = null;
+        return;
+      }
+      const targetSnippet = snippets.find((snippet) => snippet.id === targetSnippetId);
+      const sourceSnippet = snippets.find((snippet) => snippet.id === sourceSnippetId);
+      if (!targetSnippet || !sourceSnippet) return;
+      const movedSnippets = snippets.map((snippet) =>
+        snippet.id === sourceSnippetId
+          ? { ...snippet, package: targetSnippet.package || '' }
+          : snippet,
+      );
+      const position = getDropPosition(target, event.clientX, event.clientY, isGrid);
+      const previewKey = `${sourceSnippetId}:${targetSnippetId}:${position}`;
+      if (!isGrid || lastPreviewReorderRef.current !== previewKey) {
+        prepareGridLayoutAnimation();
+        onBulkSave(reorderVaultItems(
+          movedSnippets,
+          sourceSnippetId,
+          targetSnippetId,
+          position,
+        ));
+      }
+      lastPreviewReorderRef.current = null;
+      setSortMode('manual');
+      return;
+    }
+
+    const sourcePackage = draggingPackagePathRef.current || event.dataTransfer.getData('pkg-path');
+    const targetPackage = target.getAttribute('data-pkg-path');
+    if (sourcePackage && targetPackage) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (sourcePackage === targetPackage) {
+        lastPreviewReorderRef.current = null;
+        return;
+      }
+      const intent = getPackageDropIntent(target, event.clientX, event.clientY, isGrid);
+      if (intent === 'inside') return;
+      if (parentOfPackage(sourcePackage) !== parentOfPackage(targetPackage)) return;
+      const sortablePackages = Array.from(new Set([...packages, sourcePackage, targetPackage]));
+      const previewKey = `package:${sourcePackage}:${targetPackage}:${intent}`;
+      if (!isGrid || lastPreviewReorderRef.current !== previewKey) {
+        prepareGridLayoutAnimation();
+        onPackagesChange(reorderVaultStrings(sortablePackages, sourcePackage, targetPackage, intent));
+      }
+      lastPreviewReorderRef.current = null;
+      setSortMode('manual');
+    }
+  }, [
+    onBulkSave,
+    onPackagesChange,
+    packages,
+    parentOfPackage,
+    prepareGridLayoutAnimation,
+    snippets,
+    viewMode,
+  ]);
 
   const packageOptions: ComboboxOption[] = useMemo(() => {
     const allPaths = new Set<string>();
@@ -792,7 +1003,13 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
           </div>
         )}
 
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+        <div
+          ref={listRef}
+          className="flex-1 space-y-3 overflow-y-auto px-4 pb-4"
+          onDragOverCapture={handleReorderDragOver}
+          onDropCapture={handleReorderDrop}
+          onDragEndCapture={resetSnippetDragState}
+        >
           {displayedPackages.length > 0 && !search.trim() && (
             <>
               <div className="flex items-center justify-between">
@@ -808,23 +1025,35 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     <ContextMenuTrigger>
                       <div
                         className={cn(
-                          "group cursor-pointer overflow-hidden",
+                          "vault-drop-indicator-row group cursor-pointer overflow-hidden",
                           viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
                         )}
+                        data-pkg-path={pkg.path}
+                        data-vault-grid-item={`snippet-package:${pkg.path}`}
+                        data-vault-reorder-grid={viewMode === 'grid' ? 'true' : undefined}
+                        data-vault-reorder-dragging={draggingPackagePath === pkg.path ? 'true' : undefined}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
                           e.dataTransfer.setData('pkg-path', pkg.path);
+                          draggingPackagePathRef.current = pkg.path;
+                          setDraggingPackagePath(pkg.path);
+                          lastPreviewReorderRef.current = null;
                         }}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => {
                           e.preventDefault();
-                          const sId = e.dataTransfer.getData('snippet-id');
-                          const pPath = e.dataTransfer.getData('pkg-path');
+                          const sId = draggingSnippetIdRef.current || e.dataTransfer.getData('snippet-id');
+                          const pPath = draggingPackagePathRef.current || e.dataTransfer.getData('pkg-path');
                           if (sId) moveSnippet(sId, pkg.path);
-                          if (pPath) movePackage(pPath, pkg.path);
+                          if (
+                            pPath &&
+                            getPackageDropIntent(e.currentTarget, e.clientX, e.clientY, viewMode === 'grid') === 'inside'
+                          ) {
+                            movePackage(pPath, pkg.path);
+                          }
                         }}
                         onClick={() => setSelectedPackage(pkg.path)}
                       >
@@ -864,15 +1093,22 @@ const SnippetsManager: React.FC<SnippetsManagerProps> = ({
                     <ContextMenuTrigger>
                       <div
                         className={cn(
-                          "group cursor-pointer overflow-hidden",
+                          "vault-drop-indicator-row group cursor-pointer overflow-hidden",
                           viewMode === 'grid'
                             ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                             : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors"
                         )}
-                        draggable
+                        data-snippet-id={isSearchActive ? undefined : snippet.id}
+                        data-vault-grid-item={`snippet:${snippet.id}`}
+                        data-vault-reorder-grid={viewMode === 'grid' ? 'true' : undefined}
+                        data-vault-reorder-dragging={draggingSnippetId === snippet.id ? 'true' : undefined}
+                        draggable={!isSearchActive}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
                           e.dataTransfer.setData('snippet-id', snippet.id);
+                          draggingSnippetIdRef.current = snippet.id;
+                          setDraggingSnippetId(snippet.id);
+                          lastPreviewReorderRef.current = null;
                         }}
                         onClick={() => handleEdit(snippet)}
                       >

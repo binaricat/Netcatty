@@ -1,4 +1,5 @@
-import type { GroupNode, Host } from '../types';
+import type { GroupConfig, GroupNode, Host } from '../types';
+import { sortByVaultOrder, sortVaultStringsByOrder } from './vaultOrder';
 
 function countAllHostsInNode(node: GroupNode): number {
   let count = node.hosts.length;
@@ -12,7 +13,32 @@ function countAllHostsInNode(node: GroupNode): number {
 export function buildHostGroupTree(
   hosts: Host[],
   customGroups: string[],
+  groupConfigs: GroupConfig[] = [],
 ): { groupTree: GroupNode[]; ungroupedHosts: Host[] } {
+  const groupOrderByPath = new Map(
+    groupConfigs
+      .filter((config) => typeof config.order === 'number' && Number.isFinite(config.order))
+      .map((config) => [config.path, config.order as number]),
+  );
+  const orderedCustomGroups = sortVaultStringsByOrder(customGroups, groupOrderByPath);
+  const sortGroupNodesBySavedOrder = (nodes: GroupNode[]) => {
+    const originalIndex = new Map(nodes.map((node, index) => [node.path, index]));
+    return [...nodes].sort((a, b) => {
+      const orderA = groupOrderByPath.get(a.path);
+      const orderB = groupOrderByPath.get(b.path);
+      const hasOrderA = typeof orderA === 'number' && Number.isFinite(orderA);
+      const hasOrderB = typeof orderB === 'number' && Number.isFinite(orderB);
+      if (hasOrderA && hasOrderB && orderA !== orderB) return orderA - orderB;
+      if (hasOrderA) return -1;
+      if (hasOrderB) return 1;
+      return (originalIndex.get(a.path) ?? 0) - (originalIndex.get(b.path) ?? 0);
+    });
+  };
+  const sortChildrenBySavedOrder = (node: GroupNode) => {
+    const sortedChildren = sortGroupNodesBySavedOrder(Object.values(node.children));
+    node.children = Object.fromEntries(sortedChildren.map((child) => [child.name, child]));
+    sortedChildren.forEach(sortChildrenBySavedOrder);
+  };
   const root: Record<string, GroupNode> = {};
   const insertPath = (path: string, host?: Host) => {
     const parts = path.split('/').filter(Boolean);
@@ -35,7 +61,7 @@ export function buildHostGroupTree(
     });
   };
 
-  customGroups.forEach((path) => insertPath(path));
+  orderedCustomGroups.forEach((path) => insertPath(path));
   const ungroupedHosts: Host[] = [];
   for (const host of hosts) {
     const group = host.group?.trim();
@@ -47,9 +73,10 @@ export function buildHostGroupTree(
   }
 
   Object.values(root).forEach(countAllHostsInNode);
-  const groupTree = Object.values(root).sort((a, b) => a.name.localeCompare(b.name));
-  ungroupedHosts.sort((a, b) => a.label.localeCompare(b.label));
-  return { groupTree, ungroupedHosts };
+  const groupTree = sortGroupNodesBySavedOrder(Object.values(root));
+  groupTree.forEach(sortChildrenBySavedOrder);
+  const orderedUngroupedHosts = sortByVaultOrder(ungroupedHosts);
+  return { groupTree, ungroupedHosts: orderedUngroupedHosts };
 }
 
 export function groupNodeContainsHost(node: GroupNode, hostId: string | null | undefined): boolean {

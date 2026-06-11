@@ -37,7 +37,7 @@ import {
   STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED,
 } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
-import type { GroupNode, Host, TerminalTheme } from '../../types';
+import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
 import { MessageResponse } from '../ai-elements/message';
@@ -58,6 +58,40 @@ const SIDEBAR_MAX_WIDTH = TERMINAL_HOST_TREE_MAX_WIDTH;
 const HOST_TREE_DRAG_HOST_ID = 'host-id';
 const HOST_TREE_DRAG_GROUP_PATH = 'group-path';
 
+let activeHostTreeDropIndicator: HTMLElement | null = null;
+
+const clearHostTreeDropIndicators = (_root: ParentNode | null) => {
+  activeHostTreeDropIndicator?.removeAttribute('data-vault-drop-position');
+  activeHostTreeDropIndicator = null;
+};
+
+const markHostTreeDropIndicator = (
+  target: HTMLElement,
+  clientY: number,
+) => {
+  const rect = target.getBoundingClientRect();
+  const position = clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+  if (target.dataset.vaultDropPosition === position) return;
+  clearHostTreeDropIndicators(target.ownerDocument);
+  target.dataset.vaultDropPosition = position;
+  activeHostTreeDropIndicator = target;
+};
+
+const getHostTreeDropZone = (
+  target: HTMLElement,
+  clientY: number,
+): 'before' | 'inside' | 'after' => {
+  const rect = target.getBoundingClientRect();
+  const offset = clientY - rect.top;
+  const edgeSize = Math.max(6, Math.min(12, rect.height * 0.28));
+  if (offset <= edgeSize) return 'before';
+  if (offset >= rect.height - edgeSize) return 'after';
+  return 'inside';
+};
+
+const hasDragType = (dataTransfer: DataTransfer, type: string) =>
+  Array.from(dataTransfer.types).includes(type);
+
 type HostTreeDropTarget =
   | { kind: 'root' }
   | { kind: 'group'; path: string };
@@ -67,6 +101,7 @@ interface TerminalHostTreeSidebarProps {
   surfaceVisible?: boolean;
   hosts: Host[];
   customGroups: string[];
+  groupConfigs?: GroupConfig[];
   resolvedPreviewTheme: TerminalTheme;
   activeHostId?: string | null;
   onConnect: (host: Host) => void;
@@ -266,8 +301,10 @@ type HostTreeFlatRowProps = {
   onConnect: (host: Host) => void;
   onTogglePath: (path: string) => void;
   onDragOverTarget: (target: HostTreeDropTarget) => void;
+  onClearDragOverTarget: () => void;
   onDragLeaveRow: (event: React.DragEvent<HTMLDivElement>) => void;
   onDropToParent: (targetParent: string | null, dataTransfer: DataTransfer) => void;
+  onDropToRow: (row: HostTreeFlatRow, event: React.DragEvent<HTMLDivElement>) => boolean;
   theme: HostTreeTheme;
   menuActions: ReturnType<typeof useVaultHostTreeActions>;
 };
@@ -284,8 +321,10 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   onConnect,
   onTogglePath,
   onDragOverTarget,
+  onClearDragOverTarget,
   onDragLeaveRow,
   onDropToParent,
+  onDropToRow,
   theme,
   menuActions,
 }) => {
@@ -306,7 +345,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
         data-active={isActive ? 'true' : 'false'}
         data-drag-over={isDragOver ? 'true' : 'false'}
         className={cn(
-          'flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm',
+          'vault-drop-indicator-row flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm',
         )}
         style={{
           height: TREE_ROW_HEIGHT,
@@ -323,15 +362,24 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
           if (!canDrag) return;
           event.preventDefault();
           event.stopPropagation();
-          onDragOverTarget(hostDropParent ? { kind: 'group', path: hostDropParent } : { kind: 'root' });
+          if (hasDragType(event.dataTransfer, HOST_TREE_DRAG_HOST_ID)) {
+            markHostTreeDropIndicator(event.currentTarget, event.clientY);
+            onClearDragOverTarget();
+          } else {
+            clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
+            onDragOverTarget(hostDropParent ? { kind: 'group', path: hostDropParent } : { kind: 'root' });
+          }
         }}
         onDragLeave={onDragLeaveRow}
         onDrop={(event) => {
           if (!canDrag) return;
           event.preventDefault();
           event.stopPropagation();
+          clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
+          if (onDropToRow(row, event)) return;
           onDropToParent(hostDropParent, event.dataTransfer);
         }}
+        onDragEnd={(event) => clearHostTreeDropIndicators(event.currentTarget.ownerDocument)}
         onMouseEnter={(event) => {
           if (!isActive && !isDragOver) event.currentTarget.style.backgroundColor = theme.rowHoverBg;
         }}
@@ -412,7 +460,7 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
       data-expanded={isExpanded ? 'true' : 'false'}
       data-drag-over={isDragOver ? 'true' : 'false'}
       className={cn(
-        'flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm font-medium',
+        'vault-drop-indicator-row flex min-w-0 items-center gap-1 px-2 cursor-pointer select-none text-sm font-medium',
       )}
       style={{
         height: TREE_ROW_HEIGHT,
@@ -430,6 +478,14 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
         if (!canDrag) return;
         event.preventDefault();
         event.stopPropagation();
+        const isDraggingGroup = hasDragType(event.dataTransfer, HOST_TREE_DRAG_GROUP_PATH);
+        const zone = getHostTreeDropZone(event.currentTarget, event.clientY);
+        if (isDraggingGroup && zone !== 'inside') {
+          onClearDragOverTarget();
+          markHostTreeDropIndicator(event.currentTarget, event.clientY);
+          return;
+        }
+        clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
         onDragOverTarget({ kind: 'group', path: node.path });
       }}
       onDragLeave={onDragLeaveRow}
@@ -437,8 +493,13 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
         if (!canDrag) return;
         event.preventDefault();
         event.stopPropagation();
+        clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
+        const isDraggingGroup = hasDragType(event.dataTransfer, HOST_TREE_DRAG_GROUP_PATH);
+        const zone = getHostTreeDropZone(event.currentTarget, event.clientY);
+        if (isDraggingGroup && zone !== 'inside' && onDropToRow(row, event)) return;
         onDropToParent(node.path, event.dataTransfer);
       }}
+      onDragEnd={(event) => clearHostTreeDropIndicators(event.currentTarget.ownerDocument)}
       onMouseEnter={(event) => {
         if (!isDragOver) event.currentTarget.style.backgroundColor = theme.rowHoverBg;
       }}
@@ -513,8 +574,10 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   if (prev.theme !== next.theme) return false;
   if (prev.menuActions !== next.menuActions) return false;
   if (prev.onDragOverTarget !== next.onDragOverTarget) return false;
+  if (prev.onClearDragOverTarget !== next.onClearDragOverTarget) return false;
   if (prev.onDragLeaveRow !== next.onDragLeaveRow) return false;
   if (prev.onDropToParent !== next.onDropToParent) return false;
+  if (prev.onDropToRow !== next.onDropToRow) return false;
   if (prev.onTogglePath !== next.onTogglePath) return false;
   if (prev.onConnect !== next.onConnect) return false;
   if (prev.activeHostId === next.activeHostId) return true;
@@ -533,6 +596,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   surfaceVisible = true,
   hosts,
   customGroups,
+  groupConfigs = [],
   resolvedPreviewTheme,
   activeHostId,
   onConnect,
@@ -592,8 +656,8 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   }, [hosts, selectedTags]);
 
   const { groupTree, ungroupedHosts } = useMemo(
-    () => buildHostGroupTree(tagFilteredHosts, customGroups),
-    [tagFilteredHosts, customGroups],
+    () => buildHostGroupTree(tagFilteredHosts, customGroups, groupConfigs),
+    [tagFilteredHosts, customGroups, groupConfigs],
   );
 
   const searchTerm = search.trim();
@@ -683,6 +747,31 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     clearDragOver();
   }, [clearDragOver, menuActions]);
 
+  const handleDropToRow = useCallback((row: HostTreeFlatRow, event: React.DragEvent<HTMLDivElement>) => {
+    if (!menuActions) return false;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    if (row.kind === 'host') {
+      const hostId = event.dataTransfer.getData(HOST_TREE_DRAG_HOST_ID);
+      if (hostId && hostId !== row.host.id) {
+        menuActions.reorderHost(hostId, row.host.id, position);
+        clearDragOver();
+        return true;
+      }
+      return false;
+    }
+
+    const groupPath = event.dataTransfer.getData(HOST_TREE_DRAG_GROUP_PATH);
+    if (groupPath && groupPath !== row.node.path) {
+      const handled = menuActions.reorderGroup(groupPath, row.node.path, position);
+      if (handled) {
+        clearDragOver();
+        return true;
+      }
+    }
+    return false;
+  }, [clearDragOver, menuActions]);
+
   const handleDragOverTarget = useCallback((target: HostTreeDropTarget) => {
     setDragOverTarget(target);
   }, []);
@@ -692,6 +781,7 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
       return;
     }
+    clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
     clearDragOver();
   }, [clearDragOver]);
 
@@ -706,12 +796,14 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
       return;
     }
+    clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
     clearDragOver();
   }, [clearDragOver]);
 
   const handleRootDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!canDrag) return;
     event.preventDefault();
+    clearHostTreeDropIndicators(event.currentTarget.ownerDocument);
     handleDropToParent(null, event.dataTransfer);
   }, [canDrag, handleDropToParent]);
 
@@ -780,20 +872,24 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
       onConnect={onConnect}
       onTogglePath={togglePath}
       onDragOverTarget={handleDragOverTarget}
+      onClearDragOverTarget={clearDragOver}
       onDragLeaveRow={handleDragLeaveRow}
       onDropToParent={handleDropToParent}
+      onDropToRow={handleDropToRow}
       theme={theme}
       menuActions={menuActions}
     />
   ), [
     activeHostId,
     canDrag,
+    clearDragOver,
     expandedPaths,
     inlineEdit,
     inlineHostEdit,
     handleDragLeaveRow,
     handleDragOverTarget,
     handleDropToParent,
+    handleDropToRow,
     isRowDragOver,
     menuActions,
     onConnect,
