@@ -100,10 +100,10 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex max-h-[min(90vh,720px)] max-w-md flex-col overflow-hidden"
+        className="flex max-h-[min(88vh,680px)] w-[min(92vw,560px)] max-w-none flex-col overflow-hidden"
         onKeyDown={handleKeyDown}
       >
-        <DialogHeader className="shrink-0">
+        <DialogHeader className="shrink-0 pr-8">
           <DialogTitle>{t('systemManager.tmux.newSessionTitle')}</DialogTitle>
           <DialogDescription>{t('systemManager.tmux.newSessionDesc')}</DialogDescription>
         </DialogHeader>
@@ -146,6 +146,9 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
                 value={command}
                 onChange={handleCommandChange}
                 placeholder={t('systemManager.tmux.newSessionCommandPlaceholder')}
+                defaultHeight={150}
+                maxHeight={260}
+                persistHeight={false}
               />
               <p className="text-[11px] text-muted-foreground">
                 {t('systemManager.tmux.newSessionCommandHint')}
@@ -158,7 +161,7 @@ export const TmuxNewSessionModal = memo(function TmuxNewSessionModal({
                 selectedId={selectedSnippetId}
                 onSelect={handleSnippetSelect}
                 showTitle={false}
-                className="min-h-[280px]"
+                className="h-[240px] min-h-[240px]"
               />
               {selectedSnippet && (
                 <p className="text-[11px] text-muted-foreground">
