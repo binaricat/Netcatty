@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
+import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
 import { VaultHostListSection } from "./VaultHostListSection";
 import {
   VaultHeaderSearch,
@@ -701,7 +702,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           groupConfigs={groupConfigs}
           onImportKey={onImportOrReuseKey}
           onSave={(host) => {
-            onUpdateHosts(upsertHostById(hosts, host));
+            const latestHost = hosts.find((entry: { id: string }) => entry.id === host.id);
+            const nextHost = preserveConcurrentHostLineTimestampUpdate({
+              draft: host,
+              openedHost: editingHost,
+              latestHost,
+            });
+            onUpdateHosts(upsertHostById(hosts, nextHost));
             setIsHostPanelOpen(false);
             setEditingHost(null);
             setNewHostGroupPath(null);

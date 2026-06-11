@@ -7,6 +7,7 @@ import {
   migrateHostsFromLegacyLineTimestamps,
   normalizeDistroId,
   normalizePrimaryTelnetState,
+  preserveConcurrentHostLineTimestampUpdate,
   resolveHostKeepalive,
   resolveTelnetPort,
   resolveTelnetPassword,
@@ -133,6 +134,28 @@ test("migrateHostsFromLegacyLineTimestamps fills only missing host choices", () 
     { ...inherited, showLineTimestamps: true },
     disabled,
   ]);
+});
+
+test("preserves a concurrent terminal timestamp toggle when host details did not edit it", () => {
+  const openedHost = makeHost({ showLineTimestamps: false });
+  const latestHost = makeHost({ showLineTimestamps: true });
+  const draft = makeHost({ label: "Edited label", showLineTimestamps: false });
+
+  assert.deepEqual(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }),
+    { ...draft, showLineTimestamps: true },
+  );
+});
+
+test("keeps host details timestamp value when the details form edits it", () => {
+  const openedHost = makeHost({ showLineTimestamps: false });
+  const latestHost = makeHost({ showLineTimestamps: false });
+  const draft = makeHost({ showLineTimestamps: true });
+
+  assert.equal(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }).showLineTimestamps,
+    true,
+  );
 });
 
 test("normalizePrimaryTelnetState preserves an explicit telnet port", () => {

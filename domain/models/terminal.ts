@@ -112,7 +112,7 @@ export interface TerminalSettings {
 
   // Rendering
   rendererType: 'auto' | 'webgl' | 'dom'; // Terminal renderer: auto (detect based on hardware), webgl, or dom
-  showLineTimestamps: boolean; // Prefix terminal output lines with timestamps before rendering
+  showLineTimestamps: boolean; // Show output timestamps in a side gutter
 
   // Autocomplete
   autocompleteEnabled: boolean; // Enable terminal command autocomplete
@@ -289,7 +289,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
-  showLineTimestamps: false, // Opt-in: prefixes terminal output data before rendering
+  showLineTimestamps: false, // Opt-in: shows output timestamps beside terminal lines
   autocompleteEnabled: true, // Autocomplete enabled by default
   autocompleteGhostText: false, // Mutually exclusive with popup menu
   autocompletePopupMenu: true, // Popup menu enabled by default

@@ -1,5 +1,7 @@
 import { Host, TerminalSession, TerminalTheme } from './models';
 
+export type TerminalHostUpdate = Pick<Host, 'id'> & Partial<Host>;
+
 const hasLegacyStringValue = (value: string | undefined): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -40,9 +42,10 @@ export const clearHostFontSizeOverride = (host: Host): Host => ({
 
 export const mergeTerminalHostUpdate = (
   savedHost: Host,
-  terminalHostUpdate: Host,
+  terminalHostUpdate: TerminalHostUpdate,
 ): Host => {
   const nextHost: Host = {
+    ...savedHost,
     ...terminalHostUpdate,
     id: savedHost.id,
     protocol: savedHost.protocol,

@@ -9,7 +9,7 @@ import {
   closeOrphanBackendSession,
   getFlowController,
   isTerminalBootActive,
-  resetTerminalOutputTimestamps,
+  resetTerminalLineTimestampState,
   tryAttachSessionToTerminal,
   writeSessionData,
   writeTerminalLine,
@@ -1079,7 +1079,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       ctx.sessionRef.current = id;
       getFlowController(ctx, term).reset();
-      resetTerminalOutputTimestamps(term);
+      resetTerminalLineTimestampState(term);
       ctx.disposeDataRef.current = ctx.terminalBackend.onSessionData(id, (chunk) => {
         writeSessionData(ctx, term, chunk);
         if (!ctx.hasConnectedRef.current) {

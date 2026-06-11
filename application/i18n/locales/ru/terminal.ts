@@ -51,6 +51,8 @@ export const ruTerminalMessages: Messages = {
   'terminal.toolbar.terminalSettings': 'Настройки терминала',
   'terminal.toolbar.searchTerminal': 'Поиск по терминалу',
   'terminal.toolbar.search': 'Поиск',
+  'terminal.toolbar.timestampsEnable': 'Показать время',
+  'terminal.toolbar.timestampsDisable': 'Скрыть время',
   'terminal.toolbar.broadcast': 'Трансляция',
   'terminal.toolbar.broadcastEnable': 'Включить режим трансляции',
   'terminal.toolbar.broadcastDisable': 'Отключить режим трансляции',

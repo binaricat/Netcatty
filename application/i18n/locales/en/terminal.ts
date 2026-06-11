@@ -30,6 +30,8 @@ export const enTerminalMessages: Messages = {
   'terminal.toolbar.terminalSettings': 'Terminal settings',
   'terminal.toolbar.searchTerminal': 'Search terminal',
   'terminal.toolbar.search': 'Search',
+  'terminal.toolbar.timestampsEnable': 'Show timestamps',
+  'terminal.toolbar.timestampsDisable': 'Hide timestamps',
   'terminal.toolbar.broadcast': 'Broadcast',
   'terminal.toolbar.broadcastEnable': 'Enable Broadcast Mode',
   'terminal.toolbar.broadcastDisable': 'Disable Broadcast Mode',

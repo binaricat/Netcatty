@@ -129,6 +129,25 @@ test("terminal updates still persist SFTP bookmarks", () => {
   ]);
 });
 
+test("partial terminal updates preserve unrelated saved host fields", () => {
+  const hostWithAppearance: Host = {
+    ...savedHost,
+    fontSize: undefined,
+    fontSizeOverride: false,
+    showLineTimestamps: false,
+  };
+
+  const merged = mergeTerminalHostUpdate(hostWithAppearance, {
+    id: hostWithAppearance.id,
+    showLineTimestamps: true,
+  });
+
+  assert.equal(merged.showLineTimestamps, true);
+  assert.equal(merged.fontSize, undefined);
+  assert.equal(merged.fontSizeOverride, false);
+  assert.equal(merged.hostname, hostWithAppearance.hostname);
+});
+
 test("applySessionFontSizeToHost overlays workspace pane font size", () => {
   const host: Host = {
     id: "host-1",

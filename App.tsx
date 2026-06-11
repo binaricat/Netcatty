@@ -28,6 +28,7 @@ import { resolveHostAuth } from './domain/sshAuth';
 import { isEncryptedCredentialPlaceholder } from './domain/credentials';
 import {
   mergeTerminalHostUpdate,
+  type TerminalHostUpdate,
 } from './domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from './domain/connectionLog';
 import { collectSessionIds } from './domain/workspace';
@@ -874,7 +875,7 @@ function App({ settings }: { settings: SettingsState }) {
     }
   }, [updateSessionStatus, updateHostLastConnected]);
 
-  const handleUpdateHostFromTerminal = useCallback((host: Host) => {
+  const handleUpdateHostFromTerminal = useCallback((host: TerminalHostUpdate) => {
     updateHosts(hosts.map((h) => (
       h.id === host.id ? mergeTerminalHostUpdate(h, host) : h
     )));

@@ -613,7 +613,10 @@ test("local session runs startup command after attaching", async () => {
 
 test("local session resets terminal timestamp state when reusing a terminal", async () => {
   const writes: string[] = [];
+  const markerLines: number[] = [];
+  const disposedMarkerLines: number[] = [];
   let onData: ((data: string) => void) | null = null;
+  let cursorLine = 0;
 
   const terminalBackend = {
     backendAvailable: () => true,
@@ -681,7 +684,25 @@ test("local session resets terminal timestamp state when reusing a terminal", as
     buffer: { active: { type: "normal" } },
     write: (data: string, callback?: () => void) => {
       writes.push(data);
+      for (const char of data) {
+        if (char === "\n") {
+          cursorLine += 1;
+        }
+      }
       callback?.();
+    },
+    registerMarker: (offset: number) => {
+      const line = cursorLine + offset;
+      markerLines.push(line);
+      const marker = {
+        line,
+        isDisposed: false,
+        dispose() {
+          marker.isDisposed = true;
+          disposedMarkerLines.push(line);
+        },
+      };
+      return marker;
     },
     writeln: noop,
     scrollToBottom: noop,
@@ -694,9 +715,10 @@ test("local session resets terminal timestamp state when reusing a terminal", as
   onData?.("fresh");
 
   assert.equal(writes.length, 2);
-  assert.equal((writes[0].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
-  assert.equal((writes[1].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
-  assert.ok(writes[1].endsWith("] \x1b[22;39mfresh"));
+  assert.equal(writes[0], "unfinished");
+  assert.equal(writes[1], "fresh");
+  assert.deepEqual(markerLines, [0, 0]);
+  assert.deepEqual(disposedMarkerLines, [0]);
 });
 
 test("session data waits for prior terminal writes before evaluating prompt line breaks", async () => {

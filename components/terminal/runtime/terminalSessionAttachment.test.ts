@@ -10,18 +10,39 @@ import {
 
 const createFakeTerm = (activeType = "normal") => {
   const writes: string[] = [];
+  const markerLines: number[] = [];
+  const disposedMarkerLines: number[] = [];
+  let cursorLine = 0;
   const term = {
     buffer: {
       active: { type: activeType },
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
+      for (const char of data) {
+        if (char === "\n") {
+          cursorLine += 1;
+        }
+      }
       callback?.();
+    },
+    registerMarker(offset: number) {
+      const line = cursorLine + offset;
+      markerLines.push(line);
+      const marker = {
+        line,
+        isDisposed: false,
+        dispose() {
+          marker.isDisposed = true;
+          disposedMarkerLines.push(line);
+        },
+      };
+      return marker;
     },
     scrollToBottom() {},
   } as unknown as XTerm;
 
-  return { term, writes };
+  return { term, writes, markerLines, disposedMarkerLines };
 };
 
 const createContext = (showLineTimestamps: boolean, host: Record<string, unknown> = {}) => ({
@@ -43,53 +64,68 @@ const createContext = (showLineTimestamps: boolean, host: Record<string, unknown
   promptLineBreakStateRef: { current: undefined },
 });
 
-test("writeSessionData prefixes terminal output lines when enabled", () => {
-  const { term, writes } = createFakeTerm();
+test("writeSessionData records terminal output timestamps without changing output bytes", () => {
+  const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "hello\r\nnext");
 
-  assert.equal(writes.length, 1);
-  assert.equal((writes[0].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 2);
-  assert.ok(writes[0].includes("\x1b[2;90m["));
-  assert.ok(writes[0].includes("] \x1b[22;39mhello\r\n\x1b[2;90m["));
-  assert.ok(writes[0].endsWith("] \x1b[22;39mnext"));
+  assert.equal(writes.join(""), "hello\r\nnext");
+  assert.equal((writes.join("").match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 0);
+  assert.deepEqual(markerLines, [0, 1]);
 });
 
-test("writeSessionData does not use the global timestamp setting", () => {
-  const { term, writes } = createFakeTerm();
+test("writeSessionData records timestamps independently of display settings", () => {
+  const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(true, { showLineTimestamps: false }) as never, term, "hello");
 
   assert.deepEqual(writes, ["hello"]);
+  assert.deepEqual(markerLines, [0]);
 });
 
-test("writeSessionData only prefixes timestamps for hosts with timestamps enabled", () => {
-  const { term, writes } = createFakeTerm();
+test("writeSessionData records timestamps for hosts with timestamps enabled", () => {
+  const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "hello");
 
-  assert.equal(writes.length, 1);
-  assert.equal((writes[0].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
+  assert.equal(writes.join(""), "hello");
+  assert.deepEqual(markerLines, [0]);
 });
 
 test("writeSessionData skips timestamps on the alternate screen", () => {
-  const { term, writes } = createFakeTerm("alternate");
+  const { term, writes, markerLines } = createFakeTerm("alternate");
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "vim screen");
 
   assert.deepEqual(writes, ["vim screen"]);
+  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData does not timestamp output that enters alternate screen in the same chunk", () => {
-  const { term, writes } = createFakeTerm();
+  const { term, writes, markerLines } = createFakeTerm();
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "\x1b[?1049hvim screen");
 
   assert.deepEqual(writes, ["\x1b[?1049hvim screen"]);
+  assert.deepEqual(markerLines, []);
 });
 
 test("writeSessionData resumes timestamps after leaving alternate screen in the same chunk", () => {
-  const { term, writes } = createFakeTerm("alternate");
+  const { term, writes, markerLines } = createFakeTerm("alternate");
   writeSessionData(createContext(false, { showLineTimestamps: true }) as never, term, "\x1b[?1049lprompt");
 
-  assert.equal(writes.length, 1);
-  assert.ok(writes[0].startsWith("\x1b[?1049l\x1b[2;90m["));
-  assert.ok(writes[0].endsWith("] \x1b[22;39mprompt"));
+  assert.equal(writes.join(""), "\x1b[?1049lprompt");
+  assert.deepEqual(markerLines, [0]);
+});
+
+test("writeSessionData keeps recording while the latest host display setting changes", () => {
+  const { term, writes, markerLines, disposedMarkerLines } = createFakeTerm();
+  const ctx = createContext(false, { showLineTimestamps: false });
+
+  writeSessionData(ctx as never, term, "before\r\n");
+  ctx.host = { showLineTimestamps: true };
+  writeSessionData(ctx as never, term, "enabled\r\n");
+  ctx.host = { showLineTimestamps: false };
+  writeSessionData(ctx as never, term, "disabled");
+
+  assert.equal(writes.join(""), "before\r\nenabled\r\ndisabled");
+  assert.deepEqual(markerLines, [0, 1, 2]);
+  assert.deepEqual(disposedMarkerLines, []);
 });
 
 test("attachSessionToTerminal resets timestamp state for a reused terminal", () => {
@@ -119,8 +155,7 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
   writeSessionData(ctx as never, term, "fresh");
 
   assert.equal(writes.length, 2);
-  assert.equal((writes[1].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
-  assert.ok(writes[1].endsWith("] \x1b[22;39mfresh"));
+  assert.equal(writes[1], "fresh");
 });
 
 test("attachSessionToTerminal hints for sudo password prompts and fills on confirm", () => {

@@ -257,6 +257,22 @@ export const migrateHostsFromLegacyLineTimestamps = (
   return changed ? migrated : hosts;
 };
 
+export const preserveConcurrentHostLineTimestampUpdate = ({
+  draft,
+  openedHost,
+  latestHost,
+}: {
+  draft: Host;
+  openedHost?: Host | null;
+  latestHost?: Host | null;
+}): Host => {
+  if (!openedHost || !latestHost) return draft;
+  if (draft.id !== openedHost.id || draft.id !== latestHost.id) return draft;
+  if (draft.showLineTimestamps !== openedHost.showLineTimestamps) return draft;
+  if (latestHost.showLineTimestamps === openedHost.showLineTimestamps) return draft;
+  return { ...draft, showLineTimestamps: latestHost.showLineTimestamps };
+};
+
 export const upsertHostById = (hosts: Host[], host: Host): Host[] => {
   const hostExists = hosts.some((entry) => entry.id === host.id);
   return hostExists
