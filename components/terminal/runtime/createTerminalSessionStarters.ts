@@ -1124,6 +1124,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
         ctx.onSessionExit?.(ctx.sessionId, evt);
       });
+
+      ctx.onSessionAttached?.(id);
+      scheduleStartupCommand(ctx, term, id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.setError(message);

@@ -1,17 +1,177 @@
-import { X } from 'lucide-react';
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Copy, Minus, Square, Unplug, X } from 'lucide-react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { I18nProvider, useI18n } from '../application/i18n/I18nProvider';
 import { canReuseTerminalConnection } from '../application/state/terminalConnectionReuse';
 import { useSettingsState } from '../application/state/useSettingsState';
 import { useTerminalPopupWindow } from '../application/state/useTerminalPopupWindow';
 import { useVaultState } from '../application/state/useVaultState';
 import { useWindowControls } from '../application/state/useWindowControls';
+import { shouldCloseTerminalPopupOnExit } from '../application/state/resolveTerminalSessionExitIntent';
 import type { TerminalPopupPayload } from '../domain/systemManager/types';
+import type { TerminalTheme } from '../domain/models';
 import type { Host } from '../types';
+import { cn } from '../lib/utils';
 
 const Terminal = lazy(() => import('./Terminal'));
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const POPUP_STARTUP_REVEAL_EXTRA_DELAY_MS = 900;
+const POPUP_STARTUP_REVEAL_MIN_DELAY_MS = 1500;
+const POPUP_STARTUP_REVEAL_MAX_DELAY_MS = 12000;
+
+type PopupThemeVars = React.CSSProperties & Record<string, string>;
+
+const buildPopupThemeVars = (theme: TerminalTheme): PopupThemeVars => {
+  const { colors } = theme;
+  return {
+    '--terminal-popup-bg': colors.background,
+    '--terminal-popup-fg': colors.foreground,
+    '--terminal-popup-muted': colors.foreground,
+    '--terminal-popup-accent': colors.cursor,
+    '--terminal-popup-control-hover': `color-mix(in srgb, ${colors.foreground} 10%, transparent)`,
+  };
+};
+
+function TerminalPopupWindowControls({ mac, onClose }: { mac: boolean; onClose: () => void }) {
+  const { minimize, maximize, isMaximized: fetchIsMaximized } = useWindowControls();
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchIsMaximized().then((value) => {
+      if (!cancelled) setIsWindowMaximized(!!value);
+    });
+    const handleResize = () => {
+      void fetchIsMaximized().then((value) => setIsWindowMaximized(!!value));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [fetchIsMaximized]);
+
+  const handleMaximize = async () => {
+    const value = await maximize();
+    setIsWindowMaximized(!!value);
+  };
+
+  if (mac) return null;
+
+  const buttonClass =
+    'app-no-drag flex h-10 w-11 items-center justify-center text-[color:var(--terminal-popup-muted)] transition-colors hover:bg-[color:var(--terminal-popup-control-hover)] hover:text-[color:var(--terminal-popup-fg)]';
+
+  return (
+    <div className="app-no-drag ml-auto flex h-10 shrink-0 items-center">
+      <button type="button" onClick={() => void minimize()} className={buttonClass} aria-label="Minimize">
+        <Minus size={15} />
+      </button>
+      <button type="button" onClick={() => void handleMaximize()} className={buttonClass} aria-label={isWindowMaximized ? 'Restore' : 'Maximize'}>
+        {isWindowMaximized ? <Copy size={14} /> : <Square size={13} />}
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        className="app-no-drag flex h-10 w-11 items-center justify-center text-[color:var(--terminal-popup-fg)] opacity-80 transition-colors hover:bg-[color:var(--terminal-popup-control-hover)] hover:opacity-100"
+        aria-label="Close"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+function TerminalPopupSpinner() {
+  return (
+    <div className="h-full flex-1 flex items-center justify-center bg-[color:var(--terminal-popup-bg)] text-[color:var(--terminal-popup-fg)]">
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 28 28"
+        aria-label="Loading"
+        className="opacity-80"
+      >
+        <circle
+          cx="14"
+          cy="14"
+          r="11"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          opacity="0.18"
+        />
+        <path
+          d="M25 14a11 11 0 0 0-11-11"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2"
+        >
+          <animateTransform
+            attributeName="transform"
+            dur="0.75s"
+            from="0 14 14"
+            repeatCount="indefinite"
+            to="360 14 14"
+            type="rotate"
+          />
+        </path>
+      </svg>
+    </div>
+  );
+}
+
+function TerminalPopupBlank() {
+  return (
+    <div className="h-full flex-1 bg-[color:var(--terminal-popup-bg)]" />
+  );
+}
+
+function TerminalPopupStartupError({
+  message,
+  closeLabel,
+  onClose,
+}: {
+  message: string;
+  closeLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center bg-[color:var(--terminal-popup-bg)] px-6 text-center text-[color:var(--terminal-popup-fg)]">
+      <Unplug size={24} className="mb-3 opacity-45" />
+      <div className="max-w-[300px] text-xs leading-5 opacity-70">{message}</div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="app-no-drag mt-4 h-7 rounded px-3 text-[11px] opacity-70 transition-colors hover:bg-[color:var(--terminal-popup-control-hover)] hover:opacity-100"
+      >
+        {closeLabel}
+      </button>
+    </div>
+  );
+}
+
+function TerminalPopupTitleIcon({ icon }: { icon: TerminalPopupPayload['icon'] }) {
+  if (!icon) return null;
+  if (icon.kind !== 'image' || !icon.src) return null;
+  return (
+    <span
+      className="pointer-events-none ml-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px]"
+      style={{
+        backgroundColor: icon.backgroundColor ?? 'transparent',
+      }}
+    >
+      <img
+        src={icon.src}
+        alt={icon.alt ?? ''}
+        width={11}
+        height={11}
+        className="max-h-[11px] max-w-[11px] rounded-[2px] object-contain"
+        draggable={false}
+      />
+    </span>
+  );
+}
 
 /** Fallback when the parent session's host is no longer in the vault (e.g. quick connect). */
 function buildHostFromSession(source: TerminalPopupPayload['sourceSession']): Host {
@@ -37,7 +197,13 @@ function TerminalPopupPageInner() {
   const settings = useSettingsState();
   const { isInitialized: vaultInitialized, hosts, keys, identities, knownHosts, snippets, snippetPackages } = useVaultState();
   const [config, setConfig] = useState<TerminalPopupPayload | null>(null);
+  const [terminalReady, setTerminalReady] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const sessionId = useMemo(() => crypto.randomUUID(), []);
+  const popupThemeVars = useMemo(
+    () => buildPopupThemeVars(settings.currentTerminalTheme),
+    [settings.currentTerminalTheme],
+  );
 
   useEffect(() => {
     const unsubscribe = onPopupConfig((payload) => {
@@ -73,37 +239,66 @@ function TerminalPopupPageInner() {
   }, [config]);
 
   const ready = Boolean(config && host && vaultInitialized);
+  const startupRevealDelayMs = useMemo(() => {
+    if (!config?.startupCommand) return 0;
+    const configuredDelay = settings.terminalSettings?.startupCommandDelayMs;
+    const startupDelay = typeof configuredDelay === 'number' && Number.isFinite(configuredDelay)
+      ? Math.max(0, configuredDelay)
+      : 600;
+    return Math.min(
+      POPUP_STARTUP_REVEAL_MAX_DELAY_MS,
+      Math.max(POPUP_STARTUP_REVEAL_MIN_DELAY_MS, startupDelay + POPUP_STARTUP_REVEAL_EXTRA_DELAY_MS),
+    );
+  }, [config?.startupCommand, settings.terminalSettings?.startupCommandDelayMs]);
+  const revealTerminal = useCallback(() => {
+    setTerminalReady(true);
+  }, []);
+
+  useEffect(() => {
+    setTerminalReady(false);
+    setStartupError(null);
+  }, [config?.popupId, sessionId]);
+
+  useEffect(() => {
+    if (!ready) return undefined;
+    const timeout = window.setTimeout(() => setTerminalReady(true), startupRevealDelayMs);
+    return () => window.clearTimeout(timeout);
+  }, [config?.popupId, ready, startupRevealDelayMs]);
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground" data-section="terminal-popup">
+    <div
+      className="h-screen flex flex-col overflow-hidden bg-[color:var(--terminal-popup-bg)] text-[color:var(--terminal-popup-fg)]"
+      data-section="terminal-popup"
+      style={popupThemeVars}
+    >
       <div
-        className="app-drag shrink-0 h-9 flex items-center border-b border-border/50"
+        className="app-drag relative shrink-0 h-9 flex items-center bg-[color:var(--terminal-popup-bg)]"
         data-section="terminal-popup-titlebar"
       >
-        <div className={isMac ? 'w-[76px] shrink-0' : 'w-3 shrink-0'} />
-        <div className="flex-1 min-w-0 text-center text-xs text-muted-foreground truncate px-2">
-          {config?.title ?? ''}
+        {isMac && <div className="h-9 w-[92px] shrink-0" />}
+        <TerminalPopupTitleIcon icon={config?.icon} />
+        <div className={cn(
+          'min-w-0 flex-1 pr-3 text-left text-[12px] font-medium text-[color:var(--terminal-popup-fg)] opacity-70',
+          config?.icon ? 'pl-1.5' : 'pl-3',
+          !isMac && 'pl-4 text-left',
+        )}>
+          <div className="max-w-full truncate">
+            {config?.title ?? ''}
+          </div>
         </div>
-        {isMac ? (
-          <div className="w-[76px] shrink-0" />
-        ) : (
-          <button
-            type="button"
-            onClick={() => void close()}
-            className="app-no-drag shrink-0 w-9 h-9 flex items-center justify-center hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
-            aria-label={t('common.close')}
-          >
-            <X size={14} />
-          </button>
-        )}
+        {!isMac && <TerminalPopupWindowControls mac={false} onClose={() => void close()} />}
       </div>
       {!ready || !config || !host ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          {t('systemManager.popup.loading')}
-        </div>
+        <TerminalPopupSpinner />
+      ) : startupError ? (
+        <TerminalPopupStartupError
+          message={startupError}
+          closeLabel={t('common.close')}
+          onClose={() => void close()}
+        />
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-sm opacity-70">…</div>}>
+        <div className="relative flex-1 min-h-0 flex flex-col bg-[color:var(--terminal-popup-bg)]">
+          <Suspense fallback={<TerminalPopupBlank />}>
             <Terminal
               host={host}
               keys={keys}
@@ -127,12 +322,26 @@ function TerminalPopupPageInner() {
               onCloseSession={() => {
                 void close();
               }}
-              onSessionExit={() => {
-                void close();
+              onSessionExit={(_closedSessionId, evt) => {
+                if (shouldCloseTerminalPopupOnExit(evt)) {
+                  void close();
+                  return;
+                }
+                if (!terminalReady && config.startupCommand) {
+                  setStartupError(t('systemManager.popup.startupFailed'));
+                }
               }}
-              onStatusChange={() => {}}
+              onStatusChange={(_changedSessionId, status) => {
+                if (!config.startupCommand && status === 'connected') revealTerminal();
+              }}
+              onTerminalDataCapture={revealTerminal}
             />
           </Suspense>
+          {!terminalReady && (
+            <div className="pointer-events-none absolute inset-0 z-10">
+              <TerminalPopupSpinner />
+            </div>
+          )}
         </div>
       )}
     </div>

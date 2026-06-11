@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveTerminalSessionExitIntent } from "./resolveTerminalSessionExitIntent.ts";
+import {
+  resolveTerminalSessionExitIntent,
+  shouldCloseTerminalPopupOnExit,
+} from "./resolveTerminalSessionExitIntent.ts";
 
 test("normal backend exited events close the session tab", () => {
   assert.deepEqual(
@@ -29,4 +32,11 @@ test("backend closed events keep the tab and mark it disconnected", () => {
     resolveTerminalSessionExitIntent({ reason: "closed", exitCode: 0 }),
     { kind: "markDisconnected" },
   );
+});
+
+test("terminal popup only auto-closes after clean command exit", () => {
+  assert.equal(shouldCloseTerminalPopupOnExit({ reason: "exited", exitCode: 0 }), true);
+  assert.equal(shouldCloseTerminalPopupOnExit({ reason: "exited", exitCode: 1 }), false);
+  assert.equal(shouldCloseTerminalPopupOnExit({ reason: "error", error: "connection reset" }), false);
+  assert.equal(shouldCloseTerminalPopupOnExit({ reason: "closed", exitCode: 0 }), false);
 });

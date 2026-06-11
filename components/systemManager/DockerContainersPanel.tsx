@@ -2,8 +2,9 @@ import { Box, FileText, Play, RotateCcw, Square, Terminal } from 'lucide-react';
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
+import { writeSystemManagerDiagnostic } from '../../application/state/systemManagerDiagnostics';
 import type { TerminalSession } from '../../types';
-import type { DockerContainerAction, DockerContainerInfo } from '../../domain/systemManager/types';
+import type { DockerContainerAction, DockerContainerInfo, TerminalPopupIcon } from '../../domain/systemManager/types';
 import { dockerContainerInfoEqual } from '../../domain/systemManager/pollEquals';
 import { getContainerFlags, getContainerTone } from '../../domain/systemManager/containerState';
 import { buildDockerExecShellCommand, buildDockerLogsCommand } from '../../domain/systemManager/dockerShell';
@@ -30,6 +31,23 @@ import { showSystemManagerError } from './systemManagerToast';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'paused';
+
+async function buildContainerPopupIcon(image: string): Promise<TerminalPopupIcon> {
+  const {
+    dockerIconTileStyle,
+    resolveDockerIconPresentation,
+    resolveDockerImageIcon,
+  } = await import('../../domain/systemManager/dockerImageIcons');
+  const iconId = resolveDockerImageIcon(image);
+  const presentation = resolveDockerIconPresentation(iconId);
+  const tile = dockerIconTileStyle(presentation.displayIconId);
+  return {
+    kind: 'image',
+    src: presentation.iconUrl,
+    backgroundColor: tile.background,
+    alt: '',
+  };
+}
 
 interface DockerContainersPanelProps {
   sessionId: string;
@@ -247,29 +265,57 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
 
   const openShell = useCallback(async (container: DockerContainerInfo) => {
     const id = container.id.slice(0, 12);
+    await writeSystemManagerDiagnostic('docker open shell clicked', {
+      sessionId,
+      containerId: id,
+      containerName: container.name,
+      image: container.image,
+      state: container.state,
+    });
     const result = await openInteractiveTerminal(
       backend,
       parentSession,
       `docker: ${container.name || id}`,
       buildDockerExecShellCommand(id),
+      { icon: await buildContainerPopupIcon(container.image) },
     );
     if (!result.success) {
+      await writeSystemManagerDiagnostic('docker open shell failed', {
+        sessionId,
+        containerId: id,
+        containerName: container.name,
+        error: result.error,
+      });
       showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
     }
-  }, [backend, parentSession, t]);
+  }, [backend, parentSession, sessionId, t]);
 
   const openLogs = useCallback(async (container: DockerContainerInfo) => {
     const id = container.id.slice(0, 12);
+    await writeSystemManagerDiagnostic('docker open logs clicked', {
+      sessionId,
+      containerId: id,
+      containerName: container.name,
+      image: container.image,
+      state: container.state,
+    });
     const result = await openInteractiveTerminal(
       backend,
       parentSession,
       `logs: ${container.name || id}`,
       buildDockerLogsCommand(id),
+      { icon: await buildContainerPopupIcon(container.image) },
     );
     if (!result.success) {
+      await writeSystemManagerDiagnostic('docker open logs failed', {
+        sessionId,
+        containerId: id,
+        containerName: container.name,
+        error: result.error,
+      });
       showSystemManagerError(result.error || t('systemManager.errors.actionFailed'), t('common.error'));
     }
-  }, [backend, parentSession, t]);
+  }, [backend, parentSession, sessionId, t]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden" data-section="docker-containers">
@@ -306,7 +352,7 @@ export const DockerContainersPanel = memo(function DockerContainersPanel({
 
       <SystemPanelList>
         {error && (
-          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} />
+          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
         )}
         {!error && displayList.length === 0 && !loading && (
           <SystemPanelEmpty icon={Box} message={t('systemManager.docker.empty')} />

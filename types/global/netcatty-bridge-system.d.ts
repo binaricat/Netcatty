@@ -105,6 +105,11 @@ declare global {
       error?: string;
       popupId?: string;
     }>;
+    logDiagnostic?(payload: {
+      source: string;
+      message: string;
+      extra?: Record<string, unknown>;
+    }): Promise<{ success: boolean; error?: string }>;
     onTerminalPopupConfig?(cb: (payload: import("../../domain/systemManager/types").TerminalPopupPayload) => void): () => void;
   }
 }

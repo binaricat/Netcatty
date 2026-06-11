@@ -8,6 +8,19 @@ import { nextPollData } from '../listStable';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function normalizePollingErrorMessage(error: unknown, t: I18nContextValue['t']): string {
+  const message = error instanceof Error ? error.message : String(error || 'Unknown error');
+  const lower = message.toLowerCase();
+  if (lower.includes('channel open failure') || lower.includes('unable to exec')) {
+    return t('systemManager.errors.sshChannelUnavailable');
+  }
+  return message;
+}
+
 /** Stable i18n ref so polling fetchers do not reset when locale re-renders. */
 export function useStableTranslate(): I18nContextValue['t'] {
   const { t } = useI18n();
@@ -101,6 +114,7 @@ export function usePolling<T>(
   enabled: boolean,
   merge?: (prev: T | null, next: T) => T,
 ) {
+  const stableT = useStableTranslate();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -126,10 +140,11 @@ export function usePolling<T>(
     return intervalMs;
   }, [intervalMs]);
 
-  const run = useCallback(async (options?: { withLoading?: boolean }) => {
+  const run = useCallback(async (options?: { withLoading?: boolean; minLoadingMs?: number }) => {
     if (!enabled || inflightRef.current) return;
     inflightRef.current = true;
     const showLoading = options?.withLoading ?? !hasDataRef.current;
+    const startedAt = Date.now();
     if (showLoading) setLoading(true);
     try {
       const result = await fetcherRef.current();
@@ -145,12 +160,18 @@ export function usePolling<T>(
       }
     } catch (err) {
       failuresRef.current += 1;
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setData(null);
+      hasDataRef.current = false;
+      setError(normalizePollingErrorMessage(err, stableT));
     } finally {
       inflightRef.current = false;
-      if (showLoading) setLoading(false);
+      if (showLoading) {
+        const remaining = Math.max(0, (options?.minLoadingMs ?? 0) - (Date.now() - startedAt));
+        if (remaining > 0) await delay(remaining);
+        setLoading(false);
+      }
     }
-  }, [enabled]);
+  }, [enabled, stableT]);
 
   const scheduleNextPoll = useCallback(() => {
     clearPollTimer();
@@ -181,7 +202,7 @@ export function usePolling<T>(
 
   const refresh = useCallback(async () => {
     failuresRef.current = 0;
-    await run({ withLoading: true });
+    await run({ withLoading: true, minLoadingMs: 450 });
   }, [run]);
 
   return { data, error, loading, refresh };

@@ -312,7 +312,7 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
 
       <SystemPanelList>
         {error && (
-          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} />
+          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
         )}
         {!error && displayList.length === 0 && !loading && (
           <SystemPanelEmpty icon={LayoutList} message={t('systemManager.empty')} />

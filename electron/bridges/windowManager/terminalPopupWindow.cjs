@@ -1,5 +1,7 @@
 /* eslint-disable no-undef */
 
+const crashLogBridge = require("../crashLogBridge.cjs");
+
 function createTerminalPopupWindowApi(ctx) {
   with (ctx) {
     const terminalPopupWindows = new Map();
@@ -29,6 +31,14 @@ function createTerminalPopupWindowApi(ctx) {
         ? payload.title.trim()
         : "Terminal";
 
+      crashLogBridge.captureDiagnostic("terminal-popup", "creating popup window", {
+        popupId: payload?.popupId,
+        title,
+        isDev,
+        popupX,
+        popupY,
+      });
+
       const win = new BrowserWindow({
         title,
         width: popupWidth,
@@ -39,9 +49,8 @@ function createTerminalPopupWindowApi(ctx) {
         backgroundColor,
         icon: appIcon,
         show: false,
-        frame: isMac,
-        titleBarStyle: isMac ? "hiddenInset" : undefined,
-        trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
+        frame: false,
+        ...(isMac ? { trafficLightPosition: { x: 12, y: 12 } } : {}),
         webPreferences: {
           preload,
           contextIsolation: true,
@@ -53,6 +62,11 @@ function createTerminalPopupWindowApi(ctx) {
 
       const popupId = String(payload?.popupId || Date.now());
       terminalPopupWindows.set(popupId, win);
+      crashLogBridge.captureDiagnostic("terminal-popup", "popup BrowserWindow created", {
+        popupId,
+        title,
+        webContentsId: win.webContents?.id,
+      });
 
       try {
         win.webContents?.setWindowOpenHandler?.(
@@ -66,6 +80,30 @@ function createTerminalPopupWindowApi(ctx) {
         terminalPopupWindows.delete(popupId);
       });
 
+      try {
+        win.webContents?.on?.("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+          console.warn("[TerminalPopup] Failed to load renderer", {
+            popupId,
+            errorCode,
+            errorDescription,
+            validatedURL,
+          });
+        });
+        win.webContents?.on?.("render-process-gone", (_event, details) => {
+          console.warn("[TerminalPopup] Renderer process gone", { popupId, details });
+        });
+        win.webContents?.on?.("console-message", (_event, level, message, line, sourceId) => {
+          crashLogBridge.captureDiagnostic("terminal-popup-console", message, {
+            popupId,
+            level,
+            line,
+            sourceId,
+          });
+        });
+      } catch {
+        // ignore diagnostics wiring failures
+      }
+
       win.on("page-title-updated", (e) => { e.preventDefault(); });
 
       try {
@@ -76,34 +114,56 @@ function createTerminalPopupWindowApi(ctx) {
 
       applyWindowOpacityToWindow(win);
 
-      const popupPath = "/#/terminal-popup";
+      if (isMac) {
+        try {
+          win.setWindowButtonVisibility(true);
+        } catch {
+          // ignore
+        }
+        try {
+          win.setWindowButtonPosition({ x: 12, y: 12 });
+        } catch {
+          // ignore
+        }
+      }
+
+      const popupPath = "#/terminal-popup";
 
       if (isDev) {
         try {
           const baseUrl = getDevRendererBaseUrl(devServerUrl);
+          crashLogBridge.captureDiagnostic("terminal-popup", "loading dev popup URL", {
+            popupId,
+            url: `${baseUrl}${popupPath}`,
+          });
           await win.loadURL(`${baseUrl}${popupPath}`);
         } catch (e) {
           console.warn("[TerminalPopup] Dev server not reachable", e);
+          crashLogBridge.captureError("terminal-popup", e, {
+            popupId,
+            step: "load dev popup URL",
+          });
           await win.loadURL(`app://netcatty/index.html${popupPath}`);
         }
       } else {
+        crashLogBridge.captureDiagnostic("terminal-popup", "loading packaged popup URL", {
+          popupId,
+          url: `app://netcatty/index.html${popupPath}`,
+        });
         await win.loadURL(`app://netcatty/index.html${popupPath}`);
       }
 
-      const delivery = await sendWhenRendererReady(
-        win,
-        "netcatty:window:terminalPopupConfig",
-        { ...payload, popupId },
-        { timeoutMs: 10000 },
-      );
-
-      if (!delivery.success) {
-        try { win.destroy(); } catch { /* ignore */ }
-        terminalPopupWindows.delete(popupId);
-        return { success: false, error: delivery.error || "Popup failed to receive config" };
-      }
-
+      win.webContents.send("netcatty:window:terminalPopupConfig", { ...payload, popupId });
+      crashLogBridge.captureDiagnostic("terminal-popup", "popup config delivered", {
+        popupId,
+        title,
+      });
       showAndFocusWindow(win);
+      crashLogBridge.captureDiagnostic("terminal-popup", "popup window shown", {
+        popupId,
+        title,
+        visible: typeof win.isVisible === "function" ? win.isVisible() : undefined,
+      });
       return { success: true, popupId };
     }
 

@@ -7,8 +7,8 @@ import type { TmuxSessionInfo } from '../../domain/systemManager/types';
 import { tmuxSessionInfoEqual } from '../../domain/systemManager/pollEquals';
 import {
   SystemPanelEmpty,
+  SystemPanelError,
   SystemPanelIconButton,
-  SystemPanelInlineError,
   SystemPanelList,
   SystemPanelMetaBar,
   SystemPanelRefreshButton,
@@ -139,18 +139,12 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
         {t('systemManager.tmux.meta', { count: displaySessions.length })}
       </SystemPanelMetaBar>
 
-      {error && <SystemPanelInlineError message={error} />}
-
       <SystemPanelList>
         {!error && displaySessions.length === 0 && !loading && (
           <SystemPanelEmpty icon={TerminalSquare} message={t('systemManager.tmux.empty')} />
         )}
         {error && (
-          <div className="px-3 pb-3 text-center">
-            <button type="button" className="text-xs text-primary hover:underline" onClick={() => void refresh()}>
-              {t('history.action.retry')}
-            </button>
-          </div>
+          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
         )}
         {displaySessions.map((session) => (
           <TmuxSessionCard

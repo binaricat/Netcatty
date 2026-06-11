@@ -10,6 +10,7 @@ export const enSystemManagerMessages: Messages = {
   'systemManager.tabs.tmux': 'tmux',
   'systemManager.tabs.docker': 'Docker',
   'systemManager.popup.loading': 'Opening terminal…',
+  'systemManager.popup.startupFailed': 'The startup command did not complete successfully. Check that the target is still available and try again.',
 
   'systemManager.errors.loadProcesses': 'Failed to load processes',
   'systemManager.errors.loadTmux': 'Failed to load tmux sessions',
@@ -20,6 +21,7 @@ export const enSystemManagerMessages: Messages = {
   'systemManager.errors.loadDocker': 'Failed to load containers',
   'systemManager.errors.loadDockerStats': 'Failed to load container stats',
   'systemManager.errors.loadDockerImages': 'Failed to load images',
+  'systemManager.errors.sshChannelUnavailable': 'The server refused to open a new execution channel. Try again later, or reconnect this host.',
 
   'systemManager.processes.search': 'Search processes…',
   'systemManager.processes.command': 'Command',

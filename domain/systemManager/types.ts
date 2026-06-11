@@ -121,9 +121,17 @@ export type DockerImageManageAction =
 
 export type SystemManagerSubTab = 'processes' | 'tmux' | 'docker';
 
+export interface TerminalPopupIcon {
+  kind: 'image';
+  src: string;
+  backgroundColor?: string;
+  alt?: string;
+}
+
 export interface TerminalPopupPayload {
   popupId?: string;
   title: string;
+  icon?: TerminalPopupIcon;
   parentSessionId: string;
   sourceSession: import('../../types').TerminalSession;
   startupCommand: string;

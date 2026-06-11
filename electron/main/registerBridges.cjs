@@ -360,8 +360,16 @@ function createBridgeRegistrar(context) {
         if (!payload || typeof payload !== "object") {
           return { success: false, error: "Invalid popup payload" };
         }
+        crashLogBridge.captureDiagnostic("terminal-popup", "openTerminalPopup IPC received", {
+          title: payload.title,
+          parentSessionId: payload.parentSessionId,
+          startupCommand: payload.startupCommand,
+          sourceSessionId: payload.sourceSession?.id,
+          sourceProtocol: payload.sourceSession?.protocol,
+          sourceHostLabel: payload.sourceSession?.hostLabel,
+        });
         const sourceWindow = BrowserWindow.fromWebContents(event.sender);
-        return await getWindowManager().openTerminalPopupWindow(electronModule, {
+        const result = await getWindowManager().openTerminalPopupWindow(electronModule, {
           preload,
           devServerUrl: effectiveDevServerUrl,
           isDev,
@@ -370,7 +378,18 @@ function createBridgeRegistrar(context) {
           electronDir,
           sourceWindow,
         }, payload);
+        crashLogBridge.captureDiagnostic("terminal-popup", "openTerminalPopup IPC result", {
+          title: payload.title,
+          success: result?.success,
+          error: result?.error,
+          popupId: result?.popupId,
+        });
+        return result;
       } catch (err) {
+        crashLogBridge.captureError("terminal-popup", err, {
+          title: payload?.title,
+          parentSessionId: payload?.parentSessionId,
+        });
         console.error("[Main] Failed to open terminal popup:", err);
         return { success: false, error: err?.message || "Failed to open terminal popup" };
       }

@@ -23,8 +23,14 @@ import {
 } from './SystemPanelUi';
 import { SystemPanelPromptDialog } from './SystemPanelPromptDialog';
 import { openInteractiveTerminal } from './openInteractiveTerminal';
+import { showSystemManagerError } from './systemManagerToast';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
+const TMUX_POPUP_ICON = {
+  kind: 'image',
+  src: '/system-icons/tmux.svg',
+  alt: 'tmux',
+} as const;
 
 type RenamePromptTarget =
   | { kind: 'session' }
@@ -145,13 +151,19 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
     && pending.action === action
     && pending.windowIndex === windowIndex;
 
-  const handleAttach = (windowIndex?: number) => {
-    void openInteractiveTerminal(
+  const handleAttach = async (windowIndex?: number) => {
+    const result = await openInteractiveTerminal(
       backend,
       parentSession,
       windowIndex !== undefined ? `tmux: ${session.name}:${windowIndex}` : `tmux: ${session.name}`,
       buildTmuxAttachCommand(session.name, windowIndex),
+      { icon: TMUX_POPUP_ICON },
     );
+    if (!result.success) {
+      const message = result.error || t('systemManager.errors.actionFailed');
+      setActionError(message);
+      showSystemManagerError(message, t('common.error'));
+    }
   };
 
   return (

@@ -10,6 +10,7 @@ export const ruSystemManagerMessages: Messages = {
   'systemManager.tabs.tmux': 'tmux',
   'systemManager.tabs.docker': 'Docker',
   'systemManager.popup.loading': 'Открытие терминала…',
+  'systemManager.popup.startupFailed': 'Команда запуска не была выполнена успешно. Проверьте, что цель доступна, и повторите попытку.',
 
   'systemManager.errors.loadProcesses': 'Не удалось загрузить процессы',
   'systemManager.errors.loadTmux': 'Не удалось загрузить сессии tmux',
@@ -20,6 +21,7 @@ export const ruSystemManagerMessages: Messages = {
   'systemManager.errors.loadDocker': 'Не удалось загрузить контейнеры',
   'systemManager.errors.loadDockerStats': 'Не удалось загрузить статистику контейнеров',
   'systemManager.errors.loadDockerImages': 'Не удалось загрузить образы',
+  'systemManager.errors.sshChannelUnavailable': 'Сервер отказался открыть новый канал выполнения. Повторите попытку позже или переподключите этот хост.',
 
   'systemManager.processes.search': 'Поиск процессов…',
   'systemManager.processes.command': 'Команда',

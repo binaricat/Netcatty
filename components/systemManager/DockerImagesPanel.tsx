@@ -241,7 +241,7 @@ export const DockerImagesPanel = memo(function DockerImagesPanel({
 
       <SystemPanelList>
         {error && (
-          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} />
+          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
         )}
         {!error && displayList.length === 0 && !loading && (
           <SystemPanelEmpty icon={Layers} message={t('systemManager.docker.imagesEmpty')} />

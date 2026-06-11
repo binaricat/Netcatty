@@ -1,8 +1,34 @@
-import { Loader2, RefreshCw, Search } from 'lucide-react';
+import { Loader2, RefreshCw, Search, Unplug } from 'lucide-react';
 import React, { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+
+function splitPanelMessage(message: string): string[] {
+  return message.match(/[^。.!?]+[。.!?]?/g)?.map((line) => line.trim()).filter(Boolean) ?? [message];
+}
+
+function SystemPanelMessage({
+  message,
+  className,
+}: {
+  message: string;
+  className?: string;
+}) {
+  const lines = splitPanelMessage(message);
+  if (lines.length <= 1) {
+    return <span className={className}>{message}</span>;
+  }
+  return (
+    <span className={className}>
+      {lines.map((line, index) => (
+        <span key={`${line}-${index}`} className="block">
+          {line}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 export const SystemPanelShell = memo(function SystemPanelShell({
   children,
@@ -172,7 +198,7 @@ export const SystemPanelEmpty = memo(function SystemPanelEmpty({
   return (
     <div className="flex flex-col items-center justify-center py-10 px-4 text-muted-foreground text-center">
       <Icon size={24} className="opacity-40 mb-2" />
-      <span className="text-xs">{message}</span>
+      <SystemPanelMessage message={message} className="max-w-[260px] text-xs leading-5" />
     </div>
   );
 });
@@ -181,16 +207,25 @@ export const SystemPanelError = memo(function SystemPanelError({
   message,
   onRetry,
   retryLabel,
+  loading,
 }: {
   message: string;
   onRetry?: () => void;
   retryLabel?: string;
+  loading?: boolean;
 }) {
   return (
-    <div className="px-3 py-3 text-xs text-center">
-      <div className="text-destructive mb-2">{message}</div>
+    <div className="flex h-full min-h-[180px] flex-col items-center justify-center px-6 py-10 text-center text-muted-foreground">
+      <Unplug size={24} className="mb-2 opacity-40" />
+      <SystemPanelMessage message={message} className="max-w-[260px] break-words text-xs leading-5" />
       {onRetry && retryLabel && (
-        <button type="button" onClick={onRetry} className="text-primary hover:underline">
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={loading}
+          className="mt-3 inline-flex h-7 items-center gap-1.5 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
           {retryLabel}
         </button>
       )}
@@ -204,8 +239,9 @@ export const SystemPanelInlineError = memo(function SystemPanelInlineError({
   message: string;
 }) {
   return (
-    <div className="shrink-0 px-3 py-2 text-[11px] text-destructive border-b border-border/30 bg-destructive/5">
-      {message}
+    <div className="shrink-0 flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground border-b border-border/30 bg-muted/20">
+      <Unplug size={12} className="shrink-0 opacity-60" />
+      <span className="min-w-0 truncate">{message}</span>
     </div>
   );
 });

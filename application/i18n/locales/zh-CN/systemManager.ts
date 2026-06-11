@@ -10,6 +10,7 @@ export const zhCnSystemManagerMessages: Messages = {
   'systemManager.tabs.tmux': 'tmux',
   'systemManager.tabs.docker': 'Docker',
   'systemManager.popup.loading': '正在打开终端…',
+  'systemManager.popup.startupFailed': '启动命令未成功。请确认目标仍然可用后重试。',
 
   'systemManager.errors.loadProcesses': '加载进程列表失败',
   'systemManager.errors.loadTmux': '加载 tmux 会话失败',
@@ -20,6 +21,7 @@ export const zhCnSystemManagerMessages: Messages = {
   'systemManager.errors.loadDocker': '加载容器列表失败',
   'systemManager.errors.loadDockerStats': '加载容器性能数据失败',
   'systemManager.errors.loadDockerImages': '加载镜像列表失败',
+  'systemManager.errors.sshChannelUnavailable': '服务器拒绝打开新的执行通道。请稍后重试，或重新连接当前主机。',
 
   'systemManager.processes.search': '搜索进程…',
   'systemManager.processes.command': '命令',
