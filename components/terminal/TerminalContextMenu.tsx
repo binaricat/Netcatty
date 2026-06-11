@@ -11,6 +11,7 @@ import {
   SplitSquareVertical,
   Terminal as TerminalIcon,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -38,6 +39,7 @@ export interface TerminalContextMenuProps {
   onClear?: () => void;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
+  onSendYmodem?: () => void;
   isReconnectable?: boolean;
   onReconnect?: () => void;
   onClose?: () => void;
@@ -75,6 +77,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onClear,
   onSplitHorizontal,
   onSplitVertical,
+  onSendYmodem,
   isReconnectable,
   onReconnect,
   onClose,
@@ -196,6 +199,16 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
               <ContextMenuItem onClick={onReconnect}>
                 <RefreshCcw size={14} className="mr-2" />
                 {t('terminal.menu.reconnect')}
+              </ContextMenuItem>
+            </>
+          )}
+
+          {onSendYmodem && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={onSendYmodem}>
+                <Upload size={14} className="mr-2" />
+                {t('terminal.menu.sendYmodem')}
               </ContextMenuItem>
             </>
           )}

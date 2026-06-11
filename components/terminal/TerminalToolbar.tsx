@@ -2,7 +2,7 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, FolderInput, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
+import { Check, ChevronRight, FolderInput, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host, Snippet } from '../../types';
@@ -22,6 +22,7 @@ export interface TerminalToolbarProps {
     snippetPackages?: string[];
     onSnippetClick?: (snippet: Snippet) => void;
     onOpenSFTP: () => void;
+    onSendYmodem?: () => void;
     onOpenScripts: () => void;
     onOpenHistory?: () => void;
     onOpenTheme: () => void;
@@ -47,6 +48,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     snippetPackages = [],
     onSnippetClick,
     onOpenSFTP,
+    onSendYmodem,
     onOpenScripts,
     onOpenHistory,
     onOpenTheme,
@@ -187,6 +189,26 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                     </TooltipTrigger>
                     <TooltipContent>
                         {status === 'connected' ? t("terminal.toolbar.openSftp") : t("terminal.toolbar.availableAfterConnect")}
+                    </TooltipContent>
+                </Tooltip>
+            )}
+
+            {isSerialTerminal && (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="secondary"
+                            size="icon"
+                            className={cn(buttonBase, status !== 'connected' && "opacity-50")}
+                            aria-label={status === 'connected' ? t("terminal.toolbar.sendYmodem") : t("terminal.toolbar.availableAfterConnect")}
+                            onClick={onSendYmodem}
+                            disabled={status !== 'connected' || !onSendYmodem}
+                        >
+                            <Upload size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        {status === 'connected' ? t("terminal.toolbar.sendYmodem") : t("terminal.toolbar.availableAfterConnect")}
                     </TooltipContent>
                 </Tooltip>
             )}

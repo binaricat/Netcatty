@@ -5,6 +5,18 @@ import { TerminalServerStats } from './TerminalServerStats';
 
 type TerminalViewContext = Record<string, any>;
 
+export function shouldEnableYmodemAction({
+  isSerialConnection,
+  status,
+  handleSendYmodem,
+}: {
+  isSerialConnection?: boolean;
+  status?: string;
+  handleSendYmodem?: () => void;
+}): boolean {
+  return Boolean(isSerialConnection && status === "connected" && handleSendYmodem);
+}
+
 /**
  * Shallow-compare every ctx value. <Terminal> rebuilds the ctx object on every
  * render, but many re-renders (layout/fit/visibility-of-other-panes, suppress
@@ -30,7 +42,7 @@ function terminalViewCtxEqual(
 }
 
 function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
-  const { Activity, Button, Copy, Maximize2, Radio, Sparkles, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, containerRef, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleRetry, handleSearch, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onExpandToFocus, onOpenSystem, onSplitHorizontal, onSplitVertical, onToggleBroadcast, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, searchMatchCount, selectionOverlayPosition, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
+  const { Activity, Button, Copy, Maximize2, Radio, Sparkles, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, containerRef, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onExpandToFocus, onOpenSystem, onSplitHorizontal, onSplitVertical, onToggleBroadcast, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, searchMatchCount, selectionOverlayPosition, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
   return (
     <TerminalContextMenu
       hasSelection={hasSelection}
@@ -46,6 +58,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       onSelectWord={terminalContextActions.onSelectWord}
       onSplitHorizontal={onSplitHorizontal}
       onSplitVertical={onSplitVertical}
+      onSendYmodem={shouldEnableYmodemAction({ isSerialConnection, status, handleSendYmodem }) ? handleSendYmodem : undefined}
       isReconnectable={status === "disconnected"}
       onReconnect={handleRetry}
       onClose={inWorkspace ? () => onCloseSession?.(sessionId) : undefined}

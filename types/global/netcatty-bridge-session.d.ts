@@ -89,6 +89,14 @@ declare global {
       productId: string;
       pnpId: string;
     }>>;
+    sendSerialYmodem?(sessionId: string, filePath: string): Promise<{
+      success: boolean;
+      fileName?: string;
+      totalBytes?: number;
+      writtenBytes?: number;
+      error?: string;
+      code?: string;
+    }>;
     getDefaultShell?(): Promise<string>;
     discoverShells?(): Promise<DiscoveredShell[]>;
     validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; isExecutable: boolean }>;

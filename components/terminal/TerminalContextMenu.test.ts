@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import en from "../../application/i18n/locales/en.ts";
 import zhCN from "../../application/i18n/locales/zh-CN.ts";
 import * as terminalContextMenu from "./TerminalContextMenu.tsx";
+import { shouldEnableYmodemAction } from "./TerminalView.tsx";
 
 const shouldShowReconnectAction = (
   terminalContextMenu as {
@@ -46,6 +47,37 @@ test("shows reconnect only for reconnectable terminals with a handler", () => {
 test("localizes the reconnect context menu label", () => {
   assert.equal(en["terminal.menu.reconnect"], "Reconnect");
   assert.equal(zhCN["terminal.menu.reconnect"], "重新连接");
+});
+
+test("localizes the YMODEM serial send actions", () => {
+  assert.equal(en["terminal.menu.sendYmodem"], "Send with YMODEM");
+  assert.equal(en["terminal.toolbar.sendYmodem"], "Send with YMODEM");
+  assert.equal(zhCN["terminal.menu.sendYmodem"], "YMODEM 发送");
+  assert.equal(zhCN["terminal.toolbar.sendYmodem"], "YMODEM 发送");
+});
+
+test("enables YMODEM action only for connected serial terminals", () => {
+  const handler = () => {};
+
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: true,
+    status: "connected",
+    handleSendYmodem: handler,
+  }), true);
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: true,
+    status: "disconnected",
+    handleSendYmodem: handler,
+  }), false);
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: false,
+    status: "connected",
+    handleSendYmodem: handler,
+  }), false);
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: true,
+    status: "connected",
+  }), false);
 });
 
 test("allows reconnect menu while stale mouse tracking is still active", () => {

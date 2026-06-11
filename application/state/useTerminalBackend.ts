@@ -175,6 +175,32 @@ export const useTerminalBackend = () => {
     return bridge.listSerialPorts();
   }, []);
 
+  const serialYmodemAvailable = useCallback(() => {
+    const bridge = netcattyBridge.get();
+    return !!bridge?.sendSerialYmodem;
+  }, []);
+
+  const selectFileAvailable = useCallback(() => {
+    const bridge = netcattyBridge.get();
+    return !!bridge?.selectFile;
+  }, []);
+
+  const sendSerialYmodem = useCallback(async (sessionId: string, filePath: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.sendSerialYmodem) return { success: false, error: 'sendSerialYmodem unavailable' };
+    return bridge.sendSerialYmodem(sessionId, filePath);
+  }, []);
+
+  const selectFile = useCallback(async (
+    title?: string,
+    defaultPath?: string,
+    filters?: Array<{ name: string; extensions: string[] }>,
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.selectFile) return null;
+    return bridge.selectFile(title, defaultPath, filters);
+  }, []);
+
   const getSessionPwd = useCallback(async (sessionId: string, options?: { allowHomeFallback?: boolean }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getSessionPwd) return { success: false, error: 'getSessionPwd unavailable' };
@@ -229,6 +255,10 @@ export const useTerminalBackend = () => {
       startLocalSession,
       startSerialSession,
       listSerialPorts,
+      serialYmodemAvailable,
+      selectFileAvailable,
+      sendSerialYmodem,
+      selectFile,
       execCommand,
       getSessionPwd,
       getSessionRemoteInfo,
@@ -266,6 +296,10 @@ export const useTerminalBackend = () => {
       startLocalSession,
       startSerialSession,
       listSerialPorts,
+      serialYmodemAvailable,
+      selectFileAvailable,
+      sendSerialYmodem,
+      selectFile,
       execCommand,
       getSessionPwd,
       getSessionRemoteInfo,

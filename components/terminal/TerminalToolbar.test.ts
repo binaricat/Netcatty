@@ -17,6 +17,14 @@ const sshHost: Host = {
   protocol: "ssh",
 };
 
+const serialHost: Host = {
+  ...sshHost,
+  id: "serial-1",
+  label: "Serial",
+  hostname: "/dev/tty.usbserial",
+  protocol: "serial",
+};
+
 const renderToolbar = (
   host: Host,
   status: "connecting" | "connected" | "disconnected" = "connected",
@@ -56,6 +64,32 @@ test("hides SFTP for local terminal sessions", () => {
   });
 
   assert.equal(markup.includes('aria-label="Open SFTP"'), false);
+});
+
+test("shows YMODEM send only for connected serial sessions", () => {
+  const connectedSerial = renderToolbar(serialHost, "connected", {
+    onSendYmodem: () => {},
+  });
+  const disconnectedSerial = renderToolbar(serialHost, "disconnected", {
+    onSendYmodem: () => {},
+  });
+  const ssh = renderToolbar(sshHost, "connected", {
+    onSendYmodem: () => {},
+  });
+  const local = renderToolbar({
+    ...sshHost,
+    id: "local-1",
+    protocol: "local",
+  }, "connected", {
+    onSendYmodem: () => {},
+  });
+
+  assert.equal(connectedSerial.includes('aria-label="Send with YMODEM"'), true);
+  assert.doesNotMatch(connectedSerial, /aria-label="Send with YMODEM"[^>]*disabled/);
+  assert.equal(disconnectedSerial.includes('aria-label="Available after connect"'), true);
+  assert.match(disconnectedSerial, /aria-label="Available after connect"[^>]*disabled/);
+  assert.equal(ssh.includes('aria-label="Send with YMODEM"'), false);
+  assert.equal(local.includes('aria-label="Send with YMODEM"'), false);
 });
 
 test("uses the terminal active button color for pressed toolbar actions", () => {

@@ -29,6 +29,7 @@ const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
 const { normalizeTerminalEncoding, encodeTerminalInput } = require("./terminalEncoding.cjs");
+const { sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -639,6 +640,7 @@ async function startSerialSession(event, options) {
         session.zmodemSentry = serialZmodemSentry;
 
         serialPort.on('data', (data) => {
+          if (session.ymodemActive) return;
           // data is already Buffer from serialport — feed to sentry
           serialZmodemSentry.consume(data);
         });
@@ -646,6 +648,7 @@ async function startSerialSession(event, options) {
         serialPort.on('error', (err) => {
           console.error(`[Serial] Port error: ${err.message}`);
           session.zmodemSentry?.cancel();
+          session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 1, error: err.message, reason: "error" });
@@ -656,6 +659,7 @@ async function startSerialSession(event, options) {
         serialPort.on('close', () => {
           console.log(`[Serial] Port closed`);
           session.zmodemSentry?.cancel();
+          session.ymodemAbortController?.abort();
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           contents?.send("netcatty:exit", { sessionId, exitCode: 0, reason: "closed" });
@@ -675,9 +679,22 @@ async function startSerialSession(event, options) {
 /**
  * Write data to a session
  */
+function cancelActiveYmodemSession(session) {
+  if (!session?.ymodemActive) return;
+  void sendYmodemCancel(session.serialPort);
+  session.ymodemAbortController?.abort();
+}
+
 function writeToSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
+
+  if (session.ymodemActive) {
+    if (payload.data === '\x03') {
+      cancelActiveYmodemSession(session);
+    }
+    return;
+  }
 
   // During ZMODEM transfer, block terminal input (Ctrl+C cancels the transfer)
   if (session.zmodemSentry?.isActive()) {
@@ -727,6 +744,43 @@ function writeToSession(event, payload) {
     if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') {
       console.warn("Write failed", err);
     }
+  }
+}
+
+async function sendSerialYmodem(_event, payload) {
+  const session = sessions.get(payload?.sessionId);
+  if (!session || !session.serialPort || session.type !== 'serial') {
+    return { success: false, error: "YMODEM send requires an active serial session" };
+  }
+  if (session.ymodemActive) {
+    return { success: false, error: "A YMODEM transfer is already in progress" };
+  }
+  if (session.zmodemSentry?.isActive()) {
+    return { success: false, error: "Another serial file transfer is already in progress" };
+  }
+  if (!payload?.filePath || typeof payload.filePath !== "string") {
+    return { success: false, error: "No file selected" };
+  }
+
+  const abortController = new AbortController();
+  session.ymodemActive = true;
+  session.ymodemAbortController = abortController;
+
+  try {
+    const result = await sendYmodemFile(session.serialPort, payload.filePath, {
+      abortSignal: abortController.signal,
+      timeoutMs: Number.isFinite(payload.timeoutMs) ? payload.timeoutMs : undefined,
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      code: error?.code,
+    };
+  } finally {
+    session.ymodemActive = false;
+    session.ymodemAbortController = null;
   }
 }
 
@@ -802,6 +856,7 @@ function closeSession(event, payload) {
   session.closed = true;
   
   try {
+    cancelActiveYmodemSession(session);
     session.zmodemSentry?.cancel();
     session.flushPendingData?.();
     cleanupSessionExternalAuthArtifacts(session);
@@ -894,6 +949,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:et:start", startEtSession);
   ipcMain.handle("netcatty:serial:start", startSerialSession);
   ipcMain.handle("netcatty:serial:list", listSerialPorts);
+  ipcMain.handle("netcatty:serial:ymodem-send", sendSerialYmodem);
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
@@ -1003,6 +1059,7 @@ function cleanupAllSessions() {
   for (const [sessionId, session] of sessions) {
     try {
       session.zmodemSentry?.cancel();
+      cancelActiveYmodemSession(session);
       cleanupSessionExternalAuthArtifacts(session);
       if (session.stream) {
         session.stream.close();
@@ -1058,6 +1115,7 @@ module.exports = {
   execOnEtSession,
   bundledEtClient,
   startSerialSession,
+  sendSerialYmodem,
   listSerialPorts,
   writeToSession,
   setSessionEncoding,

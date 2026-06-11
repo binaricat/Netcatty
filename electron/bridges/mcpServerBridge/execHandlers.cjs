@@ -164,6 +164,11 @@ function createExecHandlerApi(ctx) {
     
       // Serial port: raw command execution (no shell wrapping)
       if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+          releaseSessionExecution(sessionId, sessionToken);
+          executionLock.release();
+          return { ok: false, error: "Serial file transfer is already in progress" };
+        }
         return runExecution(() => execViaRawPty(session.serialPort, command, {
           timeoutMs: commandTimeoutMs,
           trackForCancellation: activePtyExecs,
