@@ -283,6 +283,7 @@ export const SystemPanelRow = memo(function SystemPanelRow({
   subtitle,
   trailing,
   actions,
+  className,
 }: {
   selected?: boolean;
   onClick?: () => void;
@@ -292,6 +293,7 @@ export const SystemPanelRow = memo(function SystemPanelRow({
   subtitle?: ReactNode;
   trailing?: ReactNode;
   actions?: ReactNode;
+  className?: string;
 }) {
   const content = (
     <>
@@ -314,10 +316,11 @@ export const SystemPanelRow = memo(function SystemPanelRow({
     </>
   );
 
-  const className = cn(
+  const rowClassName = cn(
     'group flex items-center gap-2.5 pr-2.5 py-2.5 min-h-[44px] border-b border-border/30',
     selected && 'bg-accent/30',
     onClick && 'cursor-pointer hover:bg-accent/50',
+    className,
   );
   const style = { paddingLeft: 12 + depth * 14 };
 
@@ -328,7 +331,7 @@ export const SystemPanelRow = memo(function SystemPanelRow({
       <div
         role="button"
         tabIndex={0}
-        className={cn('w-full text-left', className)}
+        className={cn('w-full text-left', rowClassName)}
         style={style}
         onClick={onClick}
         onKeyDown={(e) => {
@@ -345,7 +348,7 @@ export const SystemPanelRow = memo(function SystemPanelRow({
   }
 
   return (
-    <div className={className} style={style}>
+    <div className={rowClassName} style={style}>
       {content}
     </div>
   );

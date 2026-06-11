@@ -12,6 +12,7 @@ import {
 import type { SystemProcessInfo } from '../../domain/systemManager/types';
 import { systemProcessInfoEqual } from '../../domain/systemManager/pollEquals';
 import { cn } from '../../lib/utils';
+import { VariableSizeVirtualList } from '../ui/VariableSizeVirtualList';
 import { ResourceBar } from './ResourceBar';
 import { useStableListOrder, mergePollListByKey } from './listStable';
 import {
@@ -27,7 +28,6 @@ import {
   SystemPanelSearch,
   SystemPanelSegmented,
   SystemPanelShell,
-  SystemPanelCollapsible,
   SystemPanelStatusBadge,
   SystemPanelToolbar,
 } from './SystemPanelUi';
@@ -38,9 +38,10 @@ type Backend = ReturnType<typeof useSystemManagerBackend>;
 type SortKey = 'cpuPercent' | 'memPercent' | 'pid' | 'command' | 'user';
 type ProcessFilter = 'all' | 'running';
 
-const PROCESS_INITIAL_RENDER_LIMIT = 60;
-const PROCESS_RENDER_CHUNK_SIZE = 80;
 const PROCESS_CACHE_TTL_MS = 30_000;
+const PROCESS_ROW_HEIGHT = 56;
+const PROCESS_DETAIL_HEIGHT = 112;
+const PROCESS_OVERSCAN_ROWS = 8;
 
 const processListCache = new Map<string, {
   processes: SystemProcessInfo[];
@@ -78,15 +79,6 @@ function getCachedProcesses(sessionId: string): SystemProcessInfo[] | null {
     return null;
   }
   return cached.processes;
-}
-
-function scheduleProcessRenderTask(callback: () => void): () => void {
-  if (typeof window.requestIdleCallback === 'function') {
-    const id = window.requestIdleCallback(callback, { timeout: 400 });
-    return () => window.cancelIdleCallback(id);
-  }
-  const id = window.setTimeout(callback, 32);
-  return () => window.clearTimeout(id);
 }
 
 const ProcessListLoading = memo(function ProcessListLoading({
@@ -161,12 +153,13 @@ const ProcessRow = memo(function ProcessRow({
   );
 
   return (
-    <div>
+    <div className="h-full overflow-hidden">
       <SystemPanelRow
         selected={selected}
         onClick={() => onToggle(proc.pid)}
         title={proc.command}
         subtitle={`${proc.user || '—'} · PID ${proc.pid}`}
+        className="h-14"
         trailing={(
           <div className="flex w-[88px] shrink-0 items-center justify-end">
             <SystemPanelStatusBadge tone={getProcessTone(proc)}>
@@ -176,22 +169,68 @@ const ProcessRow = memo(function ProcessRow({
         )}
         actions={actions}
       />
-      <SystemPanelCollapsible open={selected}>
-        <SystemPanelDetailStrip>
+      {selected && (
+        <SystemPanelDetailStrip className="h-28 overflow-hidden">
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-muted-foreground mb-2">
-            <span>{t('systemManager.processes.ppid')}: {proc.ppid}</span>
-            <span>{t('systemManager.processes.stat')}: {proc.stat}</span>
-            <span>{t('systemManager.processes.elapsed')}: {proc.elapsed || '—'}</span>
-            <span>{t('systemManager.processes.rss')}: {formatKb(proc.rssKb)}</span>
-            <span className="col-span-2">{t('systemManager.processes.vsz')}: {formatKb(proc.vszKb)}</span>
+            <span className="min-w-0 truncate">{t('systemManager.processes.ppid')}: {proc.ppid}</span>
+            <span className="min-w-0 truncate">{t('systemManager.processes.stat')}: {proc.stat}</span>
+            <span className="min-w-0 truncate">{t('systemManager.processes.elapsed')}: {proc.elapsed || '—'}</span>
+            <span className="min-w-0 truncate">{t('systemManager.processes.rss')}: {formatKb(proc.rssKb)}</span>
+            <span className="col-span-2 min-w-0 truncate">{t('systemManager.processes.vsz')}: {formatKb(proc.vszKb)}</span>
           </div>
           <div className="space-y-1">
             <ResourceBar label="CPU" value={proc.cpuPercent} />
             <ResourceBar label="MEM" value={proc.memPercent} />
           </div>
         </SystemPanelDetailStrip>
-      </SystemPanelCollapsible>
+      )}
     </div>
+  );
+});
+
+interface ProcessVirtualListProps {
+  processes: SystemProcessInfo[];
+  selectedPid: number | null;
+  onToggle: (pid: number) => void;
+  onSignal: (pid: number, signal: string) => void;
+  onRenice: (pid: number) => void;
+}
+
+const ProcessVirtualList = memo(function ProcessVirtualList({
+  processes,
+  selectedPid,
+  onToggle,
+  onSignal,
+  onRenice,
+}: ProcessVirtualListProps) {
+  const getItemHeight = useCallback(
+    (proc: SystemProcessInfo) => (
+      proc.pid === selectedPid
+        ? PROCESS_ROW_HEIGHT + PROCESS_DETAIL_HEIGHT
+        : PROCESS_ROW_HEIGHT
+    ),
+    [selectedPid],
+  );
+
+  const renderItem = useCallback((proc: SystemProcessInfo) => (
+    <ProcessRow
+      proc={proc}
+      selected={selectedPid === proc.pid}
+      onToggle={onToggle}
+      onSignal={onSignal}
+      onRenice={onRenice}
+    />
+  ), [onRenice, onSignal, onToggle, selectedPid]);
+
+  return (
+    <VariableSizeVirtualList<SystemProcessInfo>
+      items={processes}
+      getItemHeight={getItemHeight}
+      className="flex-1 min-h-0"
+      overscan={PROCESS_OVERSCAN_ROWS}
+      getItemKey={(proc) => String(proc.pid)}
+      renderItem={renderItem}
+    />
   );
 });
 
@@ -219,7 +258,6 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
   const [actionError, setActionError] = useState<string | null>(null);
   const [cachedProcesses, setCachedProcesses] = useState<SystemProcessInfo[] | null>(() => getCachedProcesses(sessionId));
   const [cachedProcessesSessionId, setCachedProcessesSessionId] = useState(sessionId);
-  const [renderLimit, setRenderLimit] = useState(PROCESS_INITIAL_RENDER_LIMIT);
   const [processListPending, setProcessListPending] = useState(false);
   const processFetchGenerationRef = useRef(0);
   const currentSessionIdRef = useRef(sessionId);
@@ -233,7 +271,6 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
     processFetchGenerationRef.current += 1;
     setCachedProcesses(getCachedProcesses(sessionId));
     setCachedProcessesSessionId(sessionId);
-    setRenderLimit(PROCESS_INITIAL_RENDER_LIMIT);
     setProcessListPending(false);
   }, [sessionId]);
 
@@ -323,26 +360,10 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
     sortToken,
     compareProcesses,
   );
-  const renderedList = useMemo(
-    () => displayList.slice(0, Math.min(renderLimit, displayList.length)),
-    [displayList, renderLimit],
-  );
-  const hasMoreRowsToRender = renderLimit < displayList.length;
   const isProcessRefreshActive = loading || processListPending;
   const showInitialLoading = isProcessRefreshActive && displayList.length === 0;
   const showBlockingError = Boolean(error && !isProcessRefreshActive && displayList.length === 0);
   const showInlineRefreshError = Boolean(error && !isProcessRefreshActive && displayList.length > 0);
-
-  useEffect(() => {
-    setRenderLimit(PROCESS_INITIAL_RENDER_LIMIT);
-  }, [sortToken]);
-
-  useEffect(() => {
-    if (!hasMoreRowsToRender) return undefined;
-    return scheduleProcessRenderTask(() => {
-      setRenderLimit((current) => Math.min(current + PROCESS_RENDER_CHUNK_SIZE, displayList.length));
-    });
-  }, [displayList.length, hasMoreRowsToRender, renderLimit]);
 
   const cycleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((v) => !v);
@@ -440,33 +461,27 @@ export const ProcessManagerTab = memo(function ProcessManagerTab({
       {actionError && <SystemPanelInlineError message={actionError} />}
       {showInlineRefreshError && error && <SystemPanelInlineError message={error} />}
 
-      <SystemPanelList>
-        {showBlockingError && error && (
-          <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
-        )}
-        {showInitialLoading && (
-          <ProcessListLoading message={t('systemManager.processes.loading')} />
-        )}
-        {!error && displayList.length === 0 && !loading && !showInitialLoading && (
-          <SystemPanelEmpty icon={LayoutList} message={t('systemManager.empty')} />
-        )}
-        {renderedList.map((proc) => (
-          <ProcessRow
-            key={proc.pid}
-            proc={proc}
-            selected={selectedPid === proc.pid}
-            onToggle={togglePid}
-            onSignal={signalProcess}
-            onRenice={openRenicePrompt}
-          />
-        ))}
-        {hasMoreRowsToRender && (
-          <div className="flex items-center justify-center gap-1.5 border-b border-border/30 px-3 py-2 text-[10px] text-muted-foreground">
-            <Loader2 size={11} className="animate-spin" />
-            {t('systemManager.processes.loadingMore')}
-          </div>
-        )}
-      </SystemPanelList>
+      {(showBlockingError || showInitialLoading || (!error && displayList.length === 0 && !loading && !showInitialLoading)) ? (
+        <SystemPanelList>
+          {showBlockingError && error && (
+            <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
+          )}
+          {showInitialLoading && (
+            <ProcessListLoading message={t('systemManager.processes.loading')} />
+          )}
+          {!error && displayList.length === 0 && !loading && !showInitialLoading && (
+            <SystemPanelEmpty icon={LayoutList} message={t('systemManager.empty')} />
+          )}
+        </SystemPanelList>
+      ) : (
+        <ProcessVirtualList
+          processes={displayList}
+          selectedPid={selectedPid}
+          onToggle={togglePid}
+          onSignal={signalProcess}
+          onRenice={openRenicePrompt}
+        />
+      )}
 
       <SystemPanelPromptDialog
         open={reniceTarget !== null}
