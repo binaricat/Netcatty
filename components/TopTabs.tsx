@@ -812,6 +812,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             <div
               ref={hostTreeToggleSlotRef}
               className="top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 self-end app-no-drag"
+              data-section="top-tabs-host-tree-toggle"
               data-visible={effectiveShowHostTreeToggle ? 'true' : 'false'}
               style={noDragRegionStyle}
             >
@@ -879,6 +880,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
+                      data-section="top-tabs-quick-switcher-toggle"
                       className="h-7 w-7 flex-shrink-0 app-no-drag mb-0 rounded-none"
                       style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                       onClick={onOpenQuickSwitcher}

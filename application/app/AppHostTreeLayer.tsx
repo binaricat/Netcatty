@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useMemo } from 'react';
 
 import { useActiveTabId } from '../state/activeTabStore';
 import type { EditorTab } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
-import { scheduleAfterInstantThemeSwitch } from '../state/useActiveChromeTheme';
-import { terminalHostTreeStore } from '../state/terminalHostTreeStore';
 import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
 import type { GroupConfig, Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import {
@@ -35,18 +33,6 @@ export function getAppHostTreeLayerStyle(surfaceVisible: boolean): React.CSSProp
   };
 }
 
-export function shouldAutoOpenHostTreeOnSurfaceChange({
-  enabled,
-  previousSurfaceVisible,
-  surfaceVisible,
-}: {
-  enabled: boolean;
-  previousSurfaceVisible: boolean;
-  surfaceVisible: boolean;
-}): boolean {
-  return enabled && surfaceVisible && !previousSurfaceVisible;
-}
-
 export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   enabled,
   hosts,
@@ -62,8 +48,6 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   onCreateLocalTerminal,
 }) => {
   const activeTabId = useActiveTabId();
-  const previousSurfaceVisibleRef = useRef(false);
-  const cancelAutoOpenRef = useRef<(() => void) | null>(null);
   const sessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const workspaceIds = useMemo(() => new Set(workspaces.map((workspace) => workspace.id)), [workspaces]);
   const logViewIds = useMemo(() => new Set(logViews.map((logView) => logView.id)), [logViews]);
@@ -75,28 +59,6 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
     sessionIds,
     workspaceIds,
   });
-  useEffect(() => {
-    cancelAutoOpenRef.current?.();
-    cancelAutoOpenRef.current = null;
-
-    const previousSurfaceVisible = previousSurfaceVisibleRef.current;
-    previousSurfaceVisibleRef.current = surfaceVisible;
-    if (shouldAutoOpenHostTreeOnSurfaceChange({
-      enabled,
-      previousSurfaceVisible,
-      surfaceVisible,
-    })) {
-      cancelAutoOpenRef.current = scheduleAfterInstantThemeSwitch(() => {
-        cancelAutoOpenRef.current = null;
-        terminalHostTreeStore.setIsOpen(true);
-      });
-    }
-
-    return () => {
-      cancelAutoOpenRef.current?.();
-      cancelAutoOpenRef.current = null;
-    };
-  }, [enabled, surfaceVisible]);
 
   const activeHostId = useMemo(() => resolveWorkTabActiveHostId({
     activeTabId,

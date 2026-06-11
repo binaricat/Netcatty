@@ -85,6 +85,14 @@ test("host tree toggle appears with opacity only and no bounce animation", () =>
   assert.doesNotMatch(toggleSlotCss, /scale/);
 });
 
+test("host tree toggle exposes a custom CSS hook", () => {
+  assert.match(topTabsSource, /data-section="top-tabs-host-tree-toggle"/);
+});
+
+test("quick switcher plus button exposes a custom CSS hook", () => {
+  assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
+});
+
 test("host tree chrome enters after theme switch settles so root labels can animate", () => {
   assert.match(topTabsSource, /hostTreeChromeReady/);
   assert.match(topTabsSource, /scheduleAfterInstantThemeSwitch\(\(\) => \{\s*cancelHostTreeChromeReadyRef\.current = null;\s*setHostTreeChromeReady\(true\);/);
