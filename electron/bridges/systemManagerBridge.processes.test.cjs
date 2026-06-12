@@ -16,6 +16,7 @@ function createFakeExecStream(stdout) {
 }
 
 test("listProcesses uses a ps format that works on CentOS 7 procps", async () => {
+  const compatiblePsFormat = "ps -eo pid= -o ppid= -o user= -o stat= -o pcpu= -o pmem= -o rss= -o vsz= -o etime= -o args=";
   const badCentos7Output = [
     ",ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,args=",
     "                                                    1",
@@ -26,9 +27,9 @@ test("listProcesses uses a ps format that works on CentOS 7 procps", async () =>
 
   const conn = {
     exec(command, callback) {
-      const stdout = command.includes("pid=,ppid=")
-        ? badCentos7Output
-        : compatibleOutput;
+      const stdout = command.includes(compatiblePsFormat)
+        ? compatibleOutput
+        : badCentos7Output;
       callback(null, createFakeExecStream(stdout));
     },
   };
