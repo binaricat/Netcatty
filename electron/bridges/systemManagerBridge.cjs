@@ -16,7 +16,7 @@ const CAPABILITY_SCRIPT_POSIX = [
 const PROCESS_LIST_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
-  "ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,args= 2>/dev/null | head -n 200",
+  "ps -eo pid= -o ppid= -o user= -o stat= -o pcpu= -o pmem= -o rss= -o vsz= -o etime= -o args= 2>/dev/null | head -n 200",
   "'",
 ].join("");
 
