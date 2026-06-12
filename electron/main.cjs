@@ -172,9 +172,20 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 // Never treat a packaged app as "dev" even if the user has VITE_DEV_SERVER_URL set globally.
 const isDev = !app.isPackaged && !!devServerUrl;
 const effectiveDevServerUrl = isDev ? devServerUrl : undefined;
+if (isDev) {
+  app.setName("Netcatty Dev");
+  app.setPath("userData", path.join(app.getPath("userData"), "dev"));
+}
 const preload = path.join(__dirname, "preload.cjs");
 const isMac = process.platform === "darwin";
-const appIcon = path.join(__dirname, "../public/icon.png");
+function resolveAppIconPath() {
+  const candidates = [
+    path.join(__dirname, "../dist/icon.png"),
+    path.join(__dirname, "../public/icon.png"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+const appIcon = resolveAppIconPath();
 const electronDir = __dirname;
 
 const APP_PROTOCOL_HEADERS = {

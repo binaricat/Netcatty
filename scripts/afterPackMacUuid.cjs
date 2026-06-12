@@ -19,6 +19,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { execFileSync } = require("node:child_process");
 
 const LC_UUID = 0x1b;
 const MH_MAGIC_64 = 0xfeedfacf; // thin 64-bit, little-endian on disk
@@ -105,6 +106,23 @@ function patchMachOFile(file, uuid) {
   return result;
 }
 
+function adHocSignExecutable(exePath, options = {}) {
+  const hostPlatform = options.hostPlatform || process.platform;
+  const execFile = options.execFileSync || execFileSync;
+
+  if (hostPlatform !== "darwin") {
+    console.warn(
+      `[afterPack] Skipping ad-hoc codesign for ${exePath}; host platform is ${hostPlatform}`,
+    );
+    return false;
+  }
+
+  execFile("codesign", ["--force", "--sign", "-", "--timestamp=none", exePath], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return true;
+}
+
 /** @param {import('electron-builder').AfterPackContext} context */
 async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return;
@@ -137,6 +155,14 @@ async function afterPack(context) {
       `${oldUuids.map((h) => formatUuid(Buffer.from(h, "hex"))).join(", ")} -> ${formatUuid(uuid)} ` +
       `(${patched} slice(s), appId=${appId})`,
   );
+
+  // The official Developer ID signing step runs after afterPack and replaces
+  // this temporary signature. Local unsigned builds skip that step, so the
+  // patched executable still needs a valid ad-hoc signature or macOS kills it
+  // before Electron can start.
+  if (adHocSignExecutable(exePath)) {
+    console.log("[afterPack] Ad-hoc signed patched macOS executable for local unsigned builds");
+  }
 }
 
 module.exports = afterPack;
@@ -145,3 +171,4 @@ module.exports.deriveUuid = deriveUuid;
 module.exports.formatUuid = formatUuid;
 module.exports.patchMachOBuffer = patchMachOBuffer;
 module.exports.patchMachOFile = patchMachOFile;
+module.exports.adHocSignExecutable = adHocSignExecutable;

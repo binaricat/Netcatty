@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  adHocSignExecutable,
   deriveUuid,
   patchMachOBuffer,
 } = require("./afterPackMacUuid.cjs");
@@ -114,4 +115,44 @@ test("patchMachOBuffer reports zero when there is no LC_UUID", () => {
 
   const { patched } = patchMachOBuffer(buf, deriveUuid("com.netcatty.app"));
   assert.equal(patched, 0);
+});
+
+test("adHocSignExecutable signs patched binaries on macOS hosts", () => {
+  const calls = [];
+
+  const didSign = adHocSignExecutable("/tmp/Netcatty.app/Contents/MacOS/Netcatty", {
+    hostPlatform: "darwin",
+    execFileSync: (bin, args, options) => {
+      calls.push({ bin, args, options });
+    },
+  });
+
+  assert.equal(didSign, true);
+  assert.deepEqual(calls, [
+    {
+      bin: "codesign",
+      args: [
+        "--force",
+        "--sign",
+        "-",
+        "--timestamp=none",
+        "/tmp/Netcatty.app/Contents/MacOS/Netcatty",
+      ],
+      options: { stdio: ["ignore", "pipe", "pipe"] },
+    },
+  ]);
+});
+
+test("adHocSignExecutable skips non-macOS hosts", () => {
+  let called = false;
+
+  const didSign = adHocSignExecutable("/tmp/Netcatty", {
+    hostPlatform: "linux",
+    execFileSync: () => {
+      called = true;
+    },
+  });
+
+  assert.equal(didSign, false);
+  assert.equal(called, false);
 });
