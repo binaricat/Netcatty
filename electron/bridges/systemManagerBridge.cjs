@@ -134,7 +134,7 @@ function createSystemManagerBridge(deps) {
         8000,
       );
       if (!result.success) {
-        const fallback = await execOnLocalMachine("uname -s; command -v tmux; docker info >/dev/null 2>&1 && echo docker_ok", 8000);
+        const fallback = await execOnLocalMachine("uname -s; command -v tmux; (docker info >/dev/null 2>&1 || [ -S /var/run/docker.sock ]) && echo docker_ok", 8000);
         if (!fallback.success) return { success: false, error: fallback.error || "Probe failed" };
         const text = fallback.stdout || "";
         return {
