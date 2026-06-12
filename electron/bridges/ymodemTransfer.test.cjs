@@ -263,6 +263,78 @@ test("receives a YMODEM file into the selected directory", async () => {
   }
 });
 
+test("rejects an incomplete received file and removes the partial file", async () => {
+  const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-ymodem-short-"));
+  try {
+    const serial = new FakeSerialPort();
+    const transfer = receiveYmodemFiles(serial, {
+      destinationDir: targetDir,
+      timeoutMs: 200,
+    });
+    const rejectedTransfer = assert.rejects(transfer, /incomplete/i);
+
+    await waitForWrites(serial, 1);
+    serial.emit("data", createYmodemFileInfoPacket({
+      filename: "short.log",
+      size: 1500,
+      mtime: 0,
+    }));
+    await waitForWrites(serial, 3);
+
+    serial.emit("data", createYmodemDataPackets(Buffer.alloc(1024, 0x61))[0]);
+    await waitForWrites(serial, 4);
+
+    serial.emit("data", Buffer.from([YMODEM.EOT]));
+    await waitForWrites(serial, 5);
+    serial.emit("data", Buffer.from([YMODEM.EOT]));
+    await waitForWrites(serial, 6);
+
+    await rejectedTransfer;
+    assert.equal(fs.existsSync(path.join(targetDir, "short.log")), false);
+    assert.equal(serial.listenerCount("data"), 0);
+  } finally {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+  }
+});
+
+test("does not delete an existing file if creating the receive target fails", async () => {
+  const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-ymodem-race-"));
+  const targetPath = path.join(targetDir, "race.log");
+  const originalOpen = fs.promises.open;
+  try {
+    fs.promises.open = async (filePath, flags, ...args) => {
+      if (filePath === targetPath && flags === "wx") {
+        fs.writeFileSync(targetPath, "existing");
+        const error = new Error("file exists");
+        error.code = "EEXIST";
+        throw error;
+      }
+      return originalOpen.call(fs.promises, filePath, flags, ...args);
+    };
+
+    const serial = new FakeSerialPort();
+    const transfer = receiveYmodemFiles(serial, {
+      destinationDir: targetDir,
+      timeoutMs: 200,
+    });
+    const rejectedTransfer = assert.rejects(transfer, /file exists/i);
+
+    await waitForWrites(serial, 1);
+    serial.emit("data", createYmodemFileInfoPacket({
+      filename: "race.log",
+      size: 3,
+      mtime: 0,
+    }));
+    await waitForWrites(serial, 3);
+
+    await rejectedTransfer;
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "existing");
+  } finally {
+    fs.promises.open = originalOpen;
+    fs.rmSync(targetDir, { recursive: true, force: true });
+  }
+});
+
 function waitForWrites(serial, count) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();

@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const terminalBridge = require("./terminalBridge.cjs");
 const { YMODEM } = require("./ymodemTransfer.cjs");
@@ -97,4 +100,45 @@ test("YMODEM receive is refused while ZMODEM owns the same serial session", asyn
 
   assert.equal(result.success, false);
   assert.match(result.error, /file transfer is already in progress/);
+});
+
+test("YMODEM receive sends cancel bytes when the receive setup fails", async () => {
+  const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-ymodem-bridge-"));
+  try {
+    const destinationFile = path.join(targetDir, "not-a-directory");
+    fs.writeFileSync(destinationFile, "not a directory");
+
+    const sessions = new Map();
+    const serialPort = makeSerialPort();
+    sessions.set("serial-1", {
+      type: "serial",
+      protocol: "serial",
+      serialPort,
+    });
+    terminalBridge.init({ sessions, electronModule: {} });
+
+    const result = await terminalBridge.receiveSerialYmodem({ sender: {} }, {
+      sessionId: "serial-1",
+      destinationDir: destinationFile,
+    });
+
+    assert.equal(result.success, false);
+    assert.deepEqual(
+      [...serialPort.writes[0]],
+      [
+        YMODEM.CAN,
+        YMODEM.CAN,
+        YMODEM.CAN,
+        YMODEM.CAN,
+        YMODEM.CAN,
+        YMODEM.BACKSPACE,
+        YMODEM.BACKSPACE,
+        YMODEM.BACKSPACE,
+        YMODEM.BACKSPACE,
+        YMODEM.BACKSPACE,
+      ],
+    );
+  } finally {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+  }
 });

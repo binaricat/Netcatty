@@ -83,6 +83,16 @@ test("enables YMODEM action only for connected serial terminals", () => {
   }), true);
   assert.equal(shouldEnableYmodemAction({
     isSerialConnection: true,
+    status: "connected",
+    handleReceiveYmodem: handler,
+  }), true);
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: true,
+    status: "disconnected",
+    handleReceiveYmodem: handler,
+  }), false);
+  assert.equal(shouldEnableYmodemAction({
+    isSerialConnection: true,
     status: "disconnected",
     handleSendYmodem: handler,
   }), false);

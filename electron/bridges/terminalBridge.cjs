@@ -811,6 +811,9 @@ async function receiveSerialYmodem(_event, payload) {
     });
     return { success: true, ...result };
   } catch (error) {
+    if (error?.code !== "YMODEM_CANCELLED" && error?.code !== "YMODEM_REMOTE_CANCELLED") {
+      await sendYmodemCancel(session.serialPort);
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),

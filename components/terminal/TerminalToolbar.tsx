@@ -88,6 +88,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && !isEtSession;
     const hidesSftp = isLocalTerminal || isSerialTerminal;
     const historySupported = !!onOpenHistory && !isLocalTerminal && !isSerialTerminal && host?.protocol !== 'telnet';
+    const unavailableYmodemSendLabel = `${t("terminal.toolbar.sendYmodem")} - ${t("terminal.toolbar.availableAfterConnect")}`;
+    const unavailableYmodemReceiveLabel = `${t("terminal.toolbar.receiveYmodem")} - ${t("terminal.toolbar.availableAfterConnect")}`;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
     const activeButtonStyle: React.CSSProperties = {
@@ -203,7 +205,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                                 variant="secondary"
                                 size="icon"
                                 className={cn(buttonBase, status !== 'connected' && "opacity-50")}
-                                aria-label={status === 'connected' ? t("terminal.toolbar.sendYmodem") : t("terminal.toolbar.availableAfterConnect")}
+                                aria-label={status === 'connected' ? t("terminal.toolbar.sendYmodem") : unavailableYmodemSendLabel}
                                 onClick={onSendYmodem}
                                 disabled={status !== 'connected' || !onSendYmodem}
                             >
@@ -221,7 +223,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                                 variant="secondary"
                                 size="icon"
                                 className={cn(buttonBase, status !== 'connected' && "opacity-50")}
-                                aria-label={status === 'connected' ? t("terminal.toolbar.receiveYmodem") : t("terminal.toolbar.availableAfterConnect")}
+                                aria-label={status === 'connected' ? t("terminal.toolbar.receiveYmodem") : unavailableYmodemReceiveLabel}
                                 onClick={onReceiveYmodem}
                                 disabled={status !== 'connected' || !onReceiveYmodem}
                             >

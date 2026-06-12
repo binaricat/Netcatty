@@ -111,7 +111,10 @@ function parseYmodemFileInfoPayload(payload) {
     ? payload.subarray(separatorIndex + 1).toString("ascii").replace(/\0.*$/u, "").trim()
     : "";
   const [sizeText] = metadata.split(/\s+/u);
-  const parsedSize = Number.parseInt(sizeText || "0", 10);
+  if (!/^\d+$/u.test(sizeText || "")) {
+    throw new YmodemTransferError("YMODEM file header has an invalid size", "YMODEM_INVALID_SIZE");
+  }
+  const parsedSize = Number.parseInt(sizeText, 10);
 
   return {
     fileName: sanitizeYmodemFilename(rawName),
@@ -383,6 +386,12 @@ async function receiveYmodemFileData({
         throw new YmodemTransferError("YMODEM sender did not confirm end of file", "YMODEM_EOT_EXPECTED");
       }
       await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+      if (writtenBytes !== totalBytes) {
+        throw new YmodemTransferError(
+          `YMODEM received incomplete file (${writtenBytes}/${totalBytes} bytes)`,
+          "YMODEM_INCOMPLETE_FILE",
+        );
+      }
       return writtenBytes;
     }
 
@@ -437,8 +446,12 @@ async function receiveYmodemFiles(serialPort, {
   }
 
   const resolvedDestinationDir = path.resolve(destinationDir);
-  await fs.promises.mkdir(resolvedDestinationDir, { recursive: true });
-  const destinationStat = await fs.promises.stat(resolvedDestinationDir);
+  let destinationStat;
+  try {
+    destinationStat = await fs.promises.stat(resolvedDestinationDir);
+  } catch (error) {
+    throw new YmodemTransferError("Selected destination is not a directory", "YMODEM_DESTINATION_NOT_DIRECTORY");
+  }
   if (!destinationStat.isDirectory()) {
     throw new YmodemTransferError("Selected destination is not a directory", "YMODEM_DESTINATION_NOT_DIRECTORY");
   }
@@ -475,9 +488,11 @@ async function receiveYmodemFiles(serialPort, {
       const filePath = await resolveUniqueDestinationPath(resolvedDestinationDir, fileInfo.fileName);
       let fileHandle;
       let closeNeeded = false;
+      let createdFile = false;
       try {
         fileHandle = await fs.promises.open(filePath, "wx");
         closeNeeded = true;
+        createdFile = true;
         const writtenBytes = await receiveYmodemFileData({
           serialPort,
           reader,
@@ -500,7 +515,9 @@ async function receiveYmodemFiles(serialPort, {
         if (closeNeeded) {
           await fileHandle.close().catch(() => {});
         }
-        await fs.promises.rm(filePath, { force: true }).catch(() => {});
+        if (createdFile) {
+          await fs.promises.rm(filePath, { force: true }).catch(() => {});
+        }
         throw error;
       }
     }
