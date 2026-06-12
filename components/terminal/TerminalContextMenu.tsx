@@ -5,6 +5,7 @@
 import {
   ClipboardPaste,
   Copy,
+  Download,
   RefreshCcw,
   Sparkles,
   SplitSquareHorizontal,
@@ -40,6 +41,7 @@ export interface TerminalContextMenuProps {
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
   onSendYmodem?: () => void;
+  onReceiveYmodem?: () => void;
   isReconnectable?: boolean;
   onReconnect?: () => void;
   onClose?: () => void;
@@ -82,6 +84,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onSplitHorizontal,
   onSplitVertical,
   onSendYmodem,
+  onReceiveYmodem,
   isReconnectable,
   onReconnect,
   onClose,
@@ -207,13 +210,21 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             </>
           )}
 
-          {onSendYmodem && (
+          {(onSendYmodem || onReceiveYmodem) && (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem onClick={onSendYmodem}>
-                <Upload size={14} className="mr-2" />
-                {t('terminal.menu.sendYmodem')}
-              </ContextMenuItem>
+              {onSendYmodem && (
+                <ContextMenuItem onClick={onSendYmodem}>
+                  <Upload size={14} className="mr-2" />
+                  {t('terminal.menu.sendYmodem')}
+                </ContextMenuItem>
+              )}
+              {onReceiveYmodem && (
+                <ContextMenuItem onClick={onReceiveYmodem}>
+                  <Download size={14} className="mr-2" />
+                  {t('terminal.menu.receiveYmodem')}
+                </ContextMenuItem>
+              )}
             </>
           )}
 

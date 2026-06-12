@@ -97,6 +97,22 @@ declare global {
       error?: string;
       code?: string;
     }>;
+    receiveSerialYmodem?(sessionId: string, destinationDir: string): Promise<{
+      success: boolean;
+      files?: Array<{
+        fileName: string;
+        filePath: string;
+        totalBytes: number;
+        writtenBytes: number;
+      }>;
+      fileCount?: number;
+      fileName?: string;
+      filePath?: string;
+      totalBytes?: number;
+      writtenBytes?: number;
+      error?: string;
+      code?: string;
+    }>;
     getDefaultShell?(): Promise<string>;
     discoverShells?(): Promise<DiscoveredShell[]>;
     validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; isExecutable: boolean }>;

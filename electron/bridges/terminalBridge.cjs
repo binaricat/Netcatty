@@ -29,7 +29,7 @@ const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
 const { normalizeTerminalEncoding, encodeTerminalInput } = require("./terminalEncoding.cjs");
-const { sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
+const { receiveYmodemFiles, sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -784,6 +784,44 @@ async function sendSerialYmodem(_event, payload) {
   }
 }
 
+async function receiveSerialYmodem(_event, payload) {
+  const session = sessions.get(payload?.sessionId);
+  if (!session || !session.serialPort || session.type !== 'serial') {
+    return { success: false, error: "YMODEM receive requires an active serial session" };
+  }
+  if (session.ymodemActive) {
+    return { success: false, error: "A YMODEM transfer is already in progress" };
+  }
+  if (session.zmodemSentry?.isActive()) {
+    return { success: false, error: "Another serial file transfer is already in progress" };
+  }
+  if (!payload?.destinationDir || typeof payload.destinationDir !== "string") {
+    return { success: false, error: "No destination directory selected" };
+  }
+
+  const abortController = new AbortController();
+  session.ymodemActive = true;
+  session.ymodemAbortController = abortController;
+
+  try {
+    const result = await receiveYmodemFiles(session.serialPort, {
+      destinationDir: payload.destinationDir,
+      abortSignal: abortController.signal,
+      timeoutMs: Number.isFinite(payload.timeoutMs) ? payload.timeoutMs : undefined,
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      code: error?.code,
+    };
+  } finally {
+    session.ymodemActive = false;
+    session.ymodemAbortController = null;
+  }
+}
+
 /**
  * Pause or resume a session's source stream for output back-pressure.
  * The renderer asks for this when its write backlog crosses a watermark, so a
@@ -950,6 +988,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:serial:start", startSerialSession);
   ipcMain.handle("netcatty:serial:list", listSerialPorts);
   ipcMain.handle("netcatty:serial:ymodem-send", sendSerialYmodem);
+  ipcMain.handle("netcatty:serial:ymodem-receive", receiveSerialYmodem);
   ipcMain.handle("netcatty:local:defaultShell", getDefaultShell);
   ipcMain.handle("netcatty:local:validatePath", validatePath);
   ipcMain.handle("netcatty:shells:discover", () => discoverShells());
@@ -1116,6 +1155,7 @@ module.exports = {
   bundledEtClient,
   startSerialSession,
   sendSerialYmodem,
+  receiveSerialYmodem,
   listSerialPorts,
   writeToSession,
   setSessionEncoding,

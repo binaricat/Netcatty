@@ -93,6 +93,49 @@ function createYmodemEndSessionPacket() {
   return createPacket(YMODEM.SOH, 0, Buffer.alloc(YMODEM.PACKET_SIZE_128, 0x00));
 }
 
+function sanitizeYmodemFilename(filename) {
+  const normalized = String(filename || "").replace(/\\/g, "/");
+  const baseName = path.basename(normalized).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
+  if (!baseName || baseName === "." || baseName === "..") {
+    return "ymodem-received.bin";
+  }
+  return baseName;
+}
+
+function parseYmodemFileInfoPayload(payload) {
+  const separatorIndex = payload.indexOf(0x00);
+  const rawName = (separatorIndex >= 0 ? payload.subarray(0, separatorIndex) : payload).toString("utf8");
+  if (!rawName) return null;
+
+  const metadata = separatorIndex >= 0
+    ? payload.subarray(separatorIndex + 1).toString("ascii").replace(/\0.*$/u, "").trim()
+    : "";
+  const [sizeText] = metadata.split(/\s+/u);
+  const parsedSize = Number.parseInt(sizeText || "0", 10);
+
+  return {
+    fileName: sanitizeYmodemFilename(rawName),
+    totalBytes: Number.isFinite(parsedSize) && parsedSize >= 0 ? parsedSize : 0,
+  };
+}
+
+async function resolveUniqueDestinationPath(destinationDir, fileName) {
+  const parsed = path.parse(fileName);
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const candidateName = attempt === 0
+      ? fileName
+      : `${parsed.name} (${attempt})${parsed.ext}`;
+    const candidatePath = path.join(destinationDir, candidateName);
+    try {
+      await fs.promises.access(candidatePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return candidatePath;
+      throw error;
+    }
+  }
+  throw new YmodemTransferError("Could not choose a destination file name", "YMODEM_DESTINATION_EXISTS");
+}
+
 function writeAndDrain(serialPort, buffer) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -229,6 +272,254 @@ async function sendPacketWithRetry({ serialPort, reader, packet, timeoutMs, retr
   throw new YmodemTransferError("YMODEM receiver rejected the packet too many times", "YMODEM_RETRY_LIMIT");
 }
 
+async function readYmodemFrame(reader, timeoutMs) {
+  const header = await reader.readByte(timeoutMs);
+  if (header === YMODEM.CAN) {
+    const next = await reader.readByte(1_000).catch(() => null);
+    if (next === YMODEM.CAN) {
+      throw new YmodemTransferError("YMODEM transfer cancelled by sender", "YMODEM_REMOTE_CANCELLED");
+    }
+    if (next !== null) {
+      reader.unreadByte?.(next);
+    }
+    return readYmodemFrame(reader, timeoutMs);
+  }
+  if (header === YMODEM.EOT) {
+    return { type: "eot" };
+  }
+  if (header !== YMODEM.SOH && header !== YMODEM.STX) {
+    throw new YmodemTransferError(`Unexpected YMODEM packet header: 0x${header.toString(16)}`);
+  }
+
+  const payloadSize = header === YMODEM.SOH ? YMODEM.PACKET_SIZE_128 : YMODEM.PACKET_SIZE_1024;
+  const blockNumber = await reader.readByte(timeoutMs);
+  const blockComplement = await reader.readByte(timeoutMs);
+  const payload = Buffer.alloc(payloadSize);
+  for (let i = 0; i < payloadSize; i += 1) {
+    payload[i] = await reader.readByte(timeoutMs);
+  }
+  const sentCrc = ((await reader.readByte(timeoutMs)) << 8) | await reader.readByte(timeoutMs);
+  const expectedCrc = crc16Xmodem(payload);
+  const valid = blockComplement === (0xff - blockNumber) && sentCrc === expectedCrc;
+
+  return {
+    type: "packet",
+    blockNumber,
+    payload,
+    valid,
+  };
+}
+
+async function readYmodemPacketWithRetry({
+  serialPort,
+  reader,
+  expectedBlockNumber,
+  requestByte,
+  timeoutMs,
+  retryLimit,
+  label,
+}) {
+  for (let attempt = 0; attempt < retryLimit; attempt += 1) {
+    if (requestByte !== undefined) {
+      await writeAndDrain(serialPort, Buffer.from([requestByte]));
+    }
+
+    let frame;
+    try {
+      frame = await readYmodemFrame(reader, timeoutMs);
+    } catch (error) {
+      if (error?.code === "YMODEM_TIMEOUT" && attempt < retryLimit - 1) {
+        continue;
+      }
+      throw error;
+    }
+
+    if (frame.type === "eot") {
+      return frame;
+    }
+    if (frame.valid && frame.blockNumber === expectedBlockNumber) {
+      return frame;
+    }
+    if (frame.valid && frame.blockNumber === ((expectedBlockNumber - 1) & 0xff)) {
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+      continue;
+    }
+    await writeAndDrain(serialPort, Buffer.from([YMODEM.NAK]));
+  }
+
+  throw new YmodemTransferError(`YMODEM sender did not provide a valid ${label}`, "YMODEM_RETRY_LIMIT");
+}
+
+async function receiveYmodemFileData({
+  serialPort,
+  reader,
+  fileHandle,
+  totalBytes,
+  timeoutMs,
+  retryLimit,
+  onProgress,
+}) {
+  let expectedBlockNumber = 1;
+  let writtenBytes = 0;
+  let rejectedPackets = 0;
+
+  for (;;) {
+    let frame;
+    try {
+      frame = await readYmodemFrame(reader, timeoutMs);
+    } catch (error) {
+      if (error?.code === "YMODEM_TIMEOUT" && rejectedPackets < retryLimit) {
+        rejectedPackets += 1;
+        await writeAndDrain(serialPort, Buffer.from([YMODEM.NAK]));
+        continue;
+      }
+      throw error;
+    }
+
+    if (frame.type === "eot") {
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.NAK]));
+      const secondEot = await readYmodemFrame(reader, timeoutMs);
+      if (secondEot.type !== "eot") {
+        throw new YmodemTransferError("YMODEM sender did not confirm end of file", "YMODEM_EOT_EXPECTED");
+      }
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+      return writtenBytes;
+    }
+
+    if (!frame.valid) {
+      rejectedPackets += 1;
+      if (rejectedPackets > retryLimit) {
+        throw new YmodemTransferError("YMODEM sender sent too many invalid packets", "YMODEM_RETRY_LIMIT");
+      }
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.NAK]));
+      continue;
+    }
+
+    if (frame.blockNumber === ((expectedBlockNumber - 1) & 0xff)) {
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+      continue;
+    }
+    if (frame.blockNumber !== expectedBlockNumber) {
+      rejectedPackets += 1;
+      if (rejectedPackets > retryLimit) {
+        throw new YmodemTransferError("YMODEM sender sent packets out of order", "YMODEM_RETRY_LIMIT");
+      }
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.NAK]));
+      continue;
+    }
+
+    const remainingBytes = Math.max(0, totalBytes - writtenBytes);
+    const bytesToWrite = Math.min(frame.payload.length, remainingBytes);
+    if (bytesToWrite > 0) {
+      await fileHandle.write(frame.payload, 0, bytesToWrite);
+      writtenBytes += bytesToWrite;
+    }
+
+    rejectedPackets = 0;
+    expectedBlockNumber = (expectedBlockNumber + 1) & 0xff;
+    await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+    onProgress?.({ transferredBytes: writtenBytes, totalBytes, stage: "data" });
+  }
+}
+
+async function receiveYmodemFiles(serialPort, {
+  destinationDir,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  retryLimit = DEFAULT_RETRY_LIMIT,
+  abortSignal,
+  onProgress,
+} = {}) {
+  if (!serialPort) {
+    throw new YmodemTransferError("Serial session is not available", "YMODEM_NO_SERIAL");
+  }
+  if (!destinationDir || typeof destinationDir !== "string") {
+    throw new YmodemTransferError("No destination directory selected", "YMODEM_NO_DESTINATION");
+  }
+
+  const resolvedDestinationDir = path.resolve(destinationDir);
+  await fs.promises.mkdir(resolvedDestinationDir, { recursive: true });
+  const destinationStat = await fs.promises.stat(resolvedDestinationDir);
+  if (!destinationStat.isDirectory()) {
+    throw new YmodemTransferError("Selected destination is not a directory", "YMODEM_DESTINATION_NOT_DIRECTORY");
+  }
+
+  const reader = createSerialByteReader(serialPort, abortSignal);
+  const files = [];
+
+  try {
+    for (;;) {
+      const headerFrame = await readYmodemPacketWithRetry({
+        serialPort,
+        reader,
+        expectedBlockNumber: 0,
+        requestByte: YMODEM.CRC16,
+        timeoutMs,
+        retryLimit,
+        label: "file header",
+      });
+
+      if (headerFrame.type === "eot") {
+        await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+        continue;
+      }
+
+      const fileInfo = parseYmodemFileInfoPayload(headerFrame.payload);
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.ACK]));
+      if (!fileInfo) {
+        break;
+      }
+
+      await writeAndDrain(serialPort, Buffer.from([YMODEM.CRC16]));
+      onProgress?.({ transferredBytes: 0, totalBytes: fileInfo.totalBytes, stage: "header" });
+
+      const filePath = await resolveUniqueDestinationPath(resolvedDestinationDir, fileInfo.fileName);
+      let fileHandle;
+      let closeNeeded = false;
+      try {
+        fileHandle = await fs.promises.open(filePath, "wx");
+        closeNeeded = true;
+        const writtenBytes = await receiveYmodemFileData({
+          serialPort,
+          reader,
+          fileHandle,
+          totalBytes: fileInfo.totalBytes,
+          timeoutMs,
+          retryLimit,
+          onProgress,
+        });
+        await fileHandle.close();
+        closeNeeded = false;
+
+        files.push({
+          fileName: path.basename(filePath),
+          filePath,
+          totalBytes: fileInfo.totalBytes,
+          writtenBytes,
+        });
+      } catch (error) {
+        if (closeNeeded) {
+          await fileHandle.close().catch(() => {});
+        }
+        await fs.promises.rm(filePath, { force: true }).catch(() => {});
+        throw error;
+      }
+    }
+
+    const totalBytes = files.reduce((sum, file) => sum + file.totalBytes, 0);
+    const writtenBytes = files.reduce((sum, file) => sum + file.writtenBytes, 0);
+    return {
+      files,
+      fileCount: files.length,
+      totalBytes,
+      writtenBytes,
+      fileName: files[0]?.fileName,
+      filePath: files[0]?.filePath,
+    };
+  } finally {
+    reader.cleanup();
+  }
+}
+
 async function sendYmodemBuffer(serialPort, {
   filename,
   buffer,
@@ -355,6 +646,7 @@ module.exports = {
   createYmodemFileInfoPacket,
   createYmodemDataPackets,
   createYmodemEndSessionPacket,
+  receiveYmodemFiles,
   sendYmodemCancel,
   sendYmodemBuffer,
   sendYmodemFile,

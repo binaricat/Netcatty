@@ -75,3 +75,26 @@ test("YMODEM send is refused while ZMODEM owns the same serial session", async (
   assert.equal(result.success, false);
   assert.match(result.error, /file transfer is already in progress/);
 });
+
+test("YMODEM receive is refused while ZMODEM owns the same serial session", async () => {
+  const sessions = new Map();
+  sessions.set("serial-1", {
+    type: "serial",
+    protocol: "serial",
+    serialPort: makeSerialPort(),
+    zmodemSentry: {
+      isActive() {
+        return true;
+      },
+    },
+  });
+  terminalBridge.init({ sessions, electronModule: {} });
+
+  const result = await terminalBridge.receiveSerialYmodem({ sender: {} }, {
+    sessionId: "serial-1",
+    destinationDir: "/tmp",
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /file transfer is already in progress/);
+});

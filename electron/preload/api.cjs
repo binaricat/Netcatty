@@ -45,6 +45,9 @@ function createPreloadApi(ctx) {
   sendSerialYmodem: async (sessionId, filePath) => {
     return ipcRenderer.invoke("netcatty:serial:ymodem-send", { sessionId, filePath });
   },
+  receiveSerialYmodem: async (sessionId, destinationDir) => {
+    return ipcRenderer.invoke("netcatty:serial:ymodem-receive", { sessionId, destinationDir });
+  },
   getDefaultShell: async () => {
     return ipcRenderer.invoke("netcatty:local:defaultShell");
   },
