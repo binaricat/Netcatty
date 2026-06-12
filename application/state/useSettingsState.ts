@@ -47,6 +47,7 @@ import {
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
 } from '../../infrastructure/config/storageKeys';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import {
@@ -89,6 +90,7 @@ import {
   DEFAULT_SHOW_SFTP_TAB,
   DEFAULT_SHOW_HOST_TREE_SIDEBAR,
   DEFAULT_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  DEFAULT_DISABLE_TERMINAL_FONT_ZOOM,
   DEFAULT_SSH_DEBUG_LOGS_ENABLED,
   DEFAULT_TERMINAL_THEME,
   DEFAULT_THEME,
@@ -243,6 +245,10 @@ export const useSettingsState = () => {
   const [shellOnlyTabNumberShortcuts, setShellOnlyTabNumberShortcutsState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
     return stored ?? DEFAULT_SHELL_ONLY_TAB_NUMBER_SHORTCUTS;
+  });
+  const [disableTerminalFontZoom, setDisableTerminalFontZoomState] = useState<boolean>(() => {
+    const stored = localStorageAdapter.readBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM);
+    return stored ?? DEFAULT_DISABLE_TERMINAL_FONT_ZOOM;
   });
   const [sftpTransferConcurrency, setSftpTransferConcurrencyState] = useState<number>(() => {
     const stored = localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY);
@@ -544,6 +550,8 @@ export const useSettingsState = () => {
     setShowHostTreeSidebarState(storedShowHostTreeSidebar ?? DEFAULT_SHOW_HOST_TREE_SIDEBAR);
     const storedShellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
     setShellOnlyTabNumberShortcutsState(storedShellOnlyTabNumberShortcuts ?? DEFAULT_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
+    const storedDisableTerminalFontZoom = localStorageAdapter.readBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM);
+    setDisableTerminalFontZoomState(storedDisableTerminalFontZoom ?? DEFAULT_DISABLE_TERMINAL_FONT_ZOOM);
 
     // Workspace focus style
     const storedFocusStyle = readStoredString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE);
@@ -635,6 +643,7 @@ export const useSettingsState = () => {
     setSftpDefaultViewMode,
     setWorkspaceFocusStyleState,
     setShowHostTreeSidebarState,
+    setDisableTerminalFontZoomState,
     setSftpTransferConcurrencyState,
   });
 
@@ -661,7 +670,7 @@ export const useSettingsState = () => {
     terminalThemeId, followAppTerminalTheme, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts,
+    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
     setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, setCustomAccent,
@@ -670,7 +679,7 @@ export const useSettingsState = () => {
     setFollowAppTerminalThemeState, setTerminalFontFamilyId, setTerminalFontSize,
     setSftpDoubleClickBehavior, setSftpAutoSync, setSftpShowHiddenFiles,
     setSftpUseCompressedUpload, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
-    setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setShellOnlyTabNumberShortcutsState,
+    setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setShellOnlyTabNumberShortcutsState, setDisableTerminalFontZoomState,
     setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled,
     setGlobalHotkeyEnabled, setWindowOpacity, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
@@ -789,6 +798,13 @@ export const useSettingsState = () => {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, enabled);
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, enabled);
+  }, [notifySettingsChanged]);
+
+  const setDisableTerminalFontZoom = useCallback((enabled: boolean) => {
+    setDisableTerminalFontZoomState(enabled);
+    localStorageAdapter.writeBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM, enabled);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM, enabled);
   }, [notifySettingsChanged]);
 
   // Apply and persist custom CSS
@@ -1031,6 +1047,8 @@ export const useSettingsState = () => {
     setShowHostTreeSidebar,
     shellOnlyTabNumberShortcuts,
     setShellOnlyTabNumberShortcuts,
+    disableTerminalFontZoom,
+    setDisableTerminalFontZoom,
     sftpTransferConcurrency,
     setSftpTransferConcurrency,
     // Editor Settings
@@ -1075,7 +1093,7 @@ export const useSettingsState = () => {
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-      showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts,
+      showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
       customThemes, workspaceFocusStyle, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
     ]),
   };

@@ -241,6 +241,7 @@ const WORKSPACE_CTX_KEYS = [
   'customAccent',
   'terminalSettings',
   'hotkeyScheme',
+  'disableTerminalFontZoom',
   'keyBindings',
   'resizing',
   'isComposeBarOpen',

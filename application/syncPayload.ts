@@ -67,6 +67,7 @@ import {
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_AI_PROVIDERS,
   STORAGE_KEY_AI_ACTIVE_PROVIDER,
@@ -418,6 +419,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (showSftpTab != null) settings.showSftpTab = showSftpTab;
   const shellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
   if (shellOnlyTabNumberShortcuts != null) settings.shellOnlyTabNumberShortcuts = shellOnlyTabNumberShortcuts;
+  const disableTerminalFontZoom = localStorageAdapter.readBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM);
+  if (disableTerminalFontZoom != null) settings.disableTerminalFontZoom = disableTerminalFontZoom;
   const showHostTreeSidebar = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR);
   if (showHostTreeSidebar != null) settings.showHostTreeSidebar = showHostTreeSidebar;
   const workspaceFocusStyle = localStorageAdapter.readString(STORAGE_KEY_WORKSPACE_FOCUS_STYLE);
@@ -558,6 +561,9 @@ function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): 
   }
   if (settings.shellOnlyTabNumberShortcuts != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, settings.shellOnlyTabNumberShortcuts);
+  }
+  if (settings.disableTerminalFontZoom != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM, settings.disableTerminalFontZoom);
   }
   if (settings.showHostTreeSidebar != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR, settings.showHostTreeSidebar);

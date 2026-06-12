@@ -251,6 +251,8 @@ export interface SyncPayload {
     showSftpTab?: boolean;
     // Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
     shellOnlyTabNumberShortcuts?: boolean;
+    // Shortcuts: disable terminal font zoom shortcuts
+    disableTerminalFontZoom?: boolean;
     // Terminal/editor tabs: show left host list sidebar
     showHostTreeSidebar?: boolean;
     // Workspace focus indicator style

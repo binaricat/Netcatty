@@ -131,6 +131,7 @@ export type TerminalLayerStableSnapshot = {
   snippetPackages: string[];
   knownHosts: KnownHost[];
   hotkeyScheme: TerminalLayerProps['hotkeyScheme'];
+  disableTerminalFontZoom: TerminalLayerProps['disableTerminalFontZoom'];
   keyBindings: TerminalLayerProps['keyBindings'];
   onHotkeyAction: TerminalLayerProps['onHotkeyAction'];
   onConnectToHost: TerminalLayerProps['onConnectToHost'];

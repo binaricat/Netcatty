@@ -336,6 +336,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.shortcuts.scheme.disabled': '禁用',
   'settings.shortcuts.scheme.mac': 'Mac (Cmd)',
   'settings.shortcuts.scheme.pc': 'PC (Ctrl)',
+  'settings.shortcuts.disableTerminalFontZoom.label': '禁用终端缩放',
+  'settings.shortcuts.disableTerminalFontZoom.desc': '关闭终端文字缩放快捷操作，包括 Cmd/Ctrl 加滚轮。',
   'settings.shortcuts.shellOnlyTabNumberShortcuts.label': '数字键跳过固定标签',
   'settings.shortcuts.shellOnlyTabNumberShortcuts.desc': '开启后，Cmd/Ctrl+[1...9] 仅在终端、工作区、编辑器等可关闭标签页之间切换，不包括固定的 Vault 和 SFTP 标签页。',
   'settings.shortcuts.section.custom': '自定义快捷键',

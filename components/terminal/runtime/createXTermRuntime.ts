@@ -50,8 +50,10 @@ import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { shouldDeferWebglUntilVisible } from "./webglRendererPolicy";
 import { handleSerialLineModeInput } from "./serialLineInput";
 import {
+  isTerminalFontSizeAction,
   nextTerminalFontSizeForAction,
   nextTerminalFontSizeForWheel,
+  shouldHandleTerminalFontSizeAction,
   terminalFontSizeWheelListenerOptions,
 } from "./terminalFontZoom";
 import {
@@ -122,6 +124,7 @@ export type CreateXTermRuntimeContext = {
   sessionRef: RefObject<string | null>;
 
   hotkeySchemeRef: RefObject<"disabled" | "mac" | "pc">;
+  disableTerminalFontZoomRef: RefObject<boolean>;
   keyBindingsRef: RefObject<KeyBinding[]>;
   onHotkeyActionRef: RefObject<
     ((action: string, event: KeyboardEvent) => void) | undefined
@@ -562,6 +565,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       event,
       currentTerminalFontSize(),
       isMac,
+      ctx.disableTerminalFontZoomRef.current,
     );
     if (nextFontSize === null) return;
     event.preventDefault();
@@ -684,6 +688,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
 
         if (terminalActions.has(action)) {
+          if (
+            isTerminalFontSizeAction(action)
+            && !shouldHandleTerminalFontSizeAction(action, ctx.disableTerminalFontZoomRef.current)
+          ) {
+            return true;
+          }
           e.preventDefault();
           e.stopPropagation();
           switch (action) {
@@ -731,7 +741,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             case "decreaseTerminalFontSize":
             case "resetTerminalFontSize": {
               applyTerminalFontSize(
-                nextTerminalFontSizeForAction(action, currentTerminalFontSize()),
+                nextTerminalFontSizeForAction(
+                  action,
+                  currentTerminalFontSize(),
+                  ctx.disableTerminalFontZoomRef.current,
+                ),
               );
               break;
             }

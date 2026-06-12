@@ -165,6 +165,9 @@ export const STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR = 'netcatty_show_host_tree_sideb
 // Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
 export const STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS = 'netcatty_shell_only_tab_number_shortcuts_v1';
 
+// Shortcuts: disable terminal font zoom shortcuts
+export const STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM = 'netcatty_disable_terminal_font_zoom_v1';
+
 // Group Configurations (default settings inherited by hosts)
 export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';
 

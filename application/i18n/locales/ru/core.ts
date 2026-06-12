@@ -476,6 +476,8 @@ export const ruCoreMessages: Messages = {
   'settings.shortcuts.scheme.disabled': 'Отключено',
   'settings.shortcuts.scheme.mac': 'Mac (Cmd)',
   'settings.shortcuts.scheme.pc': 'PC (Ctrl)',
+  'settings.shortcuts.disableTerminalFontZoom.label': 'Отключить масштаб терминала',
+  'settings.shortcuts.disableTerminalFontZoom.desc': 'Отключает быстрый масштаб текста в терминале, включая Cmd/Ctrl + колесо мыши.',
   'settings.shortcuts.shellOnlyTabNumberShortcuts.label': 'Цифры без закреплённых вкладок',
   'settings.shortcuts.shellOnlyTabNumberShortcuts.desc': 'Если включено, Cmd/Ctrl+[1...9] переключает только рабочие вкладки (терминалы, рабочие области, редакторы), а не закреплённые Vault и SFTP.',
   'settings.shortcuts.section.custom': 'Пользовательские сочетания',

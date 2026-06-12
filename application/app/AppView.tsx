@@ -250,6 +250,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           terminalFontFamilyId={terminalFontFamilyId}
           fontSize={terminalFontSize}
           hotkeyScheme={hotkeyScheme}
+          disableTerminalFontZoom={settings.disableTerminalFontZoom}
           keyBindings={keyBindings}
           onHotkeyAction={handleHotkeyAction}
           onUpdateTerminalThemeId={setTerminalThemeId}

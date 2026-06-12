@@ -371,6 +371,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     handleWorkspaceDrop,
     hosts: s.hosts,
     hotkeyScheme: s.hotkeyScheme,
+    disableTerminalFontZoom: s.disableTerminalFontZoom,
     identities: s.identities,
     isBroadcastEnabled: s.isBroadcastEnabled,
     isComposeBarOpen: s.isComposeBarOpen,

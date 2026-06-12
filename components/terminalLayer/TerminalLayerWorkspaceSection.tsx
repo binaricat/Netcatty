@@ -40,6 +40,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     customAccent,
     terminalSettings,
     hotkeyScheme,
+    disableTerminalFontZoom,
     keyBindings,
     resizing,
     isComposeBarOpen,
@@ -149,6 +150,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           customAccent={customAccent}
           terminalSettings={terminalSettings}
           hotkeyScheme={hotkeyScheme}
+          disableTerminalFontZoom={disableTerminalFontZoom}
           keyBindings={keyBindings}
           isResizing={!!resizing}
           isComposeBarOpen={isComposeBarOpen}

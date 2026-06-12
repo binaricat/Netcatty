@@ -476,6 +476,7 @@ export interface TerminalLayerProps {
   terminalFontFamilyId: string;
   fontSize?: number;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onUpdateTerminalThemeId?: (themeId: string) => void;
@@ -556,6 +557,7 @@ interface TerminalPaneProps {
   customAccent?: string;
   terminalSettings?: TerminalSettings;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   isResizing: boolean;
   isComposeBarOpen: boolean;
@@ -652,6 +654,7 @@ const terminalPanePropsAreEqual = (
   prev.customAccent === next.customAccent &&
   prev.terminalSettings === next.terminalSettings &&
   prev.hotkeyScheme === next.hotkeyScheme &&
+  prev.disableTerminalFontZoom === next.disableTerminalFontZoom &&
   prev.keyBindings === next.keyBindings &&
   prev.isResizing === next.isResizing &&
   prev.isComposeBarOpen === next.isComposeBarOpen &&
@@ -709,6 +712,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   customAccent,
   terminalSettings,
   hotkeyScheme,
+  disableTerminalFontZoom,
   keyBindings,
   isResizing,
   isComposeBarOpen,
@@ -896,6 +900,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         reuseConnectionFromSessionId={session.reuseConnectionFromSessionId}
         serialConfig={session.serialConfig}
         hotkeyScheme={hotkeyScheme}
+        disableTerminalFontZoom={disableTerminalFontZoom}
         keyBindings={keyBindings}
         onHotkeyAction={onHotkeyAction}
         onTerminalFontSizeChange={handleTerminalFontSizeChange}
@@ -959,6 +964,7 @@ interface TerminalPanesHostProps {
   customAccent?: string;
   terminalSettings?: TerminalSettings;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   isResizing: boolean;
   isComposeBarOpen: boolean;
@@ -1021,6 +1027,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.customAccent !== next.customAccent) return false;
   if (prev.terminalSettings !== next.terminalSettings) return false;
   if (prev.hotkeyScheme !== next.hotkeyScheme) return false;
+  if (prev.disableTerminalFontZoom !== next.disableTerminalFontZoom) return false;
   if (prev.keyBindings !== next.keyBindings) return false;
   if (prev.isResizing !== next.isResizing) return false;
   if (prev.isComposeBarOpen !== next.isComposeBarOpen) return false;

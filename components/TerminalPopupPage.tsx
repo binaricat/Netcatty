@@ -317,6 +317,7 @@ function TerminalPopupPageInner() {
               accentMode={settings.accentMode}
               customAccent={settings.customAccent}
               terminalSettings={settings.terminalSettings}
+              disableTerminalFontZoom={settings.disableTerminalFontZoom}
               sessionId={sessionId}
               startupCommand={config.startupCommand}
               reuseConnectionFromSessionId={reuseId}

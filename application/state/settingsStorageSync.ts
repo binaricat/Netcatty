@@ -29,6 +29,7 @@ import {
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
   STORAGE_KEY_TERM_FOLLOW_APP_THEME,
   STORAGE_KEY_TERM_FONT_FAMILY,
   STORAGE_KEY_TERM_FONT_SIZE,
@@ -79,6 +80,7 @@ interface UseSettingsStorageSyncParams {
   showSftpTab: boolean;
   showHostTreeSidebar: boolean;
   shellOnlyTabNumberShortcuts: boolean;
+  disableTerminalFontZoom: boolean;
   editorWordWrap: boolean;
   sessionLogsEnabled: boolean;
   sessionLogsDir: string;
@@ -115,6 +117,7 @@ interface UseSettingsStorageSyncParams {
   setShowSftpTabState: Dispatch<SetStateAction<boolean>>;
   setShowHostTreeSidebarState: Dispatch<SetStateAction<boolean>>;
   setShellOnlyTabNumberShortcutsState: Dispatch<SetStateAction<boolean>>;
+  setDisableTerminalFontZoomState: Dispatch<SetStateAction<boolean>>;
   setEditorWordWrapState: Dispatch<SetStateAction<boolean>>;
   setSessionLogsEnabled: Dispatch<SetStateAction<boolean>>;
   setSessionLogsDir: Dispatch<SetStateAction<string>>;
@@ -136,7 +139,7 @@ export function useSettingsStorageSync({
   terminalThemeId, followAppTerminalTheme, terminalFontFamilyId, terminalFontSize,
   sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
   sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-  showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts,
+  showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
   editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
   globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
   setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, setCustomAccent,
@@ -145,7 +148,7 @@ export function useSettingsStorageSync({
   setFollowAppTerminalThemeState, setTerminalFontFamilyId, setTerminalFontSize,
   setSftpDoubleClickBehavior, setSftpAutoSync, setSftpShowHiddenFiles,
   setSftpUseCompressedUpload, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
-  setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setShellOnlyTabNumberShortcutsState,
+  setShowRecentHostsState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setShellOnlyTabNumberShortcutsState, setDisableTerminalFontZoomState,
   setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled,
   setGlobalHotkeyEnabled, setWindowOpacity, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
   setSftpTransferConcurrencyState, applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
@@ -159,7 +162,7 @@ export function useSettingsStorageSync({
     terminalThemeId, followAppTerminalTheme, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts,
+    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
   });
@@ -169,7 +172,7 @@ export function useSettingsStorageSync({
     terminalThemeId, followAppTerminalTheme, terminalFontFamilyId, terminalFontSize,
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
-    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts,
+    showRecentHosts, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, shellOnlyTabNumberShortcuts, disableTerminalFontZoom,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
   };
@@ -389,6 +392,12 @@ export function useSettingsStorageSync({
           setShellOnlyTabNumberShortcutsState(newValue);
         }
       }
+      if (e.key === STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.disableTerminalFontZoom) {
+          setDisableTerminalFontZoomState(newValue);
+        }
+      }
       // Sync global hotkey enabled setting from other windows
       if (e.key === STORAGE_KEY_GLOBAL_HOTKEY_ENABLED && e.newValue !== null) {
         const newValue = e.newValue === 'true';
@@ -458,6 +467,7 @@ export function useSettingsStorageSync({
     setShowRecentHostsState,
     setShowSftpTabState,
     setShellOnlyTabNumberShortcutsState,
+    setDisableTerminalFontZoomState,
     setTerminalFontFamilyId,
     setTerminalFontSize,
     setTerminalThemeDarkId,

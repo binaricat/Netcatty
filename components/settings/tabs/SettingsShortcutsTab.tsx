@@ -12,6 +12,8 @@ export default function SettingsShortcutsTab(props: {
   setHotkeyScheme: (scheme: HotkeyScheme) => void;
   shellOnlyTabNumberShortcuts: boolean;
   setShellOnlyTabNumberShortcuts: (enabled: boolean) => void;
+  disableTerminalFontZoom: boolean;
+  setDisableTerminalFontZoom: (enabled: boolean) => void;
   keyBindings: KeyBinding[];
   updateKeyBinding?: (bindingId: string, scheme: "mac" | "pc", newKey: string) => void;
   resetKeyBinding?: (bindingId: string, scheme?: "mac" | "pc") => void;
@@ -23,6 +25,8 @@ export default function SettingsShortcutsTab(props: {
     setHotkeyScheme,
     shellOnlyTabNumberShortcuts,
     setShellOnlyTabNumberShortcuts,
+    disableTerminalFontZoom,
+    setDisableTerminalFontZoom,
     keyBindings,
     updateKeyBinding,
     resetKeyBinding,
@@ -138,6 +142,15 @@ export default function SettingsShortcutsTab(props: {
             ]}
             onChange={(v) => setHotkeyScheme(v as HotkeyScheme)}
             className="w-32"
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.shortcuts.disableTerminalFontZoom.label")}
+          description={t("settings.shortcuts.disableTerminalFontZoom.desc")}
+        >
+          <Toggle
+            checked={disableTerminalFontZoom}
+            onChange={setDisableTerminalFontZoom}
           />
         </SettingRow>
         <SettingRow

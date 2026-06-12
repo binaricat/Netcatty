@@ -119,6 +119,7 @@ export interface TerminalProps {
   reuseConnectionFromSessionId?: string;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onTerminalFontSizeChange?: (fontSize: number) => void;
