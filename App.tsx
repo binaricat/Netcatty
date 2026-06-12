@@ -194,7 +194,6 @@ function App({ settings }: { settings: SettingsState }) {
   const keysRef = useRef(keys);
   keysRef.current = keys;
   const knownHostsRef = useRef(knownHosts);
-  knownHostsRef.current = knownHosts;
   // Bridge the gap while useVaultState hydrates: its async init awaits
   // hosts/keys/identities/proxyProfiles decryption before reading knownHosts,
   // so the state is briefly [] at boot even when localStorage has entries.
@@ -205,6 +204,7 @@ function App({ settings }: { settings: SettingsState }) {
     () => getEffectiveKnownHosts(knownHosts) ?? [],
     [knownHosts],
   );
+  knownHostsRef.current = effectiveKnownHosts;
 
   const {
     sessions,

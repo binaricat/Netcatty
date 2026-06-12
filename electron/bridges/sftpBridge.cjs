@@ -24,6 +24,7 @@ const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const fileWatcherBridge = require("./fileWatcherBridge.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
+const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const {
@@ -888,6 +889,7 @@ const openConnectionApi = createOpenConnectionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   jumpConnectionsMap, SftpClient, SSHClient, NetcattyAgent, keyboardInteractiveHandler, passphraseHandler,
+  hostKeyVerifier,
   fs, path, net, Buffer, process, console, setTimeout, clearTimeout,
   SFTPWrapper, createProxySocket, buildSftpAlgorithms, getAvailableAgentSocket,
   preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, findAllDefaultPrivateKeysFromHelper,

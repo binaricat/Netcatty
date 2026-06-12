@@ -545,6 +545,13 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           },
         ),
       };
+      connOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
+        sender,
+        sessionId,
+        hostname: jump.hostname,
+        port: jump.port || 22,
+        knownHosts: options.knownHosts,
+      });
       attachSshDebugLogger(connOpts, sshDiagnosticLogger);
       logSshAlgorithms("Jump host", connOpts.algorithms, {
         hostname: jump.hostname,
