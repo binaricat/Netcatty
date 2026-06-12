@@ -1,4 +1,4 @@
-import { SftpConnection, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
+import { KnownHost, SftpConnection, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
 
 export interface SftpPane {
   id: string;
@@ -13,6 +13,22 @@ export interface SftpPane {
   filenameEncoding: SftpFilenameEncoding;
   showHiddenFiles: boolean;
   transferMutationToken: number;
+}
+
+export interface SftpHostKeyInfo {
+  hostname: string;
+  port: number;
+  keyType: string;
+  fingerprint: string;
+  publicKey?: string;
+  status?: "unknown" | "changed";
+  knownHostId?: string;
+  knownFingerprint?: string;
+}
+
+export interface SftpHostKeyVerificationState {
+  hostKeyInfo: SftpHostKeyInfo;
+  progressLogs: string[];
 }
 
 // Multi-tab state for left and right sides
@@ -70,4 +86,6 @@ export interface SftpStateOptions {
    * is honored for SFTP browsing too (not just the terminal session).
    */
   terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
+  knownHosts?: KnownHost[];
+  onAddKnownHost?: (knownHost: KnownHost) => void;
 }

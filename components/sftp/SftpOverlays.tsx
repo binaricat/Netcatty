@@ -7,6 +7,8 @@ import type { TransferTask } from "../../types";
 import FileOpenerDialog from "../FileOpenerDialog";
 import TextEditorModal from "../TextEditorModal";
 import type { TextEditorModalSnapshot } from "../TextEditorModal";
+import { TerminalHostKeyVerification } from "../terminal/TerminalHostKeyVerification";
+import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { SftpConflictDialog } from "./SftpConflictDialog";
 import { SftpHostPicker } from "./SftpHostPicker";
 import { SftpPermissionsDialog } from "./SftpPermissionsDialog";
@@ -138,6 +140,27 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
         onResolve={sftp.resolveConflict}
         formatFileSize={sftp.formatFileSize}
       />
+
+      <Dialog
+        open={!!sftp.hostKeyVerification}
+        onOpenChange={(open) => {
+          if (!open) sftp.rejectHostKeyVerification();
+        }}
+      >
+        <DialogContent className="max-w-lg" hideCloseButton>
+          <DialogTitle className="sr-only">Confirm host key</DialogTitle>
+          {sftp.hostKeyVerification && (
+            <TerminalHostKeyVerification
+              hostKeyInfo={sftp.hostKeyVerification.hostKeyInfo}
+              showLogs={sftp.hostKeyVerification.progressLogs.length > 0}
+              progressLogs={sftp.hostKeyVerification.progressLogs}
+              onClose={sftp.rejectHostKeyVerification}
+              onContinue={sftp.acceptHostKeyVerification}
+              onAddAndContinue={sftp.acceptAndSaveHostKeyVerification}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <SftpPermissionsDialog
         open={!!permissionsState}

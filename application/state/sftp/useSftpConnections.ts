@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
-import type { Host, Identity, SftpConnection, SftpFileEntry, SftpFilenameEncoding, SSHKey } from "../../../domain/models";
-import type { SftpPane } from "./types";
+import type { Host, Identity, KnownHost, SftpConnection, SftpFileEntry, SftpFilenameEncoding, SSHKey } from "../../../domain/models";
+import type { SftpHostKeyInfo, SftpHostKeyVerificationState, SftpPane } from "./types";
 import { useSftpDirectoryListing } from "./useSftpDirectoryListing";
 import { useSftpHostCredentials } from "./useSftpHostCredentials";
 import { buildCacheKey, getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
@@ -11,6 +11,8 @@ interface UseSftpConnectionsParams {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  knownHosts?: KnownHost[];
+  onAddKnownHost?: (knownHost: KnownHost) => void;
   terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number };
   leftTabsRef: MutableRefObject<{ tabs: SftpPane[]; activeTabId: string | null }>;
   rightTabsRef: MutableRefObject<{ tabs: SftpPane[]; activeTabId: string | null }>;
@@ -39,12 +41,48 @@ interface UseSftpConnectionsResult {
   disconnect: (side: "left" | "right") => Promise<void>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
+  hostKeyVerification: SftpHostKeyVerificationState | null;
+  rejectHostKeyVerification: () => void;
+  acceptHostKeyVerification: () => void;
+  acceptAndSaveHostKeyVerification: () => void;
 }
+
+type HostKeyVerificationRequest = SftpHostKeyInfo & {
+  requestId: string;
+  sessionId?: string;
+};
+
+const toSftpHostKeyInfo = (request: HostKeyVerificationRequest): SftpHostKeyInfo => ({
+  hostname: request.hostname,
+  port: request.port || 22,
+  keyType: request.keyType,
+  fingerprint: request.fingerprint,
+  publicKey: request.publicKey,
+  status: request.status,
+  knownHostId: request.knownHostId,
+  knownFingerprint: request.knownFingerprint,
+});
+
+const createKnownHostFromSftpHostKeyInfo = (
+  hostKeyInfo: SftpHostKeyInfo,
+  now = Date.now(),
+  idSuffix = Math.random().toString(36).slice(2, 11),
+): KnownHost => ({
+  id: hostKeyInfo.knownHostId || `kh-${now}-${idSuffix}`,
+  hostname: hostKeyInfo.hostname,
+  port: hostKeyInfo.port || 22,
+  keyType: hostKeyInfo.keyType,
+  publicKey: hostKeyInfo.publicKey || `SHA256:${hostKeyInfo.fingerprint}`,
+  fingerprint: hostKeyInfo.fingerprint,
+  discoveredAt: now,
+});
 
 export const useSftpConnections = ({
   hosts,
   keys,
   identities,
+  knownHosts,
+  onAddKnownHost,
   terminalSettings,
   leftTabsRef,
   rightTabsRef,
@@ -67,8 +105,76 @@ export const useSftpConnections = ({
   createEmptyPane,
   autoConnectLocalOnMount = true,
 }: UseSftpConnectionsParams): UseSftpConnectionsResult => {
-  const getHostCredentials = useSftpHostCredentials({ hosts, keys, identities, terminalSettings });
+  const getHostCredentials = useSftpHostCredentials({ hosts, keys, identities, knownHosts, terminalSettings });
   const { listLocalFiles, listRemoteFiles } = useSftpDirectoryListing();
+  const [hostKeyVerification, setHostKeyVerification] = useState<SftpHostKeyVerificationState | null>(null);
+  const hostKeyVerificationRef = useRef<(SftpHostKeyVerificationState & { requestId: string; sessionId: string }) | null>(null);
+  const activeHostKeySessionsRef = useRef<Map<string, { side: "left" | "right"; tabId: string }>>(new Map());
+
+  const setPendingHostKeyVerification = useCallback((
+    next: (SftpHostKeyVerificationState & { requestId: string; sessionId: string }) | null,
+  ) => {
+    hostKeyVerificationRef.current = next;
+    setHostKeyVerification(next ? {
+      hostKeyInfo: next.hostKeyInfo,
+      progressLogs: next.progressLogs,
+    } : null);
+  }, []);
+
+  useEffect(() => {
+    const dispose = netcattyBridge.get()?.onHostKeyVerification?.((request: HostKeyVerificationRequest) => {
+      const sessionId = request.sessionId;
+      if (!sessionId) return;
+      const activeSession = activeHostKeySessionsRef.current.get(sessionId);
+      if (!activeSession) return;
+
+      const hostKeyInfo = toSftpHostKeyInfo(request);
+      const logLine = request.status === "changed"
+        ? `Host key changed for ${request.hostname}. Waiting for confirmation...`
+        : `Host key verification required for ${request.hostname}.`;
+
+      updateTab(activeSession.side, activeSession.tabId, (prev) => ({
+        ...prev,
+        connectionLogs: [...prev.connectionLogs, logLine],
+      }));
+      setPendingHostKeyVerification({
+        requestId: request.requestId,
+        sessionId,
+        hostKeyInfo,
+        progressLogs: [logLine],
+      });
+    });
+
+    return () => {
+      dispose?.();
+    };
+  }, [setPendingHostKeyVerification, updateTab]);
+
+  const respondToHostKeyVerification = useCallback((accept: boolean, addToKnownHosts = false) => {
+    const pending = hostKeyVerificationRef.current;
+    if (!pending) return;
+    if (accept && addToKnownHosts) {
+      onAddKnownHost?.(createKnownHostFromSftpHostKeyInfo(pending.hostKeyInfo));
+    }
+    void netcattyBridge.get()?.respondHostKeyVerification?.(
+      pending.requestId,
+      accept,
+      addToKnownHosts,
+    );
+    setPendingHostKeyVerification(null);
+  }, [onAddKnownHost, setPendingHostKeyVerification]);
+
+  const rejectHostKeyVerification = useCallback(() => {
+    respondToHostKeyVerification(false);
+  }, [respondToHostKeyVerification]);
+
+  const acceptHostKeyVerification = useCallback(() => {
+    respondToHostKeyVerification(true, false);
+  }, [respondToHostKeyVerification]);
+
+  const acceptAndSaveHostKeyVerification = useCallback(() => {
+    respondToHostKeyVerification(true, true);
+  }, [respondToHostKeyVerification]);
 
   const connect = useCallback(
     async (side: "left" | "right", host: Host | "local", options?: { forceNewTab?: boolean; onTabCreated?: (tabId: string) => void; sourceSessionId?: string }) => {
@@ -230,6 +336,7 @@ export const useSftpConnections = ({
 
         // Subscribe to SFTP connection progress events for auth logging
         const sftpSessionId = `sftp-${connectionId}`;
+        activeHostKeySessionsRef.current.set(sftpSessionId, { side, tabId: activeTabId });
         let unsubSftpProgress: (() => void) | undefined;
         const bridge = netcattyBridge.get();
         if (bridge?.onSftpConnectionProgress) {
@@ -295,7 +402,7 @@ export const useSftpConnections = ({
           if (hasKey) {
             try {
               const keyFirstCredentials = {
-                sessionId: `sftp-${connectionId}`,
+                sessionId: sftpSessionId,
                 ...credentials,
                 sourceSessionId: options?.sourceSessionId,
               };
@@ -306,7 +413,7 @@ export const useSftpConnections = ({
             } catch (err) {
               if (hasPassword && isAuthError(err)) {
                 sftpId = await openSftp({
-                  sessionId: `sftp-${connectionId}`,
+                  sessionId: sftpSessionId,
                   ...credentials,
                   sourceSessionId: options?.sourceSessionId,
                   privateKey: undefined,
@@ -322,7 +429,7 @@ export const useSftpConnections = ({
             }
           } else {
             sftpId = await openSftp({
-              sessionId: `sftp-${connectionId}`,
+              sessionId: sftpSessionId,
               ...credentials,
               sourceSessionId: options?.sourceSessionId,
             });
@@ -489,6 +596,10 @@ export const useSftpConnections = ({
             reconnecting: false,
           }));
         } finally {
+          activeHostKeySessionsRef.current.delete(sftpSessionId);
+          if (hostKeyVerificationRef.current?.sessionId === sftpSessionId) {
+            setPendingHostKeyVerification(null);
+          }
           unsubSftpProgress?.();
         }
       }
@@ -503,6 +614,7 @@ export const useSftpConnections = ({
       makeCacheKey,
       listLocalFiles,
       listRemoteFiles,
+      setPendingHostKeyVerification,
     ],
   );
 
@@ -588,5 +700,9 @@ export const useSftpConnections = ({
     disconnect,
     listLocalFiles,
     listRemoteFiles,
+    hostKeyVerification,
+    rejectHostKeyVerification,
+    acceptHostKeyVerification,
+    acceptAndSaveHostKeyVerification,
   };
 };

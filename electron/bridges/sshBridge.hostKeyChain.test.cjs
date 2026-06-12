@@ -22,14 +22,32 @@ function loadBridgeWithMockedSsh2(t) {
       MockSSHClient.instances.push(this);
       this.ended = false;
       this.connectOpts = null;
+      this.hostVerifierCalls = 0;
     }
 
     connect(opts) {
       this.connectOpts = opts;
+      const rawKey = MockSSHClient.hostKeysByHost.get(opts.host) || MockSSHClient.defaultHostKey;
       setImmediate(() => {
-        this.emit("connect");
-        this.emit("handshake");
-        this.emit("ready");
+        const accept = () => {
+          this.emit("connect");
+          this.emit("handshake");
+          this.emit("ready");
+        };
+        if (typeof opts.hostVerifier !== "function") {
+          accept();
+          return;
+        }
+        this.hostVerifierCalls += 1;
+        opts.hostVerifier(rawKey, (accepted) => {
+          if (accepted) {
+            accept();
+            return;
+          }
+          const err = new Error(`Host key rejected for ${opts.host || "tunneled host"}`);
+          err.level = "client-socket";
+          this.emit("error", err);
+        });
       });
     }
 
@@ -48,6 +66,8 @@ function loadBridgeWithMockedSsh2(t) {
     }
   }
   MockSSHClient.instances = [];
+  MockSSHClient.hostKeysByHost = new Map();
+  MockSSHClient.defaultHostKey = makeRawPublicKey("ssh-ed25519", "default untrusted key");
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "ssh2") {
@@ -72,13 +92,22 @@ function loadBridgeWithMockedSsh2(t) {
   return { bridge, MockSSHClient };
 }
 
-function makeSender() {
+function makeSender({ rejectHostKeyPrompts = false } = {}) {
   return {
     id: 1,
     isDestroyed: () => false,
     sent: [],
     send(channel, payload) {
       this.sent.push({ channel, payload });
+      if (rejectHostKeyPrompts && channel === "netcatty:host-key:verify") {
+        const { handleResponse } = require("./hostKeyVerifier.cjs");
+        queueMicrotask(() => {
+          handleResponse(null, {
+            requestId: payload.requestId,
+            accept: false,
+          });
+        });
+      }
     },
   };
 }
@@ -87,6 +116,7 @@ test("jump-host chain connections verify hop host keys against known hosts", asy
   const { bridge, MockSSHClient } = loadBridgeWithMockedSsh2(t);
   const sender = makeSender();
   const rawKey = makeRawPublicKey("ssh-ed25519");
+  MockSSHClient.hostKeysByHost.set("bastion.example.com", rawKey);
   const fingerprint = crypto.createHash("sha256")
     .update(rawKey)
     .digest("base64")
@@ -121,14 +151,46 @@ test("jump-host chain connections verify hop host keys against known hosts", asy
   assert.equal(MockSSHClient.instances.length, 1);
   const connectOpts = MockSSHClient.instances[0].connectOpts;
   assert.equal(typeof connectOpts.hostVerifier, "function");
-
-  const accepted = await new Promise((resolve) => {
-    connectOpts.hostVerifier(rawKey, resolve);
-  });
-
-  assert.equal(accepted, true);
+  assert.equal(MockSSHClient.instances[0].hostVerifierCalls, 1);
   assert.deepEqual(
     sender.sent.filter((message) => message.channel === "netcatty:host-key:verify"),
     [],
+  );
+});
+
+test("jump-host chain connections stop when hop host keys are rejected", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithMockedSsh2(t);
+  const sender = makeSender({ rejectHostKeyPrompts: true });
+  MockSSHClient.hostKeysByHost.set(
+    "bastion.example.com",
+    makeRawPublicKey("ssh-ed25519", "unknown jump host key"),
+  );
+
+  await assert.rejects(
+    bridge.connectThroughChain(
+      { sender },
+      {
+        knownHosts: [],
+        _defaultKeys: [],
+      },
+      [{
+        hostname: "bastion.example.com",
+        port: 22,
+        username: "alice",
+        password: "secret",
+        label: "Bastion",
+      }],
+      "target.example.com",
+      22,
+      "session-1",
+    ),
+    /Host key rejected/,
+  );
+
+  assert.equal(MockSSHClient.instances.length, 1);
+  assert.equal(MockSSHClient.instances[0].hostVerifierCalls, 1);
+  assert.equal(
+    sender.sent.filter((message) => message.channel === "netcatty:host-key:verify").length,
+    1,
   );
 });

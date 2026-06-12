@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildSftpHostCredentials } from "./useSftpHostCredentials.ts";
-import type { Host, SSHKey } from "../../../domain/models.ts";
+import type { Host, KnownHost, SSHKey } from "../../../domain/models.ts";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
   id: "host-1",
@@ -100,6 +100,28 @@ test("buildSftpHostCredentials passes reference keys as identity file paths", ()
   assert.equal(credentials.privateKey, undefined);
   assert.deepEqual(credentials.identityFilePaths, ["/Users/alice/.ssh/id_ed25519"]);
   assert.equal(credentials.passphrase, "saved-passphrase");
+});
+
+test("buildSftpHostCredentials forwards known hosts for SFTP host-key checks", () => {
+  const knownHosts: KnownHost[] = [{
+    id: "kh-1",
+    hostname: "example.com",
+    port: 22,
+    keyType: "ssh-ed25519",
+    publicKey: "SHA256:abc",
+    fingerprint: "abc",
+    discoveredAt: 1,
+  }];
+
+  const credentials = buildSftpHostCredentials({
+    host: host(),
+    hosts: [],
+    keys: [],
+    identities: [],
+    knownHosts,
+  });
+
+  assert.equal(credentials.knownHosts, knownHosts);
 });
 
 test("buildSftpHostCredentials passes jump host reference keys as identity file paths", () => {

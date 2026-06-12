@@ -214,9 +214,11 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           hosts={hosts}
           keys={keys}
           identities={identities}
+          knownHosts={effectiveKnownHosts}
           proxyProfiles={proxyProfiles}
           groupConfigs={groupConfigs}
           updateHosts={updateHosts}
+          onAddKnownHost={handleAddKnownHost}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}

@@ -89,6 +89,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleCloseSidePanel,
     handleHistoryPaste,
     handleHistoryRun,
+    handleAddKnownHost,
     handleOpenHistory,
     handleFontFamilyChangeForFocusedSession,
     handleFontFamilyResetForFocusedSession,
@@ -116,6 +117,7 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     identities,
     keyBindings,
     keys,
+    knownHosts,
     mountedAiTabIds,
     mountedSftpTabIds,
     scriptsMountedTabIds,
@@ -460,7 +462,9 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   writableHosts={hosts}
                   keys={keys}
                   identities={identities}
+                  knownHosts={knownHosts}
                   updateHosts={updateHosts}
+                  onAddKnownHost={handleAddKnownHost}
                   sftpDefaultViewMode={sftpDefaultViewMode}
                   activeHost={panelActiveHost}
                   activeSessionId={isVisibleSftpPanel ? activeTerminalSessionIdForSftp : null}

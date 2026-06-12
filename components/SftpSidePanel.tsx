@@ -24,7 +24,7 @@ import { getParentPath, isConcreteTransferTargetPath } from "../application/stat
 import { buildCacheKey } from "../application/state/sftp/sharedRemoteHostCache";
 import { logger } from "../lib/logger";
 import type { DropEntry } from "../lib/sftpFileUtils";
-import { Host, Identity, SSHKey } from "../types";
+import { Host, Identity, KnownHost, SSHKey } from "../types";
 import type { TransferTask } from "../types";
 import { toast } from "./ui/toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -47,7 +47,9 @@ interface SftpSidePanelProps {
   writableHosts?: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  knownHosts?: KnownHost[];
   updateHosts: (hosts: Host[]) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void;
   sftpDefaultViewMode: "list" | "tree";
   /** The host to connect to (follows focused terminal) */
   activeHost: Host | null;
@@ -87,7 +89,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   writableHosts,
   keys,
   identities,
+  knownHosts = [],
   updateHosts,
+  onAddKnownHost,
   sftpDefaultViewMode,
   activeHost,
   activeSessionId,
@@ -134,7 +138,9 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     defaultShowHiddenFiles: sftpShowHiddenFiles,
     autoConnectLocalOnMount: false,
     terminalSettings,
-  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings]);
+    knownHosts,
+    onAddKnownHost,
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings, knownHosts, onAddKnownHost]);
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
   const {
@@ -964,7 +970,9 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.writableHosts === next.writableHosts &&
   prev.keys === next.keys &&
   prev.identities === next.identities &&
+  prev.knownHosts === next.knownHosts &&
   prev.updateHosts === next.updateHosts &&
+  prev.onAddKnownHost === next.onAddKnownHost &&
   prev.sftpDefaultViewMode === next.sftpDefaultViewMode &&
   prev.activeHost === next.activeHost &&
   prev.activeSessionId === next.activeSessionId &&
