@@ -106,18 +106,18 @@ function patchMachOFile(file, uuid) {
   return result;
 }
 
-function adHocSignExecutable(exePath, options = {}) {
+function adHocSignAppBundle(appPath, options = {}) {
   const hostPlatform = options.hostPlatform || process.platform;
   const execFile = options.execFileSync || execFileSync;
 
   if (hostPlatform !== "darwin") {
     console.warn(
-      `[afterPack] Skipping ad-hoc codesign for ${exePath}; host platform is ${hostPlatform}`,
+      `[afterPack] Skipping ad-hoc codesign for ${appPath}; host platform is ${hostPlatform}`,
     );
     return false;
   }
 
-  execFile("codesign", ["--force", "--sign", "-", "--timestamp=none", exePath], {
+  execFile("codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", appPath], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   return true;
@@ -129,9 +129,9 @@ async function afterPack(context) {
 
   const appId = context.packager.appInfo.id || "com.netcatty.app";
   const productFilename = context.packager.appInfo.productFilename;
+  const appPath = path.join(context.appOutDir, `${productFilename}.app`);
   const exePath = path.join(
-    context.appOutDir,
-    `${productFilename}.app`,
+    appPath,
     "Contents",
     "MacOS",
     productFilename,
@@ -158,10 +158,11 @@ async function afterPack(context) {
 
   // The official Developer ID signing step runs after afterPack and replaces
   // this temporary signature. Local unsigned builds skip that step, so the
-  // patched executable still needs a valid ad-hoc signature or macOS kills it
-  // before Electron can start.
-  if (adHocSignExecutable(exePath)) {
-    console.log("[afterPack] Ad-hoc signed patched macOS executable for local unsigned builds");
+  // patched app bundle still needs a valid ad-hoc signature or macOS kills it
+  // before Electron can start. Signing the whole bundle also covers Electron's
+  // nested frameworks, which codesign validates as subcomponents.
+  if (adHocSignAppBundle(appPath)) {
+    console.log("[afterPack] Ad-hoc signed patched macOS app for local unsigned builds");
   }
 }
 
@@ -171,4 +172,4 @@ module.exports.deriveUuid = deriveUuid;
 module.exports.formatUuid = formatUuid;
 module.exports.patchMachOBuffer = patchMachOBuffer;
 module.exports.patchMachOFile = patchMachOFile;
-module.exports.adHocSignExecutable = adHocSignExecutable;
+module.exports.adHocSignAppBundle = adHocSignAppBundle;
