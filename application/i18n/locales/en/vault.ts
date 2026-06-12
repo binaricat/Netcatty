@@ -258,6 +258,8 @@ export const enVaultMessages: Messages = {
   'sftp.tabs.addTab': 'Add new tab',
   'sftp.tabs.closeTab': 'Close tab',
   'sftp.tabs.newTab': 'New Tab',
+  'sftp.tabs.copyDefaultPath': 'Copy tab (default path)',
+  'sftp.tabs.copyCurrentPath': 'Copy and go to current path',
   'sftp.conflict.title': 'File Conflict',
   'sftp.conflict.desc': 'A file with the same name already exists at the destination',
   'sftp.conflict.alreadyExistsSuffix': 'already exists',

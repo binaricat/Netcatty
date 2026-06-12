@@ -293,6 +293,8 @@ export const ruVaultMessages: Messages = {
   'sftp.tabs.addTab': 'Добавить новую вкладку',
   'sftp.tabs.closeTab': 'Закрыть вкладку',
   'sftp.tabs.newTab': 'Новая вкладка',
+  'sftp.tabs.copyDefaultPath': 'Копировать вкладку (путь по умолчанию)',
+  'sftp.tabs.copyCurrentPath': 'Копировать и перейти к текущему пути',
   'sftp.conflict.title': 'Конфликт файлов',
   'sftp.conflict.desc': 'В месте назначения уже существует файл с таким именем',
   'sftp.conflict.alreadyExistsSuffix': 'уже существует',

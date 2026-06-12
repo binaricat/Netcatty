@@ -374,9 +374,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     handleReorderTabsRight,
     handleMoveTabFromLeftToRight,
     handleMoveTabFromRightToLeft,
+    handleDuplicateTabLeft,
+    handleDuplicateTabRight,
     handleHostSelectLeft,
     handleHostSelectRight,
-  } = useSftpViewTabs({ sftp, sftpRef });
+  } = useSftpViewTabs({ sftp, sftpRef, hosts: effectiveHosts });
 
   const handleAddTabLeftWithFocus = useCallback(() => {
     const tabId = handleAddTabLeft();
@@ -397,6 +399,26 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     handleSelectTabRight(tabId);
     handlePaneFocus("right", tabId);
   }, [handlePaneFocus, handleSelectTabRight]);
+
+  const handleDuplicateTabLeftWithFocus = useCallback(
+    async (...args: Parameters<typeof handleDuplicateTabLeft>) => {
+      const tabId = await handleDuplicateTabLeft(...args);
+      if (tabId) {
+        handlePaneFocus("left", tabId);
+      }
+    },
+    [handleDuplicateTabLeft, handlePaneFocus],
+  );
+
+  const handleDuplicateTabRightWithFocus = useCallback(
+    async (...args: Parameters<typeof handleDuplicateTabRight>) => {
+      const tabId = await handleDuplicateTabRight(...args);
+      if (tabId) {
+        handlePaneFocus("right", tabId);
+      }
+    },
+    [handleDuplicateTabRight, handlePaneFocus],
+  );
 
   return (
     <SftpContextProvider
@@ -444,6 +466,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                 onAddTab={handleAddTabLeftWithFocus}
                 onReorderTabs={handleReorderTabsLeft}
                 onMoveTabToOtherSide={handleMoveTabFromRightToLeft}
+                onDuplicateTab={handleDuplicateTabLeftWithFocus}
               />
             )}
             <div className="relative flex-1 min-h-0">
@@ -504,6 +527,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                 onAddTab={handleAddTabRightWithFocus}
                 onReorderTabs={handleReorderTabsRight}
                 onMoveTabToOtherSide={handleMoveTabFromLeftToRight}
+                onDuplicateTab={handleDuplicateTabRightWithFocus}
               />
             )}
             <div className="relative flex-1 min-h-0">

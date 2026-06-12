@@ -676,6 +676,8 @@ export const zhCNVaultMessages: Messages = {
   'sftp.tabs.addTab': '新建标签页',
   'sftp.tabs.closeTab': '关闭标签页',
   'sftp.tabs.newTab': '新标签页',
+  'sftp.tabs.copyDefaultPath': '复制标签页（默认路径）',
+  'sftp.tabs.copyCurrentPath': '复制并跳转到当前路径',
   'sftp.conflict.title': '文件冲突',
   'sftp.conflict.desc': '目标位置已存在同名文件',
   'sftp.conflict.alreadyExistsSuffix': '已存在',

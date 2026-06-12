@@ -9,7 +9,7 @@
  * - Drag-and-drop reordering of tabs
  */
 
-import { HardDrive, Monitor, Plus, X } from "lucide-react";
+import { Copy, HardDrive, Monitor, Plus, X } from "lucide-react";
 import React, {
   memo,
   useCallback,
@@ -25,12 +25,20 @@ import { useRenderTracker } from "../../lib/useRenderTracker";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { useActiveTabId } from "./SftpContext";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "../ui/context-menu";
+import type { SftpTabDuplicateMode } from "./sftpTabDuplication";
 
 export interface SftpTab {
   id: string;
   label: string;
   isLocal: boolean;
   hostId: string | null;
+  canDuplicate?: boolean;
 }
 
 interface SftpTabBarProps {
@@ -46,6 +54,10 @@ interface SftpTabBarProps {
   ) => void;
   /** Called when a tab is dragged to the other side */
   onMoveTabToOtherSide?: (tabId: string) => void;
+  onDuplicateTab?: (
+    tabId: string,
+    mode: SftpTabDuplicateMode,
+  ) => void | Promise<void>;
 }
 
 const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
@@ -56,6 +68,7 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
   onAddTab,
   onReorderTabs,
   onMoveTabToOtherSide,
+  onDuplicateTab,
 }) => {
   // Subscribe to activeTabId from store (isolated subscription)
   const activeTabId = useActiveTabId(side);
@@ -307,6 +320,7 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
         >
           {tabs.map((tab) => {
             const isActive = activeTabId === tab.id;
+            const canDuplicateTab = !!onDuplicateTab && !!tab.canDuplicate;
             const isBeingDragged =
               isDragging && draggedTabIdRef.current === tab.id;
             const showDropIndicatorBefore =
@@ -317,71 +331,94 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
               dropIndicator.position === "after";
 
             return (
-              <div
-                key={tab.id}
-                data-tab-id={tab.id}
-                data-tab-type="sftp"
-                data-state={isActive ? 'active' : 'inactive'}
-                onClick={(e) => handleSelectTabClick(e, tab.id)}
-                onMouseDown={handleTabMiddleMouseDown}
-                onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseTab(tab.id))}
-                draggable
-                onDragStart={(e) => handleTabDragStart(e, tab.id)}
-                onDragEnd={handleTabDragEnd}
-                onDragOver={(e) => handleTabDragOver(e, tab.id)}
-                onDrop={(e) => handleTabDrop(e, tab.id)}
-                className={cn(
-                  "netcatty-tab relative px-3 min-w-[100px] max-w-[180px] text-xs font-medium cursor-pointer flex items-center justify-between gap-2 flex-shrink-0 border-r border-border/40",
-                  "transition-[color,opacity,transform] duration-100 ease-out",
-                  isActive
-                    ? "text-foreground border-b-2"
-                    : "text-muted-foreground hover:text-foreground",
-                  isBeingDragged && "opacity-50",
-                )}
-                style={
-                  isActive
-                    ? { borderBottomColor: "hsl(var(--accent))" }
-                    : undefined
-                }
-              >
-                {/* Drop indicator line - before */}
-                {showDropIndicatorBefore && isDragging && (
-                  <div className="absolute left-0 top-1 bottom-1 w-0.5 bg-primary shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
-                )}
-                {/* Drop indicator line - after */}
-                {showDropIndicatorAfter && isDragging && (
-                  <div className="absolute right-0 top-1 bottom-1 w-0.5 bg-primary shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
-                )}
+              <ContextMenu key={tab.id}>
+                <ContextMenuTrigger asChild>
+                  <div
+                    data-tab-id={tab.id}
+                    data-tab-type="sftp"
+                    data-state={isActive ? 'active' : 'inactive'}
+                    onClick={(e) => handleSelectTabClick(e, tab.id)}
+                    onMouseDown={handleTabMiddleMouseDown}
+                    onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseTab(tab.id))}
+                    draggable
+                    onDragStart={(e) => handleTabDragStart(e, tab.id)}
+                    onDragEnd={handleTabDragEnd}
+                    onDragOver={(e) => handleTabDragOver(e, tab.id)}
+                    onDrop={(e) => handleTabDrop(e, tab.id)}
+                    className={cn(
+                      "netcatty-tab relative px-3 min-w-[100px] max-w-[180px] text-xs font-medium cursor-pointer flex items-center justify-between gap-2 flex-shrink-0 border-r border-border/40",
+                      "transition-[color,opacity,transform] duration-100 ease-out",
+                      isActive
+                        ? "text-foreground border-b-2"
+                        : "text-muted-foreground hover:text-foreground",
+                      isBeingDragged && "opacity-50",
+                    )}
+                    style={
+                      isActive
+                        ? { borderBottomColor: "hsl(var(--accent))" }
+                        : undefined
+                    }
+                  >
+                    {/* Drop indicator line - before */}
+                    {showDropIndicatorBefore && isDragging && (
+                      <div className="absolute left-0 top-1 bottom-1 w-0.5 bg-primary shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                    )}
+                    {/* Drop indicator line - after */}
+                    {showDropIndicatorAfter && isDragging && (
+                      <div className="absolute right-0 top-1 bottom-1 w-0.5 bg-primary shadow-[0_0_8px_2px] shadow-primary/50 animate-pulse" />
+                    )}
 
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  {tab.isLocal ? (
-                    <Monitor
-                      size={12}
-                      className={cn(
-                        "shrink-0",
-                        isActive ? "text-primary" : "text-muted-foreground",
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      {tab.isLocal ? (
+                        <Monitor
+                          size={12}
+                          className={cn(
+                            "shrink-0",
+                            isActive ? "text-primary" : "text-muted-foreground",
+                          )}
+                        />
+                      ) : (
+                        <HardDrive
+                          size={12}
+                          className={cn(
+                            "shrink-0",
+                            isActive ? "text-primary" : "text-muted-foreground",
+                          )}
+                        />
                       )}
-                    />
-                  ) : (
-                    <HardDrive
-                      size={12}
-                      className={cn(
-                        "shrink-0",
-                        isActive ? "text-primary" : "text-muted-foreground",
-                      )}
-                    />
-                  )}
-                  <span className="truncate">{tab.label}</span>
-                </div>
+                      <span className="truncate">{tab.label}</span>
+                    </div>
 
-                <button
-                  onClick={(e) => handleCloseTab(e, tab.id)}
-                  className="p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
-                  aria-label={t("common.close")}
-                >
-                  <X size={12} />
-                </button>
-              </div>
+                    <button
+                      onClick={(e) => handleCloseTab(e, tab.id)}
+                      className="p-0.5 hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+                      aria-label={t("common.close")}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem
+                    disabled={!canDuplicateTab}
+                    onClick={() => {
+                      void onDuplicateTab?.(tab.id, "defaultPath");
+                    }}
+                  >
+                    <Copy size={14} className="mr-2" />
+                    {t("sftp.tabs.copyDefaultPath")}
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    disabled={!canDuplicateTab}
+                    onClick={() => {
+                      void onDuplicateTab?.(tab.id, "currentPath");
+                    }}
+                  >
+                    <Copy size={14} className="mr-2" />
+                    {t("sftp.tabs.copyCurrentPath")}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
         </div>
@@ -432,7 +469,8 @@ const sftpTabBarAreEqual = (
       prevTab.id !== nextTab.id ||
       prevTab.label !== nextTab.label ||
       prevTab.isLocal !== nextTab.isLocal ||
-      prevTab.hostId !== nextTab.hostId
+      prevTab.hostId !== nextTab.hostId ||
+      prevTab.canDuplicate !== nextTab.canDuplicate
     ) {
       return false;
     }

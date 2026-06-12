@@ -34,8 +34,16 @@ interface UseSftpConnectionsParams {
   autoConnectLocalOnMount?: boolean;
 }
 
+export interface SftpConnectOptions {
+  forceNewTab?: boolean;
+  ignoreSharedCache?: boolean;
+  initialPath?: string;
+  onTabCreated?: (tabId: string) => void;
+  sourceSessionId?: string;
+}
+
 interface UseSftpConnectionsResult {
-  connect: (side: "left" | "right", host: Host | "local", options?: { forceNewTab?: boolean; onTabCreated?: (tabId: string) => void }) => Promise<void>;
+  connect: (side: "left" | "right", host: Host | "local", options?: SftpConnectOptions) => Promise<void>;
   disconnect: (side: "left" | "right") => Promise<void>;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
   listRemoteFiles: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpFileEntry[]>;
@@ -71,7 +79,7 @@ export const useSftpConnections = ({
   const { listLocalFiles, listRemoteFiles } = useSftpDirectoryListing();
 
   const connect = useCallback(
-    async (side: "left" | "right", host: Host | "local", options?: { forceNewTab?: boolean; onTabCreated?: (tabId: string) => void; sourceSessionId?: string }) => {
+    async (side: "left" | "right", host: Host | "local", options?: SftpConnectOptions) => {
       const setTabs = side === "left" ? setLeftTabs : setRightTabs;
 
       let activeTabId: string | null = null;
@@ -147,13 +155,15 @@ export const useSftpConnections = ({
           homeDir = isWindows ? "C:\\Users\\damao" : "/Users/damao";
         }
 
+        const startPath = options?.initialPath || homeDir;
+
         const connection: SftpConnection = {
           id: connectionId,
           hostId: "local",
           hostLabel: "Local",
           isLocal: true,
           status: "connected",
-          currentPath: homeDir,
+          currentPath: startPath,
           homeDir,
         };
 
@@ -168,9 +178,9 @@ export const useSftpConnections = ({
         }));
 
         try {
-          const files = await listLocalFiles(homeDir);
+          const files = await listLocalFiles(startPath);
           if (navSeqRef.current[side] !== connectRequestId) return;
-          dirCacheRef.current.set(makeCacheKey(connectionId, homeDir, filenameEncoding), {
+          dirCacheRef.current.set(makeCacheKey(connectionId, startPath, filenameEncoding), {
             files,
             timestamp: Date.now(),
           });
@@ -193,12 +203,16 @@ export const useSftpConnections = ({
         }
       } else {
         const hostCacheKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
-        const sharedHostCacheCandidate = getSharedRemoteHostCache(hostCacheKey);
+        const initialPath = options?.initialPath?.trim();
+        const sharedHostCacheCandidate = options?.ignoreSharedCache
+          ? null
+          : getSharedRemoteHostCache(hostCacheKey);
         const sharedHostCache =
           sharedHostCacheCandidate?.filenameEncoding === filenameEncoding
+            && (!initialPath || sharedHostCacheCandidate.path === initialPath)
             ? sharedHostCacheCandidate
             : null;
-        const cachedStartPath = sharedHostCache?.path ?? "/";
+        const cachedStartPath = initialPath || sharedHostCache?.path || "/";
 
         const connection: SftpConnection = {
           id: connectionId,
@@ -393,6 +407,10 @@ export const useSftpConnections = ({
                 }
               }
             }
+          }
+
+          if (initialPath) {
+            startPath = initialPath;
           }
 
           const provisionalCacheKey = sharedHostCache
