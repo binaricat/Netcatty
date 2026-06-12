@@ -4,6 +4,16 @@ let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
 const { readClipboardFiles, readClipboardImage } = require("../bridges/clipboardFiles.cjs");
 
+const excludedFigSpecPrefixes = ["aws", "gcloud", "az"];
+
+function isExcludedFigSpec(commandName) {
+  return excludedFigSpecPrefixes.some((prefix) => commandName === prefix || commandName.startsWith(`${prefix}/`));
+}
+
+function filterExcludedFigSpecs(specNames) {
+  return specNames.filter((name) => !isExcludedFigSpec(name));
+}
+
 function createBridgeRegistrar(context) {
   const {
     electronModule,
@@ -207,7 +217,7 @@ function createBridgeRegistrar(context) {
             .filter(f => f.endsWith(".js"))
             .map(f => f.slice(0, -3));
         } catch { /* no local specs dir */ }
-        const merged = [...new Set([...figSpecs, ...localNames])];
+        const merged = filterExcludedFigSpecs([...new Set([...figSpecs, ...localNames])]);
         return merged;
       } catch (err) {
         console.warn("[Main] Failed to load fig spec list:", err?.message || err);
@@ -219,6 +229,7 @@ function createBridgeRegistrar(context) {
         // Sanitize: reject absolute paths, path traversal, and non-spec characters
         if (!commandName || commandName.startsWith("/") || commandName.startsWith("\\") ||
             commandName.includes("..") || !/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
+        if (isExcludedFigSpec(commandName)) return null;
         const { pathToFileURL } = require("url");
         const fs = require("fs");
   
@@ -803,4 +814,4 @@ function createBridgeRegistrar(context) {
   return registerBridges;
 }
 
-module.exports = { createBridgeRegistrar };
+module.exports = { createBridgeRegistrar, filterExcludedFigSpecs, isExcludedFigSpec };
