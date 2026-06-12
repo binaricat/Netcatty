@@ -2,7 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { SftpPane } from "../../application/state/sftp/types.ts";
-import { getSftpTabDuplicateRequest } from "./sftpTabDuplication.ts";
+import {
+  canDuplicateSftpTab,
+  getSftpTabDuplicateRequest,
+  isSftpTabKeyboardContextMenuShortcut,
+  isSftpTabKeyboardSelectShortcut,
+  shouldHandleSftpTabKeyboardEvent,
+  SFTP_TAB_DUPLICATE_MENU_ITEMS,
+} from "./sftpTabDuplication.ts";
 
 const connectedPane = (overrides: Partial<NonNullable<SftpPane["connection"]>> = {}): SftpPane => ({
   id: "tab-1",
@@ -68,4 +75,40 @@ test("SFTP tab duplication is unavailable before a tab is connected", () => {
     getSftpTabDuplicateRequest(connectedPane({ status: "connecting" }), "currentPath"),
     null,
   );
+});
+
+test("SFTP tab duplicate menu exposes separate default and current path actions", () => {
+  assert.deepEqual(
+    SFTP_TAB_DUPLICATE_MENU_ITEMS.map((item) => item.mode),
+    ["defaultPath", "currentPath"],
+  );
+  assert.deepEqual(
+    SFTP_TAB_DUPLICATE_MENU_ITEMS.map((item) => item.labelKey),
+    ["sftp.tabs.copyDefaultPath", "sftp.tabs.copyCurrentPath"],
+  );
+});
+
+test("SFTP tab duplicate menu is disabled without a connected tab and handler", () => {
+  assert.equal(canDuplicateSftpTab({ canDuplicate: true }, true), true);
+  assert.equal(canDuplicateSftpTab({ canDuplicate: true }, false), false);
+  assert.equal(canDuplicateSftpTab({ canDuplicate: false }, true), false);
+  assert.equal(canDuplicateSftpTab(connectedPane(), true), true);
+  assert.equal(canDuplicateSftpTab(connectedPane({ status: "connecting" }), true), false);
+});
+
+test("SFTP tab duplicate menu has keyboard shortcuts for selection and menu access", () => {
+  assert.equal(isSftpTabKeyboardSelectShortcut("Enter"), true);
+  assert.equal(isSftpTabKeyboardSelectShortcut(" "), true);
+  assert.equal(isSftpTabKeyboardSelectShortcut("Escape"), false);
+  assert.equal(isSftpTabKeyboardContextMenuShortcut("ContextMenu"), true);
+  assert.equal(isSftpTabKeyboardContextMenuShortcut("F10", true), true);
+  assert.equal(isSftpTabKeyboardContextMenuShortcut("F10", false), false);
+});
+
+test("SFTP tab keyboard shortcuts do not intercept nested close button events", () => {
+  const tab = new EventTarget();
+  const closeButton = new EventTarget();
+
+  assert.equal(shouldHandleSftpTabKeyboardEvent(tab, tab), true);
+  assert.equal(shouldHandleSftpTabKeyboardEvent(closeButton, tab), false);
 });

@@ -6,6 +6,7 @@ import type { SftpPane } from "./types";
 import { useSftpDirectoryListing } from "./useSftpDirectoryListing";
 import { useSftpHostCredentials } from "./useSftpHostCredentials";
 import { buildCacheKey, getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
+import { resolveRemoteSftpStartState } from "./sftpConnectStartPath";
 
 interface UseSftpConnectionsParams {
   hosts: Host[];
@@ -109,6 +110,33 @@ export const useSftpConnections = ({
 
       navSeqRef.current[side] += 1;
       const connectRequestId = navSeqRef.current[side];
+      const getTargetPane = () => {
+        const tabs = side === "left" ? leftTabsRef.current.tabs : rightTabsRef.current.tabs;
+        return tabs.find((tab) => tab.id === activeTabId) ?? null;
+      };
+      const isTargetConnectionCurrent = () => {
+        const pane = getTargetPane();
+        if (!pane) return false;
+        if (pane.connection?.id === connectionId) return true;
+        return !pane.connection && navSeqRef.current[side] === connectRequestId;
+      };
+      const isTargetConnectionAtPath = (path: string) => {
+        const connection = getTargetPane()?.connection;
+        if (!connection) return navSeqRef.current[side] === connectRequestId;
+        return connection?.id === connectionId && connection.currentPath === path;
+      };
+      const closeSftpSessionForConnection = async () => {
+        const sftpId = sftpSessionsRef.current.get(connectionId);
+        sftpSessionsRef.current.delete(connectionId);
+        connectionCacheKeyMapRef.current.delete(connectionId);
+        clearCacheForConnection(connectionId);
+        if (!sftpId) return;
+        try {
+          await netcattyBridge.get()?.closeSftp(sftpId);
+        } catch {
+          // Ignore errors when closing stale SFTP sessions
+        }
+      };
 
       lastConnectedHostRef.current[side] = host;
       // Store the cache key for this connection so pane actions can look it up
@@ -179,7 +207,7 @@ export const useSftpConnections = ({
 
         try {
           const files = await listLocalFiles(startPath);
-          if (navSeqRef.current[side] !== connectRequestId) return;
+          if (!isTargetConnectionAtPath(startPath)) return;
           dirCacheRef.current.set(makeCacheKey(connectionId, startPath, filenameEncoding), {
             files,
             timestamp: Date.now(),
@@ -192,7 +220,7 @@ export const useSftpConnections = ({
             reconnecting: false,
           }));
         } catch (err) {
-          if (navSeqRef.current[side] !== connectRequestId) return;
+          if (!isTargetConnectionAtPath(startPath)) return;
           reconnectingRef.current[side] = false;
           updateTab(side, activeTabId, (prev) => ({
             ...prev,
@@ -203,16 +231,15 @@ export const useSftpConnections = ({
         }
       } else {
         const hostCacheKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username);
-        const initialPath = options?.initialPath?.trim();
         const sharedHostCacheCandidate = options?.ignoreSharedCache
           ? null
           : getSharedRemoteHostCache(hostCacheKey);
-        const sharedHostCache =
-          sharedHostCacheCandidate?.filenameEncoding === filenameEncoding
-            && (!initialPath || sharedHostCacheCandidate.path === initialPath)
-            ? sharedHostCacheCandidate
-            : null;
-        const cachedStartPath = initialPath || sharedHostCache?.path || "/";
+        const { initialPath, sharedHostCache, cachedStartPath } = resolveRemoteSftpStartState({
+          filenameEncoding,
+          ignoreSharedCache: options?.ignoreSharedCache,
+          initialPath: options?.initialPath,
+          sharedHostCacheCandidate,
+        });
 
         const connection: SftpConnection = {
           id: connectionId,
@@ -278,7 +305,7 @@ export const useSftpConnections = ({
                 logLine = `${label} - ${status}${detail ? `: ${detail}` : ''}`;
             }
             // Only update if this is still the active request (avoids stale logs leaking)
-            if (navSeqRef.current[side] !== connectRequestId) return;
+            if (!isTargetConnectionCurrent()) return;
             updateTab(side, activeTabId, (prev) => ({
               ...prev,
               connectionLogs: [...prev.connectionLogs, logLine],
@@ -345,6 +372,10 @@ export const useSftpConnections = ({
           if (!sftpId) throw new Error("Failed to open SFTP session");
 
           sftpSessionsRef.current.set(connectionId, sftpId);
+          if (!isTargetConnectionCurrent()) {
+            await closeSftpSessionForConnection();
+            return;
+          }
 
           let startPath = sharedHostCache?.path ?? "/";
           let homeDir = sharedHostCache?.homeDir ?? startPath;
@@ -456,7 +487,10 @@ export const useSftpConnections = ({
               throw new Error("Cannot list any remote directory");
             }
           }
-          if (navSeqRef.current[side] !== connectRequestId) return;
+          if (!isTargetConnectionCurrent()) {
+            await closeSftpSessionForConnection();
+            return;
+          }
           dirCacheRef.current.set(makeCacheKey(connectionId, startPath, filenameEncoding), {
             files,
             timestamp: Date.now(),
@@ -487,7 +521,10 @@ export const useSftpConnections = ({
             connectionLogs: [], // Clear after successful connect to avoid replay during navigation
           }));
         } catch (err) {
-          if (navSeqRef.current[side] !== connectRequestId) return;
+          if (!isTargetConnectionCurrent()) {
+            await closeSftpSessionForConnection();
+            return;
+          }
           reconnectingRef.current[side] = false;
           updateTab(side, activeTabId, (prev) => ({
             ...prev,

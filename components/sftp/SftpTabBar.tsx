@@ -31,7 +31,14 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "../ui/context-menu";
-import type { SftpTabDuplicateMode } from "./sftpTabDuplication";
+import {
+  canDuplicateSftpTab,
+  isSftpTabKeyboardContextMenuShortcut,
+  isSftpTabKeyboardSelectShortcut,
+  shouldHandleSftpTabKeyboardEvent,
+  SFTP_TAB_DUPLICATE_MENU_ITEMS,
+  type SftpTabDuplicateMode,
+} from "./sftpTabDuplication";
 
 export interface SftpTab {
   id: string;
@@ -245,6 +252,35 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
     [onAddTab],
   );
 
+  const handleTabKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>, tabId: string) => {
+      if (!shouldHandleSftpTabKeyboardEvent(e.target, e.currentTarget)) {
+        return;
+      }
+
+      if (isSftpTabKeyboardSelectShortcut(e.key)) {
+        e.preventDefault();
+        onSelectTab(tabId);
+        return;
+      }
+
+      if (isSftpTabKeyboardContextMenuShortcut(e.key, e.shiftKey)) {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        e.currentTarget.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + Math.min(rect.width / 2, 24),
+            clientY: rect.bottom,
+          }),
+        );
+      }
+    },
+    [onSelectTab],
+  );
+
   // Cross-pane drag handlers
   const handleCrossPaneDragOver = useCallback(
     (e: React.DragEvent) => {
@@ -320,7 +356,7 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
         >
           {tabs.map((tab) => {
             const isActive = activeTabId === tab.id;
-            const canDuplicateTab = !!onDuplicateTab && !!tab.canDuplicate;
+            const canDuplicateTab = canDuplicateSftpTab(tab, !!onDuplicateTab);
             const isBeingDragged =
               isDragging && draggedTabIdRef.current === tab.id;
             const showDropIndicatorBefore =
@@ -337,7 +373,11 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
                     data-tab-id={tab.id}
                     data-tab-type="sftp"
                     data-state={isActive ? 'active' : 'inactive'}
+                    tabIndex={0}
+                    aria-haspopup="menu"
+                    aria-label={tab.label}
                     onClick={(e) => handleSelectTabClick(e, tab.id)}
+                    onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
                     onMouseDown={handleTabMiddleMouseDown}
                     onAuxClick={(e) => handleTabMiddleClickClose(e, () => onCloseTab(tab.id))}
                     draggable
@@ -347,7 +387,7 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
                     onDrop={(e) => handleTabDrop(e, tab.id)}
                     className={cn(
                       "netcatty-tab relative px-3 min-w-[100px] max-w-[180px] text-xs font-medium cursor-pointer flex items-center justify-between gap-2 flex-shrink-0 border-r border-border/40",
-                      "transition-[color,opacity,transform] duration-100 ease-out",
+                      "transition-[color,opacity,transform] duration-100 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-inset",
                       isActive
                         ? "text-foreground border-b-2"
                         : "text-muted-foreground hover:text-foreground",
@@ -399,24 +439,18 @@ const SftpTabBarInner: React.FC<SftpTabBarProps> = ({
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                  <ContextMenuItem
-                    disabled={!canDuplicateTab}
-                    onClick={() => {
-                      void onDuplicateTab?.(tab.id, "defaultPath");
-                    }}
-                  >
-                    <Copy size={14} className="mr-2" />
-                    {t("sftp.tabs.copyDefaultPath")}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    disabled={!canDuplicateTab}
-                    onClick={() => {
-                      void onDuplicateTab?.(tab.id, "currentPath");
-                    }}
-                  >
-                    <Copy size={14} className="mr-2" />
-                    {t("sftp.tabs.copyCurrentPath")}
-                  </ContextMenuItem>
+                  {SFTP_TAB_DUPLICATE_MENU_ITEMS.map((item) => (
+                    <ContextMenuItem
+                      key={item.mode}
+                      disabled={!canDuplicateTab}
+                      onClick={() => {
+                        void onDuplicateTab?.(tab.id, item.mode);
+                      }}
+                    >
+                      <Copy size={14} className="mr-2" />
+                      {t(item.labelKey)}
+                    </ContextMenuItem>
+                  ))}
                 </ContextMenuContent>
               </ContextMenu>
             );
