@@ -1,9 +1,16 @@
 import type { SessionCapabilities } from '../../domain/systemManager/types';
 
+/** How long cached capability probes remain valid before requiring re-probe. */
+export const CAPABILITIES_TTL_MS = 60_000;
+
 type Listener = () => void;
 
 const capabilitiesBySessionId = new Map<string, SessionCapabilities>();
 const listenersBySessionId = new Map<string, Set<Listener>>();
+
+function isExpired(capabilities: SessionCapabilities): boolean {
+  return Date.now() - capabilities.probedAt > CAPABILITIES_TTL_MS;
+}
 
 function notifySession(sessionId: string) {
   listenersBySessionId.get(sessionId)?.forEach((listener) => listener());
@@ -11,21 +18,21 @@ function notifySession(sessionId: string) {
 
 export const sessionCapabilitiesStore = {
   get(sessionId: string): SessionCapabilities | undefined {
-    return capabilitiesBySessionId.get(sessionId);
+    const entry = capabilitiesBySessionId.get(sessionId);
+    if (!entry) return undefined;
+    if (isExpired(entry)) {
+      capabilitiesBySessionId.delete(sessionId);
+      return undefined;
+    }
+    return entry;
   },
 
   set(sessionId: string, capabilities: SessionCapabilities) {
-    const prev = capabilitiesBySessionId.get(sessionId);
-    if (
-      prev
-      && prev.targetOs === capabilities.targetOs
-      && prev.hasTmux === capabilities.hasTmux
-      && prev.hasDocker === capabilities.hasDocker
-      && prev.probedAt === capabilities.probedAt
-    ) {
-      return;
-    }
-    capabilitiesBySessionId.set(sessionId, capabilities);
+    const entry: SessionCapabilities = {
+      ...capabilities,
+      probedAt: Date.now(),
+    };
+    capabilitiesBySessionId.set(sessionId, entry);
     notifySession(sessionId);
   },
 

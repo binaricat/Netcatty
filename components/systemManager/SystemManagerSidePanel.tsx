@@ -98,6 +98,20 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const tmuxChecking = resolvedTab === 'tmux' && !tmuxReady && !tmuxUnavailable;
   const dockerChecking = resolvedTab === 'docker' && !dockerReady && !dockerUnavailable;
 
+  // Re-probe capabilities when switching to a tab whose tool was previously unavailable
+  // (handles stale cache: Docker/Tmux may have been installed after last probe).
+  const prevTabRef = React.useRef(resolvedTab);
+  React.useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = resolvedTab;
+    if (prev === resolvedTab) return;
+    if (resolvedTab === 'docker' && !dockerReady) {
+      void refreshCapabilities();
+    } else if (resolvedTab === 'tmux' && !tmuxReady) {
+      void refreshCapabilities();
+    }
+  }, [resolvedTab, dockerReady, tmuxReady, refreshCapabilities]);
+
   return (
     <SystemPanelShell section="system-manager-panel">
       {workspaceHostHeader}
