@@ -50,7 +50,9 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const sessionId = session?.id ?? null;
   const isConnected = session?.status === 'connected';
 
-  const { capabilities, probing } = useSessionCapabilities(sessionId, isConnected, backend, isVisible);
+  const capabilitiesTtlMs = terminalSettings.systemManagerProcessRefreshInterval * 1000;
+
+  const { capabilities, probing, refreshCapabilities } = useSessionCapabilities(sessionId, isConnected, backend, isVisible, capabilitiesTtlMs);
 
   const availableTabs = useMemo(
     () => buildSystemManagerTabs(sessionHost, capabilities, session),

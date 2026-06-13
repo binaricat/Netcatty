@@ -155,6 +155,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     systemWarmupSessionIds,
     systemBackend,
     systemWarmupSessionIds.length > 0,
+    (s.terminalSettings?.systemManagerProcessRefreshInterval ?? 3) * 1000,
   );
 
   useEffect(() => {

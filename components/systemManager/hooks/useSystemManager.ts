@@ -37,7 +37,11 @@ export function useSessionCapabilities(
   isConnected: boolean,
   backend: Backend,
   enabled: boolean,
+  capabilitiesTtlMs: number,
 ) {
+  const ttlMsRef = useRef(capabilitiesTtlMs);
+  ttlMsRef.current = capabilitiesTtlMs;
+
   const [capabilities, setCapabilities] = useState<SessionCapabilities | undefined>(
     () => (sessionId ? sessionCapabilitiesStore.get(sessionId) : undefined),
   );
@@ -63,7 +67,7 @@ export function useSessionCapabilities(
     try {
       const result = await backend.probeSystemCapabilities(sessionId);
       if (result.success && result.capabilities) {
-        sessionCapabilitiesStore.set(sessionId, result.capabilities);
+        sessionCapabilitiesStore.set(sessionId, result.capabilities, ttlMsRef.current);
       }
     } finally {
       setProbing(false);
@@ -84,10 +88,13 @@ export function useSystemCapabilitiesWarmup(
   sessionIds: string[],
   backend: Backend,
   enabled: boolean,
+  capabilitiesTtlMs: number,
 ) {
   const backendRef = useRef(backend);
   backendRef.current = backend;
   const inflightRef = useRef(new Set<string>());
+  const ttlMsRef = useRef(capabilitiesTtlMs);
+  ttlMsRef.current = capabilitiesTtlMs;
 
   const sessionKey = enabled ? sessionIds.slice().sort().join(',') : '';
 
@@ -100,7 +107,7 @@ export function useSystemCapabilitiesWarmup(
       void backendRef.current.probeSystemCapabilities(sessionId).then((result) => {
         inflightRef.current.delete(sessionId);
         if (result.success && result.capabilities) {
-          sessionCapabilitiesStore.set(sessionId, result.capabilities);
+          sessionCapabilitiesStore.set(sessionId, result.capabilities, ttlMsRef.current);
         }
       });
     }

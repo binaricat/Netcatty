@@ -1,15 +1,18 @@
 import type { SessionCapabilities } from '../../domain/systemManager/types';
 
-/** How long cached capability probes remain valid before requiring re-probe. */
-export const CAPABILITIES_TTL_MS = 60_000;
+/** Internal entry: capabilities plus computed expiry timestamp. */
+interface StoreEntry {
+  capabilities: SessionCapabilities;
+  expiresAt: number;
+}
 
 type Listener = () => void;
 
-const capabilitiesBySessionId = new Map<string, SessionCapabilities>();
+const capabilitiesBySessionId = new Map<string, StoreEntry>();
 const listenersBySessionId = new Map<string, Set<Listener>>();
 
-function isExpired(capabilities: SessionCapabilities): boolean {
-  return Date.now() - capabilities.probedAt > CAPABILITIES_TTL_MS;
+function isExpired(entry: StoreEntry): boolean {
+  return Date.now() > entry.expiresAt;
 }
 
 function notifySession(sessionId: string) {
@@ -24,13 +27,16 @@ export const sessionCapabilitiesStore = {
       capabilitiesBySessionId.delete(sessionId);
       return undefined;
     }
-    return entry;
+    return entry.capabilities;
   },
 
-  set(sessionId: string, capabilities: SessionCapabilities) {
-    const entry: SessionCapabilities = {
-      ...capabilities,
-      probedAt: Date.now(),
+  set(sessionId: string, capabilities: SessionCapabilities, ttlMs: number) {
+    const entry: StoreEntry = {
+      capabilities: {
+        ...capabilities,
+        probedAt: Date.now(),
+      },
+      expiresAt: Date.now() + ttlMs,
     };
     capabilitiesBySessionId.set(sessionId, entry);
     notifySession(sessionId);
