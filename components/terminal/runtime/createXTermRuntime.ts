@@ -704,11 +704,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ) {
             return true;
           }
-          // When copy is bound to Ctrl+C and there is no text selected,
-          // pass the event through to xterm so it encodes Ctrl+C as \x03
-          // (ETX → SIGINT). This preserves the standard terminal interrupt
-          // behaviour while still allowing copy when text is selected.
-          if (action === "copy" && !term.hasSelection()) {
+          // When copy is bound specifically to Ctrl+C / ⌃C (the ETX/SIGINT
+          // chord) and there is no text selected, pass the event through to
+          // xterm so it encodes the key as \x03. For any other copy binding
+          // (F5, Ctrl+L, etc.) we must NOT forward the key to the remote
+          // process — just consume it as a no-op.
+          if (
+            action === "copy"
+            && !term.hasSelection()
+            && e.key.toLowerCase() === "c"
+            && e.ctrlKey
+            && !e.shiftKey
+            && !e.altKey
+            && !e.metaKey
+          ) {
             return true;
           }
           e.preventDefault();
