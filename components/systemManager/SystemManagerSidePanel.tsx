@@ -62,6 +62,19 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const [activeTab, setActiveTab] = useState<SystemManagerSubTab>('processes');
   const resolvedTab = availableTabs.includes(activeTab) ? activeTab : 'processes';
 
+  // Must be defined before early returns to comply with React rules of hooks.
+  const prevTabRef = React.useRef(resolvedTab);
+  React.useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = resolvedTab;
+    if (prev === resolvedTab) return;
+    if (resolvedTab === 'docker' && capabilities?.hasDocker !== true) {
+      void refreshCapabilities();
+    } else if (resolvedTab === 'tmux' && capabilities?.hasTmux !== true) {
+      void refreshCapabilities();
+    }
+  }, [resolvedTab, capabilities, refreshCapabilities]);
+
   const workspaceHostHeader = showWorkspaceHostHeader && sessionHost ? (
     <WorkspaceSidebarHostHeader
       host={sessionHost}
@@ -99,20 +112,6 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const dockerUnavailable = !probing && capabilities !== undefined && !dockerReady;
   const tmuxChecking = resolvedTab === 'tmux' && !tmuxReady && !tmuxUnavailable;
   const dockerChecking = resolvedTab === 'docker' && !dockerReady && !dockerUnavailable;
-
-  // Re-probe capabilities when switching to a tab whose tool was previously unavailable
-  // (handles stale cache: Docker/Tmux may have been installed after last probe).
-  const prevTabRef = React.useRef(resolvedTab);
-  React.useEffect(() => {
-    const prev = prevTabRef.current;
-    prevTabRef.current = resolvedTab;
-    if (prev === resolvedTab) return;
-    if (resolvedTab === 'docker' && !dockerReady) {
-      void refreshCapabilities();
-    } else if (resolvedTab === 'tmux' && !tmuxReady) {
-      void refreshCapabilities();
-    }
-  }, [resolvedTab, dockerReady, tmuxReady, refreshCapabilities]);
 
   return (
     <SystemPanelShell section="system-manager-panel">
