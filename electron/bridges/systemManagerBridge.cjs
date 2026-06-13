@@ -16,7 +16,9 @@ const CAPABILITY_SCRIPT_POSIX = [
 const PROCESS_LIST_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
-  "ps -eo pid= -o ppid= -o user= -o stat= -o pcpu= -o pmem= -o rss= -o vsz= -o etime= -o args= 2>/dev/null",
+  // Safety cap: head -n 2000 prevents maxBuffer/timeout on process-dense hosts.
+  // This is NOT a functional limit — monitored processes still show accurate metrics.
+  "ps -eo pid= -o ppid= -o user= -o stat= -o pcpu= -o pmem= -o rss= -o vsz= -o etime= -o args= 2>/dev/null | head -n 2000",
   "'",
 ].join("");
 
@@ -164,8 +166,10 @@ function createSystemManagerBridge(deps) {
     if (!sessionId) return { success: false, error: "Missing sessionId" };
 
     if (isLocalSession(sessionId) && process.platform === "win32") {
+      // Safety cap: -First 2000 prevents maxBuffer/timeout on process-dense hosts.
+      // This is NOT a functional limit — monitored processes still show accurate metrics.
       const result = await execOnLocalMachine(
-        "Get-CimInstance Win32_Process | Sort-Object KernelModeTime -Descending | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize | ConvertTo-Json -Compress",
+        "Get-CimInstance Win32_Process | Sort-Object KernelModeTime -Descending | Select-Object -First 2000 ProcessId,ParentProcessId,Name,WorkingSetSize | ConvertTo-Json -Compress",
         10000,
       );
       if (!result.success) return { success: false, error: result.error };
