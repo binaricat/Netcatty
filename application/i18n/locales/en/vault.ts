@@ -485,6 +485,7 @@ export const enVaultMessages: Messages = {
   'hostDetails.distro.option.redhat': 'Red Hat / RHEL',
   'hostDetails.distro.option.almalinux': 'AlmaLinux',
   'hostDetails.distro.option.alinux': 'Alibaba Cloud Linux',
+  'hostDetails.distro.option.openeuler': 'openEuler',
   'hostDetails.distro.option.oracle': 'Oracle Linux',
   'hostDetails.distro.option.kali': 'Kali Linux',
   'hostDetails.distro.option.cisco': 'Cisco',

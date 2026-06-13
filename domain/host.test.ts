@@ -243,6 +243,12 @@ test("normalizeDistroId matches Alibaba Cloud Linux PRETTY_NAME/NAME fallback", 
   );
 });
 
+test("normalizeDistroId maps openEuler before the generic Linux fallback", () => {
+  assert.equal(normalizeDistroId("openeuler"), "openeuler");
+  assert.equal(normalizeDistroId("openEuler"), "openeuler");
+  assert.notEqual(normalizeDistroId("openeuler"), "linux");
+});
+
 test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {
   assert.equal(
     shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "OpenSSH_9.6" }),

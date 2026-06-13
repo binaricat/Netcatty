@@ -47,6 +47,7 @@ export const LINUX_DISTRO_OPTIONS = [
   'oracle',
   'kali',
   'alinux',
+  'openeuler',
 ] as const;
 
 /**
@@ -86,6 +87,7 @@ export const normalizeDistroId = (value?: string) => {
   if (v.includes('almalinux')) return 'almalinux';
   if (v.includes('oracle')) return 'oracle';
   if (v.includes('kali')) return 'kali';
+  if (v.includes('openeuler') || v.includes('open euler')) return 'openeuler';
   // Alibaba Cloud Linux: os-release ID is `alinux` (older branding: Aliyun
   // Linux / `aliyun`). Must come before the generic `linux` fallback because
   // 'alinux'.includes('linux') is true and would otherwise resolve to 'linux'.

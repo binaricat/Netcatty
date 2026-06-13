@@ -66,6 +66,7 @@ export const zhCNVaultMessages: Messages = {
   'hostDetails.distro.option.redhat': 'Red Hat / RHEL',
   'hostDetails.distro.option.almalinux': 'AlmaLinux',
   'hostDetails.distro.option.alinux': '阿里云 Linux',
+  'hostDetails.distro.option.openeuler': 'openEuler',
   'hostDetails.distro.option.oracle': 'Oracle Linux',
   'hostDetails.distro.option.kali': 'Kali Linux',
   'hostDetails.distro.option.cisco': '思科',
