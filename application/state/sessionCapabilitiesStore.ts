@@ -25,6 +25,7 @@ export const sessionCapabilitiesStore = {
     if (!entry) return undefined;
     if (isExpired(entry)) {
       capabilitiesBySessionId.delete(sessionId);
+      notifySession(sessionId);
       return undefined;
     }
     return entry.capabilities;
