@@ -61,6 +61,7 @@ import {
   shouldHandleTerminalFontSizeAction,
   terminalFontSizeWheelListenerOptions,
 } from "./terminalFontZoom";
+import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
 import {
   markExpectedTerminalCursorPositionReport,
   pasteTextIntoTerminal,
@@ -704,20 +705,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ) {
             return true;
           }
-          // When copy is bound specifically to Ctrl+C / ⌃C (the ETX/SIGINT
-          // chord) and there is no text selected, pass the event through to
-          // xterm so it encodes the key as \x03. For any other copy binding
-          // (F5, Ctrl+L, etc.) we must NOT forward the key to the remote
-          // process — just consume it as a no-op.
-          if (
-            action === "copy"
-            && !term.hasSelection()
-            && e.key.toLowerCase() === "c"
-            && e.ctrlKey
-            && !e.shiftKey
-            && !e.altKey
-            && !e.metaKey
-          ) {
+          // When copy is bound specifically to Ctrl+C and there is no text
+          // selected, pass the event through so xterm can send SIGINT.
+          if (shouldPassThroughCopyShortcut(action, term.hasSelection(), e)) {
             return true;
           }
           e.preventDefault();
