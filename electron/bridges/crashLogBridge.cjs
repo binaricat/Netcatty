@@ -128,6 +128,10 @@ function captureError(source, err, extra) {
   }
 }
 
+function captureDiagnostic(source, message, extra) {
+  captureError(source, new Error(String(message || "diagnostic")), extra);
+}
+
 /**
  * Delete log files older than LOG_RETENTION_DAYS.
  */
@@ -317,10 +321,21 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:crashLogs:read", async (_event, { fileName }) => readLog(fileName));
   ipcMain.handle("netcatty:crashLogs:clear", async () => clearLogs());
   ipcMain.handle("netcatty:crashLogs:openDir", async () => openDir());
+  ipcMain.handle("netcatty:diagnostics:log", async (_event, payload) => {
+    const source = typeof payload?.source === "string" && payload.source.trim()
+      ? payload.source.trim()
+      : "renderer-diagnostic";
+    const message = typeof payload?.message === "string" && payload.message.trim()
+      ? payload.message.trim()
+      : "diagnostic";
+    captureDiagnostic(source, message, payload?.extra);
+    return { success: true };
+  });
 }
 
 module.exports = {
   init,
   captureError,
+  captureDiagnostic,
   registerHandlers,
 };

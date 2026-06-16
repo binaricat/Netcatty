@@ -1,14 +1,16 @@
-import { FolderTree, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
+import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore } from '../application/state/activeTabStore';
 import { canReuseTerminalConnection } from '../application/state/terminalConnectionReuse';
 import { resolveTerminalSessionExitIntent, type TerminalSessionExitEvent } from '../application/state/resolveTerminalSessionExitIntent';
+import { prewarmAIStateStorageSnapshots } from '../application/state/aiStateSnapshots';
 import {
   getSessionActivityIdsToClear,
   getValidSessionActivityIds,
   shouldMarkSessionActivity,
 } from '../application/state/sessionActivity';
 import { sessionActivityStore } from '../application/state/sessionActivityStore';
+import { sessionCapabilitiesStore } from '../application/state/sessionCapabilitiesStore';
 import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import { collectSessionIds } from '../domain/workspace';
 
@@ -24,12 +26,15 @@ import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
 import { resolveGroupDefaults, applyGroupDefaults } from '../domain/groupConfig';
+import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
 import { materializeHostProxyProfile } from '../domain/proxyProfiles';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
 import { ScriptsSidePanel } from './ScriptsSidePanel';
+import { HistorySidePanel } from './HistorySidePanel';
+import { useRemoteHistoryState } from '../application/state/useRemoteHistoryState';
 import { resolveSnippetCommand } from './SnippetExecutionProvider';
 import type { Snippet } from '../types';
 import { ThemeSidePanel } from './terminal/ThemeSidePanel';
@@ -94,18 +99,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   terminalFontFamilyId,
   fontSize = 14,
   hotkeyScheme = 'disabled',
+  disableTerminalFontZoom = false,
   keyBindings = [],
   onHotkeyAction,
   onUpdateTerminalThemeId,
   onUpdateTerminalFontFamilyId,
   onUpdateTerminalFontSize,
   onUpdateTerminalFontWeight,
+  onUpdateSessionFontSize,
+  onClearSessionFontSizeOverride,
   onCloseSession,
   onUpdateSessionStatus,
   onUpdateHostDistro,
   onUpdateHost,
   onAddKnownHost,
   onCommandExecuted,
+  shellHistory = [],
   onTerminalDataCapture,
   onCreateWorkspaceFromSessions,
   onAddSessionToWorkspace,
@@ -115,12 +124,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onToggleWorkspaceViewMode,
   onSetWorkspaceFocusedSession,
   onReorderWorkspaceSessions,
+  onReorderTabs,
+  onCopySession,
+  onCopySessionToNewWindow,
   onSplitSession,
   onConnectToHost,
   onCreateLocalTerminal,
   isBroadcastEnabled,
   onToggleBroadcast,
   updateHosts,
+  updateSnippets,
+  updateSnippetPackages,
   sftpDefaultViewMode,
   sftpDoubleClickBehavior,
   sftpAutoSync,
@@ -139,6 +153,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   showHostTreeSidebar = true,
   toggleScriptsSidePanelRef,
   toggleSidePanelRef,
+  // Session rename props
+  onStartSessionRename,
+  onSubmitSessionRename,
+  onRemoveSessionFromWorkspace,
 }) => {
   const { t } = useI18n();
   const terminalRendererCwdBySessionRef = useRef<Map<string, string>>(new Map());
@@ -152,9 +170,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const cwdProbeCancelersRef = useRef<Map<string, () => void>>(new Map());
   const cwdProbeGenerationRef = useRef<Map<string, number>>(new Map());
 
+  useEffect(() => {
+    const runPrewarm = () => prewarmAIStateStorageSnapshots();
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(runPrewarm, { timeout: 2500 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timeoutId = window.setTimeout(runPrewarm, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
   const handleTerminalCwdChange = useCallback((sessionId: string, cwd: string | null) => {
-    if (cwd && cwd.trim().length > 0) {
-      terminalRendererCwdBySessionRef.current.set(sessionId, cwd);
+    const currentCwd = terminalRendererCwdBySessionRef.current.get(sessionId) ?? null;
+    const nextCwd = cwd && cwd.trim().length > 0 ? cwd : null;
+    if (currentCwd === nextCwd) return;
+
+    if (nextCwd) {
+      terminalRendererCwdBySessionRef.current.set(sessionId, nextCwd);
     } else {
       terminalRendererCwdBySessionRef.current.delete(sessionId);
     }
@@ -164,6 +196,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
+    sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
   }, [onCloseSession]);
 
@@ -296,6 +329,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Keep AI/scripts/theme panels mounted while switching sub-tabs (like SFTP).
   const [aiMountedTabIds, setAiMountedTabIds] = useState<string[]>([]);
   const [scriptsMountedTabIds, setScriptsMountedTabIds] = useState<string[]>([]);
+  const [systemMountedTabIds, setSystemMountedTabIds] = useState<string[]>([]);
   const [themeMountedTabIds, setThemeMountedTabIds] = useState<string[]>([]);
   const [sidePanelWidth, setSidePanelWidth, persistSidePanelWidth] = useStoredNumber(
     STORAGE_KEY_SIDE_PANEL_WIDTH, 420, { min: 280, max: 800 },
@@ -479,26 +513,28 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         const moshEnabled = session.moshEnabled ?? existingHost.moshEnabled;
         const etEnabled = session.etEnabled ?? existingHost.etEnabled;
 
+        let hostForSession: Host;
         if (
           protocol === existingHost.protocol &&
           port === existingHost.port &&
           moshEnabled === existingHost.moshEnabled
           && etEnabled === existingHost.etEnabled
         ) {
-          map.set(session.id, existingHost);
+          hostForSession = existingHost;
         } else {
-          map.set(session.id, {
+          hostForSession = {
             ...existingHost,
             protocol,
             port,
             moshEnabled,
             etEnabled,
-          });
+          };
         }
+        map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
       } else {
         // Create stable fallback host object
         const fallbackProtocol = session.protocol ?? 'local' as const;
-        map.set(session.id, {
+        const fallbackHost: Host = {
           id: session.hostId,
           label: session.hostLabel || 'Local Terminal',
           hostname: session.hostname || 'localhost',
@@ -523,7 +559,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           localShellArgs: session.localShellArgs,
           localShellName: session.localShellName,
           localShellIcon: session.localShellIcon,
-        });
+        };
+        map.set(session.id, applySessionFontSizeToHost(fallbackHost, session));
       }
     }
     return map;
@@ -619,6 +656,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [hostMap, sessions, keys, identities]);
 
   const handleTerminalFontSizeChange = useCallback((sessionId: string, nextFontSize: number) => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    // Workspace panes keep per-session font size so zooming one split does not
+    // change global defaults or sibling panes (even when they share a host).
+    if (session?.workspaceId) {
+      onUpdateSessionFontSize?.(sessionId, nextFontSize);
+      return;
+    }
+
     const sessionHost = sessionHostsMapRef.current.get(sessionId);
     if (!sessionHost) return;
 
@@ -630,7 +675,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
 
     onUpdateHost({ ...rawHost, fontSize: nextFontSize, fontSizeOverride: true });
-  }, [onUpdateHost, onUpdateTerminalFontSize]);
+  }, [onUpdateHost, onUpdateSessionFontSize, onUpdateTerminalFontSize]);
 
   const validAIScopeTargetIds = useMemo(() => {
     const ids = new Set<string>();
@@ -678,6 +723,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     if (panel === 'theme') {
       setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      return;
+    }
+    if (panel === 'system') {
+      setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
     }
   }, []);
 
@@ -753,6 +802,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setAiMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setScriptsMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     setThemeMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
+    setSystemMountedTabIds((prev) => removeMountedSidePanelTabId(prev, activeTabId));
     refocusTerminalSession(sessionIdToRefocus);
   }, [getActiveTerminalSessionId, refocusTerminalSession, syncWorkspaceFocusIfNeeded]);
 
@@ -866,10 +916,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('theme');
   }, [handleSwitchSidePanelTab]);
 
+  const handleOpenHistory = useCallback(() => {
+    handleSwitchSidePanelTab('history');
+  }, [handleSwitchSidePanelTab]);
+
   // Open AI chat side panel (side-panel rail button: a plain switch that is a
   // no-op when AI is already the active sub-panel, matching the other rail tabs)
   const handleOpenAI = useCallback(() => {
     handleSwitchSidePanelTab('ai');
+  }, [handleSwitchSidePanelTab]);
+
+  const handleOpenSystem = useCallback(() => {
+    handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
 
   const handleAddSelectionToAI = useCallback((sourceSessionId: string, selection: string) => {
@@ -937,6 +995,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     textarea?.focus();
   }, [terminalBackend]);
 
+  const remoteHistory = useRemoteHistoryState();
+  const handleHistoryPaste = useCallback(
+    (command: string) => handleSnippetClickForFocusedSession(command, true),
+    [handleSnippetClickForFocusedSession],
+  );
+  const handleHistoryRun = useCallback(
+    (command: string) => handleSnippetClickForFocusedSession(command, false),
+    [handleSnippetClickForFocusedSession],
+  );
+
   const handleSnippetFromPanel = useCallback(async (snippet: Snippet) => {
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
@@ -1000,6 +1068,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     clearTerminalPreviewVars,
     clearTopTabsPreviewVars,
     FolderTree,
+    History,
+    HistorySidePanel,
     MessageSquare,
     Palette,
     PanelLeft,
@@ -1024,10 +1094,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleCommandExecuted,
     handleCommandSubmitted,
     handleComposeSend,
+    handleHistoryPaste,
+    handleHistoryRun,
+    handleOpenHistory,
     handleOpenSftp,
     handleOpenScripts,
     handleOpenTheme,
     handleOpenAI,
+    handleOpenSystem,
     handleOsDetected,
     handlePendingTerminalSelectionConsumed,
     handlePendingUploadHandled,
@@ -1052,6 +1126,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     hosts,
     hostsRef,
     hotkeyScheme,
+    disableTerminalFontZoom,
     identities,
     isBroadcastEnabled,
     isComposeBarOpen,
@@ -1062,6 +1137,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     mountedAiTabIds: aiMountedTabIds,
     mountedSftpTabIds,
     scriptsMountedTabIds,
+    systemMountedTabIds,
     themeMountedTabIds,
     onAddSessionToWorkspace,
     onConnectToHost,
@@ -1069,10 +1145,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onCreateWorkspaceFromSessions,
     onHotkeyAction,
     onReorderWorkspaceSessions,
+    onReorderTabs,
+    onCopySession,
+    onCopySessionToNewWindow,
     onRequestAddToWorkspace,
     onSessionData,
     onSetDraggingSessionId,
     onSetWorkspaceFocusedSession,
+    onStartSessionRename,
+    onSubmitSessionRename,
+    onRemoveSessionFromWorkspace,
+    onStartSessionDrag: onSetDraggingSessionId,
+    onEndSessionDrag: () => onSetDraggingSessionId(null),
     onSplitSession,
     onSplitSessionRef,
     onToggleBroadcastRef,
@@ -1083,10 +1167,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onUpdateTerminalFontFamilyId,
     onUpdateTerminalFontSize,
     onUpdateTerminalFontWeight,
+    onUpdateSessionFontSize,
+    onClearSessionFontSizeOverride,
     onUpdateTerminalThemeId,
     pendingTerminalSelectionForAI,
     refocusActiveTerminalSession,
     refocusTerminalSession,
+    remoteHistory,
+    shellHistory,
     resolveSftpHostForTab,
     ScriptsSidePanel,
     sessionActivityStore,
@@ -1101,6 +1189,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setPendingTerminalSelectionForAI,
     setAiMountedTabIds,
     setScriptsMountedTabIds,
+    setSystemMountedTabIds,
     setThemeMountedTabIds,
     setSidePanelOpenTabs,
     setSidePanelWidth,
@@ -1145,6 +1234,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     TooltipContent,
     TooltipTrigger,
     updateHosts,
+    updateSnippetPackages,
+    updateSnippets,
     X,
     Zap,
     validAIScopeTargetIds,

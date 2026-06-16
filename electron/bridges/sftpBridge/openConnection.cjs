@@ -81,6 +81,13 @@ function createOpenConnectionApi(ctx) {
               },
             ),
           };
+          connOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
+            sender,
+            sessionId: connId,
+            hostname: jump.hostname,
+            port: jump.port || 22,
+            knownHosts: options.knownHosts,
+          });
     
           // Auth - support agent (certificate), key, and password fallback
           const hasCertificate =
@@ -640,6 +647,13 @@ function createOpenConnectionApi(ctx) {
           algorithmOverrides: options.algorithmOverrides,
         }),
       };
+      connectOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
+        sender: event.sender,
+        sessionId: connId,
+        hostname: options.hostname,
+        port: options.port || 22,
+        knownHosts: options.knownHosts,
+      });
     
       // Use the tunneled socket if we have one
       if (connectionSocket) {

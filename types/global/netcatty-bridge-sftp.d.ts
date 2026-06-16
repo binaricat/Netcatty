@@ -4,6 +4,7 @@ declare global {
   interface NetcattyBridge {
     // SFTP operations
     openSftp(options: NetcattySSHOptions): Promise<string>;
+    openSftpForSession?(sessionId: string): Promise<string>;
     listSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<RemoteFile[]>;
     readSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<string>;
     readSftpBinary?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<ArrayBuffer>;

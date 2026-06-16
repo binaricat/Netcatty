@@ -9,6 +9,7 @@ import { useVaultHostTreeActions } from '../application/state/vaultHostTreeActio
 import { useTreeExpandedState } from '../application/state/useTreeExpandedState';
 import { applyGroupDefaults, resolveGroupDefaults } from '../domain/groupConfig';
 import { resolveTelnetPort, resolveTelnetUsername, sanitizeHost } from '../domain/host';
+import { sortByVaultOrder } from '../domain/vaultOrder';
 import { STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from '../infrastructure/config/storageKeys';
 import { cn } from '../lib/utils';
 import { GroupConfig, GroupNode, Host } from '../types';
@@ -20,10 +21,24 @@ import { DistroAvatar } from './DistroAvatar';
 import { HostNotesIndicator } from './host/HostNotesIndicator';
 import { Button } from './ui/button';
 
+const getTreeGroupDropIntent = (
+  element: HTMLElement,
+  clientY: number,
+): 'before' | 'inside' | 'after' => {
+  const rect = element.getBoundingClientRect();
+  const edgeSize = Math.max(8, Math.min(14, rect.height * 0.28));
+  if (clientY <= rect.top + edgeSize) return 'before';
+  if (clientY >= rect.bottom - edgeSize) return 'after';
+  return 'inside';
+};
+
+const hasDragType = (dataTransfer: DataTransfer, type: string) =>
+  Array.from(dataTransfer.types).includes(type);
+
 interface HostTreeViewProps {
   groupTree: GroupNode[];
   hosts: Host[];
-  sortMode?: 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode?: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
   expandedPaths?: Set<string>;
   onTogglePath?: (path: string) => void;
   onExpandAll?: (paths: string[]) => void;
@@ -55,7 +70,7 @@ interface HostTreeViewProps {
 interface TreeNodeProps {
   node: GroupNode;
   depth: number;
-  sortMode: 'az' | 'za' | 'newest' | 'oldest' | 'group';
+  sortMode: 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onConnect: (host: Host) => void;
@@ -136,10 +151,26 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   const childNodes = useMemo(() => {
     if (!node.children) return [];
     const nodes = Object.values(node.children) as unknown as GroupNode[];
+    const originalIndex = new Map(nodes.map((child, index) => [child.path, index]));
+    const orderByPath = new Map(
+      groupConfigs
+        .filter((config) => typeof config.order === 'number' && Number.isFinite(config.order))
+        .map((config) => [config.path, config.order as number]),
+    );
     return nodes.sort((a, b) => {
       switch (sortMode) {
         case 'za':
           return b.name.localeCompare(a.name);
+        case 'manual': {
+          const orderA = orderByPath.get(a.path);
+          const orderB = orderByPath.get(b.path);
+          const hasOrderA = typeof orderA === 'number' && Number.isFinite(orderA);
+          const hasOrderB = typeof orderB === 'number' && Number.isFinite(orderB);
+          if (hasOrderA && hasOrderB && orderA !== orderB) return orderA - orderB;
+          if (hasOrderA) return -1;
+          if (hasOrderB) return 1;
+          return (originalIndex.get(a.path) ?? 0) - (originalIndex.get(b.path) ?? 0);
+        }
         case 'newest':
         case 'oldest':
           // For groups, fall back to name sorting since groups don't have creation dates
@@ -149,10 +180,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           return a.name.localeCompare(b.name);
       }
     });
-  }, [node.children, sortMode]);
+  }, [groupConfigs, node.children, sortMode]);
 
   const sortedHosts = useMemo(() => {
-    return [...node.hosts].sort((a, b) => {
+    const sorted = [...node.hosts].sort((a, b) => {
       switch (sortMode) {
         case 'az':
           return a.label.localeCompare(b.label);
@@ -162,10 +193,14 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           return (b.createdAt || 0) - (a.createdAt || 0);
         case 'oldest':
           return (a.createdAt || 0) - (b.createdAt || 0);
+        case 'manual':
+          return 0;
         default:
           return a.label.localeCompare(b.label);
       }
     });
+    if (sortMode === 'manual') return sortByVaultOrder(sorted);
+    return sorted;
   }, [node.hosts, sortMode]);
 
   return (
@@ -184,7 +219,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
               <div
                 ref={groupRowRef}
                 className={cn(
-                  "flex items-center py-2 pr-3 text-sm font-medium cursor-pointer transition-colors select-none group hover:bg-secondary/60 rounded-lg",
+                  "vault-drop-indicator-row flex items-center py-2 pr-3 text-sm font-medium cursor-pointer transition-colors select-none group hover:bg-secondary/60 rounded-lg",
                   getDropTargetClasses?.(node.path),
                 )}
                 style={{ paddingLeft }}
@@ -199,6 +234,13 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  if (hasDragType(e.dataTransfer, "group-path")) {
+                    const intent = getTreeGroupDropIntent(e.currentTarget, e.clientY);
+                    if (intent !== "inside") {
+                      setDragOverDropTarget?.(null);
+                      return;
+                    }
+                  }
                   setDragOverDropTarget?.(node.path);
                 }}
                 onDragLeave={(e) => {
@@ -215,7 +257,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                   const hostId = e.dataTransfer.getData("host-id");
                   const groupPath = e.dataTransfer.getData("group-path");
                   if (hostId) moveHostToGroup(hostId, node.path);
-                  if (groupPath) moveGroup(groupPath, node.path);
+                  if (groupPath && getTreeGroupDropIntent(e.currentTarget, e.clientY) === "inside") {
+                    moveGroup(groupPath, node.path);
+                  }
                 }}
               >
                 <div className="mr-2 flex-shrink-0 w-4 h-4 flex items-center justify-center">
@@ -402,7 +446,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
       <ContextMenuTrigger>
         <div
           className={cn(
-            "flex items-center py-2 pr-3 text-sm cursor-pointer transition-colors select-none group hover:bg-secondary/40 rounded-lg",
+            "vault-drop-indicator-row flex items-center py-2 pr-3 text-sm cursor-pointer transition-colors select-none group hover:bg-secondary/40 rounded-lg",
             isSelected ? "bg-primary/10" : "",
           )}
           style={{ paddingLeft }}
@@ -562,7 +606,7 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
   // Get ungrouped hosts (hosts without a group or with empty group) and sort them
   const ungroupedHosts = useMemo(() => {
     const hosts_without_group = hosts.filter(host => !host.group || host.group === '');
-    return hosts_without_group.sort((a, b) => {
+    const sorted = hosts_without_group.sort((a, b) => {
       switch (sortMode) {
         case 'az':
           return a.label.localeCompare(b.label);
@@ -572,10 +616,14 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
           return (b.createdAt || 0) - (a.createdAt || 0);
         case 'oldest':
           return (a.createdAt || 0) - (b.createdAt || 0);
+        case 'manual':
+          return 0;
         default:
           return a.label.localeCompare(b.label);
       }
     });
+    if (sortMode === 'manual') return sortByVaultOrder(sorted);
+    return sorted;
   }, [hosts, sortMode]);
 
   // Sort group tree based on sort mode
@@ -584,6 +632,8 @@ export const HostTreeView: React.FC<HostTreeViewProps> = ({
       switch (sortMode) {
         case 'za':
           return b.name.localeCompare(a.name);
+        case 'manual':
+          return 0;
         case 'newest':
         case 'oldest':
           // For groups, fall back to name sorting since groups don't have creation dates

@@ -41,6 +41,8 @@ const baseProps = {
   onSetWorkspaceFocusedSession: () => {},
   isBroadcastEnabled: () => false,
   onToggleBroadcast: () => {},
+  updateSnippets: () => {},
+  updateSnippetPackages: () => {},
   onSplitSession: () => {},
   onConnectToHost: () => {},
   toggleScriptsSidePanelRef: { current: null },
@@ -119,6 +121,24 @@ test("TerminalLayer re-renders when broadcast toggle handler changes", () => {
     terminalLayerAreEqual(
       baseProps as never,
       { ...baseProps, onToggleBroadcast: () => {} } as never,
+    ),
+    false,
+  );
+});
+
+test("TerminalLayer re-renders when snippet save handlers change", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, updateSnippets: () => {} } as never,
+    ),
+    false,
+  );
+
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, updateSnippetPackages: () => {} } as never,
     ),
     false,
   );

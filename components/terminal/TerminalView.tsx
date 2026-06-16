@@ -1,9 +1,67 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { memo } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 
 import { TerminalServerStats } from './TerminalServerStats';
+import {
+  TerminalTimestampGutter,
+  resolveTerminalTimestampGutterColor,
+  resolveTerminalTimestampGutterWidth,
+} from './TerminalTimestampGutter';
 
 type TerminalViewContext = Record<string, any>;
+type HostLineTimestampToggle = {
+  id: string;
+  showLineTimestamps?: boolean;
+};
+
+export function getLineTimestampToggleHostUpdate<T extends HostLineTimestampToggle>(
+  host: T,
+): Pick<T, "id"> & { showLineTimestamps: boolean } {
+  return {
+    id: host.id,
+    showLineTimestamps: host.showLineTimestamps !== true,
+  };
+}
+
+export function shouldShowLineTimestampToolbarToggle(
+  lineTimestampsAvailable: boolean | undefined,
+  onUpdateHost: unknown,
+): boolean {
+  return lineTimestampsAvailable !== false && Boolean(onUpdateHost);
+}
+
+export function shouldEnableYmodemAction({
+  isSerialConnection,
+  status,
+  handleSendYmodem,
+  handleReceiveYmodem,
+}: {
+  isSerialConnection?: boolean;
+  status?: string;
+  handleSendYmodem?: () => void;
+  handleReceiveYmodem?: () => void;
+}): boolean {
+  return Boolean(isSerialConnection && status === "connected" && (handleSendYmodem || handleReceiveYmodem));
+}
+
+export function shouldShowSelectionAIOverlay({
+  hasSelection,
+  selectionOverlayPosition,
+  onAddSelectionToAI,
+  showSelectionAIAction,
+}: {
+  hasSelection: boolean;
+  selectionOverlayPosition?: { left: number; top: number } | null;
+  onAddSelectionToAI?: unknown;
+  showSelectionAIAction?: boolean;
+}): boolean {
+  return Boolean(
+    showSelectionAIAction !== false
+    && hasSelection
+    && selectionOverlayPosition
+    && onAddSelectionToAI,
+  );
+}
 
 /**
  * Shallow-compare every ctx value. <Terminal> rebuilds the ctx object on every
@@ -30,7 +88,30 @@ function terminalViewCtxEqual(
 }
 
 function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
-  const { Button, Copy, Maximize2, Radio, Sparkles, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, containerRef, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleRetry, handleSearch, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, isSearchOpen, isSupportedOs, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onExpandToFocus, onSplitHorizontal, onSplitVertical, onToggleBroadcast, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, searchMatchCount, selectionOverlayPosition, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
+  const { Activity, Button, Clock3, Copy, Maximize2, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, searchMatchCount, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
+  const ymodemActionEnabled = shouldEnableYmodemAction({
+    isSerialConnection,
+    status,
+    handleSendYmodem,
+    handleReceiveYmodem,
+  });
+  const terminalContentTop = isSearchOpen ? "64px" : "30px";
+  const showLineTimestampGutter = lineTimestampsAvailable !== false && host.showLineTimestamps === true;
+  const lineTimestampColor = resolveTerminalTimestampGutterColor(effectiveTheme.colors);
+  const [lineTimestampGutterWidth, setLineTimestampGutterWidth] = useState(() => (
+    resolveTerminalTimestampGutterWidth({ fontSize: effectiveFontSize })
+  ));
+  useEffect(() => {
+    if (showLineTimestampGutter) return;
+    setLineTimestampGutterWidth(resolveTerminalTimestampGutterWidth({ fontSize: effectiveFontSize }));
+  }, [effectiveFontSize, effectiveFontWeight, resolvedFontFamily, sessionId, showLineTimestampGutter]);
+  const handleLineTimestampGutterWidthChange = useCallback((width: number) => {
+    setLineTimestampGutterWidth((current) => (current === width ? current : width));
+  }, []);
+  const activeLineTimestampGutterWidth = showLineTimestampGutter ? lineTimestampGutterWidth : 0;
+  const lineTimestampToggleLabel = showLineTimestampGutter
+    ? t("terminal.toolbar.timestampsDisable")
+    : t("terminal.toolbar.timestampsEnable");
   return (
     <TerminalContextMenu
       hasSelection={hasSelection}
@@ -46,14 +127,18 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       onSelectWord={terminalContextActions.onSelectWord}
       onSplitHorizontal={onSplitHorizontal}
       onSplitVertical={onSplitVertical}
+      onSendYmodem={ymodemActionEnabled ? handleSendYmodem : undefined}
+      onReceiveYmodem={ymodemActionEnabled ? handleReceiveYmodem : undefined}
       isReconnectable={status === "disconnected"}
       onReconnect={handleRetry}
       onClose={inWorkspace ? () => onCloseSession?.(sessionId) : undefined}
       onAddSelectionToAI={ctx.onAddSelectionToAI ? handleAddSelectionToAI : undefined}
+      onRename={onRename}
+      onDetach={inWorkspace ? onDetach : undefined}
     >
       <div
         className={cn(
-          "relative h-full w-full flex overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]",
+          "relative h-full w-full flex min-h-0 overflow-hidden bg-gradient-to-br from-[#050910] via-[#06101a] to-[#0b1220]",
           isComposeBarOpen && !inWorkspace && "flex-col"
         )}
         style={terminalPreviewVars}
@@ -76,7 +161,9 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                 <div className="text-sm text-muted-foreground">
                   {isLocalConnection
                     ? t("terminal.dragDrop.localMessage")
-                    : t("terminal.dragDrop.remoteMessage")
+                    : remoteDragDropUsesZmodem
+                      ? t("terminal.dragDrop.remoteZmodemMessage")
+                      : t("terminal.dragDrop.remoteSftpMessage")
                   }
                 </div>
               </div>
@@ -85,7 +172,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         )}
         <div className="absolute left-0 right-0 top-0 z-20 pointer-events-none">
           <div
-            className="flex items-center gap-1 px-2 py-0.5 backdrop-blur-md pointer-events-auto min-w-0"
+            className="terminal-topbar flex items-center gap-1 px-2 py-0.5 backdrop-blur-md pointer-events-auto min-w-0"
             onMouseDownCapture={handleTopOverlayMouseDownCapture}
             style={{
               backgroundColor: 'var(--terminal-ui-bg)',
@@ -98,14 +185,55 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
               ['--terminal-toolbar-btn-active' as never]: 'var(--terminal-ui-toolbar-btn-active)',
             }}
           >
-            <div className="flex items-center gap-1 text-[11px] font-semibold">
-              <span className="whitespace-nowrap">{host.label}</span>
-              <span
+            <div
+              className={cn(
+                "terminal-title-cluster flex items-center gap-1 text-[11px] font-semibold min-w-0 overflow-hidden shrink",
+              )}
+            >
+              <div
                 className={cn(
-                  "inline-block h-2 w-2 rounded-full flex-shrink-0",
-                  statusDotTone,
+                  "flex items-center gap-1 min-w-0",
+                  inWorkspace && onDetachPointerDown && "cursor-grab active:cursor-grabbing",
                 )}
-              />
+                data-terminal-detach-drag-handle={inWorkspace && onDetachPointerDown ? "true" : undefined}
+                onPointerDown={onDetachPointerDown}
+              >
+                <span className="whitespace-nowrap truncate min-w-0 max-w-[12rem]">{sessionDisplayName || host.label}</span>
+                <span
+                  className={cn(
+                    "inline-block h-2 w-2 rounded-full flex-shrink-0",
+                    statusDotTone,
+                  )}
+                />
+              </div>
+              {shouldShowLineTimestampToolbarToggle(lineTimestampsAvailable, onUpdateHost) && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "ml-0.5 p-0.5 rounded transition-colors flex-shrink-0",
+                        "hover:bg-[color:var(--terminal-toolbar-btn-hover)]",
+                        showLineTimestampGutter ? "opacity-100" : "opacity-60 hover:opacity-100",
+                      )}
+                      style={
+                        showLineTimestampGutter
+                          ? {
+                            backgroundColor: 'var(--terminal-toolbar-btn-active)',
+                            color: lineTimestampColor,
+                          }
+                          : undefined
+                      }
+                      onClick={() => onUpdateHost(getLineTimestampToggleHostUpdate(host))}
+                      aria-label={lineTimestampToggleLabel}
+                      aria-pressed={showLineTimestampGutter}
+                    >
+                      <Clock3 size={10} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{lineTimestampToggleLabel}</TooltipContent>
+                </Tooltip>
+              )}
               {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -127,16 +255,33 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                   <TooltipContent side="bottom">{t("terminal.statusbar.copyHostname.tooltip", { hostname: host.hostname })}</TooltipContent>
                 </Tooltip>
               )}
+              {isSystemSidebarEligible && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="ml-0.5 p-0.5 rounded hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors opacity-60 hover:opacity-100 flex-shrink-0"
+                      onClick={onOpenSystem}
+                      aria-label={t("terminal.layer.system")}
+                    >
+                      <Activity size={10} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("terminal.layer.system")}</TooltipContent>
+                </Tooltip>
+              )}
             </div>
-            <TerminalServerStats
-              sessionId={sessionId}
-              enabled={terminalSettings?.showServerStats ?? true}
-              refreshInterval={terminalSettings?.serverStatsRefreshInterval ?? 5}
-              isSupportedOs={isSupportedOs}
-              isConnected={status === 'connected'}
-              isVisible={isVisible}
-            />
-            <div className="flex-1" />
+            {!compactToolbar && (
+              <TerminalServerStats
+                sessionId={sessionId}
+                enabled={terminalSettings?.showServerStats ?? true}
+                refreshInterval={terminalSettings?.serverStatsRefreshInterval ?? 5}
+                isSupportedOs={isSupportedOs}
+                isConnected={status === 'connected'}
+                isVisible={isVisible}
+              />
+            )}
+            <div className="flex-1 min-w-0" />
             <div className="flex items-center gap-0.5 flex-shrink-0">
               {inWorkspace && onToggleBroadcast && (
                 <Tooltip>
@@ -164,6 +309,22 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                       ? t("terminal.toolbar.broadcastDisable")
                       : t("terminal.toolbar.broadcastEnable")}
                   </TooltipContent>
+                </Tooltip>
+              )}
+              {inWorkspace && onDetach && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="h-6 w-6 p-0 shadow-none border-none text-[color:var(--terminal-toolbar-fg)] bg-transparent hover:bg-transparent"
+                      onClick={onDetach}
+                      aria-label={t('terminal.toolbar.detach')}
+                    >
+                      <SquareArrowOutUpRight size={12} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t('terminal.toolbar.detach')}</TooltipContent>
                 </Tooltip>
               )}
               {inWorkspace && !isFocusMode && onExpandToFocus && (
@@ -200,19 +361,38 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         </div>
 
         <div
-          className="h-full flex-1 min-w-0 relative overflow-hidden pt-8"
+          className="flex-1 min-h-0 min-w-0 relative overflow-hidden pt-8"
           style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
         >
           <div
             ref={containerRef}
             className="xterm-container absolute inset-x-0 bottom-0"
             style={{
-              top: isSearchOpen ? "64px" : "30px",
+              top: terminalContentTop,
+              left: activeLineTimestampGutterWidth,
               paddingLeft: 6,
               backgroundColor: 'var(--terminal-ui-bg)',
             }}
           />
-          {hasSelection && selectionOverlayPosition && ctx.onAddSelectionToAI && handleAddSelectionToAI && (
+          <TerminalTimestampGutter
+            termRef={termRef}
+            containerRef={containerRef}
+            enabled={showLineTimestampGutter}
+            top={terminalContentTop}
+            sessionId={sessionId}
+            color={lineTimestampColor}
+            fontFamily={resolvedFontFamily}
+            fontSize={effectiveFontSize}
+            fontWeight={effectiveFontWeight}
+            width={lineTimestampGutterWidth}
+            onWidthChange={handleLineTimestampGutterWidthChange}
+          />
+          {shouldShowSelectionAIOverlay({
+            hasSelection,
+            selectionOverlayPosition,
+            onAddSelectionToAI: ctx.onAddSelectionToAI,
+            showSelectionAIAction,
+          }) && handleAddSelectionToAI && (
             <div
               className="absolute z-30 pointer-events-none"
               style={{

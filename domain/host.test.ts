@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import type { Host } from "./models.ts";
 import {
   detectVendorFromSshVersion,
+  migrateHostsFromLegacyLineTimestamps,
   normalizeDistroId,
   normalizePrimaryTelnetState,
+  preserveConcurrentHostLineTimestampUpdate,
   resolveHostKeepalive,
   resolveTelnetPort,
   resolveTelnetPassword,
@@ -109,6 +111,53 @@ test("normalizePrimaryTelnetState leaves optional telnet hosts unchanged", () =>
   assert.equal(result.telnetPort, undefined);
 });
 
+test("migrateHostsFromLegacyLineTimestamps preserves the old global opt-in", () => {
+  const host = makeHost();
+
+  assert.deepEqual(migrateHostsFromLegacyLineTimestamps([host], true), [
+    { ...host, showLineTimestamps: true },
+  ]);
+});
+
+test("migrateHostsFromLegacyLineTimestamps does not override explicit host choices", () => {
+  const enabled = makeHost({ id: "enabled", showLineTimestamps: true });
+  const disabled = makeHost({ id: "disabled", showLineTimestamps: false });
+
+  assert.deepEqual(migrateHostsFromLegacyLineTimestamps([enabled, disabled], true), [enabled, disabled]);
+});
+
+test("migrateHostsFromLegacyLineTimestamps fills only missing host choices", () => {
+  const inherited = makeHost({ id: "inherited" });
+  const disabled = makeHost({ id: "disabled", showLineTimestamps: false });
+
+  assert.deepEqual(migrateHostsFromLegacyLineTimestamps([inherited, disabled], true), [
+    { ...inherited, showLineTimestamps: true },
+    disabled,
+  ]);
+});
+
+test("preserves a concurrent terminal timestamp toggle when host details did not edit it", () => {
+  const openedHost = makeHost({ showLineTimestamps: false });
+  const latestHost = makeHost({ showLineTimestamps: true });
+  const draft = makeHost({ label: "Edited label", showLineTimestamps: false });
+
+  assert.deepEqual(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }),
+    { ...draft, showLineTimestamps: true },
+  );
+});
+
+test("keeps host details timestamp value when the details form edits it", () => {
+  const openedHost = makeHost({ showLineTimestamps: false });
+  const latestHost = makeHost({ showLineTimestamps: false });
+  const draft = makeHost({ showLineTimestamps: true });
+
+  assert.equal(
+    preserveConcurrentHostLineTimestampUpdate({ draft, openedHost, latestHost }).showLineTimestamps,
+    true,
+  );
+});
+
 test("normalizePrimaryTelnetState preserves an explicit telnet port", () => {
   const result = normalizePrimaryTelnetState(makeHost({
     protocol: "telnet",
@@ -192,6 +241,12 @@ test("normalizeDistroId matches Alibaba Cloud Linux PRETTY_NAME/NAME fallback", 
     normalizeDistroId("Alibaba Cloud Linux 3.2104 U13.1 (OpenAnolis Edition)"),
     "alinux",
   );
+});
+
+test("normalizeDistroId maps openEuler before the generic Linux fallback", () => {
+  assert.equal(normalizeDistroId("openeuler"), "openeuler");
+  assert.equal(normalizeDistroId("openEuler"), "openeuler");
+  assert.notEqual(normalizeDistroId("openeuler"), "linux");
 });
 
 test("shouldProbeSessionCwd allows the probe on a plain Linux host", () => {

@@ -13,6 +13,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
+const LazyTerminalPopupPage = lazy(() => import('./components/TerminalPopupPage'));
 
 function SettingsWindowFallback() {
   return (
@@ -80,6 +81,36 @@ function SettingsWindowFallback() {
   );
 }
 
+function TerminalPopupWindowFallback() {
+  return (
+    <div
+      style={{
+        width: '100vw',
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#0b1015',
+        color: '#d7e0ea',
+      }}
+    >
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-label="Loading" style={{ opacity: 0.8 }}>
+        <circle cx="14" cy="14" r="11" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.18" />
+        <path d="M25 14a11 11 0 0 0-11-11" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2">
+          <animateTransform
+            attributeName="transform"
+            dur="0.75s"
+            from="0 14 14"
+            repeatCount="indefinite"
+            to="360 14 14"
+            type="rotate"
+          />
+        </path>
+      </svg>
+    </div>
+  );
+}
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
@@ -93,6 +124,9 @@ const getRoute = () => {
   }
   if (hash === '#/tray' || hash.startsWith('#/tray')) {
     return 'tray';
+  }
+  if (hash === '#/terminal-popup' || hash.startsWith('#/terminal-popup')) {
+    return 'terminal-popup';
   }
   return 'main';
 };
@@ -117,6 +151,16 @@ const renderApp = () => {
         <TooltipProvider delayDuration={300}>
           <Suspense fallback={<div style={{ padding: 12, color: '#fff' }}>Loading tray panel…</div>}>
             <LazyTrayPanel />
+          </Suspense>
+        </TooltipProvider>
+      </ToastProvider>
+    );
+  } else if (route === 'terminal-popup') {
+    root.render(
+      <ToastProvider>
+        <TooltipProvider delayDuration={300}>
+          <Suspense fallback={<TerminalPopupWindowFallback />}>
+            <LazyTerminalPopupPage />
           </Suspense>
         </TooltipProvider>
       </ToastProvider>

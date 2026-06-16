@@ -9,6 +9,7 @@ import {
   applyDraftEntrySelection,
   applyHistorySessionSelection,
   normalizePanelView,
+  panelViewsEqual,
   resolveDisplayedPanelView,
   resolveDisplayedSession,
 } from "./aiPanelViewState.ts";
@@ -27,6 +28,23 @@ function createSession(id: string): AISession {
     },
   };
 }
+
+test("panelViewsEqual treats draft views as equal even when refs differ", () => {
+  assert.equal(
+    panelViewsEqual({ mode: "draft" }, { mode: "draft" }),
+    true,
+  );
+});
+
+test("panelViewsEqual distinguishes session targets", () => {
+  assert.equal(
+    panelViewsEqual(
+      { mode: "session", sessionId: "session-1" },
+      { mode: "session", sessionId: "session-2" },
+    ),
+    false,
+  );
+});
 
 test("draft view never falls back to most recent history", () => {
   const panelView: AIPanelView = { mode: "draft" };

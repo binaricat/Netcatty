@@ -229,14 +229,18 @@ export interface ExternalAgentConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  apiKey?: string;           // encrypted via credentialBridge (enc:v1: prefix)
   icon?: string;
   enabled: boolean;
-  /** SDK backend key for managed agents (claude|codex|copilot). */
+  available?: boolean;
+  /** SDK backend key for managed agents (claude|codex|copilot|cursor|codebuddy). */
   sdkBackend?: string;
   /** @deprecated Legacy persisted field from the pre-SDK migration. Read only for compatibility. */
   acpCommand?: string;
   /** @deprecated Legacy persisted field from the pre-SDK migration. */
   acpArgs?: string[];
+  /** Internal: disabled only because the managed CLI was unavailable. */
+  autoDisabledUntilAvailable?: boolean;
 }
 
 // Discovered agent from system PATH
@@ -252,8 +256,8 @@ export interface DiscoveredAgent {
   /** @deprecated Legacy discovery field from the pre-SDK migration. */
   acpCommand?: string;
   acpArgs?: string[];
-  /** SDK backend key (claude|codex|copilot) — the post-migration routing value. */
-  sdkBackend?: 'claude' | 'codex' | 'copilot';
+  /** SDK backend key (claude|codex|copilot|cursor|codebuddy) — the routing value. */
+  sdkBackend?: 'claude' | 'codex' | 'copilot' | 'cursor' | 'codebuddy';
   /** Absolute resolved CLI path (preferred over `path`). */
   binPath?: string;
   installed?: boolean;
@@ -445,11 +449,43 @@ export const CODEX_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'gpt-4o', name: 'GPT-4o' },
 ];
 
+export const CURSOR_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'composer-2.5', name: 'Composer 2.5', description: 'Recommended' },
+  { id: 'gpt-5.5', name: 'GPT-5.5' },
+  { id: 'gpt-5.2', name: 'GPT-5.2' },
+  { id: 'gpt-5.1', name: 'GPT-5.1' },
+  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
+  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+];
+
+// CodeBuddy's SDK model enumeration can be empty depending on CLI/account
+// state; keep a CLI-supported fallback list so users can still pass --model.
+export const CODEBUDDY_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { id: 'deepseek-v3-2-volc', name: 'DeepSeek V3.2' },
+  { id: 'glm-5.1', name: 'GLM 5.1' },
+  { id: 'glm-5.0', name: 'GLM 5.0' },
+  { id: 'glm-5.0-turbo', name: 'GLM 5.0 Turbo' },
+  { id: 'glm-5v-turbo', name: 'GLM 5V Turbo' },
+  { id: 'glm-4.7', name: 'GLM 4.7' },
+  { id: 'minimax-m3-pay', name: 'MiniMax M3' },
+  { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
+  { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+  { id: 'hy3-preview', name: 'Hy3 Preview' },
+];
+
 export function getAgentModelPresets(agentCommand?: string): AgentModelPreset[] {
   if (!agentCommand) return [];
-  const basename = agentCommand.split('/').pop()?.toLowerCase() ?? '';
+  // Split on both POSIX (/) and Windows (\) separators so command paths like
+  // "C:\\Users\\foo\\codex.cmd" resolve to the right basename. Splitting only
+  // on "/" leaves the full path intact on Windows, which never matches the
+  // preset prefixes below and yields an empty list (presets silently lost).
+  const basename = agentCommand.split(/[\\/]/).pop()?.toLowerCase() ?? '';
   if (basename.startsWith('claude')) return CLAUDE_MODEL_PRESETS;
   if (basename.startsWith('codex')) return CODEX_MODEL_PRESETS;
+  if (basename.startsWith('cursor')) return CURSOR_MODEL_PRESETS;
+  if (basename.startsWith('codebuddy')) return CODEBUDDY_MODEL_PRESETS;
   return [];
 }
 

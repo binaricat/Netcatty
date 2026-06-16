@@ -7,6 +7,12 @@ import {
   TransferStatus,
   TransferTask,
 } from "../../../domain/models";
+import {
+  canReplaceSftpConflict,
+  describeSftpExistingKind,
+  describeSftpIncomingKind,
+  getSftpConflictTypeKey,
+} from "../../../domain/sftpConflict";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { SftpPane } from "./types";
@@ -69,8 +75,14 @@ export const useSftpTransfers = ({
   );
 
   const conflictDefaultKey = useCallback(
-    (batchId: string | undefined, isDirectory: boolean) =>
-      `${batchId ?? "global"}:${isDirectory ? "directory" : "file"}`,
+    (batchId: string | undefined, isDirectory: boolean, existingType?: "file" | "directory" | "symlink") =>
+      `${batchId ?? "global"}:${getSftpConflictTypeKey(isDirectory, existingType)}`,
+    [],
+  );
+
+  const buildReplaceTypeMismatchError = useCallback(
+    (isDirectory: boolean, existingType: "file" | "directory" | "symlink" | undefined, targetPath: string) =>
+      `Cannot replace existing ${describeSftpExistingKind(existingType)} with ${describeSftpIncomingKind(isDirectory)}: ${targetPath}`,
     [],
   );
 
@@ -233,6 +245,33 @@ export const useSftpTransfers = ({
           const existingStat = await statTargetPath(targetPane, targetSftpId, task.targetPath, targetEncoding);
 
           if (existingStat) {
+            const applyToAllCount = task.batchId
+              ? await (async () => {
+                  const candidates = transfersRef.current.filter((candidate) =>
+                    candidate.batchId === task.batchId &&
+                    candidate.isDirectory === task.isDirectory &&
+                    !candidate.parentTaskId &&
+                    candidate.status !== "completed" &&
+                    candidate.status !== "cancelled",
+                  );
+                  const matches = await Promise.all(candidates.map(async (candidate) => {
+                    if (candidate.id === task.id) return true;
+                    try {
+                      const candidateStat = await statTargetPath(
+                        targetPane,
+                        targetSftpId,
+                        candidate.targetPath,
+                        targetEncoding,
+                      );
+                      return candidateStat?.type === existingStat.type;
+                    } catch {
+                      return false;
+                    }
+                  }));
+                  return Math.max(1, matches.filter(Boolean).length);
+                })()
+              : 1;
+
             return {
               transferId: task.id,
               batchId: task.batchId,
@@ -241,15 +280,7 @@ export const useSftpTransfers = ({
               targetPath: task.targetPath,
               isDirectory: task.isDirectory,
               existingType: existingStat.type,
-              applyToAllCount: task.batchId
-                ? transfersRef.current.filter((candidate) =>
-                    candidate.batchId === task.batchId &&
-                    candidate.isDirectory === task.isDirectory &&
-                    !candidate.parentTaskId &&
-                    candidate.status !== "completed" &&
-                    candidate.status !== "cancelled",
-                  ).length
-                : 1,
+              applyToAllCount,
               existingSize: existingStat.size,
               newSize: sourceStat?.size || task.totalBytes || 0,
               existingModified: existingStat.mtime,
@@ -271,7 +302,9 @@ export const useSftpTransfers = ({
       const conflict = await conflictCheckPromise;
 
       if (conflict) {
-        const defaultAction = conflictDefaultsRef.current.get(conflictDefaultKey(task.batchId, task.isDirectory));
+        const defaultAction = conflictDefaultsRef.current.get(
+          conflictDefaultKey(task.batchId, task.isDirectory, conflict.existingType),
+        );
         if (defaultAction) {
           if (defaultAction === "stop") {
             await markBatchStopped(task);
@@ -283,6 +316,16 @@ export const useSftpTransfers = ({
             updateTask({ status: "cancelled", endTime: Date.now() });
             await completeCancelledTask(task);
             return "cancelled";
+          }
+
+          if (defaultAction === "replace" && !canReplaceSftpConflict(task.isDirectory, conflict.existingType)) {
+            updateTask({
+              status: "failed",
+              endTime: Date.now(),
+              error: buildReplaceTypeMismatchError(task.isDirectory, conflict.existingType, task.targetPath),
+              retryable: false,
+            });
+            return "failed";
           }
 
           const duplicateTarget = defaultAction === "duplicate"
@@ -728,16 +771,19 @@ export const useSftpTransfers = ({
         return;
       }
 
-      const selectedConflictKey = conflictDefaultKey(task.batchId, task.isDirectory);
+      const selectedConflictKey = conflictDefaultKey(conflict.batchId, conflict.isDirectory, conflict.existingType);
       const affectedConflicts = applyToAll
         ? conflictsRef.current.filter((candidate) =>
-            conflictDefaultKey(candidate.batchId, candidate.isDirectory) === selectedConflictKey,
+            conflictDefaultKey(candidate.batchId, candidate.isDirectory, candidate.existingType) === selectedConflictKey,
           )
         : [conflict];
       const affectedConflictIds = new Set(affectedConflicts.map((candidate) => candidate.transferId));
       const affectedTasks = affectedConflicts
         .map((candidate) => transfersRef.current.find((transfer) => transfer.id === candidate.transferId))
         .filter((candidate): candidate is TransferTask => Boolean(candidate));
+      const affectedConflictById = new Map<string, FileConflict>(
+        affectedConflicts.map((candidate): [string, FileConflict] => [candidate.transferId, candidate]),
+      );
 
       if (applyToAll) {
         conflictDefaultsRef.current.set(selectedConflictKey, action);
@@ -771,9 +817,11 @@ export const useSftpTransfers = ({
       }
 
       const updatedTasks: TransferTask[] = [];
+      const blockedReplaceTasks: Array<{ task: TransferTask; conflict: FileConflict }> = [];
 
       for (const affectedTask of affectedTasks) {
         let updatedTask = { ...affectedTask };
+        const affectedConflict = affectedConflictById.get(affectedTask.id);
 
         if (action === "duplicate") {
           const endpoints = resolveTaskEndpoints(affectedTask);
@@ -792,6 +840,13 @@ export const useSftpTransfers = ({
             skipConflictCheck: true,
           };
         } else if (action === "replace") {
+          if (
+            affectedConflict &&
+            !canReplaceSftpConflict(affectedTask.isDirectory, affectedConflict.existingType)
+          ) {
+            blockedReplaceTasks.push({ task: affectedTask, conflict: affectedConflict });
+            continue;
+          }
           updatedTask = {
             ...affectedTask,
             skipConflictCheck: true,
@@ -806,6 +861,28 @@ export const useSftpTransfers = ({
         }
 
         updatedTasks.push(updatedTask);
+      }
+
+      if (blockedReplaceTasks.length > 0) {
+        const blockedTaskIds = new Set(blockedReplaceTasks.map(({ task }) => task.id));
+        const blockedErrors = new Map(
+          blockedReplaceTasks.map(({ task, conflict }) => [
+            task.id,
+            buildReplaceTypeMismatchError(task.isDirectory, conflict.existingType, task.targetPath),
+          ]),
+        );
+        setTransfers((prev) =>
+          prev.map((t) => blockedTaskIds.has(t.id)
+            ? {
+                ...t,
+                status: "failed" as TransferStatus,
+                endTime: Date.now(),
+                error: blockedErrors.get(t.id),
+                retryable: false,
+              }
+            : t,
+          ),
+        );
       }
 
       const updatedTaskMap = new Map(updatedTasks.map((updatedTask) => [updatedTask.id, updatedTask]));

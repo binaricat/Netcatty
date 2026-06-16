@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import type { AIDraft, AISession } from '../infrastructure/ai/types';
 import {
+  aiChatSidePanelPropsAreEqual,
   hasAIChatSidePanelRetainedContent,
   shouldKeepAIChatSidePanelMounted,
 } from './AIChatSidePanel.tsx';
@@ -99,4 +100,18 @@ test('hidden AI side panel is retained when it has session messages', () => {
 
 test('visible AI side panel is always mounted even when empty', () => {
   assert.equal(shouldKeepAIChatSidePanelMounted(baseProps({ isVisible: true })), true);
+});
+
+test('AI side panel re-renders when retained content becomes visible again', () => {
+  const hiddenProps = baseProps({
+    isVisible: false,
+    draftsByScope: {
+      'terminal:terminal-1': draft({ text: 'hello' }),
+    },
+  });
+
+  assert.equal(aiChatSidePanelPropsAreEqual(
+    hiddenProps,
+    { ...hiddenProps, isVisible: true },
+  ), false);
 });

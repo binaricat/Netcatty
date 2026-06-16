@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { Host, Identity, SSHKey, TerminalSettings } from "../../../domain/models";
+import type { Host, Identity, KnownHost, SSHKey, TerminalSettings } from "../../../domain/models";
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from "../../../domain/credentials";
 import { resolveBridgeKeyAuth, resolveHostAuth } from "../../../domain/sshAuth";
 import { resolveHostKeepalive } from "../../../domain/host";
@@ -14,6 +14,7 @@ interface UseSftpHostCredentialsParams {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  knownHosts?: KnownHost[];
   terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
 }
 
@@ -22,6 +23,7 @@ export const buildSftpHostCredentials = ({
   hosts,
   keys,
   identities,
+  knownHosts,
   terminalSettings,
 }: UseSftpHostCredentialsParams & { host: Host }): NetcattySSHOptions => {
   const globalKeepalive = terminalSettings ?? FALLBACK_KEEPALIVE;
@@ -165,6 +167,7 @@ export const buildSftpHostCredentials = ({
     identityFilePaths: keyAuth.identityFilePaths,
     keepaliveInterval: targetKeepalive.interval,
     keepaliveCountMax: targetKeepalive.countMax,
+    knownHosts,
     // Algorithm settings — must reach the SFTP bridge or hosts that need
     // legacy mode / the ECDSA skip / advanced overrides would still hit
     // the original negotiation failure when opening their SFTP pane,
@@ -179,9 +182,10 @@ export const useSftpHostCredentials = ({
   hosts,
   keys,
   identities,
+  knownHosts,
   terminalSettings,
 }: UseSftpHostCredentialsParams) =>
   useCallback(
-    (host: Host): NetcattySSHOptions => buildSftpHostCredentials({ host, hosts, keys, identities, terminalSettings }),
-    [hosts, identities, keys, terminalSettings],
+    (host: Host): NetcattySSHOptions => buildSftpHostCredentials({ host, hosts, keys, identities, knownHosts, terminalSettings }),
+    [hosts, identities, keys, knownHosts, terminalSettings],
   );

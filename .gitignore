@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+
 dist
 dist-ssr
 *.local
@@ -40,6 +41,15 @@ coverage
 
 # Codex
 /.codex/
+
+# Qoder
+.qoder
+
+# Workbuddy
+.workbuddy
+
+# Codebuddy
+.codebuddy
 
 # AI / Superpowers generated docs (local only)
 /docs/superpowers/

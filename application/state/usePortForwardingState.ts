@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Host, Identity, PortForwardingRule, SSHKey } from "../../domain/models";
+import { getNextVaultOrder, normalizeVaultOrder, reorderVaultItems, sortByVaultOrder, type VaultOrderPosition } from "../../domain/vaultOrder";
 import {
   STORAGE_KEY_PF_PREFER_FORM_MODE,
   STORAGE_KEY_PF_VIEW_MODE,
@@ -30,7 +31,7 @@ let heartbeatIntervalId: ReturnType<typeof setInterval> | undefined;
 
 export type { ViewMode };
 
-export type SortMode = "az" | "za" | "newest" | "oldest";
+export type SortMode = "manual" | "az" | "za" | "newest" | "oldest";
 
 export interface UsePortForwardingStateResult {
   rules: PortForwardingRule[];
@@ -52,6 +53,7 @@ export interface UsePortForwardingStateResult {
   updateRule: (id: string, updates: Partial<PortForwardingRule>) => void;
   deleteRule: (id: string) => void;
   duplicateRule: (id: string) => void;
+  reorderRule: (sourceId: string, targetId: string, position: VaultOrderPosition) => void;
   importRules: (rules: PortForwardingRule[]) => void;
 
   setRuleStatus: (
@@ -90,9 +92,9 @@ const notifyListeners = () => {
 };
 
 const setGlobalRules = (newRules: PortForwardingRule[]) => {
-  globalRules = newRules;
+  globalRules = normalizeVaultOrder(newRules);
   notifyListeners();
-  localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, newRules);
+  localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, globalRules);
 };
 
 const normalizeRulesWithConnections = (rules: PortForwardingRule[]): PortForwardingRule[] => {
@@ -136,7 +138,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     STORAGE_KEY_PF_VIEW_MODE,
     "grid",
   );
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [search, setSearch] = useState("");
   const [preferFormMode, setPreferFormModeState] = useState<boolean>(() => {
     return localStorageAdapter.readBoolean(STORAGE_KEY_PF_PREFER_FORM_MODE) ?? false;
@@ -249,6 +251,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         id: crypto.randomUUID(),
         createdAt: Date.now(),
         status: "inactive",
+        order: getNextVaultOrder(globalRules),
       };
       const updated = [...globalRules, newRule];
       setGlobalRules(updated);
@@ -294,10 +297,19 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         status: "inactive",
         error: undefined,
         lastUsedAt: undefined,
+        order: getNextVaultOrder(globalRules),
       };
       const updated = [...globalRules, copy];
       setGlobalRules(updated);
       setSelectedRuleId(copy.id);
+    },
+    [],
+  );
+
+  const reorderRule = useCallback(
+    (sourceId: string, targetId: string, position: VaultOrderPosition) => {
+      setGlobalRules(reorderVaultItems(globalRules, sourceId, targetId, position));
+      setSortMode("manual");
     },
     [],
   );
@@ -444,6 +456,9 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
       case "oldest":
         result.sort((a, b) => a.createdAt - b.createdAt);
         break;
+      case "manual":
+        result = sortByVaultOrder(result);
+        break;
     }
 
     return result;
@@ -469,6 +484,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     updateRule,
     deleteRule,
     duplicateRule,
+    reorderRule,
     importRules,
 
     setRuleStatus,

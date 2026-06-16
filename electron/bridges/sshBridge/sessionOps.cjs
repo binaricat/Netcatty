@@ -33,7 +33,10 @@ function createSessionOpsApi(ctx) {
         if (typeof execOnEtSession !== "function") {
           return { success: false, error: "ET command executor unavailable" };
         }
-        return execOnEtSession(session, "cat /etc/os-release 2>/dev/null || uname -a", 5000);
+        return execOnEtSession(session, "cat /etc/os-release 2>/dev/null || uname -a", 5000, {
+          requireTrustedHost: true,
+          knownHosts: session.etStatsAuth?.knownHosts,
+        });
       }
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
@@ -66,6 +69,142 @@ function createSessionOpsApi(ctx) {
             stream.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
             stream.on('close', () => {
               settle({ success: true, stdout, stderr });
+            });
+          });
+        } catch (err) {
+          settle({ success: false, error: err?.message || String(err) });
+        }
+      });
+    }
+
+    async function readRemoteHistory(event, payload) {
+      const { sessionId, limit } = payload || {};
+      const session = sessions.get(sessionId);
+      if (!session) {
+        return { success: false, error: 'Session not found' };
+      }
+
+      const safeLimit =
+        Number.isFinite(limit) && limit > 0 && limit <= 10000 ? Math.floor(limit) : 1000;
+      const fishLimit = safeLimit * 3; // fish records span 2-3 lines each
+
+      const SHELL_MARKER = '__NC_SHELL__';
+      const BASH_MARKER = '__NC_BASH__';
+      const ZSH_MARKER = '__NC_ZSH__';
+      const FISH_MARKER = '__NC_FISH__';
+      // Shell parameter expansions kept as literal text so the remote POSIX
+      // shell (not Node or the user's login shell) resolves them; honours
+      // $HISTFILE / $XDG_DATA_HOME overrides.
+      const ZSH_HIST = '${HISTFILE:-$HOME/.zsh_history}';
+      const BASH_HIST = '${HISTFILE:-$HOME/.bash_history}';
+      const FISH_PATH = '${XDG_DATA_HOME:-$HOME/.local/share}/fish/fish_history';
+      const posixScript = [
+        `SH="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -n "$SH" ] || SH="$SHELL"`,
+        `FISH="${FISH_PATH}"; [ -f "$FISH" ] || FISH="$HOME/.config/fish/fish_history"`,
+        `case "$SH" in`,
+        `  *zsh) printf '%s\\n' '${SHELL_MARKER}zsh'; printf '%s\\n' '${ZSH_MARKER}'; tail -n ${safeLimit} "${ZSH_HIST}" 2>/dev/null || true ;;`,
+        `  *bash) printf '%s\\n' '${SHELL_MARKER}bash'; printf '%s\\n' '${BASH_MARKER}'; tail -n ${safeLimit} "${BASH_HIST}" 2>/dev/null || true ;;`,
+        `  *fish) printf '%s\\n' '${SHELL_MARKER}fish'; printf '%s\\n' '${FISH_MARKER}'; tail -n ${fishLimit} "$FISH" 2>/dev/null || true ;;`,
+        `  *) printf '%s\\n' '${SHELL_MARKER}unknown'; printf '%s\\n' '${BASH_MARKER}'; tail -n ${safeLimit} "$HOME/.bash_history" 2>/dev/null || true; printf '%s\\n' '${ZSH_MARKER}'; tail -n ${safeLimit} "$HOME/.zsh_history" 2>/dev/null || true; printf '%s\\n' '${FISH_MARKER}'; tail -n ${fishLimit} "$FISH" 2>/dev/null || true ;;`,
+        `esac`,
+      ].join('\n');
+      // Match getSessionPwd: force POSIX sh so fish/zsh login shells do not
+      // parse the script themselves.
+      const command = `exec sh -c ${quoteShellArg(posixScript)}`;
+
+      const parse = (stdout) => {
+        const text = stdout || '';
+        let shell = 'unknown';
+        const shellIdx = text.indexOf(SHELL_MARKER);
+        if (shellIdx >= 0) {
+          const after = text.slice(shellIdx + SHELL_MARKER.length);
+          shell = (after.split(/\r?\n/, 1)[0] || 'unknown').trim();
+        }
+        const section = (marker) => {
+          const start = text.indexOf(marker);
+          if (start < 0) return '';
+          const from = start + marker.length;
+          // End at the nearest following section marker, if any.
+          const ends = [BASH_MARKER, ZSH_MARKER, FISH_MARKER]
+            .map((m) => text.indexOf(m, from))
+            .filter((i) => i >= 0);
+          const end = ends.length ? Math.min(...ends) : text.length;
+          return text.slice(from, end).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+        };
+        return {
+          shell,
+          bash: section(BASH_MARKER),
+          zsh: section(ZSH_MARKER),
+          fish: section(FISH_MARKER),
+        };
+      };
+
+      // ET session: no ssh2 conn — run through the shared system-ssh executor.
+      if (session.type === 'et') {
+        if (typeof execOnEtSession !== 'function') {
+          return { success: false, error: 'ET command executor unavailable' };
+        }
+        const result = await execOnEtSession(session, command, 8000);
+        if (!result || !result.success) {
+          return {
+            success: false,
+            error: (result && result.error) || 'Failed to read remote history',
+          };
+        }
+        return { success: true, ...parse(result.stdout || '') };
+      }
+
+      // Mosh has no interactive ssh2 conn of its own. Lazily open the same
+      // stats companion getServerStats uses — it lives on session.moshStatsConn,
+      // never session.conn (see moshStatsConnection.cjs). Reading the fixed
+      // history files is connection-agnostic, so the companion is a safe
+      // substitute here (unlike getSessionPwd, which needs the interactive
+      // shell's sibling exec channel).
+      if (
+        !session.conn &&
+        !session.moshStatsConn &&
+        session.type === 'mosh' &&
+        typeof ensureMoshStatsConnection === 'function'
+      ) {
+        await ensureMoshStatsConnection(session, sessionId, event?.sender);
+      }
+
+      const conn = session.conn || session.moshStatsConn;
+      if (!conn) {
+        // A Mosh session can be marked "connected" before the handshake stores
+        // credentials; report pending (mirrors getServerStats) so it isn't a
+        // hard failure during that window.
+        if (session.type === 'mosh' && !session.moshStatsAuth && !session.moshStatsConnFailed) {
+          return { success: false, pending: true, error: 'Mosh handshake in progress' };
+        }
+        return { success: false, error: 'Session not found or not connected' };
+      }
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let activeStream = null;
+        const settle = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
+        const timer = setTimeout(() => {
+          settle({ success: false, error: 'Timeout reading remote history' });
+          try { if (activeStream) activeStream.close(); } catch { /* ignore */ }
+        }, 8000);
+        try {
+          conn.exec(command, (err, stream) => {
+            if (err) {
+              settle({ success: false, error: err.message || String(err) });
+              return;
+            }
+            activeStream = stream;
+            let stdout = '';
+            stream.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+            if (stream.stderr) stream.stderr.on('data', () => { /* swallow */ });
+            stream.on('close', () => {
+              settle({ success: true, ...parse(stdout) });
             });
           });
         } catch (err) {
@@ -497,23 +636,82 @@ function createSessionOpsApi(ctx) {
         return { success: false, error: 'Session not found or not connected' };
       }
 
-      if (session.type === "et") {
-        return { success: false, error: "Server stats are not supported for EternalTerminal sessions" };
+      const isEtSession = session.type === "et";
+      const etUsesExecFallback = isEtSession && session.etStatsAuth?.hasJumpHost;
+
+      function createBufferedExecStream(stdout = "", stderr = "") {
+        const stream = {
+          stderr: {
+            on(eventName, handler) {
+              if (eventName === "data" && stderr) {
+                setTimeout(() => handler(Buffer.from(stderr)), 0);
+              }
+              return this;
+            },
+          },
+          on(eventName, handler) {
+            if (eventName === "data" && stdout) {
+              setTimeout(() => handler(Buffer.from(stdout)), 0);
+            }
+            if (eventName === "close") {
+              setTimeout(() => handler(0), 0);
+            }
+            return this;
+          },
+          close() {},
+          destroy() {},
+        };
+        return stream;
       }
 
-      // Mosh sessions run over UDP via a local mosh-client PTY and have no
+      function createEtStatsExecConn(etSession) {
+        return {
+          exec(command, cb) {
+            execOnEtSession(etSession, command, 4500, {
+              requireTrustedHost: true,
+              knownHosts: etSession.etStatsAuth?.knownHosts,
+            })
+              .then((result) => {
+                if (!result?.success) {
+                  cb(new Error(result?.error || result?.stderr || "ET stats command failed"));
+                  return;
+                }
+                cb(null, createBufferedExecStream(result.stdout || "", result.stderr || ""));
+              })
+              .catch((err) => {
+                cb(err instanceof Error ? err : new Error(String(err)));
+              });
+          },
+        };
+      }
+
+      // Mosh and direct ET sessions run through external PTYs and have no
       // ssh2 connection of their own. Lazily open a best-effort companion SSH
-      // connection (reusing the handshake credentials) so the host-info bar
-      // works for Mosh too (issue #1198). The companion lives on
-      // session.moshStatsConn — deliberately NOT session.conn — so it stays
-      // invisible to other bridges (getSessionPwd / SFTP / MCP exec) that key
-      // off session.conn as the interactive connection. This is a no-op for
-      // real SSH sessions, which already carry session.conn.
-      if (!session.conn && !session.moshStatsConn && typeof ensureMoshStatsConnection === 'function') {
-        await ensureMoshStatsConnection(session, sessionId, event?.sender);
+      // connection (reusing credentials) so the host-info bar can use the same
+      // stats parser as normal SSH. The companion lives on protocol-specific
+      // fields — never session.conn — so other bridges do not mistake it for
+      // the interactive connection. ET sessions with a jump host use the
+      // already-prepared OpenSSH environment via execOnEtSession instead.
+      if (!session.conn && !session.moshStatsConn && !session.etStatsConn) {
+        if (session.type === 'mosh' && typeof ensureMoshStatsConnection === 'function') {
+          await ensureMoshStatsConnection(session, sessionId, event?.sender);
+        } else if (
+          isEtSession &&
+          !etUsesExecFallback &&
+          !session.etStatsConnFailed &&
+          typeof ensureEtStatsConnection === 'function'
+        ) {
+          await ensureEtStatsConnection(session, sessionId, event?.sender);
+        }
       }
 
-      const conn = session.conn || session.moshStatsConn;
+      const canExecEtStats =
+        isEtSession &&
+        typeof execOnEtSession === "function" &&
+        !!session.sshUserHost &&
+        !session.externalAuthArtifactsCleaned;
+      const conn = session.conn || session.moshStatsConn || session.etStatsConn ||
+        (canExecEtStats ? createEtStatsExecConn(session) : null);
       if (!conn) {
         // A Mosh session can be marked "connected" (and start polling) from
         // the SSH bootstrap's visible output before swapToMoshClient stores
@@ -922,6 +1120,7 @@ function createSessionOpsApi(ctx) {
     return {
       getSessionRemoteInfo,
       getSessionDistroInfo,
+      readRemoteHistory,
       getSessionPwd,
       probeReceiveConflicts,
       removeRemoteFiles,

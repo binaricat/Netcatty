@@ -5,6 +5,7 @@ type PortForwardingStatus = 'inactive' | 'connecting' | 'active' | 'error';
 export interface PortForwardingRule {
   id: string;
   label: string;
+  order?: number;
   type: PortForwardingType;
   // Common fields
   localPort: number;

@@ -6,15 +6,68 @@ import {
   isHostTreeWorkTabSurface,
   isRootPageTabId,
   isTerminalContentTabSurface,
+  reorderWorkTabIds,
   resolveWorkTabActiveHostId,
+  resolveWorkTabHostTreeTheme,
 } from './workTabSurface';
 import type { EditorTab } from '../state/editorTabStore';
-import type { TerminalSession, Workspace } from '../../types';
+import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
+
+const makeTheme = (id: string, type: TerminalTheme['type'], background: string): TerminalTheme => ({
+  id,
+  name: id,
+  type,
+  colors: {
+    background,
+    foreground: type === 'dark' ? '#ffffff' : '#000000',
+    cursor: '#888888',
+    selection: '#555555',
+    black: '#000000',
+    red: '#ff0000',
+    green: '#00ff00',
+    yellow: '#ffff00',
+    blue: '#0000ff',
+    magenta: '#ff00ff',
+    cyan: '#00ffff',
+    white: '#ffffff',
+    brightBlack: '#444444',
+    brightRed: '#ff5555',
+    brightGreen: '#55ff55',
+    brightYellow: '#ffff55',
+    brightBlue: '#5555ff',
+    brightMagenta: '#ff55ff',
+    brightCyan: '#55ffff',
+    brightWhite: '#ffffff',
+  },
+});
 
 test('work tab order keeps custom positions and appends new tabs', () => {
   assert.deepEqual(
     buildOrderedWorkTabIds(['log-1', 'session-1'], ['session-1', 'workspace-1', 'log-1', 'editor:file-1']),
     ['log-1', 'session-1', 'workspace-1', 'editor:file-1'],
+  );
+});
+
+test('work tab order removes duplicate ids before rendering', () => {
+  assert.deepEqual(
+    buildOrderedWorkTabIds(
+      ['session-2', 'session-1', 'session-2', 'session-1'],
+      ['session-1', 'session-2', 'session-3', 'session-3'],
+    ),
+    ['session-2', 'session-1', 'session-3'],
+  );
+});
+
+test('work tab order reorders with newly materialized tabs', () => {
+  assert.deepEqual(
+    reorderWorkTabIds(
+      ['session-1', 'session-2', 'session-3'],
+      ['session-1', 'session-2', 'session-3'],
+      'session-1',
+      'session-3',
+      'after',
+    ),
+    ['session-2', 'session-3', 'session-1'],
   );
 });
 
@@ -79,4 +132,74 @@ test('shared host tree resolves active host ids across work tab types', () => {
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'workspace-1', sessions, workspaces, editorTabs }), 'host-2');
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'editor:file-1', sessions, workspaces, editorTabs }), 'host-3');
   assert.equal(resolveWorkTabActiveHostId({ activeTabId: 'log-1', sessions, workspaces, editorTabs }), null);
+});
+
+test('shared host tree uses the active host theme when follow-app terminal theme is off', () => {
+  const currentTheme = makeTheme('app-dark', 'dark', '#111111');
+  const hostTheme = makeTheme('host-light', 'light', '#fafafa');
+  const host = {
+    id: 'host-1',
+    label: 'Host',
+    hostname: 'host.local',
+    username: 'root',
+    tags: [],
+    os: 'linux',
+    theme: hostTheme.id,
+    themeOverride: true,
+  } as Host;
+
+  const resolved = resolveWorkTabHostTreeTheme({
+    activeHostId: host.id,
+    accentMode: 'theme',
+    currentTerminalTheme: currentTheme,
+    customAccent: '#8b5cf6',
+    followAppTerminalTheme: false,
+    hostById: new Map([[host.id, host]]),
+    themeById: new Map([[currentTheme.id, currentTheme], [hostTheme.id, hostTheme]]),
+  });
+
+  assert.equal(resolved.id, hostTheme.id);
+});
+
+test('shared host tree uses the followed terminal theme when follow-app terminal theme is on', () => {
+  const currentTheme = makeTheme('app-light', 'light', '#ffffff');
+  const hostTheme = makeTheme('host-dark', 'dark', '#050505');
+  const host = {
+    id: 'host-1',
+    label: 'Host',
+    hostname: 'host.local',
+    username: 'root',
+    tags: [],
+    os: 'linux',
+    theme: hostTheme.id,
+    themeOverride: true,
+  } as Host;
+
+  const resolved = resolveWorkTabHostTreeTheme({
+    activeHostId: host.id,
+    accentMode: 'theme',
+    currentTerminalTheme: currentTheme,
+    customAccent: '#8b5cf6',
+    followAppTerminalTheme: true,
+    hostById: new Map([[host.id, host]]),
+    themeById: new Map([[currentTheme.id, currentTheme], [hostTheme.id, hostTheme]]),
+  });
+
+  assert.equal(resolved.id, currentTheme.id);
+});
+
+test('shared host tree falls back to the current terminal theme without an active host', () => {
+  const currentTheme = makeTheme('app-dark', 'dark', '#111111');
+
+  const resolved = resolveWorkTabHostTreeTheme({
+    activeHostId: null,
+    accentMode: 'theme',
+    currentTerminalTheme: currentTheme,
+    customAccent: '#8b5cf6',
+    followAppTerminalTheme: false,
+    hostById: new Map(),
+    themeById: new Map([[currentTheme.id, currentTheme]]),
+  });
+
+  assert.equal(resolved.id, currentTheme.id);
 });

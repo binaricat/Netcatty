@@ -44,6 +44,7 @@ const {
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
   shouldPromptCloudVaultRecovery,
+  SYNCABLE_SETTING_STORAGE_KEYS,
 } = await import("./syncPayload.ts");
 const storageKeys = await import("../infrastructure/config/storageKeys.ts");
 
@@ -124,6 +125,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION, "false");
 
   const payload = buildSyncPayload(vault([]));
 
@@ -140,7 +142,16 @@ test("buildSyncPayload includes AI configuration settings", () => {
     agentModelMap: { codex: "gpt-test" },
     agentProviderMap: { catty: "openai-main" },
     webSearchConfig: webSearch,
+    showTerminalSelectionAction: false,
   });
+});
+
+test("terminal selection AI preference is syncable for auto-sync detection", () => {
+  assert.ok(
+    (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
+      storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
+    ),
+  );
 });
 
 test("buildSyncPayload includes host tree sidebar visibility setting", () => {
@@ -215,6 +226,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
         agentModelMap: { claude: "claude-test" },
         agentProviderMap: { catty: "anthropic-main" },
         webSearchConfig: webSearch,
+        showTerminalSelectionAction: false,
       },
     },
     syncedAt: 1,
@@ -234,6 +246,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION), "false");
 });
 
 test("applySyncPayload restores host tree sidebar visibility setting", async () => {
@@ -529,6 +542,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   localStorage.setItem(storageKeys.STORAGE_KEY_TERM_SETTINGS, JSON.stringify({
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    middleClickBehavior: "context-menu",
     showServerStats: false,
     serverStatsRefreshInterval: 12,
     rendererType: "dom",
@@ -541,6 +555,7 @@ test("buildSyncPayload includes syncable terminal options from settings", () => 
   assert.deepEqual(payload.settings?.terminalSettings, {
     terminalEmulationType: "vt100",
     altAsMeta: true,
+    middleClickBehavior: "context-menu",
     showServerStats: false,
     serverStatsRefreshInterval: 12,
     rendererType: "dom",
@@ -696,6 +711,49 @@ test("applySyncPayload preserves host proxy references when group configs are ab
   assert.equal("groupConfigs" in imported, false);
 });
 
+test("applySyncPayload migrates legacy global line timestamps onto hosts", async () => {
+  let imported: Record<string, unknown> | null = null;
+  const payload: SyncPayload = {
+    hosts: [
+      {
+        id: "host-1",
+        label: "Inherited",
+        hostname: "example.com",
+        username: "root",
+        tags: [],
+        os: "linux",
+      },
+      {
+        id: "host-2",
+        label: "Explicit",
+        hostname: "example.net",
+        username: "root",
+        tags: [],
+        os: "linux",
+        showLineTimestamps: false,
+      },
+    ],
+    keys: [],
+    identities: [],
+    proxyProfiles: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+    settings: { terminalSettings: { showLineTimestamps: true } },
+  };
+
+  await applySyncPayload(payload, {
+    importVaultData: (json) => {
+      imported = JSON.parse(json);
+    },
+  });
+
+  assert.ok(imported);
+  const hosts = imported.hosts as SyncPayload["hosts"];
+  assert.equal(hosts[0]?.showLineTimestamps, true);
+  assert.equal(hosts[1]?.showLineTimestamps, false);
+});
+
 test("applySyncPayload waits for async vault imports", async () => {
   let finished = false;
   const payload: SyncPayload = {
@@ -760,6 +818,42 @@ test("applySyncPayload writes incoming fallbackFont into local TERM_SETTINGS", a
   assert.ok(raw, "TERM_SETTINGS should be written");
   const parsed = JSON.parse(raw!);
   assert.equal(parsed.fallbackFont, "Sarasa Mono SC");
+});
+
+test("applySyncPayload lets legacy middle-click paste update the new middle-click behavior", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({
+      scrollback: 2000,
+      middleClickBehavior: "paste",
+      middleClickPaste: true,
+    }),
+  );
+
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+    settings: {
+      terminalSettings: {
+        middleClickPaste: false,
+      },
+    },
+  } as SyncPayload;
+
+  await applySyncPayload(payload, {
+    importVaultData: () => {},
+  });
+
+  const raw = localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS);
+  assert.ok(raw, "TERM_SETTINGS should be written");
+  const parsed = JSON.parse(raw!);
+  assert.equal(parsed.scrollback, 2000);
+  assert.equal(parsed.middleClickBehavior, "disabled");
+  assert.equal(parsed.middleClickPaste, false);
 });
 
 test("applySyncPayload from legacy client (no fallbackFont) preserves local value", async () => {

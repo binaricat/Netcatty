@@ -41,6 +41,17 @@ test('codex managed config no longer matches legacy adapter backend values', () 
   );
 });
 
+test('cursor managed config matches by sdk backend and discovered id', () => {
+  assert.equal(
+    matchesManagedAgentConfig({ id: 'discovered_cursor', command: 'cursor', sdkBackend: 'cursor' }, 'cursor'),
+    true,
+  );
+  assert.equal(
+    matchesManagedAgentConfig({ id: 'x', command: 'other', sdkBackend: 'cursor' }, 'cursor'),
+    true,
+  );
+});
+
 test('claude managed config matches by sdk backend value', () => {
   assert.equal(
     matchesManagedAgentConfig({ id: 'discovered_claude', command: 'claude', sdkBackend: 'claude' }, 'claude'),

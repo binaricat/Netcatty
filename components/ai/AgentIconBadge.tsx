@@ -12,6 +12,7 @@ type AgentLike = {
 type AgentIconKey =
   | 'catty'
   | 'copilot'
+  | 'cursor'
   | 'openai'
   | 'claude'
   | 'anthropic'
@@ -21,6 +22,7 @@ type AgentIconKey =
   | 'openrouter'
   | 'zed'
   | 'atom'
+  | 'codebuddy'
   | 'terminal'
   | 'plus';
 
@@ -40,6 +42,11 @@ const AGENT_ICON_VISUALS: Record<AgentIconKey, AgentIconVisual> = {
     src: '/ai/agents/copilot.svg',
     badgeClassName: 'border-zinc-300 bg-white',
     imageClassName: 'object-contain brightness-0',
+  },
+  cursor: {
+    src: '/ai/agents/cursor.svg',
+    badgeClassName: 'border-zinc-500/22 bg-zinc-500/12',
+    imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
   },
   openai: {
     src: '/ai/providers/openai.svg',
@@ -86,6 +93,11 @@ const AGENT_ICON_VISUALS: Record<AgentIconKey, AgentIconVisual> = {
     badgeClassName: 'border-amber-500/18 bg-amber-500/10',
     imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
   },
+  codebuddy: {
+    src: '/ai/agents/codebuddy.svg',
+    badgeClassName: 'border-indigo-500/22 bg-indigo-500/12',
+    imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
+  },
   terminal: {
     src: '/ai/agents/terminal.svg',
     badgeClassName: 'border-white/8 bg-white/[0.04]',
@@ -124,6 +136,9 @@ function getAgentIconKey(agent: AgentLike | 'add-more'): AgentIconKey {
   if (tokens.some((token) => token.includes('copilot'))) {
     return 'copilot';
   }
+  if (tokens.some((token) => token.includes('cursor'))) {
+    return 'cursor';
+  }
   if (tokens.some((token) => token.includes('anthropic'))) {
     return 'anthropic';
   }
@@ -158,6 +173,9 @@ function getAgentIconKey(agent: AgentLike | 'add-more'): AgentIconKey {
   }
   if (tokens.some((token) => token.includes('factory'))) {
     return 'atom';
+  }
+  if (tokens.some((token) => token.includes('codebuddy'))) {
+    return 'codebuddy';
   }
 
   return 'terminal';

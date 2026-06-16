@@ -2,10 +2,11 @@
  * Terminal Toolbar
  * Displays high-frequency terminal actions and close button in the terminal status bar.
  */
-import { Check, ChevronRight, FolderInput, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput } from 'lucide-react';
+import { Check, ChevronRight, Download, FolderInput, History, Languages, MoreVertical, X, Zap, Palette, Search, TextCursorInput, Upload } from 'lucide-react';
 import React, { useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { Host } from '../../types';
+import { Host, Snippet } from '../../types';
+import { ScriptsSidePanel } from '../ScriptsSidePanel';
 import { Button } from '../ui/button';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -15,8 +16,16 @@ import HostKeywordHighlightPopover from './HostKeywordHighlightPopover';
 export interface TerminalToolbarProps {
     status: 'connecting' | 'connected' | 'disconnected';
     host?: Host;
+    /** Popup/minimal mode: compose bar, search, and snippets only. */
+    compactToolbar?: boolean;
+    snippets?: Snippet[];
+    snippetPackages?: string[];
+    onSnippetClick?: (snippet: Snippet) => void;
     onOpenSFTP: () => void;
+    onSendYmodem?: () => void;
+    onReceiveYmodem?: () => void;
     onOpenScripts: () => void;
+    onOpenHistory?: () => void;
     onOpenTheme: () => void;
     onUpdateHost?: (host: Host) => void;
     showClose?: boolean;
@@ -35,8 +44,15 @@ export interface TerminalToolbarProps {
 export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     status,
     host,
+    compactToolbar = false,
+    snippets = [],
+    snippetPackages = [],
+    onSnippetClick,
     onOpenSFTP,
+    onSendYmodem,
+    onReceiveYmodem,
     onOpenScripts,
+    onOpenHistory,
     onOpenTheme,
     onUpdateHost,
     showClose,
@@ -50,6 +66,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
 }) => {
     const { t } = useI18n();
     const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
+    const [scriptsPopoverOpen, setScriptsPopoverOpen] = useState(false);
     // Overflow popover + encoding submenu are both controlled so that
     // picking an encoding closes the whole chain, and so the parent popover
     // can ignore clicks that land in the submenu portal (otherwise the
@@ -70,11 +87,85 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     // decoder we can drive.
     const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && !isEtSession;
     const hidesSftp = isLocalTerminal || isSerialTerminal;
+    const historySupported = !!onOpenHistory && !isLocalTerminal && !isSerialTerminal && host?.protocol !== 'telnet';
+    const unavailableYmodemSendLabel = `${t("terminal.toolbar.sendYmodem")} - ${t("terminal.toolbar.availableAfterConnect")}`;
+    const unavailableYmodemReceiveLabel = `${t("terminal.toolbar.receiveYmodem")} - ${t("terminal.toolbar.availableAfterConnect")}`;
 
     const menuItemClass = "w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-secondary transition-colors";
     const activeButtonStyle: React.CSSProperties = {
         backgroundColor: 'var(--terminal-toolbar-btn-active)',
     };
+
+    if (compactToolbar) {
+        return (
+            <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="secondary"
+                            size="icon"
+                            className={buttonBase}
+                            aria-label={t("terminal.toolbar.composeBar")}
+                            aria-pressed={isComposeBarOpen}
+                            onClick={onToggleComposeBar}
+                            style={isComposeBarOpen ? activeButtonStyle : undefined}
+                        >
+                            <TextCursorInput size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.toolbar.composeBar")}</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="secondary"
+                            size="icon"
+                            className={buttonBase}
+                            aria-label={t("terminal.toolbar.searchTerminal")}
+                            aria-pressed={isSearchOpen}
+                            onClick={onToggleSearch}
+                            style={isSearchOpen ? activeButtonStyle : undefined}
+                        >
+                            <Search size={12} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.toolbar.searchTerminal")}</TooltipContent>
+                </Tooltip>
+
+                <Popover open={scriptsPopoverOpen} onOpenChange={setScriptsPopoverOpen}>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="secondary"
+                                    size="icon"
+                                    className={buttonBase}
+                                    aria-label={t("terminal.toolbar.scripts")}
+                                    aria-pressed={scriptsPopoverOpen}
+                                    style={scriptsPopoverOpen ? activeButtonStyle : undefined}
+                                >
+                                    <Zap size={12} />
+                                </Button>
+                            </PopoverTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("terminal.toolbar.scripts")}</TooltipContent>
+                    </Tooltip>
+                    <PopoverContent className="w-80 p-0 h-80 flex flex-col overflow-hidden" align="end">
+                        <ScriptsSidePanel
+                            snippets={snippets}
+                            packages={snippetPackages}
+                            isVisible={scriptsPopoverOpen}
+                            onSnippetClick={(snippet) => {
+                                onSnippetClick?.(snippet);
+                                setScriptsPopoverOpen(false);
+                            }}
+                        />
+                    </PopoverContent>
+                </Popover>
+            </TooltipProvider>
+        );
+    }
 
     return (
         <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
@@ -104,6 +195,46 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                         {status === 'connected' ? t("terminal.toolbar.openSftp") : t("terminal.toolbar.availableAfterConnect")}
                     </TooltipContent>
                 </Tooltip>
+            )}
+
+            {isSerialTerminal && (
+                <>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="secondary"
+                                size="icon"
+                                className={cn(buttonBase, status !== 'connected' && "opacity-50")}
+                                aria-label={status === 'connected' ? t("terminal.toolbar.sendYmodem") : unavailableYmodemSendLabel}
+                                onClick={onSendYmodem}
+                                disabled={status !== 'connected' || !onSendYmodem}
+                            >
+                                <Upload size={12} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            {status === 'connected' ? t("terminal.toolbar.sendYmodem") : t("terminal.toolbar.availableAfterConnect")}
+                        </TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="secondary"
+                                size="icon"
+                                className={cn(buttonBase, status !== 'connected' && "opacity-50")}
+                                aria-label={status === 'connected' ? t("terminal.toolbar.receiveYmodem") : unavailableYmodemReceiveLabel}
+                                onClick={onReceiveYmodem}
+                                disabled={status !== 'connected' || !onReceiveYmodem}
+                            >
+                                <Download size={12} />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            {status === 'connected' ? t("terminal.toolbar.receiveYmodem") : t("terminal.toolbar.availableAfterConnect")}
+                        </TooltipContent>
+                    </Tooltip>
+                </>
             )}
 
             <Tooltip>
@@ -186,6 +317,21 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                             <span className="flex-1 text-left truncate">{t("terminal.toolbar.scripts")}</span>
                         </button>
                     </PopoverClose>
+                    {historySupported && (
+                        <PopoverClose asChild>
+                            <button
+                                type="button"
+                                className={menuItemClass}
+                                disabled={status !== 'connected'}
+                                onClick={onOpenHistory}
+                            >
+                                <History size={12} className="shrink-0" />
+                                <span className="flex-1 text-left truncate">
+                                    {status === 'connected' ? t("terminal.toolbar.history") : t("terminal.toolbar.availableAfterConnect")}
+                                </span>
+                            </button>
+                        </PopoverClose>
+                    )}
                     <PopoverClose asChild>
                         <button type="button" className={menuItemClass} onClick={onOpenTheme}>
                             <Palette size={12} className="shrink-0" />

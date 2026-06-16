@@ -1,11 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildSdkTurnPrompt, resolveBackendKey } = require("./sdkStreamHandlers.cjs");
+const { buildSdkTurnPrompt, resolveBackendKey, resolveSdkBackendBinPath } = require("./sdkStreamHandlers.cjs");
 
 test("resolveBackendKey maps backend command/value to registry key", () => {
   assert.equal(resolveBackendKey("claude"), "claude");
   assert.equal(resolveBackendKey("codex"), "codex");
   assert.equal(resolveBackendKey("copilot"), "copilot");
+  assert.equal(resolveBackendKey("codebuddy"), "codebuddy");
 });
 
 test("resolveBackendKey returns null for unknown", () => {
@@ -59,4 +60,93 @@ test("buildSdkTurnPrompt stages attachments as local file hints", () => {
     filePath: "/tmp/screen.png",
     base64Data: Buffer.from("img").toString("base64"),
   }]);
+});
+
+test("resolveSdkBackendBinPath prefers configured CodeBuddy path", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    shellEnv: { PATH: "/usr/bin" },
+    env: { CODEBUDDY_CODE_PATH: "/shim/bin/codebuddy" },
+    resolveCliFromPath: () => "/usr/bin/codebuddy",
+    normalizeCliPathForPlatform: (value) => value,
+    realpath: () => "/opt/codebuddy/bin/codebuddy",
+  });
+  assert.equal(out, "/opt/codebuddy/bin/codebuddy");
+});
+
+test("resolveSdkBackendBinPath falls back to PATH when CodeBuddy path is invalid", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    shellEnv: { PATH: "/usr/bin" },
+    env: { CODEBUDDY_CODE_PATH: "/missing/codebuddy" },
+    resolveCliFromPath: () => "/usr/bin/codebuddy",
+    normalizeCliPathForPlatform: () => null,
+  });
+  assert.equal(out, "/usr/bin/codebuddy");
+});
+
+test("resolveSdkBackendBinPath realpaths CodeBuddy PATH discovery fallback", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    shellEnv: { PATH: "/usr/bin" },
+    env: {},
+    resolveCliFromPath: () => "/shim/bin/codebuddy",
+    normalizeCliPathForPlatform: () => null,
+    realpath: () => "/opt/codebuddy/bin/codebuddy",
+  });
+  assert.equal(out, "/opt/codebuddy/bin/codebuddy");
+});
+
+test("resolveSdkBackendBinPath resolves Windows CodeBuddy shim to the package JS entry", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    shellEnv: { Path: "C:\\Users\\me\\AppData\\Roaming\\npm" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Users\\me\\AppData\\Roaming\\npm\\codebuddy.cmd",
+    normalizeCliPathForPlatform: () => null,
+    realpath: (p) => p,
+    resolveCodebuddyExecutableForSdk: (p) =>
+      p.endsWith("codebuddy.cmd")
+        ? "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy"
+        : p,
+  });
+  assert.equal(
+    out,
+    "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy",
+  );
+});
+
+test("resolveSdkBackendBinPath falls back to bundled CLI when Windows CodeBuddy shim is unresolvable", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codebuddy",
+    shellEnv: { Path: "C:\\Users\\me\\AppData\\Roaming\\npm" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Users\\me\\AppData\\Roaming\\npm\\codebuddy.cmd",
+    normalizeCliPathForPlatform: () => null,
+    realpath: (p) => p,
+    resolveCodebuddyExecutableForSdk: () => null,
+  });
+  assert.equal(out, undefined);
+});
+
+test("resolveSdkBackendBinPath keeps non-CodeBuddy SDK path normalization", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codex",
+    shellEnv: { PATH: "C:\\Users\\me\\AppData\\Roaming\\npm" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd",
+    resolveSdkBinPath: () => "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+  });
+  assert.equal(out, "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js");
+});
+
+test("resolveSdkBackendBinPath does not fall back to Windows shell shims for non-CodeBuddy", () => {
+  const out = resolveSdkBackendBinPath({
+    backendKey: "codex",
+    shellEnv: { PATH: "C:\\Users\\me\\AppData\\Roaming\\npm" },
+    env: {},
+    resolveCliFromPath: () => "C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd",
+    resolveSdkBinPath: () => null,
+  });
+  assert.equal(out, undefined);
 });

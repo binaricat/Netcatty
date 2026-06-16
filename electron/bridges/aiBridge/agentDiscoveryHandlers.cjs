@@ -1,8 +1,43 @@
 /* eslint-disable no-undef */
+function getCursorPlatformPackageName(platform = process.platform, arch = process.arch) {
+  if (platform === "darwin" && (arch === "arm64" || arch === "x64")) return `@cursor/sdk-darwin-${arch}`;
+  if (platform === "linux" && (arch === "arm64" || arch === "x64")) return `@cursor/sdk-linux-${arch}`;
+  if (platform === "win32" && arch === "x64") return "@cursor/sdk-win32-x64";
+  return null;
+}
+
+async function probeCursorSdkAvailability(shellEnv, options = {}) {
+  const platformPackageName = getCursorPlatformPackageName();
+  if (!platformPackageName) {
+    return { installed: false, available: false, authenticated: false, authSource: null, version: null };
+  }
+
+  try {
+    await import("@cursor/sdk");
+    require.resolve(`${platformPackageName}/package.json`);
+  } catch {
+    return { installed: false, available: false, authenticated: false, authSource: null, version: null };
+  }
+
+  const hasEnvApiKey = Boolean(shellEnv?.CURSOR_API_KEY);
+  const hasSettingsApiKey = Boolean(options?.apiKeyPresent);
+  const authenticated = hasEnvApiKey || hasSettingsApiKey;
+  return {
+    installed: true,
+    available: authenticated,
+    authenticated,
+    authSource: hasSettingsApiKey ? "settings" : hasEnvApiKey ? "CURSOR_API_KEY" : null,
+    version: "Cursor SDK",
+  };
+}
+
 function registerAgentDiscoveryHandlers(ctx) {
   with (ctx) {
-  ipcMain.handle("netcatty:ai:agents:discover", async (event) => {
+  ipcMain.handle("netcatty:ai:agents:discover", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    if (options?.refreshShellEnv) {
+      invalidateShellEnvCache();
+    }
     const agents = [];
     const knownAgents = [
       { command: "claude", name: "Claude Code", icon: "claude",
@@ -11,17 +46,35 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "OpenAI's coding agent", sdkBackend: "codex", args: [] },
       { command: "copilot", name: "GitHub Copilot CLI", icon: "copilot",
         description: "GitHub's coding agent CLI", sdkBackend: "copilot", args: [] },
+      { command: "cursor", name: "Cursor", icon: "cursor",
+        description: "Cursor's coding agent via Cursor SDK", sdkBackend: "cursor", args: [] },
+      { command: "codebuddy", name: "CodeBuddy Code", icon: "codebuddy",
+        description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
     const seenPaths = new Set();
 
     for (const agent of knownAgents) {
-      const resolvedPath = resolveCliFromPath(agent.command, shellEnv); // Layer-1: locate
+      let cursorSdkStatus = null;
+      if (agent.command === "cursor") {
+        cursorSdkStatus = await probeCursorSdkAvailability(shellEnv, {
+          apiKeyPresent: Boolean(options?.apiKeyPresent),
+        });
+        if (!cursorSdkStatus.available) continue;
+      }
+
+      const resolvedPath = agent.command === "cursor"
+        ? (await resolveCliFromPathAsync(agent.command, shellEnv) || "cursor")
+        : await resolveCliFromPathAsync(agent.command, shellEnv); // Layer-1: locate
       if (!resolvedPath || seenPaths.has(resolvedPath)) continue;
 
-      const probe = await probeCliVersion(resolvedPath, ["--version"], shellEnv); // Layer-2: version
-      const hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+      const probe = agent.command === "cursor" && resolvedPath === "cursor"
+        ? { exitCode: 0, version: cursorSdkStatus.version }
+        : await probeCliVersion(resolvedPath, ["--version"], shellEnv); // Layer-2: version
+      const hasPlausibleVersion = agent.command === "cursor"
+        ? probe.exitCode === 0
+        : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
       if (!hasPlausibleVersion) continue;
 
       // Layer-3: authentication (best-effort; never blocks discovery).
@@ -32,9 +85,14 @@ function registerAgentDiscoveryHandlers(ctx) {
         } else if (agent.command === "copilot") {
           auth = probeCopilotAuth({});
         } else if (agent.command === "codex") {
-          // codex login status is async; resolve it then inject synchronously.
-          const codexStatus = await runCodexCli(["login", "status"]).catch(() => null);
-          auth = probeCodexAuth({ runLoginStatus: () => codexStatus || { exitCode: 1, stdout: "" } });
+          auth = { authenticated: false, authSource: null };
+        } else if (agent.command === "cursor") {
+          auth = {
+            authenticated: cursorSdkStatus.authenticated,
+            authSource: cursorSdkStatus.authSource,
+          };
+        } else if (agent.command === "codebuddy") {
+          auth = probeCodebuddyAuth({ env: shellEnv });
         }
       } catch { /* auth probe is best-effort */ }
 
@@ -59,19 +117,49 @@ function registerAgentDiscoveryHandlers(ctx) {
     return agents;
   });
 
-  // Resolve a CLI binary path (auto-detect or validate custom path)
-  ipcMain.handle("netcatty:ai:resolve-cli", async (event, { command, customPath }) => {
+  ipcMain.handle("netcatty:ai:shell-env:prewarm", async (event) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    try {
+      await getShellEnv();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  // Resolve a CLI binary path (auto-detect or validate custom path)
+  ipcMain.handle("netcatty:ai:resolve-cli", async (event, { command, customPath, refreshShellEnv, apiKeyPresent }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    if (refreshShellEnv) {
+      invalidateShellEnvCache();
+    }
     const shellEnv = await getShellEnv();
+    const hasCustomPath = command !== "cursor" && Boolean(String(customPath || "").trim());
 
     let resolvedPath;
-    if (customPath) {
+    if (hasCustomPath) {
       // Normalize Windows shim paths like `codex` -> `codex.cmd` when present.
       // Fall back to PATH search if the stored path no longer exists
       // (e.g. CLI reinstalled to a different location).
-      resolvedPath = normalizeCliPathForPlatform(customPath) || resolveCliFromPath(command, shellEnv);
+      resolvedPath = normalizeCliPathForPlatform(customPath) || await resolveCliFromPathAsync(command, shellEnv);
     } else {
-      resolvedPath = resolveCliFromPath(command, shellEnv);
+      resolvedPath = await resolveCliFromPathAsync(command, shellEnv);
+    }
+
+    if (command === "cursor") {
+      const cursorSdkStatus = await probeCursorSdkAvailability(shellEnv, {
+        apiKeyPresent: Boolean(apiKeyPresent),
+      });
+      const cursorPath = await resolveCliFromPathAsync(command, shellEnv) || "cursor";
+      return {
+        path: cursorSdkStatus.installed ? cursorPath : null,
+        binPath: cursorSdkStatus.installed ? cursorPath : null,
+        version: cursorSdkStatus.version,
+        available: cursorSdkStatus.available,
+        installed: cursorSdkStatus.installed,
+        authenticated: cursorSdkStatus.authenticated,
+        authSource: cursorSdkStatus.authSource,
+      };
     }
 
     if (!resolvedPath) {
@@ -79,7 +167,9 @@ function registerAgentDiscoveryHandlers(ctx) {
     }
 
     const probe = await probeCliVersion(resolvedPath, ["--version"], shellEnv);
-    const hasPlausibleVersion = probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
+    const hasPlausibleVersion = command === "cursor"
+      ? probe.exitCode === 0
+      : probe.exitCode === 0 && isPlausibleCliVersionOutput(probe.version);
     if (!hasPlausibleVersion) {
       return { path: resolvedPath, binPath: resolvedPath, version: null, available: false, installed: true };
     }
@@ -104,7 +194,7 @@ function registerAgentDiscoveryHandlers(ctx) {
       let state = normalizeCodexIntegrationState(rawOutput);
       let effectiveRawOutput = rawOutput;
 
-      if (state === "connected_chatgpt") {
+      if (state === "connected_chatgpt" && options?.validateChatGptAuth === true) {
         const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000 });
         if (!validation.ok) {
           if (isCodexAuthError(validation)) {
@@ -176,7 +266,7 @@ function registerAgentDiscoveryHandlers(ctx) {
 
     try {
       const shellEnv = await getShellEnv();
-      const codexCliPath = resolveCliFromPath("codex", shellEnv) || "codex";
+      const codexCliPath = await resolveCliFromPathAsync("codex", shellEnv) || "codex";
       const sessionId = `codex_login_${randomUUID()}`;
       const spawnSpec = prepareCommandForSpawn(codexCliPath, ["login"]);
       const child = spawn(spawnSpec.command, spawnSpec.args, {

@@ -6,6 +6,7 @@ type FocusTargetLike = {
 };
 
 const EDITABLE_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]';
+const NATIVE_POINTER_SELECTOR = `${EDITABLE_SELECTOR}, [data-terminal-detach-drag-handle="true"]`;
 
 /**
  * The terminal's top overlay sits above the xterm textarea. Pointer clicks on
@@ -31,12 +32,16 @@ export const shouldPreserveTerminalFocusOnMouseDown = (target: EventTarget | nul
   if (typeof candidate.getAttribute === "function") {
     const contentEditable = candidate.getAttribute("contenteditable");
     const role = candidate.getAttribute("role");
+    const detachDragHandle = candidate.getAttribute("data-terminal-detach-drag-handle");
     if (contentEditable === "" || contentEditable === "true" || role === "textbox") {
+      return false;
+    }
+    if (detachDragHandle === "true") {
       return false;
     }
   }
 
-  if (typeof candidate.closest === "function" && candidate.closest(EDITABLE_SELECTOR)) {
+  if (typeof candidate.closest === "function" && candidate.closest(NATIVE_POINTER_SELECTOR)) {
     return false;
   }
 

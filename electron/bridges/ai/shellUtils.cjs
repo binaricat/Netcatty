@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const { execFileSync } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const { existsSync, readFileSync, statSync } = require("node:fs");
 const path = require("node:path");
 
@@ -17,6 +17,20 @@ const ANSI_OSC_REGEX = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const URL_CANDIDATE_REGEX = /https?:\/\/[^\s]+/g;
 const WINDOWS_RUNNABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
 const MAX_PROMPT_TRACK_TAIL = 4096;
+
+function execFileAsync(command, args, options) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
 
 // ── ANSI stripping ──
 
@@ -431,8 +445,71 @@ function resolveCodexExecutableForSdk(codexExecutablePath, platform = process.pl
   return ext === ".cmd" || ext === ".bat" || ext === ".ps1" ? null : normalized;
 }
 
+function resolveCodebuddyExecutableForSdk(codebuddyExecutablePath, platform = process.platform) {
+  const normalized = String(codebuddyExecutablePath || "").trim();
+  if (!normalized) return null;
+  if (platform !== "win32") return normalized;
+
+  const ext = path.extname(normalized).toLowerCase();
+  // A native exe or an explicit .js entry can be launched by the Agent SDK as-is.
+  if (ext === ".exe" || ext === ".js") return normalized;
+  // Any other concrete, non-shim extension: leave it untouched.
+  if (ext && ext !== ".cmd" && ext !== ".bat" && ext !== ".ps1") return normalized;
+
+  // Windows npm globals expose `codebuddy.cmd` / `codebuddy.ps1` shims (and an
+  // extensionless POSIX shim). The Agent SDK launches the CLI through `node`
+  // (electron-as-node in a packaged app), which cannot parse a batch/POSIX shim
+  // as JavaScript — the spawned process exits immediately and the SDK surfaces
+  // "CLI process stdout closed unexpectedly". Resolve the shim to the package's
+  // real `bin/codebuddy` JS entry so the SDK runs it exactly as on macOS/Linux.
+  const baseDir = path.dirname(normalized);
+  const packageRoots = [
+    path.join(baseDir, "node_modules", "@tencent-ai", "codebuddy-code"),
+    path.join(baseDir, "..", "node_modules", "@tencent-ai", "codebuddy-code"),
+  ];
+  for (const root of packageRoots) {
+    const binJs = path.join(root, "bin", "codebuddy");
+    if (existsSync(binJs)) return binJs;
+  }
+
+  // Fall back to parsing the shim for the bin/codebuddy path it references.
+  const shimCandidates = [normalized];
+  if (!ext) shimCandidates.push(`${normalized}.cmd`, `${normalized}.bat`);
+  for (const shimPath of shimCandidates) {
+    try {
+      if (!existsSync(shimPath)) continue;
+      const contents = readFileSync(shimPath, "utf8");
+      const match = contents.match(/([^"\s]*codebuddy-code[\\/]bin[\\/]codebuddy)/i);
+      if (match) {
+        const ref = match[1].replace(/^%~dp0[\\/]?/i, "").replace(/[\\/]+/g, path.sep);
+        const binJs = path.isAbsolute(ref) ? ref : path.resolve(path.dirname(shimPath), ref);
+        if (existsSync(binJs)) return binJs;
+      }
+    } catch {
+      // Try the next shim candidate.
+    }
+  }
+
+  // Could not locate the JS entry — return null so the caller falls back to the
+  // SDK's bundled CLI rather than handing `node` an unrunnable shim.
+  return ext === ".cmd" || ext === ".bat" || ext === ".ps1" ? null : normalized;
+}
+
 function resolveSdkBinPath(command, shellEnv, platform = process.platform) {
   const raw = resolveCliFromPath(command, shellEnv);
+  if (!raw) return null;
+  if (platform !== "win32") return raw;
+  if (command === "codex") {
+    return resolveCodexExecutableForSdk(raw, platform);
+  }
+  if (command === "claude") {
+    return resolveClaudeCodeExecutableForSdk(raw, platform);
+  }
+  return raw;
+}
+
+async function resolveSdkBinPathAsync(command, shellEnv, platform = process.platform) {
+  const raw = await resolveCliFromPathAsync(command, shellEnv);
   if (!raw) return null;
   if (platform !== "win32") return raw;
   if (command === "codex") {
@@ -470,6 +547,32 @@ function resolveCliFromPath(command, shellEnv) {
   return null;
 }
 
+async function resolveCliFromPathAsync(command, shellEnv) {
+  // Validate command: only allow valid binary names (alphanumeric, hyphens, underscores, dots)
+  if (!command || !/^[a-zA-Z0-9._-]+$/.test(command)) {
+    return null;
+  }
+
+  if (shellEnv) {
+    try {
+      const whichCmd = process.platform === "win32" ? "where" : "which";
+      const { stdout } = await execFileAsync(whichCmd, [command], {
+        encoding: "utf8",
+        timeout: 3000,
+        env: shellEnv,
+      });
+      const resolved = String(stdout || "").trim();
+      for (const candidate of resolved.split(/\r?\n/)) {
+        const normalized = normalizeCliPathForPlatform(candidate);
+        if (normalized) return normalized;
+      }
+    } catch {
+      // Not found on PATH
+    }
+  }
+  return null;
+}
+
 function toUnpackedAsarPath(filePath) {
   const unpackedPath = filePath.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
   if (unpackedPath !== filePath && existsSync(unpackedPath)) {
@@ -490,6 +593,8 @@ function isPlausibleCliVersionOutput(value) {
 // ── Shell environment (cached) ──
 
 let _cachedShellEnv = null;
+let _shellEnvPromise = null;
+let _shellEnvGeneration = 0;
 
 /**
  * Run the user's login shell once to print its PATH. Used as a fallback when
@@ -506,6 +611,19 @@ function defaultRunLoginShellPath() {
     stdio: ["ignore", "pipe", "ignore"],
     env: { ...process.env, HOME: process.env.HOME || "" },
   });
+}
+
+async function defaultRunLoginShellPathAsync() {
+  let shell = process.env.SHELL || "/bin/zsh";
+  if (!path.isAbsolute(shell) || !existsSync(shell)) {
+    shell = "/bin/zsh";
+  }
+  const { stdout } = await execFileAsync(shell, ["-ilc", 'echo -n "$PATH"'], {
+    encoding: "utf8",
+    timeout: 4000,
+    env: { ...process.env, HOME: process.env.HOME || "" },
+  });
+  return stdout;
 }
 
 /**
@@ -536,63 +654,175 @@ function mergeLoginShellPath({
   return out.join(delimiter);
 }
 
+// ── Windows live PATH refresh ──
+//
+// A GUI-launched Electron process freezes process.env at launch. When a CLI is
+// installed *after* Netcatty starts (its installer appends to the user/system
+// PATH in the registry), a freshly opened cmd/PowerShell sees it but Netcatty
+// does not — and clicking "Refresh" can't help, because process.env never
+// changes for the life of the process. So on Windows we re-read the authoritative
+// PATH from the registry (the value a brand-new shell would inherit) and merge it
+// with the in-process PATH. This mirrors the login-shell PATH probe used on
+// macOS/Linux and fixes CLIs (e.g. CodeBuddy) that "work in cmd" but don't scan.
+
+function parseRegQueryPath(stdout) {
+  // `reg query` prints e.g.: "    Path    REG_EXPAND_SZ    C:\\a;C:\\b"
+  for (const line of String(stdout || "").split(/\r?\n/)) {
+    const match = line.match(/^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*\S)\s*$/i);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+function expandWindowsEnvRefs(value, env = process.env) {
+  return String(value || "").replace(/%([^%]+)%/g, (whole, name) => {
+    const key = Object.keys(env).find((k) => k.toLowerCase() === String(name).toLowerCase());
+    return key && typeof env[key] === "string" ? env[key] : whole;
+  });
+}
+
+function mergeWindowsPath(...pathStrings) {
+  const seen = new Set();
+  const out = [];
+  for (const str of pathStrings) {
+    for (const part of String(str || "").split(";")) {
+      const trimmed = part.trim().replace(/^"|"$/g, "");
+      if (!trimmed) continue;
+      const dedupeKey = trimmed.toLowerCase().replace(/[\\/]+$/, "");
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      out.push(trimmed);
+    }
+  }
+  return out.join(";");
+}
+
+function getWindowsKnownCliPathDirs(env = process.env) {
+  const dirs = [];
+  if (env.APPDATA) dirs.push(path.join(env.APPDATA, "npm"));
+  if (env.LOCALAPPDATA) {
+    dirs.push(path.join(env.LOCALAPPDATA, "pnpm"));
+    dirs.push(path.join(env.LOCALAPPDATA, "Yarn", "bin"));
+  }
+  return dirs.filter((dir) => existsSync(dir));
+}
+
+async function readWindowsRegistryPath({ exec = execFileAsync, env = process.env } = {}) {
+  const hives = [
+    "HKCU\\Environment",
+    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+  ];
+  const parts = [];
+  for (const hive of hives) {
+    try {
+      const { stdout } = await exec("reg", ["query", hive, "/v", "Path"], {
+        encoding: "utf8",
+        timeout: 3000,
+      });
+      const raw = parseRegQueryPath(stdout);
+      if (raw) parts.push(expandWindowsEnvRefs(raw, env));
+    } catch {
+      // Hive unreadable / value missing — skip and rely on other sources.
+    }
+  }
+  return parts.join(";");
+}
+
 async function getShellEnv() {
   if (_cachedShellEnv) return _cachedShellEnv;
+  if (_shellEnvPromise) return _shellEnvPromise;
 
-  const home = process.env.HOME || "";
-  const extraPaths = [
-    `${home}/.local/bin`,
-    `${home}/.npm-global/bin`,
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-  ];
+  const generation = _shellEnvGeneration;
+  _shellEnvPromise = (async () => {
+    const home = process.env.HOME || "";
+    const extraPaths = [
+      `${home}/.local/bin`,
+      `${home}/.npm-global/bin`,
+      "/usr/local/bin",
+      "/opt/homebrew/bin",
+    ];
 
-  if (process.platform === "win32") {
-    _cachedShellEnv = {
-      ...process.env,
-      PATH: [...extraPaths, process.env.PATH || ""].join(path.delimiter),
-    };
-    return _cachedShellEnv;
-  }
-
-  // On macOS/Linux, spawn a login shell to capture the real environment.
-  try {
-    let shell = process.env.SHELL || "/bin/zsh";
-    if (!path.isAbsolute(shell) || !existsSync(shell)) {
-      shell = "/bin/zsh";
-    }
-    const envOutput = execFileSync(shell, ['-ilc', 'env'], {
-      encoding: "utf8",
-      timeout: 10000,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, HOME: home },
-    });
-    const envMap = {};
-    for (const line of envOutput.split("\n")) {
-      const idx = line.indexOf("=");
-      if (idx > 0) {
-        envMap[line.slice(0, idx)] = line.slice(idx + 1);
+    if (process.platform === "win32") {
+      // Re-read the live PATH from the registry so CLIs installed after launch
+      // (e.g. CodeBuddy) are discoverable without restarting Netcatty, then fold
+      // in well-known npm/pnpm/yarn global bin dirs as a belt-and-suspenders.
+      let registryPath = "";
+      try {
+        registryPath = await readWindowsRegistryPath();
+      } catch {
+        registryPath = "";
       }
+      const knownDirs = getWindowsKnownCliPathDirs().join(path.delimiter);
+      const nextEnv = {
+        ...process.env,
+        PATH: mergeWindowsPath(registryPath, knownDirs, process.env.PATH || ""),
+      };
+      if (generation === _shellEnvGeneration) {
+        _cachedShellEnv = nextEnv;
+      }
+      return nextEnv;
     }
-    const shellPath = envMap.PATH || "";
-    const mergedPath = [...extraPaths, shellPath, process.env.PATH || ""].join(path.delimiter);
-    // Layer-0 fix-path: front-load + de-duplicate the login-shell PATH we just
-    // captured (reuse the `-ilc env` result above — no second shell spawn).
-    _cachedShellEnv = {
-      ...envMap,
-      ...process.env,
-      PATH: mergeLoginShellPath({ basePath: mergedPath, runLoginShellPath: () => shellPath }),
-    };
-  } catch {
-    // `-ilc env` failed — try a lighter login-shell PATH probe as a fallback so
-    // GUI-launch PATH stripping still doesn't break CLI discovery (layer-0).
-    const basePath = [...extraPaths, process.env.PATH || ""].join(path.delimiter);
-    _cachedShellEnv = {
-      ...process.env,
-      PATH: mergeLoginShellPath({ basePath }),
-    };
-  }
-  return _cachedShellEnv;
+
+    // On macOS/Linux, spawn a login shell to capture the real environment.
+    try {
+      let shell = process.env.SHELL || "/bin/zsh";
+      if (!path.isAbsolute(shell) || !existsSync(shell)) {
+        shell = "/bin/zsh";
+      }
+      const { stdout: envOutput } = await execFileAsync(shell, ['-ilc', 'env'], {
+        encoding: "utf8",
+        timeout: 10000,
+        env: { ...process.env, HOME: home },
+      });
+      const envMap = {};
+      for (const line of envOutput.split("\n")) {
+        const idx = line.indexOf("=");
+        if (idx > 0) {
+          envMap[line.slice(0, idx)] = line.slice(idx + 1);
+        }
+      }
+      const shellPath = envMap.PATH || "";
+      const mergedPath = [...extraPaths, shellPath, process.env.PATH || ""].join(path.delimiter);
+      // Layer-0 fix-path: front-load + de-duplicate the login-shell PATH we just
+      // captured (reuse the `-ilc env` result above — no second shell spawn).
+      const nextEnv = {
+        ...envMap,
+        ...process.env,
+        PATH: mergeLoginShellPath({ basePath: mergedPath, runLoginShellPath: () => shellPath }),
+      };
+      if (generation === _shellEnvGeneration) {
+        _cachedShellEnv = nextEnv;
+      }
+      return nextEnv;
+    } catch {
+      // `-ilc env` failed — try a lighter login-shell PATH probe as a fallback so
+      // GUI-launch PATH stripping still doesn't break CLI discovery (layer-0).
+      const basePath = [...extraPaths, process.env.PATH || ""].join(path.delimiter);
+      let loginShellPath = "";
+      try {
+        loginShellPath = await defaultRunLoginShellPathAsync();
+      } catch {
+        loginShellPath = "";
+      }
+      const nextEnv = {
+        ...process.env,
+        PATH: mergeLoginShellPath({
+          basePath,
+          runLoginShellPath: () => loginShellPath,
+        }),
+      };
+      if (generation === _shellEnvGeneration) {
+        _cachedShellEnv = nextEnv;
+      }
+      return nextEnv;
+    }
+  })().finally(() => {
+    if (generation === _shellEnvGeneration) {
+      _shellEnvPromise = null;
+    }
+  });
+
+  return _shellEnvPromise;
 }
 
 /**
@@ -601,7 +831,9 @@ async function getShellEnv() {
  * their rc file and clicks "Refresh Status" without restarting the app.
  */
 function invalidateShellEnvCache() {
+  _shellEnvGeneration += 1;
   _cachedShellEnv = null;
+  _shellEnvPromise = null;
 }
 
 module.exports = {
@@ -623,11 +855,18 @@ module.exports = {
   normalizeClaudeCodeExecutableEnvForSdk,
   resolveCodexExecutableForSdk,
   addCodexExecutableEnvForSdk,
+  resolveCodebuddyExecutableForSdk,
   resolveSdkBinPath,
+  resolveSdkBinPathAsync,
   resolveCliFromPath,
+  resolveCliFromPathAsync,
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,
   mergeLoginShellPath,
+  parseRegQueryPath,
+  expandWindowsEnvRefs,
+  mergeWindowsPath,
+  readWindowsRegistryPath,
   getShellEnv,
   invalidateShellEnvCache,
 };

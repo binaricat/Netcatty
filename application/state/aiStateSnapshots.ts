@@ -199,6 +199,21 @@ export function setLatestAIActiveSessionMapSnapshot(activeSessionIdMap: Record<s
   latestAIActiveSessionMapSnapshot = activeSessionIdMap;
 }
 
+export function prewarmAIStateStorageSnapshots() {
+  try {
+    if (latestAISessionsSnapshot === null) {
+      latestAISessionsSnapshot =
+        localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS) ?? [];
+    }
+    if (latestAIActiveSessionMapSnapshot === null) {
+      latestAIActiveSessionMapSnapshot =
+        localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) ?? {};
+    }
+  } catch (error) {
+    console.warn('[AIState] Failed to prewarm AI state storage snapshots:', error);
+  }
+}
+
 export function setLatestAIDraftsByScopeSnapshot(draftsByScope: DraftsByScope) {
   latestAIDraftsByScopeSnapshot = draftsByScope;
 }

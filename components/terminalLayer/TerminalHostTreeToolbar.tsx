@@ -206,7 +206,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
         )}
         style={{ borderBottom: expandedPanel === 'search' ? `1px solid ${theme.separator}` : undefined }}
       >
-        <div className="h-9 flex items-center px-1.5">
+        <div className="h-9 flex items-center gap-0.5 px-1.5">
           <div className="relative flex-1 min-w-0">
             <Search
               size={12}
@@ -222,6 +222,26 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
               style={{ color: theme.termFg }}
             />
           </div>
+          {hasSearch && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButtonClass}
+                  style={{ color: theme.mutedFg }}
+                  onClick={() => {
+                    onSearchChange('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label={t('common.clear')}
+                >
+                  <X size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('common.clear')}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

@@ -134,9 +134,18 @@ test("Hosts grouped sort mode is restored from storage", () => {
 
 test("Hosts sort mode falls back safely when storage contains an invalid value", () => {
   const markup = renderVault("unknown-sort", [
-    host("zulu", "Zulu Host", 2),
-    host("alpha", "Alpha Host", 1),
+    { ...host("zulu", "Zulu Host", 2), order: 1000 },
+    { ...host("alpha", "Alpha Host", 1), order: 2000 },
   ]);
 
-  assert.ok(markup.indexOf("Alpha Host") < markup.indexOf("Zulu Host"));
+  assert.ok(markup.indexOf("Zulu Host") < markup.indexOf("Alpha Host"));
+});
+
+test("Hosts manual sort mode uses saved order", () => {
+  const markup = renderVault("manual", [
+    { ...host("alpha", "Alpha Host", 1), order: 2000 },
+    { ...host("zulu", "Zulu Host", 2), order: 1000 },
+  ]);
+
+  assert.ok(markup.indexOf("Zulu Host") < markup.indexOf("Alpha Host"));
 });

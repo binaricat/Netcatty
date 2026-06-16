@@ -42,13 +42,13 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleToggleTheme, handleUpdateHostFromTerminal,
     hostById, hosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
     keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, orderedTabsWithEditors, orphanSessions,
-    passphraseQueue, protocolSelectHost, proxyProfiles, publicMcpToggle, quickResults, quickSearch, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename,
+    passphraseQueue, protocolSelectHost, proxyProfiles, publicMcpToggle, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions, resetSessionRename,
     resetWorkspaceRename, resolveEmptyVaultConflict, resolvedTheme, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessionRenameValue, sessions, setActiveTabId, setAddToWorkspaceDialog, setDraggingSessionId, setEditorWordWrap, setIsCreateWorkspaceOpen, setIsQuickSwitcherOpen,
-    setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId,
+    setNavigateToSection, setProtocolSelectHost, setQuickSearch, setSessionRenameValue, setTerminalFontFamilyId, setTerminalFontSize, setTerminalThemeId, updateSessionFontSize, clearSessionFontSizeOverride,
     setWorkspaceFocusedSession, setWorkspaceRenameValue, settings, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, shellHistory, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
-    startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId,
+    startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleConnectionLogSaved, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, unmanageSource, updateConnectionLog,
     updateCustomGroups, updateGroupConfigs, updateHostDistro, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources,
     updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, workspaceRenameTarget, workspaceRenameValue, workspaces,
@@ -136,6 +136,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
         onStartSessionDrag={setDraggingSessionId}
         onEndSessionDrag={handleEndSessionDrag}
         onReorderTabs={reorderWorkTabs}
+        onRemoveSessionFromWorkspace={removeSessionFromWorkspace}
         showSftpTab={settings.showSftpTab}
         showHostTreeSidebar={settings.showHostTreeSidebar}
         editorTabs={editorTabs}
@@ -148,12 +149,18 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           enabled={settings.showHostTreeSidebar}
           hosts={hosts}
           customGroups={customGroups}
+          groupConfigs={groupConfigs}
           sessions={sessions}
           workspaces={workspaces}
           editorTabs={editorTabs}
           logViews={logViews}
           orderedTabs={orderedTabsWithEditors}
-          resolvedPreviewTheme={currentTerminalTheme}
+          accentMode={accentMode}
+          currentTerminalTheme={currentTerminalTheme}
+          customAccent={customAccent}
+          followAppTerminalTheme={followAppTerminalTheme}
+          hostById={hostById}
+          themeById={themeById}
           onConnect={handleConnectToHost}
           onCreateLocalTerminal={handleCreateLocalTerminal}
         />
@@ -215,9 +222,11 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           hosts={hosts}
           keys={keys}
           identities={identities}
+          knownHosts={effectiveKnownHosts}
           proxyProfiles={proxyProfiles}
           groupConfigs={groupConfigs}
           updateHosts={updateHosts}
+          onAddKnownHost={handleAddKnownHost}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}
@@ -251,11 +260,14 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           terminalFontFamilyId={terminalFontFamilyId}
           fontSize={terminalFontSize}
           hotkeyScheme={hotkeyScheme}
+          disableTerminalFontZoom={settings.disableTerminalFontZoom}
           keyBindings={keyBindings}
           onHotkeyAction={handleHotkeyAction}
           onUpdateTerminalThemeId={setTerminalThemeId}
           onUpdateTerminalFontFamilyId={setTerminalFontFamilyId}
           onUpdateTerminalFontSize={setTerminalFontSize}
+          onUpdateSessionFontSize={updateSessionFontSize}
+          onClearSessionFontSizeOverride={clearSessionFontSizeOverride}
           onUpdateTerminalFontWeight={(w) => updateTerminalSetting('fontWeight', w)}
           onCloseSession={closeSession}
           onUpdateSessionStatus={handleSessionStatusChange}
@@ -265,6 +277,7 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           onCommandExecuted={(command, hostId, hostLabel, sessionId) => {
             addShellHistoryEntry({ command, hostId, hostLabel, sessionId });
           }}
+          shellHistory={shellHistory}
           onTerminalDataCapture={handleTerminalDataCapture}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
@@ -276,12 +289,17 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
           onReorderWorkspaceSessions={reorderWorkspaceSessions}
+          onReorderTabs={reorderWorkTabs}
+          onCopySession={copySessionWithCurrentShell}
+          onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
           onSplitSession={splitSessionWithCurrentShell}
           onConnectToHost={handleConnectToHost}
           onCreateLocalTerminal={handleCreateLocalTerminal}
           isBroadcastEnabled={isBroadcastEnabled}
           onToggleBroadcast={toggleBroadcast}
           updateHosts={updateHosts}
+          updateSnippets={updateSnippets}
+          updateSnippetPackages={updateSnippetPackages}
           sftpDefaultViewMode={sftpDefaultViewMode}
           sftpDoubleClickBehavior={sftpDoubleClickBehavior}
           sftpAutoSync={sftpAutoSync}
@@ -300,6 +318,9 @@ export function AppView({ ctx }: { ctx: AppViewContext }) {
           showHostTreeSidebar={settings.showHostTreeSidebar}
           toggleScriptsSidePanelRef={toggleScriptsSidePanelRef}
           toggleSidePanelRef={toggleSidePanelRef}
+          onStartSessionRename={startSessionRename}
+          onSubmitSessionRename={submitSessionRename}
+          onRemoveSessionFromWorkspace={removeSessionFromWorkspace}
         />
 
         {/* Log Views - readonly terminal replays */}

@@ -3,6 +3,20 @@ function createAgentCliHelpers(ctx) {
   with (ctx) {
   async function runCommand(command, args, options) {
     return await new Promise((resolve, reject) => {
+      let settled = false;
+      let closed = false;
+      let timeoutId = null;
+      let killId = null;
+      function clearTimers() {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (killId) {
+          clearTimeout(killId);
+          killId = null;
+        }
+      }
       const spawnSpec = prepareCommandForSpawn(command, args || []);
       const child = spawn(spawnSpec.command, spawnSpec.args, {
         stdio: ["ignore", "pipe", "pipe"],
@@ -15,6 +29,7 @@ function createAgentCliHelpers(ctx) {
       let stdout = "";
       let stderr = "";
       const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+      const timeoutMs = Number.isFinite(options?.timeoutMs) ? Number(options.timeoutMs) : 0;
 
       child.stdout.on("data", (chunk) => {
         if (stdout.length < MAX_BUFFER) {
@@ -29,16 +44,44 @@ function createAgentCliHelpers(ctx) {
       });
 
       child.once("error", (error) => {
+        closed = true;
+        if (settled) return;
+        settled = true;
+        clearTimers();
         reject(error);
       });
 
       child.once("close", (exitCode) => {
+        closed = true;
+        clearTimers();
+        if (settled) return;
+        settled = true;
         resolve({
           stdout: stripAnsi(stdout),
           stderr: stripAnsi(stderr),
           exitCode,
         });
       });
+
+      if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          const error = new Error(`Command timed out after ${timeoutMs}ms`);
+          error.code = "ETIMEDOUT";
+          try {
+            if (!closed) child.kill("SIGTERM");
+          } catch {}
+          killId = setTimeout(() => {
+            try {
+              if (!closed) child.kill("SIGKILL");
+            } catch {}
+          }, 750);
+          if (typeof killId.unref === "function") killId.unref();
+          reject(error);
+        }, timeoutMs);
+        if (typeof timeoutId.unref === "function") timeoutId.unref();
+      }
     });
   }
 
@@ -55,7 +98,7 @@ function createAgentCliHelpers(ctx) {
 
   async function probeCliVersion(probeCmd, probeArgs, env) {
     try {
-      const result = await runCommand(probeCmd, probeArgs, { env });
+      const result = await runCommand(probeCmd, probeArgs, { env, timeoutMs: 5000 });
       return {
         launched: true,
         exitCode: result.exitCode,
@@ -74,7 +117,7 @@ function createAgentCliHelpers(ctx) {
 
   async function runCodexCli(args, options) {
     const shellEnv = await getShellEnv();
-    const codexCliPath = resolveCliFromPath("codex", shellEnv) || "codex";
+    const codexCliPath = await resolveCliFromPathAsync("codex", shellEnv) || "codex";
     return await runCommand(codexCliPath, args, {
       cwd: options?.cwd?.trim() || undefined,
       env: shellEnv,
@@ -101,13 +144,12 @@ function createAgentCliHelpers(ctx) {
     if (cached && now - cached.checkedAt < maxAgeMs) return cached;
 
     const shellEnv = await getShellEnv();
-    const rawCodexPath = resolveCliFromPath("codex", shellEnv);
-    if (!rawCodexPath) {
+    const codexPath = await resolveSdkBinPathAsync("codex", shellEnv);
+    if (!codexPath) {
       const result = { ok: false, checkedAt: now, error: "codex binary not found", code: "ENOENT" };
       setCodexValidationCache(result);
       return result;
     }
-    const codexPath = resolveSdkBinPath("codex", shellEnv);
     try {
       // Minimal read-only probe turn through the SDK to confirm auth works.
       const { Codex } = await import("@openai/codex-sdk");

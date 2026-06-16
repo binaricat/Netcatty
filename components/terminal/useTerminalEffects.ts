@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
+import { shouldInterceptMouseTrackingContextMenu } from './runtime/middleClickBehavior';
 
 type TerminalEffectsContext = Record<string, any>;
 
@@ -48,7 +49,7 @@ export function resolveSelectionOverlayPosition(term: any, container: HTMLElemen
 }
 
 export function useTerminalEffects(ctx: TerminalEffectsContext) {
-  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, host, hotkeySchemeRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalFontSizeChange, paneLayoutKey, pendingAuthRef, pendingOutputScrollRef, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, onSnippetShortkeyRef, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef } = ctx;
+  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, host, hotkeySchemeRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalFontSizeChange, paneLayoutKey, pendingAuthRef, pendingOutputScrollRef, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, onSnippetShortkeyRef, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef } = ctx;
 
   // Remember the last layout we successfully refit while visible so revisiting
   // the same workspace tab does not replay expensive force-fit/WebGL recovery.
@@ -239,6 +240,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           terminalBackend,
           sessionRef,
           hotkeySchemeRef,
+          disableTerminalFontZoomRef,
           keyBindingsRef,
           onHotkeyActionRef,
           onTerminalFontSizeChange,
@@ -268,6 +270,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Autocomplete integration
           onAutocompleteKeyEvent: (e: KeyboardEvent) => autocompleteKeyEventRef.current?.(e) ?? true,
           onAutocompleteInput: (data: string) => autocompleteInputRef.current?.(data),
+          terminalContextActionsRef,
           isRestoringSelectionRef,
           // Defer WebGL context creation for panes that mount hidden (e.g. the
           // background tabs of a batch connect) until they first become visible.
@@ -284,6 +287,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         fitAddonRef.current = runtime.fitAddon;
         serializeAddonRef.current = runtime.serializeAddon;
         searchAddonRef.current = runtime.searchAddon;
+        // xterm boots asynchronously; ResizeObserver may have already run without
+        // fitAddon and will not re-attach until isVisible/isResizing changes.
+        setTimeout(() => {
+          if (disposed) return;
+          safeFit({ force: true, requireVisible: true });
+        }, 0);
 
         // Apply merged keyword highlight rules immediately after runtime creation
         // This fixes a timing issue where the useEffect for keyword highlighting
@@ -436,69 +445,81 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   }, [effectiveTheme]);
 
 
+  // Keep font-size sync separate from terminalSettings so unrelated setting
+  // updates (or focus/layout re-renders) do not reset a wheel/Ctrl zoom that
+  // has not yet propagated into React props.
   useEffect(() => {
-    if (termRef.current) {
-      termRef.current.options.fontSize = effectiveFontSize;
-      termRef.current.options.fontFamily = resolvedFontFamily;
+    if (!termRef.current) return;
+    termRef.current.options.fontSize = effectiveFontSize;
+    xtermRuntimeRef.current?.clearTextureAtlas();
+    if (isVisibleRef.current) {
+      setTimeout(() => safeFit({ force: true, requireVisible: true }), 50);
+    } else {
+      lastFittedSizeRef.current = null;
+    }
+  }, [effectiveFontSize]);
 
-      if (terminalSettings) {
-        applyUserCursorPreference(termRef.current, terminalSettings);
-        termRef.current.options.scrollback = terminalSettings.scrollback === 0 ? 999999 : terminalSettings.scrollback;
-        termRef.current.options.fontWeight = effectiveFontWeight as
-          | 100
-          | 200
-          | 300
-          | 400
-          | 500
-          | 600
-          | 700
-          | 800
-          | 900;
-        const resolvedFontWeightBold = resolveFontWeightBold({
-          fontFamilyCss: termRef.current?.options.fontFamily || "",
-          normalWeight: effectiveFontWeight,
-          desiredBoldWeight: terminalSettings.fontWeightBold,
-          fontSize: effectiveFontSize,
-        });
+  useEffect(() => {
+    if (!termRef.current) return;
+    termRef.current.options.fontFamily = resolvedFontFamily;
 
-        termRef.current.options.fontWeightBold = resolvedFontWeightBold as
-          | 100
-          | 200
-          | 300
-          | 400
-          | 500
-          | 600
-          | 700
-          | 800
-          | 900;
-        termRef.current.options.lineHeight = 1 + terminalSettings.linePadding / 10;
-        termRef.current.options.drawBoldTextInBrightColors =
-          terminalSettings.drawBoldInBrightColors;
-        termRef.current.options.minimumContrastRatio =
-          terminalSettings.minimumContrastRatio;
-        termRef.current.options.smoothScrollDuration =
-          terminalSettings.smoothScrolling
-            ? XTERM_PERFORMANCE_CONFIG.rendering.smoothScrollDuration
-            : 0;
-        termRef.current.options.scrollOnUserInput =
-          shouldEnableNativeUserInputAutoScroll(terminalSettings);
-        const altKeyOpts = terminalAltKeyOptions(terminalSettings.altAsMeta);
-        termRef.current.options.macOptionIsMeta = altKeyOpts.macOptionIsMeta;
-        termRef.current.options.altClickMovesCursor = altKeyOpts.altClickMovesCursor;
-        termRef.current.options.wordSeparator = terminalSettings.wordSeparators;
-        termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
-      }
+    if (terminalSettings) {
+      applyUserCursorPreference(termRef.current, terminalSettings);
+      termRef.current.options.scrollback = terminalSettings.scrollback === 0 ? 999999 : terminalSettings.scrollback;
+      termRef.current.options.fontWeight = effectiveFontWeight as
+        | 100
+        | 200
+        | 300
+        | 400
+        | 500
+        | 600
+        | 700
+        | 800
+        | 900;
+      const resolvedFontWeightBold = resolveFontWeightBold({
+        fontFamilyCss: termRef.current?.options.fontFamily || "",
+        normalWeight: effectiveFontWeight,
+        desiredBoldWeight: terminalSettings.fontWeightBold,
+        fontSize: effectiveFontSize,
+      });
 
-      // Changing the font can leave the WebGL renderer drawing stale glyphs from
-      // the old metrics (xterm.js #3280), surfacing as garbled text (issue #1049).
-      // Clear the texture atlas so glyphs re-rasterize with the new font.
-      xtermRuntimeRef.current?.clearTextureAtlas();
+      termRef.current.options.fontWeightBold = resolvedFontWeightBold as
+        | 100
+        | 200
+        | 300
+        | 400
+        | 500
+        | 600
+        | 700
+        | 800
+        | 900;
+      termRef.current.options.lineHeight = 1 + terminalSettings.linePadding / 10;
+      termRef.current.options.drawBoldTextInBrightColors =
+        terminalSettings.drawBoldInBrightColors;
+      termRef.current.options.minimumContrastRatio =
+        terminalSettings.minimumContrastRatio;
+      termRef.current.options.smoothScrollDuration =
+        terminalSettings.smoothScrolling
+          ? XTERM_PERFORMANCE_CONFIG.rendering.smoothScrollDuration
+          : 0;
+      termRef.current.options.scrollOnUserInput =
+        shouldEnableNativeUserInputAutoScroll(terminalSettings);
+      const altKeyOpts = terminalAltKeyOptions(terminalSettings.altAsMeta);
+      termRef.current.options.macOptionIsMeta = altKeyOpts.macOptionIsMeta;
+      termRef.current.options.altClickMovesCursor = altKeyOpts.altClickMovesCursor;
+      termRef.current.options.wordSeparator = terminalSettings.wordSeparators;
+      termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
+    }
 
-      if (isVisibleRef.current) {
-        setTimeout(() => safeFit({ force: true, requireVisible: true }), 50);
-      } else {
-        lastFittedSizeRef.current = null;
-      }
+    // Changing the font can leave the WebGL renderer drawing stale glyphs from
+    // the old metrics (xterm.js #3280), surfacing as garbled text (issue #1049).
+    // Clear the texture atlas so glyphs re-rasterize with the new font.
+    xtermRuntimeRef.current?.clearTextureAtlas();
+
+    if (isVisibleRef.current) {
+      setTimeout(() => safeFit({ force: true, requireVisible: true }), 50);
+    } else {
+      lastFittedSizeRef.current = null;
     }
   }, [effectiveFontSize, effectiveFontWeight, resolvedFontFamily, terminalSettings]);
 
@@ -513,6 +534,30 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       requestAnimationFrame(() => {
         safeFit({ force: true, requireVisible: true });
       });
+    }
+  };
+
+  const layoutRecoveryTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearLayoutRecoveryTimers = () => {
+    for (const timerId of layoutRecoveryTimersRef.current) {
+      clearTimeout(timerId);
+    }
+    layoutRecoveryTimersRef.current = [];
+  };
+
+  // Re-fit after the app returns from the background, macOS fullscreen toggles,
+  // or other layout changes that do not reliably fire window.resize /
+  // ResizeObserver (common after App Nap / GPU context eviction).
+  const scheduleLayoutRecoveryRefit = (delaysMs: number[] = [0, 100, 350]) => {
+    clearLayoutRecoveryTimers();
+    for (const delayMs of delaysMs) {
+      const timerId = setTimeout(() => {
+        layoutRecoveryTimersRef.current = layoutRecoveryTimersRef.current.filter((id) => id !== timerId);
+        if (!isVisibleRef.current) return;
+        runImmediateRefit({ force: true });
+      }, delayMs);
+      layoutRecoveryTimersRef.current.push(timerId);
     }
   };
 
@@ -615,6 +660,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       // same recovery a resize performs: clear the texture atlas (no-op on the
       // DOM renderer) and synchronously repaint every row.
       xtermRuntimeRef.current?.clearTextureAtlas();
+      runImmediateRefit({ force: true });
       const visibleTerm = termRef.current;
       if (visibleTerm) forceSyncRenderAfterResize(visibleTerm);
       if (pendingOutputScrollRef.current) {
@@ -640,6 +686,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         await fontFaceSet.ready;
         if (cancelled) return;
 
+        // Ensure bundled Nerd Font icon fallbacks are loaded at the terminal's
+        // cell size. Shell prompts can arrive before these faces finish loading
+        // on cold start (Linux), leaving Powerline glyphs cached as tofu (#1363).
+        try {
+          await fontFaceSet.load(`${effectiveFontSize}px "Symbols Nerd Font Mono"`);
+        } catch (err) {
+          logger.warn("Nerd Font preload failed", err);
+        }
+        if (cancelled) return;
+
         const term = termRef.current as {
           cols: number;
           rows: number;
@@ -650,6 +706,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           term?.renderer?.remeasureFont?.();
         } catch (err) {
           logger.warn("Font remeasure failed", err);
+        }
+
+        // remeasureFont does not invalidate cells rasterized before fonts were ready.
+        xtermRuntimeRef.current?.clearTextureAtlas();
+        const visibleTerm = termRef.current;
+        if (visibleTerm) {
+          forceSyncRenderAfterResize(visibleTerm);
         }
 
         try {
@@ -698,12 +761,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
 
   useEffect(() => {
-    if (!isVisible || !containerRef.current || !fitAddonRef.current) return;
+    if (!isVisible || !containerRef.current) return;
 
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const observer = new ResizeObserver(() => {
-      if (isResizing || !isVisibleRef.current) return;
+      if (deferTerminalResizeRef?.current || !isVisibleRef.current) return;
+      if (!fitAddonRef.current) return;
       if (resizeTimeout) {
         clearTimeout(resizeTimeout);
       }
@@ -775,6 +839,27 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     }, 0);
     return () => clearTimeout(timer);
   }, [isSearchOpen]);
+
+  // When compose bar opens/closes, re-fit terminal and maintain scroll position
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !fitAddonRef.current) return;
+    const buffer = term.buffer.active;
+    const wasAtBottom = buffer.viewportY >= buffer.baseY;
+    const prevViewportY = buffer.viewportY;
+    const timer = setTimeout(() => {
+      safeFit({ force: true, requireVisible: true });
+      requestAnimationFrame(() => {
+        safeFit({ force: true, requireVisible: true });
+        if (wasAtBottom) {
+          term.scrollToBottom();
+        } else {
+          term.scrollToLine(prevViewportY);
+        }
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isComposeBarOpen]);
 
 
   useEffect(() => {
@@ -876,8 +961,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     if (!el) return;
 
     const handleContextMenuCapture = (e: MouseEvent) => {
-      if (!mouseTrackingRef.current) return;
-      if (statusRef.current !== 'connected') return;
+      if (!shouldInterceptMouseTrackingContextMenu({
+        event: e,
+        mouseTracking: mouseTrackingRef.current,
+        status: statusRef.current,
+      })) {
+        return;
+      }
       e.preventDefault();
       e.stopImmediatePropagation();
 
@@ -936,6 +1026,43 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       window.removeEventListener("resize", handler);
     };
   }, [isVisible]);
+
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    // App resume / refocus only needs a GPU+fit recovery on the active pane;
+    // non-focused split panes already refit when focused (see shouldRefitImmediatelyOnShow).
+    const shouldRecoverOnAppResume = () => (
+      !inWorkspace || isFocusMode || isFocused
+    );
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!shouldRecoverOnAppResume()) return;
+      scheduleLayoutRecoveryRefit();
+    };
+
+    const handleWindowFocus = () => {
+      if (!shouldRecoverOnAppResume()) return;
+      scheduleLayoutRecoveryRefit();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    // Fullscreen changes layout for every visible pane.
+    const unsubscribeFullscreen = terminalBackend.onWindowFullScreenChanged?.((isFullscreen) => {
+      scheduleLayoutRecoveryRefit(isFullscreen ? [0, 150, 400] : [0, 100, 300]);
+    });
+
+    return () => {
+      clearLayoutRecoveryTimers();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      unsubscribeFullscreen?.();
+    };
+  }, [isVisible, inWorkspace, isFocusMode, isFocused, terminalBackend]);
 
 
   // Only register the snippet executor once the terminal session is ready.

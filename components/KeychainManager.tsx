@@ -13,10 +13,11 @@ import {
   Upload,
   UserPlus,
 } from "lucide-react";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useStoredViewMode } from "../application/state/useStoredViewMode";
 import type { GroupConfig } from "../domain/models";
+import { reorderVaultItems, sortByVaultOrder } from "../domain/vaultOrder";
 import { STORAGE_KEY_VAULT_KEYS_VIEW_MODE } from "../infrastructure/config/storageKeys";
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
@@ -50,6 +51,7 @@ import {
   vaultHeaderIconButtonClass,
   vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
+import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 // Import utilities and components from keychain module
 import {
@@ -80,8 +82,10 @@ interface KeychainManagerProps {
   managedSources?: ManagedSource[];
   onSave: (key: SSHKey) => void;
   onUpdate: (key: SSHKey) => void;
+  onReorderKeys?: (keys: SSHKey[]) => void;
   onDelete: (id: string) => void;
   onSaveIdentity?: (identity: Identity) => void;
+  onReorderIdentities?: (identities: Identity[]) => void;
   onDeleteIdentity?: (id: string) => void;
   onNewHost?: () => void;
   onSaveHost?: (host: Host) => void;
@@ -98,8 +102,10 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
   managedSources = [],
   onSave,
   onUpdate,
+  onReorderKeys,
   onDelete,
   onSaveIdentity,
+  onReorderIdentities,
   onDeleteIdentity,
   onNewHost: _onNewHost,
   onSaveHost,
@@ -147,6 +153,7 @@ const KeychainManager: React.FC<KeychainManagerProps> = ({
 
   const [showHostSelector, setShowHostSelector] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   // Export panel state
   const [exportLocation, setExportLocation] = useState(".ssh");
@@ -170,6 +177,27 @@ echo $3 >> "$FILE"`);
   const [draftIdentity, setDraftIdentity] = useState<Partial<Identity>>({});
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const keyReorder = useVaultItemReorder({
+    containerRef: listRef,
+    viewMode,
+    dragType: "key-id",
+    targetAttribute: "data-key-id",
+    disabled: !onReorderKeys || search.trim().length > 0,
+    onReorder: (sourceId, targetId, position) => {
+      onReorderKeys?.(reorderVaultItems(keys, sourceId, targetId, position));
+    },
+  });
+  const identityReorder = useVaultItemReorder({
+    containerRef: listRef,
+    viewMode,
+    dragType: "identity-id",
+    targetAttribute: "data-identity-id",
+    disabled: !onReorderIdentities || search.trim().length > 0,
+    onReorder: (sourceId, targetId, position) => {
+      onReorderIdentities?.(reorderVaultItems(identities, sourceId, targetId, position));
+    },
+  });
 
   const showError = useCallback((message: string, title = t("common.error")) => {
     toast.error(message, title);
@@ -204,18 +232,18 @@ echo $3 >> "$FILE"`);
       );
     }
 
-    return result;
+    return sortByVaultOrder(result);
   }, [keys, activeFilter, search]);
 
   // Filter identities based on search
   const filteredIdentities = useMemo(() => {
-    if (!search.trim()) return identities;
+    if (!search.trim()) return sortByVaultOrder(identities);
     const s = search.toLowerCase();
-    return identities.filter(
+    return sortByVaultOrder(identities.filter(
       (i) =>
         i.label.toLowerCase().includes(s) ||
         i.username.toLowerCase().includes(s),
-    );
+    ));
   }, [identities, search]);
 
   // Push a new panel onto the stack
@@ -675,7 +703,26 @@ echo $3 >> "$FILE"`);
         </VaultPageHeader>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto"
+          onDragOverCapture={(event) => {
+            keyReorder.handleDragOverCapture(event);
+            identityReorder.handleDragOverCapture(event);
+          }}
+          onDragOver={(event) => {
+            keyReorder.handleDragOver(event);
+            identityReorder.handleDragOver(event);
+          }}
+          onDropCapture={(event) => {
+            keyReorder.handleDropCapture(event);
+            identityReorder.handleDropCapture(event);
+          }}
+          onDragEndCapture={() => {
+            keyReorder.handleDragEndCapture();
+            identityReorder.handleDragEndCapture();
+          }}
+        >
           {/* Keys Section */}
           <div className="space-y-3 p-3">
           <div className="flex items-center justify-between">
@@ -729,6 +776,7 @@ echo $3 >> "$FILE"`);
                     (panel.type === "export" && panel.key.id === key.id)
                   }
                   isMac={isMacOS()}
+                  reorderProps={keyReorder.getItemReorderProps(key.id, `key:${key.id}`)}
                   onClick={() => openKeyView(key)}
                   onEdit={() => openKeyEdit(key)}
                   onExport={() => openKeyExport(key)}
@@ -768,6 +816,7 @@ echo $3 >> "$FILE"`);
                         panel.type === "identity" &&
                         panel.identity?.id === identity.id
                       }
+                      reorderProps={identityReorder.getItemReorderProps(identity.id, `identity:${identity.id}`)}
                       onClick={() => {
                         setPanelStack([{ type: "identity", identity }]);
                         setDraftIdentity({ ...identity });

@@ -10,6 +10,7 @@ import type {
   ProviderConfig,
   WebSearchConfig,
 } from '../infrastructure/ai/types';
+import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 
 // -------------------------------------------------------------------
@@ -71,6 +72,9 @@ export interface AIChatSidePanelProps {
 
   // Web search
   webSearchConfig?: WebSearchConfig | null;
+
+  // Quick messages (slash prompts)
+  quickMessages?: AIQuickMessage[];
 
   // Context
   scopeType: 'terminal' | 'workspace';

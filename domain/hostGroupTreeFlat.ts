@@ -1,4 +1,5 @@
 import type { GroupNode, Host } from '../types';
+import { sortByVaultOrder } from './vaultOrder';
 
 export type HostTreeFlatRow =
   | { kind: 'group'; node: GroupNode; depth: number }
@@ -21,13 +22,12 @@ export function flattenHostGroupTree(params: {
     const isExpanded = params.searchActive || params.expandedPaths.has(node.path);
     if (!isExpanded) return;
 
-    const sortedHosts = [...node.hosts].sort((a, b) => a.label.localeCompare(b.label));
+    const sortedHosts = sortByVaultOrder(node.hosts);
     for (const host of sortedHosts) {
       rows.push({ kind: 'host', host, depth: depth + 1 });
     }
 
-    const childNodes = (Object.values(node.children) as GroupNode[])
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const childNodes = Object.values(node.children) as GroupNode[];
     for (const child of childNodes) {
       walkGroup(child, depth + 1);
     }
@@ -37,7 +37,7 @@ export function flattenHostGroupTree(params: {
     walkGroup(node, 0);
   }
 
-  const sortedUngrouped = [...params.ungroupedHosts].sort((a, b) => a.label.localeCompare(b.label));
+  const sortedUngrouped = sortByVaultOrder(params.ungroupedHosts);
   for (const host of sortedUngrouped) {
     rows.push({ kind: 'host', host, depth: 0 });
   }

@@ -25,6 +25,14 @@ const agents: ExternalAgentConfig[] = [
     command: '/usr/local/bin/missing-backend-agent',
     enabled: true,
   },
+  {
+    id: 'unavailable-agent',
+    name: 'Unavailable Agent',
+    command: '/usr/local/bin/unavailable-agent',
+    sdkBackend: 'cursor',
+    enabled: true,
+    available: false,
+  },
 ];
 
 test('canSendWithAgent allows Catty and enabled external agents', () => {
@@ -35,6 +43,7 @@ test('canSendWithAgent allows Catty and enabled external agents', () => {
 test('canSendWithAgent blocks missing or disabled external agents', () => {
   assert.equal(canSendWithAgent('disabled-agent', agents), false);
   assert.equal(canSendWithAgent('missing-backend-agent', agents), false);
+  assert.equal(canSendWithAgent('unavailable-agent', agents), false);
   assert.equal(canSendWithAgent('missing-agent', agents), false);
 });
 

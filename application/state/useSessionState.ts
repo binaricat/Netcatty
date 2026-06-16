@@ -16,8 +16,14 @@ SplitDirection,
 SplitHint,
 updateWorkspaceSplitSizes,
 } from '../../domain/workspace';
-import { buildOrderedWorkTabIds } from '../app/workTabSurface';
+import { clearSessionFontSizeOverride as clearSessionFontSizeOverrideFields } from '../../domain/terminalAppearance';
+import { buildOrderedWorkTabIds, reorderWorkTabIds } from '../app/workTabSurface';
 import { activeTabStore } from './activeTabStore';
+import {
+  closeSessionWorkspaceLayoutState,
+  detachSessionFromWorkspaceState,
+  replaceDissolvedWorkspaceTabOrder,
+} from './sessionWorkspaceDetach';
 import {
   createCopiedTerminalSessionClone,
   createSplitTerminalSessionClone,
@@ -72,6 +78,18 @@ export const useSessionState = () => {
     setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status } : s));
   }, []);
 
+  const updateSessionFontSize = useCallback((sessionId: string, fontSize: number) => {
+    setSessions(prev => prev.map(s => (
+      s.id === sessionId ? { ...s, fontSize, fontSizeOverride: true } : s
+    )));
+  }, []);
+
+  const clearSessionFontSizeOverride = useCallback((sessionId: string) => {
+    setSessions(prev => prev.map(s => (
+      s.id === sessionId ? clearSessionFontSizeOverrideFields(s) : s
+    )));
+  }, []);
+
   const closeWorkspace = useCallback((workspaceId: string) => {
     setWorkspaces(prevWorkspaces => {
       const remainingWorkspaces = prevWorkspaces.filter(w => w.id !== workspaceId);
@@ -109,33 +127,12 @@ export const useSessionState = () => {
       const wsId = targetSession?.workspaceId;
 
       setWorkspaces(prevWorkspaces => {
-        let removedWorkspaceId: string | null = null;
-        let nextWorkspaces = prevWorkspaces;
-        let dissolvedWorkspaceId: string | null = null;
-        let lastRemainingSessionId: string | null = null;
-
-        if (wsId) {
-          nextWorkspaces = prevWorkspaces
-            .map(ws => {
-              if (ws.id !== wsId) return ws;
-              const pruned = pruneWorkspaceNode(ws.root, sessionId);
-              if (!pruned) {
-                removedWorkspaceId = ws.id;
-                return null;
-              }
-
-              // Check if only 1 session remains - dissolve workspace
-              const remainingSessionIds = collectSessionIds(pruned);
-              if (remainingSessionIds.length === 1) {
-                dissolvedWorkspaceId = ws.id;
-                lastRemainingSessionId = remainingSessionIds[0];
-                return null;
-              }
-
-              return { ...ws, root: pruned };
-            })
-            .filter((ws): ws is Workspace => Boolean(ws));
-        }
+        const {
+          workspaces: nextWorkspaces,
+          removedWorkspaceId,
+          dissolvedWorkspaceId,
+          lastRemainingSessionId,
+        } = closeSessionWorkspaceLayoutState(prevWorkspaces, wsId, sessionId);
 
         const remainingSessions = prevSessions.filter(s => s.id !== sessionId);
         const fallbackWorkspace = nextWorkspaces[nextWorkspaces.length - 1];
@@ -148,6 +145,14 @@ export const useSessionState = () => {
           if (fallbackSolo) return fallbackSolo.id;
           return 'vault';
         };
+
+        if (dissolvedWorkspaceId && lastRemainingSessionId) {
+          setTabOrder(prevTabOrder => replaceDissolvedWorkspaceTabOrder(
+            prevTabOrder,
+            dissolvedWorkspaceId,
+            [lastRemainingSessionId],
+          ));
+        }
 
         if (dissolvedWorkspaceId && currentActiveTabId === dissolvedWorkspaceId) {
           setActiveTabId(getFallback());
@@ -192,20 +197,39 @@ export const useSessionState = () => {
       const target = prevSessions.find(s => s.id === sessionId);
       if (target) {
         setSessionRenameTarget(target);
-        setSessionRenameValue(target.hostLabel);
+        setSessionRenameValue(target.customName || target.hostLabel);
       }
       return prevSessions;
     });
   }, []);
 
-  const submitSessionRename = useCallback(() => {
+  const renameSessionInline = useCallback((sessionId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSessions(prev => prev.map(s => (
+      s.id === sessionId ? { ...s, customName: trimmed, hostLabel: trimmed } : s
+    )));
+  }, []);
+
+  const submitSessionRename = useCallback((sessionId?: string, name?: string) => {
+    if (sessionId !== undefined && name !== undefined) {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setSessions(prev => prev.map(s => (
+        s.id === sessionId ? { ...s, customName: trimmed, hostLabel: trimmed } : s
+      )));
+      return;
+    }
+
     setSessionRenameValue(prevValue => {
-      const name = prevValue.trim();
-      if (!name) return prevValue;
+      const trimmed = prevValue.trim();
+      if (!trimmed) return prevValue;
 
       setSessionRenameTarget(prevTarget => {
         if (!prevTarget) return prevTarget;
-        setSessions(prev => prev.map(s => s.id === prevTarget.id ? { ...s, hostLabel: name } : s));
+        setSessions(prev => prev.map(s => (
+          s.id === prevTarget.id ? { ...s, customName: trimmed, hostLabel: trimmed } : s
+        )));
         return null;
       });
 
@@ -875,6 +899,50 @@ export const useSessionState = () => {
     [getOrderedWorkTabs],
   );
 
+  const removeSessionFromWorkspace = useCallback((
+    sessionId: string,
+    tabInsertionTarget?: {
+      tabId: string;
+      position: 'before' | 'after';
+      additionalTabIds?: readonly string[];
+    },
+  ) => {
+    setSessions(prevSessions => {
+      const result = detachSessionFromWorkspaceState({
+        sessions: prevSessions,
+        workspaces: workspacesRef.current,
+        sessionId,
+      });
+
+      if (!result.changed) return prevSessions;
+      setWorkspaces(result.workspaces);
+      setTabOrder(prevTabOrder => {
+        const replacedOrder = replaceDissolvedWorkspaceTabOrder(
+          prevTabOrder,
+          result.dissolvedWorkspaceId,
+          result.replacementTabIds,
+        );
+        if (!tabInsertionTarget) return replacedOrder;
+
+        const allTabIds = [
+          ...result.sessions.filter(s => !s.workspaceId).map(s => s.id),
+          ...result.workspaces.map(w => w.id),
+          ...logViews.map(lv => lv.id),
+          ...(tabInsertionTarget.additionalTabIds ?? []),
+        ];
+        return reorderWorkTabIds(
+          replacedOrder,
+          allTabIds,
+          sessionId,
+          tabInsertionTarget.tabId,
+          tabInsertionTarget.position,
+        );
+      });
+      if (result.activeTabId) setActiveTabId(result.activeTabId);
+      return result.sessions;
+    });
+  }, [logViews, setActiveTabId]);
+
   const reorderTabs = useCallback((
     draggedId: string,
     targetId: string,
@@ -883,39 +951,13 @@ export const useSessionState = () => {
   ) => {
     if (draggedId === targetId) return;
     
-    setTabOrder(prevTabOrder => {
-      const allTabIds = [...baseWorkTabIds, ...additionalTabIds];
-      const allTabIdSet = new Set(allTabIds);
-      
-      // Build current effective order: existing order + new tabs at end
-      const orderedIds = prevTabOrder.filter(id => allTabIdSet.has(id));
-      const orderedIdSet = new Set(orderedIds);
-      const newIds = allTabIds.filter(id => !orderedIdSet.has(id));
-      const currentOrder = [...orderedIds, ...newIds];
-      
-      const draggedIndex = currentOrder.indexOf(draggedId);
-      const targetIndex = currentOrder.indexOf(targetId);
-      
-      if (draggedIndex === -1 || targetIndex === -1) return prevTabOrder;
-      
-      // Remove dragged item first
-      currentOrder.splice(draggedIndex, 1);
-      
-      // Calculate new target index (adjusted after removal)
-      let newTargetIndex = targetIndex;
-      if (draggedIndex < targetIndex) {
-        newTargetIndex -= 1;
-      }
-      
-      // Insert at the correct position
-      if (position === 'after') {
-        newTargetIndex += 1;
-      }
-      
-      currentOrder.splice(newTargetIndex, 0, draggedId);
-      
-      return currentOrder;
-    });
+    setTabOrder(prevTabOrder => reorderWorkTabIds(
+      prevTabOrder,
+      [...baseWorkTabIds, ...additionalTabIds],
+      draggedId,
+      targetId,
+      position,
+    ));
   }, [baseWorkTabIds]);
 
   return {
@@ -929,6 +971,7 @@ export const useSessionState = () => {
     sessionRenameValue,
     setSessionRenameValue,
     startSessionRename,
+    renameSessionInline,
     submitSessionRename,
     resetSessionRename,
     workspaceRenameTarget,
@@ -943,10 +986,13 @@ export const useSessionState = () => {
     closeSession,
     closeWorkspace,
     updateSessionStatus,
+    updateSessionFontSize,
+    clearSessionFontSizeOverride,
     createWorkspaceWithHosts,
     createWorkspaceFromTargets,
     createWorkspaceFromSessions,
     addSessionToWorkspace,
+    removeSessionFromWorkspace,
     appendHostToWorkspace,
     appendLocalTerminalToWorkspace,
     updateSplitSizes,

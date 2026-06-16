@@ -1,5 +1,5 @@
 import React from "react";
-import type { LinkModifier, RightClickBehavior, TerminalSettings } from "../../../domain/models";
+import type { LinkModifier, MiddleClickBehavior, RightClickBehavior, TerminalSettings } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingRow, Toggle } from "../settings-ui";
@@ -11,6 +11,15 @@ interface TerminalBehaviorSettingsProps {
   terminalSettings: TerminalSettings;
   updateTerminalSetting: <K extends keyof TerminalSettings>(key: K, value: TerminalSettings[K]) => void;
 }
+
+export const MIDDLE_CLICK_BEHAVIOR_OPTIONS: Array<{
+  value: MiddleClickBehavior;
+  labelKey: string;
+}> = [
+  { value: "context-menu", labelKey: "settings.terminal.behavior.middleClick.menu" },
+  { value: "paste", labelKey: "settings.terminal.behavior.middleClick.paste" },
+  { value: "disabled", labelKey: "settings.terminal.behavior.middleClick.disabled" },
+];
 
 export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> = ({
   t,
@@ -44,10 +53,18 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
-          label={t("settings.terminal.behavior.middleClickPaste")}
-          description={t("settings.terminal.behavior.middleClickPaste.desc")}
+          label={t("settings.terminal.behavior.middleClick")}
+          description={t("settings.terminal.behavior.middleClick.desc")}
         >
-          <Toggle checked={terminalSettings.middleClickPaste} onChange={(v) => updateTerminalSetting("middleClickPaste", v)} />
+          <Select
+            value={terminalSettings.middleClickBehavior}
+            options={MIDDLE_CLICK_BEHAVIOR_OPTIONS.map((option) => ({
+              value: option.value,
+              label: t(option.labelKey),
+            }))}
+            onChange={(v) => updateTerminalSetting("middleClickBehavior", v as MiddleClickBehavior)}
+            className="w-36"
+          />
         </SettingRow>
 
         <SettingRow

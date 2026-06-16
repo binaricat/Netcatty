@@ -3,7 +3,19 @@ import test from "node:test";
 
 import {
   scheduleChromeLayoutAnimation,
+  syncActiveChromeTheme,
+  themeFingerprint,
 } from "./useActiveChromeTheme.ts";
+import { TERMINAL_THEMES } from "../../infrastructure/config/terminalThemes.ts";
+
+function createInlineStyle() {
+  const values = new Map<string, string>();
+  return {
+    getPropertyValue: (name: string) => values.get(name) ?? "",
+    setProperty: (name: string, value: string) => values.set(name, value),
+    removeProperty: (name: string) => values.delete(name),
+  };
+}
 
 function createRafRoot() {
   const callbacks = new Map<number, FrameRequestCallback>();
@@ -46,4 +58,38 @@ test("chrome layout animations wait until theme settle frames complete", () => {
   }
   assert.equal(ran, true);
   cancel();
+});
+
+test("syncActiveChromeTheme refreshes top tabs when the active theme fingerprint is unchanged", () => {
+  const globalWithDocument = globalThis as typeof globalThis & { document?: Document };
+  const originalDocument = globalWithDocument.document;
+  const theme = TERMINAL_THEMES[0];
+  assert.ok(theme);
+  const topTabsRoot = {
+    style: createInlineStyle(),
+  };
+  const documentElement = {
+    dataset: { activeChromeTheme: themeFingerprint(theme) },
+  };
+  const fakeDocument = {
+    documentElement,
+    querySelector: (selector: string) => selector === "[data-top-tabs-root]" ? topTabsRoot : null,
+  };
+  globalWithDocument.document = fakeDocument as unknown as Document;
+
+  try {
+    syncActiveChromeTheme(theme, () => {
+      throw new Error("app theme should not be restored for an unchanged active chrome theme");
+    });
+
+    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-bg"), "");
+    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-active-bg"), "");
+    assert.notEqual(topTabsRoot.style.getPropertyValue("--top-tabs-accent"), "");
+  } finally {
+    if (originalDocument) {
+      globalWithDocument.document = originalDocument;
+    } else {
+      delete globalWithDocument.document;
+    }
+  }
 });

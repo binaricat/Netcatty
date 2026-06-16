@@ -170,10 +170,21 @@ export const useSftpState = (
   useSftpSessionCleanup(sftpSessionsRef);
   useSftpFileWatch(options);
 
-  const { connect, disconnect, listLocalFiles, listRemoteFiles } = useSftpConnections({
+  const {
+    connect,
+    disconnect,
+    listLocalFiles,
+    listRemoteFiles,
+    hostKeyVerification,
+    rejectHostKeyVerification,
+    acceptHostKeyVerification,
+    acceptAndSaveHostKeyVerification,
+  } = useSftpConnections({
     hosts,
     keys,
     identities,
+    knownHosts: options?.knownHosts,
+    onAddKnownHost: options?.onAddKnownHost,
     terminalSettings: options?.terminalSettings,
     leftTabsRef,
     rightTabsRef,
@@ -402,6 +413,9 @@ export const useSftpState = (
     resolveConflict: resolveAnyConflict,
     getSftpIdForConnection,
     reportSessionError: handleSessionError,
+    rejectHostKeyVerification,
+    acceptHostKeyVerification,
+    acceptAndSaveHostKeyVerification,
   });
   methodsRef.current = {
     getFilteredFiles,
@@ -460,6 +474,9 @@ export const useSftpState = (
     resolveConflict: resolveAnyConflict,
     getSftpIdForConnection,
     reportSessionError: handleSessionError,
+    rejectHostKeyVerification,
+    acceptHostKeyVerification,
+    acceptAndSaveHostKeyVerification,
   };
 
   // Create stable method wrappers that call through methodsRef
@@ -532,6 +549,9 @@ export const useSftpState = (
     resolveConflict: (...args: Parameters<typeof resolveAnyConflict>) => methodsRef.current.resolveConflict(...args),
     getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
     reportSessionError: (...args: Parameters<typeof handleSessionError>) => methodsRef.current.reportSessionError(...args),
+    rejectHostKeyVerification: () => methodsRef.current.rejectHostKeyVerification(),
+    acceptHostKeyVerification: () => methodsRef.current.acceptHostKeyVerification(),
+    acceptAndSaveHostKeyVerification: () => methodsRef.current.acceptAndSaveHostKeyVerification(),
     activeFileWatchCountRef,
   }), [activeFileWatchCountRef]); // activeFileWatchCountRef is a stable ref
 
@@ -546,6 +566,7 @@ export const useSftpState = (
     transfers,
     activeTransfersCount,
     conflicts,
+    hostKeyVerification,
 
     // Stable methods - never change reference
     ...stableMethods,
@@ -566,6 +587,7 @@ export const useSftpState = (
     transfers,
     activeTransfersCount,
     conflicts,
+    hostKeyVerification,
     stableMethods,
   ]);
 };

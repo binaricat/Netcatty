@@ -1,3 +1,4 @@
+import type { DragEvent, PointerEvent } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 
 import { logger } from "../../lib/logger";
@@ -16,6 +17,14 @@ import type {
 } from "../../types";
 
 export const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
+
+/**
+ * Get the display name for a terminal session.
+ * Uses customName if set, otherwise falls back to hostLabel.
+ */
+export function getSessionDisplayName(session: TerminalSession): string {
+  return session.customName || session.hostLabel || '';
+}
 
 /**
  * Extract unique root paths from drop entries for local terminal path insertion.
@@ -88,6 +97,11 @@ export interface TerminalProps {
   keys: SSHKey[];
   identities: Identity[];
   snippets: Snippet[];
+  snippetPackages?: string[];
+  /** Minimal toolbar for popup terminals (compose, search, snippets only). */
+  compactToolbar?: boolean;
+  /** Line timestamps are unavailable in popup terminals that stream shell output without timestamp metadata. */
+  lineTimestampsAvailable?: boolean;
   chainHosts?: Host[];
   themePreviewId?: string;
   knownHosts?: KnownHost[];
@@ -114,6 +128,7 @@ export interface TerminalProps {
   reuseConnectionFromSessionId?: string;
   serialConfig?: SerialConfig;
   hotkeyScheme?: "disabled" | "mac" | "pc";
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onTerminalFontSizeChange?: (fontSize: number) => void;
@@ -147,7 +162,9 @@ export interface TerminalProps {
   ) => void;
   onTerminalCwdChange?: (sessionId: string, cwd: string | null) => void;
   onOpenScripts?: () => void;
+  onOpenHistory?: () => void;
   onOpenTheme?: () => void;
+  onOpenSystem?: () => void;
   isBroadcastEnabled?: boolean;
   onToggleBroadcast?: () => void;
   onToggleComposeBar?: () => void;
@@ -160,7 +177,19 @@ export interface TerminalProps {
   sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
   sshDebugLogEnabled?: boolean;
   sudoAutofillPassword?: string;
+  showSelectionAIAction?: boolean;
   onAddSelectionToAI?: (sessionId: string, selection: string) => void;
+  /** Override display name for the pane title bar (customName || hostLabel) */
+  sessionDisplayName?: string;
+  /** Open rename dialog for this session */
+  onRename?: () => void;
+  /** Detach this session from its workspace to a standalone tab */
+  onDetach?: () => void;
+  onStartSessionDrag?: (sessionId: string) => void;
+  onEndSessionDrag?: () => void;
+  onDetachPointerDown?: (e: PointerEvent<HTMLElement>) => void;
+  onDetachDragStart?: (e: DragEvent) => void;
+  onDetachDragEnd?: (e: DragEvent) => void;
 }
 
 export function formatNetSpeed(bytesPerSec: number): string {

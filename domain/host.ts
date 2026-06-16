@@ -47,6 +47,7 @@ export const LINUX_DISTRO_OPTIONS = [
   'oracle',
   'kali',
   'alinux',
+  'openeuler',
 ] as const;
 
 /**
@@ -86,6 +87,7 @@ export const normalizeDistroId = (value?: string) => {
   if (v.includes('almalinux')) return 'almalinux';
   if (v.includes('oracle')) return 'oracle';
   if (v.includes('kali')) return 'kali';
+  if (v.includes('openeuler') || v.includes('open euler')) return 'openeuler';
   // Alibaba Cloud Linux: os-release ID is `alinux` (older branding: Aliyun
   // Linux / `aliyun`). Must come before the generic `linux` fallback because
   // 'alinux'.includes('linux') is true and would otherwise resolve to 'linux'.
@@ -242,6 +244,36 @@ export const normalizePrimaryTelnetState = (host: Host): Host =>
   host.protocol === 'telnet' && !host.telnetEnabled
     ? { ...host, telnetEnabled: true }
     : host;
+
+export const migrateHostsFromLegacyLineTimestamps = (
+  hosts: Host[],
+  legacyEnabled: boolean,
+): Host[] => {
+  if (!legacyEnabled) return hosts;
+  let changed = false;
+  const migrated = hosts.map((host) => {
+    if (host.showLineTimestamps !== undefined) return host;
+    changed = true;
+    return { ...host, showLineTimestamps: true };
+  });
+  return changed ? migrated : hosts;
+};
+
+export const preserveConcurrentHostLineTimestampUpdate = ({
+  draft,
+  openedHost,
+  latestHost,
+}: {
+  draft: Host;
+  openedHost?: Host | null;
+  latestHost?: Host | null;
+}): Host => {
+  if (!openedHost || !latestHost) return draft;
+  if (draft.id !== openedHost.id || draft.id !== latestHost.id) return draft;
+  if (draft.showLineTimestamps !== openedHost.showLineTimestamps) return draft;
+  if (latestHost.showLineTimestamps === openedHost.showLineTimestamps) return draft;
+  return { ...draft, showLineTimestamps: latestHost.showLineTimestamps };
+};
 
 export const upsertHostById = (hosts: Host[], host: Host): Host[] => {
   const hostExists = hosts.some((entry) => entry.id === host.id);

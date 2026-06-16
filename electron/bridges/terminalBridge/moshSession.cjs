@@ -572,6 +572,9 @@ function createMoshSessionApi(ctx) {
         // does not depend on this.
         knownHosts: options.knownHosts,
       };
+      session.systemManagerSudoPassword = typeof options.sudoAutofillPassword === "string" && options.sudoAutofillPassword.length > 0
+        ? options.sudoAutofillPassword
+        : undefined;
     
       if (process.platform !== "win32") {
         const decoder = new StringDecoder("utf8");

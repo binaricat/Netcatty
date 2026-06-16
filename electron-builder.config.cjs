@@ -8,10 +8,12 @@ module.exports = {
     appId: 'com.netcatty.app',
     productName: 'Netcatty',
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+    electronLanguages: ['en', 'en-US', 'zh_CN', 'zh-CN', 'ru'],
     // Give the macOS build a unique Mach-O LC_UUID before signing, so macOS
     // Local Network privacy treats Netcatty distinctly from every other
     // Electron app (which all share Electron's prebuilt LC_UUID) — see #1040
     // and scripts/afterPackMacUuid.cjs. No-op on Windows/Linux.
+    beforePack: './scripts/beforePackCursorSdk.cjs',
     afterPack: './scripts/afterPackMacUuid.cjs',
     // Platform-split icons (#813):
     //   - public/icon.png keeps Apple's HIG grid margin so the rendered
@@ -42,8 +44,47 @@ module.exports = {
         'lib/**/*.json',
         '!electron/.dev-config.json',
         'skills/**/*',
-        'public/**/*',
-        'node_modules/**/*',
+        '!public/**/*',
+        '!**/*.map',
+        '!**/*.d.ts',
+        '!**/*.d.mts',
+        '!**/*.d.cts',
+        '!**/*.ts',
+        '!**/*.tsx',
+        '!**/*.test.*',
+        '!**/*.spec.*',
+        '!**/__tests__/**/*',
+        '!**/test/**/*',
+        '!**/tests/**/*',
+        '!**/example/**/*',
+        '!**/examples/**/*',
+        '!node_modules/**/docs/**/*',
+        '!node_modules/**/doc/**/*',
+        '!node_modules/**/benchmark/**/*',
+        '!node_modules/**/benchmarks/**/*',
+        // Renderer-only packages are compiled into dist by Vite. Keep them
+        // installed for npm run dev/build, but do not ship the duplicate source
+        // packages in release artifacts.
+        '!node_modules/@fontsource/**/*',
+        '!node_modules/@monaco-editor/**/*',
+        '!node_modules/@radix-ui/**/*',
+        '!node_modules/@xterm/**/*',
+        '!node_modules/lucide-react/**/*',
+        '!node_modules/monaco-editor/**/*',
+        '!node_modules/react/**/*',
+        '!node_modules/react-dom/**/*',
+        // Heavy cloud completion specs are intentionally not bundled. The main
+        // process filters the same prefixes so dev and packaged builds behave
+        // consistently.
+        '!node_modules/@withfig/autocomplete/build/aws.js',
+        '!node_modules/@withfig/autocomplete/build/aws/**/*',
+        '!node_modules/@withfig/autocomplete/build/gcloud.js',
+        '!node_modules/@withfig/autocomplete/build/gcloud/**/*',
+        '!node_modules/@withfig/autocomplete/build/az/**/*',
+        // Fig specs are already compiled JavaScript; TypeScript is only pulled
+        // in by Fig helper packages as build tooling and is not needed at app
+        // runtime.
+        '!node_modules/typescript/**/*',
         // ── Exclude per-platform native agent binaries (~100s of MB each). ──
         // Netcatty is "bring your own CLI": each SDK is pointed at the user's
         // system-installed CLI via an absolute path override (claude
@@ -61,7 +102,20 @@ module.exports = {
         '!node_modules/@anthropic-ai/claude-code-*/**/*',
         '!node_modules/@openai/codex-{darwin,linux,linuxmusl,win32}-*/**/*',
         '!node_modules/@github/copilot-{darwin,linux,linuxmusl,win32}-*/**/*',
-        '!node_modules/@github/copilot/**/*'
+        '!node_modules/@github/copilot/**/*',
+        // CodeBuddy follows the same first-party integration model as the
+        // other coding agents: Netcatty discovers and passes the user's
+        // installed CLI path to the SDK. Keep the small SDK wrapper, but do not
+        // bundle the full CodeBuddy CLI payload (rg vendors + web UI).
+        '!node_modules/@tencent-ai/agent-sdk/cli/**/*',
+        // Netcatty loads Cursor SDK through ESM dynamic import, so the duplicate
+        // CommonJS build and type metadata are not needed at runtime.
+        '!node_modules/@cursor/sdk/dist/cjs/**/*',
+        '!node_modules/@cursor/sdk/dist/**/*.d.ts',
+        '!node_modules/@cursor/sdk/dist/**/*.d.ts.map',
+        // sqlite3 rebuilds a native module for Electron; its upstream source
+        // tarball is build-time payload only.
+        '!node_modules/sqlite3/deps/**/*'
     ],
     asarUnpack: [
         'node_modules/node-pty/**/*',
@@ -69,6 +123,8 @@ module.exports = {
         'node_modules/cpu-features/**/*',
         'node_modules/@vscode/windows-process-tree/**/*',
         'node_modules/@anthropic-ai/claude-agent-sdk/**/*',
+        'node_modules/@cursor/sdk-*/**/*',
+        'node_modules/sqlite3/**/*',
         'node_modules/@modelcontextprotocol/sdk/**/*',
         'lib/**/*.cjs',
         'lib/**/*.json',

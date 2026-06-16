@@ -24,6 +24,7 @@ const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const fileWatcherBridge = require("./fileWatcherBridge.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
+const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const {
@@ -771,9 +772,16 @@ async function openSftpForSession(_event, payload) {
   if (!sessionId) throw new Error("sessionId is required");
 
   throwIfAborted(payload?.abortSignal);
-  const { sshClient } = ensureRemoteSftpSupport(sessionId);
+  const { session, sshClient } = ensureRemoteSftpSupport(sessionId);
   const sftpId = `${sessionId}-sftp-${randomUUID()}`;
-  const client = createSessionBackedSftpClient(sessionId, sshClient);
+  const refHolder = {};
+  if (session.connRef && typeof acquireConnectionRef === "function") {
+    acquireConnectionRef(refHolder, session.connRef);
+  }
+  const client = createSessionBackedSftpClient(sessionId, sshClient, {
+    refHolder,
+    sourceSessionId: sessionId,
+  });
   try {
     await requireSftpChannel(client, {
       signal: payload?.abortSignal,
@@ -881,6 +889,7 @@ const openConnectionApi = createOpenConnectionApi({
   get sessions() { return sessions; },
   get electronModule() { return electronModule; },
   jumpConnectionsMap, SftpClient, SSHClient, NetcattyAgent, keyboardInteractiveHandler, passphraseHandler,
+  hostKeyVerifier,
   fs, path, net, Buffer, process, console, setTimeout, clearTimeout,
   SFTPWrapper, createProxySocket, buildSftpAlgorithms, getAvailableAgentSocket,
   preparePrivateKeyForAuth, loadFirstIdentityFileForAuth, findAllDefaultPrivateKeysFromHelper,
@@ -928,6 +937,7 @@ const {
  */
 function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:sftp:open", openSftp);
+  ipcMain.handle("netcatty:sftp:openForSession", openSftpForSession);
   ipcMain.handle("netcatty:sftp:list", listSftp);
   ipcMain.handle("netcatty:sftp:read", readSftp);
   ipcMain.handle("netcatty:sftp:readBinary", readSftpBinary);

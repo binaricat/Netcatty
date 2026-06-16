@@ -121,7 +121,19 @@ const SIDE_PANEL_CTX_KEYS = [
   'mountedSftpTabIds',
   'mountedAiTabIds',
   'scriptsMountedTabIds',
+  'systemMountedTabIds',
   'themeMountedTabIds',
+  'activeTerminalSessionForSystem',
+  'activeSystemSessionHost',
+  'focusedHost',
+  'historySessionId',
+  'remoteHistory',
+  'shellHistory',
+  'handleHistoryPaste',
+  'handleHistoryRun',
+  'handleOpenHistory',
+  'HistorySidePanel',
+  'History',
   'sidePanelWidth',
   'sidePanelPosition',
   'sidePanelOpenTabs',
@@ -136,6 +148,8 @@ const SIDE_PANEL_CTX_KEYS = [
   'keys',
   'identities',
   'updateHosts',
+  'updateSnippets',
+  'updateSnippetPackages',
   'sftpDefaultViewMode',
   'sftpInitialLocationForTab',
   'sftpPendingUploadsForTab',
@@ -184,6 +198,7 @@ const SIDE_PANEL_CTX_KEYS = [
   'handleOpenScripts',
   'handleOpenTheme',
   'handleOpenAI',
+  'handleOpenSystem',
   'handleCloseSidePanel',
   'setSidePanelPosition',
   'handleSftpInitialLocationApplied',
@@ -226,6 +241,7 @@ const WORKSPACE_CTX_KEYS = [
   'customAccent',
   'terminalSettings',
   'hotkeyScheme',
+  'disableTerminalFontZoom',
   'keyBindings',
   'resizing',
   'isComposeBarOpen',
@@ -236,6 +252,8 @@ const WORKSPACE_CTX_KEYS = [
   'handleOpenSftp',
   'handleTerminalCwdChange',
   'handleOpenScripts',
+  'handleOpenHistory',
+  'handleOpenSystem',
   'handleOpenTheme',
   'handleCloseSession',
   'handleStatusChange',
@@ -255,10 +273,22 @@ const WORKSPACE_CTX_KEYS = [
   'handleAddSelectionToAI',
   'activeResizers',
   'activeWorkspace',
+  'composeBarThemeColors',
   'findSplitNode',
+  'focusedSessionId',
+  'handleComposeSend',
+  'handleSnippetFromPanel',
+  'refocusTerminalSession',
+  'setIsComposeBarOpen',
+  'TerminalComposeBar',
   'setResizing',
   'Array',
   'cn',
+  'onStartSessionRename',
+  'onRemoveSessionFromWorkspace',
+  'onReorderTabs',
+  'onStartSessionDrag',
+  'onEndSessionDrag',
 ] as const;
 
 export function terminalLayerSidePanelCtxEqual(prev: Ctx, next: Ctx): boolean {
@@ -312,6 +342,11 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 't')
     && eq(prev, next, 'onReorderWorkspaceSessions')
     && eq(prev, next, 'onRequestAddToWorkspace')
+    && eq(prev, next, 'handleCloseSession')
+    && eq(prev, next, 'onCopySession')
+    && eq(prev, next, 'onCopySessionToNewWindow')
+    && eq(prev, next, 'onRemoveSessionFromWorkspace')
     && eq(prev, next, 'onSetWorkspaceFocusedSession')
-    && eq(prev, next, 'onToggleWorkspaceViewMode');
+    && eq(prev, next, 'onToggleWorkspaceViewMode')
+    && eq(prev, next, 'onSubmitSessionRename');
 }

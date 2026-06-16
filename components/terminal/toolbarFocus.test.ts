@@ -62,3 +62,18 @@ test("allows native focus for contenteditable regions", () => {
 
   assert.equal(shouldPreserveTerminalFocusOnMouseDown(editableTarget as unknown as EventTarget), false);
 });
+
+test("allows native drag start from the terminal detach drag handle", () => {
+  const dragHandleTarget = {
+    tagName: "span",
+    isContentEditable: false,
+    closest(selector: string) {
+      return selector.includes("data-terminal-detach-drag-handle") ? { tagName: "DIV" } : null;
+    },
+    getAttribute() {
+      return null;
+    },
+  };
+
+  assert.equal(shouldPreserveTerminalFocusOnMouseDown(dragHandleTarget as unknown as EventTarget), false);
+});

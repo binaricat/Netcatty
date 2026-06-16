@@ -12,6 +12,7 @@ import {
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_HOTKEY_RECORDING,
   STORAGE_KEY_HOTKEY_SCHEME,
+  STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
   STORAGE_KEY_SESSION_LOGS_DIR,
   STORAGE_KEY_SESSION_LOGS_ENABLED,
   STORAGE_KEY_SESSION_LOGS_FORMAT,
@@ -73,6 +74,7 @@ interface UseSettingsIpcSyncParams {
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
   setShowHostTreeSidebarState: Dispatch<SetStateAction<boolean>>;
+  setDisableTerminalFontZoomState: Dispatch<SetStateAction<boolean>>;
   setSftpTransferConcurrencyState: Dispatch<SetStateAction<number>>;
 }
 
@@ -105,6 +107,7 @@ export function useSettingsIpcSync({
   setSftpDefaultViewMode,
   setWorkspaceFocusStyleState,
   setShowHostTreeSidebarState,
+  setDisableTerminalFontZoomState,
   setSftpTransferConcurrencyState,
 }: UseSettingsIpcSyncParams) {
   // Listen for settings changes from other windows via IPC
@@ -228,6 +231,9 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR && typeof value === 'boolean') {
         setShowHostTreeSidebarState((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM && typeof value === 'boolean') {
+        setDisableTerminalFontZoomState((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY && typeof value === 'number') {
         setSftpTransferConcurrencyState((prev) => (prev === value ? prev : value));
       }
@@ -258,6 +264,7 @@ export function useSettingsIpcSync({
     setSftpFollowTerminalCwd,
     setSftpDefaultViewMode,
     setShowHostTreeSidebarState,
+    setDisableTerminalFontZoomState,
     setSftpTransferConcurrencyState,
     setTerminalFontFamilyId,
     setTerminalFontSize,

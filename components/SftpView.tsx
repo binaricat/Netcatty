@@ -24,7 +24,7 @@ import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
-import { Host, Identity, ProxyProfile, SSHKey, TransferTask } from "../types";
+import { Host, Identity, KnownHost, ProxyProfile, SSHKey, TransferTask } from "../types";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { materializeHostProxyProfile } from "../domain/proxyProfiles";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
@@ -54,9 +54,11 @@ interface SftpViewProps {
   hosts: Host[];
   keys: SSHKey[];
   identities: Identity[];
+  knownHosts?: KnownHost[];
   groupConfigs?: import('../domain/models').GroupConfig[];
   proxyProfiles?: ProxyProfile[];
   updateHosts: (hosts: Host[]) => void;
+  onAddKnownHost?: (knownHost: KnownHost) => void;
   sftpDefaultViewMode: "list" | "tree";
   sftpDoubleClickBehavior: "open" | "transfer";
   sftpAutoSync: boolean;
@@ -73,9 +75,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   hosts,
   keys,
   identities,
+  knownHosts = [],
   groupConfigs = [],
   proxyProfiles = [],
   updateHosts,
+  onAddKnownHost,
   sftpDefaultViewMode,
   sftpDoubleClickBehavior,
   sftpAutoSync,
@@ -110,7 +114,9 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     useCompressedUpload: sftpUseCompressedUpload,
     defaultShowHiddenFiles: sftpShowHiddenFiles,
     terminalSettings,
-  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings]);
+    knownHosts,
+    onAddKnownHost,
+  }), [fileWatchHandlers, sftpUseCompressedUpload, sftpShowHiddenFiles, terminalSettings, knownHosts, onAddKnownHost]);
 
   // Pre-resolve group defaults so SFTP connections inherit group config
   const effectiveHosts = useMemo(() => {
@@ -374,9 +380,11 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     handleReorderTabsRight,
     handleMoveTabFromLeftToRight,
     handleMoveTabFromRightToLeft,
+    handleDuplicateTabLeft,
+    handleDuplicateTabRight,
     handleHostSelectLeft,
     handleHostSelectRight,
-  } = useSftpViewTabs({ sftp, sftpRef });
+  } = useSftpViewTabs({ sftp, sftpRef, hosts: effectiveHosts });
 
   const handleAddTabLeftWithFocus = useCallback(() => {
     const tabId = handleAddTabLeft();
@@ -397,6 +405,26 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     handleSelectTabRight(tabId);
     handlePaneFocus("right", tabId);
   }, [handlePaneFocus, handleSelectTabRight]);
+
+  const handleDuplicateTabLeftWithFocus = useCallback(
+    async (...args: Parameters<typeof handleDuplicateTabLeft>) => {
+      const tabId = await handleDuplicateTabLeft(...args);
+      if (tabId) {
+        handlePaneFocus("left", tabId);
+      }
+    },
+    [handleDuplicateTabLeft, handlePaneFocus],
+  );
+
+  const handleDuplicateTabRightWithFocus = useCallback(
+    async (...args: Parameters<typeof handleDuplicateTabRight>) => {
+      const tabId = await handleDuplicateTabRight(...args);
+      if (tabId) {
+        handlePaneFocus("right", tabId);
+      }
+    },
+    [handleDuplicateTabRight, handlePaneFocus],
+  );
 
   return (
     <SftpContextProvider
@@ -444,6 +472,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                 onAddTab={handleAddTabLeftWithFocus}
                 onReorderTabs={handleReorderTabsLeft}
                 onMoveTabToOtherSide={handleMoveTabFromRightToLeft}
+                onDuplicateTab={handleDuplicateTabLeftWithFocus}
               />
             )}
             <div className="relative flex-1 min-h-0">
@@ -504,6 +533,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
                 onAddTab={handleAddTabRightWithFocus}
                 onReorderTabs={handleReorderTabsRight}
                 onMoveTabToOtherSide={handleMoveTabFromLeftToRight}
+                onDuplicateTab={handleDuplicateTabRightWithFocus}
               />
             )}
             <div className="relative flex-1 min-h-0">
@@ -588,9 +618,11 @@ const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): boolean =>
   prev.hosts === next.hosts &&
   prev.keys === next.keys &&
   prev.identities === next.identities &&
+  prev.knownHosts === next.knownHosts &&
   prev.groupConfigs === next.groupConfigs &&
   prev.proxyProfiles === next.proxyProfiles &&
   prev.sftpDefaultViewMode === next.sftpDefaultViewMode &&
+  prev.onAddKnownHost === next.onAddKnownHost &&
   prev.sftpDoubleClickBehavior === next.sftpDoubleClickBehavior &&
   prev.sftpAutoSync === next.sftpAutoSync &&
   prev.sftpShowHiddenFiles === next.sftpShowHiddenFiles &&

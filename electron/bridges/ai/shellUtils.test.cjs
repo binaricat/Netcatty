@@ -13,6 +13,11 @@ const {
   resolveWindowsShimToNativeExe,
   resolveClaudeCodeExecutableForSdk,
   resolveCodexExecutableForSdk,
+  resolveCodebuddyExecutableForSdk,
+  parseRegQueryPath,
+  expandWindowsEnvRefs,
+  mergeWindowsPath,
+  readWindowsRegistryPath,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
 const fs = require("node:fs");
@@ -340,6 +345,127 @@ test("addCodexExecutableEnvForSdk prepends bundled Codex path dir on Windows", (
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+function writeCodebuddyWin32BinLayout(dir) {
+  const binJs = path.join(dir, "node_modules", "@tencent-ai", "codebuddy-code", "bin", "codebuddy");
+  fs.mkdirSync(path.dirname(binJs), { recursive: true });
+  fs.writeFileSync(binJs, "#!/usr/bin/env node\n", "utf8");
+  return binJs;
+}
+
+test("resolveCodebuddyExecutableForSdk leaves non-Windows CodeBuddy paths unchanged", () => {
+  assert.equal(
+    resolveCodebuddyExecutableForSdk("/usr/local/bin/codebuddy", "darwin"),
+    "/usr/local/bin/codebuddy",
+  );
+});
+
+test("resolveCodebuddyExecutableForSdk maps Windows npm cmd shim to package bin/codebuddy", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codebuddy-shim-"));
+  try {
+    const shimPath = path.join(tmp, "codebuddy.cmd");
+    const binJs = writeCodebuddyWin32BinLayout(tmp);
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\nnode "%~dp0\\node_modules\\@tencent-ai\\codebuddy-code\\bin\\codebuddy" %*\r\n',
+      "utf8",
+    );
+
+    assert.equal(resolveCodebuddyExecutableForSdk(shimPath, "win32"), binJs);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodebuddyExecutableForSdk maps extensionless Windows shim to package bin/codebuddy", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codebuddy-noext-"));
+  try {
+    const shimPath = path.join(tmp, "codebuddy");
+    const binJs = writeCodebuddyWin32BinLayout(tmp);
+    fs.writeFileSync(shimPath, "#!/bin/sh\n", "utf8");
+
+    assert.equal(resolveCodebuddyExecutableForSdk(shimPath, "win32"), binJs);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodebuddyExecutableForSdk returns null for Windows cmd shim when package JS is missing", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codebuddy-missing-"));
+  try {
+    const shimPath = path.join(tmp, "codebuddy.cmd");
+    fs.writeFileSync(shimPath, "@ECHO off\r\nnode foo %*\r\n", "utf8");
+
+    assert.equal(resolveCodebuddyExecutableForSdk(shimPath, "win32"), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodebuddyExecutableForSdk passes through a native exe path", () => {
+  assert.equal(
+    resolveCodebuddyExecutableForSdk("C:\\tools\\codebuddy.exe", "win32"),
+    "C:\\tools\\codebuddy.exe",
+  );
+});
+
+test("parseRegQueryPath extracts the Path value from reg query output", () => {
+  const out = parseRegQueryPath(
+    "\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    C:\\Users\\me\\AppData\\Roaming\\npm;C:\\tools\r\n",
+  );
+  assert.equal(out, "C:\\Users\\me\\AppData\\Roaming\\npm;C:\\tools");
+});
+
+test("parseRegQueryPath handles REG_SZ and missing value", () => {
+  assert.equal(parseRegQueryPath("    Path    REG_SZ    C:\\bin"), "C:\\bin");
+  assert.equal(parseRegQueryPath("HKEY_CURRENT_USER\\Environment\r\n    Temp    REG_SZ    C:\\Temp"), "");
+});
+
+test("expandWindowsEnvRefs expands %VAR% case-insensitively", () => {
+  assert.equal(
+    expandWindowsEnvRefs("%AppData%\\npm;%Other%", { APPDATA: "C:\\Users\\me\\AppData\\Roaming" }),
+    "C:\\Users\\me\\AppData\\Roaming\\npm;%Other%",
+  );
+});
+
+test("mergeWindowsPath dedupes case-insensitively and trims trailing slashes", () => {
+  const out = mergeWindowsPath(
+    "C:\\Windows\\System32;C:\\tools\\",
+    "c:\\windows\\system32;C:\\tools;C:\\new",
+  );
+  assert.equal(out, "C:\\Windows\\System32;C:\\tools\\;C:\\new");
+});
+
+test("mergeWindowsPath keeps refreshed Windows PATH entries ahead of stale process entries", () => {
+  const out = mergeWindowsPath(
+    "C:\\new-codebuddy;C:\\Windows\\System32",
+    "C:\\Users\\me\\AppData\\Roaming\\npm",
+    "C:\\old-codebuddy;C:\\Windows\\System32",
+  );
+  assert.equal(out, "C:\\new-codebuddy;C:\\Windows\\System32;C:\\Users\\me\\AppData\\Roaming\\npm;C:\\old-codebuddy");
+});
+
+test("readWindowsRegistryPath merges HKCU and HKLM and expands refs", async () => {
+  const exec = async (cmd, args) => {
+    assert.equal(cmd, "reg");
+    const hive = args[1];
+    if (hive === "HKCU\\Environment") {
+      return { stdout: "    Path    REG_EXPAND_SZ    %APPDATA%\\npm\r\n" };
+    }
+    return { stdout: "    Path    REG_EXPAND_SZ    C:\\Windows\\System32\r\n" };
+  };
+  const out = await readWindowsRegistryPath({ exec, env: { APPDATA: "C:\\Roaming" } });
+  assert.equal(out, "C:\\Roaming\\npm;C:\\Windows\\System32");
+});
+
+test("readWindowsRegistryPath tolerates a failing hive query", async () => {
+  const exec = async (cmd, args) => {
+    if (args[1] === "HKCU\\Environment") throw new Error("ERROR: cannot read");
+    return { stdout: "    Path    REG_SZ    C:\\tools\r\n" };
+  };
+  const out = await readWindowsRegistryPath({ exec, env: {} });
+  assert.equal(out, "C:\\tools");
 });
 
 test("tracks PowerShell idle prompt after SSH output", () => {

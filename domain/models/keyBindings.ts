@@ -197,6 +197,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'next-tab', action: 'nextTab', label: 'Next Tab', mac: '⌘ + Shift + ]', pc: 'Ctrl + Tab', category: 'tabs' },
   { id: 'prev-tab', action: 'prevTab', label: 'Previous Tab', mac: '⌘ + Shift + [', pc: 'Ctrl + Shift + Tab', category: 'tabs' },
   { id: 'close-tab', action: 'closeTab', label: 'Close Tab', mac: '⌘ + W', pc: 'Ctrl + W', category: 'tabs' },
+  { id: 'close-session', action: 'closeSession', label: 'Close Session Pane', mac: '⌘ + Shift + W', pc: 'Ctrl + Shift + W', category: 'tabs' },
   { id: 'new-tab', action: 'newTab', label: 'New Local Tab', mac: '⌘ + T', pc: 'Ctrl + T', category: 'tabs' },
 
   // Terminal Operations
@@ -214,6 +215,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'move-focus', action: 'moveFocus', label: 'Move focus between Split View panes', mac: '⌘ + ⌥ + arrows', pc: 'Ctrl + Alt + arrows', category: 'navigation' },
   { id: 'split-horizontal', action: 'splitHorizontal', label: 'Split Horizontal', mac: '⌘ + D', pc: 'Ctrl + Shift + D', category: 'navigation' },
   { id: 'split-vertical', action: 'splitVertical', label: 'Split Vertical', mac: '⌘ + Shift + D', pc: 'Ctrl + Shift + E', category: 'navigation' },
+  { id: 'toggle-pane-zoom', action: 'togglePaneZoom', label: 'Toggle Pane Zoom', mac: '⌘ + Shift + Enter', pc: 'Ctrl + Shift + Enter', category: 'navigation' },
 
   // App Features
   { id: 'open-hosts', action: 'openHosts', label: 'Open Hosts Page', mac: 'Disabled', pc: 'Disabled', category: 'app' },

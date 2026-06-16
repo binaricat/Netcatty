@@ -1,27 +1,32 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useMemo } from 'react';
 
 import { useActiveTabId } from '../state/activeTabStore';
 import type { EditorTab } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
-import { scheduleAfterInstantThemeSwitch } from '../state/useActiveChromeTheme';
-import { terminalHostTreeStore } from '../state/terminalHostTreeStore';
 import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
-import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
+import type { GroupConfig, Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import {
   isHostTreeWorkTabSurface,
   resolveWorkTabActiveHostId,
+  resolveWorkTabHostTreeTheme,
 } from './workTabSurface';
 
 interface AppHostTreeLayerProps {
   enabled: boolean;
   hosts: Host[];
   customGroups: string[];
+  groupConfigs: GroupConfig[];
   sessions: TerminalSession[];
   workspaces: Workspace[];
   editorTabs: readonly EditorTab[];
   logViews: readonly LogView[];
   orderedTabs: readonly string[];
-  resolvedPreviewTheme: TerminalTheme;
+  accentMode: 'theme' | 'custom';
+  currentTerminalTheme: TerminalTheme;
+  customAccent: string;
+  followAppTerminalTheme: boolean;
+  hostById: ReadonlyMap<string, Host>;
+  themeById: ReadonlyMap<string, TerminalTheme>;
   onConnect: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
 }
@@ -34,34 +39,26 @@ export function getAppHostTreeLayerStyle(surfaceVisible: boolean): React.CSSProp
   };
 }
 
-export function shouldAutoOpenHostTreeOnSurfaceChange({
-  enabled,
-  previousSurfaceVisible,
-  surfaceVisible,
-}: {
-  enabled: boolean;
-  previousSurfaceVisible: boolean;
-  surfaceVisible: boolean;
-}): boolean {
-  return enabled && surfaceVisible && !previousSurfaceVisible;
-}
-
 export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
   enabled,
   hosts,
   customGroups,
+  groupConfigs,
   sessions,
   workspaces,
   editorTabs,
   logViews,
   orderedTabs,
-  resolvedPreviewTheme,
+  accentMode,
+  currentTerminalTheme,
+  customAccent,
+  followAppTerminalTheme,
+  hostById,
+  themeById,
   onConnect,
   onCreateLocalTerminal,
 }) => {
   const activeTabId = useActiveTabId();
-  const previousSurfaceVisibleRef = useRef(false);
-  const cancelAutoOpenRef = useRef<(() => void) | null>(null);
   const sessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const workspaceIds = useMemo(() => new Set(workspaces.map((workspace) => workspace.id)), [workspaces]);
   const logViewIds = useMemo(() => new Set(logViews.map((logView) => logView.id)), [logViews]);
@@ -73,28 +70,6 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
     sessionIds,
     workspaceIds,
   });
-  useEffect(() => {
-    cancelAutoOpenRef.current?.();
-    cancelAutoOpenRef.current = null;
-
-    const previousSurfaceVisible = previousSurfaceVisibleRef.current;
-    previousSurfaceVisibleRef.current = surfaceVisible;
-    if (shouldAutoOpenHostTreeOnSurfaceChange({
-      enabled,
-      previousSurfaceVisible,
-      surfaceVisible,
-    })) {
-      cancelAutoOpenRef.current = scheduleAfterInstantThemeSwitch(() => {
-        cancelAutoOpenRef.current = null;
-        terminalHostTreeStore.setIsOpen(true);
-      });
-    }
-
-    return () => {
-      cancelAutoOpenRef.current?.();
-      cancelAutoOpenRef.current = null;
-    };
-  }, [enabled, surfaceVisible]);
 
   const activeHostId = useMemo(() => resolveWorkTabActiveHostId({
     activeTabId,
@@ -102,6 +77,24 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
     sessions,
     workspaces,
   }), [activeTabId, editorTabs, sessions, workspaces]);
+
+  const hostTreeTheme = useMemo(() => resolveWorkTabHostTreeTheme({
+    activeHostId,
+    accentMode,
+    currentTerminalTheme,
+    customAccent,
+    followAppTerminalTheme,
+    hostById,
+    themeById,
+  }), [
+    activeHostId,
+    accentMode,
+    currentTerminalTheme,
+    customAccent,
+    followAppTerminalTheme,
+    hostById,
+    themeById,
+  ]);
 
   return (
     <div
@@ -114,7 +107,8 @@ export const AppHostTreeLayer: React.FC<AppHostTreeLayerProps> = ({
         surfaceVisible={surfaceVisible}
         hosts={hosts}
         customGroups={customGroups}
-        resolvedPreviewTheme={resolvedPreviewTheme}
+        groupConfigs={groupConfigs}
+        resolvedPreviewTheme={hostTreeTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}
         onCreateLocalTerminal={onCreateLocalTerminal}

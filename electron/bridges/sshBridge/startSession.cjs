@@ -38,6 +38,9 @@ function createStartSessionApi(ctx) {
         hostname: options.host || options.hostname || '',
         username: options.username || '',
         label: options.label || '',
+        systemManagerSudoPassword: typeof options.sudoAutofillPassword === 'string' && options.sudoAutofillPassword.length > 0
+          ? options.sudoAutofillPassword
+          : undefined,
         lastIdlePrompt: '',
         lastIdlePromptAt: 0,
         _promptTrackTail: '',

@@ -47,8 +47,12 @@ export interface CodexLoginSession {
 
 export interface AgentPathInfo {
   path: string | null;
+  binPath?: string | null;
   version: string | null;
   available: boolean;
+  installed?: boolean;
+  authenticated?: boolean;
+  authSource?: string | null;
 }
 
 export interface UserSkillStatusItem {
@@ -99,12 +103,14 @@ export interface FetchBridge {
 }
 
 export interface NetcattyAiBridge {
-  aiCodexGetIntegration?: (options?: { refreshShellEnv?: boolean }) => Promise<CodexIntegrationStatus>;
+  aiDiscoverAgents?: (options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<Array<AgentPathInfo & { command: string }>>;
+  aiPrewarmShellEnv?: () => Promise<{ ok: boolean; error?: string }>;
+  aiCodexGetIntegration?: (options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean }) => Promise<CodexIntegrationStatus>;
   aiCodexStartLogin?: () => Promise<{ ok: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexGetLoginSession?: (sessionId: string) => Promise<{ ok: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexCancelLogin?: (sessionId: string) => Promise<{ ok: boolean; found?: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexLogout?: () => Promise<{ ok: boolean; state?: CodexIntegrationState; isConnected?: boolean; rawOutput?: string; logoutOutput?: string; error?: string }>;
-  aiResolveCli?: (params: { command: string; customPath?: string }) => Promise<AgentPathInfo>;
+  aiResolveCli?: (params: { command: string; customPath?: string; refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<AgentPathInfo>;
   aiUserSkillsGetStatus?: () => Promise<UserSkillsStatusResult>;
   aiUserSkillsOpenFolder?: () => Promise<UserSkillsStatusResult>;
   publicMcpGetStatus?: () => Promise<PublicMcpStatus>;
@@ -186,6 +192,18 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     icon: "copilot",
     sdkBackend: "copilot",
   },
+  cursor: {
+    name: "Cursor",
+    args: ["{prompt}"],
+    icon: "cursor",
+    sdkBackend: "cursor",
+  },
+  codebuddy: {
+    name: "CodeBuddy Code",
+    args: [],
+    icon: "codebuddy",
+    sdkBackend: "codebuddy",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -212,13 +230,14 @@ export function normalizeCodexBridgeError(error: unknown): string {
 // Provider icon helper
 // ---------------------------------------------------------------------------
 
-export type SettingsIconId = AIProviderId | "claude" | "copilot";
+export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy";
 
 export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   openai: "/ai/providers/openai.svg",
   anthropic: "/ai/providers/anthropic.svg",
   claude: "/ai/agents/claude.svg",
   copilot: "/ai/agents/copilot.svg",
+  codebuddy: "/ai/agents/codebuddy.svg",
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
@@ -236,6 +255,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   anthropic: "bg-orange-600",
   claude: "bg-orange-600",
   copilot: "border border-zinc-300 bg-white",
+  codebuddy: "bg-indigo-600",
   google: "bg-blue-600",
   ollama: "bg-purple-600",
   openrouter: "bg-pink-600",

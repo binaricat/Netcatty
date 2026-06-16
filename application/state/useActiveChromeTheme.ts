@@ -208,10 +208,17 @@ function applyActiveChromeTheme(theme: TerminalTheme) {
     }
     style.textContent = getChromeCss(theme);
     root.dataset.activeChromeTheme = themeFingerprint(theme);
+    refreshActiveChromeThemeSurfaces(theme);
+  }, { mode: "instant" });
+}
+
+function refreshActiveChromeThemeSurfaces(theme: TerminalTheme) {
+  const targetClass = theme.type === "dark" ? "dark" : "light";
+  if (typeof window !== "undefined") {
     netcattyBridge.get()?.setTheme?.(targetClass);
     netcattyBridge.get()?.setBackgroundColor?.(theme.colors.background);
-    applyTopTabsChromeThemeVars(theme);
-  });
+  }
+  applyTopTabsChromeThemeVars(theme);
 }
 
 export function syncActiveChromeTheme(
@@ -220,7 +227,14 @@ export function syncActiveChromeTheme(
 ): void {
   const nextFingerprint = activeTheme ? themeFingerprint(activeTheme) : null;
   const appliedFingerprint = getAppliedChromeFingerprint();
-  if (nextFingerprint === appliedFingerprint) return;
+  if (nextFingerprint === appliedFingerprint) {
+    if (activeTheme) {
+      refreshActiveChromeThemeSurfaces(activeTheme);
+    } else {
+      clearTopTabsChromeThemeVars();
+    }
+    return;
+  }
 
   if (activeTheme) {
     applyActiveChromeTheme(activeTheme);
@@ -231,7 +245,7 @@ export function syncActiveChromeTheme(
   runThemeTransition(() => {
     removeActiveChromeTheme();
     applyAppTheme();
-  });
+  }, { mode: "instant" });
 }
 
 export function useActiveChromeTheme({

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { FolderTree, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
+import { Activity, FolderTree, History, MessageSquare, Palette, PanelLeft, PanelRight, X, Zap } from 'lucide-react';
+import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
 import React, { memo, useCallback, useState } from 'react';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
@@ -36,14 +37,21 @@ function TerminalLayerSidePanelShell({ ctx }: { ctx: SidePanelContext }) {
     mountedAiTabIds,
     mountedSftpTabIds,
     scriptsMountedTabIds,
+    systemMountedTabIds,
     themeMountedTabIds,
+    sidePanelOpenTabs,
   } = ctx;
+
+  const anyHistoryOpen = sidePanelOpenTabs instanceof Map
+    && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('history');
 
   if (
     mountedSftpTabIds.length === 0
     && mountedAiTabIds.length === 0
     && scriptsMountedTabIds.length === 0
+    && systemMountedTabIds.length === 0
     && themeMountedTabIds.length === 0
+    && !anyHistoryOpen
   ) {
     return null;
   }
@@ -74,10 +82,15 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     focusedFontSizeOverridden,
     focusedFontWeight,
     focusedFontWeightOverridden,
+    focusedHost,
     focusedThemeOverridden,
     followAppTerminalTheme,
     getTerminalCwd,
     handleCloseSidePanel,
+    handleHistoryPaste,
+    handleHistoryRun,
+    handleAddKnownHost,
+    handleOpenHistory,
     handleFontFamilyChangeForFocusedSession,
     handleFontFamilyResetForFocusedSession,
     handleFontSizeChangeForFocusedSession,
@@ -86,7 +99,10 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleFontWeightResetForFocusedSession,
     handleOpenAI,
     handleOpenScripts,
+    handleOpenSystem,
     handleOpenTheme,
+    activeTerminalSessionForSystem,
+    activeSystemSessionHost,
     handlePendingTerminalSelectionConsumed,
     handleSftpInitialLocationApplied,
     handleSnippetFromPanel,
@@ -94,18 +110,24 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     handleThemeResetForFocusedSession,
     handleToggleSftpFromBar,
     handlePendingUploadHandled,
+    historySessionId,
+    HistorySidePanel,
     hosts,
     hotkeyScheme,
     identities,
     keyBindings,
     keys,
+    knownHosts,
     mountedAiTabIds,
     mountedSftpTabIds,
     scriptsMountedTabIds,
+    systemMountedTabIds,
     themeMountedTabIds,
     pendingTerminalSelectionForAI,
     previewedOrVisibleThemeId,
     refocusActiveTerminalSession,
+    remoteHistory,
+    shellHistory,
     resolveAIExecutorContext,
     resolvedPreviewTheme,
     ScriptsSidePanel,
@@ -135,6 +157,8 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
     terminalTheme,
     ThemeSidePanel,
     updateHosts,
+    updateSnippetPackages,
+    updateSnippets,
     validAIScopeTargetIds,
   } = ctx;
 
@@ -293,6 +317,30 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <Btn
                     variant="ghost"
                     size="icon"
+                    data-tab-id="history"
+                    data-tab-type="sidepanel"
+                    data-state={activeSidePanelTab === 'history' ? 'active' : 'inactive'}
+                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{
+                      backgroundColor: activeSidePanelTab === 'history'
+                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                        : 'transparent',
+                      color: activeSidePanelTab === 'history'
+                        ? 'var(--terminal-sidepanel-fg)'
+                        : 'var(--terminal-sidepanel-muted)',
+                    }}
+                    onClick={handleOpenHistory}
+                  >
+                    <History size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent>{t('terminal.layer.history')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
                     data-tab-id="theme"
                     data-tab-type="sidepanel"
                     data-state={activeSidePanelTab === 'theme' ? 'active' : 'inactive'}
@@ -311,6 +359,30 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   </Btn>
                 </TooltipTrigger>
                 <TooltipContent>{t('terminal.layer.theme')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
+                    data-tab-id="system"
+                    data-tab-type="sidepanel"
+                    data-state={activeSidePanelTab === 'system' ? 'active' : 'inactive'}
+                    className="netcatty-tab h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{
+                      backgroundColor: activeSidePanelTab === 'system'
+                        ? 'color-mix(in srgb, var(--terminal-sidepanel-accent) 24%, transparent)'
+                        : 'transparent',
+                      color: activeSidePanelTab === 'system'
+                        ? 'var(--terminal-sidepanel-fg)'
+                        : 'var(--terminal-sidepanel-muted)',
+                    }}
+                    onClick={handleOpenSystem}
+                  >
+                    <Activity size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent>{t('terminal.layer.system')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -390,7 +462,9 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   writableHosts={hosts}
                   keys={keys}
                   identities={identities}
+                  knownHosts={knownHosts}
                   updateHosts={updateHosts}
+                  onAddKnownHost={handleAddKnownHost}
                   sftpDefaultViewMode={sftpDefaultViewMode}
                   activeHost={panelActiveHost}
                   activeSessionId={isVisibleSftpPanel ? activeTerminalSessionIdForSftp : null}
@@ -414,12 +488,32 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   editorWordWrap={editorWordWrap}
                   setEditorWordWrap={setEditorWordWrap}
                   onGetTerminalCwd={getTerminalCwd}
-                  activeTerminalCwd={activeTerminalCwd}
+                  activeTerminalCwd={isVisibleSftpPanel && sftpFollowTerminalCwd ? activeTerminalCwd : null}
                   sftpFollowTerminalCwd={sftpFollowTerminalCwd}
                   onSftpFollowTerminalCwdChange={setSftpFollowTerminalCwd}
                   onRequestTerminalFocus={refocusActiveTerminalSession}
                   terminalSettings={terminalSettings}
                 />
+                </div>
+              );
+            })}
+
+            {systemMountedTabIds.map((tabId: string) => {
+              const isVisibleSystemPanel = activeTabId === tabId && activeSidePanelTab === 'system';
+              return (
+                <div
+                  key={`system-${tabId}`}
+                  className={cn('absolute inset-0 z-10', !isVisibleSystemPanel && 'hidden')}
+                >
+                  <SystemManagerSidePanel
+                    key={activeTerminalSessionForSystem?.id ?? 'system-none'}
+                    session={activeTerminalSessionForSystem ?? null}
+                    sessionHost={activeSystemSessionHost ?? null}
+                    showWorkspaceHostHeader={isVisibleSystemPanel && !!activeWorkspace}
+                    isVisible={isVisibleSystemPanel}
+                    terminalSettings={terminalSettings}
+                    snippets={snippets}
+                  />
                 </div>
               );
             })}
@@ -434,12 +528,29 @@ function TerminalLayerSidePanelTabBody({ ctx }: { ctx: SidePanelContext }) {
                   <ScriptsSidePanel
                     snippets={snippets}
                     packages={snippetPackages}
+                    onSnippetsChange={updateSnippets}
+                    onPackagesChange={updateSnippetPackages}
                     onSnippetClick={handleSnippetFromPanel}
                     isVisible={isVisibleScriptsPanel}
                   />
                 </div>
               );
             })}
+
+            {activeSidePanelTab === 'history' && (
+              <div className="absolute inset-0 z-10">
+                <HistorySidePanel
+                  focusedHost={focusedHost}
+                  focusedSessionId={historySessionId}
+                  state={remoteHistory.getState(focusedHost?.id, historySessionId)}
+                  globalEntries={shellHistory}
+                  onFetch={remoteHistory.fetch}
+                  onPasteToTerminal={handleHistoryPaste}
+                  onRunInTerminal={handleHistoryRun}
+                  isVisible
+                />
+              </div>
+            )}
 
             {themeMountedTabIds.map((tabId: string) => {
               const isVisibleThemePanel = activeTabId === tabId && activeSidePanelTab === 'theme';

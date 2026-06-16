@@ -129,6 +129,10 @@ function registerCattyExecHandlers(ctx) {
 
       // Serial port: raw command execution (no shell wrapping)
       if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+          releaseLock();
+          return { ok: false, error: "Serial file transfer is already in progress" };
+        }
         const { execViaRawPty } = require("./ai/ptyExec.cjs");
         const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return withLockRelease(() => execViaRawPty(session.serialPort, command, {

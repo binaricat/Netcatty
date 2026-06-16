@@ -14,6 +14,7 @@ interface IdentityCardProps {
     identity: Identity;
     viewMode: 'grid' | 'list';
     isSelected: boolean;
+    reorderProps?: React.HTMLAttributes<HTMLDivElement>;
     onClick: () => void;
 }
 
@@ -21,6 +22,7 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({
     identity,
     viewMode,
     isSelected,
+    reorderProps,
     onClick,
 }) => {
     const { t } = useI18n();
@@ -43,12 +45,15 @@ export const IdentityCard: React.FC<IdentityCardProps> = ({
 
     return (
         <div
+            {...reorderProps}
             className={cn(
+                reorderProps && "vault-drop-indicator-row",
                 "group cursor-pointer",
                 viewMode === 'grid'
                     ? "soft-card elevate rounded-xl h-[68px] px-3 py-2"
                     : "h-14 px-3 py-2 hover:bg-secondary/60 rounded-lg transition-colors",
-                isSelected && "ring-2 ring-primary"
+                isSelected && "ring-2 ring-primary",
+                reorderProps?.className,
             )}
             onClick={onClick}
         >

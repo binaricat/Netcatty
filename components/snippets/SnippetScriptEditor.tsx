@@ -19,14 +19,25 @@ const DEFAULT_HEIGHT = 120;
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 520;
 
-function clampHeight(height: number): number {
-  return Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, height));
+function clampHeight(height: number, minHeight = MIN_HEIGHT, maxHeight = MAX_HEIGHT): number {
+  return Math.max(minHeight, Math.min(maxHeight, height));
 }
 
-function readStoredHeight(): number {
+function readStoredHeight({
+  defaultHeight,
+  minHeight,
+  maxHeight,
+  persistHeight,
+}: {
+  defaultHeight: number;
+  minHeight: number;
+  maxHeight: number;
+  persistHeight: boolean;
+}): number {
+  if (!persistHeight) return clampHeight(defaultHeight, minHeight, maxHeight);
   const stored = localStorageAdapter.readNumber(STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT);
-  if (stored === null) return DEFAULT_HEIGHT;
-  return clampHeight(stored);
+  if (stored === null) return clampHeight(defaultHeight, minHeight, maxHeight);
+  return clampHeight(stored, minHeight, maxHeight);
 }
 
 const editorFillClass =
@@ -39,6 +50,10 @@ export interface SnippetScriptEditorProps {
   id?: string;
   /** Shown on the same row as the expand button (e.g. "Script *"). */
   label?: string;
+  defaultHeight?: number;
+  minHeight?: number;
+  maxHeight?: number;
+  persistHeight?: boolean;
 }
 
 export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
@@ -47,9 +62,18 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
   placeholder,
   id,
   label,
+  defaultHeight = DEFAULT_HEIGHT,
+  minHeight = MIN_HEIGHT,
+  maxHeight = MAX_HEIGHT,
+  persistHeight = true,
 }) => {
   const { t } = useI18n();
-  const [height, setHeight] = useState(readStoredHeight);
+  const [height, setHeight] = useState(() => readStoredHeight({
+    defaultHeight,
+    minHeight,
+    maxHeight,
+    persistHeight,
+  }));
   const [modalOpen, setModalOpen] = useState(false);
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const heightRef = useRef(height);
@@ -66,10 +90,10 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current) return;
       const delta = e.clientY - dragRef.current.startY;
-      setHeight(clampHeight(dragRef.current.startHeight + delta));
+      setHeight(clampHeight(dragRef.current.startHeight + delta, minHeight, maxHeight));
     };
     const onUp = () => {
-      if (dragRef.current) {
+      if (dragRef.current && persistHeight) {
         localStorageAdapter.writeNumber(
           STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT,
           heightRef.current,
@@ -87,7 +111,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, []);
+  }, [maxHeight, minHeight, persistHeight]);
 
   return (
     <>

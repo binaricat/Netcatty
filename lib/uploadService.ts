@@ -9,6 +9,12 @@
 import { extractDropEntries, DropEntry, getPathForFile } from "./sftpFileUtils";
 import { logger } from "./logger";
 import { uploadFoldersCompressed } from "./uploadCompressed";
+import {
+  canReplaceSftpConflict,
+  describeSftpExistingKind,
+  describeSftpIncomingKind,
+  getSftpConflictTypeKey,
+} from "../domain/sftpConflict";
 
 // ============================================================================
 // Types
@@ -397,22 +403,37 @@ async function uploadEntries(
   if (resolveConflict) {
     const resolved: DropEntry[] = [];
     let stop = false;
-    const groups = Array.from(rootFolders.entries());
-
-    for (const [key, groupEntries] of groups) {
-      if (stop || controller?.isCancelled()) break;
-
+    const groupInfos = await Promise.all(Array.from(rootFolders.entries()).map(async ([key, groupEntries]) => {
       const isStandaloneFile = key.startsWith("__file__");
       const rootName = isStandaloneFile ? key.slice("__file__".length) : key;
       const isDirectory = !isStandaloneFile;
       const rootTargetPath = joinPath(targetPath, rootName);
       const existing = await statTarget(rootTargetPath);
+      return {
+        groupEntries,
+        rootName,
+        isDirectory,
+        rootTargetPath,
+        existing,
+      };
+    }));
+
+    const conflictCounts = new Map<string, number>();
+    for (const info of groupInfos) {
+      if (!info.existing) continue;
+      const conflictKey = getSftpConflictTypeKey(info.isDirectory, info.existing.type);
+      conflictCounts.set(conflictKey, (conflictCounts.get(conflictKey) ?? 0) + 1);
+    }
+
+    for (const { groupEntries, rootName, isDirectory, rootTargetPath, existing } of groupInfos) {
+      if (stop || controller?.isCancelled()) break;
 
       if (!existing) {
         resolved.push(...groupEntries);
         continue;
       }
 
+      const conflictKey = getSftpConflictTypeKey(isDirectory, existing.type);
       const newSize = groupEntries.reduce((sum, entry) => sum + getDropEntrySize(entry), 0);
       const action = await resolveConflict({
         fileName: rootName,
@@ -423,7 +444,7 @@ async function uploadEntries(
         newSize,
         existingModified: existing.lastModified,
         newModified: Date.now(),
-        applyToAllCount: groups.filter(([groupKey]) => groupKey.startsWith("__file__") !== isDirectory).length,
+        applyToAllCount: conflictCounts.get(conflictKey) ?? 1,
       });
 
       if (action === "stop") {
@@ -440,6 +461,14 @@ async function uploadEntries(
       }
 
       if (action === "replace") {
+        if (!canReplaceSftpConflict(isDirectory, existing.type)) {
+          results.push({
+            fileName: rootName,
+            success: false,
+            error: `Cannot replace existing ${describeSftpExistingKind(existing.type)} with ${describeSftpIncomingKind(isDirectory)}: ${rootTargetPath}`,
+          });
+          continue;
+        }
         await deleteTarget(rootTargetPath);
         resolved.push(...groupEntries);
         continue;
@@ -448,6 +477,15 @@ async function uploadEntries(
       if (action === "duplicate") {
         const duplicateName = await getDuplicateName(rootName, isDirectory);
         resolved.push(...groupEntries.map((entry) => renameRoot(entry, rootName, duplicateName)));
+        continue;
+      }
+
+      if (action === "merge" && !(isDirectory && existing.type === "directory")) {
+        results.push({
+          fileName: rootName,
+          success: false,
+          error: `Cannot merge existing ${describeSftpExistingKind(existing.type)} with ${describeSftpIncomingKind(isDirectory)}: ${rootTargetPath}`,
+        });
         continue;
       }
 

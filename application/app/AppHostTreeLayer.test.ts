@@ -14,7 +14,6 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 const {
   getAppHostTreeLayerStyle,
-  shouldAutoOpenHostTreeOnSurfaceChange,
 } = await import('./AppHostTreeLayer');
 const hostTreeLayerSource = readFileSync(new URL('./AppHostTreeLayer.tsx', import.meta.url), 'utf8');
 
@@ -34,28 +33,9 @@ test('shared host tree layer is hidden behind root pages', () => {
   });
 });
 
-test('shared host tree auto-opens when entering a work tab surface', () => {
-  assert.equal(shouldAutoOpenHostTreeOnSurfaceChange({
-    enabled: true,
-    previousSurfaceVisible: false,
-    surfaceVisible: true,
-  }), true);
-});
-
-test('shared host tree does not force reopen while already on work tab surfaces', () => {
-  assert.equal(shouldAutoOpenHostTreeOnSurfaceChange({
-    enabled: true,
-    previousSurfaceVisible: true,
-    surfaceVisible: true,
-  }), false);
-});
-
-test('shared host tree does not auto-open when disabled', () => {
-  assert.equal(shouldAutoOpenHostTreeOnSurfaceChange({
-    enabled: false,
-    previousSurfaceVisible: false,
-    surfaceVisible: true,
-  }), false);
+test('shared host tree does not force open when entering a work tab surface', () => {
+  assert.doesNotMatch(hostTreeLayerSource, /setIsOpen\(true\)/);
+  assert.doesNotMatch(hostTreeLayerSource, /shouldAutoOpenHostTreeOnSurfaceChange/);
 });
 
 test('host tree layer hides immediately when leaving work tab surfaces', () => {

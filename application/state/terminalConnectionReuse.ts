@@ -43,6 +43,8 @@ function createTerminalSessionClone(
     localShellArgs: session.localShellArgs,
     localShellName: session.localShellName,
     localShellIcon: session.localShellIcon,
+    fontSize: session.fontSize,
+    fontSizeOverride: session.fontSizeOverride,
     reuseConnectionFromSessionId: canReuseTerminalConnection(session) ? session.id : undefined,
   };
 

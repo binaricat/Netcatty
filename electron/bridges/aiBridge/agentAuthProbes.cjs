@@ -1,19 +1,23 @@
 "use strict";
 
 /**
- * Layer-3 (authentication) CLI probes for the three managed backends.
+ * Layer-3 (authentication) CLI probes for the managed backends.
  * Each probe is dependency-injected (runners / fileExists) for unit testing;
  * the discovery handler wires the real implementations.
  *
  * Returns: { authenticated: boolean, authSource: string|null }
  */
-const { existsSync } = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 function defaultFileExists(p) {
   try { return existsSync(p); } catch { return false; }
+}
+
+function defaultReadFile(p) {
+  try { return readFileSync(p, "utf-8"); } catch { return null; }
 }
 
 // ── Claude ──
@@ -92,10 +96,44 @@ function probeCodexAuth({ runLoginStatus, fileExists, homeDir } = {}) {
   return { authenticated: false, authSource: null };
 }
 
+// ── CodeBuddy ──
+// SDK supports CODEBUDDY_API_KEY, CODEBUDDY_AUTH_TOKEN (OAuth), and CLI login
+// state (~/.codebuddy/settings.json with authToken/apiKeyHelper).
+function probeCodebuddyAuth({ env, fileExists, readFile, homeDir } = {}) {
+  const e = env || process.env;
+  const fx = fileExists || defaultFileExists;
+  const rf = readFile || defaultReadFile;
+  const home = homeDir || os.homedir();
+
+  const apiKey = typeof e.CODEBUDDY_API_KEY === "string" ? e.CODEBUDDY_API_KEY.trim() : "";
+  const authToken = typeof e.CODEBUDDY_AUTH_TOKEN === "string" ? e.CODEBUDDY_AUTH_TOKEN.trim() : "";
+  if (apiKey) return { authenticated: true, authSource: "api-key" };
+  if (authToken) return { authenticated: true, authSource: "auth-token" };
+
+  // Check CLI login state in settings.json (authToken / apiKeyHelper fields).
+  const settingsPath = path.join(home, ".codebuddy", "settings.json");
+  const content = rf(settingsPath);
+  if (content !== null) {
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === "object") {
+        if (typeof parsed.authToken === "string" && parsed.authToken.trim()) {
+          return { authenticated: true, authSource: "settings-file" };
+        }
+        if (typeof parsed.apiKeyHelper === "string" && parsed.apiKeyHelper.trim()) {
+          return { authenticated: true, authSource: "settings-file" };
+        }
+      }
+    } catch { /* Malformed JSON — treat as no auth */ }
+  }
+  return { authenticated: false, authSource: null };
+}
+
 module.exports = {
   probeClaudeAuth,
   probeCopilotAuth,
   probeCodexAuth,
+  probeCodebuddyAuth,
   defaultRunSecurity,
   defaultRunGhAuthStatus,
 };

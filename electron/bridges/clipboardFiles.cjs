@@ -151,9 +151,62 @@ function readClipboardFiles({
   return [];
 }
 
+function formatClipboardImageTimestamp(date = new Date()) {
+  const pad = (value, width = 2) => String(value).padStart(width, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    "-",
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+    "-",
+    pad(date.getMilliseconds(), 3),
+  ].join("");
+}
+
+function createClipboardImageFileName(date = new Date()) {
+  return `netcatty-paste-${formatClipboardImageTimestamp(date)}.png`;
+}
+
+async function readClipboardImage({
+  clipboard,
+  fsImpl = fs,
+  tempDirBridge,
+  now = () => new Date(),
+} = {}) {
+  if (!clipboard || typeof clipboard.readImage !== "function" || !tempDirBridge?.getTempFilePath) {
+    return null;
+  }
+
+  try {
+    const image = clipboard.readImage();
+    if (!image || (typeof image.isEmpty === "function" && image.isEmpty())) return null;
+    if (typeof image.toPNG !== "function") return null;
+
+    const content = image.toPNG();
+    if (!Buffer.isBuffer(content) || content.length === 0) return null;
+
+    const name = createClipboardImageFileName(now());
+    const imagePath = tempDirBridge.getTempFilePath(name);
+    await fsImpl.promises.writeFile(imagePath, content);
+    return {
+      path: imagePath,
+      name,
+      mediaType: "image/png",
+      size: content.length,
+    };
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  createClipboardImageFileName,
   decodeWindowsHDrop,
   decodeWindowsFileNameW,
   parseClipboardTextFilePaths,
   readClipboardFiles,
+  readClipboardImage,
 };

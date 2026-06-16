@@ -4,6 +4,7 @@ import type { Host, HostProtocol } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import { getEffectiveHostDistro } from '../../domain/host';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
+import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
@@ -131,7 +132,11 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       target instanceof HTMLElement &&
       !!target.closest?.(".xterm, .xterm-helper-textarea, .xterm-screen, .xterm-viewport");
 
-    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape') {
+    const quickSwitchBinding = keyBindings.find((binding) => binding.action === 'quickSwitch');
+    const quickSwitchKeyStr = quickSwitchBinding ? (isMac ? quickSwitchBinding.mac : quickSwitchBinding.pc) : null;
+    const isQuickSwitchHotkey = quickSwitchKeyStr ? matchesKeyBinding(e, quickSwitchKeyStr, isMac) : false;
+
+    if ((isFormElement || isMonacoElement) && !isXtermInput && e.key !== 'Escape' && !isQuickSwitchHotkey) {
       return;
     }
 
@@ -435,7 +440,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
 }
 
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {
-  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces } = getCtx();
+  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, splitSessionWithCurrentShell, systemInfoRef, toEditorTabId, toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWorkspaceViewMode, workspaces } = getCtx();
 {
     // Build complete tab list: vault + (sftp when visible) + sessions/workspaces + editor tabs.
     // Hiding the SFTP tab must also remove it from keyboard cycling so nextTab
@@ -444,13 +449,19 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
     const allTabs = settings.showSftpTab
       ? ['vault', 'sftp', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))]
       : ['vault', ...orderedTabs, ...editorTabs.map((t) => toEditorTabId(t.id))];
+    const numberShortcutTabs = buildNumberShortcutTabTargets({
+      showSftpTab: settings.showSftpTab ?? true,
+      shellOnlyTabNumberShortcuts: settings.shellOnlyTabNumberShortcuts ?? false,
+      orderedTabs,
+      editorTabIds: editorTabs.map((t) => toEditorTabId(t.id)),
+    });
     switch (action) {
       case 'switchToTab': {
         // Get the number key pressed (1-9)
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= 9) {
-          if (num <= allTabs.length) {
-            setActiveTabId(allTabs[num - 1]);
+          if (num <= numberShortcutTabs.length) {
+            setActiveTabId(numberShortcutTabs[num - 1]);
           }
         }
         break;
@@ -528,6 +539,40 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
 
         break;
       }
+      case 'closeSession': {
+        const currentId = activeTabStore.getActiveTabId();
+        if (!currentId || currentId === 'vault' || currentId === 'sftp') break;
+        if (closeTabInFlightRef.current) break;
+
+        const session = sessions.find((s) => s.id === currentId) ?? null;
+        const workspace = workspaces.find((w) => w.id === currentId) ?? null;
+
+        closeTabInFlightRef.current = true;
+        (async () => {
+          try {
+            // If active tab is a workspace, close the focused session (pane)
+            if (workspace) {
+              // Validate focusedSessionId is still valid — it can become stale
+              // if the previously focused session was already closed
+              const aliveIds = collectSessionIds(workspace.root);
+              const focusedId = aliveIds.includes(workspace.focusedSessionId)
+                ? workspace.focusedSessionId
+                : aliveIds[0];
+              if (focusedId) {
+                const ok = await confirmIfBusyLocalTerminal([focusedId]);
+                if (ok) closeSession(focusedId);
+              }
+            } else if (session) {
+              // Standalone session tab — close the session
+              const ok = await confirmIfBusyLocalTerminal([session.id]);
+              if (ok) closeSession(session.id);
+            }
+          } finally {
+            closeTabInFlightRef.current = false;
+          }
+        })();
+        break;
+      }
       case 'newTab':
       case 'openLocal':
         // Add connection log for local terminal
@@ -553,6 +598,8 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         }
         break;
       case 'quickSwitch':
+        setIsQuickSwitcherOpen(!isQuickSwitcherOpen);
+        break;
       case 'commandPalette':
         setIsQuickSwitcherOpen(true);
         break;
@@ -628,6 +675,15 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
             ? activeWs.focusedSessionId
             : liveIds[0];
           if (targetId) splitSessionWithCurrentShell(targetId, 'vertical');
+        }
+        break;
+      }
+      case 'togglePaneZoom': {
+        // Toggle workspace between split and focus (zoom) mode
+        const currentId = activeTabStore.getActiveTabId();
+        const activeWs = workspaces.find(w => w.id === currentId);
+        if (activeWs) {
+          toggleWorkspaceViewMode(activeWs.id);
         }
         break;
       }

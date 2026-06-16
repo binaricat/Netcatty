@@ -54,22 +54,21 @@ export function resolveActiveChromeTheme({
 }: ResolveActiveChromeThemeInput): TerminalTheme | null {
   if (activeTabId === "vault" || activeTabId === "sftp") return null;
 
-  const resolveSessionTheme = (session: TerminalSession): TerminalTheme => {
+  const resolveHostTheme = (hostId: string): TerminalTheme => {
     if (followAppTerminalTheme) return currentTerminalTheme;
-    const host = hostById.get(session.hostId) ?? null;
+    const host = hostById.get(hostId) ?? null;
     const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
     const baseTheme = themeById.get(themeId) ?? currentTerminalTheme;
     return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
   };
 
+  const resolveSessionTheme = (session: TerminalSession): TerminalTheme => resolveHostTheme(session.hostId);
+
   if (isEditorTabId(activeTabId)) {
     const editorTabId = fromEditorTabId(activeTabId);
     const editorTab = editorTabs.find((tab) => tab.id === editorTabId);
     if (!editorTab) return null;
-    const host = hostById.get(editorTab.hostId) ?? null;
-    const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
-    const baseTheme = themeById.get(themeId) ?? currentTerminalTheme;
-    return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
+    return resolveHostTheme(editorTab.hostId);
   }
 
   const logView = logViews.find((item) => item.id === activeTabId);

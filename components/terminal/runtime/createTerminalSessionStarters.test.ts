@@ -161,6 +161,47 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
   });
 });
 
+test("startSSH forwards the saved sudo autofill password to the SSH bridge", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      password: "login-secret",
+    },
+    terminalBackend,
+    sudoAutofillPassword: "sudo-secret",
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(capturedOptions?.sudoAutofillPassword, "sudo-secret");
+});
+
 test("startSSH enables sudo autofill only with the host saved password", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
@@ -255,7 +296,7 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   assert.deepEqual(sent, []);
 });
 
-test("startSSH prefers latest sudo autofill password state over pending saved auth", async () => {
+test("startSSH uses pending saved auth for sudo autofill on the first saved connection", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
   const terminalBackend = {
@@ -296,14 +337,15 @@ test("startSSH prefers latest sudo autofill password state over pending saved au
       },
     },
     terminalBackend,
-    sudoAutofillPasswordRef: { current: undefined },
+    sudoAutofillPasswordRef: { current: "stale-secret" },
   });
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
   ctx.sudoAutofillRef.current?.armForCommand("sudo whoami");
   onData?.("[sudo] password for alice: ");
+  ctx.sudoAutofillRef.current?.confirmFill();
 
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, ["pending-secret\n"]);
 });
 
 test("startSSH does not use merged group default passwords for sudo autofill", async () => {
@@ -559,9 +601,64 @@ test("local session captures paste cleanup writes in terminal log data", async (
   assert.deepEqual(capturedLogData, ["line 3 with enough content", "\x1b[K"]);
 });
 
+test("local session runs startup command after attaching", async () => {
+  const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+  const attached: string[] = [];
+
+  const terminalBackend = {
+    backendAvailable: () => true,
+    telnetAvailable: () => true,
+    moshAvailable: () => true,
+    localAvailable: () => true,
+    serialAvailable: () => true,
+    execAvailable: () => true,
+    startSSHSession: async () => "ssh-session",
+    startTelnetSession: async () => "telnet-session",
+    startMoshSession: async () => "mosh-session",
+    startLocalSession: async () => "local-session",
+    startSerialSession: async () => "serial-session",
+    execCommand: async () => ({}),
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+      sessionWrites.push({ id, data, automated: options?.automated });
+    },
+    resizeSession: noop,
+  };
+
+  const ctx = createStarterContext({
+    host: {
+      id: "local-host",
+      label: "Local",
+      hostname: "local",
+      username: "",
+      protocol: "local",
+    },
+    terminalSettings: { startupCommandDelayMs: 0 },
+    terminalBackend,
+    startupCommand: "docker logs -f --tail 200 abc123",
+    promptLineBreakStateRef: undefined,
+    onSessionAttached: (id: string) => attached.push(id),
+  });
+
+  await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(attached, ["local-session"]);
+  assert.deepEqual(sessionWrites, [{
+    id: "local-session",
+    data: "docker logs -f --tail 200 abc123\r",
+    automated: true,
+  }]);
+});
+
 test("local session resets terminal timestamp state when reusing a terminal", async () => {
   const writes: string[] = [];
+  const markerLines: number[] = [];
+  const disposedMarkerLines: number[] = [];
   let onData: ((data: string) => void) | null = null;
+  let cursorLine = 0;
 
   const terminalBackend = {
     backendAvailable: () => true,
@@ -593,6 +690,7 @@ test("local session resets terminal timestamp state when reusing a terminal", as
       hostname: "local",
       username: "",
       protocol: "local",
+      showLineTimestamps: true,
     },
     keys: [],
     resolvedChainHosts: [],
@@ -628,7 +726,25 @@ test("local session resets terminal timestamp state when reusing a terminal", as
     buffer: { active: { type: "normal" } },
     write: (data: string, callback?: () => void) => {
       writes.push(data);
+      for (const char of data) {
+        if (char === "\n") {
+          cursorLine += 1;
+        }
+      }
       callback?.();
+    },
+    registerMarker: (offset: number) => {
+      const line = cursorLine + offset;
+      markerLines.push(line);
+      const marker = {
+        line,
+        isDisposed: false,
+        dispose() {
+          marker.isDisposed = true;
+          disposedMarkerLines.push(line);
+        },
+      };
+      return marker;
     },
     writeln: noop,
     scrollToBottom: noop,
@@ -641,9 +757,10 @@ test("local session resets terminal timestamp state when reusing a terminal", as
   onData?.("fresh");
 
   assert.equal(writes.length, 2);
-  assert.equal((writes[0].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
-  assert.equal((writes[1].match(/\[\d{2}:\d{2}:\d{2}\]/g) ?? []).length, 1);
-  assert.ok(writes[1].endsWith("] \x1b[22;39mfresh"));
+  assert.equal(writes[0], "unfinished");
+  assert.equal(writes[1], "fresh");
+  assert.deepEqual(markerLines, [0, 0]);
+  assert.deepEqual(disposedMarkerLines, [0]);
 });
 
 test("session data waits for prior terminal writes before evaluating prompt line breaks", async () => {

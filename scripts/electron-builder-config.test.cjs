@@ -54,6 +54,35 @@ test("asarUnpack keeps MCP server runtime deps unpacked", () => {
   assert.ok(config.asarUnpack.includes("node_modules/@modelcontextprotocol/sdk/**/*"));
 });
 
+test("asarUnpack keeps Cursor SDK runtime deps unpacked", () => {
+  assert.ok(
+    !config.asarUnpack.includes("node_modules/@cursor/sdk/**/*"),
+    "Cursor SDK JavaScript can load from app.asar and should not be duplicated into app.asar.unpacked",
+  );
+  assert.ok(config.asarUnpack.includes("node_modules/@cursor/sdk-*/**/*"));
+  assert.ok(config.asarUnpack.includes("node_modules/sqlite3/**/*"));
+});
+
+test("beforePack installs missing Cursor SDK platform runtime packages", () => {
+  assert.equal(config.beforePack, "./scripts/beforePackCursorSdk.cjs");
+});
+
+test("build.files trims release-only dependency payloads", () => {
+  const files = config.files;
+  for (const glob of [
+    "!node_modules/@cursor/sdk/dist/cjs/**/*",
+    "!node_modules/@cursor/sdk/dist/**/*.d.ts",
+    "!node_modules/@cursor/sdk/dist/**/*.d.ts.map",
+    "!node_modules/sqlite3/deps/**/*",
+    "!node_modules/**/docs/**/*",
+    "!node_modules/**/doc/**/*",
+    "!node_modules/**/benchmark/**/*",
+    "!node_modules/**/benchmarks/**/*",
+  ]) {
+    assert.ok(files.includes(glob), `build.files must exclude release-only payload: ${glob}`);
+  }
+});
+
 test("linux packaging uses multi-size build/icons instead of a single 1024px override", async () => {
   assert.equal(
     config.linux.icon,

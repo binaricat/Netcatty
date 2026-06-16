@@ -1,5 +1,5 @@
 [
-  "\\brm\\s+(-[a-zA-Z]*r[a-zA-Z]*\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?|-[a-zA-Z]*f[a-zA-Z]*\\s+(-[a-zA-Z]*r[a-zA-Z]*\\s+)?|--recursive\\s+|--force\\s+){1,}",
+  "\\brm\\s+(?=[^\\n;&|]*(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\\b|-[a-zA-Z]*r[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*r[a-zA-Z]*\\b|--recursive\\b[^\\n;&|]*(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)|(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)[^\\n;&|]*--recursive\\b))",
   "\\bmkfs\\.",
   "\\bdd\\s+if=.*\\s+of=/dev/",
   "\\b(shutdown|reboot|poweroff|halt)\\b",

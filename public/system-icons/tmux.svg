@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Derived from the official tmux logo: https://github.com/tmux/tmux/blob/master/logo/tmux-logo.svg -->
+<svg width="160" height="160" viewBox="0 0 160 160" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" fill-rule="evenodd">
+    <g fill="#1BB91F">
+      <path d="M0,116 L160,116 L160,144.996128 C160,153.282538 153.278035,160 145.001535,160 L14.9984654,160 C6.71504169,160 0,153.293415 0,144.996128 L0,116 Z M0,116 L160,116 L160,146 L0,146 L0,116 Z" />
+    </g>
+    <path d="M83,70 L83,0 L77,0 L77,146 L83,146 L83,76 L160,76 L160,70 L83,70 Z M0,15.0064867 C0,6.71863293 6.72196489,0 14.9984654,0 L145.001535,0 C153.284958,0 160,6.72491953 160,15.0064867 L160,146 L0,146 L0,15.0064867 Z" fill="#3C3C3C" />
+  </g>
+</svg>

@@ -116,7 +116,7 @@ function createMoshStatsConnectionApi(ctx) {
     // keys. `trust.trusted` additionally gates the password method in the
     // authHandler (defense in depth); `trust.rejected` lets the caller treat an
     // untrusted host as a permanent failure so it stops reconnecting every poll.
-    function createTrustEnforcingHostVerifier({ hostname, port, knownHosts, trust }) {
+    function createTrustEnforcingHostVerifier({ hostname, port, knownHosts, trust, label }) {
       return (rawKey, callback) => {
         try {
           const keyInfo = hostKeyVerifier.describeHostKey(rawKey);
@@ -140,7 +140,7 @@ function createMoshStatsConnectionApi(ctx) {
             }) === true;
           }
         } catch (err) {
-          log("[Mosh] stats companion host-key check failed:", err?.message || String(err));
+          log(`[${label}] stats companion host-key check failed:`, err?.message || String(err));
           trust.trusted = false;
         }
         if (!trust.trusted) trust.rejected = true;
@@ -178,7 +178,7 @@ function createMoshStatsConnectionApi(ctx) {
       };
     }
 
-    async function buildStatsConnectOpts(auth) {
+    async function buildStatsConnectOpts(auth, label = "Mosh") {
       const connectOpts = {
         host: auth.hostname,
         port: auth.port || 22,
@@ -268,6 +268,7 @@ function createMoshStatsConnectionApi(ctx) {
         port: connectOpts.port,
         knownHosts: auth.knownHosts,
         trust,
+        label,
       });
 
       // When a plaintext password is in play, also gate it behind the trust
@@ -310,21 +311,41 @@ function createMoshStatsConnectionApi(ctx) {
      * @param {Electron.WebContents} [webContents] - sender of the stats IPC,
      *   used only for certificate-agent construction.
      */
-    function ensureMoshStatsConnection(session, sessionId, webContents) {
+    function ensureStatsConnection(session, sessionId, webContents, opts) {
       if (!session) return Promise.resolve(null);
       // A previously established companion is reused.
-      if (session.moshStatsConn) return Promise.resolve(session.moshStatsConn);
+      if (session[opts.connProp]) return Promise.resolve(session[opts.connProp]);
       // A prior attempt permanently failed — don't keep retrying every poll.
-      if (session.moshStatsConnFailed) return Promise.resolve(null);
+      if (session[opts.failedProp]) return Promise.resolve(null);
       // Reuse an in-flight attempt so two near-simultaneous polls don't open
       // two connections.
-      if (session.moshStatsConnPromise) return session.moshStatsConnPromise;
+      if (session[opts.promiseProp]) return session[opts.promiseProp];
 
-      const promise = establishMoshStatsConnection(session, sessionId, webContents).finally(() => {
-        session.moshStatsConnPromise = null;
+      const promise = establishStatsConnection(session, sessionId, webContents, opts).finally(() => {
+        session[opts.promiseProp] = null;
       });
-      session.moshStatsConnPromise = promise;
+      session[opts.promiseProp] = promise;
       return promise;
+    }
+
+    function ensureMoshStatsConnection(session, sessionId, webContents) {
+      return ensureStatsConnection(session, sessionId, webContents, {
+        label: "Mosh",
+        authProp: "moshStatsAuth",
+        connProp: "moshStatsConn",
+        failedProp: "moshStatsConnFailed",
+        promiseProp: "moshStatsConnPromise",
+      });
+    }
+
+    function ensureEtStatsConnection(session, sessionId, webContents) {
+      return ensureStatsConnection(session, sessionId, webContents, {
+        label: "ET",
+        authProp: "etStatsAuth",
+        connProp: "etStatsConn",
+        failedProp: "etStatsConnFailed",
+        promiseProp: "etStatsConnPromise",
+      });
     }
 
     // True once the session has gone away — either explicitly closed or
@@ -334,8 +355,8 @@ function createMoshStatsConnectionApi(ctx) {
       return session.closed || sessions.get(sessionId) !== session;
     }
 
-    async function establishMoshStatsConnection(session, sessionId, webContents) {
-      const auth = session.moshStatsAuth;
+    async function establishStatsConnection(session, sessionId, webContents, opts) {
+      const auth = session[opts.authProp];
       if (!auth || !auth.hostname) {
         // moshStatsAuth is only assigned once the handshake completes and the
         // session swaps to mosh-client. The renderer can mark a session
@@ -349,11 +370,11 @@ function createMoshStatsConnectionApi(ctx) {
       const { connectOpts, hasAnyAuth, trust } = await buildStatsConnectOpts({
         ...auth,
         webContents,
-      });
+      }, opts.label);
       if (!hasAnyAuth) {
         // Nothing we can authenticate with non-interactively (e.g. the user
         // typed a password into the Mosh handshake PTY that we never stored).
-        session.moshStatsConnFailed = true;
+        session[opts.failedProp] = true;
         return null;
       }
 
@@ -399,7 +420,7 @@ function createMoshStatsConnectionApi(ctx) {
         // retry.
         const fail = (err, permanent) => {
           try { conn.end(); } catch { /* ignore */ }
-          if (permanent) session.moshStatsConnFailed = true;
+          if (permanent) session[opts.failedProp] = true;
           finish(null);
         };
 
@@ -410,17 +431,18 @@ function createMoshStatsConnectionApi(ctx) {
             finish(null);
             return;
           }
-          // Stored only on moshStatsConn — never on session.conn (see the
-          // ensureMoshStatsConnection docstring for why).
-          session.moshStatsConn = conn;
+          // Stored only on the protocol-specific companion property
+          // (opts.connProp, e.g. moshStatsConn / etStatsConn) — never on
+          // session.conn (see ensureMoshStatsConnection docstring for why).
+          session[opts.connProp] = conn;
           finish(conn);
         });
 
         conn.on("error", (err) => {
-          log("[Mosh] stats companion connection error:", err?.message || String(err));
+          log(`[${opts.label}] stats companion connection error:`, err?.message || String(err));
           // If this fired after we already adopted the connection, drop the
           // stale handle so the next poll can rebuild a fresh one.
-          if (session.moshStatsConn === conn) session.moshStatsConn = null;
+          if (session[opts.connProp] === conn) session[opts.connProp] = null;
           // Auth rejection won't change with the same stored credentials, and a
           // host-key rejection (untrusted host) won't either until the user
           // vets the host via a real session — treat both as permanent so we
@@ -429,10 +451,11 @@ function createMoshStatsConnectionApi(ctx) {
         });
 
         conn.on("close", () => {
-          if (session.moshStatsConn === conn) session.moshStatsConn = null;
+          if (session[opts.connProp] === conn) session[opts.connProp] = null;
           // If the socket closed mid-handshake without ever emitting "ready"
           // or "error", settle the attempt here so the awaiting getServerStats
-          // call (and session.moshStatsConnPromise) don't hang forever. This
+          // call (and the in-flight promise on opts.promiseProp) don't hang
+          // forever. This
           // is treated as transient — the next poll may retry.
           finish(null);
         });
@@ -440,7 +463,7 @@ function createMoshStatsConnectionApi(ctx) {
         try {
           conn.connect(connectOpts);
         } catch (err) {
-          log("[Mosh] stats companion connect threw:", err?.message || String(err));
+          log(`[${opts.label}] stats companion connect threw:`, err?.message || String(err));
           // A synchronous throw from connect() (e.g. malformed options) won't
           // succeed on retry either.
           fail(err, true);
@@ -448,7 +471,7 @@ function createMoshStatsConnectionApi(ctx) {
       });
     }
 
-    return { ensureMoshStatsConnection };
+    return { ensureMoshStatsConnection, ensureEtStatsConnection };
   }
 }
 

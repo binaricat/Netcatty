@@ -10,6 +10,7 @@
 import { ChevronRight, Edit2, FileCode, Package, Plus, Search, Trash2, Zap } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from '../domain/vaultOrder';
 import { cn } from '../lib/utils';
 import { Snippet } from '../types';
 import {
@@ -33,6 +34,8 @@ interface ScriptsSidePanelProps {
   snippets: Snippet[];
   packages: string[];
   onSnippetClick: (snippet: Snippet) => void;
+  onSnippetsChange?: (snippets: Snippet[]) => void;
+  onPackagesChange?: (packages: string[]) => void;
   isVisible?: boolean;
 }
 
@@ -63,10 +66,163 @@ const pkgDisplayName = (path: string) => {
   return path.startsWith('/') && !clean.includes('/') ? `/${last}` : last;
 };
 
+const packageDisplayIndex = (packages: string[], path: string): number => {
+  const exactIndex = packages.indexOf(path);
+  if (exactIndex >= 0) return exactIndex;
+  const childIndex = packages.findIndex((pkg) => pkg.startsWith(`${path}/`));
+  return childIndex >= 0 ? childIndex : Number.MAX_SAFE_INTEGER;
+};
+
+let activeScriptsDropIndicator: HTMLElement | null = null;
+
+const clearScriptsDropIndicator = () => {
+  activeScriptsDropIndicator?.removeAttribute('data-vault-drop-position');
+  activeScriptsDropIndicator = null;
+};
+
+const markScriptsDropIndicator = (target: HTMLElement, position: 'before' | 'after') => {
+  if (target.dataset.vaultDropPosition === position) return;
+  clearScriptsDropIndicator();
+  target.dataset.vaultDropPosition = position;
+  activeScriptsDropIndicator = target;
+};
+
+const markScriptsInsideIndicator = (target: HTMLElement) => {
+  if (target.dataset.vaultDropPosition === 'inside') return;
+  clearScriptsDropIndicator();
+  target.dataset.vaultDropPosition = 'inside';
+  activeScriptsDropIndicator = target;
+};
+
+const getVerticalDropIntent = (
+  element: HTMLElement,
+  clientY: number,
+): 'before' | 'inside' | 'after' => {
+  const rect = element.getBoundingClientRect();
+  const edgeSize = Math.max(8, Math.min(14, rect.height * 0.28));
+  if (clientY <= rect.top + edgeSize) return 'before';
+  if (clientY >= rect.bottom - edgeSize) return 'after';
+  return 'inside';
+};
+
+const hasDragType = (dataTransfer: DataTransfer, type: string) =>
+  Array.from(dataTransfer.types).includes(type);
+
+export function buildScriptsSidePanelRows({
+  snippets,
+  packages,
+  expandedPaths,
+}: {
+  snippets: Snippet[];
+  packages: string[];
+  expandedPaths: Set<string>;
+}): TreeRow[] {
+  const normalizedPackages = new Set<string>();
+  const addWithAncestors = (raw: string) => {
+    const path = raw.trim();
+    if (!path) return;
+    const isAbs = path.startsWith('/');
+    const body = isAbs ? path.slice(1) : path;
+    const parts = body.split('/').filter(Boolean);
+    for (let i = 1; i <= parts.length; i += 1) {
+      const sub = parts.slice(0, i).join('/');
+      normalizedPackages.add(isAbs ? `/${sub}` : sub);
+    }
+  };
+
+  packages.forEach(addWithAncestors);
+  snippets.forEach((snippet) => {
+    if (snippet.package) addWithAncestors(snippet.package);
+  });
+
+  const snippetsByPackage = new Map<string, Snippet[]>();
+  const descendantCountByPackage = new Map<string, number>();
+  const bumpCount = (path: string) => {
+    descendantCountByPackage.set(path, (descendantCountByPackage.get(path) ?? 0) + 1);
+  };
+
+  for (const snippet of snippets) {
+    const pkg = snippet.package || '';
+    const bucket = snippetsByPackage.get(pkg);
+    if (bucket) bucket.push(snippet);
+    else snippetsByPackage.set(pkg, [snippet]);
+
+    if (pkg === '') {
+      bumpCount('');
+      continue;
+    }
+
+    let path = pkg;
+    while (true) {
+      bumpCount(path);
+      const slash = path.lastIndexOf('/');
+      if (slash < 0) break;
+      path = path.slice(0, slash);
+    }
+  }
+
+  const packagePaths = Array.from(normalizedPackages);
+  const childPackagesOf = (parent: string | null): string[] => {
+    const prefix = parent === null ? '' : `${parent}/`;
+    return packagePaths
+      .filter((path) => {
+        if (parent === null) {
+          const body = path.startsWith('/') ? path.slice(1) : path;
+          return !body.includes('/');
+        }
+        if (!path.startsWith(prefix)) return false;
+        const rest = path.slice(prefix.length);
+        return rest.length > 0 && !rest.includes('/');
+      })
+      .sort((a, b) => {
+        const orderDiff = packageDisplayIndex(packages, a) - packageDisplayIndex(packages, b);
+        if (orderDiff !== 0) return orderDiff;
+        return pkgDisplayName(a).localeCompare(pkgDisplayName(b));
+      });
+  };
+
+  const snippetsIn = (pkg: string | null): Snippet[] =>
+    sortByVaultOrder(snippetsByPackage.get(pkg ?? '') ?? []);
+
+  const rows: TreeRow[] = [];
+  const walk = (pkg: string, depth: number) => {
+    const children = childPackagesOf(pkg);
+    const localSnippets = snippetsIn(pkg);
+    const hasChildren = children.length > 0 || localSnippets.length > 0;
+    const isExpanded = expandedPaths.has(pkg);
+
+    rows.push({
+      type: 'package',
+      id: pkg,
+      path: pkg,
+      name: pkgDisplayName(pkg),
+      depth,
+      count: descendantCountByPackage.get(pkg) ?? 0,
+      hasChildren,
+      isExpanded,
+    });
+
+    if (!isExpanded) return;
+    children.forEach((child) => walk(child, depth + 1));
+    localSnippets.forEach((snippet) =>
+      rows.push({ type: 'snippet', id: snippet.id, depth: depth + 1, snippet, packagePath: pkg }),
+    );
+  };
+
+  snippetsIn(null).forEach((snippet) =>
+    rows.push({ type: 'snippet', id: snippet.id, depth: 0, snippet, packagePath: '' }),
+  );
+  childPackagesOf(null).forEach((root) => walk(root, 0));
+
+  return rows;
+}
+
 const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   snippets,
   packages,
   onSnippetClick,
+  onSnippetsChange,
+  onPackagesChange,
   isVisible = true,
 }) => {
   const { t } = useI18n();
@@ -126,47 +282,6 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     });
   }, [normalizedPackages, isVisible]);
 
-  const snippetIndex = useMemo(() => {
-    if (!isVisible) {
-      return {
-        snippetsByPackage: new Map<string, Snippet[]>(),
-        descendantCountByPackage: new Map<string, number>(),
-      };
-    }
-    const snippetsByPackage = new Map<string, Snippet[]>();
-    const descendantCountByPackage = new Map<string, number>();
-
-    const bumpCount = (path: string) => {
-      descendantCountByPackage.set(path, (descendantCountByPackage.get(path) ?? 0) + 1);
-    };
-
-    for (const snippet of snippets) {
-      const pkg = snippet.package || '';
-      const bucket = snippetsByPackage.get(pkg);
-      if (bucket) bucket.push(snippet);
-      else snippetsByPackage.set(pkg, [snippet]);
-
-      if (pkg === '') {
-        bumpCount('');
-        continue;
-      }
-
-      let path = pkg;
-      while (true) {
-        bumpCount(path);
-        const slash = path.lastIndexOf('/');
-        if (slash < 0) break;
-        path = path.slice(0, slash);
-      }
-    }
-
-    for (const bucket of snippetsByPackage.values()) {
-      bucket.sort((a, b) => a.label.localeCompare(b.label));
-    }
-
-    return { snippetsByPackage, descendantCountByPackage };
-  }, [snippets, isVisible]);
-
   const togglePackage = useCallback((path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
@@ -181,72 +296,19 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     if (!isVisible) return null;
     const q = search.trim().toLowerCase();
     if (!q) return null;
-    return snippets.filter(
+    return sortByVaultOrder(snippets.filter(
       (s) =>
         s.label.toLowerCase().includes(q) ||
         s.command.toLowerCase().includes(q),
-    );
+    ));
   }, [snippets, search, isVisible]);
 
   const rows = useMemo<TreeRow[]>(() => {
     if (!isVisible) return [];
     if (searchMatches !== null) return [];
 
-    const out: TreeRow[] = [];
-    const paths: string[] = [];
-    normalizedPackages.forEach((p) => paths.push(p));
-
-    const childPackagesOf = (parent: string | null): string[] => {
-      const prefix = parent === null ? '' : parent + '/';
-      return paths
-        .filter((p) => {
-          if (parent === null) {
-            // Root-level: no "/" inside the body
-            const body = p.startsWith('/') ? p.slice(1) : p;
-            return !body.includes('/');
-          }
-          if (!p.startsWith(prefix)) return false;
-          const rest = p.slice(prefix.length);
-          return rest.length > 0 && !rest.includes('/');
-        })
-        .sort((a, b) => pkgDisplayName(a).localeCompare(pkgDisplayName(b)));
-    };
-
-    const snippetsIn = (pkg: string | null): Snippet[] =>
-      snippetIndex.snippetsByPackage.get(pkg ?? '') ?? [];
-
-    const walk = (pkg: string, depth: number) => {
-      const children = childPackagesOf(pkg);
-      const localSnippets = snippetsIn(pkg);
-      const hasChildren = children.length > 0 || localSnippets.length > 0;
-      const isExpanded = expandedPaths.has(pkg);
-
-      out.push({
-        type: 'package',
-        id: pkg,
-        path: pkg,
-        name: pkgDisplayName(pkg),
-        depth,
-        count: snippetIndex.descendantCountByPackage.get(pkg) ?? 0,
-        hasChildren,
-        isExpanded,
-      });
-
-      if (!isExpanded) return;
-      children.forEach((c) => walk(c, depth + 1));
-      localSnippets.forEach((s) =>
-        out.push({ type: 'snippet', id: s.id, depth: depth + 1, snippet: s, packagePath: pkg }),
-      );
-    };
-
-    // Orphan / uncategorized snippets first (package === '')
-    snippetsIn(null).forEach((s) =>
-      out.push({ type: 'snippet', id: s.id, depth: 0, snippet: s, packagePath: '' }),
-    );
-    childPackagesOf(null).forEach((root) => walk(root, 0));
-
-    return out;
-  }, [normalizedPackages, snippetIndex, expandedPaths, searchMatches, isVisible]);
+    return buildScriptsSidePanelRows({ snippets, packages, expandedPaths });
+  }, [snippets, packages, expandedPaths, searchMatches, isVisible]);
 
   type ScriptsListItem =
     | { key: string; kind: 'search'; snippet: Snippet }
@@ -285,6 +347,163 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     },
     [onSnippetClick],
   );
+
+  const moveSnippetToPackage = useCallback((snippetId: string, packagePath: string | null) => {
+    if (!onSnippetsChange) return;
+    const targetPackage = packagePath || '';
+    const snippet = snippets.find((item) => item.id === snippetId);
+    if (!snippet || (snippet.package || '') === targetPackage) return;
+    onSnippetsChange(snippets.map((item) =>
+      item.id === snippetId ? { ...item, package: targetPackage } : item,
+    ));
+  }, [onSnippetsChange, snippets]);
+
+  const movePackageToPackage = useCallback((source: string, target: string | null) => {
+    if (!onPackagesChange || !onSnippetsChange) return;
+    const name = source.split('/').pop() || '';
+    const isAbsolute = source.startsWith('/');
+    const newPath = target ? `${target}/${name}` : (isAbsolute ? `/${name}` : name);
+    if (newPath === source || newPath.startsWith(`${source}/`) || packages.includes(newPath)) return;
+
+    const updatedPackages = packages.map((path) => {
+      if (path === source) return newPath;
+      if (path.startsWith(`${source}/`)) return newPath + path.substring(source.length);
+      return path;
+    });
+    const updatedSnippets = snippets.map((snippet) => {
+      const packagePath = snippet.package || '';
+      if (packagePath === source) return { ...snippet, package: newPath };
+      if (packagePath.startsWith(`${source}/`)) {
+        return { ...snippet, package: newPath + packagePath.substring(source.length) };
+      }
+      return snippet;
+    });
+
+    onPackagesChange(Array.from(new Set(updatedPackages)));
+    onSnippetsChange(updatedSnippets);
+  }, [onPackagesChange, onSnippetsChange, packages, snippets]);
+
+  const reorderSnippetToTarget = useCallback((
+    sourceSnippetId: string,
+    targetSnippetId: string,
+    position: 'before' | 'after',
+  ) => {
+    if (!onSnippetsChange || sourceSnippetId === targetSnippetId) return;
+    const targetSnippet = snippets.find((snippet) => snippet.id === targetSnippetId);
+    if (!targetSnippet) return;
+    const movedSnippets = snippets.map((snippet) =>
+      snippet.id === sourceSnippetId
+        ? { ...snippet, package: targetSnippet.package || '' }
+        : snippet,
+    );
+    onSnippetsChange(reorderVaultItems(movedSnippets, sourceSnippetId, targetSnippetId, position));
+  }, [onSnippetsChange, snippets]);
+
+  const reorderPackageToTarget = useCallback((
+    sourcePackage: string,
+    targetPackage: string,
+    position: 'before' | 'after',
+  ) => {
+    if (!onPackagesChange || sourcePackage === targetPackage) return;
+    const parentOf = (path: string) => {
+      const parts = path.split('/').filter(Boolean);
+      const prefix = path.startsWith('/') ? '/' : '';
+      return prefix + parts.slice(0, -1).join('/');
+    };
+    if (parentOf(sourcePackage) !== parentOf(targetPackage)) return;
+    const sortablePackages = Array.from(new Set([...packages, sourcePackage, targetPackage]));
+    onPackagesChange(reorderVaultStrings(sortablePackages, sourcePackage, targetPackage, position));
+  }, [onPackagesChange, packages]);
+
+  const handleRowDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
+    if (!onSnippetsChange && !onPackagesChange) return;
+    const row = event.currentTarget;
+    const targetSnippetId = row.getAttribute('data-snippet-id');
+    const targetPackage = row.getAttribute('data-pkg-path');
+    const isDraggingSnippet = hasDragType(event.dataTransfer, 'snippet-id');
+    const isDraggingPackage = hasDragType(event.dataTransfer, 'pkg-path');
+    if (targetSnippetId && isDraggingSnippet) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      markScriptsDropIndicator(row, event.clientY < rect.top + rect.height / 2 ? 'before' : 'after');
+      return;
+    }
+    if (targetPackage && isDraggingSnippet) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      markScriptsInsideIndicator(row);
+      return;
+    }
+    if (targetPackage && isDraggingPackage) {
+      const sourcePackage = event.dataTransfer.getData('pkg-path');
+      if (
+        sourcePackage &&
+        (sourcePackage === targetPackage || targetPackage.startsWith(`${sourcePackage}/`))
+      ) {
+        event.dataTransfer.dropEffect = 'none';
+        clearScriptsDropIndicator();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      const intent = getVerticalDropIntent(row, event.clientY);
+      if (intent === 'inside') {
+        markScriptsInsideIndicator(row);
+        return;
+      }
+      markScriptsDropIndicator(row, intent);
+      return;
+    }
+    event.dataTransfer.dropEffect = 'none';
+    clearScriptsDropIndicator();
+  }, [onPackagesChange, onSnippetsChange]);
+
+  const handleRowDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
+    if (!onSnippetsChange && !onPackagesChange) return;
+    const row = event.currentTarget;
+    clearScriptsDropIndicator();
+
+    const targetSnippetId = row.getAttribute('data-snippet-id');
+    const targetPackage = row.getAttribute('data-pkg-path');
+    const sourceSnippetId = event.dataTransfer.getData('snippet-id');
+    const sourcePackage = event.dataTransfer.getData('pkg-path');
+
+    if (sourceSnippetId && targetSnippetId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = row.getBoundingClientRect();
+      reorderSnippetToTarget(
+        sourceSnippetId,
+        targetSnippetId,
+        event.clientY < rect.top + rect.height / 2 ? 'before' : 'after',
+      );
+      return;
+    }
+    if (sourceSnippetId && targetPackage) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveSnippetToPackage(sourceSnippetId, targetPackage);
+      return;
+    }
+    if (sourcePackage && targetPackage) {
+      event.preventDefault();
+      event.stopPropagation();
+      const intent = getVerticalDropIntent(row, event.clientY);
+      if (intent === 'inside') movePackageToPackage(sourcePackage, targetPackage);
+      else reorderPackageToTarget(sourcePackage, targetPackage, intent);
+    }
+  }, [
+    movePackageToPackage,
+    moveSnippetToPackage,
+    onPackagesChange,
+    onSnippetsChange,
+    reorderPackageToTarget,
+    reorderSnippetToTarget,
+  ]);
 
   const handleAddSnippet = useCallback(() => {
     // Let the App shell listen and navigate to the Snippets section with
@@ -366,6 +585,11 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                     snippet={item.snippet}
                     depth={0}
                     subtitle={item.snippet.package || t('terminal.toolbar.library')}
+                    draggable={false}
+                    sortableTarget={false}
+                    onDragOver={handleRowDragOver}
+                    onDrop={handleRowDrop}
+                    onDragEnd={clearScriptsDropIndicator}
                     onClick={() => handleSnippetClick(item.snippet)}
                     onEdit={() => handleEditSnippet(item.snippet)}
                     onDelete={() => handleDeleteSnippet(item.snippet.id)}
@@ -379,6 +603,10 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                   <PackageRow
                     row={item.row}
                     countLabel={item.countLabel}
+                    draggable={Boolean(onPackagesChange || onSnippetsChange)}
+                    onDragOver={handleRowDragOver}
+                    onDrop={handleRowDrop}
+                    onDragEnd={clearScriptsDropIndicator}
                     onToggle={() => togglePackage(item.row.path)}
                   />
                 );
@@ -387,6 +615,11 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                 <SnippetRow
                   snippet={item.row.snippet}
                   depth={item.row.depth}
+                  draggable={Boolean(onSnippetsChange)}
+                  sortableTarget={true}
+                  onDragOver={handleRowDragOver}
+                  onDrop={handleRowDrop}
+                  onDragEnd={clearScriptsDropIndicator}
                   onClick={() => handleSnippetClick(item.row.snippet)}
                   onEdit={() => handleEditSnippet(item.row.snippet)}
                   onDelete={() => handleDeleteSnippet(item.row.snippet.id)}
@@ -406,15 +639,29 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
 interface PackageRowProps {
   row: Extract<TreeRow, { type: 'package' }>;
   countLabel: string;
+  draggable: boolean;
+  onDragOver: (event: React.DragEvent<HTMLElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
   onToggle: () => void;
 }
 
-const PackageRow = memo<PackageRowProps>(({ row, countLabel, onToggle }) => (
+const PackageRow = memo<PackageRowProps>(({ row, countLabel, draggable, onDragOver, onDrop, onDragEnd, onToggle }) => (
   <button
     type="button"
     onClick={onToggle}
-    className="w-full flex items-center gap-1.5 pr-3 py-1.5 text-left hover:bg-accent/50 transition-colors"
+    className="vault-drop-indicator-row w-full flex items-center gap-1.5 pr-3 py-1.5 text-left hover:bg-accent/50 transition-colors"
     style={{ paddingLeft: 8 + row.depth * 14 }}
+    data-pkg-path={row.path}
+    draggable={draggable}
+    onDragStart={(event) => {
+      if (!draggable) return;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('pkg-path', row.path);
+    }}
+    onDragOver={onDragOver}
+    onDrop={onDrop}
+    onDragEnd={onDragEnd}
   >
     <ChevronRight
       size={12}
@@ -435,6 +682,11 @@ interface SnippetRowProps {
   snippet: Snippet;
   depth: number;
   subtitle?: string;
+  draggable: boolean;
+  sortableTarget: boolean;
+  onDragOver: (event: React.DragEvent<HTMLElement>) => void;
+  onDrop: (event: React.DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -446,6 +698,11 @@ const SnippetRow = memo<SnippetRowProps>(({
   snippet,
   depth,
   subtitle,
+  draggable,
+  sortableTarget,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onClick,
   onEdit,
   onDelete,
@@ -454,7 +711,19 @@ const SnippetRow = memo<SnippetRowProps>(({
 }) => (
   <ContextMenu>
     <ContextMenuTrigger asChild>
-      <div>
+      <div
+        className="vault-drop-indicator-row"
+        data-snippet-id={sortableTarget ? snippet.id : undefined}
+        draggable={draggable}
+        onDragStart={(event) => {
+          if (!draggable) return;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('snippet-id', snippet.id);
+        }}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <button

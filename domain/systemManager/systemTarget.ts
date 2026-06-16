@@ -1,0 +1,48 @@
+import { classifyDistroId, getEffectiveHostDistro } from '../host';
+import type { Host } from '../models/connection';
+import type { TerminalSession } from '../../types';
+import type { SessionCapabilities, SystemManagerSubTab } from './types';
+
+export function isDefiniteLinuxTarget(
+  host: Host | null | undefined,
+  capabilities: SessionCapabilities | undefined,
+  session: TerminalSession | null | undefined,
+): boolean {
+  if (capabilities?.targetOs === 'linux') return true;
+  if (host?.os === 'linux') return true;
+  if (host?.deviceType === 'network') return false;
+  if (classifyDistroId(getEffectiveHostDistro(host)) === 'linux-like') return true;
+  if (session?.protocol === 'local' && host?.os === 'linux') return true;
+  return false;
+}
+
+export function shouldShowTmuxTab(
+  host: Host | null | undefined,
+  capabilities: SessionCapabilities | undefined,
+  session: TerminalSession | null | undefined,
+): boolean {
+  if (isDefiniteLinuxTarget(host, capabilities, session)) return true;
+  if (capabilities?.targetOs === 'darwin') return true;
+  if (host?.os === 'macos') return true;
+  return false;
+}
+
+export function shouldShowDockerTab(
+  host: Host | null | undefined,
+  capabilities: SessionCapabilities | undefined,
+  session: TerminalSession | null | undefined,
+): boolean {
+  if (capabilities?.hasDocker === true) return true;
+  return isDefiniteLinuxTarget(host, capabilities, session);
+}
+
+export function buildSystemManagerTabs(
+  host: Host | null | undefined,
+  capabilities: SessionCapabilities | undefined,
+  session: TerminalSession | null | undefined,
+): SystemManagerSubTab[] {
+  const tabs: SystemManagerSubTab[] = ['processes'];
+  if (shouldShowTmuxTab(host, capabilities, session)) tabs.push('tmux');
+  if (shouldShowDockerTab(host, capabilities, session)) tabs.push('docker');
+  return tabs;
+}

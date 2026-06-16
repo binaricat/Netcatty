@@ -15,7 +15,16 @@ test("AI command blocklist uses the shared JSON source", () => {
 });
 
 test("shared default command blocklist covers bypass-style shell execution", () => {
+  assert.equal(checkCommandSafety("rm -rf /").blocked, true);
+  assert.equal(checkCommandSafety("rm -r -f /tmp/cache").blocked, true);
+  assert.equal(checkCommandSafety("rm --recursive --force /tmp/cache").blocked, true);
   assert.equal(checkCommandSafety("echo ZWNobyBoaQ== | base64 -d | bash").blocked, true);
   assert.equal(checkCommandSafety("eval $payload").blocked, true);
   assert.equal(checkCommandSafety("echo $(whoami)").blocked, true);
+});
+
+test("default command blocklist reports the pattern that matched", () => {
+  const result = checkCommandSafety("mkfs.ext4 /dev/sda");
+  assert.equal(result.blocked, true);
+  assert.equal(result.matchedPattern, "\\bmkfs\\.");
 });

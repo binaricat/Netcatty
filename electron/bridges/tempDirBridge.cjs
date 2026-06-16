@@ -14,6 +14,7 @@ const NETCATTY_TEMP_DIR_NAME = "Netcatty";
 
 // Cached temp directory path
 let cachedTempDir = null;
+let tempFileCounter = 0;
 
 /**
  * Get the Netcatty temp directory path
@@ -143,8 +144,9 @@ async function clearTempDir() {
 function getTempFilePath(fileName) {
   const tempDir = getTempDir();
   const timestamp = Date.now();
+  tempFileCounter = (tempFileCounter + 1) % 1000000;
   const safeFileName = fileName.replace(/[<>:"/\\|?*]/g, "_");
-  return path.join(tempDir, `${timestamp}_${safeFileName}`);
+  return path.join(tempDir, `${timestamp}_${tempFileCounter}_${safeFileName}`);
 }
 
 /**

@@ -19,6 +19,7 @@ export const terminalLayerAreEqual = (
   prev.terminalSettings === next.terminalSettings &&
   prev.fontSize === next.fontSize &&
   prev.hotkeyScheme === next.hotkeyScheme &&
+  prev.disableTerminalFontZoom === next.disableTerminalFontZoom &&
   prev.keyBindings === next.keyBindings &&
   prev.sftpDefaultViewMode === next.sftpDefaultViewMode &&
   prev.sftpDoubleClickBehavior === next.sftpDoubleClickBehavior &&
@@ -38,12 +39,16 @@ export const terminalLayerAreEqual = (
   prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onReorderWorkspaceSessions === next.onReorderWorkspaceSessions &&
+  prev.onReorderTabs === next.onReorderTabs &&
   prev.onSplitSession === next.onSplitSession &&
   prev.onConnectToHost === next.onConnectToHost &&
   prev.onCreateLocalTerminal === next.onCreateLocalTerminal &&
   prev.isBroadcastEnabled === next.isBroadcastEnabled &&
   prev.onToggleBroadcast === next.onToggleBroadcast &&
+  prev.updateSnippets === next.updateSnippets &&
+  prev.updateSnippetPackages === next.updateSnippetPackages &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.toggleSidePanelRef === next.toggleSidePanelRef &&
-  prev.identities === next.identities
+  prev.identities === next.identities &&
+  prev.shellHistory === next.shellHistory
 );

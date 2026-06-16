@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import type { Host } from '../../types';
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, 'localStorage', {
@@ -15,6 +16,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 const {
   applyTerminalHostTreeHostRename,
   shouldShowTerminalHostHoverCard,
+  getTerminalHostTreeHiddenSurfaceShellWidth,
   getTerminalHostTreeInitialLayoutWidth,
   getTerminalHostTreeLayoutTargetWidth,
   getTerminalHostTreeMeasuredLayoutWidth,
@@ -24,7 +26,7 @@ const {
 } = await import('./TerminalHostTreeSidebar.tsx');
 const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import('../../application/state/terminalHostTreeAnimation.ts');
 
-const host = {
+const host: Host = {
   id: 'host-1',
   label: 'Ubuntu',
   hostname: '10.2.0.124',
@@ -34,7 +36,7 @@ const host = {
   tags: [],
   os: 'linux',
   createdAt: 1,
-} as const;
+};
 
 test('host tree sidebar is visually hidden when disabled even if it remains open', () => {
   assert.equal(isTerminalHostTreeSidebarVisible(true, false), false);
@@ -52,6 +54,12 @@ test('host tree sidebar stays collapsed behind root pages', () => {
 test('host tree layout target follows visible surface state', () => {
   assert.equal(getTerminalHostTreeLayoutTargetWidth(true, 240), 240);
   assert.equal(getTerminalHostTreeLayoutTargetWidth(false, 240), 0);
+});
+
+test('host tree hidden surface shell keeps the open width for return navigation', () => {
+  assert.equal(getTerminalHostTreeHiddenSurfaceShellWidth(true, true, 240), 240);
+  assert.equal(getTerminalHostTreeHiddenSurfaceShellWidth(false, true, 240), 0);
+  assert.equal(getTerminalHostTreeHiddenSurfaceShellWidth(true, false, 240), 0);
 });
 
 test('host tree layout starts collapsed so first mount can animate open', () => {
@@ -76,11 +84,13 @@ test('host tree layout width follows the animated shell via ResizeObserver', () 
   assert.doesNotMatch(source, /performance\.now\(\)/);
 });
 
-test('host tree collapses instantly when hidden behind root pages', () => {
+test('host tree keeps shell width while hidden behind root pages', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /isResizing \|\| !surfaceVisible/);
-  assert.match(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(0\);\s*terminalHostTreeStore\.setLayoutWidth\(0\);/);
+  assert.match(source, /const hiddenSurfaceShellWidth = getTerminalHostTreeHiddenSurfaceShellWidth/);
+  assert.match(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(hiddenSurfaceShellWidth\);\s*terminalHostTreeStore\.setLayoutWidth\(0\);/);
+  assert.doesNotMatch(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(0\);/);
 });
 
 test('host tree sidebar memo tracks surface visibility changes', () => {

@@ -29,6 +29,7 @@ declare global {
       moshServerPath?: string;
       moshClientPath?: string;
       agentForwarding?: boolean;
+      sudoAutofillPassword?: string;
       // Algorithm settings, forwarded so the host-info stats companion SSH
       // connection (issue #1198) negotiates the same KEX / cipher / host-key
       // set the interactive session would.
@@ -58,8 +59,12 @@ declare global {
       port?: number;
       etPort?: number;
       legacyAlgorithms?: boolean;
+      skipEcdsaHostKey?: boolean;
+      algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
+      knownHosts?: import("../../domain/models").KnownHost[];
       jumpHosts?: NetcattyJumpHost[];
       agentForwarding?: boolean;
+      sudoAutofillPassword?: string;
       cols?: number;
       rows?: number;
       charset?: string;
@@ -86,6 +91,30 @@ declare global {
       productId: string;
       pnpId: string;
     }>>;
+    sendSerialYmodem?(sessionId: string, filePath: string): Promise<{
+      success: boolean;
+      fileName?: string;
+      totalBytes?: number;
+      writtenBytes?: number;
+      error?: string;
+      code?: string;
+    }>;
+    receiveSerialYmodem?(sessionId: string, destinationDir: string): Promise<{
+      success: boolean;
+      files?: Array<{
+        fileName: string;
+        filePath: string;
+        totalBytes: number;
+        writtenBytes: number;
+      }>;
+      fileCount?: number;
+      fileName?: string;
+      filePath?: string;
+      totalBytes?: number;
+      writtenBytes?: number;
+      error?: string;
+      code?: string;
+    }>;
     getDefaultShell?(): Promise<string>;
     discoverShells?(): Promise<DiscoveredShell[]>;
     validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; isExecutable: boolean }>;
@@ -141,6 +170,16 @@ declare global {
       stdout?: string;
       stderr?: string;
       error?: string;
+    }>;
+    /** Read the remote host's shell history file via an exec channel. */
+    readRemoteHistory?(sessionId: string, limit?: number): Promise<{
+      success: boolean;
+      pending?: boolean;
+      error?: string;
+      shell?: string;
+      bash?: string;
+      zsh?: string;
+      fish?: string;
     }>;
     /** Get server stats (CPU, Memory, Disk, Network) from an active SSH session */
     getServerStats?(sessionId: string): Promise<{
@@ -207,7 +246,17 @@ declare global {
         error?: string;
       }) => void
     ): () => void;
-    cancelZmodem?(sessionId: string): void;
+    cancelZmodem?(sessionId: string, options?: { interrupt?: boolean }): void;
+    startZmodemDragDropUpload?(
+      sessionId: string,
+      files: Array<{
+        path?: string;
+        name: string;
+        remoteName: string;
+        data?: ArrayBuffer;
+      }>,
+      uploadCommand?: string,
+    ): Promise<{ success: boolean; error?: string }>;
     onZmodemOverwriteRequest?(
       sessionId: string,
       cb: (payload: { sessionId: string; requestId: string; filename: string }) => void

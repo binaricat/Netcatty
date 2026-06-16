@@ -11,21 +11,27 @@ export const CopilotCliCard: React.FC<{
   customPath: string;
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
+  i18nPrefix?: "ai.copilot" | "ai.cursor";
+  allowEmptyCheck?: boolean;
+  showCustomPathInput?: boolean;
 }> = ({
   pathInfo,
   isResolvingPath,
   customPath,
   onCustomPathChange,
   onRecheckPath,
+  i18nPrefix = "ai.copilot",
+  allowEmptyCheck = false,
+  showCustomPathInput = true,
 }) => {
   const { t } = useI18n();
   const found = pathInfo?.available;
 
   const statusText = isResolvingPath
-    ? t('ai.copilot.detecting')
+    ? t(`${i18nPrefix}.detecting`)
     : found
-      ? t('ai.copilot.detected')
-      : t('ai.copilot.notFound');
+      ? t(`${i18nPrefix}.detected`)
+      : t(`${i18nPrefix}.notFound`);
 
   const statusClassName = isResolvingPath
     ? "text-muted-foreground"
@@ -37,7 +43,7 @@ export const CopilotCliCard: React.FC<{
     <div className="rounded-lg border bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
         <p className="min-w-0 text-xs text-muted-foreground leading-5">
-          {t('ai.copilot.description')}
+          {t(`${i18nPrefix}.description`)}
         </p>
         <div className={cn("text-xs font-medium shrink-0", statusClassName)}>
           {statusText}
@@ -46,7 +52,7 @@ export const CopilotCliCard: React.FC<{
 
       {found ? (
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">{t('ai.copilot.path')}</span>
+          <span className="text-muted-foreground">{t(`${i18nPrefix}.path`)}</span>
           <span className="font-mono text-foreground truncate">{pathInfo.path}</span>
           {pathInfo.version && (
             <>
@@ -58,19 +64,21 @@ export const CopilotCliCard: React.FC<{
       ) : !isResolvingPath ? (
         <div className="space-y-2">
           <p className="text-xs text-amber-500">
-            {t('ai.copilot.notFoundHint')}
+            {t(`${i18nPrefix}.notFoundHint`)}
           </p>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={customPath}
-              onChange={(e) => onCustomPathChange(e.target.value)}
-              placeholder={t('ai.copilot.customPathPlaceholder')}
-              className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
-            <Button variant="outline" size="sm" onClick={onRecheckPath} disabled={!customPath.trim()}>
+          <div className={cn("flex items-center gap-2", showCustomPathInput ? "" : "justify-end")}>
+            {showCustomPathInput && (
+              <input
+                type="text"
+                value={customPath}
+                onChange={(e) => onCustomPathChange(e.target.value)}
+                placeholder={t(`${i18nPrefix}.customPathPlaceholder`)}
+                className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            )}
+            <Button variant="outline" size="sm" onClick={onRecheckPath} disabled={!allowEmptyCheck && !customPath.trim()}>
               <RefreshCw size={14} className="mr-1.5" />
-              {t('ai.copilot.check')}
+              {t(`${i18nPrefix}.check`)}
             </Button>
           </div>
         </div>

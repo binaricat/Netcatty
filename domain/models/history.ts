@@ -9,6 +9,7 @@ export interface KnownHost {
   discoveredAt: number;
   lastSeen?: number;
   convertedToHostId?: string; // If converted to managed host
+  order?: number;
 }
 
 // Shell History - records real commands executed in terminal sessions
@@ -19,6 +20,19 @@ export interface ShellHistoryEntry {
   hostLabel: string; // Label for display
   sessionId: string;
   timestamp: number;
+}
+
+// Remote Shell History - commands parsed from a remote host's own shell
+// history file (~/.bash_history, ~/.zsh_history, fish_history), read on
+// demand through the SSH/ET exec channel. Distinct from ShellHistoryEntry,
+// which records commands typed inside Netcatty's own terminal sessions.
+export type RemoteHistorySource = 'bash' | 'zsh' | 'fish';
+
+export interface RemoteHistoryEntry {
+  id: string;
+  command: string;
+  source: RemoteHistorySource;
+  timestamp?: number; // Only set when the history file carries one (zsh EXTENDED_HISTORY, fish `when`)
 }
 
 // Connection Log - records connection history

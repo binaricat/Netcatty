@@ -894,6 +894,22 @@ const {
   prewarmSettingsWindow,
 } = settingsWindowApi;
 
+const { createTerminalPopupWindowApi } = require("./windowManager/terminalPopupWindow.cjs");
+const terminalPopupWindowApi = createTerminalPopupWindowApi({
+  get mainWindow() { return mainWindow; },
+  get currentTheme() { return currentTheme; },
+  V8_CACHE_OPTIONS,
+  __dirname,
+  resolveFrontendBackgroundColor,
+  createExternalOnlyWindowOpenHandler,
+  getDevRendererBaseUrl,
+  applyWindowOpacityToWindow,
+  sendWhenRendererReady,
+  showAndFocusWindow,
+  resolveSettingsWindowBounds,
+});
+const { openTerminalPopupWindow, closeTerminalPopupWindow } = terminalPopupWindowApi;
+
 /**
  * Register window control IPC handlers (only once)
  */
@@ -1116,7 +1132,6 @@ function buildAppMenu(Menu, app, isMac, language = currentLanguage) {
       label: tMenu(language, "view"),
       submenu: [
         { label: tMenu(language, "reload"), click: (_, win) => { if (win) win.reload(); } },
-        { role: "forceReload" },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
@@ -1174,6 +1189,8 @@ module.exports = {
   createWindow,
   openSettingsWindow,
   closeSettingsWindow,
+  openTerminalPopupWindow,
+  closeTerminalPopupWindow,
   prewarmSettingsWindow,
   buildAppMenu,
   getMainWindow,

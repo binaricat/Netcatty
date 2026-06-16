@@ -47,16 +47,16 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
   if (!enabled || !isConnected || !serverStats.lastUpdated) return null;
 
   return (
-              <div className="flex items-center gap-2.5 ml-2 text-[10px] opacity-80 flex-nowrap overflow-hidden min-w-0">
+              <div className="terminal-server-stats flex items-center gap-2 ml-1 text-[10px] opacity-80 flex-nowrap overflow-hidden min-w-0 shrink">
                 {/* CPU with HoverCard for per-core details */}
                 <HoverCard openDelay={200} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <button
-                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
+                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer min-w-0 shrink"
                       aria-label={t("terminal.serverStats.cpu")}
                     >
                       <Cpu size={10} className="flex-shrink-0" />
-                      <span>
+                      <span className="truncate">
                         {serverStats.cpu !== null ? `${serverStats.cpu}%` : '--'}
                         {serverStats.cpuCores !== null && ` (${serverStats.cpuCores}C)`}
                       </span>
@@ -121,11 +121,11 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                 <HoverCard openDelay={200} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <button
-                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
+                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer min-w-0 shrink"
                       aria-label={t("terminal.serverStats.memory")}
                     >
                       <MemoryStick size={10} className="flex-shrink-0" />
-                      <span>
+                      <span className="truncate">
                         {serverStats.memUsed !== null && serverStats.memTotal !== null
                           ? `${(serverStats.memUsed / 1024).toFixed(1)}/${(serverStats.memTotal / 1024).toFixed(1)}G`
                           : '--'}
@@ -248,11 +248,12 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                 <HoverCard openDelay={200} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <button
-                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
+                      className="flex items-center gap-0.5 hover:opacity-100 opacity-80 transition-opacity cursor-pointer min-w-0 shrink"
                       aria-label={t("terminal.serverStats.disk")}
                     >
                       <HardDrive size={10} className="flex-shrink-0" />
                       <span className={cn(
+                        "truncate",
                         serverStats.diskPercent !== null && serverStats.diskPercent >= 90 && "text-red-400",
                         serverStats.diskPercent !== null && serverStats.diskPercent >= 80 && serverStats.diskPercent < 90 && "text-amber-400"
                       )}>
@@ -315,13 +316,13 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                   <HoverCard openDelay={200} closeDelay={100}>
                     <HoverCardTrigger asChild>
                       <button
-                        className="flex items-center gap-1 hover:opacity-100 opacity-80 transition-opacity cursor-pointer flex-shrink-0"
+                        className="flex items-center gap-1 hover:opacity-100 opacity-80 transition-opacity cursor-pointer min-w-0 shrink"
                         aria-label={t("terminal.serverStats.network")}
                       >
                         <ArrowDownToLine size={9} className="flex-shrink-0 text-emerald-400" />
-                        <span>{formatNetSpeed(serverStats.netRxSpeed)}</span>
+                        <span className="truncate">{formatNetSpeed(serverStats.netRxSpeed)}</span>
                         <ArrowUpFromLine size={9} className="flex-shrink-0 text-sky-400" />
-                        <span>{formatNetSpeed(serverStats.netTxSpeed)}</span>
+                        <span className="truncate">{formatNetSpeed(serverStats.netTxSpeed)}</span>
                       </button>
                     </HoverCardTrigger>
                     <HoverCardContent

@@ -7,7 +7,10 @@ import { STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH } from '../../infrastructure/
 import { cn } from '../../lib/utils';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
+import { SessionInlineRenameInput } from '../terminal/SessionInlineRenameInput';
+import { SessionTabContextMenuContent } from '../top-tabs/SessionTabContextMenuContent';
 import { Button } from '../ui/button';
+import { ContextMenu, ContextMenuTrigger } from '../ui/context-menu';
 import { Input } from '../ui/input';
 import { ScrollArea } from '../ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -17,8 +20,13 @@ interface TerminalFocusSidebarProps {
   focusedSessionId: string | undefined;
   onReorderWorkspaceSessions?: (workspaceId: string, draggedSessionId: string, targetSessionId: string, position: 'before' | 'after') => void;
   onRequestAddToWorkspace?: (workspaceId: string) => void;
+  onCloseSession: (sessionId: string) => void;
+  onCopySession?: (sessionId: string) => void;
+  onCopySessionToNewWindow?: (sessionId: string) => void;
+  onDetachSessionFromWorkspace?: (sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
+  onSubmitSessionRename: (sessionId: string, name: string) => void;
   resolvedPreviewTheme: TerminalTheme;
   sessionHostsMap: Map<string, Host>;
   sessions: TerminalSession[];
@@ -40,6 +48,15 @@ type WorkspaceFocusSessionRowProps = {
   session: TerminalSession;
   host: Host | undefined;
   isSelected: boolean;
+  isRenaming: boolean;
+  renameValue: string;
+  onStartRename: (sessionId: string) => void;
+  onSubmitRename: (name: string) => void;
+  onCancelRename: () => void;
+  onCloseSession: (sessionId: string) => void;
+  onCopySession?: (sessionId: string) => void;
+  onCopySessionToNewWindow?: (sessionId: string) => void;
+  onDetachSessionFromWorkspace?: (sessionId: string) => void;
   isDragging: boolean;
   dropPosition: 'before' | 'after' | null;
   theme: FocusSidebarTheme;
@@ -48,12 +65,22 @@ type WorkspaceFocusSessionRowProps = {
   onDragOver: (event: DragEvent, sessionId: string) => void;
   onDrop: (event: DragEvent, sessionId: string) => void;
   onDragEnd: () => void;
+  t: (key: string) => string;
 };
 
 const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
   session,
   host,
   isSelected,
+  isRenaming,
+  renameValue,
+  onStartRename,
+  onSubmitRename,
+  onCancelRename,
+  onCloseSession,
+  onCopySession,
+  onCopySessionToNewWindow,
+  onDetachSessionFromWorkspace,
   isDragging,
   dropPosition,
   theme,
@@ -62,6 +89,7 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
   onDragOver,
   onDrop,
   onDragEnd,
+  t,
 }) => {
   const {
     termFg,
@@ -83,80 +111,121 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
   const rowFg = isSelected ? termFg : unselectedFg;
 
   return (
-    <div
-      data-workspace-focus-session-id={session.id}
-      draggable
-      role="button"
-      tabIndex={0}
-      className={cn(
-        'relative flex w-full select-none items-center justify-start gap-2 rounded-md px-2 py-1.5 text-sm font-normal outline-none transition-colors hover:text-inherit focus-visible:ring-1',
-        isDragging && 'opacity-50',
-      )}
-      style={{
-        backgroundColor: restBg,
-        color: rowFg,
-        boxShadow: dropPosition
-          ? `inset 0 ${dropPosition === 'before' ? '2px' : '-2px'} 0 ${termFg}`
-          : undefined,
-      }}
-      onDragStart={(event) => onDragStart(event, session.id)}
-      onDragOver={(event) => onDragOver(event, session.id)}
-      onDragLeave={(event) => {
-        event.stopPropagation();
-      }}
-      onDrop={(event) => onDrop(event, session.id)}
-      onDragEnd={onDragEnd}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.backgroundColor = hoverBg;
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.backgroundColor = restBg;
-      }}
-      onClick={() => onSelect(session.id)}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        onSelect(session.id);
-      }}
-    >
-      <div className="relative flex h-6 w-6 shrink-0 items-center justify-center self-center">
-        {host ? (
-          <DistroAvatar
-            host={host}
-            fallback={session.hostLabel}
-            size="sm"
-            className="!h-6 !w-6"
-          />
-        ) : (
-          <Server size={14} style={{ color: mutedFg }} />
-        )}
-        <Circle
-          size={5}
-          className={cn('absolute bottom-0 right-0 fill-current', statusColor)}
-        />
-      </div>
-      <div className="flex h-6 flex-1 min-w-0 flex-col justify-center self-center text-left">
-        <div className={cn('truncate text-xs leading-none', isSelected ? 'font-semibold' : 'font-medium')}>
-          {session.hostLabel}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          data-workspace-focus-session-id={session.id}
+          draggable
+          role="button"
+          tabIndex={0}
+          className={cn(
+            'relative flex w-full select-none items-center justify-start gap-2 rounded-md px-2 py-1.5 text-sm font-normal outline-none transition-colors hover:text-inherit focus-visible:ring-1',
+            isDragging && 'opacity-50',
+          )}
+          style={{
+            backgroundColor: restBg,
+            color: rowFg,
+            boxShadow: dropPosition
+              ? `inset 0 ${dropPosition === 'before' ? '2px' : '-2px'} 0 ${termFg}`
+              : undefined,
+          }}
+          onContextMenu={() => onSelect(session.id)}
+          onDragStart={(event) => onDragStart(event, session.id)}
+          onDragOver={(event) => onDragOver(event, session.id)}
+          onDragLeave={(event) => {
+            event.stopPropagation();
+          }}
+          onDrop={(event) => onDrop(event, session.id)}
+          onDragEnd={onDragEnd}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.backgroundColor = hoverBg;
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.backgroundColor = restBg;
+          }}
+          onClick={() => onSelect(session.id)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onSelect(session.id);
+          }}
+        >
+          <div className="relative flex h-6 w-6 shrink-0 items-center justify-center self-center">
+            {host ? (
+              <DistroAvatar
+                host={host}
+                fallback={session.hostLabel}
+                size="sm"
+                className="!h-6 !w-6"
+              />
+            ) : (
+              <Server size={14} style={{ color: mutedFg }} />
+            )}
+            <Circle
+              size={5}
+              className={cn('absolute bottom-0 right-0 fill-current', statusColor)}
+            />
+          </div>
+          <div className="flex h-6 flex-1 min-w-0 flex-col justify-center self-center text-left">
+            {isRenaming ? (
+              <SessionInlineRenameInput
+                initialName={renameValue}
+                onCommit={onSubmitRename}
+                onCancel={onCancelRename}
+                className="h-5 text-xs leading-none"
+              />
+            ) : (
+              <>
+                <div
+                  className={cn('truncate text-xs leading-none', isSelected ? 'font-semibold' : 'font-medium')}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    onStartRename(session.id);
+                  }}
+                >
+                  {session.customName || session.hostLabel}
+                </div>
+                <div className="mt-0.5 truncate text-[10px] leading-none" style={{ color: mutedFg }}>
+                  {session.username}@{session.hostname}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-        <div className="mt-0.5 truncate text-[10px] leading-none" style={{ color: mutedFg }}>
-          {session.username}@{session.hostname}
-        </div>
-      </div>
-    </div>
+      </ContextMenuTrigger>
+      <SessionTabContextMenuContent
+        sessionId={session.id}
+        onCloseSession={onCloseSession}
+        onCopySession={onCopySession}
+        onCopySessionToNewWindow={onCopySessionToNewWindow}
+        onDetachSession={onDetachSessionFromWorkspace}
+        onRenameSession={onStartRename}
+        t={t}
+      />
+    </ContextMenu>
   );
 }, (prev, next) => (
   prev.session === next.session
   && prev.host === next.host
   && prev.isSelected === next.isSelected
+  && prev.isRenaming === next.isRenaming
+  && prev.renameValue === next.renameValue
   && prev.isDragging === next.isDragging
   && prev.dropPosition === next.dropPosition
   && prev.theme === next.theme
   && prev.onSelect === next.onSelect
+  && prev.onStartRename === next.onStartRename
+  && prev.onSubmitRename === next.onSubmitRename
+  && prev.onCancelRename === next.onCancelRename
+  && prev.onCloseSession === next.onCloseSession
+  && prev.onCopySession === next.onCopySession
+  && prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow
+  && prev.onDetachSessionFromWorkspace === next.onDetachSessionFromWorkspace
   && prev.onDragStart === next.onDragStart
   && prev.onDragOver === next.onDragOver
   && prev.onDrop === next.onDrop
   && prev.onDragEnd === next.onDragEnd
+  && prev.t === next.t
 ));
 WorkspaceFocusSessionRow.displayName = 'WorkspaceFocusSessionRow';
 
@@ -165,8 +234,13 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
   focusedSessionId,
   onReorderWorkspaceSessions,
   onRequestAddToWorkspace,
+  onCloseSession,
+  onCopySession,
+  onCopySessionToNewWindow,
+  onDetachSessionFromWorkspace,
   onSetWorkspaceFocusedSession,
   onToggleWorkspaceViewMode,
+  onSubmitSessionRename,
   resolvedPreviewTheme,
   sessionHostsMap,
   sessions,
@@ -181,6 +255,9 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
   const [focusSidebarWidth, setFocusSidebarWidth, persistFocusSidebarWidth] = useStoredNumber(
     STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH, 224, { min: 160, max: 480 },
   );
+
+  const [sidebarRenameSessionId, setSidebarRenameSessionId] = useState<string | null>(null);
+  const [sidebarRenameValue, setSidebarRenameValue] = useState('');
 
   const theme = useMemo<FocusSidebarTheme>(() => {
     const termBg = resolvedPreviewTheme.colors.background;
@@ -208,7 +285,8 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
     const term = focusSidebarSearch.trim().toLowerCase();
     if (!term) return workspaceSessions;
     return workspaceSessions.filter((session) => (
-      session.hostLabel?.toLowerCase().includes(term)
+      session.customName?.toLowerCase().includes(term)
+      || session.hostLabel?.toLowerCase().includes(term)
       || session.hostname?.toLowerCase().includes(term)
       || session.username?.toLowerCase().includes(term)
     ));
@@ -349,6 +427,25 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
     onSetWorkspaceFocusedSession?.(activeWorkspace.id, sessionId);
   }, [activeWorkspace.id, onSetWorkspaceFocusedSession]);
 
+  const handleLocalStartRename = useCallback((sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    setSidebarRenameSessionId(sessionId);
+    setSidebarRenameValue(session.customName || session.hostLabel || '');
+  }, [sessions]);
+
+  const handleLocalSubmitRename = useCallback((name: string) => {
+    if (!sidebarRenameSessionId) return;
+    onSubmitSessionRename(sidebarRenameSessionId, name);
+    setSidebarRenameSessionId(null);
+    setSidebarRenameValue('');
+  }, [sidebarRenameSessionId, onSubmitSessionRename]);
+
+  const handleLocalCancelRename = useCallback(() => {
+    setSidebarRenameSessionId(null);
+    setSidebarRenameValue('');
+  }, []);
+
   return (
     <div
       className="flex-shrink-0 flex flex-col relative"
@@ -426,6 +523,15 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
               session={session}
               host={sessionHostsMap.get(session.id)}
               isSelected={session.id === focusedSessionId}
+              isRenaming={sidebarRenameSessionId === session.id}
+              renameValue={sidebarRenameValue}
+              onStartRename={handleLocalStartRename}
+              onSubmitRename={handleLocalSubmitRename}
+              onCancelRename={handleLocalCancelRename}
+              onCloseSession={onCloseSession}
+              onCopySession={onCopySession}
+              onCopySessionToNewWindow={onCopySessionToNewWindow}
+              onDetachSessionFromWorkspace={onDetachSessionFromWorkspace}
               isDragging={focusSidebarDragSessionId === session.id}
               dropPosition={
                 focusSidebarDropIndicator?.sessionId === session.id
@@ -438,6 +544,7 @@ const TerminalFocusSidebarInner: React.FC<TerminalFocusSidebarProps> = ({
               onDragOver={handleFocusSidebarDragOver}
               onDrop={handleFocusSidebarDrop}
               onDragEnd={handleFocusSidebarDragEnd}
+              t={t}
             />
           ))}
         </div>
@@ -451,6 +558,11 @@ function terminalFocusSidebarPropsEqual(
   next: TerminalFocusSidebarProps,
 ): boolean {
   if (prev.focusedSessionId !== next.focusedSessionId) return false;
+  if (prev.onSubmitSessionRename !== next.onSubmitSessionRename) return false;
+  if (prev.onCloseSession !== next.onCloseSession) return false;
+  if (prev.onCopySession !== next.onCopySession) return false;
+  if (prev.onCopySessionToNewWindow !== next.onCopySessionToNewWindow) return false;
+  if (prev.onDetachSessionFromWorkspace !== next.onDetachSessionFromWorkspace) return false;
   if (prev.resolvedPreviewTheme !== next.resolvedPreviewTheme) return false;
   if (prev.sessionHostsMap !== next.sessionHostsMap) return false;
   if (prev.sessions !== next.sessions) return false;

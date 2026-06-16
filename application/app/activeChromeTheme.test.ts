@@ -39,7 +39,7 @@ const baseInput = {
   workspaceById: new Map<string, Workspace>(),
 };
 
-test("editor tabs use the theme from their owning host", () => {
+test("editor tabs use the owning host terminal theme when follow-app terminal theme is off", () => {
   const editorTab = {
     id: "editor-1",
     hostId: "host-1",
@@ -56,6 +56,26 @@ test("editor tabs use the theme from their owning host", () => {
   });
 
   assert.equal(resolved?.id, hostTheme.id);
+});
+
+test("editor tabs use the followed terminal theme when follow-app terminal theme is on", () => {
+  const editorTab = {
+    id: "editor-1",
+    hostId: "host-1",
+    sessionId: "sftp-1",
+  };
+
+  const resolved = resolveActiveChromeTheme({
+    ...baseInput,
+    activeTabId: toEditorTabId(editorTab.id),
+    editorTabs: [editorTab as unknown as EditorTab],
+    followAppTerminalTheme: true,
+    hostById: new Map([
+      ["host-1", { id: "host-1", theme: hostTheme.id } as unknown as Host],
+    ]),
+  });
+
+  assert.equal(resolved?.id, currentTheme.id);
 });
 
 test("log tabs use the saved log theme when available", () => {

@@ -58,7 +58,7 @@ declare global {
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
-    aiDiscoverAgents?(): Promise<Array<{
+    aiDiscoverAgents?(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<Array<{
       command: string;
       name: string;
       icon: string;
@@ -76,7 +76,8 @@ declare global {
       acpCommand?: string;
       acpArgs?: string[];
     }>>;
-    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean }): Promise<{
+    aiPrewarmShellEnv?(): Promise<{ ok: boolean; error?: string }>;
+    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean }): Promise<{
       state: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected: boolean;
       rawOutput: string;

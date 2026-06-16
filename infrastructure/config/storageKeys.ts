@@ -148,6 +148,8 @@ export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 export const STORAGE_KEY_AI_PUBLIC_MCP_ENABLED = 'netcatty_ai_public_mcp_enabled_v1';
 export const STORAGE_KEY_AI_PUBLIC_MCP_MODE = 'netcatty_ai_public_mcp_mode_v1';
 export const STORAGE_KEY_AI_PUBLIC_MCP_IDLE_TIMEOUT_MINUTES = 'netcatty_ai_public_mcp_idle_timeout_minutes_v1';
+export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
+export const STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION = 'netcatty_ai_show_terminal_selection_action_v1';
 
 // SFTP Transfer Concurrency
 export const STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY = 'netcatty_sftp_transfer_concurrency_v1';
@@ -162,6 +164,12 @@ export const STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT = 'netcatty_show_only
 // Top tabs: Show standalone SFTP view tab
 export const STORAGE_KEY_SHOW_SFTP_TAB = 'netcatty_show_sftp_tab_v1';
 export const STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR = 'netcatty_show_host_tree_sidebar_v1';
+
+// Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
+export const STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS = 'netcatty_shell_only_tab_number_shortcuts_v1';
+
+// Shortcuts: disable terminal font zoom shortcuts
+export const STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM = 'netcatty_disable_terminal_font_zoom_v1';
 
 // Group Configurations (default settings inherited by hosts)
 export const STORAGE_KEY_GROUP_CONFIGS = 'netcatty_group_configs_v1';

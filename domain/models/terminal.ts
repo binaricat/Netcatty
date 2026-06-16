@@ -2,7 +2,9 @@ import type { SerialConfig } from './connection';
 
 // Terminal appearance settings
 export type CursorShape = 'block' | 'bar' | 'underline';
-export type RightClickBehavior = 'context-menu' | 'paste' | 'select-word';
+export type TerminalMouseClickBehavior = 'context-menu' | 'paste' | 'select-word';
+export type RightClickBehavior = TerminalMouseClickBehavior;
+export type MiddleClickBehavior = 'context-menu' | 'paste' | 'disabled';
 export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
 
@@ -53,8 +55,9 @@ export interface TerminalSettings {
 
   // Mouse
   rightClickBehavior: RightClickBehavior;
+  middleClickBehavior: MiddleClickBehavior;
   copyOnSelect: boolean; // Automatically copy selected text
-  middleClickPaste: boolean; // Paste on middle-click
+  middleClickPaste: boolean; // Legacy mirror for older settings payloads
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
 
@@ -81,6 +84,12 @@ export interface TerminalSettings {
   showServerStats: boolean; // Show CPU/Memory/Disk in terminal statusbar
   serverStatsRefreshInterval: number; // Seconds between stats refresh (default: 30)
 
+  // System Manager side panel polling (seconds)
+  systemManagerProcessRefreshInterval: number;
+  systemManagerTmuxRefreshInterval: number;
+  systemManagerDockerListRefreshInterval: number;
+  systemManagerDockerStatsRefreshInterval: number;
+
   // Paste
   disableBracketedPaste: boolean; // Disable bracketed paste mode (avoid ^[[200~ artifacts)
 
@@ -106,7 +115,7 @@ export interface TerminalSettings {
 
   // Rendering
   rendererType: 'auto' | 'webgl' | 'dom'; // Terminal renderer: auto (detect based on hardware), webgl, or dom
-  showLineTimestamps: boolean; // Prefix terminal output lines with timestamps before rendering
+  showLineTimestamps: boolean; // Show output timestamps in a side gutter
 
   // Autocomplete
   autocompleteEnabled: boolean; // Enable terminal command autocomplete
@@ -207,12 +216,39 @@ const normalizeKeywordHighlightRules = (
   return normalizedRules;
 };
 
+const isMiddleClickBehavior = (value: unknown): value is MiddleClickBehavior => (
+  value === 'context-menu' ||
+  value === 'paste' ||
+  value === 'disabled'
+);
+
+const resolveMiddleClickBehavior = (
+  settings?: Partial<TerminalSettings> | null,
+): MiddleClickBehavior => {
+  if (isMiddleClickBehavior(settings?.middleClickBehavior)) {
+    return settings.middleClickBehavior;
+  }
+
+  if (
+    settings &&
+    Object.prototype.hasOwnProperty.call(settings, 'middleClickPaste') &&
+    settings.middleClickPaste === false
+  ) {
+    return 'disabled';
+  }
+
+  return DEFAULT_TERMINAL_SETTINGS.middleClickBehavior;
+};
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
+  const middleClickBehavior = resolveMiddleClickBehavior(settings);
   const mergedSettings = {
     ...DEFAULT_TERMINAL_SETTINGS,
     ...(settings ?? {}),
+    middleClickBehavior,
+    middleClickPaste: middleClickBehavior === 'paste',
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -253,6 +289,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollOnPaste: true,
   smoothScrolling: false,
   rightClickBehavior: 'context-menu',
+  middleClickBehavior: 'paste',
   copyOnSelect: false,
   middleClickPaste: true,
   wordSeparators: ' ()[]{}\'"',
@@ -273,13 +310,17 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
+  systemManagerProcessRefreshInterval: 3,
+  systemManagerTmuxRefreshInterval: 3,
+  systemManagerDockerListRefreshInterval: 5,
+  systemManagerDockerStatsRefreshInterval: 3,
   disableBracketedPaste: false, // Bracketed paste enabled by default
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   rendererType: 'auto', // Auto-detect best renderer based on hardware
-  showLineTimestamps: false, // Opt-in: prefixes terminal output data before rendering
+  showLineTimestamps: false, // Opt-in: shows output timestamps beside terminal lines
   autocompleteEnabled: true, // Autocomplete enabled by default
   autocompleteGhostText: false, // Mutually exclusive with popup menu
   autocompletePopupMenu: true, // Popup menu enabled by default
@@ -347,4 +388,9 @@ export interface TerminalSession {
   // falls back to a fresh connection — so this also applies on reconnect: a
   // reconnect reuses the source again if still connected, else dials fresh.
   reuseConnectionFromSessionId?: string;
+  // Per-pane font size override (workspace splits only; not persisted to vault hosts).
+  fontSize?: number;
+  fontSizeOverride?: boolean;
+  /** User-assigned display name for this terminal session (overrides hostLabel in UI) */
+  customName?: string;
 }

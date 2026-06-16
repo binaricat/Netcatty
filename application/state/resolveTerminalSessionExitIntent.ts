@@ -20,3 +20,7 @@ export function resolveTerminalSessionExitIntent(
   // so the user can inspect output and reconnect.
   return { kind: "markDisconnected" };
 }
+
+export function shouldCloseTerminalPopupOnExit(evt: TerminalSessionExitEvent): boolean {
+  return evt.reason === "exited" && evt.exitCode === 0;
+}

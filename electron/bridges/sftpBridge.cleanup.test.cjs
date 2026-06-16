@@ -4,6 +4,7 @@ const { EventEmitter } = require("node:events");
 const Module = require("node:module");
 
 const passphraseHandler = require("./passphraseHandler.cjs");
+const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
 
 function loadSftpBridgeWithProxySocket(proxySocket, overrides = {}) {
   const bridgePath = require.resolve("./sftpBridge.cjs");
@@ -153,4 +154,48 @@ test("openSftp cleans a jump proxy socket when the first jump connection fails",
   assert.equal(proxySocket.ended, true);
   assert.equal(proxySocket.destroyed, true);
   assert.equal(FailingSshClient.instances[0]?.ended, true);
+});
+
+test("openSftpForSession holds a shared SSH connection until the SFTP handle closes", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  const fakeSftp = {
+    ended: false,
+    readdir: () => {},
+    stat: () => {},
+    mkdir: () => {},
+    unlink: () => {},
+    end() {
+      this.ended = true;
+    },
+  };
+  const conn = {
+    ended: false,
+    sftp(cb) {
+      cb(null, fakeSftp);
+    },
+    end() {
+      this.ended = true;
+    },
+  };
+  const connRef = { count: 1, conn, chainConnections: [] };
+  const session = {
+    conn,
+    stream: {},
+    connRef,
+  };
+  const sessions = new Map([["session-1", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  const opened = await bridge.openSftpForSession(null, { sessionId: "session-1" });
+
+  assert.equal(opened.ok, true);
+  assert.equal(connRef.count, 2);
+  assert.equal(releaseConnectionRef(session), false);
+  assert.equal(conn.ended, false);
+
+  await bridge.closeSftp(null, { sftpId: opened.sftpId });
+
+  assert.equal(fakeSftp.ended, true);
+  assert.equal(conn.ended, true);
 });

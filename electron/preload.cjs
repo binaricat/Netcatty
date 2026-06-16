@@ -31,6 +31,10 @@ const updateAvailableListeners = new Set();
 const updateNotAvailableListeners = new Set();
 const updateErrorListeners = new Set();
 const updateNeedsSaveListeners = new Set();
+const terminalPopupConfigState = {
+  pending: null,
+  listeners: new Set(),
+};
 
 function cleanupTransferListeners(transferId) {
   transferProgressListeners.delete(transferId);
@@ -128,6 +132,20 @@ ipcRenderer.on("netcatty:zmodem:detect", (_event, payload) => {
   const set = zmodemListeners.get(payload.sessionId);
   if (!set) return;
   set.forEach((cb) => { try { cb({ type: "detect", ...payload }); } catch {} });
+});
+
+ipcRenderer.on("netcatty:window:terminalPopupConfig", (_event, payload) => {
+  if (terminalPopupConfigState.listeners.size === 0) {
+    terminalPopupConfigState.pending = payload;
+    return;
+  }
+  terminalPopupConfigState.listeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Terminal popup config callback failed", err);
+    }
+  });
 });
 ipcRenderer.on("netcatty:zmodem:progress", (_event, payload) => {
   const set = zmodemListeners.get(payload.sessionId);
@@ -656,6 +674,7 @@ const api = createPreloadApi({
   updateNotAvailableListeners,
   updateErrorListeners,
   updateNeedsSaveListeners,
+  terminalPopupConfigState,
   uploadProgressListeners,
   uploadCompleteListeners,
   uploadErrorListeners,

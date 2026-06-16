@@ -120,6 +120,47 @@ test('runSdkAgentTurn forwards configured SDK agent environment', async () => {
   assert.equal(streamArgs[2], 'codex');
 });
 
+test('runSdkAgentTurn forwards Cursor API key as agent environment', async () => {
+  let streamArgs: unknown[] = [];
+  let done: (() => void) | null = null;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    aiSdkAgentStream: async (...args: unknown[]) => {
+      streamArgs = args;
+      queueMicrotask(() => done?.());
+      return { ok: true };
+    },
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId: unknown, cb: unknown) => {
+      done = cb as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+  };
+
+  await runSdkAgentTurn(
+    bridge,
+    'request-cursor-key',
+    'chat-cursor-key',
+    {
+      id: 'cursor',
+      name: 'Cursor',
+      command: 'cursor',
+      enabled: true,
+      sdkBackend: 'cursor',
+      apiKey: 'cur-test-key',
+    },
+    'hello',
+    createCallbacks([]),
+  );
+
+  assert.deepEqual(streamArgs.at(-1), {
+    CURSOR_API_KEY: 'cur-test-key',
+  });
+  assert.equal(streamArgs[2], 'cursor');
+});
+
+
 test('runSdkAgentTurn formats structured async error events', async () => {
   const errors: string[] = [];
   let onError: ((error: unknown) => void) | null = null;

@@ -249,6 +249,10 @@ export interface SyncPayload {
     showOnlyUngroupedHostsInRoot?: boolean;
     // Top tabs: show standalone SFTP view tab
     showSftpTab?: boolean;
+    // Shortcuts: Cmd/Ctrl+[1...9] skip pinned Vault/SFTP tabs
+    shellOnlyTabNumberShortcuts?: boolean;
+    // Shortcuts: disable terminal font zoom shortcuts
+    disableTerminalFontZoom?: boolean;
     // Terminal/editor tabs: show left host list sidebar
     showHostTreeSidebar?: boolean;
     // Workspace focus indicator style
@@ -270,6 +274,8 @@ export interface SyncPayload {
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
+      quickMessages?: Array<Record<string, unknown>>;
+      showTerminalSelectionAction?: boolean;
     };
   };
 

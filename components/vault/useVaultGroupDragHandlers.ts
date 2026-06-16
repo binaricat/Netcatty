@@ -47,6 +47,7 @@ export function useVaultGroupDragHandlers({
       if (!a || !b) return a === b;
       if (a.kind !== b.kind) return false;
       if (a.kind === "root") return true;
+      if (b.kind === "root") return false;
       return a.path === b.path;
     }, []);
   
@@ -78,9 +79,12 @@ export function useVaultGroupDragHandlers({
         .filter(s => targetGroup === s.groupName || targetGroup.startsWith(s.groupName + "/"))
         .sort((a, b) => b.groupName.length - a.groupName.length)[0];
   
-      onUpdateHosts(
-        hosts.map((h) => {
-          if (h.id !== hostId) return h;
+      const movedHost = {
+        ...hostToMove,
+        group: targetGroup,
+      };
+      const updatedHost = (() => {
+          const h = movedHost;
   
           // Only SSH hosts can be managed (SSH config only supports SSH)
           const canBeManaged = !h.protocol || h.protocol === "ssh";
@@ -97,8 +101,8 @@ export function useVaultGroupDragHandlers({
             group: targetGroup,
             managedSourceId: (targetManagedSource && canBeManaged) ? targetManagedSource.id : undefined,
           };
-        }),
-      );
+        })();
+      onUpdateHosts(hosts.map((host) => (host.id === hostId ? updatedHost : host)));
       setDragOverDropTarget(null);
       pulseDropTarget(groupPath ? { kind: "group", path: groupPath } : { kind: "root" });
       toast.success(

@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import { Cpu, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine, Sparkles } from "lucide-react";
+import { Activity, Cpu, Clock3, Copy, HardDrive, Maximize2, MemoryStick, Radio, ArrowDownToLine, ArrowUpFromLine, Sparkles, SquareArrowOutUpRight } from "lucide-react";
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { detectLocalOs } from "../lib/localShell";
@@ -22,8 +22,10 @@ import {
 import {
   applyCustomAccentToTerminalTheme,
   resolveHostTerminalThemeId,
+  type TerminalHostUpdate,
 } from "../domain/terminalAppearance";
 import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
+import { supportsZmodemTerminalDragDrop } from "../lib/zmodemDragDrop";
 import { resolveHostAuth } from "../domain/sshAuth";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { useTerminalLayoutSuppressActive } from "../application/state/terminalLayoutSuppressStore";
@@ -91,6 +93,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   keys,
   identities,
   snippets,
+  snippetPackages = [],
+  compactToolbar = false,
+  lineTimestampsAvailable = true,
   chainHosts = [],
   themePreviewId,
   knownHosts = [],
@@ -113,6 +118,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   reuseConnectionFromSessionId,
   serialConfig,
   hotkeyScheme = "disabled",
+  disableTerminalFontZoom = false,
   keyBindings = [],
   onHotkeyAction,
   onTerminalFontSizeChange,
@@ -131,7 +137,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   onOpenSftp,
   onTerminalCwdChange,
   onOpenScripts,
+  onOpenHistory,
   onOpenTheme,
+  onOpenSystem,
   isBroadcastEnabled,
   onToggleBroadcast,
   onToggleComposeBar,
@@ -141,10 +149,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   sessionLog,
   sshDebugLogEnabled,
   sudoAutofillPassword,
+  showSelectionAIAction = true,
   onAddSelectionToAI,
+  sessionDisplayName,
+  onRename,
+  onDetach,
+  onStartSessionDrag,
+  onEndSessionDrag,
+  onDetachPointerDown,
+  onDetachDragStart,
+  onDetachDragEnd,
 }) => {
   const layoutSuppressActive = useTerminalLayoutSuppressActive();
   const deferTerminalResize = isResizing || layoutSuppressActive;
+  const deferTerminalResizeRef = useRef(deferTerminalResize);
+  deferTerminalResizeRef.current = deferTerminalResize;
 
   // Timeout for connection - increased to 120s to allow time for keyboard-interactive (2FA) authentication
   const CONNECTION_TIMEOUT = 120000;
@@ -181,6 +200,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const terminalSettingsRef = useRef(terminalSettings);
   terminalSettingsRef.current = terminalSettings;
+  const handleUpdateHostFromTerminal = useCallback((hostUpdate: TerminalHostUpdate) => {
+    onUpdateHost?.(hostUpdate as Host);
+  }, [onUpdateHost]);
   onTerminalDataCaptureRef.current = onTerminalDataCapture;
   const isVisibleRef = useRef(isVisible);
   isVisibleRef.current = isVisible;
@@ -209,9 +231,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [captureTerminalLogData]);
 
   const hotkeySchemeRef = useRef(hotkeyScheme);
+  const disableTerminalFontZoomRef = useRef(disableTerminalFontZoom);
   const keyBindingsRef = useRef(keyBindings);
   const onHotkeyActionRef = useRef(onHotkeyAction);
   hotkeySchemeRef.current = hotkeyScheme;
+  disableTerminalFontZoomRef.current = disableTerminalFontZoom;
   keyBindingsRef.current = keyBindings;
   onHotkeyActionRef.current = onHotkeyAction;
 
@@ -234,7 +258,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const sudoHintRef = useRef<((active: boolean) => boolean) | undefined>(undefined);
 
   const terminalBackend = useTerminalBackend();
-  const { resizeSession, setSessionEncoding } = terminalBackend;
+  const {
+    resizeSession,
+    receiveSerialYmodem,
+    selectDirectory,
+    selectDirectoryAvailable,
+    selectFile,
+    selectFileAvailable,
+    sendSerialYmodem,
+    serialYmodemAvailable,
+    serialYmodemReceiveAvailable,
+    setSessionEncoding,
+  } = terminalBackend;
 
 
 
@@ -444,10 +479,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const detectedDeviceClass = classifyDistroId(host.distro);
   const isNetworkDevice =
     host.deviceType === 'network' || detectedDeviceClass === 'network-device';
+  const remoteDragDropUsesZmodem = supportsZmodemTerminalDragDrop(host, isNetworkDevice);
 
   // Check if this is a local or serial connection (doesn't need connection dialog during connecting)
   const isLocalConnection = host.protocol === "local";
   const isSerialConnection = host.protocol === "serial";
+  const supportsRemoteImagePaste =
+    !isLocalConnection &&
+    !isSerialConnection &&
+    host.protocol !== "telnet" &&
+    host.protocol !== "mosh" &&
+    !host.moshEnabled &&
+    host.protocol !== "et" &&
+    !host.etEnabled;
 
   // Server stats (CPU, Memory, Disk) — only for Linux/macOS, never for
   // network devices. See isNetworkDevice above for why the gating uses the
@@ -456,6 +500,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isSupportedOs =
     !isNetworkDevice &&
     (host.os === 'linux' || host.os === 'macos' || detectedDeviceClass === 'linux-like');
+  const isSystemSidebarEligible =
+    !!onOpenSystem &&
+    isSupportedOs &&
+    !isLocalConnection &&
+    !isSerialConnection &&
+    host.protocol !== 'telnet';
   // Server-stats polling now lives inside <TerminalServerStats> (rendered by
   // TerminalView) so its ~5s refresh only re-renders that widget, not the whole
   // terminal. We just forward `isSupportedOs` via ctx.
@@ -473,7 +523,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     host,
     pendingAuthRef,
     termRef,
-    onUpdateHost,
+    onUpdateHost: handleUpdateHostFromTerminal,
     onStartSession: (term) => {
       const starters = sessionStartersRef.current;
       if (!starters) return;
@@ -797,6 +847,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
   }, []);
 
+  const broadcastUserPasteData = useCallback((data: string) => {
+    if (sessionRef.current && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
+      onBroadcastInputRef.current(data, sessionId);
+      return true;
+    }
+    return false;
+  }, [sessionId]);
+
   const executeSnippetCommand = useCallback((
     command: string,
     noAutoRun?: boolean,
@@ -851,7 +909,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isBroadcastEnabledRef,
     onBroadcastInputRef,
     isLocalConnection,
+    supportsRemoteImagePaste,
     terminalBackend,
+    getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
+    scrollToBottomAfterProgrammaticInput,
   });
   // Kept fresh on every render so the mouseTracking capture handler at
   // handleContextMenuCapture (which is bound once per sessionId) can
@@ -889,6 +950,71 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     setShowSFTP(true);
   }, [host, onOpenSftp, resolveSftpInitialPath, sessionId, showSFTP]);
+
+  const handleSendYmodem = useCallback(async () => {
+    if (!isSerialConnection || statusRef.current !== "connected") return;
+    if (!selectFileAvailable() || !serialYmodemAvailable()) {
+      toast.error(t("terminal.ymodem.unavailable"));
+      return;
+    }
+
+    try {
+      const filePath = await selectFile(
+        t("terminal.ymodem.selectFile"),
+        undefined,
+        [{ name: t("terminal.ymodem.allFiles"), extensions: ["*"] }],
+      );
+      if (!filePath) return;
+
+      const fileName = filePath.split(/[\\/]/).pop() || filePath;
+      toast.info(t("terminal.ymodem.started", { fileName }));
+      const result = await sendSerialYmodem(sessionRef.current || sessionId, filePath);
+      if (result.success) {
+        toast.success(t("terminal.ymodem.complete", { fileName: result.fileName || fileName }));
+      } else {
+        toast.error(result.error || t("terminal.ymodem.failed"));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("terminal.ymodem.failed"));
+    }
+  }, [isSerialConnection, selectFile, selectFileAvailable, sendSerialYmodem, serialYmodemAvailable, sessionId, t]);
+
+  const handleReceiveYmodem = useCallback(async () => {
+    if (!isSerialConnection || statusRef.current !== "connected") return;
+    if (!selectDirectoryAvailable() || !serialYmodemReceiveAvailable()) {
+      toast.error(t("terminal.ymodem.unavailable"));
+      return;
+    }
+
+    try {
+      const destinationDir = await selectDirectory(t("terminal.ymodem.selectReceiveDirectory"));
+      if (!destinationDir) return;
+
+      toast.info(t("terminal.ymodem.receiveStarted"));
+      const result = await receiveSerialYmodem(sessionRef.current || sessionId, destinationDir);
+      if (result.success) {
+        if (result.fileCount && result.fileCount > 1) {
+          toast.success(t("terminal.ymodem.receiveCompleteMultiple", { count: result.fileCount }));
+        } else if (result.fileName) {
+          toast.success(t("terminal.ymodem.receiveComplete", { fileName: result.fileName }));
+        } else {
+          toast.success(t("terminal.ymodem.receiveEmpty"));
+        }
+      } else {
+        toast.error(t("terminal.ymodem.receiveFailed"));
+      }
+    } catch {
+      toast.error(t("terminal.ymodem.receiveFailed"));
+    }
+  }, [
+    isSerialConnection,
+    receiveSerialYmodem,
+    selectDirectory,
+    selectDirectoryAvailable,
+    serialYmodemReceiveAvailable,
+    sessionId,
+    t,
+  ]);
 
   const handleCancelConnect = () => {
     if (pendingHostKeyRequestId) {
@@ -1046,6 +1172,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   } = useTerminalDragDrop({
     host,
     isLocalConnection,
+    isNetworkDevice,
     onOpenSftp,
     resolveSftpInitialPath,
     scrollToBottomAfterProgrammaticInput,
@@ -1059,10 +1186,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   useTerminalFilePaste({
     isLocalConnection,
+    supportsRemoteImagePaste,
     status,
     termRef,
     sessionRef,
     terminalBackend,
+    resolveSftpInitialPath,
+    scrollOnPasteRef,
+    onPasteData: broadcastUserPasteData,
     scrollToBottomAfterProgrammaticInput,
     containerRef,
   });
@@ -1071,10 +1202,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     <TerminalToolbar
       status={status}
       host={host}
+      compactToolbar={compactToolbar}
+      snippets={snippets}
+      snippetPackages={snippetPackages}
+      onSnippetClick={(snippet) => { void executeSnippet(snippet); }}
       onOpenSFTP={handleOpenSFTP}
+      onSendYmodem={isSerialConnection ? handleSendYmodem : undefined}
+      onReceiveYmodem={isSerialConnection ? handleReceiveYmodem : undefined}
       onOpenScripts={onOpenScripts ?? (() => {})}
+      onOpenHistory={onOpenHistory}
       onOpenTheme={onOpenTheme ?? (() => {})}
-      onUpdateHost={onUpdateHost}
+      onUpdateHost={handleUpdateHostFromTerminal}
       showClose={opts?.showClose}
       onClose={() => onCloseSession?.(sessionId)}
       isSearchOpen={isSearchOpen}
@@ -1085,20 +1223,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onSetTerminalEncoding={handleSetTerminalEncoding}
     />
   ), [
+    compactToolbar,
+    executeSnippet,
     handleOpenSFTP,
+    handleReceiveYmodem,
+    handleSendYmodem,
     handleSetTerminalEncoding,
     handleToggleSearch,
     host,
     inWorkspace,
+    isSerialConnection,
     isComposeBarOpen,
     isSearchOpen,
     isWorkspaceComposeBarOpen,
     onCloseSession,
     onOpenScripts,
+    onOpenHistory,
     onOpenTheme,
     onToggleComposeBar,
-    onUpdateHost,
+    handleUpdateHostFromTerminal,
     sessionId,
+    snippetPackages,
+    snippets,
     status,
     terminalEncoding,
   ]);
@@ -1118,9 +1264,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     ['--terminal-ui-toolbar-btn-active' as never]: `var(--terminal-preview-toolbar-btn-active, color-mix(in srgb, ${effectiveTheme.colors.cursor} 78%, ${effectiveTheme.colors.background} 22%))`,
   }), [effectiveTheme.colors.background, effectiveTheme.colors.cursor, effectiveTheme.colors.foreground]);
 
-  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, host, hotkeySchemeRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalFontSizeChange, paneLayoutKey, pendingAuthRef, pendingOutputScrollRef, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef });
+  const effectiveComposeBarOpen = inWorkspace ? !!isWorkspaceComposeBarOpen : isComposeBarOpen;
 
-  return <TerminalView ctx={{ ArrowDownToLine, ArrowUpFromLine, Button, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, Sparkles, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, containerRef, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleRetry, handleSearch, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, isSearchOpen, isSupportedOs, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onExpandToFocus, onSplitHorizontal, onSplitVertical, onToggleBroadcast, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, scrollToBottomAfterProgrammaticInput, searchMatchCount, selectionOverlayPosition, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, snippets, status, statusDotTone, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />;
+  useTerminalEffects({ CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, host, hotkeySchemeRef, identities, inWorkspace, isBootActiveRef, isBroadcastEnabledRef, isComposeBarOpen: effectiveComposeBarOpen, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing: deferTerminalResize, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, onBroadcastInputRef, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onSnippetShortkeyRef, onSnippetExecutorChange, onTerminalCwdChange, onTerminalFontSizeChange, paneLayoutKey, pendingAuthRef, pendingOutputScrollRef, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setHasSelection, setIsCancelling, setIsDisconnectedDialogDismissed, setIsSearchOpen, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setSelectionOverlayPosition, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, snippetsRef, status, statusRef, sudoAutofillRef, t, teardown, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef });
+
+  return <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, Sparkles, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, hasSelection, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isDraggingOver, isFocusMode, isLocalConnection, remoteDragDropUsesZmodem, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, scrollToBottomAfterProgrammaticInput, searchMatchCount, selectionOverlayPosition, sessionDisplayName, sessionId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, snippets, status, statusDotTone, sudoHintRef, sudoHintText: t("terminal.sudoHint.pressEnter"), t, termRef, terminalBackend, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem }} />;
 };
 
 const Terminal = memo(TerminalComponent, terminalPropsAreEqual);

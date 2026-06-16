@@ -4,9 +4,12 @@ import { activeTabStore } from '../../application/state/activeTabStore';
 import { useTerminalLayoutSuppressActive } from '../../application/state/terminalLayoutSuppressStore';
 import type { TerminalSessionExitEvent } from '../../application/state/resolveTerminalSessionExitIntent';
 import { createTerminalSelectionAttachment } from '../../application/state/terminalSelectionAttachment';
+import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
-import { SplitDirection } from '../../domain/workspace';
+import { useStoredBoolean } from '../../application/state/useStoredBoolean';
+import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { KeyBinding, TerminalSettings } from '../../domain/models';
+import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastructure/config/storageKeys';
 import { cn } from '../../lib/utils';
 import type { DropEntry } from '../../lib/sftpFileUtils';
 import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, TerminalTheme, Workspace } from '../../types';
@@ -19,7 +22,7 @@ import {
   parseTerminalPaneRenderSnapshot,
 } from '../terminalPaneVisibility';
 
-export type SidePanelTab = 'sftp' | 'scripts' | 'theme' | 'ai';
+export type SidePanelTab = 'sftp' | 'scripts' | 'history' | 'theme' | 'ai' | 'system';
 
 export type WorkspaceRect = { x: number; y: number; w: number; h: number };
 
@@ -434,6 +437,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                   commandBlocklist={aiState.commandBlocklist}
                   maxIterations={aiState.maxIterations}
                   webSearchConfig={aiState.webSearchConfig}
+                  quickMessages={aiState.quickMessages}
                   scopeType={context.scopeType}
                   scopeTargetId={context.scopeTargetId}
                   scopeHostIds={context.scopeHostIds}
@@ -473,18 +477,22 @@ export interface TerminalLayerProps {
   terminalFontFamilyId: string;
   fontSize?: number;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onUpdateTerminalThemeId?: (themeId: string) => void;
   onUpdateTerminalFontFamilyId?: (fontFamilyId: string) => void;
   onUpdateTerminalFontSize?: (fontSize: number) => void;
   onUpdateTerminalFontWeight?: (fontWeight: number) => void;
+  onUpdateSessionFontSize?: (sessionId: string, fontSize: number) => void;
+  onClearSessionFontSizeOverride?: (sessionId: string) => void;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onUpdateSessionStatus: (sessionId: string, status: TerminalSession['status']) => void;
   onUpdateHostDistro: (hostId: string, distro: string) => void;
   onUpdateHost: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  shellHistory?: import('../../types').ShellHistoryEntry[];
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
@@ -494,6 +502,13 @@ export interface TerminalLayerProps {
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onReorderWorkspaceSessions?: (workspaceId: string, draggedSessionId: string, targetSessionId: string, position: 'before' | 'after') => void;
+  onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
+  onCopySession?: (sessionId: string) => void;
+  onCopySessionToNewWindow?: (sessionId: string) => void;
+  onRemoveSessionFromWorkspace?: (
+    sessionId: string,
+    tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
+  ) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   onConnectToHost: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
@@ -502,6 +517,8 @@ export interface TerminalLayerProps {
   onToggleBroadcast?: (workspaceId: string) => void;
   // SFTP side panel
   updateHosts: (hosts: Host[]) => void;
+  updateSnippets?: (snippets: Snippet[]) => void;
+  updateSnippetPackages?: (packages: string[]) => void;
   sftpDefaultViewMode: 'list' | 'tree';
   sftpDoubleClickBehavior: 'open' | 'transfer';
   sftpAutoSync: boolean;
@@ -521,6 +538,9 @@ export interface TerminalLayerProps {
   showHostTreeSidebar?: boolean;
   toggleScriptsSidePanelRef?: React.MutableRefObject<(() => void) | null>;
   toggleSidePanelRef?: React.MutableRefObject<(() => void) | null>;
+  // Session rename
+  onStartSessionRename?: (sessionId: string) => void;
+  onSubmitSessionRename?: (sessionId?: string, name?: string) => void;
 }
 
 interface TerminalPaneProps {
@@ -548,6 +568,7 @@ interface TerminalPaneProps {
   customAccent?: string;
   terminalSettings?: TerminalSettings;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   isResizing: boolean;
   isComposeBarOpen: boolean;
@@ -563,7 +584,9 @@ interface TerminalPaneProps {
   ) => void;
   onTerminalCwdChange: (sessionId: string, cwd: string | null) => void;
   onOpenScripts: () => void;
+  onOpenHistory?: () => void;
   onOpenTheme: () => void;
+  onOpenSystem?: () => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
@@ -572,6 +595,7 @@ interface TerminalPaneProps {
   onUpdateHost: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  shellHistory?: import('../../types').ShellHistoryEntry[];
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
@@ -583,6 +607,15 @@ interface TerminalPaneProps {
     executor: SnippetExecutor | null,
   ) => void;
   onAddSelectionToAI?: (sessionId: string, selection: string) => void;
+  showSelectionAIAction: boolean;
+  onStartSessionRename?: (sessionId: string) => void;
+  onRemoveSessionFromWorkspace?: (
+    sessionId: string,
+    tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
+  ) => void;
+  onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
+  onStartSessionDrag?: (sessionId: string) => void;
+  onEndSessionDrag?: () => void;
 }
 
 const getPaneThemePreviewId = (props: TerminalPaneProps): string | null => (
@@ -640,6 +673,7 @@ const terminalPanePropsAreEqual = (
   prev.customAccent === next.customAccent &&
   prev.terminalSettings === next.terminalSettings &&
   prev.hotkeyScheme === next.hotkeyScheme &&
+  prev.disableTerminalFontZoom === next.disableTerminalFontZoom &&
   prev.keyBindings === next.keyBindings &&
   prev.isResizing === next.isResizing &&
   prev.isComposeBarOpen === next.isComposeBarOpen &&
@@ -650,7 +684,9 @@ const terminalPanePropsAreEqual = (
   prev.onOpenSftp === next.onOpenSftp &&
   prev.onTerminalCwdChange === next.onTerminalCwdChange &&
   prev.onOpenScripts === next.onOpenScripts &&
+  prev.onOpenHistory === next.onOpenHistory &&
   prev.onOpenTheme === next.onOpenTheme &&
+  prev.onOpenSystem === next.onOpenSystem &&
   prev.onCloseSession === next.onCloseSession &&
   prev.onStatusChange === next.onStatusChange &&
   prev.onSessionExit === next.onSessionExit &&
@@ -666,7 +702,13 @@ const terminalPanePropsAreEqual = (
   prev.onBroadcastInput === next.onBroadcastInput &&
   prev.onToggleWorkspaceComposeBar === next.onToggleWorkspaceComposeBar &&
   prev.onSnippetExecutorChange === next.onSnippetExecutorChange &&
-  prev.onAddSelectionToAI === next.onAddSelectionToAI
+  prev.onAddSelectionToAI === next.onAddSelectionToAI &&
+  prev.showSelectionAIAction === next.showSelectionAIAction &&
+  prev.onStartSessionRename === next.onStartSessionRename &&
+  prev.onRemoveSessionFromWorkspace === next.onRemoveSessionFromWorkspace &&
+  prev.onReorderTabs === next.onReorderTabs &&
+  prev.onStartSessionDrag === next.onStartSessionDrag &&
+  prev.onEndSessionDrag === next.onEndSessionDrag
 );
 
 const TerminalPane: React.FC<TerminalPaneProps> = memo(({
@@ -694,6 +736,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   customAccent,
   terminalSettings,
   hotkeyScheme,
+  disableTerminalFontZoom,
   keyBindings,
   isResizing,
   isComposeBarOpen,
@@ -704,7 +747,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onOpenSftp,
   onTerminalCwdChange,
   onOpenScripts,
+  onOpenHistory,
   onOpenTheme,
+  onOpenSystem,
   onCloseSession,
   onStatusChange,
   onSessionExit,
@@ -721,6 +766,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onToggleWorkspaceComposeBar,
   onSnippetExecutorChange,
   onAddSelectionToAI,
+  showSelectionAIAction,
+  onStartSessionRename,
+  onRemoveSessionFromWorkspace,
+  onReorderTabs,
+  onStartSessionDrag,
+  onEndSessionDrag,
 }) => {
   const layoutSuppressActive = useTerminalLayoutSuppressActive();
   const deferPaneLayoutUpdate = isResizing || layoutSuppressActive;
@@ -827,6 +878,198 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
   }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, session.id]);
+  const handleOpenSystemForPane = useCallback(() => {
+    if (activeWorkspaceId && !isFocusMode) {
+      onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
+    }
+    onOpenSystem?.();
+  }, [activeWorkspaceId, isFocusMode, onOpenSystem, onSetWorkspaceFocusedSession, session.id]);
+  const handleRename = useCallback(() => {
+    onStartSessionRename?.(session.id);
+  }, [onStartSessionRename, session.id]);
+  const handleDetach = useCallback(() => {
+    onRemoveSessionFromWorkspace?.(session.id);
+  }, [onRemoveSessionFromWorkspace, session.id]);
+  const handleDetachDragStart = useCallback((e: React.DragEvent) => {
+    if (!inActiveWorkspace) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData(WORKSPACE_SESSION_DRAG_TYPE, session.id);
+    e.dataTransfer.setData('session-id', session.id);
+    e.dataTransfer.setData('text/plain', session.id);
+    onStartSessionDrag?.(session.id);
+  }, [inActiveWorkspace, onStartSessionDrag, session.id]);
+  const handleDetachDragEnd = useCallback(() => {
+    onEndSessionDrag?.();
+  }, [onEndSessionDrag]);
+  const handleDetachPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    if (!inActiveWorkspace || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startPoint = { clientX: e.clientX, clientY: e.clientY };
+    const dragLabel = session.customName || session.hostLabel;
+    let dragStarted = false;
+    let ghostEl: HTMLDivElement | null = null;
+    let insertEl: HTMLDivElement | null = null;
+
+    const ensureDragElements = () => {
+      if (!ghostEl) {
+        ghostEl = document.createElement('div');
+        ghostEl.textContent = dragLabel;
+        ghostEl.style.position = 'fixed';
+        ghostEl.style.left = '0';
+        ghostEl.style.top = '0';
+        ghostEl.style.zIndex = '2147483647';
+        ghostEl.style.pointerEvents = 'none';
+        ghostEl.style.maxWidth = '220px';
+        ghostEl.style.padding = '5px 10px';
+        ghostEl.style.borderRadius = '7px';
+        ghostEl.style.border = '1px solid color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 60%, transparent)';
+        ghostEl.style.background = 'color-mix(in srgb, var(--top-tabs-active-bg, hsl(var(--background))) 90%, transparent)';
+        ghostEl.style.color = 'var(--top-tabs-fg, hsl(var(--foreground)))';
+        ghostEl.style.boxShadow = '0 12px 28px rgba(0, 0, 0, 0.28)';
+        ghostEl.style.fontSize = '12px';
+        ghostEl.style.fontWeight = '600';
+        ghostEl.style.whiteSpace = 'nowrap';
+        ghostEl.style.overflow = 'hidden';
+        ghostEl.style.textOverflow = 'ellipsis';
+        document.body.appendChild(ghostEl);
+      }
+
+      if (!insertEl) {
+        insertEl = document.createElement('div');
+        insertEl.style.position = 'fixed';
+        insertEl.style.zIndex = '2147483646';
+        insertEl.style.pointerEvents = 'none';
+        insertEl.style.width = '2px';
+        insertEl.style.borderRadius = '999px';
+        insertEl.style.background = 'var(--top-tabs-accent, hsl(var(--accent)))';
+        insertEl.style.boxShadow = '0 0 10px color-mix(in srgb, var(--top-tabs-accent, hsl(var(--accent))) 70%, transparent)';
+        insertEl.style.display = 'none';
+        document.body.appendChild(insertEl);
+      }
+    };
+
+    const removeDragElements = () => {
+      ghostEl?.remove();
+      insertEl?.remove();
+      ghostEl = null;
+      insertEl = null;
+    };
+
+    const updateDragElements = (event: PointerEvent) => {
+      ensureDragElements();
+      if (ghostEl) {
+        ghostEl.style.transform = `translate(${event.clientX + 12}px, ${event.clientY + 10}px)`;
+      }
+
+      const topTabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
+      const insertionTarget = getTopTabInsertionTarget(event, topTabsRoot);
+      if (!topTabsRoot || !insertionTarget || !insertEl) {
+        if (insertEl) insertEl.style.display = 'none';
+        return insertionTarget;
+      }
+
+      const targetTab = Array.from(topTabsRoot.querySelectorAll<HTMLElement>('[data-tab-id]'))
+        .find((tab) => tab.dataset.tabId === insertionTarget.tabId);
+      if (!targetTab) {
+        insertEl.style.display = 'none';
+        return insertionTarget;
+      }
+
+      const targetRect = targetTab.getBoundingClientRect();
+      const rootRect = topTabsRoot.getBoundingClientRect();
+      const lineX = insertionTarget.position === 'before' ? targetRect.left : targetRect.right;
+      insertEl.style.display = 'block';
+      insertEl.style.left = `${lineX - 1}px`;
+      insertEl.style.top = `${Math.max(rootRect.top + 5, targetRect.top + 3)}px`;
+      insertEl.style.height = `${Math.max(18, Math.min(rootRect.bottom - rootRect.top - 8, targetRect.height - 4))}px`;
+      return insertionTarget;
+    };
+
+    const resolveStableInsertionTarget = (insertionTarget: ReturnType<typeof getTopTabInsertionTarget>) => {
+      if (!insertionTarget || insertionTarget.tabId !== session.workspaceId) return insertionTarget;
+      const sourceWorkspace = session.workspaceId ? workspaceById.get(session.workspaceId) : undefined;
+      if (!sourceWorkspace) return insertionTarget;
+      const remainingSessionIds = collectSessionIds(sourceWorkspace.root)
+        .filter((candidateId) => candidateId !== session.id);
+      if (remainingSessionIds.length !== 1) return insertionTarget;
+      return {
+        tabId: remainingSessionIds[0],
+        position: insertionTarget.position,
+      };
+    };
+
+    const startDragIfNeeded = (event: PointerEvent) => {
+      if (dragStarted) return;
+      const dx = event.clientX - startPoint.clientX;
+      const dy = event.clientY - startPoint.clientY;
+      if (Math.hypot(dx, dy) < 4) return;
+      dragStarted = true;
+      onStartSessionDrag?.(session.id);
+      updateDragElements(event);
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('pointermove', handlePointerMove, true);
+      document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('pointercancel', handlePointerCancel, true);
+      removeDragElements();
+      if (dragStarted) onEndSessionDrag?.();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      startDragIfNeeded(event);
+      if (dragStarted) updateDragElements(event);
+    };
+
+    const handlePointerCancel = () => {
+      cleanup();
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      startDragIfNeeded(event);
+      const topTabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
+      const insertionTarget = dragStarted ? updateDragElements(event) : null;
+      const shouldDetach = dragStarted && !!topTabsRoot && isPointInsideRect(event, topTabsRoot.getBoundingClientRect());
+      cleanup();
+      if (shouldDetach) {
+        const stableInsertionTarget = resolveStableInsertionTarget(insertionTarget);
+        if (onRemoveSessionFromWorkspace) {
+          onRemoveSessionFromWorkspace(
+            session.id,
+            stableInsertionTarget
+              ? {
+                  tabId: stableInsertionTarget.tabId,
+                  position: stableInsertionTarget.position,
+                  additionalTabIds: [session.id, stableInsertionTarget.tabId],
+                }
+              : undefined,
+          );
+        } else if (stableInsertionTarget) {
+          onReorderTabs?.(session.id, stableInsertionTarget.tabId, stableInsertionTarget.position, [
+            session.id,
+            stableInsertionTarget.tabId,
+          ]);
+        }
+      }
+    };
+
+    document.addEventListener('pointermove', handlePointerMove, true);
+    document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('pointercancel', handlePointerCancel, true);
+  }, [
+    inActiveWorkspace,
+    onEndSessionDrag,
+    onRemoveSessionFromWorkspace,
+    onReorderTabs,
+    onStartSessionDrag,
+    session.customName,
+    session.hostLabel,
+    session.id,
+    session.workspaceId,
+    workspaceById,
+  ]);
   const handleTerminalFontSizeChange = useCallback((nextFontSize: number) => {
     onTerminalFontSizeChange?.(session.id, nextFontSize);
   }, [onTerminalFontSizeChange, session.id]);
@@ -872,13 +1115,16 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         reuseConnectionFromSessionId={session.reuseConnectionFromSessionId}
         serialConfig={session.serialConfig}
         hotkeyScheme={hotkeyScheme}
+        disableTerminalFontZoom={disableTerminalFontZoom}
         keyBindings={keyBindings}
         onHotkeyAction={onHotkeyAction}
         onTerminalFontSizeChange={handleTerminalFontSizeChange}
         onOpenSftp={onOpenSftp}
         onTerminalCwdChange={onTerminalCwdChange}
         onOpenScripts={onOpenScripts}
+        onOpenHistory={onOpenHistory}
         onOpenTheme={onOpenTheme}
+        onOpenSystem={handleOpenSystemForPane}
         onCloseSession={onCloseSession}
         onStatusChange={onStatusChange}
         onSessionExit={onSessionExit}
@@ -900,7 +1146,16 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         sessionLog={sessionLog}
         sshDebugLogEnabled={sshDebugLogEnabled}
         sudoAutofillPassword={sudoAutofillPassword}
+        sessionDisplayName={session.customName || session.hostLabel}
+        showSelectionAIAction={showSelectionAIAction}
         onAddSelectionToAI={onAddSelectionToAI}
+        onRename={handleRename}
+        onDetach={inActiveWorkspace ? handleDetach : undefined}
+        onStartSessionDrag={inActiveWorkspace ? onStartSessionDrag : undefined}
+        onEndSessionDrag={inActiveWorkspace ? onEndSessionDrag : undefined}
+        onDetachPointerDown={inActiveWorkspace ? handleDetachPointerDown : undefined}
+        onDetachDragStart={inActiveWorkspace ? handleDetachDragStart : undefined}
+        onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
     </div>
   );
@@ -932,6 +1187,7 @@ interface TerminalPanesHostProps {
   customAccent?: string;
   terminalSettings?: TerminalSettings;
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
+  disableTerminalFontZoom?: boolean;
   keyBindings?: KeyBinding[];
   isResizing: boolean;
   isComposeBarOpen: boolean;
@@ -942,7 +1198,9 @@ interface TerminalPanesHostProps {
   onOpenSftp: TerminalPaneProps['onOpenSftp'];
   onTerminalCwdChange: TerminalPaneProps['onTerminalCwdChange'];
   onOpenScripts: () => void;
+  onOpenHistory?: () => void;
   onOpenTheme: () => void;
+  onOpenSystem?: () => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
@@ -951,6 +1209,7 @@ interface TerminalPanesHostProps {
   onUpdateHost: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  shellHistory?: import('../../types').ShellHistoryEntry[];
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
@@ -962,6 +1221,11 @@ interface TerminalPanesHostProps {
     executor: SnippetExecutor | null,
   ) => void;
   onAddSelectionToAI?: (sessionId: string, selection: string) => void;
+  onStartSessionRename?: (sessionId: string) => void;
+  onRemoveSessionFromWorkspace?: TerminalPaneProps['onRemoveSessionFromWorkspace'];
+  onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
+  onStartSessionDrag?: (sessionId: string) => void;
+  onEndSessionDrag?: () => void;
 }
 
 const terminalPanesHostPropsAreEqual = (
@@ -991,6 +1255,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.customAccent !== next.customAccent) return false;
   if (prev.terminalSettings !== next.terminalSettings) return false;
   if (prev.hotkeyScheme !== next.hotkeyScheme) return false;
+  if (prev.disableTerminalFontZoom !== next.disableTerminalFontZoom) return false;
   if (prev.keyBindings !== next.keyBindings) return false;
   if (prev.isResizing !== next.isResizing) return false;
   if (prev.isComposeBarOpen !== next.isComposeBarOpen) return false;
@@ -1001,7 +1266,9 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onOpenSftp !== next.onOpenSftp) return false;
   if (prev.onTerminalCwdChange !== next.onTerminalCwdChange) return false;
   if (prev.onOpenScripts !== next.onOpenScripts) return false;
+  if (prev.onOpenHistory !== next.onOpenHistory) return false;
   if (prev.onOpenTheme !== next.onOpenTheme) return false;
+  if (prev.onOpenSystem !== next.onOpenSystem) return false;
   if (prev.onCloseSession !== next.onCloseSession) return false;
   if (prev.onStatusChange !== next.onStatusChange) return false;
   if (prev.onSessionExit !== next.onSessionExit) return false;
@@ -1018,6 +1285,11 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onToggleWorkspaceComposeBar !== next.onToggleWorkspaceComposeBar) return false;
   if (prev.onSnippetExecutorChange !== next.onSnippetExecutorChange) return false;
   if (prev.onAddSelectionToAI !== next.onAddSelectionToAI) return false;
+  if (prev.onStartSessionRename !== next.onStartSessionRename) return false;
+  if (prev.onRemoveSessionFromWorkspace !== next.onRemoveSessionFromWorkspace) return false;
+  if (prev.onReorderTabs !== next.onReorderTabs) return false;
+  if (prev.onStartSessionDrag !== next.onStartSessionDrag) return false;
+  if (prev.onEndSessionDrag !== next.onEndSessionDrag) return false;
 
   if (prev.workspaceRectsById === next.workspaceRectsById) return true;
 
@@ -1040,22 +1312,30 @@ export const TerminalPanesHost: React.FC<TerminalPanesHostProps> = memo(({
   sessionChainHostsMap,
   sessionSudoAutofillPasswordsMap,
   ...sharedProps
-}) => (
-  <>
-    {sessions.map((session) => {
-      const host = sessionHostsMap.get(session.id);
-      if (!host) return null;
-      return (
-        <TerminalPane
-          key={session.id}
-          session={session}
-          host={host}
-          chainHosts={sessionChainHostsMap.get(session.id)}
-          sudoAutofillPassword={sessionSudoAutofillPasswordsMap.get(session.id)}
-          {...sharedProps}
-        />
-      );
-    })}
-  </>
-), terminalPanesHostPropsAreEqual);
+}) => {
+  const [showSelectionAIAction] = useStoredBoolean(
+    STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
+    true,
+  );
+
+  return (
+    <>
+      {sessions.map((session) => {
+        const host = sessionHostsMap.get(session.id);
+        if (!host) return null;
+        return (
+          <TerminalPane
+            key={session.id}
+            session={session}
+            host={host}
+            chainHosts={sessionChainHostsMap.get(session.id)}
+            sudoAutofillPassword={sessionSudoAutofillPasswordsMap.get(session.id)}
+            showSelectionAIAction={showSelectionAIAction}
+            {...sharedProps}
+          />
+        );
+      })}
+    </>
+  );
+}, terminalPanesHostPropsAreEqual);
 TerminalPanesHost.displayName = 'TerminalPanesHost';

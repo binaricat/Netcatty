@@ -29,3 +29,26 @@ test("normalizeTerminalSettings preserves provided localShellArgs", () => {
   );
 });
 
+test("normalizeTerminalSettings defaults middle-click behavior to paste", () => {
+  const settings = normalizeTerminalSettings();
+
+  assert.equal(settings.middleClickBehavior, "paste");
+  assert.equal(settings.middleClickPaste, true);
+});
+
+test("normalizeTerminalSettings migrates disabled legacy middle-click paste", () => {
+  const settings = normalizeTerminalSettings({ middleClickPaste: false });
+
+  assert.equal(settings.middleClickBehavior, "disabled");
+  assert.equal(settings.middleClickPaste, false);
+});
+
+test("normalizeTerminalSettings prefers explicit middle-click behavior over legacy paste flag", () => {
+  const settings = normalizeTerminalSettings({
+    middleClickBehavior: "context-menu",
+    middleClickPaste: true,
+  });
+
+  assert.equal(settings.middleClickBehavior, "context-menu");
+  assert.equal(settings.middleClickPaste, false);
+});

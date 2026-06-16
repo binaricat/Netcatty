@@ -5,12 +5,12 @@
 import { AppWindow, Cloud, FileType, HardDrive, Keyboard, Palette, Sparkles, TerminalSquare, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSettingsState } from "../application/state/useSettingsState";
+import { useAISettingsState } from "../application/state/useAISettingsState";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
 import { useVaultState } from "../application/state/useVaultState";
 import { useWindowControls } from "../application/state/useWindowControls";
 import { useUpdateCheck } from "../application/state/useUpdateCheck";
-import { useAIState } from "../application/state/useAIState";
 import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
 import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
 import { toast } from "./ui/toast";
@@ -45,7 +45,7 @@ class AITabErrorBoundary extends React.Component<
         </div>
       );
     }
-    return (this.props as { children: React.ReactNode }).children;
+    return this.props.children;
   }
 }
 
@@ -126,7 +126,7 @@ const SettingsTerminalTabContainer = React.memo<TerminalTabSettingsProps>(functi
 });
 
 const SettingsAITabContainer: React.FC = () => {
-    const aiState = useAIState();
+    const aiState = useAISettingsState();
 
     return (
         <AITabErrorBoundary>
@@ -162,6 +162,10 @@ const SettingsAITabContainer: React.FC = () => {
                     setPublicMcpMode={aiState.setPublicMcpMode}
                     publicMcpIdleTimeoutMinutes={aiState.publicMcpIdleTimeoutMinutes}
                     setPublicMcpIdleTimeoutMinutes={aiState.setPublicMcpIdleTimeoutMinutes}
+                    quickMessages={aiState.quickMessages}
+                    setQuickMessages={aiState.setQuickMessages}
+                    showTerminalSelectionAIAction={aiState.showTerminalSelectionAIAction}
+                    setShowTerminalSelectionAIAction={aiState.setShowTerminalSelectionAIAction}
                 />
             </React.Suspense>
         </AITabErrorBoundary>
@@ -405,6 +409,10 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                         <SettingsShortcutsTab
                             hotkeyScheme={settings.hotkeyScheme}
                             setHotkeyScheme={settings.setHotkeyScheme}
+                            shellOnlyTabNumberShortcuts={settings.shellOnlyTabNumberShortcuts}
+                            setShellOnlyTabNumberShortcuts={settings.setShellOnlyTabNumberShortcuts}
+                            disableTerminalFontZoom={settings.disableTerminalFontZoom}
+                            setDisableTerminalFontZoom={settings.setDisableTerminalFontZoom}
                             keyBindings={settings.keyBindings}
                             updateKeyBinding={settings.updateKeyBinding}
                             resetKeyBinding={settings.resetKeyBinding}

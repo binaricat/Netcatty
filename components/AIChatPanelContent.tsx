@@ -2,6 +2,7 @@ import React, { type Dispatch, type SetStateAction } from 'react';
 import { History, Plus } from 'lucide-react';
 import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
 import type { UserSkillOption } from './ai/userSkillsState';
+import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import AgentSelector from './ai/AgentSelector';
@@ -65,6 +66,7 @@ interface AIChatPanelContentProps {
   terminalSessions: TerminalSessionSummary[];
   selectedUserSkills: UserSkillOption[];
   userSkillOptions: UserSkillOption[];
+  quickMessages: AIQuickMessage[];
   addSelectedUserSkill: (slug: string) => void;
   removeSelectedUserSkill: (slug: string) => void;
   globalPermissionMode: AIPermissionMode;
@@ -112,6 +114,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   terminalSessions,
   selectedUserSkills,
   userSkillOptions,
+  quickMessages,
   addSelectedUserSkill,
   removeSelectedUserSkill,
   globalPermissionMode,
@@ -263,6 +266,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 hosts={terminalSessions.map(s => ({ sessionId: s.sessionId, hostname: s.hostname, label: s.label, connected: s.connected }))}
                 selectedUserSkills={selectedUserSkills}
                 userSkills={userSkillOptions}
+                quickMessages={quickMessages}
                 onAddUserSkill={addSelectedUserSkill}
                 onRemoveUserSkill={removeSelectedUserSkill}
                 permissionMode={globalPermissionMode}

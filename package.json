@@ -12,7 +12,7 @@
     "netcatty-tool-cli": "./electron/cli/netcatty-tool-cli.cjs"
   },
   "scripts": {
-    "dev": "npm run fetch:mosh:dev && npm run fetch:et:dev && npm run lint && concurrently -k \"vite\" \"npm:dev:electron\"",
+    "dev": "npm run fetch:mosh:dev && npm run fetch:et:dev && npm run lint && concurrently -k \"vite --strictPort\" \"npm:dev:electron\"",
     "dev:electron": "wait-on http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 node electron/launch.cjs",
     "prebuild": "node scripts/copy-monaco.cjs",
     "fetch:mosh": "node scripts/fetch-mosh-binaries.cjs",
@@ -36,7 +36,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs electron/mcp/*.test.cjs scripts/*.test.cjs application/*.test.ts application/app/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.ts components/*.test.tsx components/editor/*.test.ts components/editor/*.test.tsx components/terminalLayer/*.test.ts components/settings/*.test.tsx components/settings/tabs/ai/*.test.ts components/ai/*.test.ts components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/runtime/*.test.ts domain/*.test.ts infrastructure/ai/*.test.ts infrastructure/config/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts"
+    "test": "node --test --import tsx electron/bridges/*.test.cjs electron/bridges/*/*.test.cjs electron/bridges/aiBridge/sdk/*.test.cjs electron/mcp/*.test.cjs scripts/*.test.cjs application/*.test.ts application/app/*.test.ts application/i18n/locales/*.test.ts application/state/*.test.ts application/state/*/*.test.ts components/*.test.ts components/*.test.tsx components/editor/*.test.ts components/editor/*.test.tsx components/terminalLayer/*.test.ts components/settings/*.test.tsx components/settings/tabs/ai/*.test.ts components/ai/*.test.ts components/ai-elements/*.test.tsx components/sftp/*.test.ts components/terminal/*.test.ts components/terminal/runtime/*.test.ts domain/*.test.ts infrastructure/ai/*.test.ts infrastructure/config/*.test.ts infrastructure/services/*/*.test.ts lib/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
@@ -45,7 +45,6 @@
     "@aws-sdk/client-s3": "^3.956.0",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
-    "@google/genai": "1.33.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
     "@openai/codex-sdk": "^0.136.0",
@@ -56,7 +55,6 @@
     "@radix-ui/react-popover": "1.1.15",
     "@radix-ui/react-scroll-area": "1.2.10",
     "@radix-ui/react-select": "2.2.6",
-    "@radix-ui/react-slot": "1.2.4",
     "@radix-ui/react-tabs": "1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@streamdown/cjk": "^1.0.2",
@@ -96,7 +94,6 @@
     "@typescript-eslint/eslint-plugin": "^8.49.0",
     "@typescript-eslint/parser": "^8.49.0",
     "@vitejs/plugin-react": "^5.1.2",
-    "@withfig/autocomplete-types": "^1.31.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^42.3.3",
@@ -105,6 +102,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-unused-imports": "^4.3.0",
     "patch-package": "^8.0.0",
+    "simple-icons": "^16.23.0",
     "tailwindcss": "^4.1.17",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
@@ -113,7 +111,9 @@
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.161",
+    "@cursor/sdk": "^1.0.18",
     "@github/copilot-sdk": "1.0.0",
+    "@tencent-ai/agent-sdk": "^0.3.173",
     "@vscode/windows-process-tree": "^0.7.0"
   },
   "overrides": {

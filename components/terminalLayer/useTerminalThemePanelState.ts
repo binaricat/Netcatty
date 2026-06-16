@@ -41,6 +41,8 @@ interface UseTerminalThemePanelStateOptions {
   onUpdateTerminalFontSize?: (fontSize: number) => void;
   onUpdateTerminalFontWeight?: (fontWeight: number) => void;
   onUpdateTerminalThemeId?: (themeId: string) => void;
+  onUpdateSessionFontSize?: (sessionId: string, fontSize: number) => void;
+  onClearSessionFontSizeOverride?: (sessionId: string) => void;
   sessionHostsMap: Map<string, Host>;
   terminalFontFamilyId: string;
   terminalSettings?: { fontWeight?: number };
@@ -63,6 +65,8 @@ export function useTerminalThemePanelState({
   onUpdateTerminalFontSize,
   onUpdateTerminalFontWeight,
   onUpdateTerminalThemeId,
+  onUpdateSessionFontSize,
+  onClearSessionFontSizeOverride,
   sessionHostsMap,
   terminalFontFamilyId,
   terminalSettings,
@@ -252,6 +256,10 @@ export function useTerminalThemePanelState({
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
       if (!focusedHost || newFontSize === focusedFontSize) return;
       startTransition(() => {
+        if (activeWorkspace && focusedSessionId) {
+          onUpdateSessionFontSize?.(focusedSessionId, newFontSize);
+          return;
+        }
         if (isFocusedHostEphemeral) {
           onUpdateTerminalFontSize?.(newFontSize);
           return;
@@ -260,12 +268,17 @@ export function useTerminalThemePanelState({
           onUpdateHost({ ...rawFocusedHost, fontSize: newFontSize, fontSizeOverride: true });
         }
       });
-    }, [focusedHost, focusedFontSize, isFocusedHostEphemeral, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
+    }, [activeWorkspace, focusedHost, focusedFontSize, focusedSessionId, isFocusedHostEphemeral, onUpdateSessionFontSize, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
   
   const handleFontSizeResetForFocusedSession = useCallback(() => {
-      if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
+      if (!focusedHost) return;
+      if (activeWorkspace && focusedSessionId) {
+        onClearSessionFontSizeOverride?.(focusedSessionId);
+        return;
+      }
+      if (isFocusedHostEphemeral || !rawFocusedHost) return;
       onUpdateHost(clearHostFontSizeOverride(rawFocusedHost));
-    }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, rawFocusedHost]);
+    }, [activeWorkspace, focusedHost, focusedSessionId, isFocusedHostEphemeral, onClearSessionFontSizeOverride, onUpdateHost, rawFocusedHost]);
   
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
       if (!focusedHost || newFontWeight === focusedFontWeight) return;

@@ -1,6 +1,6 @@
 import type { SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
 
-interface SharedRemoteHostCacheEntry {
+export interface SharedRemoteHostCacheEntry {
   path: string;
   homeDir: string;
   files: SftpFileEntry[];

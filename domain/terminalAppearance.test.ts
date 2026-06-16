@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   applyCustomAccentToTerminalTheme,
+  applySessionFontSizeToHost,
   mergeTerminalHostUpdate,
   resolveFollowedTerminalThemeId,
   TERMINAL_THEME_AUTO,
@@ -126,6 +127,53 @@ test("terminal updates still persist SFTP bookmarks", () => {
   assert.deepEqual(merged.sftpBookmarks, [
     { id: "bookmark-1", path: "/srv/www", label: "/srv/www" },
   ]);
+});
+
+test("partial terminal updates preserve unrelated saved host fields", () => {
+  const hostWithAppearance: Host = {
+    ...savedHost,
+    fontSize: undefined,
+    fontSizeOverride: false,
+    showLineTimestamps: false,
+  };
+
+  const merged = mergeTerminalHostUpdate(hostWithAppearance, {
+    id: hostWithAppearance.id,
+    showLineTimestamps: true,
+  });
+
+  assert.equal(merged.showLineTimestamps, true);
+  assert.equal(merged.fontSize, undefined);
+  assert.equal(merged.fontSizeOverride, false);
+  assert.equal(merged.hostname, hostWithAppearance.hostname);
+});
+
+test("applySessionFontSizeToHost overlays workspace pane font size", () => {
+  const host: Host = {
+    id: "host-1",
+    label: "Server",
+    hostname: "example.com",
+    username: "root",
+    port: 22,
+    group: "",
+    tags: [],
+  };
+  const session = {
+    id: "session-1",
+    hostId: "host-1",
+    hostLabel: "Server",
+    username: "root",
+    hostname: "example.com",
+    status: "connected" as const,
+    workspaceId: "workspace-1",
+    fontSize: 18,
+    fontSizeOverride: true,
+  };
+
+  const merged = applySessionFontSizeToHost(host, session);
+
+  assert.equal(merged.fontSize, 18);
+  assert.equal(merged.fontSizeOverride, true);
 });
 
 test("terminal appearance reset clears only appearance fields", () => {

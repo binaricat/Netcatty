@@ -4,6 +4,7 @@
 /// <reference path="./types/global/netcatty-bridge-files.d.ts" />
 /// <reference path="./types/global/netcatty-bridge-ai.d.ts" />
 /// <reference path="./types/global/netcatty-bridge-app.d.ts" />
+/// <reference path="./types/global/netcatty-bridge-system.d.ts" />
 declare module "*.cjs" {
   const value: Record<string, unknown>;
   export = value;
@@ -118,6 +119,8 @@ declare global {
     algorithmOverrides?: import("./domain/models").HostAlgorithmOverrides;
     // Use sudo for SFTP server
     sudo?: boolean;
+    // Saved host password used by background system tools when they need sudo.
+    sudoAutofillPassword?: string;
     // Session log configuration for real-time streaming
     sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
     // SSH connection diagnostics. Does not capture terminal output.

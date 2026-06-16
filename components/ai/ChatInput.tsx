@@ -6,7 +6,9 @@
  * and a bottom toolbar with muted controls + subtle send button.
  */
 
-import { AtSign, Check, ChevronDown, ChevronRight, Cpu, Expand, Eye, FileText, ImageIcon, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
+import { AtSign, Check, ChevronDown, ChevronRight, Cpu, Expand, Eye, FileText, ImageIcon, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
+import { filterQuickMessages, buildSlashCommandItems, filterUserSkillsForSlash, getSlashCommandItemKey, type AIQuickMessage, type SlashCommandItem, type UserSkillSlashOption } from '../../infrastructure/ai/quickMessages';
+import { SlashCommandPicker } from './SlashCommandPicker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { createPortal } from 'react-dom';
@@ -81,6 +83,8 @@ interface ChatInputProps {
   selectedUserSkills?: Array<{ id: string; slug: string; name: string; description: string }>;
   /** Available user skills for /skill-slug insertion */
   userSkills?: Array<{ id: string; slug: string; name: string; description: string }>;
+  /** Custom slash prompts configured in Settings → AI */
+  quickMessages?: AIQuickMessage[];
   /** Callback to add a selected user skill */
   onAddUserSkill?: (slug: string) => void;
   /** Callback to remove a selected user skill */
@@ -118,6 +122,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   hosts = [],
   selectedUserSkills = [],
   userSkills = [],
+  quickMessages = [],
   onAddUserSkill,
   onRemoveUserSkill,
   permissionMode,
@@ -128,7 +133,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const hasTerminalSelectionAttachment = files.some((file) => file.terminalSelection);
   const [expanded, setExpanded] = useState(false);
   // Consolidate menu state into a single discriminated union to prevent multiple menus open simultaneously
-  type ActiveMenu = 'model' | 'attach' | 'atMention' | 'slashSkill' | 'perm' | null;
+  type ActiveMenu = 'model' | 'attach' | 'atMention' | 'slashCommand' | 'perm' | null;
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [inputPanelPos, setInputPanelPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
@@ -142,7 +147,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const showModelPicker = activeMenu === 'model';
   const showAttachMenu = activeMenu === 'attach';
   const showAtMention = activeMenu === 'atMention';
-  const showSlashSkillPicker = activeMenu === 'slashSkill';
+  const showSlashCommandPicker = activeMenu === 'slashCommand';
   const showPermPicker = activeMenu === 'perm';
 
   const closeAllMenus = useCallback(() => {
@@ -158,6 +163,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const permBtnRef = useRef<HTMLButtonElement>(null);
   const attachBtnRef = useRef<HTMLButtonElement>(null);
+  const quickMsgBtnRef = useRef<HTMLButtonElement>(null);
+  const slashPickerListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const findSlashTrigger = useCallback((text: string, caretPosition: number) => {
@@ -202,21 +209,24 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
 
     const slashTrigger = findSlashTrigger(newValue, caretPosition);
-    if (userSkills.length > 0 && slashTrigger) {
+    if (slashTrigger) {
       const pos = getInputPanelMenuPos();
-      if (pos) setInputPanelPos(pos);
+      if (pos) {
+        setMenuPos(null);
+        setInputPanelPos(pos);
+      }
       setSlashQuery(slashTrigger.query);
       setSlashRange({ start: slashTrigger.start, end: slashTrigger.end });
-      setActiveMenu('slashSkill');
+      setActiveMenu('slashCommand');
       return;
     }
 
     if (showAtMention && !newValue.includes('@')) {
       setActiveMenu(null);
-    } else if (showSlashSkillPicker) {
+    } else if (showSlashCommandPicker) {
       closeAllMenus();
     }
-  }, [onChange, value, hosts.length, showAtMention, findSlashTrigger, userSkills.length, showSlashSkillPicker, closeAllMenus, getInputPanelMenuPos]);
+  }, [onChange, value, hosts.length, showAtMention, findSlashTrigger, showSlashCommandPicker, closeAllMenus, getInputPanelMenuPos]);
 
   const handleSelectAtMention = useCallback((host: { label: string; hostname: string }) => {
     // Replace the trailing @ with @hostname
@@ -229,22 +239,84 @@ const ChatInput: React.FC<ChatInputProps> = ({
     closeAllMenus();
   }, [value, onChange, closeAllMenus]);
 
-  const openInputPanelMenu = useCallback((menu: 'atMention' | 'slashSkill') => {
+  const openInputPanelMenu = useCallback((menu: 'atMention' | 'slashCommand') => {
     const pos = getInputPanelMenuPos();
     if (!pos) return;
+    setMenuPos(null);
     setInputPanelPos(pos);
-    if (menu === 'slashSkill') {
-      setSlashQuery('');
-      setSlashRange(null);
+    if (menu === 'slashCommand') {
+      const caret = textareaRef.current?.selectionStart ?? value.length;
+      const trigger = findSlashTrigger(value, caret);
+      if (trigger) {
+        setSlashQuery(trigger.query);
+        setSlashRange({ start: trigger.start, end: trigger.end });
+      } else {
+        setSlashQuery('');
+        setSlashRange(null);
+      }
     }
     setActiveMenu(menu);
-  }, [getInputPanelMenuPos]);
+  }, [findSlashTrigger, getInputPanelMenuPos, value]);
 
-  const filteredUserSkills = useMemo(() => userSkills.filter((skill) => {
-    if (!slashQuery) return true;
-    const lowerQuery = slashQuery.toLowerCase();
-    return skill.slug.toLowerCase().startsWith(lowerQuery) || skill.name.toLowerCase().includes(lowerQuery);
-  }), [userSkills, slashQuery]);
+  const openSlashCommandPicker = useCallback((anchor?: 'toolbar') => {
+    if (anchor === 'toolbar') {
+      const rect = quickMsgBtnRef.current?.getBoundingClientRect();
+      if (rect) {
+        setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 });
+      }
+      setInputPanelPos(null);
+      const caret = textareaRef.current?.selectionStart ?? value.length;
+      const trigger = findSlashTrigger(value, caret);
+      if (trigger) {
+        setSlashQuery(trigger.query);
+        setSlashRange({ start: trigger.start, end: trigger.end });
+      } else {
+        setSlashQuery('');
+        setSlashRange(null);
+      }
+      setActiveMenu('slashCommand');
+      return;
+    }
+    openInputPanelMenu('slashCommand');
+  }, [findSlashTrigger, openInputPanelMenu, value]);
+
+  const userSkillOptions = useMemo<UserSkillSlashOption[]>(
+    () => userSkills.map((skill) => ({
+      id: skill.id,
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+    })),
+    [userSkills],
+  );
+
+  const quickMessageSlugSet = useMemo(
+    () => new Set(quickMessages.map((message) => message.slug)),
+    [quickMessages],
+  );
+
+  const filteredQuickMessages = useMemo(
+    () => filterQuickMessages(quickMessages, slashQuery),
+    [quickMessages, slashQuery],
+  );
+
+  const filteredUserSkills = useMemo(
+    () => filterUserSkillsForSlash(userSkillOptions, slashQuery)
+      .filter((skill) => !quickMessageSlugSet.has(skill.slug)),
+    [userSkillOptions, slashQuery, quickMessageSlugSet],
+  );
+
+  const slashCommandItems = useMemo(
+    () => buildSlashCommandItems(quickMessages, userSkillOptions, slashQuery),
+    [quickMessages, userSkillOptions, slashQuery],
+  );
+
+  const isSlashCatalogEmpty = quickMessages.length === 0 && userSkills.length === 0;
+  const slashPickerNoResultsLabel = isSlashCatalogEmpty
+    ? t('ai.chat.slashEmptyHint')
+    : t('ai.chat.slashNoResults');
+  const slashPickerListboxId = menuPos ? 'slash-command-toolbar' : 'slash-command-input';
+  const showSlashPickerUI = showSlashCommandPicker && (inputPanelPos != null || menuPos != null);
 
   const removeSlashQueryFromInput = useCallback(() => {
     if (!slashRange) return value;
@@ -264,6 +336,28 @@ const ChatInput: React.FC<ChatInputProps> = ({
     closeAllMenus();
   }, [closeAllMenus, onAddUserSkill, onChange, removeSlashQueryFromInput, slashRange]);
 
+  const insertQuickMessage = useCallback((message: AIQuickMessage) => {
+    if (slashRange) {
+      const before = value.slice(0, slashRange.start);
+      const after = value.slice(slashRange.end);
+      const spacerBefore = before.length > 0 && !/\s$/.test(before) ? ' ' : '';
+      const spacerAfter = after.length > 0 && !/^\s/.test(after) ? ' ' : '';
+      onChange(`${before}${spacerBefore}${message.content}${spacerAfter}${after}`);
+    } else {
+      const spacer = value.length > 0 && !/\s$/.test(value) ? ' ' : '';
+      onChange(`${value}${spacer}${message.content}`);
+    }
+    closeAllMenus();
+  }, [closeAllMenus, onChange, slashRange, value]);
+
+  const handleSelectSlashCommandItem = useCallback((item: SlashCommandItem) => {
+    if (item.kind === 'quickMessage') {
+      insertQuickMessage(item.message);
+      return;
+    }
+    insertUserSkillToken(item.skill);
+  }, [insertQuickMessage, insertUserSkillToken]);
+
   // Reset active highlight when a menu opens or when the *identity* of the
   // visible items changes. Watching only `.length` misses cases where the
   // filter produces a different set with the same count (e.g. user types
@@ -273,16 +367,64 @@ const ChatInput: React.FC<ChatInputProps> = ({
     () => hosts.map((h) => h.sessionId).join('|'),
     [hosts],
   );
-  const slashSkillKey = useMemo(
-    () => filteredUserSkills.map((s) => s.id).join('|'),
-    [filteredUserSkills],
+  const slashCommandKey = useMemo(
+    () => slashCommandItems.map(getSlashCommandItemKey).join('|'),
+    [slashCommandItems],
   );
   useEffect(() => {
     if (showAtMention) setActiveMenuIndex(0);
   }, [showAtMention, atMentionKey]);
   useEffect(() => {
-    if (showSlashSkillPicker) setActiveMenuIndex(0);
-  }, [showSlashSkillPicker, slashSkillKey]);
+    if (showSlashCommandPicker) setActiveMenuIndex(0);
+  }, [showSlashCommandPicker, slashCommandKey]);
+
+  useEffect(() => {
+    if (!showSlashCommandPicker || !menuPos || slashCommandItems.length === 0) return;
+    slashPickerListRef.current?.focus();
+  }, [showSlashCommandPicker, menuPos, slashCommandKey, slashCommandItems.length]);
+
+  const handleSlashCommandKeyDown = useCallback((e: KeyboardEvent | React.KeyboardEvent) => {
+    if ('nativeEvent' in e && e.nativeEvent.isComposing) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAllMenus();
+      return;
+    }
+    if (e.key === 'Enter') {
+      if ('shiftKey' in e && e.shiftKey) {
+        return;
+      }
+      if (slashCommandItems.length > 0) {
+        e.preventDefault();
+        const item = slashCommandItems[Math.min(activeMenuIndex, slashCommandItems.length - 1)];
+        if (item) handleSelectSlashCommandItem(item);
+        return;
+      }
+      // Mid-slash token with no matches: block accidental send of "/query" text.
+      if (slashRange) {
+        e.preventDefault();
+      }
+      return;
+    }
+    if (slashCommandItems.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveMenuIndex((i) => (i + 1) % slashCommandItems.length);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveMenuIndex((i) => (i - 1 + slashCommandItems.length) % slashCommandItems.length);
+      return;
+    }
+  }, [activeMenuIndex, closeAllMenus, handleSelectSlashCommandItem, slashCommandItems, slashRange]);
+
+  useEffect(() => {
+    if (!showSlashCommandPicker || !menuPos) return;
+    const onKeyDown = (event: KeyboardEvent) => handleSlashCommandKeyDown(event);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [handleSlashCommandKeyDown, menuPos, showSlashCommandPicker]);
 
   const handleTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return;
@@ -310,31 +452,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
         return;
       }
     }
-    // / skill popover keyboard navigation
-    if (showSlashSkillPicker && filteredUserSkills.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveMenuIndex((i) => (i + 1) % filteredUserSkills.length);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveMenuIndex((i) => (i - 1 + filteredUserSkills.length) % filteredUserSkills.length);
-        return;
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        const skill = filteredUserSkills[Math.min(activeMenuIndex, filteredUserSkills.length - 1)];
-        if (skill) insertUserSkillToken(skill);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeAllMenus();
-        return;
-      }
+    // / command popover keyboard navigation (input-anchored picker)
+    if (showSlashCommandPicker && !menuPos) {
+      handleSlashCommandKeyDown(e);
+      return;
     }
-  }, [showAtMention, hosts, showSlashSkillPicker, filteredUserSkills, activeMenuIndex, handleSelectAtMention, insertUserSkillToken, closeAllMenus]);
+  }, [showAtMention, hosts, showSlashCommandPicker, menuPos, activeMenuIndex, handleSelectAtMention, handleSlashCommandKeyDown, closeAllMenus]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const pastedFiles = Array.from(e.clipboardData.items)
@@ -585,48 +708,42 @@ const ChatInput: React.FC<ChatInputProps> = ({
           document.body,
         )}
 
-        {/* / skill popover */}
-        {showSlashSkillPicker && filteredUserSkills.length > 0 && inputPanelPos && createPortal(
+        {/* / command popover */}
+        {showSlashPickerUI && createPortal(
           <>
             <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
-            <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
-            <div
-              role="listbox"
-              aria-label="Insert user skill"
-              aria-activedescendant={filteredUserSkills[activeMenuIndex] ? `slash-skill-${filteredUserSkills[activeMenuIndex].id}` : undefined}
-              className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg"
-              style={{ left: inputPanelPos.left, bottom: inputPanelPos.bottom, width: 'auto', minWidth: Math.min(200, inputPanelPos.width), maxWidth: inputPanelPos.width }}
-            >
-              <ScrollArea className="max-h-[280px]">
-                <div className="p-1">
-                  {filteredUserSkills.map((skill, idx) => {
-                    const isActive = idx === activeMenuIndex;
-                    return (
-                      <button
-                        id={`slash-skill-${skill.id}`}
-                        key={skill.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isActive}
-                        onMouseEnter={() => setActiveMenuIndex(idx)}
-                        onClick={() => insertUserSkillToken(skill)}
-                        className={`w-full rounded-md px-2 py-1 text-left transition-colors cursor-pointer ${isActive ? 'bg-muted/40' : 'hover:bg-muted/30'}`}
-                      >
-                        <div className="flex items-center gap-2 text-[12px]">
-                          <Package size={12} className="text-muted-foreground/55 shrink-0" />
-                          <span className="text-foreground/90">/{skill.slug}</span>
-                        </div>
-                        {skill.description ? (
-                          <div className="pl-5 text-[10px] leading-4.5 text-muted-foreground/62 line-clamp-2">
-                            {skill.description}
-                          </div>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </div>
+            <SlashCommandPicker
+              listRef={slashPickerListRef}
+              listboxId={slashPickerListboxId}
+              ariaLabel={t('ai.chat.slashCommands')}
+              quickMessages={filteredQuickMessages}
+              userSkills={filteredUserSkills}
+              slashCommandItems={slashCommandItems}
+              activeMenuIndex={activeMenuIndex}
+              onActiveIndexChange={setActiveMenuIndex}
+              onSelectQuickMessage={insertQuickMessage}
+              onSelectSkill={insertUserSkillToken}
+              quickMessagesSectionLabel={t('ai.chat.slashQuickMessages')}
+              userSkillsSectionLabel={t('ai.chat.slashUserSkills')}
+              noResultsLabel={slashPickerNoResultsLabel}
+              className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg outline-none"
+              style={
+                menuPos
+                  ? {
+                      left: menuPos.left,
+                      bottom: menuPos.bottom,
+                      minWidth: 220,
+                      maxWidth: 360,
+                    }
+                  : {
+                      left: inputPanelPos!.left,
+                      bottom: inputPanelPos!.bottom,
+                      width: 'auto',
+                      minWidth: Math.min(200, inputPanelPos!.width),
+                      maxWidth: inputPanelPos!.width,
+                    }
+              }
+            />
           </>,
           document.body,
         )}
@@ -696,19 +813,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <span className="flex-1 text-foreground/85">{t('ai.chat.menuMentionHost')}</span>
                     {hosts.length > 0 && <ChevronRight size={10} className="text-muted-foreground/50" />}
                   </button>
-                  {userSkills.length > 0 && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      aria-label="Insert user skill"
-                      onClick={() => openInputPanelMenu('slashSkill')}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
-                    >
-                      <Package size={13} className="text-muted-foreground/60" />
-                      <span className="flex-1 text-foreground/85">{t('ai.chat.menuUserSkills')}</span>
-                      <ChevronRight size={10} className="text-muted-foreground/50" />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={t('ai.chat.slashCommands')}
+                    onClick={() => openInputPanelMenu('slashCommand')}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <MessageSquare size={13} className="text-muted-foreground/60" />
+                    <span className="flex-1 text-foreground/85">{t('ai.chat.menuSlashCommands')}</span>
+                    <ChevronRight size={10} className="text-muted-foreground/50" />
+                  </button>
                 </div>
               </>,
               document.body,
@@ -953,6 +1068,30 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <div className="flex-1 min-w-0" />
 
           <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  ref={quickMsgBtnRef}
+                  type="button"
+                  onClick={() => {
+                    if (!showSlashCommandPicker) {
+                      openSlashCommandPicker('toolbar');
+                    } else {
+                      closeAllMenus();
+                    }
+                  }}
+                  className={[
+                    iconButtonClassName,
+                    isSlashCatalogEmpty ? 'opacity-45 hover:opacity-80' : '',
+                  ].filter(Boolean).join(' ')}
+                  aria-label={t('ai.chat.slashCommands')}
+                  aria-expanded={showSlashCommandPicker}
+                >
+                  <MessageSquare size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.chat.slashCommands')}</TooltipContent>
+            </Tooltip>
             <PromptInputSubmit
               status={status}
               onStop={onStop}

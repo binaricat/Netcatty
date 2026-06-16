@@ -115,6 +115,25 @@ export function setSessionView(
   };
 }
 
+export function pruneStaleSessionPanelViews(
+  panelViewByScope: PanelViewByScope,
+  validSessionIds: Set<string>,
+): PanelViewByScope {
+  let next = panelViewByScope;
+
+  for (const [scopeKey, panelView] of Object.entries(panelViewByScope)) {
+    if (panelView?.mode !== 'session' || validSessionIds.has(panelView.sessionId)) {
+      continue;
+    }
+    const updated = setDraftView(next, scopeKey);
+    if (updated !== next) {
+      next = updated;
+    }
+  }
+
+  return next;
+}
+
 export function updateDraftForScope(
   draftsByScope: DraftsByScope,
   scopeKey: string,

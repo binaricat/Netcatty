@@ -74,3 +74,56 @@ test("runThemeTransition uses view transition API when available", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(finished, true);
 });
+
+test("runThemeTransition handles skipped view transitions", async () => {
+  const root = createRoot();
+  let applied = false;
+  let rejectFinished!: (reason: unknown) => void;
+  const doc = {
+    startViewTransition: (callback: () => void) => {
+      callback();
+      return {
+        finished: new Promise<void>((_, reject) => {
+          rejectFinished = reject;
+        }),
+        skipTransition: () => {},
+      };
+    },
+  };
+  (root as { ownerDocument: typeof doc }).ownerDocument = doc;
+
+  runThemeTransition(() => {
+    applied = true;
+  }, root);
+
+  rejectFinished(new DOMException("Transition was skipped", "AbortError"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(applied, true);
+  assert.equal(root.getAttribute(THEME_TRANSITION_ATTR), null);
+});
+
+test("runThemeTransition can apply without animation for heavy tab switches", () => {
+  const root = createRoot();
+  let applied = false;
+  let startViewTransitionCalled = false;
+  const doc = {
+    startViewTransition: (callback: () => void) => {
+      startViewTransitionCalled = true;
+      callback();
+      return {
+        finished: Promise.resolve(),
+        skipTransition: () => {},
+      };
+    },
+  };
+  (root as { ownerDocument: typeof doc }).ownerDocument = doc;
+
+  runThemeTransition(() => {
+    applied = true;
+  }, { root, mode: "instant" });
+
+  assert.equal(applied, true);
+  assert.equal(startViewTransitionCalled, false);
+  assert.equal(root.getAttribute(THEME_TRANSITION_ATTR), null);
+});

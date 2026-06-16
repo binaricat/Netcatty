@@ -18,13 +18,23 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
 
 const {
   computeHostTreeTabGutter,
+  resolveWorkspaceSessionTabDropTarget,
   shouldKeepHostTreeToggleSurface,
   shouldShowHostTreeToggle,
 } = await import("./TopTabs.tsx");
+const {
+  WORKSPACE_SESSION_DRAG_TYPE,
+  dataTransferHasType,
+  getTopTabInsertionTarget,
+  getWorkspaceSessionDragId,
+  hasWorkspaceSessionDrag,
+  isPointInsideRect,
+} = await import("../application/state/terminalDragData.ts");
 const { activateLogViewTab } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
@@ -83,6 +93,160 @@ test("host tree toggle appears with opacity only and no bounce animation", () =>
   assert.match(toggleSlotCss, /opacity 220ms ease/);
   assert.doesNotMatch(toggleSlotCss, /transform/);
   assert.doesNotMatch(toggleSlotCss, /scale/);
+});
+
+test("host tree toggle exposes a custom CSS hook", () => {
+  assert.match(topTabsSource, /data-section="top-tabs-host-tree-toggle"/);
+});
+
+test("quick switcher plus button exposes a custom CSS hook", () => {
+  assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
+});
+
+test("workspace session drag data is recognized with a dedicated drag type", () => {
+  const data = new Map([
+    [WORKSPACE_SESSION_DRAG_TYPE, "session-1"],
+    ["session-id", "fallback-session"],
+  ]);
+  const transfer = {
+    types: [WORKSPACE_SESSION_DRAG_TYPE, "text/plain"],
+    getData: (format: string) => data.get(format) ?? "",
+  };
+
+  assert.equal(hasWorkspaceSessionDrag(transfer), true);
+  assert.equal(getWorkspaceSessionDragId(transfer), "session-1");
+});
+
+test("workspace session drag id falls back to the legacy session id", () => {
+  const transfer = {
+    types: ["session-id"],
+    getData: (format: string) => (format === "session-id" ? "session-2" : ""),
+  };
+
+  assert.equal(dataTransferHasType(transfer, "session-id"), true);
+  assert.equal(hasWorkspaceSessionDrag(transfer), false);
+  assert.equal(getWorkspaceSessionDragId(transfer), "session-2");
+});
+
+test("point-in-rect detects pointer release inside the top tab bar", () => {
+  const rect = { left: 10, right: 110, top: 20, bottom: 60 };
+
+  assert.equal(isPointInsideRect({ clientX: 10, clientY: 20 }, rect), true);
+  assert.equal(isPointInsideRect({ clientX: 70, clientY: 40 }, rect), true);
+  assert.equal(isPointInsideRect({ clientX: 111, clientY: 40 }, rect), false);
+  assert.equal(isPointInsideRect({ clientX: 70, clientY: 61 }, rect), false);
+});
+
+test("top tab insertion target ignores fixed root tabs", () => {
+  const makeTab = (id: string, type: string, left: number, right: number) => ({
+    dataset: { tabId: id, tabType: type },
+    getBoundingClientRect: () => ({ left, right, top: 20, bottom: 60, width: right - left, height: 40 }),
+  });
+  const root = {
+    getBoundingClientRect: () => ({ left: 0, right: 400, top: 0, bottom: 80, width: 400, height: 80 }),
+    querySelectorAll: () => [
+      makeTab("vault", "root", 0, 80),
+      makeTab("workspace-1", "workspace", 90, 210),
+      makeTab("session-1", "session", 210, 330),
+    ],
+  } as unknown as HTMLElement;
+
+  assert.deepEqual(getTopTabInsertionTarget({ clientX: 20, clientY: 40 }, root), {
+    tabId: "workspace-1",
+    position: "before",
+  });
+  assert.deepEqual(getTopTabInsertionTarget({ clientX: 180, clientY: 40 }, root), {
+    tabId: "workspace-1",
+    position: "after",
+  });
+  assert.deepEqual(getTopTabInsertionTarget({ clientX: 380, clientY: 40 }, root), {
+    tabId: "session-1",
+    position: "after",
+  });
+  assert.equal(getTopTabInsertionTarget({ clientX: 180, clientY: 120 }, root), null);
+});
+
+test("workspace session tab drop forwards the requested insertion target", () => {
+  assert.deepEqual(resolveWorkspaceSessionTabDropTarget({
+    targetTabId: "session-3",
+    position: "after",
+    draggedSessionId: "session-1",
+    draggedWorkspaceId: "workspace-1",
+    workspaces: [],
+  }), {
+    tabId: "session-3",
+    position: "after",
+    additionalTabIds: ["session-1", "session-3"],
+  });
+});
+
+test("workspace session tab drop targets the remaining terminal when its workspace dissolves", () => {
+  assert.deepEqual(resolveWorkspaceSessionTabDropTarget({
+    targetTabId: "workspace-1",
+    position: "before",
+    draggedSessionId: "session-1",
+    draggedWorkspaceId: "workspace-1",
+    workspaces: [{
+      id: "workspace-1",
+      title: "Workspace",
+      focusedSessionId: "session-1",
+      root: {
+        id: "split-1",
+        type: "split",
+        direction: "horizontal",
+        children: [
+          { id: "pane-1", type: "pane", sessionId: "session-1" },
+          { id: "pane-2", type: "pane", sessionId: "session-2" },
+        ],
+        sizes: [1, 1],
+      },
+    }],
+  }), {
+    tabId: "session-2",
+    position: "before",
+    additionalTabIds: ["session-1", "session-2"],
+  });
+});
+
+test("workspace session tab-bar blank drop inserts after the last work tab", () => {
+  const makeTab = (id: string, type: string, left: number, right: number) => ({
+    dataset: { tabId: id, tabType: type },
+    getBoundingClientRect: () => ({ left, right, top: 20, bottom: 60, width: right - left, height: 40 }),
+  });
+  const root = {
+    getBoundingClientRect: () => ({ left: 0, right: 500, top: 0, bottom: 80, width: 500, height: 80 }),
+    querySelectorAll: () => [
+      makeTab("vault", "root", 0, 80),
+      makeTab("workspace-1", "workspace", 90, 210),
+      makeTab("session-3", "session", 210, 330),
+    ],
+  } as unknown as HTMLElement;
+  const insertionTarget = getTopTabInsertionTarget({ clientX: 460, clientY: 40 }, root);
+
+  assert.deepEqual(insertionTarget, { tabId: "session-3", position: "after" });
+  assert.deepEqual(resolveWorkspaceSessionTabDropTarget({
+    targetTabId: insertionTarget!.tabId,
+    position: insertionTarget!.position,
+    draggedSessionId: "session-1",
+    draggedWorkspaceId: "workspace-1",
+    workspaces: [],
+  }), {
+    tabId: "session-3",
+    position: "after",
+    additionalTabIds: ["session-1", "session-3"],
+  });
+});
+
+test("terminal top bar hides server stats before they crowd the host title", () => {
+  assert.match(indexCss, /\.terminal-topbar\s*\{[\s\S]*container-type: inline-size/);
+  assert.match(indexCss, /@container \(max-width: 760px\) \{[\s\S]*\.terminal-server-stats\s*\{[\s\S]*display: none/);
+  assert.match(terminalViewSource, /terminal-topbar/);
+  assert.match(terminalViewSource, /terminal-title-cluster/);
+  assert.match(terminalViewSource, /onPointerDown=\{onDetachPointerDown\}/);
+});
+
+test("workspace session drag no longer uses a full tab-bar drop zone", () => {
+  assert.doesNotMatch(topTabsSource, /top-tabs-workspace-detach-drop-zone/);
 });
 
 test("host tree chrome enters after theme switch settles so root labels can animate", () => {

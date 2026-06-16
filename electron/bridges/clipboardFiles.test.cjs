@@ -4,10 +4,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  createClipboardImageFileName,
   decodeWindowsHDrop,
   decodeWindowsFileNameW,
   parseClipboardTextFilePaths,
   readClipboardFiles,
+  readClipboardImage,
 } = require("./clipboardFiles.cjs");
 
 const createFs = (entries) => ({
@@ -146,4 +148,59 @@ test("reads CF_HDROP before falling back to FileNameW", () => {
     { path: "C:\\Users\\me\\a.txt", name: "a.txt", isDirectory: false, size: 42 },
     { path: "D:\\b.txt", name: "b.txt", isDirectory: false, size: 42 },
   ]);
+});
+
+test("creates stable clipboard image file names", () => {
+  assert.equal(
+    createClipboardImageFileName(new Date(2026, 5, 11, 3, 4, 5, 6)),
+    "netcatty-paste-20260611-030405-006.png",
+  );
+});
+
+test("writes clipboard image to Netcatty temp directory", async () => {
+  const writes = [];
+  const content = Buffer.from([1, 2, 3]);
+  const result = await readClipboardImage({
+    clipboard: {
+      readImage: () => ({
+        isEmpty: () => false,
+        toPNG: () => content,
+      }),
+    },
+    fsImpl: {
+      promises: {
+        writeFile: async (filePath, data) => writes.push({ filePath, data }),
+      },
+    },
+    tempDirBridge: {
+      getTempFilePath: (name) => `/netcatty-temp/${name}`,
+    },
+    now: () => new Date(2026, 5, 11, 3, 4, 5, 6),
+  });
+
+  assert.deepEqual(result, {
+    path: "/netcatty-temp/netcatty-paste-20260611-030405-006.png",
+    name: "netcatty-paste-20260611-030405-006.png",
+    mediaType: "image/png",
+    size: 3,
+  });
+  assert.deepEqual(writes, [
+    { filePath: "/netcatty-temp/netcatty-paste-20260611-030405-006.png", data: content },
+  ]);
+});
+
+test("returns null when clipboard image is empty", async () => {
+  const result = await readClipboardImage({
+    clipboard: {
+      readImage: () => ({
+        isEmpty: () => true,
+        toPNG: () => Buffer.from([1]),
+      }),
+    },
+    tempDirBridge: {
+      getTempFilePath: () => "/netcatty-temp/unused.png",
+    },
+  });
+
+  assert.equal(result, null);
 });

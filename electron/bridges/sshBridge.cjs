@@ -545,6 +545,13 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           },
         ),
       };
+      connOpts.hostVerifier = hostKeyVerifier.createHostVerifier({
+        sender,
+        sessionId,
+        hostname: jump.hostname,
+        port: jump.port || 22,
+        knownHosts: options.knownHosts,
+      });
       attachSshDebugLogger(connOpts, sshDiagnosticLogger);
       logSshAlgorithms("Jump host", connOpts.algorithms, {
         hostname: jump.hostname,
@@ -990,7 +997,7 @@ const { isHostKeyTrustedBySystem } = createSystemKnownHostsApi({
 });
 
 const { createMoshStatsConnectionApi } = require("./sshBridge/moshStatsConnection.cjs");
-const { ensureMoshStatsConnection } = createMoshStatsConnectionApi({
+const { ensureMoshStatsConnection, ensureEtStatsConnection } = createMoshStatsConnectionApi({
   get sessions() { return sessions; },
   SSHClient, sshUtils, NetcattyAgent, buildAlgorithms, getSshAgentSocket,
   readFileNoFollow, expandIdentityFilePath, isAutoFillablePasswordChallenge,
@@ -1003,13 +1010,14 @@ const sessionOpsApi = createSessionOpsApi({
   get electronModule() { return electronModule; },
   fs, path, os, exec, randomUUID, iconv, Buffer, process, console, setTimeout, clearTimeout,
   getSessionDecoder, resetSessionDecoders, sessionEncodings, resolveLangFromCharset, safeSend,
-  quoteShellArg, log, ensureMoshStatsConnection,
+  quoteShellArg, log, ensureMoshStatsConnection, ensureEtStatsConnection,
   execOnEtSession: (...args) => require("./terminalBridge.cjs").execOnEtSession(...args),
   getServerStats: undefined,
 });
 const {
   getSessionRemoteInfo,
   getSessionDistroInfo,
+  readRemoteHistory,
   getSessionPwd,
   probeReceiveConflicts,
   removeRemoteFiles,
@@ -1028,6 +1036,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:ssh:pwd", getSessionPwd);
   ipcMain.handle("netcatty:ssh:remoteInfo", getSessionRemoteInfo);
   ipcMain.handle("netcatty:ssh:distroInfo", getSessionDistroInfo);
+  ipcMain.handle("netcatty:ssh:readRemoteHistory", readRemoteHistory);
   ipcMain.handle("netcatty:ssh:listdir", listSessionDir);
   ipcMain.handle("netcatty:ssh:stats", getServerStats);
   ipcMain.handle("netcatty:key:generate", generateKeyPair);
@@ -1081,4 +1090,5 @@ module.exports = {
   // derives the preferred default key from findAllDefaultPrivateKeys()[0]).
   _findDefaultPrivateKey: findDefaultPrivateKey,
   _findAllDefaultPrivateKeys: findAllDefaultPrivateKeys,
+  ensureMoshStatsConnection,
 };

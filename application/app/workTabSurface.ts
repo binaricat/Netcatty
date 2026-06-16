@@ -2,8 +2,20 @@ import {
   fromEditorTabId,
   isEditorTabId,
 } from '../state/activeTabStore';
+import { applyCustomAccentToTerminalTheme, resolveHostTerminalThemeId } from '../../domain/terminalAppearance';
 import type { EditorTab } from '../state/editorTabStore';
-import type { TerminalSession, Workspace } from '../../types';
+import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
+
+function uniqueTabIds(tabIds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const uniqueIds: string[] = [];
+  for (const tabId of tabIds) {
+    if (!tabId || seen.has(tabId)) continue;
+    seen.add(tabId);
+    uniqueIds.push(tabId);
+  }
+  return uniqueIds;
+}
 
 export function isRootPageTabId(activeTabId: string): boolean {
   return activeTabId === 'vault' || activeTabId === 'sftp';
@@ -13,11 +25,40 @@ export function buildOrderedWorkTabIds(
   tabOrder: readonly string[],
   allTabIds: readonly string[],
 ): string[] {
-  const allTabIdSet = new Set(allTabIds);
-  const orderedIds = tabOrder.filter((id) => allTabIdSet.has(id));
+  const uniqueAllTabIds = uniqueTabIds(allTabIds);
+  const allTabIdSet = new Set(uniqueAllTabIds);
+  const orderedIds = uniqueTabIds(tabOrder.filter((id) => allTabIdSet.has(id)));
   const orderedIdSet = new Set(orderedIds);
-  const newIds = allTabIds.filter((id) => !orderedIdSet.has(id));
+  const newIds = uniqueAllTabIds.filter((id) => !orderedIdSet.has(id));
   return [...orderedIds, ...newIds];
+}
+
+export function reorderWorkTabIds(
+  tabOrder: readonly string[],
+  allTabIds: readonly string[],
+  draggedId: string,
+  targetId: string,
+  position: 'before' | 'after' = 'before',
+): string[] {
+  if (draggedId === targetId) return buildOrderedWorkTabIds(tabOrder, allTabIds);
+
+  const currentOrder = buildOrderedWorkTabIds(tabOrder, allTabIds);
+  const draggedIndex = currentOrder.indexOf(draggedId);
+  const targetIndex = currentOrder.indexOf(targetId);
+  if (draggedIndex === -1 || targetIndex === -1) return [...tabOrder];
+
+  currentOrder.splice(draggedIndex, 1);
+
+  let nextTargetIndex = targetIndex;
+  if (draggedIndex < targetIndex) {
+    nextTargetIndex -= 1;
+  }
+  if (position === 'after') {
+    nextTargetIndex += 1;
+  }
+
+  currentOrder.splice(nextTargetIndex, 0, draggedId);
+  return currentOrder;
 }
 
 export function isHostTreeWorkTabSurface({
@@ -84,4 +125,29 @@ export function resolveWorkTabActiveHostId({
   }
 
   return null;
+}
+
+export function resolveWorkTabHostTreeTheme({
+  activeHostId,
+  accentMode,
+  currentTerminalTheme,
+  customAccent,
+  followAppTerminalTheme,
+  hostById,
+  themeById,
+}: {
+  activeHostId: string | null;
+  accentMode: 'theme' | 'custom';
+  currentTerminalTheme: TerminalTheme;
+  customAccent: string;
+  followAppTerminalTheme: boolean;
+  hostById: ReadonlyMap<string, Host>;
+  themeById: ReadonlyMap<string, TerminalTheme>;
+}): TerminalTheme {
+  if (!activeHostId || followAppTerminalTheme) return currentTerminalTheme;
+
+  const host = hostById.get(activeHostId) ?? null;
+  const themeId = resolveHostTerminalThemeId(host, currentTerminalTheme.id);
+  const baseTheme = themeById.get(themeId) ?? currentTerminalTheme;
+  return applyCustomAccentToTerminalTheme(baseTheme, accentMode, customAccent);
 }

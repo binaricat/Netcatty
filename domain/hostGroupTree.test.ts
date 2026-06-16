@@ -12,6 +12,7 @@ const host = (id: string, label: string, group?: string): Host => ({
   port: 22,
   group,
   tags: [],
+  os: 'linux',
 });
 
 describe('buildHostGroupTree', () => {

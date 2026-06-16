@@ -5,7 +5,11 @@ export function findEnabledExternalAgent(
   agents: ExternalAgentConfig[],
   agentId: string,
 ): ExternalAgentConfig | undefined {
-  return agents.find((agent) => agent.id === agentId && agent.enabled && Boolean(getExternalAgentSdkBackend(agent)));
+  return agents.find((agent) =>
+    agent.id === agentId &&
+    agent.enabled &&
+    agent.available !== false &&
+    Boolean(getExternalAgentSdkBackend(agent)));
 }
 
 export function canSendWithAgent(

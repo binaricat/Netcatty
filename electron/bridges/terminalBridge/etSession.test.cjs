@@ -9,7 +9,7 @@ const { createEtSessionApi } = require("./etSession.cjs");
 
 // Build an et session API wired to a hermetic temp HOME so prepareEtSshEnvironment
 // is deterministic regardless of the developer's real ~/.ssh contents.
-function makeApi(t) {
+function makeApi(t, overrides = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-et-prep-"));
   const fakeHome = path.join(base, "home");
   fs.mkdirSync(fakeHome, { recursive: true });
@@ -36,6 +36,7 @@ function makeApi(t) {
     // no-op execFileSync so writeSecureFile's Windows icacls hardening doesn't spawn
     execFileSync: () => {},
     execFile: () => {},
+    ...overrides,
     StringDecoder: require("node:string_decoder").StringDecoder,
     randomUUID: require("node:crypto").randomUUID,
     pty: {},
@@ -322,6 +323,41 @@ test("prepareEtSshEnvironment uses a persistent user known_hosts file", (t) => {
     `UserKnownHostsFile=${path.join(base, "home", ".ssh", "known_hosts").replace(/\\/g, "/")}`,
   );
   assert.equal(fs.existsSync(path.join(base, "et-ssh-home-sess1", ".ssh", "known_hosts")), false);
+});
+
+test("execOnEtSession requireTrustedHost uses strict host-key checking", async (t) => {
+  let capturedArgs = null;
+  const { api } = makeApi(t, {
+    execFile: (_cmd, args, _opts, cb) => {
+      capturedArgs = args;
+      process.nextTick(() => cb(null, "", ""));
+    },
+  });
+  const env = api.prepareEtSshEnvironment("sess1", { hostname: "host.example", username: "alice" });
+  const session = {
+    sshUserHost: env.userHost,
+    sshOptions: env.sshOptions,
+    sshEnv: env.env,
+    externalAuthArtifacts: env.artifacts,
+    externalAuthArtifactsCleaned: false,
+    etStatsAuth: {
+      knownHosts: [{
+        hostname: "host.example",
+        port: 22,
+        keyType: "ssh-ed25519",
+        publicKey: "vaultblob",
+      }],
+    },
+  };
+
+  await api.execOnEtSession(session, "echo ok", 1000, { requireTrustedHost: true });
+
+  const joined = capturedArgs.join(" ");
+  assert.match(joined, /StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(joined, /StrictHostKeyChecking=accept-new/);
+  assert.ok(session.etStrictExecKnownHostsPath);
+  const strictContent = fs.readFileSync(session.etStrictExecKnownHostsPath, "utf8");
+  assert.match(strictContent, /host\.example ssh-ed25519 vaultblob/);
 });
 
 test("cleanupStaleEtTempDirs only removes Netcatty ET temp directories by prefix", (t) => {

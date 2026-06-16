@@ -1,5 +1,6 @@
 import { useCallback, useRef, useMemo, useState } from "react";
 import { FileConflict, FileConflictAction, TransferStatus, SftpFilenameEncoding } from "../../../domain/models";
+import { getSftpConflictTypeKey } from "../../../domain/sftpConflict";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import { notify } from "../../notification";
@@ -501,7 +502,7 @@ export const useSftpExternalOperations = (
       newModified: number;
       applyToAllCount: number;
     }): Promise<FileConflictAction> => {
-      const conflictType = conflict.isDirectory ? "directory" : "file";
+      const conflictType = getSftpConflictTypeKey(conflict.isDirectory, conflict.existingType);
       const defaultAction = conflictDefaults.get(conflictType);
       if (defaultAction) return defaultAction;
 

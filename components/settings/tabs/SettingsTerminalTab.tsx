@@ -27,6 +27,19 @@ import { resolveFollowedTerminalThemeId, TERMINAL_THEME_AUTO } from "../../../do
 
 import { KeywordHighlightRulesEditor, ThemePreviewButton } from "./SettingsTerminalTabControls";
 import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
+
+const FONT_WEIGHT_OPTIONS = [
+  { value: "100", labelKey: "settings.terminal.font.weight.thin" },
+  { value: "200", labelKey: "settings.terminal.font.weight.extraLight" },
+  { value: "300", labelKey: "settings.terminal.font.weight.light" },
+  { value: "400", labelKey: "settings.terminal.font.weight.normal" },
+  { value: "500", labelKey: "settings.terminal.font.weight.medium" },
+  { value: "600", labelKey: "settings.terminal.font.weight.semiBold" },
+  { value: "700", labelKey: "settings.terminal.font.weight.bold" },
+  { value: "800", labelKey: "settings.terminal.font.weight.extraBold" },
+  { value: "900", labelKey: "settings.terminal.font.weight.black" },
+];
+
 function SettingsTerminalTab(props: {
   terminalThemeId: string;
   setTerminalThemeId: (id: string) => void;
@@ -145,6 +158,13 @@ function SettingsTerminalTab(props: {
       || customThemes.find(t => t.id === terminalThemeId)
       || TERMINAL_THEMES[0];
   }, [terminalThemeDarkId, terminalThemeLightId, lightUiThemeId, darkUiThemeId, terminalThemeId, customThemes]);
+
+  const fontWeightOptions = useMemo(() => (
+    FONT_WEIGHT_OPTIONS.map((option) => ({
+      value: option.value,
+      label: `${option.value} - ${t(option.labelKey)}`,
+    }))
+  ), [t]);
 
   const handleAutocompleteGhostTextChange = useCallback((enabled: boolean) => {
     updateTerminalSetting("autocompleteGhostText", enabled);
@@ -516,17 +536,7 @@ function SettingsTerminalTab(props: {
         >
           <Select
             value={String(terminalSettings.fontWeight)}
-            options={[
-              { value: "100", label: "100 - Thin" },
-              { value: "200", label: "200 - Extra Light" },
-              { value: "300", label: "300 - Light" },
-              { value: "400", label: "400 - Normal" },
-              { value: "500", label: "500 - Medium" },
-              { value: "600", label: "600 - Semi Bold" },
-              { value: "700", label: "700 - Bold" },
-              { value: "800", label: "800 - Extra Bold" },
-              { value: "900", label: "900 - Black" },
-            ]}
+            options={fontWeightOptions}
             onChange={(v) => updateTerminalSetting("fontWeight", parseInt(v))}
             className="w-40"
           />
@@ -538,17 +548,7 @@ function SettingsTerminalTab(props: {
         >
           <Select
             value={String(terminalSettings.fontWeightBold)}
-            options={[
-              { value: "100", label: "100 - Thin" },
-              { value: "200", label: "200 - Extra Light" },
-              { value: "300", label: "300 - Light" },
-              { value: "400", label: "400 - Normal" },
-              { value: "500", label: "500 - Medium" },
-              { value: "600", label: "600 - Semi Bold" },
-              { value: "700", label: "700 - Bold" },
-              { value: "800", label: "800 - Extra Bold" },
-              { value: "900", label: "900 - Black" },
-            ]}
+            options={fontWeightOptions}
             onChange={(v) => updateTerminalSetting("fontWeightBold", parseInt(v))}
             className="w-40"
           />
@@ -856,6 +856,94 @@ function SettingsTerminalTab(props: {
         )}
       </div>
 
+      <SectionHeader title={t("settings.terminal.section.systemManager")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          label={t("settings.terminal.systemManager.processRefreshInterval")}
+          description={t("settings.terminal.systemManager.processRefreshInterval.desc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={2}
+              max={60}
+              value={terminalSettings.systemManagerProcessRefreshInterval}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10) || 3;
+                if (val >= 2 && val <= 60) {
+                  updateTerminalSetting("systemManagerProcessRefreshInterval", val);
+                }
+              }}
+              className="w-20"
+            />
+            <span className="text-sm text-muted-foreground">{t("settings.terminal.serverStats.seconds")}</span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.systemManager.tmuxRefreshInterval")}
+          description={t("settings.terminal.systemManager.tmuxRefreshInterval.desc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={2}
+              max={60}
+              value={terminalSettings.systemManagerTmuxRefreshInterval}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10) || 3;
+                if (val >= 2 && val <= 60) {
+                  updateTerminalSetting("systemManagerTmuxRefreshInterval", val);
+                }
+              }}
+              className="w-20"
+            />
+            <span className="text-sm text-muted-foreground">{t("settings.terminal.serverStats.seconds")}</span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.systemManager.dockerListRefreshInterval")}
+          description={t("settings.terminal.systemManager.dockerListRefreshInterval.desc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={3}
+              max={120}
+              value={terminalSettings.systemManagerDockerListRefreshInterval}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10) || 5;
+                if (val >= 3 && val <= 120) {
+                  updateTerminalSetting("systemManagerDockerListRefreshInterval", val);
+                }
+              }}
+              className="w-20"
+            />
+            <span className="text-sm text-muted-foreground">{t("settings.terminal.serverStats.seconds")}</span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.systemManager.dockerStatsRefreshInterval")}
+          description={t("settings.terminal.systemManager.dockerStatsRefreshInterval.desc")}
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={2}
+              max={60}
+              value={terminalSettings.systemManagerDockerStatsRefreshInterval}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10) || 3;
+                if (val >= 2 && val <= 60) {
+                  updateTerminalSetting("systemManagerDockerStatsRefreshInterval", val);
+                }
+              }}
+              className="w-20"
+            />
+            <span className="text-sm text-muted-foreground">{t("settings.terminal.serverStats.seconds")}</span>
+          </div>
+        </SettingRow>
+      </div>
+
       <SectionHeader title={t("settings.terminal.section.rendering")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
@@ -871,15 +959,6 @@ function SettingsTerminalTab(props: {
             ]}
             onChange={(v) => updateTerminalSetting("rendererType", v as "auto" | "webgl" | "dom")}
             className="w-32"
-          />
-        </SettingRow>
-        <SettingRow
-          label={t("settings.terminal.rendering.lineTimestamps")}
-          description={t("settings.terminal.rendering.lineTimestamps.desc")}
-        >
-          <Toggle
-            checked={terminalSettings.showLineTimestamps}
-            onChange={(v) => updateTerminalSetting("showLineTimestamps", v)}
           />
         </SettingRow>
       </div>

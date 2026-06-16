@@ -11,8 +11,9 @@ import { Host, TerminalSession, Workspace } from '../../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from '../DistroAvatar';
 import { getShellIconPath, isMonochromeShellIcon } from '../../lib/useDiscoveredShells';
 import { handleTabMiddleClickClose, handleTabMiddleMouseDown } from '../../lib/tabInteractions';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '../ui/context-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { SessionTabContextMenuContent } from './SessionTabContextMenuContent';
 
 // File extensions that render the code-file icon instead of the plain text icon.
 const CODE_EXTENSIONS_RE = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
@@ -555,7 +556,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
           )}
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <SessionTabIcon host={host} isActive={isActive} protocol={session.protocol} shellIcon={session.localShellIcon} />
-            <span className="truncate">{session.hostLabel}</span>
+            <span className="truncate">{session.customName || session.hostLabel}</span>
             <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
           </div>
           <button
@@ -567,21 +568,15 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
           </button>
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={() => onRenameSession(session.id)}>
-          {t('common.rename')}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopySession(session.id)}>
-          {t('tabs.copyTab')}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopySessionToNewWindow(session.id)}>
-          {t('tabs.copyTabToNewWindow')}
-        </ContextMenuItem>
-        <ContextMenuItem className="text-destructive" onClick={() => onCloseSession(session.id)}>
-          {t('common.close')}
-        </ContextMenuItem>
-        {renderBulkCloseItems(session.id)}
-      </ContextMenuContent>
+      <SessionTabContextMenuContent
+        sessionId={session.id}
+        onCloseSession={onCloseSession}
+        onCopySession={onCopySession}
+        onCopySessionToNewWindow={onCopySessionToNewWindow}
+        onRenameSession={onRenameSession}
+        renderBulkCloseItems={renderBulkCloseItems}
+        t={t}
+      />
     </ContextMenu>
   );
 });
@@ -603,6 +598,8 @@ interface WorkspaceTopTabProps {
   onTabDrop: (e: React.DragEvent, targetTabId: string) => void;
   onRenameWorkspace: (workspaceId: string) => void;
   onCloseWorkspace: (workspaceId: string) => void;
+  onDetachSessionFromWorkspace?: (workspaceId: string, sessionId: string) => void;
+  workspaceSessionLabels?: Record<string, string>;
   renderBulkCloseItems: RenderBulkCloseItems;
   t: TranslateFn;
   tabAnimationClass?: string;
@@ -624,6 +621,8 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   onTabDrop,
   onRenameWorkspace,
   onCloseWorkspace,
+  onDetachSessionFromWorkspace,
+  workspaceSessionLabels,
   renderBulkCloseItems,
   t,
   tabAnimationClass,
@@ -715,6 +714,17 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
         <ContextMenuItem onClick={() => onRenameWorkspace(workspace.id)}>
           {t('common.rename')}
         </ContextMenuItem>
+        {onDetachSessionFromWorkspace && workspaceSessionLabels && Object.entries(workspaceSessionLabels).map(([sessionId, label]) => (
+          <ContextMenuItem
+            key={sessionId}
+            onClick={() => onDetachSessionFromWorkspace(workspace.id, sessionId)}
+          >
+            {t('terminal.menu.detachSession', { name: label })}
+          </ContextMenuItem>
+        ))}
+        {onDetachSessionFromWorkspace && workspaceSessionLabels && Object.keys(workspaceSessionLabels).length > 0 && (
+          <ContextMenuSeparator />
+        )}
         <ContextMenuItem className="text-destructive" onClick={() => onCloseWorkspace(workspace.id)}>
           {t('common.close')}
         </ContextMenuItem>

@@ -67,8 +67,30 @@ function loadBridgeWithMocks(options = {}) {
         typeof options.resolveCliFromPath === "function"
           ? options.resolveCliFromPath(...args)
           : null,
-      getShellEnv: async () => ({}),
-      invalidateShellEnvCache() {},
+      resolveCliFromPathAsync: async (...args) =>
+        typeof options.resolveCliFromPathAsync === "function"
+          ? options.resolveCliFromPathAsync(...args)
+          : typeof options.resolveCliFromPath === "function"
+            ? options.resolveCliFromPath(...args)
+            : null,
+      resolveSdkBinPath: (...args) =>
+        typeof options.resolveSdkBinPath === "function"
+          ? options.resolveSdkBinPath(...args)
+          : null,
+      resolveSdkBinPathAsync: async (...args) =>
+        typeof options.resolveSdkBinPathAsync === "function"
+          ? options.resolveSdkBinPathAsync(...args)
+          : typeof options.resolveSdkBinPath === "function"
+            ? options.resolveSdkBinPath(...args)
+            : null,
+      getShellEnv: async () => (
+        typeof options.shellEnv === "function"
+          ? options.shellEnv()
+          : options.shellEnv || {}
+      ),
+      invalidateShellEnvCache: () => {
+        if (typeof options.invalidateShellEnvCache === "function") options.invalidateShellEnvCache();
+      },
       toUnpackedAsarPath: (value) => value,
     },
     "./ai/codexHelpers.cjs": {
@@ -172,15 +194,15 @@ test("discover returns the 3-layer contract for an installed, authenticated agen
     const discover = ipcMain.handlers.get("netcatty:ai:agents:discover");
     assert.equal(typeof discover, "function");
     const agents = await discover({ sender: { id: 1 } });
-    assert.equal(agents.length, 1);
-    assert.equal(agents[0].command, "claude");
-    assert.equal(agents[0].sdkBackend, "claude");
-    assert.equal(agents[0].binPath, claudePath);
-    assert.equal(agents[0].path, claudePath);
-    assert.equal(agents[0].installed, true);
-    assert.equal(agents[0].available, true);
-    assert.equal(agents[0].authenticated, true);
-    assert.equal(agents[0].authSource, "env");
+    const claude = agents.find((agent) => agent.command === "claude");
+    assert.ok(claude);
+    assert.equal(claude.sdkBackend, "claude");
+    assert.equal(claude.binPath, claudePath);
+    assert.equal(claude.path, claudePath);
+    assert.equal(claude.installed, true);
+    assert.equal(claude.available, true);
+    assert.equal(claude.authenticated, true);
+    assert.equal(claude.authSource, "env");
   } finally {
     restore();
   }
@@ -309,6 +331,239 @@ test("resolve-cli probes Windows Claude exe paths with spaces", { skip: process.
       available: true,
       installed: true,
     });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli reports Cursor SDK installed but unavailable without an API key", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli({ sender: { id: 1 } }, { command: "cursor", customPath: "" });
+    assert.deepEqual(result, {
+      path: "cursor",
+      binPath: "cursor",
+      version: "Cursor SDK",
+      available: false,
+      installed: true,
+      authenticated: false,
+      authSource: null,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli separates Cursor SDK installation from API key availability", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: () => "/Applications/Cursor.app/Contents/MacOS/Cursor",
+    resolveCliFromPath: () => null,
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "/Applications/Cursor.app/Contents/MacOS/Cursor" },
+    );
+    assert.deepEqual(result, {
+      path: "cursor",
+      binPath: "cursor",
+      version: "Cursor SDK",
+      available: false,
+      installed: true,
+      authenticated: false,
+      authSource: null,
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli ignores custom Cursor paths and stores the SDK sentinel path", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: () => "/tmp/not-cursor",
+    resolveCliFromPath: () => null,
+    shellEnv: { CURSOR_API_KEY: "cur-key" },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "/tmp/not-cursor" },
+    );
+    assert.deepEqual(result, {
+      path: "cursor",
+      binPath: "cursor",
+      version: "Cursor SDK",
+      available: true,
+      installed: true,
+      authenticated: true,
+      authSource: "CURSOR_API_KEY",
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli exposes Cursor SDK support when installed and authenticated", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+    shellEnv: { CURSOR_API_KEY: "cur-key" },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli({ sender: { id: 1 } }, { command: "cursor", customPath: "" });
+    assert.deepEqual(result, {
+      path: "cursor",
+      binPath: "cursor",
+      version: "Cursor SDK",
+      available: true,
+      installed: true,
+      authenticated: true,
+      authSource: "CURSOR_API_KEY",
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli exposes Cursor SDK support when API key is saved in settings", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => "/usr/local/bin/cursor",
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "", apiKeyPresent: true },
+    );
+    assert.deepEqual(result, {
+      path: "/usr/local/bin/cursor",
+      binPath: "/usr/local/bin/cursor",
+      version: "Cursor SDK",
+      available: true,
+      installed: true,
+      authenticated: true,
+      authSource: "settings",
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli reports settings as Cursor auth source when settings and env keys both exist", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => "/usr/local/bin/cursor",
+    shellEnv: { CURSOR_API_KEY: "env-key" },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "", apiKeyPresent: true },
+    );
+
+    assert.equal(result.available, true);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.authSource, "settings");
+  } finally {
+    restore();
+  }
+});
+
+test("resolve-cli can refresh shell env before resolving Cursor", async () => {
+  let refreshed = false;
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+    shellEnv: { CURSOR_API_KEY: "cur-key" },
+    invalidateShellEnvCache: () => { refreshed = true; },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli(
+      { sender: { id: 1 } },
+      { command: "cursor", customPath: "", refreshShellEnv: true },
+    );
+
+    assert.equal(refreshed, true);
+    assert.equal(result.available, true);
+  } finally {
+    restore();
+  }
+});
+
+test("discover exposes Cursor SDK support when API key is saved in settings", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const discover = ipcMain.handlers.get("netcatty:ai:agents:discover");
+    const agents = await discover({ sender: { id: 1 } }, { apiKeyPresent: true });
+    const cursor = agents.find((agent) => agent.command === "cursor");
+
+    assert.equal(cursor?.path, "cursor");
+    assert.equal(cursor?.available, true);
+    assert.equal(cursor?.authenticated, true);
+    assert.equal(cursor?.authSource, "settings");
+  } finally {
+    restore();
+  }
+});
+
+test("discover can refresh shell env before scanning Cursor", async () => {
+  let refreshed = false;
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+    shellEnv: () => (refreshed ? { CURSOR_API_KEY: "cur-key" } : {}),
+    invalidateShellEnvCache: () => { refreshed = true; },
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const discover = ipcMain.handlers.get("netcatty:ai:agents:discover");
+    const agents = await discover({ sender: { id: 1 } }, { refreshShellEnv: true });
+    const cursor = agents.find((agent) => agent.command === "cursor");
+
+    assert.equal(refreshed, true);
+    assert.equal(cursor?.path, "cursor");
+    assert.equal(cursor?.available, true);
   } finally {
     restore();
   }

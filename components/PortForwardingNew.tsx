@@ -9,7 +9,7 @@ import {
   Shuffle,
   Zap,
 } from "lucide-react";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
 import {
@@ -49,6 +49,7 @@ import {
   vaultHeaderSecondaryButtonClass,
   vaultSectionTitleClass,
 } from "./vault/VaultPageHeader";
+import { useVaultItemReorder } from "./vault/vaultReorderDrag";
 
 // Import components and utilities from port-forwarding module
 import {
@@ -111,6 +112,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     updateRule,
     deleteRule,
     duplicateRule,
+    reorderRule,
     setRuleStatus,
     startTunnel,
     stopTunnel,
@@ -128,6 +130,16 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     () => new Set(proxyProfiles.map((profile) => profile.id)),
     [proxyProfiles],
   );
+  const ruleListRef = useRef<HTMLDivElement | null>(null);
+
+  const ruleReorder = useVaultItemReorder({
+    containerRef: ruleListRef,
+    viewMode,
+    dragType: "rule-id",
+    targetAttribute: "data-rule-id",
+    disabled: search.trim().length > 0,
+    onReorder: reorderRule,
+  });
 
   const resolveEffectiveHost = useCallback(
     (host: Host): Host => {
@@ -684,7 +696,10 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             {/* Sort mode toggle */}
             <SortDropdown
               value={sortMode}
-              onChange={setSortMode}
+              onChange={(mode) => {
+                if (mode !== "group") setSortMode(mode);
+              }}
+              modes={["manual", "az", "za", "newest", "oldest"]}
               className={vaultHeaderIconButtonClass}
             />
           </div>
@@ -714,11 +729,16 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
               </div>
 
               <div
+                ref={ruleListRef}
                 className={cn(
                   viewMode === "grid"
                     ? "grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
                     : "flex flex-col gap-2.5",
                 )}
+                onDragOverCapture={ruleReorder.handleDragOverCapture}
+                onDragOver={ruleReorder.handleDragOver}
+                onDropCapture={ruleReorder.handleDropCapture}
+                onDragEndCapture={ruleReorder.handleDragEndCapture}
               >
                 {filteredRules.map((rule) => (
                   <RuleCard
@@ -728,6 +748,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
                     viewMode={viewMode}
                     isSelected={selectedRuleId === rule.id}
                     isPending={pendingOperations.has(rule.id)}
+                    reorderProps={ruleReorder.getItemReorderProps(rule.id, `rule:${rule.id}`)}
                     onSelect={() => {
                       setSelectedRuleId(rule.id);
                       startEditRule(rule);

@@ -5,6 +5,22 @@ import type {
 
 const DEFAULT_PANEL_VIEW: AIPanelView = { mode: "draft" };
 
+export function panelViewsEqual(
+  left: AIPanelView,
+  right: AIPanelView,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left.mode !== right.mode) {
+    return false;
+  }
+  if (left.mode === "session" && right.mode === "session") {
+    return left.sessionId === right.sessionId;
+  }
+  return true;
+}
+
 interface HistorySessionSelectionActions {
   showSessionView: (sessionId: string) => void;
   setActiveSessionId: (sessionId: string) => void;

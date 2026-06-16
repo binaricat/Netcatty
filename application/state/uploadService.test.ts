@@ -139,6 +139,86 @@ test("uploads picked folder files with their relative directory structure", asyn
   ]);
 });
 
+test("does not replace an existing directory when uploading a same-named file", async () => {
+  const file = new File(["local"], "dddd", { lastModified: 1234 });
+  const deletedPaths: string[] = [];
+  const uploadedPaths: string[] = [];
+
+  const results = await uploadFromFileList(
+    [file],
+    {
+      targetPath: "/target",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        statSftp: async (_sftpId, path) =>
+          path === "/target/dddd"
+            ? { type: "directory", size: 0, lastModified: 1000 }
+            : null,
+        deleteSftp: async (_sftpId, path) => {
+          deletedPaths.push(path);
+        },
+        writeSftpBinary: async (_sftpId, path) => {
+          uploadedPaths.push(path);
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+      resolveConflict: async () => "replace",
+    },
+  );
+
+  assert.deepEqual(deletedPaths, []);
+  assert.deepEqual(uploadedPaths, []);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].fileName, "dddd");
+  assert.equal(results[0].success, false);
+  assert.match(results[0].error ?? "", /directory/i);
+});
+
+test("counts apply-to-all upload conflicts by incoming and existing type", async () => {
+  const files = [
+    new File(["local"], "existing-file", { lastModified: 1234 }),
+    new File(["local"], "existing-directory", { lastModified: 1234 }),
+  ];
+  const conflictCounts: number[] = [];
+
+  const results = await uploadFromFileList(
+    files,
+    {
+      targetPath: "/target",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        statSftp: async (_sftpId, path) => {
+          if (path === "/target/existing-file") {
+            return { type: "file", size: 2, lastModified: 1000 };
+          }
+          if (path === "/target/existing-directory") {
+            return { type: "directory", size: 0, lastModified: 1000 };
+          }
+          return null;
+        },
+        writeSftpBinary: async () => {
+          throw new Error("skipped conflicts should not upload");
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+      resolveConflict: async (conflict) => {
+        conflictCounts.push(conflict.applyToAllCount);
+        return "skip";
+      },
+    },
+  );
+
+  assert.deepEqual(conflictCounts, [1, 1]);
+  assert.deepEqual(results, [
+    { fileName: "existing-file", success: false, cancelled: true },
+    { fileName: "existing-directory", success: false, cancelled: true },
+  ]);
+});
+
 test("uploads path-backed clipboard files through stream transfer", async () => {
   const transfers: Array<{ sourcePath: string; targetPath: string; totalBytes?: number }> = [];
   const taskTotals: number[] = [];
