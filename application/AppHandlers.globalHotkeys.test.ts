@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { executeHotkeyActionImpl, handleGlobalHotkeyKeyDownImpl } from './app/AppHandlers.ts';
+import { executeHotkeyActionImpl, getLogHostVisualSnapshot, handleGlobalHotkeyKeyDownImpl } from './app/AppHandlers.ts';
 import { matchesKeyBinding } from '../domain/models.ts';
 import { DEFAULT_KEY_BINDINGS } from '../domain/models/keyBindings.ts';
 
@@ -168,4 +168,28 @@ test('quick switch hotkey toggles the quick switcher open state', () => {
 
   executeHotkeyActionImpl(() => ({ ...baseCtx, isQuickSwitcherOpen: true }), 'quickSwitch', event);
   assert.equal(isQuickSwitcherOpen, false);
+});
+
+test('connection log host snapshot includes custom host icon fields', () => {
+  assert.deepEqual(
+    getLogHostVisualSnapshot({
+      id: 'host-1',
+      label: 'Database',
+      hostname: 'db.example.com',
+      username: 'root',
+      tags: [],
+      os: 'linux',
+      distro: 'ubuntu',
+      iconMode: 'custom',
+      iconId: 'database',
+      iconColor: 'blue',
+    }),
+    {
+      hostOs: 'linux',
+      hostDistro: 'ubuntu',
+      hostIconMode: 'custom',
+      hostIconId: 'database',
+      hostIconColor: 'blue',
+    },
+  );
 });

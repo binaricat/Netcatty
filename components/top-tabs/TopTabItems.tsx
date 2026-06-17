@@ -6,6 +6,7 @@ import type { LogView } from '../../application/state/logViewState';
 import { useWindowControls } from '../../application/state/useWindowControls';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { getEffectiveHostDistro } from '../../domain/host';
+import { resolveHostIconAppearance } from '../../domain/hostIcon';
 import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from '../DistroAvatar';
@@ -14,6 +15,7 @@ import { handleTabMiddleClickClose, handleTabMiddleMouseDown } from '../../lib/t
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SessionTabContextMenuContent } from './SessionTabContextMenuContent';
+import { renderHostIconGlyph } from '../hostIconRenderer';
 
 // File extensions that render the code-file icon instead of the plain text icon.
 const CODE_EXTENSIONS_RE = /\.(js|jsx|ts|tsx|py|rb|go|rs|c|cpp|cs|java|php|sh|bash|zsh|fish|lua|r|scala|swift|kt|html|css|scss|less|json|yaml|yml|toml|xml|sql|graphql|gql|md|mdx|conf|ini|env|tf|hcl|dockerfile)$/i;
@@ -76,6 +78,17 @@ const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; prot
         <TerminalSquare className={iconSize} />
       </div>
     );
+  }
+
+  if (host) {
+    const customAppearance = resolveHostIconAppearance(host);
+    if (customAppearance) {
+      return (
+        <div className={cn(boxBase, "text-white")} style={{ backgroundColor: customAppearance.colorHex }}>
+          {renderHostIconGlyph(customAppearance.iconId, iconSize)}
+        </div>
+      );
+    }
   }
 
   // Try distro logo with brand background color

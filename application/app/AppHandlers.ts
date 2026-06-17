@@ -3,16 +3,23 @@ import type React from 'react';
 import type { Host, HostProtocol } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import { getEffectiveHostDistro } from '../../domain/host';
+import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
 
-const getLogHostVisualSnapshot = (host: Host) => ({
-  hostOs: host.os,
-  hostDistro: getEffectiveHostDistro(host) || undefined,
-});
+export const getLogHostVisualSnapshot = (host: Host) => {
+  const icon = sanitizeHostIconFields(host);
+  return {
+    hostOs: host.os,
+    hostDistro: getEffectiveHostDistro(host) || undefined,
+    hostIconMode: icon.iconMode,
+    hostIconId: icon.iconId,
+    hostIconColor: icon.iconColor,
+  };
+};
 
 export function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sessionId: string) {
   const { sessions, setActiveTabId, setWorkspaceFocusedSession } = getCtx();
