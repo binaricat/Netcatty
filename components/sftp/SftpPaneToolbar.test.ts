@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   getSftpBookmarkButtonLabelKey,
   getNextSftpViewMode,
+  copySftpCurrentPathToClipboard,
+  getNextSftpToolbarDisplayPath,
   getSftpViewModeToggleTarget,
   getSftpViewModeToggleLabelKey,
   shouldToggleSftpBookmarkFromButton,
@@ -137,6 +139,137 @@ test("toolbar renders one view-mode toggle instead of separate list and tree but
   assert.doesNotMatch(markup, /aria-label="List view"/);
   assert.doesNotMatch(markup, /aria-label="Tree view"/);
   assert.match(markup, /aria-label="Bookmarked paths"/);
+});
+
+test("toolbar exposes copy-current-path action for the active directory", () => {
+  const pane: SftpPane = {
+    id: "pane-1",
+    connection: {
+      id: "conn-1",
+      hostId: "host-1",
+      name: "Example",
+      currentPath: "/var/www/app",
+      homeDir: "/home/app",
+      isLocal: false,
+    },
+    files: [],
+    loading: false,
+    reconnecting: false,
+    error: null,
+    connectionLogs: [],
+    selectedFiles: new Set(),
+    filter: "",
+    filenameEncoding: "auto",
+    showHiddenFiles: false,
+    transferMutationToken: 0,
+  };
+
+  const markup = renderToStaticMarkup(
+    React.createElement(SftpPaneToolbar, {
+      t: (key: string) => ({
+        "sftp.copyCurrentPath": "Copy current path",
+        "sftp.viewMode.switchToTree": "Switch to tree view",
+        "sftp.bookmark.list": "Bookmarked paths",
+      }[key] ?? key),
+      pane,
+      onNavigateTo: () => {},
+      onSetFilter: () => {},
+      onSetFilenameEncoding: () => {},
+      onRefresh: () => {},
+      showFilterBar: false,
+      setShowFilterBar: () => {},
+      filterInputRef: { current: null },
+      isEditingPath: false,
+      editingPathValue: "",
+      setEditingPathValue: () => {},
+      setShowPathSuggestions: () => {},
+      showPathSuggestions: false,
+      setPathSuggestionIndex: () => {},
+      pathSuggestions: [],
+      pathSuggestionIndex: -1,
+      pathInputRef: { current: null },
+      pathDropdownRef: { current: null },
+      handlePathBlur: () => {},
+      handlePathKeyDown: () => {},
+      handlePathDoubleClick: () => {},
+      handlePathSubmit: () => {},
+      startTransition: (callback: () => void) => callback(),
+      getNextUntitledName: () => "untitled",
+      setNewFileName: () => {},
+      setFileNameError: () => {},
+      setShowNewFileDialog: () => {},
+      setShowNewFolderDialog: () => {},
+      setNewFolderName: () => {},
+      bookmarks: [],
+      isCurrentPathBookmarked: false,
+      onToggleBookmark: () => {},
+      onAddGlobalBookmark: () => {},
+      isCurrentPathGlobalBookmarked: false,
+      onNavigateToBookmark: () => {},
+      onDeleteBookmark: () => {},
+      showHiddenFiles: false,
+      onToggleShowHiddenFiles: () => {},
+      viewMode: "list",
+      onSetViewMode: () => {},
+    }),
+  );
+
+  assert.match(markup, /aria-label="Copy current path"/);
+});
+
+test("copy-current-path action writes the displayed path and reports success", async () => {
+  let copiedText = "";
+  let successMessage = "";
+
+  await copySftpCurrentPathToClipboard({
+    currentPath: "/srv/current",
+    writeText: async (text) => {
+      copiedText = text;
+    },
+    onSuccess: (message) => {
+      successMessage = message;
+    },
+    onError: () => {},
+    t: (key) => ({
+      "sftp.copyCurrentPath.success": "Current path copied",
+    }[key] ?? key),
+  });
+
+  assert.equal(copiedText, "/srv/current");
+  assert.equal(successMessage, "Current path copied");
+});
+
+test("copy-current-path action reports clipboard failures", async () => {
+  let errorMessage = "";
+
+  await copySftpCurrentPathToClipboard({
+    currentPath: "/srv/current",
+    writeText: async () => {
+      throw new Error("denied");
+    },
+    onSuccess: () => {},
+    onError: (message) => {
+      errorMessage = message;
+    },
+    t: (key) => ({
+      "sftp.copyCurrentPath.error": "Could not copy current path",
+    }[key] ?? key),
+  });
+
+  assert.equal(errorMessage, "Could not copy current path");
+});
+
+test("toolbar display path keeps the previous confirmed path while loading the same connection", () => {
+  assert.equal(
+    getNextSftpToolbarDisplayPath({
+      previousDisplayPath: "/srv/old",
+      previousConnectionId: "conn-1",
+      connectionId: "conn-1",
+      currentPath: "/srv/new",
+      loading: true,
+    }),
+    "/srv/old",
+  );
 });
 
 test("bookmark list renders saved paths as selectable rows", () => {
