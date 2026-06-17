@@ -62,6 +62,8 @@ test("localized vault messages include host icon labels", () => {
     "hostDetails.icon.mode.auto",
     "hostDetails.icon.mode.custom",
     "hostDetails.icon.reset",
+    "hostDetails.icon.showLibrary",
+    "hostDetails.icon.hideLibrary",
     "hostDetails.icon.autoUsesDistro",
     "hostDetails.icon.customOverridesDistro",
     ...HOST_ICON_IDS.map((id) => `hostDetails.icon.option.${id}`),

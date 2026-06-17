@@ -33,9 +33,21 @@ test("HostIconPicker renders custom choices and reset when custom", () => {
   const markup = renderPicker({ iconMode: "custom", iconId: "database", iconColor: "blue" });
 
   assert.match(markup, /Database/);
+  assert.match(markup, /Globe/);
+  assert.match(markup, /Show icon library/);
+  assert.doesNotMatch(markup, /Server settings/);
+  assert.match(markup, /grid-cols-5/);
   assert.match(markup, /Blue/);
   assert.match(markup, /Reset/);
-  assert.match(markup, /Custom icon overrides Linux Distribution/);
+  assert.match(markup, /Built-in icon replaces Linux Distribution for this host/);
+});
+
+test("HostIconPicker shows two rows of color swatches in automatic mode", () => {
+  const markup = renderPicker({ iconMode: "auto", iconColor: "violet" });
+
+  assert.match(markup, /Violet/);
+  assert.match(markup, /grid-cols-8/);
+  assert.match(markup, /Use Linux Distribution icon and selected color/);
 });
 
 test("HostIconPicker does not expose image upload", () => {
@@ -54,5 +66,5 @@ test("HostIconPicker normalizes invalid incoming custom values only for editing"
 
   assert.match(markup, /Server/);
   assert.match(markup, /Blue/);
-  assert.match(markup, /Custom icon overrides Linux Distribution/);
+  assert.match(markup, /Built-in icon replaces Linux Distribution/);
 });

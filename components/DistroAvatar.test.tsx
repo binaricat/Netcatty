@@ -35,7 +35,7 @@ test("DistroAvatar keeps serial hosts on the USB icon", () => {
   assert.doesNotMatch(markup, /background-color:#2563EB/i);
 });
 
-test("DistroAvatar falls back to distro icon when icon mode is automatic", () => {
+test("DistroAvatar keeps distro icon and applies custom palette color when icon mode is automatic", () => {
   const markup = renderToStaticMarkup(
     <DistroAvatar
       host={{ ...baseHost, distro: "ubuntu", iconMode: "auto", iconId: "database", iconColor: "blue" }}
@@ -43,6 +43,7 @@ test("DistroAvatar falls back to distro icon when icon mode is automatic", () =>
     />,
   );
 
-  assert.match(markup, /bg-\[#E95420\]/);
-  assert.doesNotMatch(markup, /background-color:#2563EB/i);
+  assert.match(markup, /background-color:#2563EB/i);
+  assert.match(markup, /src="\/distro\/ubuntu.svg"/);
+  assert.doesNotMatch(markup, /bg-\[#E95420\]/);
 });

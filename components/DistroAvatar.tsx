@@ -1,7 +1,7 @@
 import { Server, Usb } from "lucide-react";
 import React, { memo } from "react";
 import { getEffectiveHostDistro } from "../domain/host";
-import { resolveHostIconAppearance } from "../domain/hostIcon";
+import { resolveHostIconAppearance, resolveHostIconColorAppearance } from "../domain/hostIcon";
 import { cn } from "../lib/utils";
 import { Host } from "../types";
 import { renderHostIconGlyph } from "./hostIconRenderer";
@@ -128,6 +128,7 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
   }
 
   const customAppearance = resolveHostIconAppearance(host);
+  const customColor = resolveHostIconColorAppearance(host);
   if (customAppearance) {
     return (
       <div
@@ -149,9 +150,10 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
         className={cn(
           "shrink-0 rounded flex items-center justify-center overflow-hidden",
           containerClass,
-          bg,
+          !customColor && bg,
           className,
         )}
+        style={customColor ? { backgroundColor: customColor.colorHex } : undefined}
       >
         <img
           src={logo}

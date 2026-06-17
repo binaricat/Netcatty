@@ -150,6 +150,17 @@ test("sanitizeHost preserves valid custom host icon fields", () => {
   assert.equal(sanitized.iconColor, "blue");
 });
 
+test("sanitizeHost preserves automatic host icon color fields", () => {
+  const sanitized = sanitizeHost(makeHost({
+    iconMode: "auto",
+    iconColor: "violet",
+  }));
+
+  assert.equal(sanitized.iconMode, "auto");
+  assert.equal(sanitized.iconId, undefined);
+  assert.equal(sanitized.iconColor, "violet");
+});
+
 test("sanitizeHost removes invalid custom host icon fields", () => {
   const sanitized = sanitizeHost(makeHost({
     iconMode: "custom",

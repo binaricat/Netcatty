@@ -18,6 +18,13 @@ test("resolveHostIconAppearance returns null for automatic hosts", () => {
   assert.equal(resolveHostIconAppearance({ iconMode: "auto", iconId: "database", iconColor: "blue" }), null);
 });
 
+test("automatic hosts may keep a custom palette color without a custom icon", () => {
+  assert.deepEqual(sanitizeHostIconFields({ iconMode: "auto", iconColor: "violet" }), {
+    iconMode: "auto",
+    iconColor: "violet",
+  });
+});
+
 test("resolveHostIconAppearance returns validated custom icon and color", () => {
   assert.deepEqual(
     resolveHostIconAppearance({ iconMode: "custom", iconId: "database", iconColor: "blue" }),
@@ -61,7 +68,11 @@ test("clearHostIconAppearance removes custom icon fields", () => {
 
 test("host icon validators accept only curated IDs and color IDs", () => {
   assert.equal(isHostIconId("server"), true);
+  assert.equal(isHostIconId("globe"), true);
+  assert.equal(isHostIconId("server-cog"), true);
   assert.equal(isHostIconId("uploaded-file"), false);
   assert.equal(isHostIconColorId(HOST_ICON_COLORS[0].id), true);
+  assert.equal(isHostIconColorId("violet"), true);
+  assert.equal(HOST_ICON_COLORS.length, 16);
   assert.equal(isHostIconColorId("#2563EB"), false);
 });

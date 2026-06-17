@@ -32,22 +32,28 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
   onReset,
 }) => {
   const { t } = useI18n();
+  const [expanded, setExpanded] = React.useState(false);
   const custom = iconMode === "custom";
   const normalizedSelection = normalizeHostIconSelection({ iconMode, iconId, iconColor });
   const selectedIconId = custom && isHostIconId(normalizedSelection.iconId)
     ? normalizedSelection.iconId
     : DEFAULT_HOST_ICON_ID;
-  const selectedColor = custom && isHostIconColorId(normalizedSelection.iconColor)
-    ? normalizedSelection.iconColor
-    : DEFAULT_HOST_ICON_COLOR;
+  const hasCustomColor = isHostIconColorId(normalizedSelection.iconColor);
+  const selectedColor = hasCustomColor ? normalizedSelection.iconColor : DEFAULT_HOST_ICON_COLOR;
   const selectedColorHex =
     HOST_ICON_COLORS.find((color) => color.id === selectedColor)?.hex || HOST_ICON_COLORS[0].hex;
 
   const setCustom = () => onChange({ iconMode: "custom", iconId: selectedIconId, iconColor: selectedColor });
   const updateIcon = (nextIconId: HostIconId) =>
     onChange({ iconMode: "custom", iconId: nextIconId, iconColor: selectedColor });
-  const updateColor = (nextColor: HostIconColorId) =>
-    onChange({ iconMode: "custom", iconId: selectedIconId, iconColor: nextColor });
+  const updateColor = (nextColor: HostIconColorId) => {
+    if (custom) {
+      onChange({ iconMode: "custom", iconId: selectedIconId, iconColor: nextColor });
+      return;
+    }
+    onChange({ iconMode: "auto", iconColor: nextColor });
+  };
+  const visibleIconIds = custom && !expanded ? HOST_ICON_IDS.slice(0, 10) : HOST_ICON_IDS;
 
   return (
     <div className="space-y-3">
@@ -70,7 +76,7 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
         >
           {t("hostDetails.icon.mode.custom")}
         </Button>
-        {custom && (
+        {(custom || hasCustomColor) && (
           <Button
             type="button"
             variant="ghost"
@@ -84,10 +90,10 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
         )}
       </div>
 
-      {custom ? (
-        <>
-          <div className="grid grid-cols-4 gap-2">
-            {HOST_ICON_IDS.map((optionIconId) => {
+      {custom && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-5 gap-2">
+            {visibleIconIds.map((optionIconId) => {
               const selected = selectedIconId === optionIconId;
               return (
                 <Tooltip key={optionIconId}>
@@ -111,43 +117,48 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
               );
             })}
           </div>
-
-          <div className="grid grid-cols-8 gap-2">
-            {HOST_ICON_COLORS.map((color) => {
-              const selected = selectedColor === color.id;
-              return (
-                <Tooltip key={color.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={t(`hostDetails.icon.color.${color.id}`)}
-                      aria-pressed={selected}
-                      className={cn(
-                        "h-7 rounded-md border transition-transform hover:scale-105",
-                        selected ? "border-primary ring-2 ring-primary/30" : "border-border/60",
-                      )}
-                      style={{ backgroundColor: color.hex }}
-                      onClick={() => updateColor(color.id)}
-                    >
-                      <span className="sr-only">{t(`hostDetails.icon.color.${color.id}`)}</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t(`hostDetails.icon.color.${color.id}`)}</TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-2.5 py-2 text-xs text-muted-foreground">
-            <span className="h-4 w-4 rounded" style={{ backgroundColor: selectedColorHex }} />
-            <span>{t("hostDetails.icon.customOverridesDistro")}</span>
-          </div>
-        </>
-      ) : (
-        <div className="rounded-md border border-border/60 bg-secondary/40 px-2.5 py-2 text-xs text-muted-foreground">
-          {t("hostDetails.icon.autoUsesDistro")}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 w-full text-xs"
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {t(expanded ? "hostDetails.icon.hideLibrary" : "hostDetails.icon.showLibrary")}
+          </Button>
         </div>
       )}
+
+      <div className="grid grid-cols-8 gap-2">
+        {HOST_ICON_COLORS.map((color) => {
+          const selected = hasCustomColor && selectedColor === color.id;
+          return (
+            <Tooltip key={color.id}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t(`hostDetails.icon.color.${color.id}`)}
+                  aria-pressed={selected}
+                  className={cn(
+                    "h-7 rounded-md border transition-transform hover:scale-105",
+                    selected ? "border-primary ring-2 ring-primary/30" : "border-border/60",
+                  )}
+                  style={{ backgroundColor: color.hex }}
+                  onClick={() => updateColor(color.id)}
+                >
+                  <span className="sr-only">{t(`hostDetails.icon.color.${color.id}`)}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t(`hostDetails.icon.color.${color.id}`)}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-2.5 py-2 text-xs text-muted-foreground">
+        <span className="h-4 w-4 rounded" style={{ backgroundColor: hasCustomColor ? selectedColorHex : undefined }} />
+        <span>{t(custom ? "hostDetails.icon.customOverridesDistro" : "hostDetails.icon.autoUsesDistro")}</span>
+      </div>
     </div>
   );
 };

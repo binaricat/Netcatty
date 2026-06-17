@@ -6,7 +6,7 @@ import type { LogView } from '../../application/state/logViewState';
 import { useWindowControls } from '../../application/state/useWindowControls';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { getEffectiveHostDistro } from '../../domain/host';
-import { resolveHostIconAppearance } from '../../domain/hostIcon';
+import { resolveHostIconAppearance, resolveHostIconColorAppearance } from '../../domain/hostIcon';
 import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
 import { DISTRO_LOGOS, DISTRO_COLORS } from '../DistroAvatar';
@@ -97,8 +97,9 @@ const SessionTabIcon: React.FC<{ host: Host | undefined; isActive: boolean; prot
     const logo = DISTRO_LOGOS[distro];
     if (logo) {
       const bg = DISTRO_COLORS[distro] || DISTRO_COLORS.default;
+      const customColor = resolveHostIconColorAppearance(host);
       return (
-        <div className={cn(boxBase, bg)}>
+        <div className={cn(boxBase, !customColor && bg)} style={customColor ? { backgroundColor: customColor.colorHex } : undefined}>
           <img
             src={logo}
             alt={distro || host.os}

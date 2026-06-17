@@ -58,7 +58,19 @@ export type HostIconId =
   | 'router'
   | 'shield'
   | 'code'
-  | 'box';
+  | 'box'
+  | 'globe'
+  | 'cpu'
+  | 'hard-drive'
+  | 'network'
+  | 'wifi'
+  | 'lock'
+  | 'key'
+  | 'monitor'
+  | 'container'
+  | 'activity'
+  | 'zap'
+  | 'server-cog';
 export type HostIconColorId =
   | 'blue'
   | 'green'
@@ -67,7 +79,15 @@ export type HostIconColorId =
   | 'purple'
   | 'cyan'
   | 'orange'
-  | 'slate';
+  | 'slate'
+  | 'violet'
+  | 'pink'
+  | 'rose'
+  | 'lime'
+  | 'teal'
+  | 'sky'
+  | 'indigo'
+  | 'zinc';
 
 // Serial port configuration
 export type SerialParity = 'none' | 'even' | 'odd' | 'mark' | 'space';
@@ -152,7 +172,7 @@ export interface Host {
   manualDistro?: string; // manually selected distro id when distroMode='manual'
   iconMode?: HostIconMode; // Optional host icon mode. Missing/auto preserves distro detection.
   iconId?: HostIconId; // Curated icon override used when iconMode='custom'
-  iconColor?: HostIconColorId; // Palette color used when iconMode='custom'
+  iconColor?: HostIconColorId; // Palette color used with automatic or custom host icons
   // Multi-protocol support
   protocols?: ProtocolConfig[]; // Multiple protocol configurations
   telnetPort?: number; // Telnet-specific port (for quick access)

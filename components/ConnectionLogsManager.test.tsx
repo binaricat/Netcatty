@@ -50,3 +50,15 @@ test("ConnectionLogsManager renders saved custom host icon snapshots", () => {
   assert.match(markup, /background-color:#2563EB/i);
   assert.doesNotMatch(markup, /bg-\[#E95420\]/);
 });
+
+test("ConnectionLogsManager renders saved distro icon snapshots with custom colors", () => {
+  const markup = renderLogs({
+    ...baseLog,
+    hostIconMode: "auto",
+    hostIconColor: "violet",
+  });
+
+  assert.match(markup, /background-color:#7C3AED/i);
+  assert.match(markup, /src="\/distro\/ubuntu.svg"/);
+  assert.doesNotMatch(markup, /bg-\[#E95420\]/);
+});

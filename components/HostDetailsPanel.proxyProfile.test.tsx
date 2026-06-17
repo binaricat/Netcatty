@@ -308,6 +308,7 @@ test("HostDetailsPanel shows host icon customization in the connection settings"
 
   assert.match(markup, /Host Icon/);
   assert.match(markup, /Database/);
-  assert.match(markup, /Custom icon overrides Linux Distribution/);
+  assert.match(markup, /Violet/);
+  assert.match(markup, /Built-in icon replaces Linux Distribution/);
   assert.match(markup, /IP or Hostname/);
 });
