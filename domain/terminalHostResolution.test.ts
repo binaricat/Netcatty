@@ -119,3 +119,43 @@ test("resolveTerminalChainHosts materializes proxy profiles on jump hosts", () =
   assert.equal(resolved[0]?.id, "jump-1");
   assert.deepEqual(resolved[0]?.proxyConfig, proxyProfiles[0].config);
 });
+
+test("resolveTerminalChainHosts applies group default proxy profiles to jump hosts", () => {
+  const target: Host = {
+    id: "target",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+    hostChain: { hostIds: ["jump-1"] },
+  };
+  const jumpHost: Host = {
+    id: "jump-1",
+    label: "Jump",
+    hostname: "jump.example.test",
+    username: "jump",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+    group: "bastion",
+  };
+  const groupConfigs: GroupConfig[] = [
+    { path: "bastion", proxyProfileId: "proxy-1" },
+  ];
+
+  const resolved = resolveTerminalChainHosts({
+    host: target,
+    hosts: [target, jumpHost],
+    groupConfigs,
+    proxyProfiles,
+  });
+
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0]?.id, "jump-1");
+  assert.equal(resolved[0]?.proxyProfileId, "proxy-1");
+  assert.deepEqual(resolved[0]?.proxyConfig, proxyProfiles[0].config);
+});
