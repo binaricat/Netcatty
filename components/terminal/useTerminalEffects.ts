@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
+import { resolveXTermScrollback } from '../../infrastructure/config/xtermPerformance';
 import { shouldInterceptMouseTrackingContextMenu } from './runtime/middleClickBehavior';
 
 type TerminalEffectsContext = Record<string, any>;
@@ -465,7 +466,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
     if (terminalSettings) {
       applyUserCursorPreference(termRef.current, terminalSettings);
-      termRef.current.options.scrollback = terminalSettings.scrollback === 0 ? 999999 : terminalSettings.scrollback;
+      termRef.current.options.scrollback = resolveXTermScrollback(terminalSettings.scrollback);
       termRef.current.options.fontWeight = effectiveFontWeight as
         | 100
         | 200

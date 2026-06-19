@@ -15,6 +15,7 @@ import { fontStore } from "../../../application/state/fontStore";
 import { KeywordHighlighter } from "../keywordHighlight";
 import {
   XTERM_PERFORMANCE_CONFIG,
+  resolveXTermScrollback,
   type XTermPlatform,
   resolveXTermPerformanceConfig,
 } from "../../../infrastructure/config/xtermPerformance";
@@ -270,11 +271,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const cursorStyle = settings?.cursorShape ?? "block";
   const cursorBlink = settings?.cursorBlink ?? true;
-  // xterm.js treats scrollback=0 as "no scrollback buffer", which breaks mouse
-  // wheel scrolling (events become arrow-key sequences).  The UI uses 0 to mean
-  // "no limit", so map it to a large value instead.
   const rawScrollback = settings?.scrollback ?? 10000;
-  const scrollback = rawScrollback === 0 ? 999999 : rawScrollback;
+  const scrollback = resolveXTermScrollback(rawScrollback);
   const drawBoldTextInBrightColors = settings?.drawBoldInBrightColors ?? true;
   const fontWeight = resolveHostTerminalFontWeight(ctx.host, settings?.fontWeight ?? 400);
   const fontWeightBold = settings?.fontWeightBold ?? 700;
