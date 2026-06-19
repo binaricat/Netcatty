@@ -84,6 +84,42 @@ test("resolveTerminalSessionHost applies group default proxy profiles before ope
   assert.deepEqual(resolved.proxyConfig, proxyProfiles[0].config);
 });
 
+test("resolveTerminalSessionHost defaults missing saved remote sessions to SSH", () => {
+  const resolved = resolveTerminalSessionHost({
+    session: {
+      ...baseSession,
+      protocol: undefined,
+    },
+    hosts: [],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "macos",
+  });
+
+  assert.equal(resolved.protocol, "ssh");
+  assert.equal(resolved.hostname, "target.example.test");
+  assert.equal(resolved.username, "alice");
+  assert.equal(resolved.os, "linux");
+});
+
+test("resolveTerminalSessionHost keeps explicit missing local sessions local", () => {
+  const resolved = resolveTerminalSessionHost({
+    session: {
+      ...baseSession,
+      protocol: "local",
+      hostname: "localhost",
+      username: "local",
+    },
+    hosts: [],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "macos",
+  });
+
+  assert.equal(resolved.protocol, "local");
+  assert.equal(resolved.os, "macos");
+});
+
 test("resolveTerminalChainHosts materializes proxy profiles on jump hosts", () => {
   const target: Host = {
     id: "target",

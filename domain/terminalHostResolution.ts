@@ -46,7 +46,7 @@ function buildFallbackHostFromSession(
   session: TerminalSession,
   localOs: LocalOs,
 ): Host {
-  const fallbackProtocol = session.protocol ?? "local";
+  const fallbackProtocol = session.protocol ?? "ssh";
   return {
     id: session.hostId,
     label: session.hostLabel || "Local Terminal",
