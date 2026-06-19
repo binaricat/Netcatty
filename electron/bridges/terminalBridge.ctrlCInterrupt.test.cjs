@@ -116,3 +116,21 @@ test("telnet Ctrl+C behavior is unchanged", () => {
 
   assert.deepEqual(calls, [["write", "\x03"]]);
 });
+
+test("serial Ctrl+C behavior is unchanged", () => {
+  const calls = [];
+  const sessions = new Map();
+  sessions.set("serial-1", {
+    type: "serial",
+    serialPort: {
+      write(data) {
+        calls.push(["write", data]);
+      },
+    },
+  });
+  initBridge(sessions);
+
+  terminalBridge.writeToSession({ sender: {} }, { sessionId: "serial-1", data: "\x03" });
+
+  assert.deepEqual(calls, [["write", "\x03"]]);
+});
