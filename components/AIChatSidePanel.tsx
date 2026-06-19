@@ -166,6 +166,9 @@ export function shouldKeepAIChatSidePanelMounted(props: AIChatSidePanelProps): b
 function shouldDelayAIChatSidePanelActivation(props: AIChatSidePanelProps): boolean {
   if (!(props.isVisible ?? true)) return false;
   const scopeKey = `${props.scopeType}:${props.scopeTargetId ?? ''}`;
+  if (props.draftsByScope[scopeKey] || props.panelViewByScope[scopeKey]?.mode === 'draft') {
+    return false;
+  }
   const sessionId = props.activeSessionIdMap[scopeKey] ?? null;
   if (isAIChatSessionStreaming(sessionId)) return false;
   return !hasAIChatSidePanelRetainedContent(props);

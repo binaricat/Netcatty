@@ -1,8 +1,10 @@
 import { Server, Usb } from "lucide-react";
 import React, { memo } from "react";
 import { getEffectiveHostDistro } from "../domain/host";
+import { resolveHostIconAppearance, resolveHostIconColorAppearance } from "../domain/hostIcon";
 import { cn } from "../lib/utils";
 import { Host } from "../types";
+import { renderHostIconGlyph } from "./hostIconRenderer";
 
 export const DISTRO_LOGOS: Record<string, string> = {
   ubuntu: "/distro/ubuntu.svg",
@@ -71,7 +73,7 @@ export const DISTRO_COLORS: Record<string, string> = {
 
 type DistroAvatarProps = {
   host: Pick<Host, "distro" | "manualDistro" | "distroMode" | "os"> &
-    Partial<Pick<Host, "protocol">>;
+    Partial<Pick<Host, "protocol" | "iconMode" | "iconId" | "iconColor">>;
   fallback: string;
   className?: string;
   /** xs matches top tab bar icons (h-4 rounded rect) */
@@ -125,15 +127,33 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
     );
   }
 
+  const customAppearance = resolveHostIconAppearance(host);
+  const customColor = resolveHostIconColorAppearance(host);
+  if (customAppearance) {
+    return (
+      <div
+        className={cn(
+          "shrink-0 rounded flex items-center justify-center text-white",
+          containerClass,
+          className,
+        )}
+        style={{ backgroundColor: customAppearance.colorHex }}
+      >
+        {renderHostIconGlyph(customAppearance.iconId, iconSize)}
+      </div>
+    );
+  }
+
   if (logo && !errored) {
     return (
       <div
         className={cn(
           "shrink-0 rounded flex items-center justify-center overflow-hidden",
           containerClass,
-          bg,
+          !customColor && bg,
           className,
         )}
+        style={customColor ? { backgroundColor: customColor.colorHex } : undefined}
       >
         <img
           src={logo}

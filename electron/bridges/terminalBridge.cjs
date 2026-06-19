@@ -685,6 +685,15 @@ function cancelActiveYmodemSession(session) {
   session.ymodemAbortController?.abort();
 }
 
+function signalSshInterruptIfNeeded(session, data) {
+  if (data !== '\x03' || !session?.stream || typeof session.stream.signal !== "function") return;
+  try {
+    session.stream.signal("INT");
+  } catch {
+    // Keep the legacy Ctrl+C byte write as the compatibility fallback.
+  }
+}
+
 function writeToSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
@@ -720,6 +729,7 @@ function writeToSession(event, payload) {
     const outgoing = encodeTerminalInput(payload.data, session.encoding);
 
     if (session.stream) {
+      signalSshInterruptIfNeeded(session, payload.data);
       session.stream.write(outgoing);
     } else if (session.proc) {
       session.proc.write(outgoing);

@@ -1,4 +1,6 @@
 // Known Hosts - discovered from system SSH known_hosts file
+import type { HostIconColorId, HostIconId, HostIconMode } from './connection';
+
 export interface KnownHost {
   id: string;
   hostname: string; // The host pattern from known_hosts
@@ -46,6 +48,9 @@ export interface ConnectionLog {
   protocol: 'ssh' | 'telnet' | 'local' | 'mosh' | 'et' | 'serial';
   hostOs?: 'linux' | 'windows' | 'macos'; // Snapshot of the connected host OS for log icons
   hostDistro?: string; // Snapshot of the connected host distro/vendor icon id
+  hostIconMode?: HostIconMode; // Snapshot of the host icon mode for log icons
+  hostIconId?: HostIconId; // Snapshot of the built-in host icon id
+  hostIconColor?: HostIconColorId; // Snapshot of the host icon color id
   startTime: number; // Connection start timestamp
   endTime?: number; // Connection end timestamp (undefined if still active)
   localUsername: string; // System username of the local user

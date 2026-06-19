@@ -1,4 +1,5 @@
 import { Host, TerminalSettings } from './models';
+import { sanitizeHostIconFields } from './hostIcon';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
 
 export type HostLabelRenameResult =
@@ -326,6 +327,7 @@ export const sanitizeHost = (host: Host): Host => {
       : host.distroMode === 'auto'
         ? 'auto'
         : undefined;
+  const cleanHostIcon = sanitizeHostIconFields(host);
   const migrated = migrateDeprecatedFontOverride(host);
   const cleanNotes = host.notes?.trim() || undefined;
   return {
@@ -334,6 +336,10 @@ export const sanitizeHost = (host: Host): Host => {
     distro: cleanDistro,
     distroMode: cleanDistroMode,
     manualDistro: cleanManualDistro || undefined,
+    iconMode: undefined,
+    iconId: undefined,
+    iconColor: undefined,
+    ...cleanHostIcon,
     notes: cleanNotes,
   };
 };

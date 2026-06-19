@@ -3,6 +3,7 @@ import { ChevronDown, Eye, EyeOff, FileKey, FolderLock, FolderOpen, Key, KeyRoun
 import type { Host } from "../types";
 import { cn } from "../lib/utils";
 import { DistroAvatar } from "./DistroAvatar";
+import { HostIconPicker } from "./HostIconPicker";
 import { Button } from "./ui/button";
 import { Combobox } from "./ui/combobox";
 import { HostDetailsSection, HostDetailsSettingRow } from "./host-details";
@@ -69,6 +70,28 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
               className="h-10 flex-1"
             />
           </div>
+        </HostDetailsSection>
+
+        <HostDetailsSection
+          icon={<DistroAvatar host={form as Host} fallback="H" size="sm" />}
+          title={t("hostDetails.icon.title")}
+          hint={t("hostDetails.icon.desc")}
+        >
+          <HostIconPicker
+            iconMode={form.iconMode}
+            iconId={form.iconId}
+            iconColor={form.iconColor}
+            onChange={(next) => {
+              update("iconMode", next.iconMode);
+              update("iconId", next.iconId);
+              update("iconColor", next.iconColor);
+            }}
+            onReset={() => {
+              update("iconMode", undefined);
+              update("iconId", undefined);
+              update("iconColor", undefined);
+            }}
+          />
         </HostDetailsSection>
 
         <HostDetailsSection
