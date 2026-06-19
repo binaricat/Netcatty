@@ -2,11 +2,78 @@
  * Parse and substitute {{variable}} / {{variable:default}} placeholders in snippet commands.
  */
 
-/** Non-global: safe to reuse; avoids lastIndex side effects across calls. */
-const VARIABLE_TOKEN = /\{\{([^}:]+)(?::([^}]*))?\}\}/;
-
 function variablePattern(): RegExp {
   return /\{\{([^}:]+)(?::([^}]*))?\}\}/g;
+}
+
+const GO_TEMPLATE_CONTROL_ACTIONS = new Set([
+  "break",
+  "continue",
+  "else",
+  "end",
+  "if",
+  "range",
+  "with",
+]);
+
+function normalizeGoTemplateAction(name: string): string {
+  return name.trim().replace(/^-/, "").replace(/-$/, "").trim();
+}
+
+function templateActionBody(match: RegExpMatchArray): string {
+  return (match[0] ?? "").slice(2, -2);
+}
+
+function collectVariableMatches(text: string): {
+  matches: RegExpMatchArray[];
+  hasGoTemplateContext: boolean;
+} {
+  const matches = Array.from(text.matchAll(variablePattern()));
+  const hasGoTemplateContext = matches.some((match) => (
+    hasGoTemplateFieldReference(templateActionBody(match))
+  ));
+  return { matches, hasGoTemplateContext };
+}
+
+function hasGoTemplateFieldReference(name: string): boolean {
+  const action = normalizeGoTemplateAction(name);
+  return action === "."
+    || /(?:^|[\s(])\.[A-Za-z_]/.test(action)
+    || /(?:^|[\s(])\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]/.test(action);
+}
+
+function isGoTemplateControlAction(name: string): boolean {
+  const action = normalizeGoTemplateAction(name);
+  if (action === "break" || action === "continue" || action === "else" || action === "end") {
+    return true;
+  }
+  const firstWord = action.split(/\s+/, 1)[0] ?? "";
+  return GO_TEMPLATE_CONTROL_ACTIONS.has(firstWord) && action.startsWith(`${firstWord} `);
+}
+
+function isSnippetVariableName(
+  name: string,
+  tokenBody: string,
+  hasGoTemplateContext = false,
+): boolean {
+  return name !== ""
+    && !hasGoTemplateFieldReference(tokenBody)
+    && !(hasGoTemplateContext && isGoTemplateControlAction(tokenBody));
+}
+
+function replaceSnippetVariableTokens(
+  command: string,
+  replacementFor: (name: string, token: string) => string,
+): string {
+  const text = String(command ?? "");
+  const { hasGoTemplateContext } = collectVariableMatches(text);
+  return text.replace(variablePattern(), (token: string, rawName: string) => {
+    const name = String(rawName ?? "").trim();
+    if (!isSnippetVariableName(name, token.slice(2, -2), hasGoTemplateContext)) {
+      return token;
+    }
+    return replacementFor(name, token);
+  });
 }
 
 export interface SnippetVariableDef {
@@ -15,17 +82,18 @@ export interface SnippetVariableDef {
 }
 
 export function snippetHasVariables(command: string): boolean {
-  return VARIABLE_TOKEN.test(String(command ?? ""));
+  return parseSnippetVariables(command).length > 0;
 }
 
 export function parseSnippetVariables(command: string): SnippetVariableDef[] {
   const text = String(command ?? "");
   const seen = new Set<string>();
   const result: SnippetVariableDef[] = [];
+  const { matches, hasGoTemplateContext } = collectVariableMatches(text);
 
-  for (const match of text.matchAll(variablePattern())) {
+  for (const match of matches) {
     const name = match[1]?.trim() ?? "";
-    if (!name || seen.has(name)) continue;
+    if (!isSnippetVariableName(name, templateActionBody(match), hasGoTemplateContext) || seen.has(name)) continue;
     seen.add(name);
     const defaultRaw = match[2];
     result.push({
@@ -80,18 +148,10 @@ export function applySnippetVariables(
     return { ok: false, missing };
   }
 
-  let output = String(command ?? "");
-  for (const def of defs) {
-    const value = resolved[def.name];
-    const escapedName = def.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(
-      `\\{\\{${escapedName}(?::[^}]*)?\\}\\}`,
-      "g",
-    );
-    output = output.replace(pattern, value);
-  }
-
-  return { ok: true, command: output };
+  return {
+    ok: true,
+    command: replaceSnippetVariableTokens(command, (name, token) => resolved[name] ?? token),
+  };
 }
 
 /** Preview resolved command for UI; unfilled required vars stay as placeholders. */
@@ -102,16 +162,9 @@ export function previewSnippetCommand(
   const defs = parseSnippetVariables(command);
   if (defs.length === 0) return String(command ?? "");
 
-  let output = String(command ?? "");
-  for (const def of defs) {
-    const value = resolveVariableValue(def, values);
-    const replacement = value ?? `{{${def.name}}}`;
-    const escapedName = def.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(
-      `\\{\\{${escapedName}(?::[^}]*)?\\}\\}`,
-      "g",
-    );
-    output = output.replace(pattern, replacement);
-  }
-  return output;
+  return replaceSnippetVariableTokens(command, (name) => {
+    const def = defs.find((candidate) => candidate.name === name);
+    if (!def) return `{{${name}}}`;
+    return resolveVariableValue(def, values) ?? `{{${def.name}}}`;
+  });
 }
