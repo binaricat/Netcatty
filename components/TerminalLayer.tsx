@@ -25,10 +25,13 @@ import {
 import { buildCacheKey } from '../application/state/sftp/sharedRemoteHostCache';
 import type { DropEntry } from '../lib/sftpFileUtils';
 import { Host, KnownHost, TerminalSession, Workspace } from '../types';
-import { resolveGroupDefaults, applyGroupDefaults } from '../domain/groupConfig';
 import { applySessionFontSizeToHost } from '../domain/terminalAppearance';
 import { resolveHostAutofillPassword } from '../domain/sshAuth';
-import { materializeHostProxyProfile } from '../domain/proxyProfiles';
+import {
+  resolveEffectiveTerminalHost,
+  resolveTerminalChainHosts,
+  resolveTerminalSessionHost,
+} from '../domain/terminalHostResolution';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { SftpSidePanel } from './SftpSidePanel';
@@ -481,15 +484,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     [proxyProfiles],
   );
   const effectiveHosts = useMemo(
-    () => hosts.map((host) => {
-      const groupDefaults = host.group
-        ? resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-        : {};
-      return materializeHostProxyProfile(
-        applyGroupDefaults(host, groupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-        proxyProfiles,
-      );
-    }),
+    () => hosts.map((host) => resolveEffectiveTerminalHost({
+      host,
+      groupConfigs,
+      proxyProfiles,
+      validProxyProfileIds: proxyProfileIdSet,
+    })),
     [groupConfigs, hosts, proxyProfileIdSet, proxyProfiles],
   );
 
@@ -497,98 +497,32 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMap = useMemo(() => {
     const map = new Map<string, Host>();
     for (const session of sessions) {
-      const rawHost = hostMap.get(session.hostId);
-      if (rawHost) {
-        // Apply group config defaults so Terminal sees the merged host
-        const groupDefaults = rawHost.group
-          ? resolveGroupDefaults(rawHost.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-          : {};
-        const existingHost = materializeHostProxyProfile(
-          applyGroupDefaults(rawHost, groupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-          proxyProfiles,
-        );
-
-        const protocol = session.protocol ?? existingHost.protocol;
-        const port = session.port ?? existingHost.port;
-        const moshEnabled = session.moshEnabled ?? existingHost.moshEnabled;
-        const etEnabled = session.etEnabled ?? existingHost.etEnabled;
-
-        let hostForSession: Host;
-        if (
-          protocol === existingHost.protocol &&
-          port === existingHost.port &&
-          moshEnabled === existingHost.moshEnabled
-          && etEnabled === existingHost.etEnabled
-        ) {
-          hostForSession = existingHost;
-        } else {
-          hostForSession = {
-            ...existingHost,
-            protocol,
-            port,
-            moshEnabled,
-            etEnabled,
-          };
-        }
-        map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
-      } else {
-        // Create stable fallback host object
-        const fallbackProtocol = session.protocol ?? 'local' as const;
-        const fallbackHost: Host = {
-          id: session.hostId,
-          label: session.hostLabel || 'Local Terminal',
-          hostname: session.hostname || 'localhost',
-          username: session.username || 'local',
-          port: session.port ?? 22,
-          // Only local terminals adopt the client OS — unsaved serial
-          // sessions and orphaned remote sessions (whose host was deleted
-          // while the session lives on) also hit this fallback, and the
-          // non-local autocomplete path in Terminal.tsx trusts host.os, so
-          // a Windows-client 'windows' tag here would mis-shape POSIX
-          // remote/serial autocomplete (#1112 review).
-          os: fallbackProtocol === 'local'
-            ? detectLocalOs(navigator.userAgent || navigator.platform)
-            : 'linux',
-          group: '',
-          tags: [],
-          protocol: fallbackProtocol,
-          moshEnabled: session.moshEnabled,
-          etEnabled: session.etEnabled,
-          charset: session.charset,
-          localShell: session.localShell,
-          localShellArgs: session.localShellArgs,
-          localShellName: session.localShellName,
-          localShellIcon: session.localShellIcon,
-        };
-        map.set(session.id, applySessionFontSizeToHost(fallbackHost, session));
-      }
+      const hostForSession = resolveTerminalSessionHost({
+        session,
+        hosts,
+        groupConfigs,
+        proxyProfiles,
+        localOs: detectLocalOs(navigator.userAgent || navigator.platform),
+      });
+      map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
     }
     return map;
-  }, [sessions, hostMap, groupConfigs, proxyProfileIdSet, proxyProfiles]);
+  }, [sessions, hosts, groupConfigs, proxyProfiles]);
   const sessionChainHostsMap = useMemo(() => {
     const map = new Map<string, Host[]>();
     for (const session of sessions) {
       const host = sessionHostsMap.get(session.id);
-      if (!host?.hostChain?.hostIds?.length) continue;
-      map.set(
-        session.id,
-        host.hostChain.hostIds
-          .map((hostId) => {
-            const rawChainHost = hostMap.get(hostId);
-            if (!rawChainHost) return undefined;
-            const chainGroupDefaults = rawChainHost.group
-              ? resolveGroupDefaults(rawChainHost.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet })
-              : {};
-            return materializeHostProxyProfile(
-              applyGroupDefaults(rawChainHost, chainGroupDefaults, { validProxyProfileIds: proxyProfileIdSet }),
-              proxyProfiles,
-            );
-          })
-          .filter((value): value is Host => Boolean(value)),
-      );
+      const chainHosts = resolveTerminalChainHosts({
+        host,
+        hosts,
+        groupConfigs,
+        proxyProfiles,
+        validProxyProfileIds: proxyProfileIdSet,
+      });
+      if (chainHosts.length > 0) map.set(session.id, chainHosts);
     }
     return map;
-  }, [sessions, sessionHostsMap, hostMap, groupConfigs, proxyProfileIdSet, proxyProfiles]);
+  }, [sessions, sessionHostsMap, hosts, groupConfigs, proxyProfileIdSet, proxyProfiles]);
   const sessionHostsMapRef = useRef(sessionHostsMap);
   sessionHostsMapRef.current = sessionHostsMap;
 
